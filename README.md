@@ -4,12 +4,10 @@ Cargo [workspace](https://doc.rust-lang.org/cargo/reference/workspaces.html) (si
 
 | Crate | Role |
 | ----- | ---- |
-| **`vmux`** | Binary (`crates/vmux`) |
-| **`vmux_app`** | Umbrella plugin composing the crates below (`crates/vmux_app`) |
-| **`vmux_core`** | Shared markers (`VmuxWebview`, `VmuxWorldCamera`) + `cef_root_cache_path` |
+| **`vmux_core`** | `VmuxWorldCamera`, `CAMERA_DISTANCE` — shared by `vmux` + `vmux_webview` |
+| **`vmux`** | Library + binary `vmux`: `VmuxPlugin`, `core` (re-exports), `cef_root_cache_path` |
+| **`vmux_webview`** | `VmuxWebviewPlugin` — CEF plane, layout |
 | **`vmux_input`** | `VmuxInputPlugin` — leafwing quit bindings |
-| **`vmux_scene`** | `VmuxScenePlugin` — camera, light, default webview plane |
-| **`vmux_webview_layout`** | `VmuxWebviewLayoutPlugin` — `WebviewSize` + plane scale |
 | **`vmux_screenshot`** | `VmuxScreenshotPlugin` — Space screenshots, busy cursor |
 
 ### Development

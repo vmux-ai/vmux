@@ -24,8 +24,8 @@ usage() {
 	cat <<'EOF'
 Usage: macos.sh [command]
 
-  dev       Build and run with CEF debug mode (cargo run --features debug). Default.
-  bundle    cargo build --release, run bevy_cef_bundle_app, open Vmux.app
+  dev       Build and run with CEF debug mode (cargo run -p vmux --features debug). Default.
+  bundle    cargo build -p vmux --release, run bevy_cef_bundle_app, open Vmux.app
   help      Show this help
 
 Environment (optional):
@@ -59,8 +59,8 @@ ensure_dev_prereqs() {
 cmd_dev() {
 	ensure_dev_prereqs
 	cd "$ROOT"
-	echo "==> cargo run --features debug"
-	cargo run --features debug
+	echo "==> cargo run -p vmux --features debug"
+	cargo run -p vmux --features debug
 }
 
 cmd_bundle() {

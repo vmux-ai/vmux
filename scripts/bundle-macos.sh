@@ -17,8 +17,8 @@ PLIST_SRC="${PLIST_SRC:-$ROOT/packaging/macos/Info.plist}"
 
 cd "$ROOT"
 
-echo "==> cargo build --release"
-cargo build --release
+echo "==> cargo build -p vmux --release"
+cargo build -p vmux --release
 
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 cp -f "$ROOT/target/release/vmux" "$APP_BUNDLE/Contents/MacOS/vmux"

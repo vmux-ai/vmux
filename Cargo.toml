@@ -1,6 +1,11 @@
-# Workspace layout mirrors [Bevy](https://github.com/bevyengine/bevy/): virtual root, app crate under `crates/vmux`.
+# Workspace layout mirrors [Bevy](https://github.com/bevyengine/bevy/): virtual root; crate dirs use underscores (`crates/vmux_input`, etc.).
 [workspace]
-members = ["crates/vmux"]
+members = [
+    "crates/vmux_core",
+    "crates/vmux_input",
+    "crates/vmux",
+    "crates/vmux_webview",
+]
 default-members = ["crates/vmux"]
 resolver = "3"
 

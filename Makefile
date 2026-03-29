@@ -5,10 +5,10 @@ run-mac: build-mac-debug
 	exec env -u CEF_PATH ./target/debug/vmux
 
 build-mac-debug:
-	env -u CEF_PATH cargo build --features debug
+	env -u CEF_PATH cargo build -p vmux --features debug
 
 build:
-	env -u CEF_PATH cargo build --release
+	env -u CEF_PATH cargo build -p vmux --release
 
 bundle-mac:
 	chmod +x scripts/bundle-macos.sh

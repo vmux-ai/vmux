@@ -1,0 +1,13 @@
+[package]
+name = "vmux_input"
+description = "vmux — leafwing input (quit shortcuts)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bevy = { workspace = true }
+leafwing-input-manager = { workspace = true }

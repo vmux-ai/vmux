@@ -1,13 +1,7 @@
-//! Scene and input components.
+//! Input action types and root entity marker.
 
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
-
-#[derive(Component)]
-pub struct VmuxWebview;
-
-#[derive(Component)]
-pub struct VmuxWorldCamera;
 
 #[derive(Component)]
 pub struct AppInputRoot;

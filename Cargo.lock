@@ -5848,7 +5848,33 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_cef",
+ "vmux_core",
+ "vmux_input",
+ "vmux_webview",
+]
+
+[[package]]
+name = "vmux_core"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
+name = "vmux_input"
+version = "0.1.0"
+dependencies = [
+ "bevy",
  "leafwing-input-manager",
+]
+
+[[package]]
+name = "vmux_webview"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "vmux_core",
 ]
 
 [[package]]
