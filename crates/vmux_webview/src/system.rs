@@ -44,6 +44,21 @@ fn chrome_go_forward_pressed(keys: &ButtonInput<KeyCode>) -> bool {
     }
 }
 
+/// Chrome: ⌘R on macOS, Ctrl+R on Windows/Linux.
+fn chrome_reload_pressed(keys: &ButtonInput<KeyCode>) -> bool {
+    if !keys.just_pressed(KeyCode::KeyR) {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        super_chord(keys)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight)
+    }
+}
+
 /// macOS Chrome: ⌘[ and ⌘←; other platforms: Alt+←.
 pub fn go_back(
     mut commands: Commands,
@@ -75,6 +90,19 @@ pub fn go_forward(
     }
     for webview in webviews.iter() {
         commands.trigger(RequestGoForward { webview });
+    }
+}
+
+pub fn reload(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    webviews: Query<Entity, With<VmuxWebview>>,
+) {
+    if !chrome_reload_pressed(&keys) {
+        return;
+    }
+    for webview in webviews.iter() {
+        commands.trigger(RequestReload { webview });
     }
 }
 
