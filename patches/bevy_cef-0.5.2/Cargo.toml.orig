@@ -1,0 +1,78 @@
+[package]
+name = "bevy_cef"
+description = "Bevy CEF integration for web rendering"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+exclude = ["assets/"]
+
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.5.2"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+authors = ["notelm"]
+repository = "https://github.com/not-elm/bevy_cef"
+readme = "README.md"
+keywords = ["bevy", "cef", "web", "rendering"]
+categories = ["game-development", "web-programming", "graphics"]
+
+[workspace.dependencies]
+bevy = { version = "0.18", default-features = false, features = [
+    "bevy_log",
+    "bevy_window",
+    "bevy_asset",
+    "bevy_sprite",
+    "bevy_pbr",
+    "bevy_winit",
+    "picking",
+] }
+bevy_remote = "0.18"
+cef = { version = "145.6.1+145.0.28" }
+cef-dll-sys = { version = "145.6.1+145.0.28", features = ["sandbox"] }
+bevy_cef = { path = ".", version = "0.5.2" }
+bevy_cef_core = { path = "crates/bevy_cef_core", version = "0.5.2" }
+async-channel = { version = "2.5" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+raw-window-handle = "0.6"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+plist = "1"
+
+[dependencies]
+bevy = { workspace = true }
+bevy_remote = { workspace = true }
+cef = { workspace = true }
+bevy_cef_core = { workspace = true }
+async-channel = { version = "2.5" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+raw-window-handle = "0.6"
+
+[dev-dependencies]
+bevy = { workspace = true, default-features = true, features = [
+    "file_watcher",
+] }
+bevy_cef = { path = ".", features = ["debug"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = { version = "0.2" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(feature, values("cargo-clippy"))',
+] }
+
+[features]
+default = []
+serialize = ["bevy/serialize"]
+debug = ["bevy_cef_core/debug"]
