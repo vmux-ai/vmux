@@ -1,0 +1,19 @@
+[package]
+name = "vmux"
+version = "0.1.0"
+edition = "2024"
+description = "Bevy app with embedded webview via bevy_cef (simple example baseline)"
+
+[dependencies]
+bevy = { version = "0.18", default-features = true }
+bevy_cef = "0.5.2"
+leafwing-input-manager = "0.20"
+
+[features]
+default = []
+debug = ["bevy_cef/debug"]
+
+[patch.crates-io]
+winit = { path = "patches/winit-0.30.13" }
+bevy_cef = { path = "patches/bevy_cef-0.5.2" }
+bevy_cef_core = { path = "patches/bevy_cef_core-0.5.2" }
