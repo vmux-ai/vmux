@@ -1,9 +1,12 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::*;
-use vmux_core::{CAMERA_DISTANCE, VmuxWorldCamera};
+use vmux_core::{initial_webview_url, LastVisitedUrl, CAMERA_DISTANCE, VmuxWorldCamera};
 
 use crate::{CEF_PAGE_ZOOM_LEVEL, VmuxWebview, WEBVIEW_URL};
+
+/// Reports `location.href` to Bevy via `window.cef.emit({ url })` (pageshow, SPA history, retry until `cef` exists).
+const URL_TRACK_PRELOAD: &str = r#"(function(){function e(){try{if(typeof window!=="undefined"&&window.cef&&typeof window.cef.emit==="function")window.cef.emit({url:location.href});}catch(_){}}function t(){e()}var n=history.pushState,r=history.replaceState;history.pushState=function(){n.apply(history,arguments);setTimeout(t,0)};history.replaceState=function(){r.apply(history,arguments);setTimeout(t,0)};window.addEventListener("popstate",function(){setTimeout(t,0)});window.addEventListener("pageshow",function(){setTimeout(t,0)});var i=0,o=setInterval(function(){e();(window.cef&&window.cef.emit||++i>200)&&clearInterval(o)},50)})();"#;
 
 fn super_chord(keys: &ButtonInput<KeyCode>) -> bool {
     keys.pressed(KeyCode::SuperLeft) || keys.pressed(KeyCode::SuperRight)
@@ -110,10 +113,13 @@ pub(crate) fn spawn_webview(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    last: Option<Res<LastVisitedUrl>>,
 ) {
+    let start_url = initial_webview_url(last.as_deref(), WEBVIEW_URL);
     commands.spawn((
         VmuxWebview,
-        WebviewSource::new(WEBVIEW_URL),
+        WebviewSource::new(start_url),
+        PreloadScripts::from([URL_TRACK_PRELOAD.to_string()]),
         ZoomLevel(CEF_PAGE_ZOOM_LEVEL),
         Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE))),
         MeshMaterial3d(materials.add(WebviewExtendStandardMaterial {

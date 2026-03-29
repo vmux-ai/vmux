@@ -3867,6 +3867,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "moonshine-save"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90b460c1065d660fc40aa86921aa75dfb1b14693ec0b5d9fd1a8e7d892e101b0"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_log",
+ "bevy_platform",
+ "bevy_reflect",
+ "bevy_scene",
+ "bevy_utils",
+ "moonshine-util",
+ "ron",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "moonshine-util"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9057c9b2627df7dfe9478bd2519ed06aa8a801dba1e39d768d731ade428fad3"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_log",
+ "bevy_platform",
+ "bevy_reflect",
+ "disqualified",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5848,6 +5881,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_cef",
+ "moonshine-save",
  "vmux_core",
  "vmux_input",
  "vmux_webview",
@@ -5858,6 +5892,7 @@ name = "vmux_core"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "serde",
 ]
 
 [[package]]

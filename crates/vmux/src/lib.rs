@@ -1,9 +1,12 @@
 //! vmux — Bevy + embedded CEF webview library.
 
 pub mod core;
+mod session;
 mod system;
 
 pub use core::{CAMERA_DISTANCE, VmuxWorldCamera};
+pub use session::{vmux_cache_dir, SessionPlugin};
+pub use vmux_core::LastVisitedUrl;
 pub use vmux_input::{AppAction, AppInputRoot, VmuxInputPlugin};
 pub use vmux_webview::VmuxWebviewPlugin;
 
@@ -12,17 +15,13 @@ use bevy_cef::prelude::*;
 
 /// User-writable CEF disk cache root (profiles, etc.).
 pub fn cef_root_cache_path() -> Option<String> {
-    if let Ok(home) = std::env::var("HOME") {
-        let subdir = if cfg!(target_os = "macos") {
-            "Library/Caches/vmux/cef"
-        } else {
-            ".cache/vmux/cef"
-        };
-        return Some(format!("{home}/{subdir}"));
-    }
-    std::env::temp_dir()
-        .to_str()
-        .map(|p| format!("{p}/vmux_cef"))
+    session::vmux_cache_dir()
+        .map(|p| p.join("cef").to_string_lossy().into_owned())
+        .or_else(|| {
+            std::env::temp_dir()
+                .to_str()
+                .map(|p| format!("{p}/vmux_cef"))
+        })
 }
 
 #[derive(Default)]
@@ -57,6 +56,8 @@ impl Plugin for VmuxPlugin {
             VmuxInputPlugin::default(),
             VmuxScenePlugin::default(),
             VmuxWebviewPlugin::default(),
+            JsEmitEventPlugin::<vmux_core::WebviewDocumentUrlEmit>::default(),
+            SessionPlugin::default(),
         ));
     }
 }

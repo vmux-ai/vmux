@@ -19,6 +19,7 @@ debug = ["bevy_cef/debug", "vmux_webview/debug"]
 [dependencies]
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
+moonshine-save = { workspace = true }
 vmux_core = { path = "../vmux_core" }
 vmux_input = { path = "../vmux_input" }
 vmux_webview = { path = "../vmux_webview" }
