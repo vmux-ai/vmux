@@ -1,17 +1,18 @@
-[package]
-name = "vmux"
+# Workspace layout mirrors [Bevy](https://github.com/bevyengine/bevy/): virtual root, app crate under `crates/vmux`.
+[workspace]
+members = ["crates/vmux"]
+default-members = ["crates/vmux"]
+resolver = "3"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "Bevy app with embedded webview via bevy_cef (simple example baseline)"
+license = "MIT OR Apache-2.0"
 
-[dependencies]
+[workspace.dependencies]
 bevy = { version = "0.18", default-features = true }
 bevy_cef = "0.5.2"
 leafwing-input-manager = "0.20"
-
-[features]
-default = []
-debug = ["bevy_cef/debug"]
 
 [patch.crates-io]
 winit = { path = "patches/winit-0.30.13" }
