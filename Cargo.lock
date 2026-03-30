@@ -7667,12 +7667,25 @@ dependencies = [
  "leafwing-input-manager",
  "liquid-glass-rs",
  "raw-window-handle",
+ "vmux_command",
  "vmux_core",
  "vmux_input",
  "vmux_layout",
  "vmux_session",
  "vmux_settings",
  "vmux_webview",
+]
+
+[[package]]
+name = "vmux_command"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "leafwing-input-manager",
+ "vmux_core",
+ "vmux_input",
+ "vmux_layout",
 ]
 
 [[package]]

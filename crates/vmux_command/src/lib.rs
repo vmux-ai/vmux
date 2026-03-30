@@ -1,4 +1,7 @@
 //! Centered command palette (Arc-style): ⌘T / Ctrl+T, glass panel, URL/search row.
+//!
+//! Register [`VmuxCommandPlugin`] after [`vmux_input::VmuxInputPlugin`]. On [`Startup`], run
+//! [`setup`] after the main scene camera exists (e.g. after `vmux`’s `spawn_camera`).
 
 use bevy::camera::ClearColorConfig;
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -20,19 +23,19 @@ const PANEL_BG: Color = Color::srgba(0.11, 0.11, 0.12, 0.92);
 const BORDER_SUBTLE: Color = Color::srgba(1.0, 1.0, 1.0, 0.12);
 
 #[derive(Component)]
-pub(crate) struct CommandPaletteUiCamera;
+struct CommandPaletteUiCamera;
 
 #[derive(Component)]
-pub(crate) struct CommandPaletteRoot;
+struct CommandPaletteRoot;
 
 #[derive(Component)]
 struct CommandPaletteBackdrop;
 
 #[derive(Component)]
-pub(crate) struct CommandPaletteQueryText;
+struct CommandPaletteQueryText;
 
 #[derive(Component)]
-pub(crate) struct CommandPaletteRow(pub(crate) u8);
+struct CommandPaletteRow(u8);
 
 fn super_or_ctrl_held(keys: &ButtonInput<KeyCode>) -> bool {
     #[cfg(target_os = "macos")]
@@ -67,7 +70,8 @@ fn is_printable_char(chr: char) -> bool {
     !is_in_private_use_area && !chr.is_ascii_control()
 }
 
-pub(crate) fn setup(mut commands: Commands) {
+/// Spawns the palette UI camera and root. Run after the main [`vmux_core::VmuxWorldCamera`] exists.
+pub fn setup(mut commands: Commands) {
     let camera = commands
         .spawn((
             CommandPaletteUiCamera,
@@ -220,7 +224,7 @@ pub(crate) fn setup(mut commands: Commands) {
         });
 }
 
-pub(crate) fn sync_visibility(
+fn sync_visibility(
     palette: Res<VmuxCommandPaletteState>,
     mut q: Query<&mut Visibility, With<CommandPaletteRoot>>,
 ) {
@@ -237,7 +241,7 @@ pub(crate) fn sync_visibility(
     };
 }
 
-pub(crate) fn toggle_hotkey(
+fn toggle_hotkey(
     state: Query<&ActionState<AppAction>, With<AppInputRoot>>,
     mut palette: ResMut<VmuxCommandPaletteState>,
 ) {
@@ -253,7 +257,7 @@ pub(crate) fn toggle_hotkey(
     }
 }
 
-pub(crate) fn handle_keyboard(
+fn handle_keyboard(
     mut palette: ResMut<VmuxCommandPaletteState>,
     mut reader: MessageReader<KeyboardInput>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -301,7 +305,7 @@ pub(crate) fn handle_keyboard(
     }
 }
 
-pub(crate) fn submit(
+fn submit(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     mut palette: ResMut<VmuxCommandPaletteState>,
@@ -326,7 +330,7 @@ pub(crate) fn submit(
     }
 }
 
-pub(crate) fn refresh_labels(
+fn refresh_labels(
     palette: Res<VmuxCommandPaletteState>,
     mut q: Query<&mut Text, With<CommandPaletteQueryText>>,
     mut rows: Query<(&CommandPaletteRow, &Children)>,
@@ -375,7 +379,7 @@ pub(crate) fn refresh_labels(
     }
 }
 
-pub(crate) fn style_rows(
+fn style_rows(
     palette: Res<VmuxCommandPaletteState>,
     mut rows: Query<(&CommandPaletteRow, &mut BackgroundColor, &Children)>,
     mut text_colors: Query<&mut TextColor, Without<CommandPaletteQueryText>>,
@@ -405,5 +409,27 @@ pub(crate) fn style_rows(
                 TextColor(ROW_TEXT)
             };
         }
+    }
+}
+
+/// Command palette resource and [`Update`] systems. Add [`setup`] on [`Startup`] after the world camera.
+#[derive(Default)]
+pub struct VmuxCommandPlugin;
+
+impl Plugin for VmuxCommandPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<VmuxCommandPaletteState>();
+        app.add_systems(
+            Update,
+            (
+                toggle_hotkey,
+                handle_keyboard,
+                submit,
+                sync_visibility,
+                refresh_labels,
+                style_rows,
+            )
+                .chain(),
+        );
     }
 }
