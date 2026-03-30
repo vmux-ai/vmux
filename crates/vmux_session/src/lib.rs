@@ -7,11 +7,9 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_core::WebviewDocumentUrlEmit;
-use vmux_core::{SessionSavePath, SessionSaveQueue};
-use vmux_input::tmux_prefix_commands;
+pub use vmux_core::{SessionSavePath, SessionSaveQueue};
 use vmux_layout::{
     LayoutTree, PaneLastUrl, Root, SessionLayoutSnapshot, allowed_navigation_url, setup_vmux_panes,
-    split_active_pane,
 };
 use vmux_settings::{VmuxAppSettings, VmuxCacheDir, VmuxCacheDirInitSet};
 use vmux_webview::rebuild_session_snapshot;
@@ -71,7 +69,7 @@ fn on_webview_document_url(
     layout_q: Query<&LayoutTree, With<Root>>,
     webview_src: Query<&WebviewSource>,
     (path, settings): (Res<SessionSavePath>, Res<VmuxAppSettings>),
-    mut commands: Commands,
+    mut session_queue: ResMut<SessionSaveQueue>,
 ) {
     let webview = trigger.event().webview;
     let url = trigger.url.trim();
@@ -97,9 +95,11 @@ fn on_webview_document_url(
         &webview_src,
         settings.default_webview_url.as_str(),
     );
-    save_session_snapshot_to_file(&mut commands, path.0.clone());
+    session_queue.0.push(path.0.clone());
 }
 
+/// Flushes session to disk on shutdown. `AppExit` uses Bevy’s message bus, not the ECS observer
+/// `Event` system, so `add_observer(On<AppExit>)` is not applicable; `MessageReader` in `Last` is correct.
 fn save_session_on_app_exit(
     path: Res<SessionSavePath>,
     mut exits: MessageReader<AppExit>,
@@ -132,12 +132,8 @@ impl Plugin for SessionPlugin {
                 Startup,
                 drain_session_save_queue_startup.after(setup_vmux_panes),
             )
-            .add_systems(
-                Update,
-                drain_session_save_queue_update
-                    .after(tmux_prefix_commands)
-                    .after(split_active_pane),
-            )
+            // After all `Update` systems and observers (including URL `Receive`), so enqueued paths flush same frame.
+            .add_systems(PostUpdate, drain_session_save_queue_update)
             .add_systems(Last, save_session_on_app_exit);
     }
 }

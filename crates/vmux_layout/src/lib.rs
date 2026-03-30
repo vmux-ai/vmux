@@ -4,6 +4,7 @@
 //! + CEF resize sync (after Bevy’s [`camera_system`](bevy::render::camera::camera_system)).
 
 mod pane_layout;
+mod pane_lifecycle;
 mod pane_ops;
 mod pane_spawn;
 mod url;
@@ -363,6 +364,7 @@ impl Plugin for LayoutPlugin {
             .register_type::<SessionLayoutSnapshot>()
             .register_type::<LastVisitedUrl>()
             .init_resource::<LastVisitedUrl>()
+            .add_observer(pane_lifecycle::warn_if_pane_despawn_still_in_layout)
             .add_systems(Startup, setup_vmux_panes)
             .add_systems(
                 PostUpdate,

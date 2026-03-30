@@ -4,7 +4,7 @@ pub mod core;
 mod system;
 
 pub use core::{CAMERA_DISTANCE, VmuxWorldCamera};
-pub use vmux_core::SessionSavePath;
+pub use vmux_session::{SessionSavePath, SessionSaveQueue};
 pub use vmux_input::{AppAction, AppInputRoot, VmuxInputPlugin};
 pub use vmux_layout::LastVisitedUrl;
 pub use vmux_layout::{LayoutPlugin, SessionLayoutSnapshot};
