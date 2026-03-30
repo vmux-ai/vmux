@@ -7,7 +7,9 @@ members = [
     "crates/vmux_settings",
     "crates/vmux_session",
     "crates/vmux",
+    "crates/vmux_server",
     "crates/vmux_webview",
+    "crates/vmux_status_bar",
 ]
 default-members = ["crates/vmux"]
 resolver = "3"
@@ -19,11 +21,18 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 bevy = { version = "0.18", default-features = true }
+bevy_ecs = { version = "0.18", default-features = true }
 bevy_cef = "0.5.2"
 bevy_cef_core = "0.5.2"
 leafwing-input-manager = "0.20"
 # Session persistence: `bevy_save` on crates.io targets Bevy 0.16.x; vmux uses Bevy 0.18, so we use moonshine-save.
 moonshine-save = "0.6.1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "net"] }
+axum = { version = "0.7", default-features = false, features = ["http1", "tokio"] }
+tower-http = { version = "0.5", features = ["fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+crossbeam-channel = "0.5"
 
 [patch.crates-io]
 winit = { path = "patches/winit-0.30.13" }

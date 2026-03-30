@@ -8,8 +8,8 @@ use vmux_core::{SessionSavePath, SessionSaveQueue};
 use crate::pane_spawn::spawn_pane;
 use crate::url::{allowed_navigation_url, sanitize_embedded_webview_url};
 use crate::{
-    Active, LayoutAxis, LayoutNode, LayoutTree, Pane, PaneLastUrl, Root, SessionLayoutSnapshot,
-    layout_node_to_saved,
+    Active, LayoutAxis, LayoutNode, LayoutTree, Pane, PaneChromeOwner, PaneChromeStrip,
+    PaneLastUrl, Root, SessionLayoutSnapshot, layout_node_to_saved,
 };
 use vmux_settings::VmuxAppSettings;
 
@@ -56,6 +56,18 @@ fn ctrl_shift(keys: &ButtonInput<KeyCode>) -> bool {
 
 fn tmux_prefix_armed(prefix: &Query<&VmuxPrefixState, With<AppInputRoot>>) -> bool {
     prefix.single().map(|p| p.awaiting).unwrap_or(false)
+}
+
+fn despawn_chrome_for_pane(
+    commands: &mut Commands,
+    chrome_q: &Query<(Entity, &PaneChromeOwner), With<PaneChromeStrip>>,
+    pane: Entity,
+) {
+    for (e, owner) in chrome_q.iter() {
+        if owner.0 == pane {
+            commands.entity(e).despawn();
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -110,6 +122,7 @@ pub fn try_kill_active_pane(
     snapshot: &mut SessionLayoutSnapshot,
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
+    chrome_q: &Query<(Entity, &PaneChromeOwner), With<PaneChromeStrip>>,
     path: Option<&Res<SessionSavePath>>,
     session_queue: &mut SessionSaveQueue,
     default_webview_url: &str,
@@ -124,6 +137,7 @@ pub fn try_kill_active_pane(
         layout_tree.root = LayoutNode::Leaf(new_pane);
         layout_tree.bump();
         commands.entity(active_ent).remove::<Active>();
+        despawn_chrome_for_pane(commands, chrome_q, active_ent);
         commands.entity(active_ent).despawn();
         commands.entity(new_pane).insert(Active);
         *snapshot =
@@ -145,6 +159,7 @@ pub fn try_kill_active_pane(
         commands.entity(e).remove::<Active>();
     }
     commands.entity(survivor).insert(Active);
+    despawn_chrome_for_pane(commands, chrome_q, active_ent);
     commands.entity(active_ent).despawn();
     *snapshot = rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
     if let Some(p) = path {

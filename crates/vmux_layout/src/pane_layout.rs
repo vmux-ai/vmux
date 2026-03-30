@@ -6,10 +6,13 @@ use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::Browsers;
 
-use crate::{CAMERA_DISTANCE, LayoutTree, Pane, PixelRect, Root, VmuxWorldCamera, solve_layout};
+use crate::{
+    Active, CAMERA_DISTANCE, DEFAULT_PANE_CHROME_HEIGHT_PX, LayoutTree, Pane, PaneChromeOwner,
+    PaneChromeStrip, PixelRect, Root, VmuxWorldCamera, solve_layout,
+};
 
-/// World-space Z separation between pane planes (camera at +Z; larger Z is closer to the camera).
-const PANE_Z_STRIDE: f32 = 0.05;
+/// Legacy constant (panes are laid out **coplanar** at `z = 0`; ordering uses [`PANE_DEPTH_BIAS_STRIDE`]).
+pub const PANE_Z_STRIDE: f32 = 0.05;
 
 /// Per-pane [`StandardMaterial::depth_bias`] step so stacked panes win the depth test (see [`apply_pane_layout`]).
 const PANE_DEPTH_BIAS_STRIDE: f32 = 250.0;
@@ -19,8 +22,32 @@ const PANE_DEPTH_BIAS_STRIDE: f32 = 250.0;
 /// the pane — the texture is upscaled slightly when capped.
 const MAX_CEF_BACKING_LONG_SIDE: f32 = 1536.0;
 
+/// Pixel size for pane ↔ world mapping.
+///
+/// Prefer [`Window`] width/height when valid so layout tracks resize immediately. On some frames
+/// during window resize, `Camera::logical_viewport_size()` can lag behind [`Window`]; using the
+/// smaller/stale viewport for `solve_layout` while normalizing with a different effective size
+/// widens pane and chrome strips (notably the active pane’s status bar spilling past the split).
+fn layout_viewport_px(window: &Window, camera: &Camera) -> (f32, f32) {
+    let vw = window.width();
+    let vh = window.height();
+    if vw.is_finite() && vh.is_finite() && vw > 0.0 && vh > 0.0 {
+        return (vw, vh);
+    }
+    if let Some(size) = camera.logical_viewport_size()
+        && size.x > 0.0
+        && size.y > 0.0
+        && size.x.is_finite()
+        && size.y.is_finite()
+    {
+        return (size.x, size.y);
+    }
+    (vw, vh)
+}
+
+/// Same backing-size cap as pane webviews (see [`apply_pane_layout`]).
 #[inline]
-fn clamp_webview_backing_size(layout_px: Vec2) -> Vec2 {
+pub fn clamp_webview_backing_size(layout_px: Vec2) -> Vec2 {
     let w = layout_px.x.max(1.0);
     let h = layout_px.y.max(1.0);
     let m = w.max(h);
@@ -31,6 +58,69 @@ fn clamp_webview_backing_size(layout_px: Vec2) -> Vec2 {
     Vec2::new((w * s).max(1.0), (h * s).max(1.0))
 }
 
+/// Map a [`PixelRect`] in window pixels to world XY plane space (same convention as [`apply_pane_layout`]).
+/// Translation `z` is `0.0`; set `translation.z` for stacking in front of panes.
+pub fn pixel_rect_to_world_plane(
+    pr: PixelRect,
+    vw: f32,
+    vh: f32,
+    half_w: f32,
+    half_h: f32,
+) -> (Vec3, Vec3, Vec2) {
+    let cx = pr.x + pr.w * 0.5;
+    let cy = pr.y + pr.h * 0.5;
+    let nx = cx / vw;
+    let ny = cy / vh;
+    let wx = (nx - 0.5) * 2.0 * half_w;
+    let wy = (0.5 - ny) * 2.0 * half_h;
+    let scale_x = (pr.w / vw) * half_w;
+    let scale_y = (pr.h / vh) * half_h;
+    let translation = Vec3::new(wx, wy, 0.0);
+    let scale = Vec3::new(scale_x.max(1.0e-4), scale_y.max(1.0e-4), 1.0);
+    let layout_px = Vec2::new(pr.w.max(1.0), pr.h.max(1.0));
+    (translation, scale, layout_px)
+}
+
+/// Minimum main content height when splitting off chrome (matches leaf solver).
+const MIN_PANE_CONTENT_PX: f32 = 48.0;
+
+/// Split a pane tile into **content** (top) and **chrome** (bottom) pixel rects.
+///
+/// Main [`Pane`] webviews use the **full** tile ([`apply_pane_layout`]); this split is for the
+/// [`PaneChromeStrip`] overlay so it sits **on top** of the page at the bottom (same geometry as
+/// `chrome`).
+pub fn split_pane_content_and_chrome(
+    full: PixelRect,
+    desired_chrome_px: f32,
+) -> (PixelRect, PixelRect) {
+    let full_h = full.h.max(1.0);
+    let mut chrome_h = desired_chrome_px.min(full_h * 0.5).max(0.0);
+    chrome_h = chrome_h.min((full_h - MIN_PANE_CONTENT_PX).max(0.0));
+    if chrome_h > 0.0 && chrome_h < 8.0 {
+        chrome_h = if full_h >= MIN_PANE_CONTENT_PX + 8.0 {
+            8.0
+        } else {
+            0.0
+        };
+    }
+    // Integer px height so every pane’s strip matches in backing size and on screen.
+    chrome_h = chrome_h.round().max(0.0);
+    let content_h = (full_h - chrome_h).max(1.0);
+    let content = PixelRect {
+        x: full.x,
+        y: full.y,
+        w: full.w,
+        h: content_h,
+    };
+    let chrome = PixelRect {
+        x: full.x,
+        y: full.y + content_h,
+        w: full.w,
+        h: chrome_h.max(0.0),
+    };
+    (content, chrome)
+}
+
 #[allow(clippy::type_complexity)]
 #[allow(clippy::too_many_arguments)]
 pub fn apply_pane_layout(
@@ -38,9 +128,12 @@ pub fn apply_pane_layout(
     camera: Query<(&Camera, &Projection), (With<Camera3d>, With<VmuxWorldCamera>)>,
     layout_q: Query<&LayoutTree, With<Root>>,
     panes: Query<Entity, With<Pane>>,
-    mut transforms: Query<&mut Transform, With<Pane>>,
-    mut sizes: Query<&mut WebviewSize, With<Pane>>,
-    mesh_mat: Query<&MeshMaterial3d<WebviewExtendStandardMaterial>, With<Pane>>,
+    mut transforms: Query<&mut Transform, (With<Pane>, Without<PaneChromeStrip>)>,
+    mut sizes: Query<&mut WebviewSize, (With<Pane>, Without<PaneChromeStrip>)>,
+    mesh_mat: Query<
+        &MeshMaterial3d<WebviewExtendStandardMaterial>,
+        (With<Pane>, Without<PaneChromeStrip>),
+    >,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let Ok(window) = window.single() else {
@@ -57,17 +150,12 @@ pub fn apply_pane_layout(
         return;
     };
 
-    let vw = window.width();
-    let vh = window.height();
+    let (vw, vh) = layout_viewport_px(&window, camera);
     if !(vw.is_finite() && vh.is_finite()) || vw <= 0.0 || vh <= 0.0 {
         return;
     }
 
-    let aspect = camera
-        .logical_viewport_size()
-        .filter(|s| s.x > 0.0 && s.y > 0.0 && s.x.is_finite() && s.y.is_finite())
-        .map(|s| s.x / s.y)
-        .unwrap_or(vw / vh);
+    let aspect = vw / vh;
 
     let tan_half_fov = (perspective.fov * 0.5).tan();
     let half_h = CAMERA_DISTANCE * tan_half_fov;
@@ -93,14 +181,17 @@ pub fn apply_pane_layout(
             })
     });
 
-    let mut z_eps = 0.0_f32;
-    for (i, (entity, pr)) in rects.into_iter().enumerate() {
+    for (i, (entity, pr_full)) in rects.into_iter().enumerate() {
         let Ok(mut tf) = transforms.get_mut(entity) else {
             continue;
         };
         let Ok(mut ws) = sizes.get_mut(entity) else {
             continue;
         };
+
+        // Full tile for the main webview; status chrome is a separate mesh in front (see
+        // [`apply_pane_chrome_layout`]) so inactive panes don’t reserve an empty strip band.
+        let pr = pr_full;
 
         let cx = pr.x + pr.w * 0.5;
         let cy = pr.y + pr.h * 0.5;
@@ -113,15 +204,132 @@ pub fn apply_pane_layout(
         let scale_x = (pr.w / vw) * half_w;
         let scale_y = (pr.h / vh) * half_h;
 
-        tf.translation = Vec3::new(wx, wy, z_eps);
+        // All panes share z = 0 so perspective projects the same logical pixel size for every tile
+        // (including status strips). Stacking order uses depth_bias on materials, not translation.z.
+        tf.translation = Vec3::new(wx, wy, 0.0);
         tf.scale = Vec3::new(scale_x.max(1.0e-4), scale_y.max(1.0e-4), 1.0);
         ws.0 = clamp_webview_backing_size(Vec2::new(pr.w.max(1.0), pr.h.max(1.0)));
-        z_eps += PANE_Z_STRIDE;
 
         if let Ok(handle) = mesh_mat.get(entity)
             && let Some(mat) = materials.get_mut(handle.id())
         {
             mat.base.depth_bias = i as f32 * PANE_DEPTH_BIAS_STRIDE;
+        }
+    }
+}
+
+/// Position per-pane chrome strips as a bottom **overlay** on each pane tile (after [`apply_pane_layout`]).
+#[allow(clippy::too_many_arguments)]
+pub fn apply_pane_chrome_layout(
+    window: Query<&Window, With<PrimaryWindow>>,
+    camera: Query<(&Camera, &Projection), (With<Camera3d>, With<VmuxWorldCamera>)>,
+    layout_q: Query<&LayoutTree, With<Root>>,
+    active: Query<Entity, (With<Pane>, With<Active>)>,
+    panes: Query<Entity, With<Pane>>,
+    pane_tf: Query<&Transform, (With<Pane>, Without<PaneChromeStrip>)>,
+    chrome_q: Query<(Entity, &PaneChromeOwner), With<PaneChromeStrip>>,
+    mut transforms: Query<&mut Transform, (With<PaneChromeStrip>, Without<Pane>)>,
+    mut sizes: Query<&mut WebviewSize, (With<PaneChromeStrip>, Without<Pane>)>,
+    mesh_mat: Query<
+        &MeshMaterial3d<WebviewExtendStandardMaterial>,
+        (With<PaneChromeStrip>, Without<Pane>),
+    >,
+    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut vis: Query<&mut Visibility, (With<PaneChromeStrip>, Without<Pane>)>,
+) {
+    let Ok(window) = window.single() else {
+        return;
+    };
+    let Ok((camera, projection)) = camera.single() else {
+        return;
+    };
+    let Ok(layout) = layout_q.single() else {
+        return;
+    };
+
+    let Projection::Perspective(perspective) = projection else {
+        return;
+    };
+
+    let (vw, vh) = layout_viewport_px(&window, camera);
+    if !(vw.is_finite() && vh.is_finite()) || vw <= 0.0 || vh <= 0.0 {
+        return;
+    }
+
+    let aspect = vw / vh;
+
+    let tan_half_fov = (perspective.fov * 0.5).tan();
+    let half_h = CAMERA_DISTANCE * tan_half_fov;
+    let half_w = half_h * aspect;
+
+    let entity_alive = |e: Entity| panes.contains(e);
+    let area = PixelRect {
+        x: 0.0,
+        y: 0.0,
+        w: vw,
+        h: vh,
+    };
+    let rects = solve_layout(&layout.root, area, entity_alive);
+    let rect_map: HashMap<Entity, PixelRect> = rects.into_iter().collect();
+
+    let active_pane = active.iter().next().or_else(|| panes.iter().next());
+    for (i, (chrome_ent, owner)) in chrome_q.iter().enumerate() {
+        let Some(pr_full) = rect_map.get(&owner.0).copied() else {
+            continue;
+        };
+        let (_, mut chrome_pr) = split_pane_content_and_chrome(pr_full, DEFAULT_PANE_CHROME_HEIGHT_PX);
+        if chrome_pr.h <= 0.0 {
+            if let Ok(mut v) = vis.get_mut(chrome_ent) {
+                *v = Visibility::Hidden;
+            }
+            continue;
+        }
+        // Hard clamp to owner tile so the strip never extends past the split (layout float / resize).
+        let r = pr_full.x + pr_full.w;
+        chrome_pr.x = chrome_pr.x.clamp(pr_full.x, r);
+        chrome_pr.w = chrome_pr.w.min(r - chrome_pr.x).max(0.0);
+        if chrome_pr.w <= 0.0 || chrome_pr.h <= 0.0 {
+            if let Ok(mut v) = vis.get_mut(chrome_ent) {
+                *v = Visibility::Hidden;
+            }
+            continue;
+        }
+
+        let is_active = active_pane == Some(owner.0);
+        if let Ok(mut v) = vis.get_mut(chrome_ent) {
+            *v = if is_active {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
+        }
+
+        // Inactive strips stay hidden but still get layout + WebviewSize so focus switches don’t jump.
+        let (mut trans, scale, layout_px) =
+            pixel_rect_to_world_plane(chrome_pr, vw, vh, half_w, half_h);
+        let z_base = pane_tf.get(owner.0).map(|t| t.translation.z).unwrap_or(0.0);
+        // Same Z as the owner pane so perspective does not change strip height between panes
+        // (offsetting in Z made left/right splits look mismatched). Draw order uses depth_bias.
+        trans.z = z_base;
+
+        let Ok(mut tf) = transforms.get_mut(chrome_ent) else {
+            continue;
+        };
+        tf.translation = trans;
+        tf.scale = scale;
+
+        let Ok(mut ws) = sizes.get_mut(chrome_ent) else {
+            continue;
+        };
+        ws.0 = clamp_webview_backing_size(Vec2::new(
+            layout_px.x.round().max(1.0),
+            layout_px.y.round().max(1.0),
+        ));
+
+        if let Ok(handle) = mesh_mat.get(chrome_ent)
+            && let Some(mat) = materials.get_mut(handle.id())
+        {
+            mat.base.depth_bias = 1_000_000.0 + i as f32;
         }
     }
 }
@@ -135,7 +343,7 @@ pub fn sync_cef_sizes_after_pane_layout(
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     host_window: Query<&HostWindow>,
-    panes: Query<(Entity, &WebviewSize), With<Pane>>,
+    panes: Query<(Entity, &WebviewSize), Or<(With<Pane>, With<PaneChromeStrip>)>>,
 ) {
     let Ok(primary_e) = primary_window.single() else {
         return;

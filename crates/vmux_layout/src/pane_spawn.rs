@@ -6,9 +6,9 @@ use vmux_core::{SessionSavePath, SessionSaveQueue};
 use vmux_settings::VmuxAppSettings;
 
 use crate::{
-    Active, LastVisitedUrl, LayoutNode, LayoutTree, Pane, PaneLastUrl, Root, SavedLayoutNode,
-    SessionLayoutSnapshot, allowed_navigation_url, initial_webview_url,
-    sanitize_embedded_webview_url,
+    Active, LastVisitedUrl, LayoutNode, LayoutTree, Pane, PaneChromeNeedsUrl, PaneChromeOwner,
+    PaneChromeStrip, PaneLastUrl, Root, SavedLayoutNode, SessionLayoutSnapshot,
+    allowed_navigation_url, initial_webview_url, sanitize_embedded_webview_url,
 };
 
 /// Marker for the primary vmux webview entity.
@@ -29,6 +29,9 @@ pub const TEXT_INPUT_EMACS_BINDINGS_PRELOAD: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../vmux_input/src/text_input_emacs_bindings.js"
 ));
+
+/// Placeholder until `vmux_webview` sets the real status URL from the embedded server or env.
+const CHROME_LOADING_HTML: &str = r#"<!DOCTYPE html><html><head><meta charset="utf-8"/><style>html,body{margin:0;background:#1a1a1a;height:100%;}</style></head><body></body></html>"#;
 
 /// Keep [`Active`] and [`CefKeyboardTarget`] aligned with the pane under the pointer **before** CEF
 /// receives keys. `Pointer<Move>` alone misses click-to-focus without a move; `Pointer<Press>` covers that.
@@ -64,6 +67,59 @@ fn activate_pane_on_pointer_press(
     apply_active_pane_for_pointer(trigger.entity, &mut commands, &active);
 }
 
+fn activate_owner_pane_on_pointer_move(
+    trigger: On<Pointer<Move>>,
+    mut commands: Commands,
+    owner: Query<&PaneChromeOwner>,
+    active: Query<Entity, (With<Pane>, With<Active>)>,
+) {
+    let Ok(o) = owner.get(trigger.entity) else {
+        return;
+    };
+    apply_active_pane_for_pointer(o.0, &mut commands, &active);
+}
+
+fn activate_owner_pane_on_pointer_press(
+    trigger: On<Pointer<Press>>,
+    mut commands: Commands,
+    owner: Query<&PaneChromeOwner>,
+    active: Query<Entity, (With<Pane>, With<Active>)>,
+) {
+    let Ok(o) = owner.get(trigger.entity) else {
+        return;
+    };
+    apply_active_pane_for_pointer(o.0, &mut commands, &active);
+}
+
+fn spawn_pane_chrome(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<WebviewExtendStandardMaterial>,
+    pane: Entity,
+) {
+    commands
+        .spawn((
+            PaneChromeStrip,
+            PaneChromeOwner(pane),
+            PaneChromeNeedsUrl,
+            WebviewSource::inline(CHROME_LOADING_HTML),
+            PreloadScripts::default(),
+            ZoomLevel(CEF_PAGE_ZOOM_LEVEL),
+            Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE))),
+            MeshMaterial3d(materials.add(WebviewExtendStandardMaterial {
+                base: StandardMaterial {
+                    unlit: true,
+                    base_color: Color::WHITE,
+                    depth_bias: 1_000_000.0,
+                    ..default()
+                },
+                extension: WebviewMaterial::default(),
+            })),
+        ))
+        .observe(activate_owner_pane_on_pointer_move)
+        .observe(activate_owner_pane_on_pointer_press);
+}
+
 pub fn spawn_pane(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -95,7 +151,9 @@ pub fn spawn_pane(
     }
     b.observe(activate_pane_on_pointer_move)
         .observe(activate_pane_on_pointer_press);
-    b.id()
+    let pane_id = b.id();
+    spawn_pane_chrome(commands, meshes, materials, pane_id);
+    pane_id
 }
 
 pub fn spawn_saved_recursive(

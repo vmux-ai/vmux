@@ -13,10 +13,18 @@ default = []
 debug = ["bevy_cef/debug"]
 
 [dependencies]
+crossbeam-channel = { workspace = true }
+axum = { workspace = true }
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
 moonshine-save = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_server = { path = "../vmux_server" }
 vmux_settings = { path = "../vmux_settings" }
+vmux_status_bar = { path = "../vmux_status_bar" }

@@ -4,8 +4,8 @@ use bevy_cef::prelude::*;
 use leafwing_input_manager::prelude::*;
 use vmux_core::{SessionSavePath, SessionSaveQueue};
 use vmux_layout::{
-    Active, LayoutAxis, LayoutTree, Pane, PaneLastUrl, Root, SessionLayoutSnapshot,
-    try_cycle_pane_focus, try_kill_active_pane, try_split_active_pane,
+    Active, LayoutAxis, LayoutTree, Pane, PaneChromeOwner, PaneChromeStrip, PaneLastUrl, Root,
+    SessionLayoutSnapshot, try_cycle_pane_focus, try_kill_active_pane, try_split_active_pane,
 };
 use vmux_settings::VmuxAppSettings;
 
@@ -55,6 +55,7 @@ pub fn tmux_prefix_commands(
     mut snapshot: ResMut<SessionLayoutSnapshot>,
     pane_last: Query<&PaneLastUrl>,
     webview_src: Query<&WebviewSource>,
+    chrome_q: Query<(Entity, &PaneChromeOwner), With<PaneChromeStrip>>,
     path: Option<Res<SessionSavePath>>,
     mut session_queue: ResMut<SessionSaveQueue>,
     settings: Res<VmuxAppSettings>,
@@ -163,6 +164,7 @@ pub fn tmux_prefix_commands(
             &mut snapshot,
             &pane_last,
             &webview_src,
+            &chrome_q,
             path.as_ref(),
             &mut session_queue,
             default_url,

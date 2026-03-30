@@ -3,6 +3,7 @@
 //! [`LayoutPlugin`] registers reflected layout types, [`VmuxWorldCamera`], and `PostUpdate` pane layout
 //! + CEF resize sync (after Bevy’s [`camera_system`](bevy::render::camera::camera_system)).
 
+mod hosted_web_ui;
 mod pane_layout;
 mod pane_lifecycle;
 mod pane_ops;
@@ -15,7 +16,11 @@ use bevy_cef::prelude::render_standard_materials;
 use serde::{Deserialize, Serialize};
 use vmux_core::VmuxPrefixChordSet;
 
-pub use pane_layout::{apply_pane_layout, sync_cef_sizes_after_pane_layout};
+pub use hosted_web_ui::{VmuxHostedWebPlugin, VmuxWebviewSurface};
+pub use pane_layout::{
+    PANE_Z_STRIDE, apply_pane_chrome_layout, apply_pane_layout, clamp_webview_backing_size,
+    pixel_rect_to_world_plane, split_pane_content_and_chrome, sync_cef_sizes_after_pane_layout,
+};
 pub use pane_ops::{
     cycle_pane_focus, rebuild_session_snapshot, split_active_pane, try_cycle_pane_focus,
     try_kill_active_pane, try_split_active_pane,
@@ -39,6 +44,27 @@ pub struct VmuxWorldCamera;
 #[derive(Component, Default, Debug, Clone, Copy, Reflect)]
 #[reflect(Component, Default)]
 pub struct Pane;
+
+/// Bottom chrome strip webview for a pane (status UI, etc.). Drawn **over** the main pane webview
+/// at the bottom of the tile; **visible only** when the owner pane has [`Active`]
+/// ([`apply_pane_chrome_layout`]). Main panes use the full tile height ([`apply_pane_layout`]).
+#[derive(Component, Default, Debug, Clone, Copy, Reflect)]
+#[reflect(Component, Default)]
+pub struct PaneChromeStrip;
+
+/// Chrome entity is tied to this pane [`Entity`] (despawn chrome before the pane).
+#[derive(Component, Debug, Clone, Copy, Reflect)]
+#[reflect(Component)]
+pub struct PaneChromeOwner(pub Entity);
+
+/// Set until the status UI base URL is applied by `vmux_webview`.
+#[derive(Component, Default, Debug, Clone, Copy, Reflect)]
+#[reflect(Component, Default)]
+pub struct PaneChromeNeedsUrl;
+
+/// Default height in **layout pixels** of the [`PaneChromeStrip`] overlay at the bottom of each pane tile.
+/// Sized for the ~11px status bar (`vmux_status_bar`) with a little padding.
+pub const DEFAULT_PANE_CHROME_HEIGHT_PX: f32 = 28.0;
 
 /// Singleton anchor for subsystems (e.g. layout host with [`LayoutTree`]).
 #[derive(Component, Default, Debug, Clone, Copy, Reflect)]
@@ -358,6 +384,9 @@ impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Active>()
             .register_type::<Pane>()
+            .register_type::<PaneChromeStrip>()
+            .register_type::<PaneChromeOwner>()
+            .register_type::<PaneChromeNeedsUrl>()
             .register_type::<Root>()
             .register_type::<PaneLastUrl>()
             .register_type::<LayoutAxis>()
@@ -372,8 +401,11 @@ impl Plugin for LayoutPlugin {
                     apply_pane_layout
                         .after(camera_system)
                         .before(render_standard_materials),
-                    sync_cef_sizes_after_pane_layout
+                    apply_pane_chrome_layout
                         .after(apply_pane_layout)
+                        .before(render_standard_materials),
+                    sync_cef_sizes_after_pane_layout
+                        .after(apply_pane_chrome_layout)
                         .before(render_standard_materials),
                 ),
             )

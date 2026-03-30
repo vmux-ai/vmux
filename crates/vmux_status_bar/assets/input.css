@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    @apply box-border;
+  }
+
+  html,
+  body {
+    @apply m-0 h-full min-h-screen overflow-hidden bg-tmux-bg p-0 text-tmux-fg antialiased;
+    font-family: theme("fontFamily.status");
+    font-size: 11px;
+    line-height: 1;
+  }
+}
+
+/* Dioxus root: stretch so #bar can fill CEF viewport height (percent height alone often fails). */
+@layer components {
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  body > div {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start !important;
+    box-sizing: border-box;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    line-height: 1;
+    text-align: left !important;
+  }
+  #bar * {
+    text-align: left !important;
+  }
+}

@@ -1,3 +1,10 @@
 /target
 .DS_Store
 *.app
+
+# Tailwind output (run `npm run build:css` in crates/vmux_status_bar)
+crates/vmux_status_bar/assets/status.css
+# Dioxus web bundle (run `dx build --platform web` in crates/vmux_status_bar)
+crates/vmux_status_bar/dist/
+# Cargo artifacts when building inside the crate (e.g. `dx build`, `cargo build -p vmux_status_bar`)
+crates/vmux_status_bar/target/
