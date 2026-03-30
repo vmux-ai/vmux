@@ -11,4 +11,3 @@ path = "src/lib.rs"
 [dependencies]
 bevy = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
-vmux_layout = { path = "../vmux_layout" }

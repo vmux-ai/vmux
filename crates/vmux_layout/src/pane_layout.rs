@@ -6,13 +6,30 @@ use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::Browsers;
 
-use crate::{LayoutTree, Pane, PixelRect, Root, solve_layout, CAMERA_DISTANCE, VmuxWorldCamera};
+use crate::{CAMERA_DISTANCE, LayoutTree, Pane, PixelRect, Root, VmuxWorldCamera, solve_layout};
 
 /// World-space Z separation between pane planes (camera at +Z; larger Z is closer to the camera).
 const PANE_Z_STRIDE: f32 = 0.05;
 
 /// Per-pane [`StandardMaterial::depth_bias`] step so stacked panes win the depth test (see [`apply_pane_layout`]).
 const PANE_DEPTH_BIAS_STRIDE: f32 = 250.0;
+
+/// Upper bound on CEF OSR backing size (longest side in layout pixels). Uncapped sizes track the
+/// full window/pane pixel area and are very expensive for typing/compositing; the mesh still fills
+/// the pane — the texture is upscaled slightly when capped.
+const MAX_CEF_BACKING_LONG_SIDE: f32 = 1536.0;
+
+#[inline]
+fn clamp_webview_backing_size(layout_px: Vec2) -> Vec2 {
+    let w = layout_px.x.max(1.0);
+    let h = layout_px.y.max(1.0);
+    let m = w.max(h);
+    if m <= MAX_CEF_BACKING_LONG_SIDE {
+        return Vec2::new(w, h);
+    }
+    let s = MAX_CEF_BACKING_LONG_SIDE / m;
+    Vec2::new((w * s).max(1.0), (h * s).max(1.0))
+}
 
 #[allow(clippy::type_complexity)]
 #[allow(clippy::too_many_arguments)]
@@ -98,7 +115,7 @@ pub fn apply_pane_layout(
 
         tf.translation = Vec3::new(wx, wy, z_eps);
         tf.scale = Vec3::new(scale_x.max(1.0e-4), scale_y.max(1.0e-4), 1.0);
-        ws.0 = Vec2::new(pr.w.max(1.0), pr.h.max(1.0));
+        ws.0 = clamp_webview_backing_size(Vec2::new(pr.w.max(1.0), pr.h.max(1.0)));
         z_eps += PANE_Z_STRIDE;
 
         if let Ok(handle) = mesh_mat.get(entity)

@@ -5912,10 +5912,10 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_cef",
- "moonshine-save",
  "vmux_core",
  "vmux_input",
  "vmux_layout",
+ "vmux_session",
  "vmux_settings",
  "vmux_webview",
 ]
@@ -5926,7 +5926,6 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "serde",
- "vmux_layout",
 ]
 
 [[package]]
@@ -5934,8 +5933,11 @@ name = "vmux_input"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_cef",
  "leafwing-input-manager",
+ "vmux_core",
  "vmux_layout",
+ "vmux_settings",
 ]
 
 [[package]]
@@ -5945,10 +5947,24 @@ dependencies = [
  "bevy",
  "bevy_cef",
  "bevy_cef_core",
- "moonshine-save",
  "ron 0.8.1",
  "serde",
+ "vmux_core",
  "vmux_settings",
+]
+
+[[package]]
+name = "vmux_session"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "moonshine-save",
+ "vmux_core",
+ "vmux_input",
+ "vmux_layout",
+ "vmux_settings",
+ "vmux_webview",
 ]
 
 [[package]]

@@ -5,6 +5,7 @@ members = [
     "crates/vmux_layout",
     "crates/vmux_input",
     "crates/vmux_settings",
+    "crates/vmux_session",
     "crates/vmux",
     "crates/vmux_webview",
 ]

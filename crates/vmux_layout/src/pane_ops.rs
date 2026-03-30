@@ -2,15 +2,16 @@
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use crate::input_root::{AppInputRoot, VmuxPrefixState};
+use vmux_core::input_root::{AppInputRoot, VmuxPrefixState};
+use vmux_core::{SessionSavePath, SessionSaveQueue};
 
+use crate::pane_spawn::spawn_pane;
+use crate::url::{allowed_navigation_url, sanitize_embedded_webview_url};
 use crate::{
     Active, LayoutAxis, LayoutNode, LayoutTree, Pane, PaneLastUrl, Root, SessionLayoutSnapshot,
-    SessionSavePath, layout_node_to_saved, save_session_snapshot_to_file,
+    layout_node_to_saved,
 };
-use crate::pane_spawn::spawn_pane;
 use vmux_settings::VmuxAppSettings;
-use crate::url::allowed_navigation_url;
 
 fn webview_source_url(src: &WebviewSource) -> String {
     match src {
@@ -29,13 +30,19 @@ pub fn rebuild_session_snapshot(
         if let Ok(p) = pane_last.get(e) {
             let u = p.0.trim();
             if !u.is_empty() && allowed_navigation_url(u) {
-                return p.0.clone();
+                return sanitize_embedded_webview_url(&p.0, fallback_webview_url);
             }
         }
-        webview_src
+        let raw = webview_src
             .get(e)
             .map(webview_source_url)
-            .unwrap_or_else(|_| fallback_webview_url.to_string())
+            .unwrap_or_else(|_| fallback_webview_url.to_string());
+        let u = raw.trim();
+        if !u.is_empty() && allowed_navigation_url(u) {
+            sanitize_embedded_webview_url(&raw, fallback_webview_url)
+        } else {
+            fallback_webview_url.to_string()
+        }
     });
     let mut snap = SessionLayoutSnapshot::default();
     snap.set_root(&root);
@@ -63,20 +70,17 @@ pub fn try_split_active_pane(
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
     path: Option<&Res<SessionSavePath>>,
+    session_queue: &mut SessionSaveQueue,
     default_webview_url: &str,
 ) {
     let new_pane = spawn_pane(commands, meshes, materials, default_webview_url, false);
     if layout_tree.split_leaf(active_ent, new_pane, axis) {
         commands.entity(new_pane).insert(Active);
         commands.entity(active_ent).remove::<Active>();
-        *snapshot = rebuild_session_snapshot(
-            layout_tree,
-            pane_last,
-            webview_src,
-            default_webview_url,
-        );
+        *snapshot =
+            rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
         if let Some(p) = path {
-            save_session_snapshot_to_file(commands, p.0.clone());
+            session_queue.0.push(p.0.clone());
         }
     }
 }
@@ -107,6 +111,7 @@ pub fn try_kill_active_pane(
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
     path: Option<&Res<SessionSavePath>>,
+    session_queue: &mut SessionSaveQueue,
     default_webview_url: &str,
 ) -> bool {
     let mut leaves = Vec::new();
@@ -121,14 +126,10 @@ pub fn try_kill_active_pane(
         commands.entity(active_ent).remove::<Active>();
         commands.entity(active_ent).despawn();
         commands.entity(new_pane).insert(Active);
-        *snapshot = rebuild_session_snapshot(
-            layout_tree,
-            pane_last,
-            webview_src,
-            default_webview_url,
-        );
+        *snapshot =
+            rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
         if let Some(p) = path {
-            save_session_snapshot_to_file(commands, p.0.clone());
+            session_queue.0.push(p.0.clone());
         }
         return true;
     }
@@ -145,14 +146,9 @@ pub fn try_kill_active_pane(
     }
     commands.entity(survivor).insert(Active);
     commands.entity(active_ent).despawn();
-    *snapshot = rebuild_session_snapshot(
-        layout_tree,
-        pane_last,
-        webview_src,
-        default_webview_url,
-    );
+    *snapshot = rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
     if let Some(p) = path {
-        save_session_snapshot_to_file(commands, p.0.clone());
+        session_queue.0.push(p.0.clone());
     }
     true
 }
@@ -170,6 +166,7 @@ pub fn split_active_pane(
     pane_last: Query<&PaneLastUrl>,
     webview_src: Query<&WebviewSource>,
     path: Option<Res<SessionSavePath>>,
+    mut session_queue: ResMut<SessionSaveQueue>,
     settings: Res<VmuxAppSettings>,
 ) {
     if tmux_prefix_armed(&prefix) {
@@ -205,6 +202,7 @@ pub fn split_active_pane(
         &pane_last,
         &webview_src,
         path.as_ref(),
+        &mut session_queue,
         url,
     );
 }

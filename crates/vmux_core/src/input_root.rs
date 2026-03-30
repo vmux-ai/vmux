@@ -1,4 +1,4 @@
-//! Shared input-root marker, tmux-style prefix state, and ordering set for chord vs. pane systems.
+//! Shared input-root marker, tmux-style prefix state, and ordering set (used by layout + input).
 
 use bevy::prelude::*;
 

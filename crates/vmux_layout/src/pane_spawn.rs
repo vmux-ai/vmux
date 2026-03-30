@@ -2,13 +2,13 @@
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
+use vmux_core::{SessionSavePath, SessionSaveQueue};
 use vmux_settings::VmuxAppSettings;
 
-use crate::session_save::save_session_snapshot_to_file;
-
 use crate::{
-    Active, LayoutNode, LayoutTree, LastVisitedUrl, Pane, PaneLastUrl, Root, SavedLayoutNode,
-    SessionLayoutSnapshot, SessionSavePath, allowed_navigation_url, initial_webview_url,
+    Active, LastVisitedUrl, LayoutNode, LayoutTree, Pane, PaneLastUrl, Root, SavedLayoutNode,
+    SessionLayoutSnapshot, allowed_navigation_url, initial_webview_url,
+    sanitize_embedded_webview_url,
 };
 
 /// Marker for the primary vmux webview entity.
@@ -18,23 +18,50 @@ pub struct VmuxWebview;
 /// CEF page zoom; `0.0` matches typical desktop browsers at 100%.
 pub const CEF_PAGE_ZOOM_LEVEL: f64 = 0.0;
 
-/// Reports `location.href` to Bevy via `window.cef.emit({ url })` (pageshow, SPA history, retry until `cef` exists).
-pub const URL_TRACK_PRELOAD: &str = r#"(function(){function e(){try{if(typeof window!=="undefined"&&window.cef&&typeof window.cef.emit==="function")window.cef.emit({url:location.href});}catch(_){}}function t(){e()}var n=history.pushState,r=history.replaceState;history.pushState=function(){n.apply(history,arguments);setTimeout(t,0)};history.replaceState=function(){r.apply(history,arguments);setTimeout(t,0)};window.addEventListener("popstate",function(){setTimeout(t,0)});window.addEventListener("pageshow",function(){setTimeout(t,0)});var i=0,o=setInterval(function(){e();(window.cef&&window.cef.emit||++i>200)&&clearInterval(o)},50)})();"#;
+/// Reports **top-frame** `location.href` to Bevy via `window.cef.emit({ url })` (pageshow, SPA history, retry until `cef` exists).
+///
+/// Iframes (e.g. YouTube embeds on Google) must not emit: they would overwrite session URLs with the
+/// embed origin while the visible page stays on Google.
+pub const URL_TRACK_PRELOAD: &str = r#"(function(){function e(){try{if(window.self!==window.top)return;if(typeof window!=="undefined"&&window.cef&&typeof window.cef.emit==="function")window.cef.emit({url:location.href});}catch(_){}}function t(){e()}var n=history.pushState,r=history.replaceState;history.pushState=function(){n.apply(history,arguments);setTimeout(t,0)};history.replaceState=function(){r.apply(history,arguments);setTimeout(t,0)};window.addEventListener("popstate",function(){setTimeout(t,0)});window.addEventListener("pageshow",function(){setTimeout(t,0)});var i=0,o=setInterval(function(){e();(window.cef&&window.cef.emit||++i>200)&&clearInterval(o)},50)})();"#;
 
-/// Move keyboard shortcuts and tmux-style focus to whichever pane the cursor is over.
-fn activate_pane_on_pointer_hover(
-    trigger: On<Pointer<Move>>,
-    mut commands: Commands,
-    active: Query<Entity, (With<Pane>, With<Active>)>,
+/// Emacs-style readline bindings for `<input>` / `<textarea>` (source: [`vmux_input::TEXT_INPUT_EMACS_BINDINGS_PRELOAD`]).
+pub const TEXT_INPUT_EMACS_BINDINGS_PRELOAD: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../vmux_input/src/text_input_emacs_bindings.js"
+));
+
+/// Keep [`Active`] and [`CefKeyboardTarget`] aligned with the pane under the pointer **before** CEF
+/// receives keys. `Pointer<Move>` alone misses click-to-focus without a move; `Pointer<Press>` covers that.
+fn apply_active_pane_for_pointer(
+    ent: Entity,
+    commands: &mut Commands,
+    active: &Query<Entity, (With<Pane>, With<Active>)>,
 ) {
-    let ent = trigger.entity;
     if active.contains(ent) {
+        commands.entity(ent).insert(CefKeyboardTarget);
         return;
     }
     for e in active.iter() {
         commands.entity(e).remove::<Active>();
+        commands.entity(e).remove::<CefKeyboardTarget>();
     }
-    commands.entity(ent).insert(Active);
+    commands.entity(ent).insert((Active, CefKeyboardTarget));
+}
+
+fn activate_pane_on_pointer_move(
+    trigger: On<Pointer<Move>>,
+    mut commands: Commands,
+    active: Query<Entity, (With<Pane>, With<Active>)>,
+) {
+    apply_active_pane_for_pointer(trigger.entity, &mut commands, &active);
+}
+
+fn activate_pane_on_pointer_press(
+    trigger: On<Pointer<Press>>,
+    mut commands: Commands,
+    active: Query<Entity, (With<Pane>, With<Active>)>,
+) {
+    apply_active_pane_for_pointer(trigger.entity, &mut commands, &active);
 }
 
 pub fn spawn_pane(
@@ -49,7 +76,10 @@ pub fn spawn_pane(
         Pane,
         PaneLastUrl(start_url.to_string()),
         WebviewSource::new(start_url.to_string()),
-        PreloadScripts::from([URL_TRACK_PRELOAD.to_string()]),
+        PreloadScripts::from([
+            URL_TRACK_PRELOAD.to_string(),
+            TEXT_INPUT_EMACS_BINDINGS_PRELOAD.to_string(),
+        ]),
         ZoomLevel(CEF_PAGE_ZOOM_LEVEL),
         Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE))),
         MeshMaterial3d(materials.add(WebviewExtendStandardMaterial {
@@ -61,9 +91,10 @@ pub fn spawn_pane(
         })),
     ));
     if with_active {
-        b.insert(Active);
+        b.insert((Active, CefKeyboardTarget));
     }
-    b.observe(activate_pane_on_pointer_hover);
+    b.observe(activate_pane_on_pointer_move)
+        .observe(activate_pane_on_pointer_press);
     b.id()
 }
 
@@ -104,7 +135,7 @@ pub fn spawn_saved_recursive(
         SavedLayoutNode::Leaf { url } => {
             let u = url.trim();
             let start = if !u.is_empty() && allowed_navigation_url(u) {
-                u.to_string()
+                sanitize_embedded_webview_url(u, default_webview_url)
             } else {
                 default_webview_url.to_string()
             };
@@ -122,20 +153,21 @@ pub fn setup_vmux_panes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     path: Option<Res<SessionSavePath>>,
+    mut session_queue: ResMut<SessionSaveQueue>,
     settings: Res<VmuxAppSettings>,
 ) {
+    let fallback = settings.default_webview_url.as_str();
     let mut migrated = false;
     if snapshot.parsed_root().is_none()
         && let Some(last) = last.as_ref()
     {
         let u = last.0.trim();
         if !u.is_empty() && allowed_navigation_url(u) {
-            snapshot.set_root(&SavedLayoutNode::leaf_url(last.0.clone()));
+            let migrated_url = sanitize_embedded_webview_url(u, fallback);
+            snapshot.set_root(&SavedLayoutNode::leaf_url(migrated_url));
             migrated = true;
         }
     }
-
-    let fallback = settings.default_webview_url.as_str();
     let root_node = if let Some(saved) = snapshot.parsed_root() {
         let mut first_active = true;
         spawn_saved_recursive(
@@ -166,6 +198,6 @@ pub fn setup_vmux_panes(
     ));
 
     if migrated && let Some(p) = path.as_ref() {
-        save_session_snapshot_to_file(&mut commands, p.0.clone());
+        session_queue.0.push(p.0.clone());
     }
 }

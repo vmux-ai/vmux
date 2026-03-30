@@ -1,3 +1,3 @@
-//! Shared scene markers and constants (from [`vmux_core`]).
+//! Shared scene markers and constants (from [`vmux_layout`]).
 
-pub use vmux_core::{CAMERA_DISTANCE, VmuxWorldCamera};
+pub use vmux_layout::{CAMERA_DISTANCE, VmuxWorldCamera};

@@ -20,8 +20,11 @@ use bevy_cef_core::prelude::{CefExtensions, CommandLineConfig};
 use bevy_remote::RemotePlugin;
 
 pub mod prelude {
-    pub use crate::{CefPlugin, RunOnMainThread, common::*, navigation::*, webview::prelude::*};
-    pub use bevy_cef_core::prelude::{CefExtensions, CommandLineConfig};
+    pub use crate::{
+        CefPlugin, RunOnMainThread, common::*, keyboard::CefKeyboardInputSet, navigation::*,
+        webview::prelude::*,
+    };
+    pub use bevy_cef_core::prelude::{CefDiskProfileRoot, CefExtensions, CommandLineConfig};
 }
 
 pub struct RunOnMainThread;
@@ -38,6 +41,9 @@ pub struct CefPlugin {
 
 impl Plugin for CefPlugin {
     fn build(&self, app: &mut App) {
+        app.insert_resource(bevy_cef_core::prelude::CefDiskProfileRoot(
+            self.root_cache_path.clone(),
+        ));
         app.add_plugins((
             LocalHostPlugin,
             MessageLoopPlugin {

@@ -74,6 +74,7 @@ pub struct WebviewPlugin;
 impl Plugin for WebviewPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<RequestShowDevTool>()
+            .init_resource::<CefDiskProfileRoot>()
             .init_non_send_resource::<Browsers>()
             .add_plugins((MeshWebviewPlugin,))
             .add_systems(Main, send_external_begin_frame)
@@ -114,6 +115,7 @@ fn send_external_begin_frame(mut hosts: NonSendMut<Browsers>) {
 #[allow(clippy::too_many_arguments)]
 fn create_webview(
     mut browsers: NonSendMut<Browsers>,
+    disk_profile: Res<CefDiskProfileRoot>,
     requester: Res<Requester>,
     ipc_event_sender: Res<IpcEventRawSender>,
     brp_sender: Res<BrpSender>,
@@ -163,6 +165,7 @@ fn create_webview(
                 cursor_icon_sender.clone(),
                 &initialize_scripts.0,
                 host_window,
+                disk_profile.0.as_deref(),
             );
         }
     });

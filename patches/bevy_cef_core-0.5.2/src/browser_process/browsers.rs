@@ -32,6 +32,11 @@ pub use keyboard::*;
 /// gray used by bevy_cef’s webview placeholder texture (sRGB 43, 44, 47) so OSR clears are not white.
 const CEF_OSR_BACKGROUND_COLOR_ARGB: u32 = 0xFF2B2C2F;
 
+/// Disk profile root for [`RequestContextSettings::cache_path`], aligned with `CefPlugin::root_cache_path` in the `bevy_cef` crate.
+/// Inserted by that plugin; when `bevy_cef_core` is used without it, initialize via `init_resource` (default `None`).
+#[derive(Resource, Clone, Debug, Default)]
+pub struct CefDiskProfileRoot(pub Option<String>);
+
 pub struct WebviewBrowser {
     pub client: Browser,
     pub host: BrowserHost,
@@ -43,6 +48,9 @@ pub struct Browsers {
     browsers: HashMap<Entity, WebviewBrowser>,
     sender: TextureSender,
     receiver: TextureReceiver,
+    /// Lazily created when [`Self::create_browser`] is called with a non-empty disk profile root.
+    /// Shared by all webviews so multiple panes use one cookie store and avoid conflicting contexts on the same path.
+    shared_disk_context: Option<RequestContext>,
 }
 
 impl Default for Browsers {
@@ -52,6 +60,7 @@ impl Default for Browsers {
             browsers: HashMap::default(),
             sender,
             receiver,
+            shared_disk_context: None,
         }
     }
 }
@@ -70,10 +79,38 @@ impl Browsers {
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         initialize_scripts: &[String],
         _window_handle: Option<RawWindowHandle>,
+        disk_profile_root: Option<&str>,
     ) {
-        let mut context = Self::request_context(requester);
         let size = Rc::new(Cell::new(webview_size));
         let device_scale = Rc::new(Cell::new(device_scale_factor));
+        // Build the client before borrowing `shared_disk_context` mutably (same `self`).
+        let mut client = self.client_handler(
+            webview,
+            size.clone(),
+            device_scale.clone(),
+            ipc_event_sender,
+            brp_sender,
+            system_cursor_icon_sender,
+        );
+
+        // Holds the per-browser ephemeral context when not using `shared_disk_context`.
+        #[allow(unused_assignments)]
+        let mut ephemeral_local: Option<RequestContext> = None;
+        let context_for_browser = match disk_profile_root.filter(|s| !s.trim().is_empty()) {
+            Some(root) => {
+                if self.shared_disk_context.is_none() {
+                    self.ensure_shared_disk_context(requester, root);
+                } else {
+                    let _ = requester;
+                }
+                self.shared_disk_context.as_mut()
+            }
+            None => {
+                ephemeral_local = Self::ephemeral_request_context(requester);
+                ephemeral_local.as_mut()
+            }
+        };
+
         let browser = browser_host_create_browser_sync(
             Some(&WindowInfo {
                 windowless_rendering_enabled: true as _,
@@ -93,22 +130,16 @@ impl Browsers {
                 // shared_texture_enabled: true as _,
                 ..Default::default()
             }),
-            Some(&mut self.client_handler(
-                webview,
-                size.clone(),
-                device_scale.clone(),
-                ipc_event_sender,
-                brp_sender,
-                system_cursor_icon_sender,
-            )),
+            Some(&mut client),
             Some(&uri.into()),
             Some(&BrowserSettings {
-                windowless_frame_rate: 60,
+                // Cap for OSR; matches ProMotion / 120 Hz displays when the host can sustain it.
+                windowless_frame_rate: 120,
                 background_color: CEF_OSR_BACKGROUND_COLOR_ARGB,
                 ..Default::default()
             }),
             Self::create_extra_info(initialize_scripts).as_mut(),
-            context.as_mut(),
+            context_for_browser,
         )
         .expect("Failed to create browser");
         let host = browser.host().expect("Failed to get browser host");
@@ -421,7 +452,32 @@ impl Browsers {
         }
     }
 
-    fn request_context(requester: Requester) -> Option<RequestContext> {
+    fn persistent_request_context_settings(cache_path: &str) -> RequestContextSettings {
+        let mut settings = RequestContextSettings::default();
+        settings.cache_path = cache_path.into();
+        settings.persist_session_cookies = 1;
+        settings
+    }
+
+    fn ensure_shared_disk_context(&mut self, requester: Requester, root: &str) {
+        if self.shared_disk_context.is_some() {
+            return;
+        }
+        let mut context = cef::request_context_create_context(
+            Some(&Self::persistent_request_context_settings(root)),
+            Some(&mut RequestContextHandlerBuilder::build()),
+        );
+        if let Some(context) = context.as_mut() {
+            context.register_scheme_handler_factory(
+                Some(&SCHEME_CEF.into()),
+                Some(&HOST_CEF.into()),
+                Some(&mut LocalSchemaHandlerBuilder::build(requester)),
+            );
+        }
+        self.shared_disk_context = context;
+    }
+
+    fn ephemeral_request_context(requester: Requester) -> Option<RequestContext> {
         let mut context = cef::request_context_create_context(
             Some(&RequestContextSettings::default()),
             Some(&mut RequestContextHandlerBuilder::build()),

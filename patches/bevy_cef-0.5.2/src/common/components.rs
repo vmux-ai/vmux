@@ -8,6 +8,7 @@ impl Plugin for WebviewCoreComponentsPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<WebviewSize>()
             .register_type::<WebviewSource>()
+            .register_type::<CefKeyboardTarget>()
             .register_type::<HostWindow>()
             .register_type::<ZoomLevel>()
             .register_type::<AudioMuted>()
@@ -22,6 +23,13 @@ impl Plugin for WebviewCoreComponentsPlugin {
 ///
 /// When the value of this component is changed at runtime, the existing browser
 /// automatically navigates to the new source without being recreated.
+/// When present on **at least one** [`WebviewSource`] entity, only those entities receive
+/// forwarded keyboard events. When **no** webview has this marker, every webview receives keys
+/// (legacy single- or multi-webview behavior).
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct CefKeyboardTarget;
+
 #[derive(Component, Debug, Clone, Reflect)]
 #[reflect(Component, Debug)]
 #[require(WebviewSize, ZoomLevel, AudioMuted, PreloadScripts)]

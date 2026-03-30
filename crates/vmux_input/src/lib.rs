@@ -2,16 +2,25 @@
 //!
 //! Add `vmux_settings::SettingsPlugin` **before** this plugin so `VmuxAppSettings` is initialized for chord systems.
 
+/// Emacs-style readline bindings for `<input>` / `<textarea>` (Ctrl+A/E/…); **Cmd+A** selects all on macOS.
+pub const TEXT_INPUT_EMACS_BINDINGS_PRELOAD: &str = include_str!("text_input_emacs_bindings.js");
+
+mod cef_keyboard_target;
 mod component;
 mod system;
 
-pub use component::AppAction;
-pub use vmux_layout::{
-    tmux_prefix_commands, AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixChordSet, VmuxPrefixState,
+pub use cef_keyboard_target::sync_cef_keyboard_target;
+pub use component::{
+    AppAction, AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixChordSet, VmuxPrefixState,
 };
+pub use system::tmux_prefix_commands;
+pub use vmux_core::Active;
 
+use bevy::input::InputSystems;
 use bevy::prelude::*;
+use bevy_cef::prelude::CefKeyboardInputSet;
 use leafwing_input_manager::prelude::*;
+use vmux_layout::{cycle_pane_focus, split_active_pane};
 
 #[derive(Default)]
 pub struct VmuxInputPlugin;
@@ -22,11 +31,23 @@ impl Plugin for VmuxInputPlugin {
             .add_plugins(InputManagerPlugin::<AppAction>::default())
             .add_systems(Startup, system::spawn_app_input)
             .add_systems(
+                PreUpdate,
+                cef_keyboard_target::sync_cef_keyboard_target
+                    .after(InputSystems)
+                    .before(CefKeyboardInputSet),
+            )
+            .add_systems(
                 Update,
                 (
                     system::exit_on_quit_action,
-                    tmux_prefix_commands.in_set(VmuxPrefixChordSet),
+                    system::tmux_prefix_commands.in_set(VmuxPrefixChordSet),
                 ),
+            )
+            .add_systems(
+                Update,
+                cef_keyboard_target::sync_cef_keyboard_target
+                    .after(split_active_pane)
+                    .after(cycle_pane_focus),
             );
     }
 }

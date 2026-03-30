@@ -6,9 +6,8 @@ use cef::{Settings, api_hash, execute_process, initialize, shutdown, sys};
 
 /// Controls the CEF message loop.
 ///
-/// Uses `external_message_pump` on all platforms and calls
-/// [`CefDoMessageLoopWork`](https://cef-builds.spotifycdn.com/docs/106.1/cef__app_8h.html#a830ae43dcdffcf4e719540204cefdb61)
-/// every frame.
+/// Uses `external_message_pump` on all platforms. `cef::do_message_loop_work` runs **every
+/// frame** so input and IPC stay responsive; timer state from CEF is still tracked for scheduling.
 pub struct MessageLoopPlugin {
     pub config: CommandLineConfig,
     pub extensions: CefExtensions,
@@ -160,10 +159,14 @@ fn cef_do_message_loop_work(
         timer.replace(t);
     }
     if timer.as_ref().map(|t| t.is_finished()).unwrap_or(false) || max_delay_timer.is_finished() {
-        cef::do_message_loop_work();
         *max_delay_timer = MessageLoopWorkingMaxDelayTimer::default();
         timer.take();
     }
+    // Gating `do_message_loop_work` on the ~30 Hz max-delay timer meant most frames skipped the
+    // pump entirely, which stalls keyboard/pointer IPC and feels laggy. Pump every frame.
+    cef::do_message_loop_work();
+    // Second pass helps drain IPC queued between the render and input phases on the same tick.
+    cef::do_message_loop_work();
 }
 
 fn cef_shutdown(_: NonSend<RunOnMainThread>) {

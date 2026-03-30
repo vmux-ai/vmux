@@ -3,37 +3,29 @@
 //! [`LayoutPlugin`] registers reflected layout types, [`VmuxWorldCamera`], and `PostUpdate` pane layout
 //! + CEF resize sync (after Bevy’s [`camera_system`](bevy::render::camera::camera_system)).
 
-mod input_root;
-mod input_chords;
 mod pane_layout;
 mod pane_ops;
 mod pane_spawn;
-mod session_path;
-mod session_save;
 mod url;
 
 use bevy::prelude::*;
 use bevy::render::camera::camera_system;
 use bevy_cef::prelude::render_standard_materials;
 use serde::{Deserialize, Serialize};
+use vmux_core::VmuxPrefixChordSet;
 
-pub use input_chords::tmux_prefix_commands;
-pub use input_root::{
-    AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixChordSet, VmuxPrefixState,
-};
 pub use pane_layout::{apply_pane_layout, sync_cef_sizes_after_pane_layout};
 pub use pane_ops::{
     cycle_pane_focus, rebuild_session_snapshot, split_active_pane, try_cycle_pane_focus,
     try_kill_active_pane, try_split_active_pane,
 };
 pub use pane_spawn::{
-    setup_vmux_panes, spawn_pane, spawn_saved_recursive, CEF_PAGE_ZOOM_LEVEL, URL_TRACK_PRELOAD,
-    VmuxWebview,
+    CEF_PAGE_ZOOM_LEVEL, TEXT_INPUT_EMACS_BINDINGS_PRELOAD, URL_TRACK_PRELOAD, VmuxWebview,
+    setup_vmux_panes, spawn_pane, spawn_saved_recursive,
 };
-pub use session_path::SessionSavePath;
-pub use session_save::save_session_snapshot_to_file;
-pub use url::{allowed_navigation_url, initial_webview_url};
-pub use vmux_settings::{default_webview_url, VmuxAppSettings};
+pub use url::{allowed_navigation_url, initial_webview_url, sanitize_embedded_webview_url};
+pub use vmux_core::Active;
+pub use vmux_settings::{VmuxAppSettings, default_webview_url};
 
 /// Z distance of the world camera from the webview plane at z = 0 (used for frustum sizing).
 pub const CAMERA_DISTANCE: f32 = 3.0;
@@ -41,11 +33,6 @@ pub const CAMERA_DISTANCE: f32 = 3.0;
 /// Marker for the vmux world-facing camera used to size the webview plane.
 #[derive(Component)]
 pub struct VmuxWorldCamera;
-
-/// Marks the focused pane (paired with [`Pane`]).
-#[derive(Component, Default, Debug, Clone, Copy, Reflect)]
-#[reflect(Component, Default)]
-pub struct Active;
 
 /// Marks a pane entity (e.g. CEF webview).
 #[derive(Component, Default, Debug, Clone, Copy, Reflect)]
@@ -181,29 +168,23 @@ impl LayoutTree {
 fn remove_leaf_in_place(node: &mut LayoutNode, target: Entity) -> bool {
     match node {
         LayoutNode::Leaf(_) => false,
-        LayoutNode::Split { left, right, .. } => {
-            match (left.as_mut(), right.as_mut()) {
-                (LayoutNode::Leaf(le), _) if *le == target => {
-                    let promoted = std::mem::replace(
-                        &mut **right,
-                        LayoutNode::Leaf(Entity::PLACEHOLDER),
-                    );
-                    *node = promoted;
-                    true
-                }
-                (_, LayoutNode::Leaf(re)) if *re == target => {
-                    let promoted = std::mem::replace(
-                        &mut **left,
-                        LayoutNode::Leaf(Entity::PLACEHOLDER),
-                    );
-                    *node = promoted;
-                    true
-                }
-                (l, _) if l.contains_leaf(target) => remove_leaf_in_place(l, target),
-                (_, r) if r.contains_leaf(target) => remove_leaf_in_place(r, target),
-                _ => false,
+        LayoutNode::Split { left, right, .. } => match (left.as_mut(), right.as_mut()) {
+            (LayoutNode::Leaf(le), _) if *le == target => {
+                let promoted =
+                    std::mem::replace(&mut **right, LayoutNode::Leaf(Entity::PLACEHOLDER));
+                *node = promoted;
+                true
             }
-        }
+            (_, LayoutNode::Leaf(re)) if *re == target => {
+                let promoted =
+                    std::mem::replace(&mut **left, LayoutNode::Leaf(Entity::PLACEHOLDER));
+                *node = promoted;
+                true
+            }
+            (l, _) if l.contains_leaf(target) => remove_leaf_in_place(l, target),
+            (_, r) if r.contains_leaf(target) => remove_leaf_in_place(r, target),
+            _ => false,
+        },
     }
 }
 

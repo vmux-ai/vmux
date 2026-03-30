@@ -1,12 +1,14 @@
-//! Shared scene markers and constants for `vmux` and `vmux_webview`.
+//! Shared scene markers and IPC payloads for vmux crates.
+
+mod active;
+pub mod input_root;
+mod session;
+
+pub use active::Active;
+pub use input_root::{AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixChordSet, VmuxPrefixState};
+pub use session::{SessionSavePath, SessionSaveQueue};
 
 use serde::Deserialize;
-
-pub use vmux_layout::{
-    Active, LayoutAxis, LayoutNode, LayoutPlugin, LayoutTree, LastVisitedUrl, Pane, PaneLastUrl,
-    PixelRect, Root, SavedLayoutNode, SessionLayoutSnapshot, SessionSavePath, allowed_navigation_url,
-    initial_webview_url, CAMERA_DISTANCE, VmuxWorldCamera, layout_node_to_saved, solve_layout,
-};
 
 /// Payload from `window.cef.emit({ url })` (single-arg form matches bevy_cef IPC).
 #[derive(Debug, Clone, Deserialize)]

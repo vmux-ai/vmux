@@ -4,7 +4,7 @@
 //! - [KeyboardCodes](https://chromium.googlesource.com/external/Webkit/+/safari-4-branch/WebCore/platform/KeyboardCodes.h)
 
 use bevy::input::ButtonState;
-use bevy::input::keyboard::KeyboardInput;
+use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::{ButtonInput, KeyCode};
 use cef_dll_sys::{cef_event_flags_t, cef_key_event_t, cef_key_event_type_t};
 
@@ -34,29 +34,82 @@ pub fn keyboard_modifiers(input: &ButtonInput<KeyCode>) -> u32 {
     flags
 }
 
+#[inline]
+fn control_modifier_down(modifiers: u32) -> bool {
+    modifiers & (cef_event_flags_t::EVENTFLAG_CONTROL_DOWN.0 as u32) != 0
+}
+
+/// Text / UTF-16 character for [`KEYEVENT_CHAR`]. On macOS the first stroke in an `<input>` can
+/// arrive with `text: None` while [`KeyboardInput::logical_key`] is still [`Key::Character`];
+/// using only `text` produced CHAR with code 0 and odd latency until the next key.
+#[inline]
+fn utf16_input_char(key_event: &KeyboardInput) -> u16 {
+    key_event
+        .text
+        .as_ref()
+        .and_then(|t| t.chars().next())
+        .or_else(|| match &key_event.logical_key {
+            Key::Character(s) => s.chars().next(),
+            _ => None,
+        })
+        .unwrap_or('\0') as u16
+}
+
+/// After long delete/backspace repeat, macOS can emit a frame where `text` is empty and
+/// `logical_key` is not yet [`Key::Character`], so [`utf16_input_char`] returns 0. Without a
+/// fallback we only emit `KEYEVENT_RAWKEYDOWN` and the first typed letter is lost until the next
+/// keypress. Map physical [`KeyCode`] + shift/caps to a US-ASCII UTF-16 code unit when needed.
+fn latin_utf16_fallback(key_event: &KeyboardInput, input: &ButtonInput<KeyCode>) -> Option<u16> {
+    let shift = input.pressed(KeyCode::ShiftLeft) || input.pressed(KeyCode::ShiftRight);
+    let caps = input.pressed(KeyCode::CapsLock);
+    let upper = if caps { !shift } else { shift };
+
+    let vk = keycode_to_windows_vk(key_event.key_code);
+    if (0x41..=0x5A).contains(&vk) {
+        let ch = vk as u8;
+        let ch = if upper { ch } else { ch.to_ascii_lowercase() };
+        return Some(ch as u16);
+    }
+    if (0x30..=0x39).contains(&vk) && !shift {
+        return Some(vk as u16);
+    }
+    if key_event.key_code == KeyCode::Space {
+        return Some(0x20);
+    }
+    None
+}
+
+#[inline]
+fn resolved_utf16_char(key_event: &KeyboardInput, input: &ButtonInput<KeyCode>) -> u16 {
+    let c = utf16_input_char(key_event);
+    if c != 0 {
+        return c;
+    }
+    latin_utf16_fallback(key_event, input).unwrap_or(0)
+}
+
 /// Converts a Bevy `KeyboardInput` into one or more CEF key events.
 ///
-/// On Windows, character key presses produce two events (RAWKEYDOWN then CHAR)
-/// to match the native WM_KEYDOWN → WM_CHAR sequence. This ensures both DOM
-/// `keydown` and text input work correctly. All other cases produce a single event.
+/// - **Character presses** (all platforms): `KEYEVENT_RAWKEYDOWN` then `KEYEVENT_CHAR` when the resolved
+///   character is non-zero. OSR logs showed `CHAR` alone was dropped for the first letter after long
+///   backspace bursts while `KEYUP` still fired; Chromium expects a keydown before text + keyup.
+/// - **Character with unresolved char (0)** — Non-Windows: `KEYEVENT_RAWKEYDOWN` only (fallback path).
+/// - **Control + character** (e.g. Ctrl+A): `KEYEVENT_RAWKEYDOWN` only — no `KEYEVENT_CHAR`. Sending a
+///   printable CHAR with Control held confuses Chromium’s key handling and breaks shortcut listeners.
+/// - **Non–text keys** — `KEYEVENT_RAWKEYDOWN` / `KEYEVENT_KEYUP`.
 pub fn create_cef_key_events(
     modifiers: u32,
-    _input: &ButtonInput<KeyCode>,
+    input: &ButtonInput<KeyCode>,
     key_event: &KeyboardInput,
 ) -> Vec<cef::KeyEvent> {
     let native_key_code = to_native_key_code(&key_event.key_code) as _;
     let vk_code = keycode_to_windows_vk(key_event.key_code);
 
-    let is_windows_char_key = cfg!(target_os = "windows")
-        && key_event.state == ButtonState::Pressed
+    let is_character_key_press = key_event.state == ButtonState::Pressed
         && !is_not_character_key_code(&key_event.key_code);
 
-    if is_windows_char_key {
-        let character = key_event
-            .text
-            .as_ref()
-            .and_then(|text| text.chars().next())
-            .unwrap_or('\0') as u16;
+    if is_character_key_press {
+        let character = resolved_utf16_char(key_event, input);
 
         let base = cef_key_event_t {
             size: core::mem::size_of::<cef_key_event_t>(),
@@ -71,49 +124,36 @@ pub fn create_cef_key_events(
         };
 
         if character != 0 {
-            let char_event = cef_key_event_t {
-                type_: cef_key_event_type_t::KEYEVENT_CHAR,
-                windows_key_code: character as i32,
-                character,
-                unmodified_character: character,
-                ..base
-            };
-            vec![cef::KeyEvent::from(base), cef::KeyEvent::from(char_event)]
+            if control_modifier_down(modifiers) {
+                vec![cef::KeyEvent::from(base)]
+            } else {
+                let char_event = cef_key_event_t {
+                    type_: cef_key_event_type_t::KEYEVENT_CHAR,
+                    windows_key_code: character as i32,
+                    character,
+                    unmodified_character: character,
+                    focus_on_editable_field: true as _,
+                    ..base
+                };
+                vec![cef::KeyEvent::from(base), cef::KeyEvent::from(char_event)]
+            }
         } else {
             vec![cef::KeyEvent::from(base)]
         }
     } else {
         let key_type = match key_event.state {
-            ButtonState::Pressed if cfg!(target_os = "windows") => {
-                cef_key_event_type_t::KEYEVENT_RAWKEYDOWN
-            }
-            ButtonState::Pressed => cef_key_event_type_t::KEYEVENT_CHAR,
+            ButtonState::Pressed => cef_key_event_type_t::KEYEVENT_RAWKEYDOWN,
             ButtonState::Released => cef_key_event_type_t::KEYEVENT_KEYUP,
         };
-        let character = if key_type == cef_key_event_type_t::KEYEVENT_CHAR {
-            key_event
-                .text
-                .as_ref()
-                .and_then(|text| text.chars().next())
-                .unwrap_or('\0') as u16
-        } else {
-            0
-        };
-        let windows_key_code =
-            if cfg!(target_os = "windows") && key_type == cef_key_event_type_t::KEYEVENT_CHAR {
-                character as i32
-            } else {
-                vk_code
-            };
 
         vec![cef::KeyEvent::from(cef_key_event_t {
             size: core::mem::size_of::<cef_key_event_t>(),
             type_: key_type,
             modifiers,
-            windows_key_code,
+            windows_key_code: vk_code,
             native_key_code,
-            character,
-            unmodified_character: character,
+            character: 0,
+            unmodified_character: 0,
             is_system_key: false as _,
             focus_on_editable_field: false as _,
         })]
@@ -547,4 +587,152 @@ fn to_windows_native_key_code(keycode: &KeyCode) -> u32 {
     };
     let extended_prefix = if extended { 0xe000u32 } else { 0 };
     scan_code | extended_prefix
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::entity::Entity;
+    use bevy::input::keyboard::NativeKey;
+    use cef::KeyEventType;
+
+    fn win() -> Entity {
+        Entity::PLACEHOLDER
+    }
+
+    fn kb(
+        key_code: KeyCode,
+        logical_key: Key,
+        state: ButtonState,
+        text: Option<&str>,
+        repeat: bool,
+    ) -> KeyboardInput {
+        KeyboardInput {
+            key_code,
+            logical_key,
+            state,
+            text: text.map(|s| s.into()),
+            repeat,
+            window: win(),
+        }
+    }
+
+    #[test]
+    fn letter_with_text_produces_expected_cef_sequence() {
+        let input = ButtonInput::default();
+        let ev = kb(
+            KeyCode::KeyL,
+            Key::Character("l".into()),
+            ButtonState::Pressed,
+            Some("l"),
+            false,
+        );
+        let events = create_cef_key_events(0, &input, &ev);
+        assert_eq!(events.len(), 2, "expected RAWKEYDOWN + CHAR");
+        assert_eq!(events[0].type_, KeyEventType::RAWKEYDOWN);
+        assert_eq!(events[1].type_, KeyEventType::CHAR);
+        assert_eq!(events[1].character, u16::from(b'l'));
+        assert_eq!(events[1].windows_key_code, u16::from(b'l') as i32);
+        assert_ne!(events[1].focus_on_editable_field, 0, "CHAR must mark editable for OSR");
+    }
+
+    /// Simulates macOS after delete-repeat: no text, logical not yet Character.
+    #[test]
+    fn letter_l_without_text_falls_back_to_physical_keycode_latin() {
+        let input = ButtonInput::default();
+        let ev = kb(
+            KeyCode::KeyL,
+            Key::Unidentified(NativeKey::Unidentified),
+            ButtonState::Pressed,
+            None,
+            false,
+        );
+        let events = create_cef_key_events(0, &input, &ev);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].type_, KeyEventType::CHAR);
+        assert_eq!(events[1].character, u16::from(b'l'));
+        assert_eq!(events[1].windows_key_code, u16::from(b'l') as i32);
+    }
+
+    #[test]
+    fn delete_press_is_rawkeydown_not_char() {
+        let input = ButtonInput::default();
+        let ev = kb(
+            KeyCode::Delete,
+            Key::Unidentified(NativeKey::Unidentified),
+            ButtonState::Pressed,
+            None,
+            false,
+        );
+        let events = create_cef_key_events(0, &input, &ev);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].type_, KeyEventType::RAWKEYDOWN);
+        assert_eq!(events[0].character, 0);
+        assert_eq!(events[0].focus_on_editable_field, 0);
+    }
+
+    #[test]
+    fn delete_release_is_keyup() {
+        let input = ButtonInput::default();
+        let ev = kb(
+            KeyCode::Delete,
+            Key::Unidentified(NativeKey::Unidentified),
+            ButtonState::Released,
+            None,
+            false,
+        );
+        let events = create_cef_key_events(0, &input, &ev);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].type_, KeyEventType::KEYUP);
+    }
+
+    #[test]
+    fn arrow_left_repeated_press_rawkeydown() {
+        let input = ButtonInput::default();
+        let ev = kb(
+            KeyCode::ArrowLeft,
+            Key::Unidentified(NativeKey::Unidentified),
+            ButtonState::Pressed,
+            None,
+            true,
+        );
+        let events = create_cef_key_events(0, &input, &ev);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].type_, KeyEventType::RAWKEYDOWN);
+    }
+
+    #[test]
+    fn prefers_unicode_text_when_present() {
+        let input = ButtonInput::default();
+        let ev = kb(
+            KeyCode::KeyA,
+            Key::Character("ä".into()),
+            ButtonState::Pressed,
+            Some("ä"),
+            false,
+        );
+        let events = create_cef_key_events(0, &input, &ev);
+        assert_eq!(events.len(), 2);
+        let char_ev = &events[1];
+        assert_eq!(char_ev.type_, KeyEventType::CHAR);
+        assert_eq!(char_ev.character, 0x00E4);
+    }
+
+    #[test]
+    fn latin_fallback_shift_uppercase_l() {
+        let mut input = ButtonInput::default();
+        input.press(KeyCode::ShiftLeft);
+        let ev = kb(
+            KeyCode::KeyL,
+            Key::Unidentified(NativeKey::Unidentified),
+            ButtonState::Pressed,
+            None,
+            false,
+        );
+        let events = create_cef_key_events(0, &input, &ev);
+        assert_eq!(events.len(), 2);
+        let char_ev = &events[1];
+        assert_eq!(char_ev.type_, KeyEventType::CHAR);
+        assert_eq!(char_ev.character, u16::from(b'L'));
+    }
 }
