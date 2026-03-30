@@ -2,6 +2,7 @@
 [workspace]
 members = [
     "crates/vmux_core",
+    "crates/vmux_command",
     "crates/vmux_layout",
     "crates/vmux_input",
     "crates/vmux_settings",
