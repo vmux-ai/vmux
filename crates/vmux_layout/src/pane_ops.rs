@@ -97,6 +97,76 @@ pub fn try_split_active_pane(
     }
 }
 
+/// Mirror the two halves of the innermost split that contains the active pane (see [`LayoutTree::mirror_deepest_split_around`]).
+pub fn try_mirror_pane_layout(
+    layout_tree: &mut LayoutTree,
+    active_ent: Entity,
+    snapshot: &mut SessionLayoutSnapshot,
+    pane_last: &Query<&PaneLastUrl>,
+    webview_src: &Query<&WebviewSource>,
+    path: Option<&Res<SessionSavePath>>,
+    session_queue: &mut SessionSaveQueue,
+    default_webview_url: &str,
+) -> bool {
+    if !layout_tree.mirror_deepest_split_around(active_ent) {
+        return false;
+    }
+    *snapshot = rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
+    if let Some(p) = path {
+        session_queue.0.push(p.0.clone());
+    }
+    true
+}
+
+/// Tmux **rotate-window** (`-D` / `-U`): cycle pane entities through layout slots in DFS order; moves
+/// focus like tmux (`PREV` of active for `-D`, `NEXT` for `-U` in the pane list before rotation).
+pub fn try_rotate_window(
+    commands: &mut Commands,
+    layout_tree: &mut LayoutTree,
+    active_ent: Entity,
+    down: bool,
+    snapshot: &mut SessionLayoutSnapshot,
+    pane_last: &Query<&PaneLastUrl>,
+    webview_src: &Query<&WebviewSource>,
+    path: Option<&Res<SessionSavePath>>,
+    session_queue: &mut SessionSaveQueue,
+    default_webview_url: &str,
+) -> bool {
+    let mut leaves = Vec::new();
+    layout_tree.root.collect_leaves(&mut leaves);
+    if leaves.len() < 2 {
+        return false;
+    }
+    let Some(i) = leaves.iter().position(|&e| e == active_ent) else {
+        return false;
+    };
+    let n = leaves.len();
+    let new_active = if down {
+        leaves[(i + n - 1) % n]
+    } else {
+        leaves[(i + 1) % n]
+    };
+
+    let ok = if down {
+        layout_tree.rotate_window_down()
+    } else {
+        layout_tree.rotate_window_up()
+    };
+    if !ok {
+        return false;
+    }
+
+    if new_active != active_ent {
+        commands.entity(active_ent).remove::<Active>();
+        commands.entity(new_active).insert(Active);
+    }
+    *snapshot = rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
+    if let Some(p) = path {
+        session_queue.0.push(p.0.clone());
+    }
+    true
+}
+
 pub fn try_cycle_pane_focus(commands: &mut Commands, tree: &LayoutTree, cur: Entity) {
     let mut leaves = Vec::new();
     tree.root.collect_leaves(&mut leaves);

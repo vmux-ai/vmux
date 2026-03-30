@@ -23,7 +23,7 @@ pub use pane_layout::{
 };
 pub use pane_ops::{
     cycle_pane_focus, rebuild_session_snapshot, split_active_pane, try_cycle_pane_focus,
-    try_kill_active_pane, try_split_active_pane,
+    try_kill_active_pane, try_mirror_pane_layout, try_rotate_window, try_split_active_pane,
 };
 pub use pane_spawn::{
     CEF_PAGE_ZOOM_LEVEL, TEXT_INPUT_EMACS_BINDINGS_PRELOAD, URL_TRACK_PRELOAD, VmuxWebview,
@@ -188,6 +188,101 @@ impl LayoutTree {
             true
         } else {
             false
+        }
+    }
+
+    /// Swap the two children of the deepest split on the path to `active` (where `active` is a
+    /// direct child leaf of that split): mirror across that split’s axis (left↔right or top↔bottom).
+    pub fn mirror_deepest_split_around(&mut self, active: Entity) -> bool {
+        if !self.root.contains_leaf(active) {
+            return false;
+        }
+        let mut leaves = Vec::new();
+        self.root.collect_leaves(&mut leaves);
+        if leaves.len() < 2 {
+            return false;
+        }
+        if mirror_deepest_split_in_place(&mut self.root, active) {
+            self.bump();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// [`rotate-window -D`](https://man.openbsd.org/tmux.1#rotate-window): move the last pane in
+    /// DFS order to the front; each pane takes the next pane’s layout slot (tree shape unchanged).
+    pub fn rotate_window_down(&mut self) -> bool {
+        let mut leaves = Vec::new();
+        self.root.collect_leaves(&mut leaves);
+        if leaves.len() < 2 {
+            return false;
+        }
+        let n = leaves.len();
+        let mut rotated = Vec::with_capacity(n);
+        rotated.push(leaves[n - 1]);
+        rotated.extend_from_slice(&leaves[0..n - 1]);
+        assign_leaves_in_dfs_order(&mut self.root, &rotated, &mut 0);
+        self.bump();
+        true
+    }
+
+    /// [`rotate-window -U`](https://man.openbsd.org/tmux.1#rotate-window): move the first pane in
+    /// DFS order to the end (counter-rotate).
+    pub fn rotate_window_up(&mut self) -> bool {
+        let mut leaves = Vec::new();
+        self.root.collect_leaves(&mut leaves);
+        if leaves.len() < 2 {
+            return false;
+        }
+        let n = leaves.len();
+        let mut rotated = Vec::with_capacity(n);
+        rotated.extend_from_slice(&leaves[1..n]);
+        rotated.push(leaves[0]);
+        assign_leaves_in_dfs_order(&mut self.root, &rotated, &mut 0);
+        self.bump();
+        true
+    }
+}
+
+fn assign_leaves_in_dfs_order(node: &mut LayoutNode, entities: &[Entity], idx: &mut usize) {
+    match node {
+        LayoutNode::Leaf(e) => {
+            *e = entities[*idx];
+            *idx += 1;
+        }
+        LayoutNode::Split { left, right, .. } => {
+            assign_leaves_in_dfs_order(left, entities, idx);
+            assign_leaves_in_dfs_order(right, entities, idx);
+        }
+    }
+}
+
+fn mirror_deepest_split_in_place(node: &mut LayoutNode, active: Entity) -> bool {
+    match node {
+        LayoutNode::Leaf(_) => false,
+        LayoutNode::Split { left, right, .. } => {
+            let left_contains = left.contains_leaf(active);
+            if !left_contains && !right.contains_leaf(active) {
+                return false;
+            }
+            if left_contains {
+                match left.as_mut() {
+                    LayoutNode::Leaf(e) if *e == active => {
+                        std::mem::swap(left, right);
+                        true
+                    }
+                    _ => mirror_deepest_split_in_place(left.as_mut(), active),
+                }
+            } else {
+                match right.as_mut() {
+                    LayoutNode::Leaf(e) if *e == active => {
+                        std::mem::swap(left, right);
+                        true
+                    }
+                    _ => mirror_deepest_split_in_place(right.as_mut(), active),
+                }
+            }
         }
     }
 }

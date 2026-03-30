@@ -9,7 +9,7 @@ mod cef_keyboard_target;
 mod component;
 mod system;
 
-pub use cef_keyboard_target::sync_cef_keyboard_target;
+pub use cef_keyboard_target::{consume_keyboard_for_prefix_routing, sync_cef_keyboard_target};
 pub use component::{
     AppAction, AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixChordSet, VmuxPrefixState,
 };
@@ -32,9 +32,14 @@ impl Plugin for VmuxInputPlugin {
             .add_systems(Startup, system::spawn_app_input)
             .add_systems(
                 PreUpdate,
-                cef_keyboard_target::sync_cef_keyboard_target
-                    .after(InputSystems)
-                    .before(CefKeyboardInputSet),
+                (
+                    cef_keyboard_target::consume_keyboard_for_prefix_routing
+                        .after(InputSystems)
+                        .before(CefKeyboardInputSet),
+                    cef_keyboard_target::sync_cef_keyboard_target
+                        .after(InputSystems)
+                        .before(CefKeyboardInputSet),
+                ),
             )
             .add_systems(
                 Update,
