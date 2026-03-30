@@ -4,12 +4,17 @@
 //! [`consume_keyboard_for_prefix_routing`] drains [`KeyboardInput`] before CEF so chord keys
 //! (e.g. **Ctrl+B** then **r**) are not typed into the focused webview; [`tmux_prefix_commands`]
 //! still sees [`ButtonInput`] from [`InputSystems`].
+//!
+//! [`sync_cef_pointer_suppression_for_prefix`] sets [`CefSuppressPointerInput`] and
+//! [`CefSuppressKeyboardInput`] in [`PreUpdate`] (same rules as below). Draining [`KeyboardInput`]
+//! here does not stop CEF from seeing the same messages (independent readers), so keyboard
+//! blocking is enforced via [`CefSuppressKeyboardInput`] in bevy_cef’s key handler.
 
 use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
-use bevy_cef::prelude::CefKeyboardTarget;
-use vmux_core::input_root::{AppInputRoot, VmuxPrefixState};
+use bevy_cef::prelude::{CefKeyboardTarget, CefSuppressKeyboardInput, CefSuppressPointerInput};
 use vmux_core::Active;
+use vmux_core::input_root::{AppInputRoot, VmuxPrefixState};
 use vmux_layout::Pane;
 
 /// Drop keyboard messages before they reach CEF while a tmux-style prefix chord is in progress.
@@ -33,6 +38,29 @@ pub fn consume_keyboard_for_prefix_routing(
         return;
     }
     for _ in reader.read() {}
+}
+
+/// Skip CEF pointer forwarding while a tmux-style prefix chord is active (including the frame
+/// of the first **Ctrl+B**).
+pub fn sync_cef_pointer_suppression_for_prefix(
+    mut pointer: ResMut<CefSuppressPointerInput>,
+    mut keyboard: ResMut<CefSuppressKeyboardInput>,
+    prefix_q: Query<&VmuxPrefixState, With<AppInputRoot>>,
+    keys: Res<ButtonInput<KeyCode>>,
+) {
+    let Ok(prefix) = prefix_q.single() else {
+        pointer.0 = false;
+        keyboard.0 = false;
+        return;
+    };
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    let just_b = keys.just_pressed(KeyCode::KeyB);
+    let double_prefix = prefix.awaiting && ctrl && just_b;
+    let first_prefix = !prefix.awaiting && ctrl && just_b;
+    let chord_continuation = prefix.awaiting && !double_prefix;
+    let on = first_prefix || chord_continuation;
+    pointer.0 = on;
+    keyboard.0 = on;
 }
 
 pub fn sync_cef_keyboard_target(

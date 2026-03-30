@@ -1,16 +1,36 @@
 use bevy::app::AppExit;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::*;
 use leafwing_input_manager::prelude::*;
 use vmux_core::{SessionSavePath, SessionSaveQueue};
 use vmux_layout::{
-    Active, LayoutAxis, LayoutTree, Pane, PaneChromeOwner, PaneChromeStrip, PaneLastUrl, Root,
-    SessionLayoutSnapshot, try_cycle_pane_focus, try_kill_active_pane, try_mirror_pane_layout,
-    try_rotate_window, try_split_active_pane, try_toggle_zoom_pane,
+    Active, LayoutAxis, LayoutTree, LoadingBarMaterial, Pane, PaneChromeLoadingBar, PaneChromeOwner,
+    PaneChromeStrip, PaneLastUrl,
+    PaneSwapDir, Root, SessionLayoutSnapshot, VmuxWorldCamera, layout_viewport_for_workspace,
+    layout_workspace_pane_rects, try_cycle_pane_focus, try_kill_active_pane,
+    try_mirror_pane_layout, try_rotate_window, try_select_pane_direction, try_split_active_pane,
+    try_swap_active_pane, try_toggle_zoom_pane,
 };
 use vmux_settings::VmuxAppSettings;
 
 use crate::component::{AppAction, AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixState};
+
+/// Asset stores used when spawning panes from tmux chord handlers (keeps system param count low).
+#[derive(SystemParam)]
+pub struct PaneSpawnAssets<'w> {
+    pub meshes: ResMut<'w, Assets<Mesh>>,
+    pub materials: ResMut<'w, Assets<WebviewExtendStandardMaterial>>,
+    pub loading_bar_materials: ResMut<'w, Assets<LoadingBarMaterial>>,
+}
+
+/// Bundles `Res<Time>` + `Res<ButtonInput>` so [`tmux_prefix_commands`] stays within Bevy’s system-parameter limit (16).
+#[derive(SystemParam)]
+pub struct TmuxChordInput<'w> {
+    pub time: Res<'w, Time>,
+    pub keys: Res<'w, ButtonInput<KeyCode>>,
+}
 
 pub(crate) fn spawn_app_input(mut commands: Commands) {
     let mut input_map = InputMap::<AppAction>::default();
@@ -42,30 +62,36 @@ pub(crate) fn exit_on_quit_action(
     }
 }
 
-/// Tmux-style **Ctrl+B** chord handling (splits / focus / zoom (`resize-pane -Z`) / mirror / rotate-window (`{` `}` or `r` `R`) / kill-pane).
+/// Tmux-style **Ctrl+B** chord handling (splits / focus / zoom (`resize-pane -Z`) / mirror / **select-pane** (arrows) / **swap-pane** (Ctrl+arrows) / rotate-window (`{` `}` or `r` `R`) / kill-pane).
 #[allow(clippy::too_many_arguments)]
 pub fn tmux_prefix_commands(
-    time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
+    input: TmuxChordInput,
     mut prefix_q: Query<&mut VmuxPrefixState, With<AppInputRoot>>,
     mut commands: Commands,
     mut layout_q: Query<&mut LayoutTree, With<Root>>,
     active: Query<Entity, (With<Pane>, With<Active>)>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut spawn_assets: PaneSpawnAssets,
     mut snapshot: ResMut<SessionLayoutSnapshot>,
     pane_last: Query<&PaneLastUrl>,
     webview_src: Query<&WebviewSource>,
-    chrome_q: Query<(Entity, &PaneChromeOwner), With<PaneChromeStrip>>,
+    chrome_or_border_q: Query<
+        (Entity, &PaneChromeOwner),
+        Or<(With<PaneChromeStrip>, With<PaneChromeLoadingBar>)>,
+    >,
     path: Option<Res<SessionSavePath>>,
     mut session_queue: ResMut<SessionSaveQueue>,
     settings: Res<VmuxAppSettings>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    camera: Query<&Camera, With<VmuxWorldCamera>>,
+    panes: Query<Entity, With<Pane>>,
 ) {
     let Ok(mut prefix) = prefix_q.single_mut() else {
         return;
     };
     let default_url = settings.default_webview_url.as_str();
 
+    let keys = &input.keys;
+    let time = &input.time;
     let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
     let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 
@@ -99,8 +125,9 @@ pub fn tmux_prefix_commands(
             &mut tree,
             active_ent,
             LayoutAxis::Horizontal,
-            &mut meshes,
-            &mut materials,
+            &mut spawn_assets.meshes,
+            &mut spawn_assets.materials,
+            &mut spawn_assets.loading_bar_materials,
             &mut snapshot,
             &pane_last,
             &webview_src,
@@ -124,8 +151,9 @@ pub fn tmux_prefix_commands(
             &mut tree,
             active_ent,
             LayoutAxis::Vertical,
-            &mut meshes,
-            &mut materials,
+            &mut spawn_assets.meshes,
+            &mut spawn_assets.materials,
+            &mut spawn_assets.loading_bar_materials,
             &mut snapshot,
             &pane_last,
             &webview_src,
@@ -145,6 +173,56 @@ pub fn tmux_prefix_commands(
             return;
         };
         try_cycle_pane_focus(&mut commands, &mut tree, cur);
+        return;
+    }
+
+    // select-pane -L/-R/-U/-D: prefix + arrows (tmux default). swap-pane: prefix + Ctrl+arrows.
+    let arrow_dir = if keys.just_pressed(KeyCode::ArrowLeft) {
+        Some(PaneSwapDir::Left)
+    } else if keys.just_pressed(KeyCode::ArrowRight) {
+        Some(PaneSwapDir::Right)
+    } else if keys.just_pressed(KeyCode::ArrowUp) {
+        Some(PaneSwapDir::Up)
+    } else if keys.just_pressed(KeyCode::ArrowDown) {
+        Some(PaneSwapDir::Down)
+    } else {
+        None
+    };
+    if let Some(dir) = arrow_dir {
+        prefix.awaiting = false;
+        let Ok(window) = window.single() else {
+            return;
+        };
+        let Ok(camera) = camera.single() else {
+            return;
+        };
+        let Some((vw, vh)) = layout_viewport_for_workspace(window, camera) else {
+            return;
+        };
+        let Ok(mut tree) = layout_q.single_mut() else {
+            return;
+        };
+        let Ok(active_ent) = active.single() else {
+            return;
+        };
+        let rects = layout_workspace_pane_rects(vw, vh, &tree, &settings, |e| {
+            panes.get(e).is_ok()
+        });
+        if ctrl {
+            try_swap_active_pane(
+                &mut tree,
+                active_ent,
+                dir,
+                &mut snapshot,
+                &pane_last,
+                &webview_src,
+                path.as_ref(),
+                &mut session_queue,
+                default_url,
+            );
+        } else {
+            try_select_pane_direction(&mut commands, &mut tree, active_ent, dir, &rects);
+        }
         return;
     }
 
@@ -264,12 +342,13 @@ pub fn tmux_prefix_commands(
             &mut commands,
             &mut tree,
             active_ent,
-            &mut meshes,
-            &mut materials,
+            &mut spawn_assets.meshes,
+            &mut spawn_assets.materials,
+            &mut spawn_assets.loading_bar_materials,
             &mut snapshot,
             &pane_last,
             &webview_src,
-            &chrome_q,
+            &chrome_or_border_q,
             path.as_ref(),
             &mut session_queue,
             default_url,

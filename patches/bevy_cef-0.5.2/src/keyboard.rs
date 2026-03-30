@@ -1,4 +1,4 @@
-use crate::common::{CefKeyboardTarget, WebviewSource};
+use crate::common::{CefKeyboardTarget, CefSuppressKeyboardInput, WebviewSource};
 use bevy::input::keyboard::KeyboardInput;
 use bevy::input::InputSystems;
 use bevy::prelude::*;
@@ -6,8 +6,8 @@ use bevy_cef_core::prelude::{Browsers, create_cef_key_events, keyboard_modifiers
 use cef;
 use serde::{Deserialize, Serialize};
 
-/// [`SystemSet`] for systems that forward raw key events to CEF (runs in [`PreUpdate`] after
-/// [`InputSystems`](bevy::input::InputSystems)). Schedule app logic that must run before key
+/// [`SystemSet`] for systems that forward keyboard and IME input to CEF (runs in [`PreUpdate`]
+/// after [`InputSystems`](bevy::input::InputSystems)). Schedule app logic that must run before
 /// delivery with `.before(CefKeyboardInputSet)`.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CefKeyboardInputSet;
@@ -25,7 +25,9 @@ impl Plugin for KeyboardPlugin {
                 // Workaround for bevy_winit not calling `set_ime_allowed` on initial window
                 // creation when `Window::ime_enabled` is `true` from the start.
                 activate_ime,
-                ime_event.run_if(on_message::<Ime>),
+                ime_event
+                    .run_if(on_message::<Ime>)
+                    .in_set(CefKeyboardInputSet),
                 send_key_event
                     .run_if(on_message::<KeyboardInput>)
                     .in_set(CefKeyboardInputSet),
@@ -84,6 +86,7 @@ fn send_key_event(
     webviews_all: Query<Entity, With<WebviewSource>>,
     webviews_targeted: Query<Entity, (With<WebviewSource>, With<CefKeyboardTarget>)>,
     mut targeted_buf: Local<Vec<Entity>>,
+    suppress: Res<CefSuppressKeyboardInput>,
 ) {
     let modifiers = keyboard_modifiers(&input);
     targeted_buf.clear();
@@ -93,6 +96,9 @@ fn send_key_event(
         // Drain browser-process work before/after each key so IPC isn't still queued when the next
         // frame's Main pump runs (reduces randomly dropped characters under load).
         cef::do_message_loop_work();
+        if suppress.0 {
+            continue;
+        }
         if event.key_code == KeyCode::Enter && is_ime_commiting.0 {
             // If the IME is committing, we don't want to send the Enter key event.
             // This is to prevent sending the Enter key event when the IME is committing.
@@ -120,8 +126,12 @@ fn ime_event(
     mut er: MessageReader<Ime>,
     mut is_ime_commiting: ResMut<IsImeCommiting>,
     browsers: NonSend<Browsers>,
+    suppress: Res<CefSuppressKeyboardInput>,
 ) {
     for event in er.read() {
+        if suppress.0 {
+            continue;
+        }
         match event {
             Ime::Preedit { value, cursor, .. } => {
                 browsers.set_ime_composition(value, cursor.map(|(_, e)| e as u32))

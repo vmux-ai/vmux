@@ -1,0 +1,12 @@
+[package]
+name = "vmux_ui"
+description = "vmux — UI design tokens (colors, spacing, …) shared across chrome and overlays"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bevy = { workspace = true }

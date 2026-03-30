@@ -1,7 +1,6 @@
 use crate::browser_process::BrpHandler;
 use crate::browser_process::ClientHandlerBuilder;
 use crate::browser_process::client_handler::{IpcEventRaw, JsEmitEventHandler};
-use crate::prelude::IntoString;
 use crate::prelude::*;
 use async_channel::{Sender, TryRecvError};
 use bevy::platform::collections::HashMap;
@@ -25,6 +24,7 @@ mod keyboard;
 
 use crate::browser_process::browsers::devtool_render_handler::DevToolRenderHandlerBuilder;
 use crate::browser_process::display_handler::{DisplayHandlerBuilder, SystemCursorIconSenderInner};
+use crate::browser_process::load_handler::{WebviewLoadHandlerBuilder, WebviewLoadingStateSenderInner};
 use crate::browser_process::renderer_handler::SharedDeviceScaleFactor;
 pub use keyboard::*;
 
@@ -77,6 +77,7 @@ impl Browsers {
         ipc_event_sender: Sender<IpcEventRaw>,
         brp_sender: Sender<BrpMessage>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
+        webview_loading_state_sender: WebviewLoadingStateSenderInner,
         initialize_scripts: &[String],
         _window_handle: Option<RawWindowHandle>,
         disk_profile_root: Option<&str>,
@@ -91,6 +92,7 @@ impl Browsers {
             ipc_event_sender,
             brp_sender,
             system_cursor_icon_sender,
+            webview_loading_state_sender,
         );
 
         // Holds the per-browser ephemeral context when not using `shared_disk_context`.
@@ -334,13 +336,17 @@ impl Browsers {
         }
     }
 
-    /// Reload a specific webview's current page.
+    /// Reload a specific webview (normal reload, may use cache — Chrome ⌘R / Ctrl+R).
     pub fn reload_webview(&self, webview: &Entity) {
-        if let Some(browser) = self.browsers.get(webview)
-            && let Some(frame) = browser.client.main_frame()
-        {
-            let url = frame.url().into_string();
-            frame.load_url(Some(&url.as_str().into()));
+        if let Some(browser) = self.browsers.get(webview) {
+            browser.client.reload();
+        }
+    }
+
+    /// Hard-reload a specific webview (bypass HTTP cache — Chrome ⌘⇧R / Ctrl+Shift+R).
+    pub fn reload_webview_ignore_cache(&self, webview: &Entity) {
+        if let Some(browser) = self.browsers.get(webview) {
+            browser.client.reload_ignore_cache();
         }
     }
 
@@ -380,11 +386,8 @@ impl Browsers {
     #[inline]
     pub fn reload(&self) {
         for browser in self.browsers.values() {
-            if let Some(frame) = browser.client.main_frame() {
-                let url = frame.url().into_string();
-                info!("Reloading browser with URL: {}", url);
-                frame.load_url(Some(&url.as_str().into()));
-            }
+            info!("Reloading browser");
+            browser.client.reload();
         }
     }
 
@@ -500,6 +503,7 @@ impl Browsers {
         ipc_event_sender: Sender<IpcEventRaw>,
         brp_sender: Sender<BrpMessage>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
+        webview_loading_state_sender: WebviewLoadingStateSenderInner,
     ) -> Client {
         ClientHandlerBuilder::new(RenderHandlerBuilder::build(
             webview,
@@ -508,6 +512,10 @@ impl Browsers {
             device_scale.clone(),
         ))
         .with_display_handler(DisplayHandlerBuilder::build(system_cursor_icon_sender))
+        .with_load_handler(WebviewLoadHandlerBuilder::build(
+            webview,
+            webview_loading_state_sender,
+        ))
         .with_message_handler(JsEmitEventHandler::new(webview, ipc_event_sender))
         .with_message_handler(BrpHandler::new(brp_sender))
         .build()

@@ -127,32 +127,31 @@ struct SettingsFileReloadChannel {
 fn event_targets_path(event: &notify::Event, path: &Path) -> bool {
     event.paths.iter().any(|p| {
         p == path
-            || p.file_name().is_some_and(|n| n == path.file_name().unwrap_or_default())
+            || p.file_name()
+                .is_some_and(|n| n == path.file_name().unwrap_or_default())
     })
 }
 
 fn run_watcher(path: PathBuf, tx: crossbeam_channel::Sender<()>) {
     let path_for_cb = path.clone();
-    let mut watcher = match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-        let Ok(event) = res else {
-            return;
+    let mut watcher =
+        match notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+            let Ok(event) = res else {
+                return;
+            };
+            if !event.kind.is_modify() && !event.kind.is_create() && !event.kind.is_remove() {
+                return;
+            }
+            if event_targets_path(&event, &path_for_cb) {
+                let _ = tx.send(());
+            }
+        }) {
+            Ok(w) => w,
+            Err(e) => {
+                warn!("vmux_settings: could not create file watcher: {e}");
+                return;
+            }
         };
-        if !event.kind.is_modify()
-            && !event.kind.is_create()
-            && !event.kind.is_remove()
-        {
-            return;
-        }
-        if event_targets_path(&event, &path_for_cb) {
-            let _ = tx.send(());
-        }
-    }) {
-        Ok(w) => w,
-        Err(e) => {
-            warn!("vmux_settings: could not create file watcher: {e}");
-            return;
-        }
-    };
 
     let watch_res = if path.is_file() {
         watcher.watch(&path, RecursiveMode::NonRecursive)

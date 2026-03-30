@@ -43,7 +43,10 @@ fn migrate_last_session_vmux_settings_keys(path: Res<SessionSavePath>) {
     s = s.replace("window_edge_gap_px:", "window_padding_px:");
     if s != before {
         if let Err(e) = std::fs::write(path, s.as_bytes()) {
-            warn!("vmux_session: could not migrate session file {:?}: {e}", path);
+            warn!(
+                "vmux_session: could not migrate session file {:?}: {e}",
+                path
+            );
         }
     }
 }

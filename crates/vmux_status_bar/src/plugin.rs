@@ -11,9 +11,7 @@ use vmux_layout::{
     Active, Pane, PaneChromeNeedsUrl, PaneChromeOwner, PaneChromeStrip, PaneLastUrl,
     VmuxHostedWebPlugin, VmuxWebviewSurface, setup_vmux_panes,
 };
-use vmux_server::{
-    EmbeddedServeDirRequest, EmbeddedServeDirStartup, PendingEmbeddedServeDir,
-};
+use vmux_server::{EmbeddedServeDirRequest, EmbeddedServeDirStartup, PendingEmbeddedServeDir};
 
 #[derive(Resource, Default)]
 pub struct StatusUiBaseUrl(pub Option<String>);

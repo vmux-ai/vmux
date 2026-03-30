@@ -1,4 +1,4 @@
-use crate::common::{WebviewSize, WebviewSource};
+use crate::common::{CefSuppressPointerInput, WebviewSize, WebviewSource};
 use crate::prelude::update_webview_image;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
@@ -60,7 +60,11 @@ fn apply_on_pointer_move(
     browsers: NonSend<Browsers>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     webviews: Query<(&Sprite, &WebviewSize, &GlobalTransform)>,
+    suppress: Res<CefSuppressPointerInput>,
 ) {
+    if suppress.0 {
+        return;
+    }
     let Some(pos) = obtain_relative_pos_from_trigger(&trigger, &webviews, &cameras)
     else {
         return;
@@ -73,7 +77,11 @@ fn apply_on_pointer_pressed(
     browsers: NonSend<Browsers>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     webviews: Query<(&Sprite, &WebviewSize, &GlobalTransform)>,
+    suppress: Res<CefSuppressPointerInput>,
 ) {
+    if suppress.0 {
+        return;
+    }
     let Some(pos) = obtain_relative_pos_from_trigger(&trigger, &webviews, &cameras)
     else {
         return;
@@ -86,7 +94,11 @@ fn apply_on_pointer_released(
     browsers: NonSend<Browsers>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     webviews: Query<(&Sprite, &WebviewSize, &GlobalTransform)>,
+    suppress: Res<CefSuppressPointerInput>,
 ) {
+    if suppress.0 {
+        return;
+    }
     let Some(pos) = obtain_relative_pos_from_trigger(&trigger, &webviews, &cameras)
     else {
         return;
@@ -100,7 +112,12 @@ fn on_mouse_wheel(
     webviews: Query<(Entity, &Sprite, &WebviewSize, &GlobalTransform)>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     windows: Query<&Window>,
+    suppress: Res<CefSuppressPointerInput>,
 ) {
+    if suppress.0 {
+        for _ in er.read() {}
+        return;
+    }
     for event in er.read() {
         let Ok(window) = windows.get(event.window) else {
             continue;

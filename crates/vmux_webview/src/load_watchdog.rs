@@ -12,7 +12,7 @@ const AFTER_NAVIGATE_SECS: f32 = 5.0;
 const MAX_INITIAL_RELOADS: u32 = 3;
 const MAX_POST_FALLBACK_RELOADS: u32 = 3;
 
-const UNREACHABLE_HTML: &str = r#"<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><style>html,body{margin:0;background:#1a1a1a;color:#bbb;font:14px system-ui,-apple-system,sans-serif;height:100%;}body{display:flex;align-items:center;justify-content:center;text-align:center;padding:1.5rem;}p{margin:.5rem 0;}small{opacity:.65;font-size:12px;}</style></head><body><div><p>Couldn’t load this page.</p><small>Network or renderer issue — try reloading (⌘R / Ctrl+R) or another URL.</small></div></body></html>"#;
+const UNREACHABLE_HTML: &str = r#"<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><style>html,body{margin:0;background:#1a1a1a;color:#bbb;font:14px system-ui,-apple-system,sans-serif;height:100%;}body{display:flex;align-items:center;justify-content:center;text-align:center;padding:1.5rem;}p{margin:.5rem 0;}small{opacity:.65;font-size:12px;}</style></head><body><div><p>Couldn’t load this page.</p><small>Network or renderer issue — try reloading (⌘R / Ctrl+R, or ⌘⇧R / Ctrl+Shift+R without cache) or another URL.</small></div></body></html>"#;
 
 #[derive(Component, Debug)]
 pub(crate) struct WebviewLoadWatchdog {
@@ -64,12 +64,15 @@ pub(crate) fn webview_load_watchdog_tick(
     settings: Res<VmuxAppSettings>,
     images: Res<Assets<Image>>,
     materials: Res<Assets<WebviewExtendStandardMaterial>>,
-    mut q: Query<(
-        Entity,
-        &WebviewSource,
-        &MeshMaterial3d<WebviewExtendStandardMaterial>,
-        &mut WebviewLoadWatchdog,
-    ), With<VmuxWebview>>,
+    mut q: Query<
+        (
+            Entity,
+            &WebviewSource,
+            &MeshMaterial3d<WebviewExtendStandardMaterial>,
+            &mut WebviewLoadWatchdog,
+        ),
+        With<VmuxWebview>,
+    >,
 ) {
     let now = time.elapsed_secs();
     let fallback_url = settings.default_webview_url.trim();

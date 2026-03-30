@@ -1,7 +1,7 @@
 //! Root [`App`] component (status strip). Markup uses Tailwind (`assets/input.css` → `assets/status.css`).
 
 use crate::bridge::EVAL_SCRIPT;
-use crate::payload::{apply_payload, BridgeMsg};
+use crate::payload::{BridgeMsg, apply_payload};
 
 use dioxus::prelude::*;
 
