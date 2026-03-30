@@ -5,7 +5,8 @@ use leafwing_input_manager::prelude::*;
 use vmux_core::{SessionSavePath, SessionSaveQueue};
 use vmux_layout::{
     Active, LayoutAxis, LayoutTree, Pane, PaneChromeOwner, PaneChromeStrip, PaneLastUrl, Root,
-    SessionLayoutSnapshot, try_cycle_pane_focus, try_kill_active_pane, try_split_active_pane,
+    SessionLayoutSnapshot, try_cycle_pane_focus, try_kill_active_pane, try_mirror_pane_layout,
+    try_rotate_window, try_split_active_pane,
 };
 use vmux_settings::VmuxAppSettings;
 
@@ -41,7 +42,7 @@ pub(crate) fn exit_on_quit_action(
     }
 }
 
-/// Tmux-style **Ctrl+B** chord handling (splits / focus / kill-pane).
+/// Tmux-style **Ctrl+B** chord handling (splits / focus / mirror / rotate-window (`{` `}` or `r` `R`) / kill-pane).
 #[allow(clippy::too_many_arguments)]
 pub fn tmux_prefix_commands(
     time: Res<Time>,
@@ -144,6 +145,98 @@ pub fn tmux_prefix_commands(
             return;
         };
         try_cycle_pane_focus(&mut commands, tree, cur);
+        return;
+    }
+
+    // Mirror: swap halves of the innermost split containing the active pane (prefix + m).
+    if keys.just_pressed(KeyCode::KeyM) {
+        prefix.awaiting = false;
+        let Ok(mut tree) = layout_q.single_mut() else {
+            return;
+        };
+        let Ok(active_ent) = active.single() else {
+            return;
+        };
+        try_mirror_pane_layout(
+            &mut tree,
+            active_ent,
+            &mut snapshot,
+            &pane_last,
+            &webview_src,
+            path.as_ref(),
+            &mut session_queue,
+            default_url,
+        );
+        return;
+    }
+
+    // rotate-window -D / -U (tmux default: prefix + `}` / `{`).
+    if shift && keys.just_pressed(KeyCode::BracketRight) {
+        prefix.awaiting = false;
+        let Ok(mut tree) = layout_q.single_mut() else {
+            return;
+        };
+        let Ok(active_ent) = active.single() else {
+            return;
+        };
+        try_rotate_window(
+            &mut commands,
+            &mut tree,
+            active_ent,
+            true,
+            &mut snapshot,
+            &pane_last,
+            &webview_src,
+            path.as_ref(),
+            &mut session_queue,
+            default_url,
+        );
+        return;
+    }
+    if shift && keys.just_pressed(KeyCode::BracketLeft) {
+        prefix.awaiting = false;
+        let Ok(mut tree) = layout_q.single_mut() else {
+            return;
+        };
+        let Ok(active_ent) = active.single() else {
+            return;
+        };
+        try_rotate_window(
+            &mut commands,
+            &mut tree,
+            active_ent,
+            false,
+            &mut snapshot,
+            &pane_last,
+            &webview_src,
+            path.as_ref(),
+            &mut session_queue,
+            default_url,
+        );
+        return;
+    }
+
+    // rotate-window -D / -U (prefix + r / R, same as `}` / `{`).
+    if keys.just_pressed(KeyCode::KeyR) {
+        prefix.awaiting = false;
+        let Ok(mut tree) = layout_q.single_mut() else {
+            return;
+        };
+        let Ok(active_ent) = active.single() else {
+            return;
+        };
+        try_rotate_window(
+            &mut commands,
+            &mut tree,
+            active_ent,
+            !shift,
+            &mut snapshot,
+            &pane_last,
+            &webview_src,
+            path.as_ref(),
+            &mut session_queue,
+            default_url,
+        );
         return;
     }
 
