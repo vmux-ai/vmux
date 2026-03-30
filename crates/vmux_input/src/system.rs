@@ -6,7 +6,7 @@ use vmux_core::{SessionSavePath, SessionSaveQueue};
 use vmux_layout::{
     Active, LayoutAxis, LayoutTree, Pane, PaneChromeOwner, PaneChromeStrip, PaneLastUrl, Root,
     SessionLayoutSnapshot, try_cycle_pane_focus, try_kill_active_pane, try_mirror_pane_layout,
-    try_rotate_window, try_split_active_pane,
+    try_rotate_window, try_split_active_pane, try_toggle_zoom_pane,
 };
 use vmux_settings::VmuxAppSettings;
 
@@ -42,7 +42,7 @@ pub(crate) fn exit_on_quit_action(
     }
 }
 
-/// Tmux-style **Ctrl+B** chord handling (splits / focus / mirror / rotate-window (`{` `}` or `r` `R`) / kill-pane).
+/// Tmux-style **Ctrl+B** chord handling (splits / focus / zoom (`resize-pane -Z`) / mirror / rotate-window (`{` `}` or `r` `R`) / kill-pane).
 #[allow(clippy::too_many_arguments)]
 pub fn tmux_prefix_commands(
     time: Res<Time>,
@@ -138,13 +138,25 @@ pub fn tmux_prefix_commands(
 
     if keys.just_pressed(KeyCode::KeyO) {
         prefix.awaiting = false;
-        let Ok(tree) = layout_q.single() else {
+        let Ok(mut tree) = layout_q.single_mut() else {
             return;
         };
         let Ok(cur) = active.single() else {
             return;
         };
-        try_cycle_pane_focus(&mut commands, tree, cur);
+        try_cycle_pane_focus(&mut commands, &mut tree, cur);
+        return;
+    }
+
+    if keys.just_pressed(KeyCode::KeyZ) {
+        prefix.awaiting = false;
+        let Ok(mut tree) = layout_q.single_mut() else {
+            return;
+        };
+        let Ok(active_ent) = active.single() else {
+            return;
+        };
+        try_toggle_zoom_pane(&mut tree, active_ent);
         return;
     }
 

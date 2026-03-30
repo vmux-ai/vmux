@@ -102,6 +102,7 @@ fn spawn_pane_chrome(
         .spawn((
             PaneChromeStrip,
             PaneChromeOwner(pane),
+            Visibility::Visible,
             PaneChromeNeedsUrl,
             WebviewSource::inline(CHROME_LOADING_HTML),
             PreloadScripts::default(),
@@ -132,6 +133,7 @@ pub fn spawn_pane(
     let mut b = commands.spawn((
         VmuxWebview,
         Pane,
+        Visibility::Visible,
         PaneLastUrl(start_url.to_string()),
         WebviewSource::new(start_url.to_string()),
         PreloadScripts::from([
@@ -255,6 +257,7 @@ pub fn setup_vmux_panes(
         LayoutTree {
             root: root_node,
             revision: 0,
+            zoom_pane: None,
         },
     ));
 

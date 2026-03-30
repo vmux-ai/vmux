@@ -193,6 +193,7 @@ pub fn apply_pane_layout(
     panes: Query<Entity, With<Pane>>,
     mut transforms: Query<&mut Transform, (With<Pane>, Without<PaneChromeStrip>)>,
     mut sizes: Query<&mut WebviewSize, (With<Pane>, Without<PaneChromeStrip>)>,
+    mut pane_vis: Query<&mut Visibility, (With<Pane>, Without<PaneChromeStrip>)>,
     mesh_mat: Query<
         &MeshMaterial3d<WebviewExtendStandardMaterial>,
         (With<Pane>, Without<PaneChromeStrip>),
@@ -228,7 +229,13 @@ pub fn apply_pane_layout(
     let s = settings.window_padding_px;
     let top = settings.window_padding_top_px;
     let area = layout_root_area(vw, vh, s, top, s, s);
-    let mut rects = solve_layout(&layout.root, area, entity_alive, settings.pane_border_spacing_px);
+    let mut rects = solve_layout(
+        &layout.root,
+        area,
+        entity_alive,
+        settings.pane_border_spacing_px,
+        layout.zoom_pane,
+    );
     rects.sort_by(|a, b| {
         let cy_a = a.1.y + a.1.h * 0.5;
         let cy_b = b.1.y + b.1.h * 0.5;
@@ -240,6 +247,10 @@ pub fn apply_pane_layout(
                 cx_b.partial_cmp(&cx_a).unwrap_or(std::cmp::Ordering::Equal)
             })
     });
+    let rect_map: HashMap<Entity, PixelRect> = rects.iter().map(|(e, r)| (*e, *r)).collect();
+
+    let mut leaves = Vec::new();
+    layout.root.collect_leaves(&mut leaves);
 
     for (i, (entity, pr_full)) in rects.into_iter().enumerate() {
         let Ok(mut tf) = transforms.get_mut(entity) else {
@@ -248,6 +259,9 @@ pub fn apply_pane_layout(
         let Ok(mut ws) = sizes.get_mut(entity) else {
             continue;
         };
+        if let Ok(mut v) = pane_vis.get_mut(entity) {
+            *v = Visibility::Visible;
+        }
 
         // Full tile for the main webview; status chrome is a separate mesh in front (see
         // [`apply_pane_chrome_layout`]) so inactive panes don’t reserve an empty strip band.
@@ -280,6 +294,31 @@ pub fn apply_pane_layout(
                 PANE_CORNER_CLIP_FULL,
             );
             mat.base.depth_bias = i as f32 * PANE_DEPTH_BIAS_STRIDE;
+        }
+    }
+
+    // Panes not in the layout result (e.g. tmux zoom hides other leaves): collapse and hide so
+    // transforms don’t stick from the previous frame.
+    for leaf in leaves {
+        if rect_map.contains_key(&leaf) {
+            continue;
+        }
+        let Ok(mut tf) = transforms.get_mut(leaf) else {
+            continue;
+        };
+        let Ok(mut ws) = sizes.get_mut(leaf) else {
+            continue;
+        };
+        if let Ok(mut v) = pane_vis.get_mut(leaf) {
+            *v = Visibility::Hidden;
+        }
+        tf.translation = Vec3::ZERO;
+        tf.scale = Vec3::splat(1.0e-4);
+        ws.0 = Vec2::splat(1.0);
+        if let Ok(handle) = mesh_mat.get(leaf)
+            && let Some(mat) = materials.get_mut(handle.id())
+        {
+            mat.base.depth_bias = -1_000_000.0;
         }
     }
 }
@@ -333,12 +372,21 @@ pub fn apply_pane_chrome_layout(
     let s = settings.window_padding_px;
     let top = settings.window_padding_top_px;
     let area = layout_root_area(vw, vh, s, top, s, s);
-    let rects = solve_layout(&layout.root, area, entity_alive, settings.pane_border_spacing_px);
+    let rects = solve_layout(
+        &layout.root,
+        area,
+        entity_alive,
+        settings.pane_border_spacing_px,
+        layout.zoom_pane,
+    );
     let rect_map: HashMap<Entity, PixelRect> = rects.into_iter().collect();
 
     let active_pane = active.iter().next().or_else(|| panes.iter().next());
     for (i, (chrome_ent, owner)) in chrome_q.iter().enumerate() {
         let Some(pr_full) = rect_map.get(&owner.0).copied() else {
+            if let Ok(mut v) = vis.get_mut(chrome_ent) {
+                *v = Visibility::Hidden;
+            }
             continue;
         };
         let (_, mut chrome_pr) = split_pane_content_and_chrome(pr_full, DEFAULT_PANE_CHROME_HEIGHT_PX);
