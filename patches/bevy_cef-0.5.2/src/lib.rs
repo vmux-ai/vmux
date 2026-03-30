@@ -2,6 +2,7 @@
 
 mod common;
 mod cursor_icon;
+mod loading_state;
 mod keyboard;
 mod mute;
 mod navigation;
@@ -11,6 +12,7 @@ mod zoom;
 
 use crate::common::{LocalHostPlugin, MessageLoopPlugin, WebviewCoreComponentsPlugin};
 use crate::cursor_icon::SystemCursorIconPlugin;
+use crate::loading_state::WebviewLoadingStatePlugin;
 use crate::keyboard::KeyboardPlugin;
 use crate::mute::AudioMutePlugin;
 use crate::prelude::{IpcPlugin, NavigationPlugin, WebviewPlugin};
@@ -21,10 +23,12 @@ use bevy_remote::RemotePlugin;
 
 pub mod prelude {
     pub use crate::{
-        CefPlugin, RunOnMainThread, common::*, keyboard::CefKeyboardInputSet, navigation::*,
-        webview::prelude::*,
+        CefPlugin, RunOnMainThread, common::*, keyboard::CefKeyboardInputSet, loading_state::*,
+        navigation::*, webview::prelude::*,
     };
-    pub use bevy_cef_core::prelude::{CefDiskProfileRoot, CefExtensions, CommandLineConfig};
+    pub use bevy_cef_core::prelude::{
+        CefDiskProfileRoot, CefExtensions, CommandLineConfig, WebviewLoadingStateEvent,
+    };
 }
 
 pub struct RunOnMainThread;
@@ -56,6 +60,7 @@ impl Plugin for CefPlugin {
             IpcPlugin,
             KeyboardPlugin,
             SystemCursorIconPlugin,
+            WebviewLoadingStatePlugin,
             NavigationPlugin,
             ZoomPlugin,
             AudioMutePlugin,

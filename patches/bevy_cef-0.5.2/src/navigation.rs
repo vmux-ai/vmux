@@ -10,10 +10,12 @@ impl Plugin for NavigationPlugin {
             .register_type::<RequestGoForward>()
             .register_type::<RequestNavigate>()
             .register_type::<RequestReload>()
+            .register_type::<RequestReloadIgnoreCache>()
             .add_observer(apply_request_go_back)
             .add_observer(apply_request_go_forward)
             .add_observer(apply_request_navigate)
-            .add_observer(apply_request_reload);
+            .add_observer(apply_request_reload)
+            .add_observer(apply_request_reload_ignore_cache);
     }
 }
 
@@ -46,6 +48,13 @@ pub struct RequestReload {
     pub webview: Entity,
 }
 
+/// Hard reload: bypass cache (Chrome ⌘⇧R / Ctrl+Shift+R).
+#[derive(Debug, EntityEvent, Copy, Clone, Reflect, Serialize, Deserialize)]
+pub struct RequestReloadIgnoreCache {
+    #[event_target]
+    pub webview: Entity,
+}
+
 fn apply_request_go_back(trigger: On<RequestGoBack>, browsers: NonSend<Browsers>) {
     browsers.go_back(&trigger.webview);
 }
@@ -60,4 +69,11 @@ fn apply_request_navigate(trigger: On<RequestNavigate>, browsers: NonSend<Browse
 
 fn apply_request_reload(trigger: On<RequestReload>, browsers: NonSend<Browsers>) {
     browsers.reload_webview(&trigger.webview);
+}
+
+fn apply_request_reload_ignore_cache(
+    trigger: On<RequestReloadIgnoreCache>,
+    browsers: NonSend<Browsers>,
+) {
+    browsers.reload_webview_ignore_cache(&trigger.webview);
 }

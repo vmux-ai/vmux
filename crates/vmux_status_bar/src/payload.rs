@@ -49,12 +49,12 @@ pub fn apply_payload(
     mut win_label: Signal<String>,
 ) {
     let p: VmuxStatusPayload = match raw {
-        serde_json::Value::String(s) => serde_json::from_str(&s).unwrap_or_else(|_| {
-            VmuxStatusPayload {
+        serde_json::Value::String(s) => {
+            serde_json::from_str(&s).unwrap_or_else(|_| VmuxStatusPayload {
                 active_url: Some(s),
                 ..Default::default()
-            }
-        }),
+            })
+        }
         v => serde_json::from_value(v).unwrap_or_default(),
     };
 

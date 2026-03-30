@@ -53,7 +53,11 @@ fn on_pointer_move(
     input: Res<ButtonInput<MouseButton>>,
     pointer: WebviewPointer,
     browsers: NonSend<Browsers>,
+    suppress: Res<CefSuppressPointerInput>,
 ) {
+    if suppress.0 {
+        return;
+    }
     let Some((webview, pos)) = pointer.pos_from_trigger(&trigger) else {
         return;
     };
@@ -65,7 +69,11 @@ fn on_pointer_pressed(
     trigger: On<Pointer<Press>>,
     browsers: NonSend<Browsers>,
     pointer: WebviewPointer,
+    suppress: Res<CefSuppressPointerInput>,
 ) {
+    if suppress.0 {
+        return;
+    }
     let Some((webview, pos)) = pointer.pos_from_trigger(&trigger) else {
         return;
     };
@@ -76,7 +84,11 @@ fn on_pointer_released(
     trigger: On<Pointer<Release>>,
     browsers: NonSend<Browsers>,
     pointer: WebviewPointer,
+    suppress: Res<CefSuppressPointerInput>,
 ) {
+    if suppress.0 {
+        return;
+    }
     let Some((webview, pos)) = pointer.pos_from_trigger(&trigger) else {
         return;
     };
@@ -89,7 +101,12 @@ fn on_mouse_wheel(
     pointer: WebviewPointer,
     windows: Query<&Window>,
     webviews: Query<Entity, (With<WebviewSource>, Or<(With<Mesh3d>, With<Mesh2d>)>)>,
+    suppress: Res<CefSuppressPointerInput>,
 ) {
+    if suppress.0 {
+        for _ in er.read() {}
+        return;
+    }
     for event in er.read() {
         let Ok(window) = windows.get(event.window) else {
             continue;

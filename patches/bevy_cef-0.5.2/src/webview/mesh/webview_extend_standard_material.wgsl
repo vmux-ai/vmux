@@ -10,7 +10,7 @@
     mesh_view_bindings::view,
 }
 #import webview::util::{
-    surface_color,
+    vmux_surface_color,
 }
 
 @fragment
@@ -19,7 +19,7 @@ fn fragment(
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
-    pbr_input.material.base_color *= surface_color(in.uv);
+    pbr_input.material.base_color *= vmux_surface_color(in.uv);
     pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
     var out: FragmentOutput;
     if (material.flags & STANDARD_MATERIAL_FLAGS_UNLIT_BIT) == 0u {

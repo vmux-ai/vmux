@@ -8,8 +8,10 @@ use vmux_core::{SessionSavePath, SessionSaveQueue};
 use crate::pane_spawn::spawn_pane;
 use crate::url::{allowed_navigation_url, sanitize_embedded_webview_url};
 use crate::{
-    Active, LayoutAxis, LayoutNode, LayoutTree, Pane, PaneChromeOwner, PaneChromeStrip,
-    PaneLastUrl, Root, SessionLayoutSnapshot, layout_node_to_saved,
+    Active, LayoutAxis, LayoutNode, LayoutTree, LoadingBarMaterial, Pane, PaneChromeLoadingBar,
+    PaneChromeOwner, PaneChromeStrip, PaneLastUrl,
+    PaneSwapDir, PixelRect, Root, SessionLayoutSnapshot, layout_node_to_saved,
+    neighbor_pane_in_direction,
 };
 use vmux_settings::VmuxAppSettings;
 
@@ -58,12 +60,16 @@ fn tmux_prefix_armed(prefix: &Query<&VmuxPrefixState, With<AppInputRoot>>) -> bo
     prefix.single().map(|p| p.awaiting).unwrap_or(false)
 }
 
+#[allow(clippy::type_complexity)]
 fn despawn_chrome_for_pane(
     commands: &mut Commands,
-    chrome_q: &Query<(Entity, &PaneChromeOwner), With<PaneChromeStrip>>,
+    chrome_or_border: &Query<
+        (Entity, &PaneChromeOwner),
+        Or<(With<PaneChromeStrip>, With<PaneChromeLoadingBar>)>,
+    >,
     pane: Entity,
 ) {
-    for (e, owner) in chrome_q.iter() {
+    for (e, owner) in chrome_or_border.iter() {
         if owner.0 == pane {
             commands.entity(e).despawn();
         }
@@ -106,6 +112,7 @@ pub fn try_split_active_pane(
     axis: LayoutAxis,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    loading_bar_materials: &mut ResMut<Assets<LoadingBarMaterial>>,
     snapshot: &mut SessionLayoutSnapshot,
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
@@ -114,7 +121,14 @@ pub fn try_split_active_pane(
     default_webview_url: &str,
 ) {
     clear_zoom_pane(layout_tree);
-    let new_pane = spawn_pane(commands, meshes, materials, default_webview_url, false);
+    let new_pane = spawn_pane(
+        commands,
+        meshes,
+        materials,
+        loading_bar_materials,
+        default_webview_url,
+        false,
+    );
     if layout_tree.split_leaf(active_ent, new_pane, axis) {
         commands.entity(new_pane).insert(Active);
         commands.entity(active_ent).remove::<Active>();
@@ -198,6 +212,49 @@ pub fn try_rotate_window(
     true
 }
 
+/// Tmux **[select-pane](https://man.openbsd.org/tmux.1#select-pane)** (`-L` / `-R` / `-U` / `-D`): move focus to the adjacent pane in that direction (layout unchanged).
+pub fn try_select_pane_direction(
+    commands: &mut Commands,
+    layout_tree: &mut LayoutTree,
+    active_ent: Entity,
+    dir: PaneSwapDir,
+    rects: &[(Entity, PixelRect)],
+) -> bool {
+    clear_zoom_pane(layout_tree);
+    let Some(next) = neighbor_pane_in_direction(rects, active_ent, dir) else {
+        return false;
+    };
+    if next == active_ent {
+        return false;
+    }
+    commands.entity(active_ent).remove::<Active>();
+    commands.entity(next).insert(Active);
+    true
+}
+
+/// Tmux **[swap-pane](https://man.openbsd.org/tmux.1#swap-pane)** (`-L` / `-R` / `-U` / `-D`): exchange the active pane with its neighbor in that direction.
+pub fn try_swap_active_pane(
+    layout_tree: &mut LayoutTree,
+    active_ent: Entity,
+    dir: PaneSwapDir,
+    snapshot: &mut SessionLayoutSnapshot,
+    pane_last: &Query<&PaneLastUrl>,
+    webview_src: &Query<&WebviewSource>,
+    path: Option<&Res<SessionSavePath>>,
+    session_queue: &mut SessionSaveQueue,
+    default_webview_url: &str,
+) -> bool {
+    clear_zoom_pane(layout_tree);
+    if !layout_tree.swap_active_pane(active_ent, dir) {
+        return false;
+    }
+    *snapshot = rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
+    if let Some(p) = path {
+        session_queue.0.push(p.0.clone());
+    }
+    true
+}
+
 pub fn try_cycle_pane_focus(commands: &mut Commands, layout_tree: &mut LayoutTree, cur: Entity) {
     clear_zoom_pane(layout_tree);
     let mut leaves = Vec::new();
@@ -215,16 +272,22 @@ pub fn try_cycle_pane_focus(commands: &mut Commands, layout_tree: &mut LayoutTre
 
 /// Tmux **kill-pane** (`kill-pane`): close the active pane. If it is the last pane, replace it with a
 /// fresh pane at [`default_webview_url`].
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 pub fn try_kill_active_pane(
     commands: &mut Commands,
     layout_tree: &mut LayoutTree,
     active_ent: Entity,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    loading_bar_materials: &mut ResMut<Assets<LoadingBarMaterial>>,
     snapshot: &mut SessionLayoutSnapshot,
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
-    chrome_q: &Query<(Entity, &PaneChromeOwner), With<PaneChromeStrip>>,
+    chrome_or_border: &Query<
+        (Entity, &PaneChromeOwner),
+        Or<(With<PaneChromeStrip>, With<PaneChromeLoadingBar>)>,
+    >,
     path: Option<&Res<SessionSavePath>>,
     session_queue: &mut SessionSaveQueue,
     default_webview_url: &str,
@@ -236,11 +299,18 @@ pub fn try_kill_active_pane(
         if leaves[0] != active_ent {
             return false;
         }
-        let new_pane = spawn_pane(commands, meshes, materials, default_webview_url, false);
+        let new_pane = spawn_pane(
+            commands,
+            meshes,
+            materials,
+            loading_bar_materials,
+            default_webview_url,
+            false,
+        );
         layout_tree.root = LayoutNode::Leaf(new_pane);
         layout_tree.bump();
         commands.entity(active_ent).remove::<Active>();
-        despawn_chrome_for_pane(commands, chrome_q, active_ent);
+        despawn_chrome_for_pane(commands, chrome_or_border, active_ent);
         commands.entity(active_ent).despawn();
         commands.entity(new_pane).insert(Active);
         *snapshot =
@@ -262,7 +332,7 @@ pub fn try_kill_active_pane(
         commands.entity(e).remove::<Active>();
     }
     commands.entity(survivor).insert(Active);
-    despawn_chrome_for_pane(commands, chrome_q, active_ent);
+    despawn_chrome_for_pane(commands, chrome_or_border, active_ent);
     commands.entity(active_ent).despawn();
     *snapshot = rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
     if let Some(p) = path {
@@ -280,6 +350,7 @@ pub fn split_active_pane(
     active: Query<Entity, (With<Pane>, With<Active>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut loading_bar_materials: ResMut<Assets<LoadingBarMaterial>>,
     mut snapshot: ResMut<SessionLayoutSnapshot>,
     pane_last: Query<&PaneLastUrl>,
     webview_src: Query<&WebviewSource>,
@@ -316,6 +387,7 @@ pub fn split_active_pane(
         axis,
         &mut meshes,
         &mut materials,
+        &mut loading_bar_materials,
         &mut snapshot,
         &pane_last,
         &webview_src,

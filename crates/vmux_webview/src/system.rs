@@ -41,9 +41,28 @@ fn chrome_go_forward_pressed(keys: &ButtonInput<KeyCode>) -> bool {
     }
 }
 
-/// Chrome: ⌘R on macOS, Ctrl+R on Windows/Linux.
-fn chrome_reload_pressed(keys: &ButtonInput<KeyCode>) -> bool {
-    if !keys.just_pressed(KeyCode::KeyR) {
+fn shift_held(keys: &ButtonInput<KeyCode>) -> bool {
+    keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight)
+}
+
+/// Chrome: ⌘R / Ctrl+R — normal reload (may use cache).
+fn chrome_soft_reload_pressed(keys: &ButtonInput<KeyCode>) -> bool {
+    if !keys.just_pressed(KeyCode::KeyR) || shift_held(keys) {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        super_chord(keys)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight)
+    }
+}
+
+/// Chrome: ⌘⇧R / Ctrl+Shift+R — hard reload (ignore cache).
+fn chrome_hard_reload_pressed(keys: &ButtonInput<KeyCode>) -> bool {
+    if !keys.just_pressed(KeyCode::KeyR) || !shift_held(keys) {
         return false;
     }
     #[cfg(target_os = "macos")]
@@ -93,10 +112,14 @@ pub fn reload(
     keys: Res<ButtonInput<KeyCode>>,
     webviews: Query<Entity, (With<VmuxWebview>, With<Active>)>,
 ) {
-    if !chrome_reload_pressed(&keys) {
+    let Ok(webview) = webviews.single() else {
+        return;
+    };
+    if chrome_hard_reload_pressed(&keys) {
+        commands.trigger(RequestReloadIgnoreCache { webview });
         return;
     }
-    if let Ok(webview) = webviews.single() {
+    if chrome_soft_reload_pressed(&keys) {
         commands.trigger(RequestReload { webview });
     }
 }

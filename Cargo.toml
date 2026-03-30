@@ -10,6 +10,7 @@ members = [
     "crates/vmux_server",
     "crates/vmux_webview",
     "crates/vmux_status_bar",
+    "crates/vmux_ui",
 ]
 default-members = ["crates/vmux"]
 resolver = "3"

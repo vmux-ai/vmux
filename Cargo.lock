@@ -7705,6 +7705,7 @@ dependencies = [
  "serde",
  "vmux_core",
  "vmux_settings",
+ "vmux_ui",
 ]
 
 [[package]]
@@ -7759,6 +7760,13 @@ dependencies = [
  "vmux_core",
  "vmux_layout",
  "vmux_server",
+]
+
+[[package]]
+name = "vmux_ui"
+version = "0.1.0"
+dependencies = [
+ "bevy",
 ]
 
 [[package]]

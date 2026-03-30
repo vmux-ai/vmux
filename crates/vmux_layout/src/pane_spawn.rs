@@ -6,6 +6,7 @@ use bevy_cef::prelude::*;
 use vmux_core::{SessionSavePath, SessionSaveQueue};
 use vmux_settings::VmuxAppSettings;
 
+use crate::loading_bar::{LoadingBarMaterial, PaneChromeLoadingBar};
 use crate::{
     Active, LastVisitedUrl, LayoutNode, LayoutTree, Pane, PaneChromeNeedsUrl, PaneChromeOwner,
     PaneChromeStrip, PaneLastUrl, Root, SavedLayoutNode, SessionLayoutSnapshot,
@@ -96,8 +97,11 @@ fn spawn_pane_chrome(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<WebviewExtendStandardMaterial>,
+    loading_bar_materials: &mut Assets<LoadingBarMaterial>,
     pane: Entity,
 ) {
+    let chrome_mesh = meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE));
+    let loading_mesh = meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE));
     commands
         .spawn((
             PaneChromeStrip,
@@ -107,7 +111,7 @@ fn spawn_pane_chrome(
             WebviewSource::inline(CHROME_LOADING_HTML),
             PreloadScripts::default(),
             ZoomLevel(CEF_PAGE_ZOOM_LEVEL),
-            Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE))),
+            Mesh3d(chrome_mesh),
             MeshMaterial3d(materials.add(WebviewExtendStandardMaterial {
                 base: StandardMaterial {
                     unlit: true,
@@ -121,12 +125,20 @@ fn spawn_pane_chrome(
         ))
         .observe(activate_owner_pane_on_pointer_move)
         .observe(activate_owner_pane_on_pointer_press);
+    commands.spawn((
+        PaneChromeLoadingBar,
+        PaneChromeOwner(pane),
+        Visibility::Hidden,
+        Mesh3d(loading_mesh),
+        MeshMaterial3d(loading_bar_materials.add(LoadingBarMaterial::default())),
+    ));
 }
 
 pub fn spawn_pane(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<WebviewExtendStandardMaterial>,
+    loading_bar_materials: &mut Assets<LoadingBarMaterial>,
     start_url: &str,
     with_active: bool,
 ) -> Entity {
@@ -157,7 +169,13 @@ pub fn spawn_pane(
     b.observe(activate_pane_on_pointer_move)
         .observe(activate_pane_on_pointer_press);
     let pane_id = b.id();
-    spawn_pane_chrome(commands, meshes, materials, pane_id);
+    spawn_pane_chrome(
+        commands,
+        meshes,
+        materials,
+        loading_bar_materials,
+        pane_id,
+    );
     pane_id
 }
 
@@ -165,6 +183,7 @@ pub fn spawn_saved_recursive(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<WebviewExtendStandardMaterial>,
+    loading_bar_materials: &mut Assets<LoadingBarMaterial>,
     node: &SavedLayoutNode,
     first_active: &mut bool,
     default_webview_url: &str,
@@ -182,6 +201,7 @@ pub fn spawn_saved_recursive(
                 commands,
                 meshes,
                 materials,
+                loading_bar_materials,
                 left,
                 first_active,
                 default_webview_url,
@@ -190,6 +210,7 @@ pub fn spawn_saved_recursive(
                 commands,
                 meshes,
                 materials,
+                loading_bar_materials,
                 right,
                 first_active,
                 default_webview_url,
@@ -204,17 +225,26 @@ pub fn spawn_saved_recursive(
             };
             let active = *first_active;
             *first_active = false;
-            LayoutNode::leaf(spawn_pane(commands, meshes, materials, &start, active))
+            LayoutNode::leaf(spawn_pane(
+                commands,
+                meshes,
+                materials,
+                loading_bar_materials,
+                &start,
+                active,
+            ))
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn setup_vmux_panes(
     mut commands: Commands,
     mut snapshot: ResMut<SessionLayoutSnapshot>,
     last: Option<Res<LastVisitedUrl>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut loading_bar_materials: ResMut<Assets<LoadingBarMaterial>>,
     path: Option<Res<SessionSavePath>>,
     mut session_queue: ResMut<SessionSaveQueue>,
     settings: Res<VmuxAppSettings>,
@@ -237,6 +267,7 @@ pub fn setup_vmux_panes(
             &mut commands,
             &mut meshes,
             &mut materials,
+            &mut loading_bar_materials,
             &saved,
             &mut first_active,
             fallback,
@@ -247,6 +278,7 @@ pub fn setup_vmux_panes(
             &mut commands,
             &mut meshes,
             &mut materials,
+            &mut loading_bar_materials,
             &start_url,
             true,
         ))

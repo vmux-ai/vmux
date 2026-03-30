@@ -4,10 +4,12 @@
 //! + CEF resize sync (after Bevy’s [`camera_system`](bevy::render::camera::camera_system)).
 
 mod hosted_web_ui;
+mod loading_bar;
 mod pane_layout;
 mod pane_lifecycle;
 mod pane_ops;
 mod pane_spawn;
+pub mod tmux;
 mod url;
 
 use bevy::prelude::*;
@@ -16,15 +18,22 @@ use bevy_cef::prelude::render_standard_materials;
 use serde::{Deserialize, Serialize};
 use vmux_core::VmuxPrefixChordSet;
 
+pub use loading_bar::{
+    LoadingBarMaterial, LOADING_BAR_ANIM_TIME_SCALE, LOADING_BAR_DEPTH_BIAS_ABOVE_PANE,
+    LOADING_BAR_HEIGHT_PX, PaneChromeLoadingBar,
+    PendingNavigationLoads,
+};
 pub use hosted_web_ui::{VmuxHostedWebPlugin, VmuxWebviewSurface};
 pub use pane_layout::{
-    PANE_Z_STRIDE, apply_pane_chrome_layout, apply_pane_layout, clamp_webview_backing_size,
-    pixel_rect_to_world_plane, split_pane_content_and_chrome, sync_cef_sizes_after_pane_layout,
+    CHROME_BORDER_OUTSET_PX, PANE_Z_STRIDE, apply_pane_chrome_layout, apply_pane_layout,
+    apply_pane_loading_bar_layout, clamp_webview_backing_size, layout_viewport_for_workspace,
+    layout_workspace_pane_rects, pixel_rect_to_world_plane, split_pane_content_and_chrome,
+    sync_cef_sizes_after_pane_layout,
 };
 pub use pane_ops::{
     cycle_pane_focus, rebuild_session_snapshot, split_active_pane, try_cycle_pane_focus,
-    try_kill_active_pane, try_mirror_pane_layout, try_rotate_window, try_split_active_pane,
-    try_toggle_zoom_pane,
+    try_kill_active_pane, try_mirror_pane_layout, try_rotate_window, try_select_pane_direction,
+    try_split_active_pane, try_swap_active_pane, try_toggle_zoom_pane,
 };
 pub use pane_spawn::{
     CEF_PAGE_ZOOM_LEVEL, TEXT_INPUT_EMACS_BINDINGS_PRELOAD, URL_TRACK_PRELOAD, VmuxWebview,
@@ -84,6 +93,16 @@ pub enum LayoutAxis {
     #[default]
     Horizontal,
     Vertical,
+}
+
+/// Direction for tmux **[select-pane](https://man.openbsd.org/tmux.1#select-pane)** / **[swap-pane](https://man.openbsd.org/tmux.1#swap-pane)** (`-L` / `-R` / `-U` / `-D`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[reflect(Serialize, Deserialize)]
+pub enum PaneSwapDir {
+    Left,
+    Right,
+    Up,
+    Down,
 }
 
 /// Runtime layout node: leaves reference pane [`Entity`] values.
@@ -247,6 +266,78 @@ impl LayoutTree {
         self.bump();
         true
     }
+
+    /// Tmux **[swap-pane](https://man.openbsd.org/tmux.1#swap-pane)** (`-L` / `-R` / `-U` / `-D`): swap the active pane with the adjacent pane in that direction (deepest applicable split).
+    pub fn swap_active_pane(&mut self, active: Entity, dir: PaneSwapDir) -> bool {
+        if !self.root.contains_leaf(active) {
+            return false;
+        }
+        let mut leaves = Vec::new();
+        self.root.collect_leaves(&mut leaves);
+        if leaves.len() < 2 {
+            return false;
+        }
+        if !swap_pane_in_direction(&mut self.root, active, dir) {
+            return false;
+        }
+        self.bump();
+        true
+    }
+}
+
+fn swap_pane_in_direction(node: &mut LayoutNode, active: Entity, dir: PaneSwapDir) -> bool {
+    match node {
+        LayoutNode::Leaf(_) => false,
+        LayoutNode::Split {
+            axis, left, right, ..
+        } => {
+            let left_contains = left.contains_leaf(active);
+            let right_contains = right.contains_leaf(active);
+            if !left_contains && !right_contains {
+                return false;
+            }
+            let only_left = left_contains && !right_contains;
+            let only_right = right_contains && !left_contains;
+
+            match (*axis, dir) {
+                (LayoutAxis::Horizontal, PaneSwapDir::Right) if only_left => {
+                    if swap_pane_in_direction(left.as_mut(), active, dir) {
+                        return true;
+                    }
+                    std::mem::swap(left, right);
+                    true
+                }
+                (LayoutAxis::Horizontal, PaneSwapDir::Left) if only_right => {
+                    if swap_pane_in_direction(right.as_mut(), active, dir) {
+                        return true;
+                    }
+                    std::mem::swap(left, right);
+                    true
+                }
+                (LayoutAxis::Vertical, PaneSwapDir::Down) if only_left => {
+                    if swap_pane_in_direction(left.as_mut(), active, dir) {
+                        return true;
+                    }
+                    std::mem::swap(left, right);
+                    true
+                }
+                (LayoutAxis::Vertical, PaneSwapDir::Up) if only_right => {
+                    if swap_pane_in_direction(right.as_mut(), active, dir) {
+                        return true;
+                    }
+                    std::mem::swap(left, right);
+                    true
+                }
+                _ => {
+                    if left_contains {
+                        swap_pane_in_direction(left.as_mut(), active, dir)
+                    } else {
+                        swap_pane_in_direction(right.as_mut(), active, dir)
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn assign_leaves_in_dfs_order(node: &mut LayoutNode, entities: &[Entity], idx: &mut usize) {
@@ -375,6 +466,77 @@ pub struct PixelRect {
     pub h: f32,
 }
 
+/// Tmux **[select-pane](https://man.openbsd.org/tmux.1#select-pane)** (`-L` / `-R` / `-U` / `-D`): pick the adjacent pane in that direction from solved layout rects.
+pub fn neighbor_pane_in_direction(
+    rects: &[(Entity, PixelRect)],
+    active: Entity,
+    dir: PaneSwapDir,
+) -> Option<Entity> {
+    let ar = rects.iter().find(|(e, _)| *e == active).map(|(_, r)| *r)?;
+    // Pixel tolerance for gaps and float edges (matches typical pane-border spacing scale).
+    const TOL: f32 = 4.0;
+
+    #[inline]
+    fn overlap_1d(a0: f32, a1: f32, b0: f32, b1: f32) -> f32 {
+        let left = a0.max(b0);
+        let right = a1.min(b1);
+        (right - left).max(0.0)
+    }
+
+    let mut best: Option<(Entity, f32, f32)> = None;
+
+    for &(e, o) in rects {
+        if e == active {
+            continue;
+        }
+        let (overlap, ok, gap) = match dir {
+            PaneSwapDir::Left => {
+                if o.x + o.w > ar.x + TOL {
+                    continue;
+                }
+                let ov = overlap_1d(o.y, o.y + o.h, ar.y, ar.y + ar.h);
+                let gap = ar.x - (o.x + o.w);
+                (ov, ov > 1.0, gap)
+            }
+            PaneSwapDir::Right => {
+                if o.x < ar.x + ar.w - TOL {
+                    continue;
+                }
+                let ov = overlap_1d(o.y, o.y + o.h, ar.y, ar.y + ar.h);
+                let gap = o.x - (ar.x + ar.w);
+                (ov, ov > 1.0, gap)
+            }
+            PaneSwapDir::Up => {
+                if o.y + o.h > ar.y + TOL {
+                    continue;
+                }
+                let ov = overlap_1d(o.x, o.x + o.w, ar.x, ar.x + ar.w);
+                let gap = ar.y - (o.y + o.h);
+                (ov, ov > 1.0, gap)
+            }
+            PaneSwapDir::Down => {
+                if o.y < ar.y + ar.h - TOL {
+                    continue;
+                }
+                let ov = overlap_1d(o.x, o.x + o.w, ar.x, ar.x + ar.w);
+                let gap = o.y - (ar.y + ar.h);
+                (ov, ov > 1.0, gap)
+            }
+        };
+        if !ok {
+            continue;
+        }
+        let take = match best {
+            None => true,
+            Some((_, bo, bg)) => overlap > bo + 1.0e-3 || (overlap - bo).abs() <= 1.0e-3 && gap < bg,
+        };
+        if take {
+            best = Some((e, overlap, gap));
+        }
+    }
+    best.map(|(e, _, _)| e)
+}
+
 const MIN_PANE_PX: f32 = 48.0;
 
 /// Compute leaf rectangles. Skips dead entities if `entity_alive` returns false.
@@ -428,8 +590,7 @@ fn solve_layout_inner(
                 LayoutAxis::Horizontal => {
                     let g = clamp_split_gap(pane_border_spacing_px, area.w);
                     let inner_w = area.w - g;
-                    let split =
-                        (inner_w * ratio).clamp(MIN_PANE_PX, inner_w - MIN_PANE_PX);
+                    let split = (inner_w * ratio).clamp(MIN_PANE_PX, inner_w - MIN_PANE_PX);
                     let left_rect = PixelRect {
                         x: area.x,
                         y: area.y,
@@ -443,13 +604,18 @@ fn solve_layout_inner(
                         h: area.h,
                     };
                     solve_layout_inner(left, left_rect, pane_border_spacing_px, entity_alive, out);
-                    solve_layout_inner(right, right_rect, pane_border_spacing_px, entity_alive, out);
+                    solve_layout_inner(
+                        right,
+                        right_rect,
+                        pane_border_spacing_px,
+                        entity_alive,
+                        out,
+                    );
                 }
                 LayoutAxis::Vertical => {
                     let g = clamp_split_gap(pane_border_spacing_px, area.h);
                     let inner_h = area.h - g;
-                    let split =
-                        (inner_h * ratio).clamp(MIN_PANE_PX, inner_h - MIN_PANE_PX);
+                    let split = (inner_h * ratio).clamp(MIN_PANE_PX, inner_h - MIN_PANE_PX);
                     let top_rect = PixelRect {
                         x: area.x,
                         y: area.y,
@@ -509,9 +675,11 @@ pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<Active>()
+        app.add_plugins(loading_bar::LoadingBarPlugin)
+            .register_type::<Active>()
             .register_type::<Pane>()
             .register_type::<PaneChromeStrip>()
+            .register_type::<PaneChromeLoadingBar>()
             .register_type::<PaneChromeOwner>()
             .register_type::<PaneChromeNeedsUrl>()
             .register_type::<Root>()
@@ -520,6 +688,7 @@ impl Plugin for LayoutPlugin {
             .register_type::<SessionLayoutSnapshot>()
             .register_type::<LastVisitedUrl>()
             .init_resource::<LastVisitedUrl>()
+            .init_resource::<PendingNavigationLoads>()
             .add_observer(pane_lifecycle::warn_if_pane_despawn_still_in_layout)
             .add_systems(Startup, setup_vmux_panes)
             .add_systems(
@@ -528,8 +697,11 @@ impl Plugin for LayoutPlugin {
                     apply_pane_layout
                         .after(camera_system)
                         .before(render_standard_materials),
-                    apply_pane_chrome_layout
+                    apply_pane_loading_bar_layout
                         .after(apply_pane_layout)
+                        .before(render_standard_materials),
+                    apply_pane_chrome_layout
+                        .after(apply_pane_loading_bar_layout)
                         .before(render_standard_materials),
                     sync_cef_sizes_after_pane_layout
                         .after(apply_pane_chrome_layout)

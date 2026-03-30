@@ -9,11 +9,14 @@ mod cef_keyboard_target;
 mod component;
 mod system;
 
-pub use cef_keyboard_target::{consume_keyboard_for_prefix_routing, sync_cef_keyboard_target};
+pub use cef_keyboard_target::{
+    consume_keyboard_for_prefix_routing, sync_cef_keyboard_target,
+    sync_cef_pointer_suppression_for_prefix,
+};
 pub use component::{
     AppAction, AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixChordSet, VmuxPrefixState,
 };
-pub use system::tmux_prefix_commands;
+pub use system::{tmux_prefix_commands, TmuxChordInput};
 pub use vmux_core::Active;
 
 use bevy::input::InputSystems;
@@ -34,6 +37,9 @@ impl Plugin for VmuxInputPlugin {
                 PreUpdate,
                 (
                     cef_keyboard_target::consume_keyboard_for_prefix_routing
+                        .after(InputSystems)
+                        .before(CefKeyboardInputSet),
+                    cef_keyboard_target::sync_cef_pointer_suppression_for_prefix
                         .after(InputSystems)
                         .before(CefKeyboardInputSet),
                     cef_keyboard_target::sync_cef_keyboard_target
