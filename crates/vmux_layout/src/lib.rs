@@ -24,6 +24,7 @@ pub use pane_layout::{
 pub use pane_ops::{
     cycle_pane_focus, rebuild_session_snapshot, split_active_pane, try_cycle_pane_focus,
     try_kill_active_pane, try_mirror_pane_layout, try_rotate_window, try_split_active_pane,
+    try_toggle_zoom_pane,
 };
 pub use pane_spawn::{
     CEF_PAGE_ZOOM_LEVEL, TEXT_INPUT_EMACS_BINDINGS_PRELOAD, URL_TRACK_PRELOAD, VmuxWebview,
@@ -149,6 +150,9 @@ impl LayoutNode {
 pub struct LayoutTree {
     pub root: LayoutNode,
     pub revision: u64,
+    /// When set, [`solve_layout`] assigns the full root area to this pane only (tmux **`resize-pane -Z`**).
+    /// Not persisted in session snapshots.
+    pub zoom_pane: Option<Entity>,
 }
 
 impl LayoutTree {
@@ -377,12 +381,20 @@ const MIN_PANE_PX: f32 = 48.0;
 ///
 /// `pane_border_spacing_px` is the gap **between the two children** of each split (clamped per split so
 /// minimum pane sizes can still be satisfied).
+///
+/// When `zoom_pane` is `Some(z)` and `z` is a live leaf of `node`, returns only `(z, area)` (tmux zoom).
 pub fn solve_layout(
     node: &LayoutNode,
     area: PixelRect,
     entity_alive: impl Fn(Entity) -> bool,
     pane_border_spacing_px: f32,
+    zoom_pane: Option<Entity>,
 ) -> Vec<(Entity, PixelRect)> {
+    if let Some(z) = zoom_pane {
+        if node.contains_leaf(z) && entity_alive(z) && area.w > 0.0 && area.h > 0.0 {
+            return vec![(z, area)];
+        }
+    }
     let mut out = Vec::new();
     solve_layout_inner(node, area, pane_border_spacing_px, &entity_alive, &mut out);
     out

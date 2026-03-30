@@ -70,6 +70,34 @@ fn despawn_chrome_for_pane(
     }
 }
 
+fn clear_zoom_pane(layout_tree: &mut LayoutTree) {
+    if layout_tree.zoom_pane.take().is_some() {
+        layout_tree.bump();
+    }
+}
+
+/// Tmux **`resize-pane -Z`**: toggle zoom so the active pane fills the window; not persisted.
+pub fn try_toggle_zoom_pane(layout_tree: &mut LayoutTree, active_ent: Entity) -> bool {
+    let mut leaves = Vec::new();
+    layout_tree.root.collect_leaves(&mut leaves);
+    if leaves.len() < 2 {
+        if layout_tree.zoom_pane.take().is_some() {
+            layout_tree.bump();
+        }
+        return false;
+    }
+    if !layout_tree.root.contains_leaf(active_ent) {
+        return false;
+    }
+    let next = match layout_tree.zoom_pane {
+        Some(z) if z == active_ent => None,
+        _ => Some(active_ent),
+    };
+    layout_tree.zoom_pane = next;
+    layout_tree.bump();
+    true
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn try_split_active_pane(
     commands: &mut Commands,
@@ -85,6 +113,7 @@ pub fn try_split_active_pane(
     session_queue: &mut SessionSaveQueue,
     default_webview_url: &str,
 ) {
+    clear_zoom_pane(layout_tree);
     let new_pane = spawn_pane(commands, meshes, materials, default_webview_url, false);
     if layout_tree.split_leaf(active_ent, new_pane, axis) {
         commands.entity(new_pane).insert(Active);
@@ -108,6 +137,7 @@ pub fn try_mirror_pane_layout(
     session_queue: &mut SessionSaveQueue,
     default_webview_url: &str,
 ) -> bool {
+    clear_zoom_pane(layout_tree);
     if !layout_tree.mirror_deepest_split_around(active_ent) {
         return false;
     }
@@ -132,6 +162,7 @@ pub fn try_rotate_window(
     session_queue: &mut SessionSaveQueue,
     default_webview_url: &str,
 ) -> bool {
+    clear_zoom_pane(layout_tree);
     let mut leaves = Vec::new();
     layout_tree.root.collect_leaves(&mut leaves);
     if leaves.len() < 2 {
@@ -167,9 +198,10 @@ pub fn try_rotate_window(
     true
 }
 
-pub fn try_cycle_pane_focus(commands: &mut Commands, tree: &LayoutTree, cur: Entity) {
+pub fn try_cycle_pane_focus(commands: &mut Commands, layout_tree: &mut LayoutTree, cur: Entity) {
+    clear_zoom_pane(layout_tree);
     let mut leaves = Vec::new();
-    tree.root.collect_leaves(&mut leaves);
+    layout_tree.root.collect_leaves(&mut leaves);
     if leaves.len() < 2 {
         return;
     }
@@ -197,6 +229,7 @@ pub fn try_kill_active_pane(
     session_queue: &mut SessionSaveQueue,
     default_webview_url: &str,
 ) -> bool {
+    clear_zoom_pane(layout_tree);
     let mut leaves = Vec::new();
     layout_tree.root.collect_leaves(&mut leaves);
     if leaves.len() == 1 {
@@ -295,7 +328,7 @@ pub fn split_active_pane(
 pub fn cycle_pane_focus(
     keys: Res<ButtonInput<KeyCode>>,
     prefix: Query<&VmuxPrefixState, With<AppInputRoot>>,
-    layout_q: Query<&LayoutTree, With<Root>>,
+    mut layout_q: Query<&mut LayoutTree, With<Root>>,
     active: Query<Entity, (With<Pane>, With<Active>)>,
     mut commands: Commands,
 ) {
@@ -305,11 +338,11 @@ pub fn cycle_pane_focus(
     if !ctrl_shift(&keys) || !keys.just_pressed(KeyCode::Tab) {
         return;
     }
-    let Ok(tree) = layout_q.single() else {
+    let Ok(mut tree) = layout_q.single_mut() else {
         return;
     };
     let Ok(cur) = active.single() else {
         return;
     };
-    try_cycle_pane_focus(&mut commands, tree, cur);
+    try_cycle_pane_focus(&mut commands, &mut tree, cur);
 }
