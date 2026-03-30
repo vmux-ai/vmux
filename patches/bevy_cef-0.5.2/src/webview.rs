@@ -81,7 +81,7 @@ impl Plugin for WebviewPlugin {
                 Update,
                 (
                     resize.run_if(any_resized),
-                    create_webview.run_if(added_webview),
+                    create_webview,
                     navigate_on_source_change,
                 ),
             )
@@ -107,10 +107,6 @@ fn any_resized(webviews: Query<Entity, Changed<WebviewSize>>) -> bool {
     !webviews.is_empty()
 }
 
-fn added_webview(webviews: Query<Entity, Added<ResolvedWebviewUri>>) -> bool {
-    !webviews.is_empty()
-}
-
 fn send_external_begin_frame(mut hosts: NonSendMut<Browsers>) {
     hosts.send_external_begin_frame();
 }
@@ -130,7 +126,6 @@ fn create_webview(
             &PreloadScripts,
             Option<&HostWindow>,
         ),
-        Added<ResolvedWebviewUri>,
     >,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -138,6 +133,9 @@ fn create_webview(
     WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
         for (entity, uri, size, initialize_scripts, host_window) in webviews.iter() {
+            if browsers.has_browser(entity) {
+                continue;
+            }
             let window_entity = host_window
                 .map(|h| h.0)
                 .or_else(|| primary_window.single().ok());

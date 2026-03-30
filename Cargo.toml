@@ -2,6 +2,7 @@
 [workspace]
 members = [
     "crates/vmux_core",
+    "crates/vmux_layout",
     "crates/vmux_input",
     "crates/vmux",
     "crates/vmux_webview",
@@ -17,6 +18,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 bevy = { version = "0.18", default-features = true }
 bevy_cef = "0.5.2"
+bevy_cef_core = "0.5.2"
 leafwing-input-manager = "0.20"
 # Session persistence: `bevy_save` on crates.io targets Bevy 0.16.x; vmux uses Bevy 0.18, so we use moonshine-save.
 moonshine-save = "0.6.1"

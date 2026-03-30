@@ -54,7 +54,10 @@ fn any_changed_assets(mut er: MessageReader<AssetEvent<CefResponse>>) -> bool {
 fn resolve_webview_source(
     mut commands: Commands,
     mut store: ResMut<InlineHtmlStore>,
-    query: Query<(Entity, &WebviewSource, Option<&InlineHtmlId>), Changed<WebviewSource>>,
+    query: Query<
+        (Entity, &WebviewSource, Option<&InlineHtmlId>),
+        Or<(Added<WebviewSource>, Changed<WebviewSource>)>,
+    >,
 ) {
     for (entity, source, existing_id) in query.iter() {
         // Clean up old inline entry if switching away or updating

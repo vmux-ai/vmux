@@ -3,7 +3,7 @@
 mod component;
 mod system;
 
-pub use component::{AppAction, AppInputRoot};
+pub use component::{AppAction, AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixState};
 
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;

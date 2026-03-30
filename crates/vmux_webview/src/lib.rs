@@ -1,14 +1,15 @@
 //! Default CEF webview spawn and window/camera layout.
 
+mod layout;
 mod system;
+mod tmux;
 
 use bevy::prelude::*;
 use bevy::render::camera::camera_system;
 
-pub use system::{
-    fit_webview_plane_to_window, go_back, go_forward, reload,
-    sync_webview_layout_size_to_window,
-};
+pub use layout::rebuild_session_snapshot;
+pub use system::{go_back, go_forward, reload};
+pub use vmux_layout::LayoutPlugin;
 
 /// Marker for the primary vmux webview entity.
 #[derive(Component)]
@@ -25,16 +26,25 @@ pub struct VmuxWebviewPlugin;
 
 impl Plugin for VmuxWebviewPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, system::spawn_webview)
-            .add_systems(Update, (system::go_back, system::go_forward, system::reload))
+        app.add_plugins(LayoutPlugin);
+        app.add_systems(Startup, layout::setup_vmux_panes)
+            .add_systems(
+                Update,
+                (
+                    system::go_back,
+                    system::go_forward,
+                    system::reload,
+                    tmux::tmux_prefix_commands,
+                    layout::split_active_pane,
+                    layout::cycle_pane_focus,
+                ),
+            )
             .add_systems(
                 PostUpdate,
                 (
-                    sync_webview_layout_size_to_window,
-                    fit_webview_plane_to_window,
-                )
-                    .chain()
-                    .after(camera_system),
+                    layout::apply_pane_layout.after(camera_system),
+                    layout::sync_cef_sizes_after_pane_layout.after(layout::apply_pane_layout),
+                ),
             );
     }
 }

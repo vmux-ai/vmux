@@ -22,4 +22,5 @@ bevy_cef = { workspace = true }
 moonshine-save = { workspace = true }
 vmux_core = { path = "../vmux_core" }
 vmux_input = { path = "../vmux_input" }
+vmux_layout = { path = "../vmux_layout" }
 vmux_webview = { path = "../vmux_webview" }

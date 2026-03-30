@@ -122,4 +122,5 @@ where
 /// This component is automatically inserted and updated by the render systems.
 /// It provides material-type-agnostic access to the webview texture.
 #[derive(Component, Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) struct WebviewSurface(pub(crate) Handle<Image>);

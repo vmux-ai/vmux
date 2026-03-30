@@ -1,15 +1,13 @@
-//! Persist [`LastVisitedUrl`](vmux_core::LastVisitedUrl) with [moonshine-save].
-//!
-//! [crates.io `bevy_save`](https://crates.io/crates/bevy_save) currently targets Bevy 0.16.x; vmux uses Bevy 0.18, so we use moonshine-save instead.
+//! Session persistence with [moonshine-save]: hierarchical layout snapshot + legacy URL resource.
 
 use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_core::{
-    allowed_navigation_url, LastVisitedUrl, WebviewDocumentUrlEmit,
-};
+use vmux_core::{LastVisitedUrl, SessionSavePath, WebviewDocumentUrlEmit, allowed_navigation_url};
+use vmux_layout::{LayoutTree, PaneLastUrl, Root, SessionLayoutSnapshot};
+use vmux_webview::rebuild_session_snapshot;
 
 const SAVE_FILENAME: &str = "last_session.ron";
 
@@ -42,27 +40,38 @@ pub(crate) fn load_session_from_resource(commands: Commands, path: Res<SessionSa
 
 pub(crate) fn on_webview_document_url(
     trigger: On<Receive<WebviewDocumentUrlEmit>>,
-    mut last: ResMut<LastVisitedUrl>,
-    mut commands: Commands,
+    mut snapshot: ResMut<SessionLayoutSnapshot>,
+    mut pane_queries: ParamSet<(Query<&mut PaneLastUrl>, Query<&PaneLastUrl>)>,
+    layout_q: Query<&LayoutTree, With<Root>>,
+    webview_src: Query<&WebviewSource>,
     path: Res<SessionSavePath>,
+    mut commands: Commands,
 ) {
+    let webview = trigger.event().webview;
     let url = trigger.url.trim();
     if url.is_empty() || !allowed_navigation_url(url) {
         return;
     }
-    if last.0.as_str() == url {
-        return;
+    {
+        let mut q = pane_queries.p0();
+        let Ok(mut pl) = q.get_mut(webview) else {
+            return;
+        };
+        if pl.0.as_str() == url {
+            return;
+        }
+        pl.0 = url.to_string();
     }
-    last.0 = url.to_string();
+    let Ok(tree) = layout_q.single() else {
+        return;
+    };
+    *snapshot = rebuild_session_snapshot(tree, &pane_queries.p1(), &webview_src);
     commands.trigger_save(
-        SaveWorld::default_into_file(path.0.clone()).include_resource::<LastVisitedUrl>(),
+        SaveWorld::default_into_file(path.0.clone()).include_resource::<SessionLayoutSnapshot>(),
     );
 }
 
-#[derive(Resource, Clone, Debug)]
-pub(crate) struct SessionSavePath(pub PathBuf);
-
-/// Registers [`LastVisitedUrl`], session file path, moonshine-save load/save, and URL-change persistence.
+/// Registers layout snapshot, legacy URL resource, session path, moonshine load/save, and URL observer.
 #[derive(Default)]
 pub struct SessionPlugin;
 
@@ -70,6 +79,7 @@ impl Plugin for SessionPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<LastVisitedUrl>()
             .init_resource::<LastVisitedUrl>()
+            .init_resource::<SessionLayoutSnapshot>()
             .insert_resource(SessionSavePath(session_save_path()))
             .add_observer(moonshine_save::prelude::save_on_default_event)
             .add_observer(moonshine_save::prelude::load_on_default_event)

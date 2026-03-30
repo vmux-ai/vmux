@@ -1,10 +1,21 @@
 //! Shared scene markers and constants for `vmux` and `vmux_webview`.
 
+use std::path::PathBuf;
+
 use bevy::prelude::*;
 use serde::Deserialize;
 
+pub use vmux_layout::{
+    Active, LayoutAxis, LayoutNode, LayoutPlugin, LayoutTree, Pane, PaneLastUrl, PixelRect, Root,
+    SavedLayoutNode, SessionLayoutSnapshot, layout_node_to_saved, solve_layout,
+};
+
 /// Z distance of the world camera from the webview plane at z = 0 (used for frustum sizing).
 pub const CAMERA_DISTANCE: f32 = 3.0;
+
+/// Moonshine session file path (shared by `vmux` and `vmux_webview`).
+#[derive(Resource, Clone, Debug)]
+pub struct SessionSavePath(pub PathBuf);
 
 /// Marker for the vmux world-facing camera used to size the webview plane.
 #[derive(Component)]

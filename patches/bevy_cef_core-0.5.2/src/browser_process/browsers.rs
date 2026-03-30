@@ -122,6 +122,12 @@ impl Browsers {
         self.browsers.insert(webview, webview_browser);
     }
 
+    /// Returns `true` if [`Self::create_browser`] has already succeeded for this webview entity.
+    #[inline]
+    pub fn has_browser(&self, webview: Entity) -> bool {
+        self.browsers.contains_key(&webview)
+    }
+
     pub fn send_external_begin_frame(&mut self) {
         for browser in self.browsers.values_mut() {
             browser.host.send_external_begin_frame();

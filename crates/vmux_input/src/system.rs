@@ -2,7 +2,7 @@ use bevy::app::AppExit;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
 
-use crate::component::{AppAction, AppInputRoot};
+use crate::component::{AppAction, AppInputRoot, VmuxPrefixState};
 
 pub(crate) fn spawn_app_input(mut commands: Commands) {
     let mut input_map = InputMap::<AppAction>::default();
@@ -14,7 +14,12 @@ pub(crate) fn spawn_app_input(mut commands: Commands) {
         AppAction::Quit,
         ButtonlikeChord::modified(ModifierKey::Control, KeyCode::KeyQ),
     );
-    commands.spawn((AppInputRoot, input_map, ActionState::<AppAction>::default()));
+    commands.spawn((
+        AppInputRoot,
+        VmuxPrefixState::default(),
+        input_map,
+        ActionState::<AppAction>::default(),
+    ));
 }
 
 pub(crate) fn exit_on_quit_action(

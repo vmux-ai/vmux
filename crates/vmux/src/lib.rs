@@ -5,9 +5,10 @@ mod session;
 mod system;
 
 pub use core::{CAMERA_DISTANCE, VmuxWorldCamera};
-pub use session::{vmux_cache_dir, SessionPlugin};
-pub use vmux_core::LastVisitedUrl;
+pub use session::{SessionPlugin, vmux_cache_dir};
+pub use vmux_core::{LastVisitedUrl, SessionSavePath};
 pub use vmux_input::{AppAction, AppInputRoot, VmuxInputPlugin};
+pub use vmux_layout::{LayoutPlugin, SessionLayoutSnapshot};
 pub use vmux_webview::VmuxWebviewPlugin;
 
 use bevy::prelude::*;
@@ -53,11 +54,11 @@ impl Plugin for VmuxPlugin {
         app.add_plugins((
             DefaultPlugins,
             cef_plugin,
-            VmuxInputPlugin::default(),
-            VmuxScenePlugin::default(),
-            VmuxWebviewPlugin::default(),
+            VmuxInputPlugin,
+            VmuxScenePlugin,
             JsEmitEventPlugin::<vmux_core::WebviewDocumentUrlEmit>::default(),
-            SessionPlugin::default(),
+            SessionPlugin,
+            VmuxWebviewPlugin,
         ));
     }
 }
