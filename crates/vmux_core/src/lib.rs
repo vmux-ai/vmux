@@ -2,6 +2,7 @@
 
 mod active;
 pub mod input_root;
+pub mod pane_corner_clip;
 mod session;
 
 pub use active::Active;

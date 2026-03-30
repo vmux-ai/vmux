@@ -18,6 +18,7 @@ debug = ["bevy_cef/debug", "vmux_webview/debug"]
 
 [dependencies]
 bevy = { workspace = true }
+bevy_winit = { workspace = true }
 bevy_cef = { workspace = true }
 vmux_core = { path = "../vmux_core" }
 vmux_input = { path = "../vmux_input" }

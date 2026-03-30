@@ -28,6 +28,26 @@ fn init_session_save_path(mut commands: Commands, cache: Res<VmuxCacheDir>) {
     commands.insert_resource(SessionSavePath(session_save_path(&cache)));
 }
 
+/// Moonshine deserializes [`VmuxAppSettings`] via Reflect (not serde), so old session files still
+/// use `pane_gap_px` / `window_edge_gap_px`. Rewrite those keys before load so upgrades do not panic.
+fn migrate_last_session_vmux_settings_keys(path: Res<SessionSavePath>) {
+    let path = &path.0;
+    if !path.is_file() {
+        return;
+    }
+    let Ok(mut s) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let before = s.clone();
+    s = s.replace("pane_gap_px:", "pane_border_spacing_px:");
+    s = s.replace("window_edge_gap_px:", "window_padding_px:");
+    if s != before {
+        if let Err(e) = std::fs::write(path, s.as_bytes()) {
+            warn!("vmux_session: could not migrate session file {:?}: {e}", path);
+        }
+    }
+}
+
 fn load_session(mut commands: Commands, path: PathBuf) {
     if path.is_file() {
         commands.trigger_load(LoadWorld::default_from_file(path));
@@ -125,7 +145,8 @@ impl Plugin for SessionPlugin {
                 PreStartup,
                 (
                     init_session_save_path.after(VmuxCacheDirInitSet),
-                    load_session_from_resource.after(init_session_save_path),
+                    migrate_last_session_vmux_settings_keys.after(init_session_save_path),
+                    load_session_from_resource.after(migrate_last_session_vmux_settings_keys),
                 ),
             )
             .add_systems(

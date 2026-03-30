@@ -22,6 +22,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 bevy = { version = "0.18", default-features = true }
 bevy_ecs = { version = "0.18", default-features = true }
+bevy_winit = { version = "0.18", default-features = true }
 bevy_cef = "0.5.2"
 bevy_cef_core = "0.5.2"
 leafwing-input-manager = "0.20"
@@ -33,6 +34,7 @@ tower-http = { version = "0.5", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 crossbeam-channel = "0.5"
+notify = "6"
 
 [patch.crates-io]
 winit = { path = "patches/winit-0.30.13" }

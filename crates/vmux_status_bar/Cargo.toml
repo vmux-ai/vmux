@@ -25,6 +25,7 @@ bevy_ecs = { workspace = true }
 bevy_cef = { workspace = true }
 crossbeam-channel = { workspace = true }
 hostname = "0.4"
+vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_server = { path = "../vmux_server" }
 

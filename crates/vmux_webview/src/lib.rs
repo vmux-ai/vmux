@@ -1,5 +1,6 @@
 //! Default CEF webview spawn and window/camera layout.
 
+mod load_watchdog;
 mod system;
 
 use bevy::prelude::*;
@@ -48,7 +49,13 @@ impl Plugin for VmuxWebviewPlugin {
         ));
         app.add_systems(
             Update,
-            (system::go_back, system::go_forward, system::reload),
+            (
+                load_watchdog::add_webview_load_watchdog,
+                load_watchdog::webview_load_watchdog_tick,
+                system::go_back,
+                system::go_forward,
+                system::reload,
+            ),
         );
     }
 }

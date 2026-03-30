@@ -6,6 +6,11 @@ use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::Browsers;
 
+use vmux_core::pane_corner_clip::{
+    PANE_CORNER_CLIP_FULL, PANE_CORNER_CLIP_STATUS_BAR_BOTTOM,
+};
+use vmux_settings::VmuxAppSettings;
+
 use crate::{
     Active, CAMERA_DISTANCE, DEFAULT_PANE_CHROME_HEIGHT_PX, LayoutTree, Pane, PaneChromeOwner,
     PaneChromeStrip, PixelRect, Root, VmuxWorldCamera, solve_layout,
@@ -28,6 +33,31 @@ const MAX_CEF_BACKING_LONG_SIDE: f32 = 1536.0;
 /// during window resize, `Camera::logical_viewport_size()` can lag behind [`Window`]; using the
 /// smaller/stale viewport for `solve_layout` while normalizing with a different effective size
 /// widens pane and chrome strips (notably the active pane’s status bar spilling past the split).
+/// Root [`PixelRect`] for [`solve_layout`], inset from the window by `edge_gap_px` (clamped).
+fn layout_root_area(vw: f32, vh: f32, edge_gap_px: f32) -> PixelRect {
+    if !edge_gap_px.is_finite() || edge_gap_px <= 0.0 || !vw.is_finite() || !vh.is_finite() {
+        return PixelRect {
+            x: 0.0,
+            y: 0.0,
+            w: vw,
+            h: vh,
+        };
+    }
+    // Leave at least one minimal pane worth of span in each axis for the inner region.
+    const MIN_SPAN: f32 = 2.0 * crate::MIN_PANE_PX;
+    let max_g_w = ((vw - MIN_SPAN) * 0.5).max(0.0);
+    let max_g_h = ((vh - MIN_SPAN) * 0.5).max(0.0);
+    let g = edge_gap_px.max(0.0).min(max_g_w).min(max_g_h);
+    let w = (vw - 2.0 * g).max(0.0);
+    let h = (vh - 2.0 * g).max(0.0);
+    PixelRect {
+        x: g,
+        y: g,
+        w,
+        h,
+    }
+}
+
 fn layout_viewport_px(window: &Window, camera: &Camera) -> (f32, f32) {
     let vw = window.width();
     let vh = window.height();
@@ -43,6 +73,18 @@ fn layout_viewport_px(window: &Window, camera: &Camera) -> (f32, f32) {
         return (size.x, size.y);
     }
     (vw, vh)
+}
+
+/// `x` = corner radius (layout px), `y`/`z` = tile size (layout px), `w` = clip mode ([`vmux_core::pane_corner_clip`]).
+fn pane_corner_clip_uniform(px: f32, rect_w: f32, rect_h: f32, clip_mode: f32) -> Vec4 {
+    if !px.is_finite() || px <= 0.0 {
+        return Vec4::ZERO;
+    }
+    let w = rect_w.max(1.0e-6);
+    let h = rect_h.max(1.0e-6);
+    let m = w.min(h);
+    let r_px = px.min(m * 0.5).max(0.0);
+    Vec4::new(r_px, w, h, clip_mode)
 }
 
 /// Same backing-size cap as pane webviews (see [`apply_pane_layout`]).
@@ -127,6 +169,7 @@ pub fn apply_pane_layout(
     window: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &Projection), (With<Camera3d>, With<VmuxWorldCamera>)>,
     layout_q: Query<&LayoutTree, With<Root>>,
+    settings: Res<VmuxAppSettings>,
     panes: Query<Entity, With<Pane>>,
     mut transforms: Query<&mut Transform, (With<Pane>, Without<PaneChromeStrip>)>,
     mut sizes: Query<&mut WebviewSize, (With<Pane>, Without<PaneChromeStrip>)>,
@@ -162,13 +205,8 @@ pub fn apply_pane_layout(
     let half_w = half_h * aspect;
 
     let entity_alive = |e: Entity| panes.contains(e);
-    let area = PixelRect {
-        x: 0.0,
-        y: 0.0,
-        w: vw,
-        h: vh,
-    };
-    let mut rects = solve_layout(&layout.root, area, entity_alive);
+    let area = layout_root_area(vw, vh, settings.window_padding_px);
+    let mut rects = solve_layout(&layout.root, area, entity_alive, settings.pane_border_spacing_px);
     rects.sort_by(|a, b| {
         let cy_a = a.1.y + a.1.h * 0.5;
         let cy_b = b.1.y + b.1.h * 0.5;
@@ -213,6 +251,12 @@ pub fn apply_pane_layout(
         if let Ok(handle) = mesh_mat.get(entity)
             && let Some(mat) = materials.get_mut(handle.id())
         {
+            mat.extension.pane_corner_clip = pane_corner_clip_uniform(
+                settings.pane_border_radius_px,
+                pr.w,
+                pr.h,
+                PANE_CORNER_CLIP_FULL,
+            );
             mat.base.depth_bias = i as f32 * PANE_DEPTH_BIAS_STRIDE;
         }
     }
@@ -224,6 +268,7 @@ pub fn apply_pane_chrome_layout(
     window: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &Projection), (With<Camera3d>, With<VmuxWorldCamera>)>,
     layout_q: Query<&LayoutTree, With<Root>>,
+    settings: Res<VmuxAppSettings>,
     active: Query<Entity, (With<Pane>, With<Active>)>,
     panes: Query<Entity, With<Pane>>,
     pane_tf: Query<&Transform, (With<Pane>, Without<PaneChromeStrip>)>,
@@ -263,13 +308,8 @@ pub fn apply_pane_chrome_layout(
     let half_w = half_h * aspect;
 
     let entity_alive = |e: Entity| panes.contains(e);
-    let area = PixelRect {
-        x: 0.0,
-        y: 0.0,
-        w: vw,
-        h: vh,
-    };
-    let rects = solve_layout(&layout.root, area, entity_alive);
+    let area = layout_root_area(vw, vh, settings.window_padding_px);
+    let rects = solve_layout(&layout.root, area, entity_alive, settings.pane_border_spacing_px);
     let rect_map: HashMap<Entity, PixelRect> = rects.into_iter().collect();
 
     let active_pane = active.iter().next().or_else(|| panes.iter().next());
@@ -329,6 +369,13 @@ pub fn apply_pane_chrome_layout(
         if let Ok(handle) = mesh_mat.get(chrome_ent)
             && let Some(mat) = materials.get_mut(handle.id())
         {
+            // Status strip: bottom-only rounding — contract in `vmux_status_bar::pane_corner_clip`.
+            mat.extension.pane_corner_clip = pane_corner_clip_uniform(
+                settings.pane_border_radius_px,
+                chrome_pr.w,
+                chrome_pr.h,
+                PANE_CORNER_CLIP_STATUS_BAR_BOTTOM,
+            );
             mat.base.depth_bias = 1_000_000.0 + i as f32;
         }
     }

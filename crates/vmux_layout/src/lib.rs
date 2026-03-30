@@ -279,19 +279,33 @@ pub struct PixelRect {
 const MIN_PANE_PX: f32 = 48.0;
 
 /// Compute leaf rectangles. Skips dead entities if `entity_alive` returns false.
+///
+/// `pane_border_spacing_px` is the gap **between the two children** of each split (clamped per split so
+/// minimum pane sizes can still be satisfied).
 pub fn solve_layout(
     node: &LayoutNode,
     area: PixelRect,
     entity_alive: impl Fn(Entity) -> bool,
+    pane_border_spacing_px: f32,
 ) -> Vec<(Entity, PixelRect)> {
     let mut out = Vec::new();
-    solve_layout_inner(node, area, &entity_alive, &mut out);
+    solve_layout_inner(node, area, pane_border_spacing_px, &entity_alive, &mut out);
     out
+}
+
+#[inline]
+fn clamp_split_gap(requested: f32, span: f32) -> f32 {
+    if !requested.is_finite() || requested <= 0.0 || !span.is_finite() {
+        return 0.0;
+    }
+    let max_g = (span - 2.0 * MIN_PANE_PX).max(0.0);
+    requested.min(max_g)
 }
 
 fn solve_layout_inner(
     node: &LayoutNode,
     area: PixelRect,
+    pane_border_spacing_px: f32,
     entity_alive: &impl Fn(Entity) -> bool,
     out: &mut Vec<(Entity, PixelRect)>,
 ) {
@@ -305,7 +319,10 @@ fn solve_layout_inner(
             let ratio = ratio.clamp(0.05, 0.95);
             match axis {
                 LayoutAxis::Horizontal => {
-                    let split = (area.w * ratio).clamp(MIN_PANE_PX, area.w - MIN_PANE_PX);
+                    let g = clamp_split_gap(pane_border_spacing_px, area.w);
+                    let inner_w = area.w - g;
+                    let split =
+                        (inner_w * ratio).clamp(MIN_PANE_PX, inner_w - MIN_PANE_PX);
                     let left_rect = PixelRect {
                         x: area.x,
                         y: area.y,
@@ -313,16 +330,19 @@ fn solve_layout_inner(
                         h: area.h,
                     };
                     let right_rect = PixelRect {
-                        x: area.x + split,
+                        x: area.x + split + g,
                         y: area.y,
-                        w: area.w - split,
+                        w: inner_w - split,
                         h: area.h,
                     };
-                    solve_layout_inner(left, left_rect, entity_alive, out);
-                    solve_layout_inner(right, right_rect, entity_alive, out);
+                    solve_layout_inner(left, left_rect, pane_border_spacing_px, entity_alive, out);
+                    solve_layout_inner(right, right_rect, pane_border_spacing_px, entity_alive, out);
                 }
                 LayoutAxis::Vertical => {
-                    let split = (area.h * ratio).clamp(MIN_PANE_PX, area.h - MIN_PANE_PX);
+                    let g = clamp_split_gap(pane_border_spacing_px, area.h);
+                    let inner_h = area.h - g;
+                    let split =
+                        (inner_h * ratio).clamp(MIN_PANE_PX, inner_h - MIN_PANE_PX);
                     let top_rect = PixelRect {
                         x: area.x,
                         y: area.y,
@@ -331,12 +351,12 @@ fn solve_layout_inner(
                     };
                     let bot_rect = PixelRect {
                         x: area.x,
-                        y: area.y + split,
+                        y: area.y + split + g,
                         w: area.w,
-                        h: area.h - split,
+                        h: inner_h - split,
                     };
-                    solve_layout_inner(left, top_rect, entity_alive, out);
-                    solve_layout_inner(right, bot_rect, entity_alive, out);
+                    solve_layout_inner(left, top_rect, pane_border_spacing_px, entity_alive, out);
+                    solve_layout_inner(right, bot_rect, pane_border_spacing_px, entity_alive, out);
                 }
             }
         }

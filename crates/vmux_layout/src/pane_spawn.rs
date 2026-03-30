@@ -1,6 +1,7 @@
 //! CEF pane spawn (mesh + webview) for layout leaves.
 
 use bevy::prelude::*;
+use bevy::render::alpha::AlphaMode;
 use bevy_cef::prelude::*;
 use vmux_core::{SessionSavePath, SessionSaveQueue};
 use vmux_settings::VmuxAppSettings;
@@ -109,6 +110,7 @@ fn spawn_pane_chrome(
             MeshMaterial3d(materials.add(WebviewExtendStandardMaterial {
                 base: StandardMaterial {
                     unlit: true,
+                    alpha_mode: AlphaMode::Blend,
                     base_color: Color::WHITE,
                     depth_bias: 1_000_000.0,
                     ..default()
@@ -141,6 +143,7 @@ pub fn spawn_pane(
         MeshMaterial3d(materials.add(WebviewExtendStandardMaterial {
             base: StandardMaterial {
                 unlit: true,
+                alpha_mode: AlphaMode::Blend,
                 ..default()
             },
             extension: WebviewMaterial::default(),

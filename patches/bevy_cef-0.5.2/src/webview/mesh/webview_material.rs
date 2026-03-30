@@ -2,6 +2,7 @@ use bevy::asset::*;
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, Extent3d, TextureDimension, TextureFormat};
 use bevy_cef_core::prelude::*;
+use std::hash::{Hash, Hasher};
 
 const WEBVIEW_UTIL_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("6c7cb871-4208-4407-9c25-306c6f069e2b");
@@ -22,7 +23,7 @@ impl Plugin for WebviewMaterialPlugin {
     }
 }
 
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone, PartialEq, Default)]
 pub struct WebviewMaterial {
     /// Holds the texture handle for the webview.
     ///
@@ -30,6 +31,20 @@ pub struct WebviewMaterial {
     #[texture(101)]
     #[sampler(102)]
     pub surface: Option<Handle<Image>>,
+    /// Rounded-rect clip in **layout pixels**: `x` = corner radius, `y` = width, `z` = height,
+    /// `w` = `0` = all corners; `1` = bottom corners only (status strip).
+    #[uniform(103)]
+    pub pane_corner_clip: Vec4,
+}
+
+impl Hash for WebviewMaterial {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.surface.hash(state);
+        self.pane_corner_clip.x.to_bits().hash(state);
+        self.pane_corner_clip.y.to_bits().hash(state);
+        self.pane_corner_clip.z.to_bits().hash(state);
+        self.pane_corner_clip.w.to_bits().hash(state);
+    }
 }
 
 impl Material for WebviewMaterial {}

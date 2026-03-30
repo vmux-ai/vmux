@@ -1,3 +1,9 @@
 (
     default_webview_url: "https://www.google.com",
+    // Spacing between panes at each split (layout px). Named like tmux pane-border-* (e.g. pane-border-style).
+    pane_border_spacing_px: 8.0,
+    // Inset from the window inner edge to the pane grid (layout px). Named like tmux window-* (e.g. window-style).
+    window_padding_px: 8.0,
+    // Rounded corners on each pane tile (layout px). Clamped to half the shorter edge (tmux has no radius option).
+    pane_border_radius_px: 8.0,
 )

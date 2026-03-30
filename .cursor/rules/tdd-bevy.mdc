@@ -1,0 +1,21 @@
+---
+description: TDD workflow and Bevy system-level tests for ECS behavior
+globs: "**/*.rs"
+alwaysApply: false
+---
+
+# Test-driven development (TDD)
+
+- **Red → green → refactor**: add a **failing** test that expresses the desired behavior, implement the smallest change that passes, then clean up without changing behavior.
+- For new features or bug fixes, **write or extend a test before** (or together with) production code that makes it pass—do not leave tests as an afterthought unless the user explicitly skips them.
+- Keep tests **fast and deterministic**; avoid real network, windowing, or CEF unless the task is an integration harness.
+
+# Bevy: test at system level
+
+This project uses Bevy. Logic that runs in **systems, schedules, plugins, or resources** should be verified through the **ECS**, not only through isolated unit tests of helpers.
+
+- Prefer tests that build a small **`App`** (or `World`), register the **minimal plugin set** needed (`MinimalPlugins`, headless subsets, or test-only plugin groups), insert **resources / spawn entities** as setup, run **`app.update()`** (or the relevant **schedule** / `World::run_schedule_once` when appropriate), then **assert** on components, resources, events, or messages in the `World`.
+- Use **`#[cfg(test)]`** modules in the same crate or **`tests/`** integration tests when exercising multiple crates—match what already exists in the touched crate.
+- Pure functions (parsing, math with no `World`) may stay in **unit tests**; when behavior is defined by **system ordering and queries**, add a **system-level** test that proves the full path.
+
+Do not only suggest tests—**add or update them** in the same change when implementing behavior, unless the user says otherwise.
