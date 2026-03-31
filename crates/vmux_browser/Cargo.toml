@@ -1,0 +1,20 @@
+[package]
+name = "vmux_browser"
+description = "vmux — browser stack facade (BrowserPlugin + WebviewPlugin)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+debug = ["vmux_webview/debug"]
+
+[dependencies]
+bevy = { workspace = true }
+vmux_webview = { path = "../vmux_webview" }
+vmux_server = { path = "../vmux_server" }
+vmux_status_bar = { path = "../vmux_status_bar" }
+vmux_history = { path = "../vmux_history" }

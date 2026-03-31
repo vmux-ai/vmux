@@ -1,6 +1,6 @@
 .PHONY: run-mac build-mac-debug build bundle-mac setup-cef install-debug-render-process
 
-# Status bar (`dist/`) and history UI (`web_dist/`) are built by each crate’s `build.rs` when you compile `vmux` or `vmux_status_bar` / `vmux_history`. History: set `VMUX_HISTORY_USE_DX=1` for the Dioxus CLI path (see `crates/vmux_history/build.rs`).
+# Status bar (`dist/`) and history UI (`web_dist/`) are built by each crate’s `build.rs` when you compile `vmux` or `vmux_status_bar` / `vmux_history`.
 
 # Build then exec the binary instead of `cargo run` so the foreground process is vmux (not Cargo).
 run-mac: build-mac-debug

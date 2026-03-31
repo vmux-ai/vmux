@@ -1,4 +1,4 @@
-//! Default CEF webview spawn and window/camera layout.
+//! Browser stack for CEF webviews and hosted browser UIs.
 
 mod load_watchdog;
 mod navigation_loading;
@@ -9,26 +9,26 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{CefExtensions, CefPlugin, CommandLineConfig, JsEmitEventPlugin};
 pub use system::{go_back, go_forward, reload};
 pub use startup::{setup_vmux_panes_startup, startup_drain_embedded_ui_urls};
-pub use vmux_history::{HistoryUiBaseUrl, VmuxHistoryServerPlugin, VmuxHistoryUiPlugin};
+pub use vmux_history::HistoryUiBaseUrl;
 pub use vmux_layout::{CEF_PAGE_ZOOM_LEVEL, LayoutPlugin, VmuxWebview, rebuild_session_snapshot};
 pub use vmux_layout::{VmuxHostedWebPlugin, VmuxWebviewSurface};
 pub use vmux_layout::loading_bar_color;
 pub use vmux_server::{
-    EmbeddedServeDirRequest, EmbeddedServeDirStartup, PendingEmbeddedServeDir, VmuxServerPlugin,
+    EmbeddedServeDirRequest, EmbeddedServeDirStartup, PendingEmbeddedServeDir,
     VmuxServerShutdownRegistry, register_shutdown_flag, spawn_embedded_serve_dir_system,
 };
 pub use vmux_settings::{VmuxAppSettings, cef_root_cache_path, default_webview_url};
-pub use vmux_status_bar::{StatusBarHostedPlugin, StatusUiBaseUrl};
+pub use vmux_status_bar::StatusUiBaseUrl;
 
-/// Webview stack plus [`CefPlugin`] configuration (command line, extensions, CEF cache root).
+/// Core CEF webview rendering + navigation systems.
 #[derive(Clone, Debug)]
-pub struct VmuxWebviewPlugin {
+pub struct WebviewPlugin {
     pub command_line_config: CommandLineConfig,
     pub extensions: CefExtensions,
     pub root_cache_path: Option<String>,
 }
 
-impl Default for VmuxWebviewPlugin {
+impl Default for WebviewPlugin {
     fn default() -> Self {
         Self {
             command_line_config: CommandLineConfig::default(),
@@ -38,7 +38,7 @@ impl Default for VmuxWebviewPlugin {
     }
 }
 
-impl Plugin for VmuxWebviewPlugin {
+impl Plugin for WebviewPlugin {
     fn build(&self, app: &mut App) {
         let cef_plugin = CefPlugin {
             command_line_config: self.command_line_config.clone(),
@@ -46,13 +46,8 @@ impl Plugin for VmuxWebviewPlugin {
             root_cache_path: self.root_cache_path.clone(),
         };
         app.add_plugins((
-            VmuxServerPlugin,
             cef_plugin,
-            LayoutPlugin,
             JsEmitEventPlugin::<vmux_core::WebviewDocumentUrlEmit>::default(),
-            StatusBarHostedPlugin,
-            VmuxHistoryServerPlugin,
-            VmuxHistoryUiPlugin,
         ));
         startup::register(app);
         navigation_loading::register(app);
@@ -66,5 +61,20 @@ impl Plugin for VmuxWebviewPlugin {
                 system::reload,
             ),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_layout::Pane;
+
+    #[test]
+    fn navigation_systems_run_in_ecs_schedule() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.add_systems(Update, (go_back, go_forward, reload));
+        app.world_mut().spawn((Pane, VmuxWebview, vmux_core::Active));
+        app.update();
     }
 }

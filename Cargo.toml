@@ -9,6 +9,7 @@ members = [
     "crates/vmux_session",
     "crates/vmux",
     "crates/vmux_server",
+    "crates/vmux_browser",
     "crates/vmux_webview",
     "crates/vmux_status_bar",
     "crates/vmux_history",

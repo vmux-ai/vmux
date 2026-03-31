@@ -10,3 +10,40 @@
     overflow: hidden;
   }
 }
+
+@layer utilities {
+  @keyframes vmux-shimmer-sweep {
+    0% {
+      background-position: 180% 0;
+    }
+    100% {
+      background-position: -20% 0;
+    }
+  }
+
+  .vmux-shimmer-bar {
+    background-image: linear-gradient(
+      90deg,
+      rgba(56, 189, 248, 0.22) 0%,
+      rgba(125, 211, 252, 0.7) 45%,
+      rgba(56, 189, 248, 0.22) 100%
+    );
+    background-size: 220% 100%;
+    animation: vmux-shimmer-sweep 1.1s linear infinite;
+  }
+
+  .vmux-shimmer-text {
+    display: inline-block;
+    background-image: linear-gradient(
+      90deg,
+      rgba(232, 234, 237, 0.48) 0%,
+      rgba(232, 234, 237, 0.95) 45%,
+      rgba(232, 234, 237, 0.48) 100%
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: vmux-shimmer-sweep 1.6s linear infinite;
+  }
+}

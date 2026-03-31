@@ -7792,12 +7792,23 @@ dependencies = [
  "leafwing-input-manager",
  "liquid-glass-rs",
  "raw-window-handle",
+ "vmux_browser",
  "vmux_command",
  "vmux_core",
  "vmux_input",
  "vmux_layout",
  "vmux_session",
  "vmux_settings",
+]
+
+[[package]]
+name = "vmux_browser"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "vmux_history",
+ "vmux_server",
+ "vmux_status_bar",
  "vmux_webview",
 ]
 
@@ -7809,8 +7820,6 @@ dependencies = [
  "bevy_cef",
  "leafwing-input-manager",
  "vmux_core",
- "vmux_history",
- "vmux_input",
  "vmux_layout",
 ]
 
@@ -7841,6 +7850,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "vmux_command",
  "vmux_core",
  "vmux_input",
  "vmux_layout",
@@ -7858,6 +7868,7 @@ dependencies = [
  "bevy_cef",
  "bevy_cef_core",
  "leafwing-input-manager",
+ "vmux_command",
  "vmux_core",
  "vmux_layout",
  "vmux_settings",

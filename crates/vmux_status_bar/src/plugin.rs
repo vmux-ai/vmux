@@ -221,3 +221,14 @@ impl Plugin for StatusBarHostedPlugin {
 impl VmuxHostedWebPlugin for StatusBarHostedPlugin {
     const SURFACE: VmuxWebviewSurface = VmuxWebviewSurface::PaneChrome;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_bar_plugin_registers_in_app() {
+        let mut app = App::new();
+        app.add_plugins(StatusBarHostedPlugin);
+    }
+}

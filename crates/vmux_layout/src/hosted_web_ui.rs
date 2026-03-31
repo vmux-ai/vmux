@@ -2,8 +2,8 @@
 //!
 //! ## Plugin order
 //!
-//! Implementations register embedded HTTP against `VmuxServerShutdownRegistry` after `VmuxServerPlugin`
-//! (from the `vmux_server` crate; add `VmuxServerPlugin` before the hosted plugin).
+//! Implementations register embedded HTTP against `VmuxServerShutdownRegistry` after `ServerPlugin`
+//! (from the `vmux_server` crate; add `ServerPlugin` before the hosted plugin).
 
 use bevy::prelude::*;
 
@@ -18,7 +18,7 @@ pub enum VmuxWebviewSurface {
     /// Bottom status / chrome strip ([`PaneChromeStrip`](crate::PaneChromeStrip)).
     PaneChrome,
     /// Tiled history pane ([`WebviewPane`] + [`History`](crate::History)).
-    HistoryOverlay,
+    HistoryPane,
 }
 
 /// A Bevy [`Plugin`] that serves a web app from loopback and wires it into a [`VmuxWebviewSurface`].

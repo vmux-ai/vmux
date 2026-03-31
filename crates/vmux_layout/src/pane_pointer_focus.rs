@@ -190,13 +190,14 @@ pub(super) fn update_active_pane_under_cursor(
 mod tests {
     use super::*;
     use crate::{LayoutAxis, LayoutNode, LayoutTree, Root, VmuxWorldCamera};
-    use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
 
-    fn active_pane(world: &World) -> Entity {
+    fn active_pane(world: &mut World) -> Entity {
         world
             .query_filtered::<Entity, (With<Pane>, With<Active>)>()
-            .single(world)
+            .iter(world)
+            .next()
+            .expect("expected one active pane")
     }
 
     #[test]
@@ -228,34 +229,38 @@ mod tests {
         {
             let world = app.world_mut();
             let mut q = world.query_filtered::<&mut Window, With<PrimaryWindow>>();
-            let mut window = q.single_mut(world);
+            let mut window = q
+                .single_mut(world)
+                .expect("expected exactly one primary window");
             window.set_cursor_position(Some(Vec2::new(100.0, 100.0)));
         }
 
         // Build hover stability state over the left pane.
         app.update();
         app.update();
-        assert_eq!(active_pane(app.world()), left);
+        assert_eq!(active_pane(app.world_mut()), left);
 
         // Simulate keyboard navigation moving focus to the right pane.
         app.world_mut().entity_mut(left).remove::<Active>();
         app.world_mut().entity_mut(right).insert(Active);
-        assert_eq!(active_pane(app.world()), right);
+        assert_eq!(active_pane(app.world_mut()), right);
 
         // Pointer did not move; hover must not steal focus back.
         app.update();
         app.update();
-        assert_eq!(active_pane(app.world()), right);
+        assert_eq!(active_pane(app.world_mut()), right);
 
         // After the pointer moves again, hover is allowed to retake focus.
         {
             let world = app.world_mut();
             let mut q = world.query_filtered::<&mut Window, With<PrimaryWindow>>();
-            let mut window = q.single_mut(world);
+            let mut window = q
+                .single_mut(world)
+                .expect("expected exactly one primary window");
             window.set_cursor_position(Some(Vec2::new(120.0, 100.0)));
         }
         app.update();
         app.update();
-        assert_eq!(active_pane(app.world()), left);
+        assert_eq!(active_pane(app.world_mut()), left);
     }
 }

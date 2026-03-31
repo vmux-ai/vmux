@@ -14,11 +14,55 @@
   <link rel="stylesheet" href="history.css"/>
 </head>
 <body class="h-full min-h-0">
+  <div id="boot-loader" aria-live="polite">
+    <div class="boot-card">
+      <div class="boot-title">Starting history pane</div>
+      <div class="boot-track"><div id="boot-bar" class="boot-bar"></div></div>
+      <div id="boot-line" class="boot-line">Waiting for CEF runtime...</div>
+      <div id="boot-step" class="boot-step">[work] Booting web UI shell</div>
+    </div>
+  </div>
   <!-- Dioxus web mounts to #main by default (see dioxus_web::Config::default). -->
   <div id="main" class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"></div>
+  <style>
+    #boot-loader{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#141518;color:#c8ced8;z-index:9999}
+    .boot-card{width:min(440px,86vw);border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.02);padding:16px 18px;box-shadow:0 6px 22px rgba(0,0,0,.35)}
+    .boot-title{font:600 13px/1.3 system-ui,-apple-system,sans-serif;color:#eef2f7}
+    .boot-track{margin-top:10px;height:4px;background:rgba(255,255,255,.09);border-radius:999px;overflow:hidden}
+    .boot-bar{height:100%;width:22%;background:rgba(89,185,255,.6);border-radius:999px;animation:boot-slide 1.1s ease-in-out infinite}
+    .boot-line{margin-top:10px;font:500 12px/1.35 system-ui,-apple-system,sans-serif;color:rgba(232,234,237,.9);animation:boot-pulse 1.2s ease-in-out infinite}
+    .boot-step{margin-top:6px;font:500 11px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(232,234,237,.45)}
+    @keyframes boot-slide{0%{transform:translateX(-120%)}100%{transform:translateX(420%)}}
+    @keyframes boot-pulse{0%,100%{opacity:.45}50%{opacity:1}}
+  </style>
   <script type="module">
+    const boot = document.getElementById('boot-loader');
+    const bootLine = document.getElementById('boot-line');
+    const bootStep = document.getElementById('boot-step');
+    const stages = [
+      ["Waiting for CEF runtime...", "[work] Booting Chromium surface"],
+      ["Loading history UI module...", "[work] Compiling WebAssembly module"],
+      ["Connecting bridge to host...", "[work] Handshaking cef.listen / cef.emit"],
+      ["Requesting history snapshot...", "[work] Fetching first history chunk"],
+      ["Preparing list render...", "[work] Hydrating rows and search index"],
+    ];
+    let idx = 0;
+    let dots = 0;
+    const ticker = setInterval(() => {
+      dots = (dots + 1) % 4;
+      const [msg, step] = stages[idx % stages.length];
+      bootLine.textContent = `${msg}${".".repeat(dots)}`;
+      bootStep.textContent = step;
+      if (dots === 0) idx += 1;
+    }, 320);
+
     import init from './vmux_history.js';
-    await init();
+    try {
+      await init();
+    } finally {
+      clearInterval(ticker);
+      if (boot) boot.remove();
+    }
   </script>
 </body>
 </html>

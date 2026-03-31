@@ -13,6 +13,4 @@ bevy = { workspace = true }
 bevy_cef = { workspace = true }
 leafwing-input-manager = { workspace = true }
 vmux_core = { path = "../vmux_core" }
-vmux_history = { path = "../vmux_history" }
-vmux_input = { path = "../vmux_input" }
 vmux_layout = { path = "../vmux_layout" }

@@ -2,8 +2,8 @@
 //!
 //! Push [`EmbeddedServeDirRequest`] values into [`PendingEmbeddedServeDir`] from systems in
 //! [`EmbeddedServeDirStartup::FillPending`]
-//! (before [`VmuxServerPlugin`]’s [`spawn_embedded_serve_dir_system`] on [`Startup`]). Shutdown flags
-//! are registered automatically; [`VmuxServerPlugin`] stops all servers on
+//! (before [`ServerPlugin`]’s [`spawn_embedded_serve_dir_system`] on [`Startup`]). Shutdown flags
+//! are registered automatically; [`ServerPlugin`] stops all servers on
 //! [`AppExit`](bevy::app::AppExit).
 
 use std::path::PathBuf;
@@ -35,7 +35,7 @@ fn embedded_http_runtime() -> Arc<tokio::runtime::Runtime> {
 #[derive(Resource, Default)]
 pub struct VmuxServerShutdownRegistry(pub Vec<Arc<Mutex<bool>>>);
 
-/// Register a shutdown flag so [`VmuxServerPlugin`] can signal graceful shutdown on app exit.
+/// Register a shutdown flag so [`ServerPlugin`] can signal graceful shutdown on app exit.
 pub fn register_shutdown_flag(registry: &mut VmuxServerShutdownRegistry, flag: Arc<Mutex<bool>>) {
     registry.0.push(flag);
 }
@@ -159,9 +159,9 @@ fn shutdown_registered_servers(
 
 /// Registers [`VmuxServerShutdownRegistry`] and stops all registered servers on [`AppExit`].
 #[derive(Default)]
-pub struct VmuxServerPlugin;
+pub struct ServerPlugin;
 
-impl Plugin for VmuxServerPlugin {
+impl Plugin for ServerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PendingEmbeddedServeDir>()
             .init_resource::<VmuxServerShutdownRegistry>()
@@ -178,5 +178,16 @@ impl Plugin for VmuxServerPlugin {
                 spawn_embedded_serve_dir_system.in_set(EmbeddedServeDirStartup::SpawnEmbedded),
             )
             .add_systems(Last, shutdown_registered_servers);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vmux_server_plugin_registers_in_app() {
+        let mut app = App::new();
+        app.add_plugins(ServerPlugin);
     }
 }

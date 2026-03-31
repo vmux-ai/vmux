@@ -2,7 +2,7 @@
   "name": "vmux_history",
   "private": true,
   "scripts": {
-    "build:css": "tailwindcss -i ./assets/input.css -o ./web_dist/history.css --minify && node ./scripts/inline-history-css.mjs"
+    "build:css": "tailwindcss -i ./assets/input.css -o ./dist/history.css --minify && node ./scripts/inline-history-css.mjs"
   },
   "devDependencies": {
     "tailwindcss": "^3.4.17"

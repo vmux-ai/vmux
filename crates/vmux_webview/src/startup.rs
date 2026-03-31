@@ -20,29 +20,57 @@ pub fn startup_drain_embedded_ui_urls(
     mut hist_ready: ResMut<HistoryUiBaseUrl>,
     hist_rx: Res<HistoryUiUrlReceiver>,
 ) {
-    const WAIT: Duration = Duration::from_secs(3);
+    const WAIT_TOTAL: Duration = Duration::from_millis(350);
     let t0 = Instant::now();
-    drain_channel(&mut status_ready.0, status_rx.0.as_ref(), WAIT);
-    drain_channel(&mut hist_ready.0, hist_rx.0.as_ref(), WAIT);
+    let deadline = t0 + WAIT_TOTAL;
+    drain_channels_until_deadline(
+        &mut status_ready.0,
+        status_rx.0.as_ref(),
+        &mut hist_ready.0,
+        hist_rx.0.as_ref(),
+        deadline,
+    );
     info!(
         "vmux: embedded status/history UI base URLs drained in {:?}",
         t0.elapsed()
     );
 }
 
-fn drain_channel(
-    ready: &mut Option<String>,
-    rx: Option<&crossbeam_channel::Receiver<String>>,
-    wait: Duration,
+fn drain_channels_until_deadline(
+    status_ready: &mut Option<String>,
+    status_rx: Option<&crossbeam_channel::Receiver<String>>,
+    hist_ready: &mut Option<String>,
+    hist_rx: Option<&crossbeam_channel::Receiver<String>>,
+    deadline: Instant,
 ) {
-    if ready.is_some() {
-        return;
-    }
-    let Some(rx) = rx else {
-        return;
-    };
-    if let Ok(u) = rx.recv_timeout(wait) {
-        *ready = Some(u);
+    loop {
+        let mut progressed = false;
+        if status_ready.is_none()
+            && let Some(rx) = status_rx
+            && let Ok(u) = rx.try_recv()
+        {
+            *status_ready = Some(u);
+            progressed = true;
+        }
+        if hist_ready.is_none()
+            && let Some(rx) = hist_rx
+            && let Ok(u) = rx.try_recv()
+        {
+            *hist_ready = Some(u);
+            progressed = true;
+        }
+        if (status_ready.is_some() || status_rx.is_none())
+            && (hist_ready.is_some() || hist_rx.is_none())
+        {
+            return;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return;
+        }
+        if !progressed {
+            std::thread::sleep((deadline - now).min(Duration::from_millis(10)));
+        }
     }
 }
 

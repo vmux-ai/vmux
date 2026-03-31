@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 [features]
 default = []
-debug = ["bevy_cef/debug", "vmux_webview/debug"]
+debug = ["bevy_cef/debug", "vmux_browser/debug"]
 
 [dependencies]
 bevy = { workspace = true }
@@ -27,7 +27,7 @@ vmux_input = { path = "../vmux_input" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_session = { path = "../vmux_session" }
 vmux_settings = { path = "../vmux_settings" }
-vmux_webview = { path = "../vmux_webview" }
+vmux_browser = { path = "../vmux_browser" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 liquid-glass-rs = "0.1.1"

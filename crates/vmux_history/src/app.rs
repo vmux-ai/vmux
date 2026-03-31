@@ -26,11 +26,13 @@ const TW_LOAD_MORE: &str = "mt-1.5 block w-full cursor-pointer rounded-[10px] bo
 const TW_STREAM_HINT: &str = "mt-2 text-center text-[10px] text-white/30";
 const TW_LOADING_BOX: &str = "flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center";
 const TW_LOADING_TRACK: &str = "h-1 w-36 overflow-hidden rounded-full bg-white/[0.08]";
-const TW_LOADING_PULSE: &str = "h-full w-2/5 rounded-full bg-sky-400/35 animate-pulse";
+const TW_LOADING_PULSE: &str = "vmux-shimmer-bar h-full rounded-full bg-sky-400/35";
+const TW_SHIMMER_TEXT: &str = "vmux-shimmer-text text-[11px] text-white/28";
 
 /// First paint shows this many rows; avoids mounting hundreds of DOM nodes at once (faster CEF composite).
 const INITIAL_VISIBLE_ROWS: usize = 48;
 const LOAD_MORE_ROWS: usize = 72;
+const CEF_LISTENER_ATTEMPTS_MAX: u32 = 200;
 
 fn day_label(now_ms: i64, entry_ms: i64) -> &'static str {
     let age = (now_ms - entry_ms).max(0) / MS_PER_DAY;
@@ -344,6 +346,12 @@ pub fn App() -> Element {
     let mut history_stream_complete = use_signal(|| true);
     let mut filter = use_signal(String::new);
     let mut visible_limit = use_signal(|| INITIAL_VISIBLE_ROWS);
+    let mut chrome_progress_percent = use_signal(|| 5u8);
+    let mut chrome_progress_message = use_signal(|| "Waiting for CEF to start...".to_string());
+    let mut host_progress_stage_sig = use_signal(|| "startup".to_string());
+    let mut host_progress_message = use_signal(|| "Fetching history...".to_string());
+    let mut host_progress_percent = use_signal(|| 12u8);
+    let mut history_sync_stalled = use_signal(|| false);
 
     // `use_hook`: run once per mount. `use_effect` would resubscribe when captured signals change
     // and could orphan the CEF listener + channel (see `try_install_cef_history_listener`).
@@ -353,16 +361,27 @@ pub fn App() -> Element {
             // Poll quickly: `cef` appears soon after navigation; 32ms×120 was ~4s worst-case
             // before we even asked the host for history.
             let mut rx = Some(rx);
-            for attempt in 0..200 {
+            for attempt in 0..CEF_LISTENER_ATTEMPTS_MAX {
+                let pct = 5u8.saturating_add((((attempt + 1) * 50) / CEF_LISTENER_ATTEMPTS_MAX) as u8);
+                chrome_progress_percent.set(pct.min(55));
+                chrome_progress_message.set("Waiting for CEF to start...".to_string());
                 if try_install_cef_history_listener(tx.clone()) {
                     let nonce = random_history_sync_nonce();
                     bridge_sync_pending.set(Some(nonce));
                     cef_listener_ready.set(true);
+                    chrome_progress_percent.set(60);
+                    chrome_progress_message.set("CEF ready.".to_string());
+                    host_progress_stage_sig.set("request".to_string());
+                    host_progress_message.set("Fetching history...".to_string());
+                    host_progress_percent.set(65);
+                    history_sync_stalled.set(false);
                     request_history_sync_from_host(Some(nonce));
                     // Resync timers must not block `run_history_bridge_loop`: pending only clears when
                     // `rx` is drained; a prior sequential loop delayed the UI by up to ~2.4s.
                     let mut pending_sig = bridge_sync_pending;
+                    let mut host_msg_sig = host_progress_message;
                     let mut host_snap_sig = host_snapshot_received;
+                    let mut stalled_sig = history_sync_stalled;
                     spawn(async move {
                         for ms in [16u32, 48, 120] {
                             gloo_timers::future::TimeoutFuture::new(ms).await;
@@ -378,13 +397,18 @@ pub fn App() -> Element {
                             }
                             request_history_sync_from_host(*pending_sig.peek());
                         }
-                        // Short final wait before showing empty (avoids long spinner if IPC is wedged).
+                        // Short final wait before updating status.
                         if pending_sig.peek().is_some() {
                             gloo_timers::future::TimeoutFuture::new(400).await;
                         }
                         if pending_sig.peek().is_some() {
+                            // Avoid infinite spinner when startup sync is wedged.
+                            stalled_sig.set(true);
                             host_snap_sig.set(true);
                             pending_sig.set(None);
+                            host_msg_sig.set(
+                                "History sync is still starting (focus pane to retry).".to_string(),
+                            );
                         }
                     });
                     let rx = rx.take().expect("rx available once listener installs");
@@ -394,6 +418,9 @@ pub fn App() -> Element {
                         bridge_sync_pending,
                         host_snapshot_received,
                         history_stream_complete,
+                        host_progress_stage_sig,
+                        host_progress_message,
+                        host_progress_percent,
                     )
                     .await;
                     return;
@@ -418,6 +445,9 @@ pub fn App() -> Element {
                     bridge_sync_pending,
                     host_snapshot_received,
                     history_stream_complete,
+                    host_progress_stage_sig,
+                    host_progress_message,
+                    host_progress_percent,
                 )
                 .await;
             }
@@ -447,6 +477,11 @@ pub fn App() -> Element {
     let filter_trimmed = filter().trim().to_string();
     let chrome_loading = !cef_listener_ready();
     let list_loading = cef_listener_ready() && !host_snapshot_received();
+    let chrome_progress_width = format!("width: {}%;", chrome_progress_percent());
+    let host_progress_width = format!("width: {}%;", host_progress_percent());
+    let host_msg = host_progress_message();
+    let chrome_agentic = chrome_progress_message();
+    let host_agentic = host_msg;
 
     rsx! {
         div {
@@ -461,9 +496,10 @@ pub fn App() -> Element {
                         aria_label: "Starting history UI",
                         span { class: "text-[13px] text-white/55", "Starting…" }
                         div { class: "{TW_LOADING_TRACK}",
-                            div { class: "{TW_LOADING_PULSE}" }
+                            div { class: "{TW_LOADING_PULSE}", style: "{chrome_progress_width}" }
                         }
-                        span { class: "text-[11px] text-white/28", "Connecting to the host" }
+                        span { class: "{TW_SHIMMER_TEXT}", "{chrome_agentic}" }
+                        span { class: "text-[10px] text-white/20 tabular-nums", "{chrome_progress_percent()}%" }
                     }
                 }
             } else {
@@ -516,15 +552,23 @@ pub fn App() -> Element {
                                 aria_label: "Loading history",
                                 span { class: "text-[13px] text-white/55", "Loading visits…" }
                                 div { class: "{TW_LOADING_TRACK}",
-                                    div { class: "{TW_LOADING_PULSE}" }
+                                    div { class: "{TW_LOADING_PULSE}", style: "{host_progress_width}" }
                                 }
-                                span { class: "text-[11px] text-white/28", "Fetching list from the host" }
+                                span { class: "{TW_SHIMMER_TEXT}", "{host_agentic}" }
+                                span { class: "text-[10px] text-white/20 tabular-nums", "{host_progress_percent()}%" }
                             }
                         } else if grouped_for_view.is_empty() {
                             if filter_trimmed.is_empty() {
-                                div { class: "flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center",
-                                    span { class: "text-[13px] text-white/50", "No history yet." }
-                                    span { class: "text-[11px] text-white/28", "Browse in another pane to build history." }
+                                if history_sync_stalled() {
+                                    div { class: "flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-amber-300/20 bg-amber-300/[0.04] px-6 py-14 text-center",
+                                        span { class: "text-[13px] text-amber-100/90", "Still waiting for history engine." }
+                                        span { class: "text-[11px] text-amber-100/55", "Focus this pane to trigger another sync." }
+                                    }
+                                } else {
+                                    div { class: "flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center",
+                                        span { class: "text-[13px] text-white/50", "No history yet." }
+                                        span { class: "text-[11px] text-white/28", "Browse in another pane to build history." }
+                                    }
                                 }
                             } else {
                                 div { class: "flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center",

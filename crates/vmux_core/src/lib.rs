@@ -25,16 +25,16 @@ use serde::Deserialize;
 pub struct WebviewDocumentUrlEmit {
     #[serde(default)]
     pub url: Option<String>,
-    /// When set (e.g. from history overlay), open this URL in the active main pane.
+    /// When set (e.g. from history pane), open this URL in the active main pane.
     #[serde(default, rename = "vmux_open_in_pane")]
     pub vmux_open_in_pane: Option<String>,
-    /// History overlay asks the host to push the current list (after `cef.listen` is registered).
+    /// History pane asks the host to push the current list (after `cef.listen` is registered).
     #[serde(default, rename = "vmux_request_history")]
     pub vmux_request_history: bool,
     /// Echoed on the next `vmux_history` host emit so the UI can confirm the bridge delivered (`u32` so JS numbers stay exact).
     #[serde(default, rename = "vmux_history_sync_nonce")]
     pub vmux_history_sync_nonce: Option<u32>,
-    /// History overlay asks the host to wipe persisted visit list.
+    /// History pane asks the host to wipe persisted visit list.
     #[serde(default, rename = "vmux_clear_history")]
     pub vmux_clear_history: bool,
 }

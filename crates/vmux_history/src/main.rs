@@ -15,6 +15,6 @@ fn main() {
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     eprintln!(
-        "vmux_history: wasm32 only — from repo root run `cargo build -p vmux_history --target wasm32-unknown-unknown` (native `cargo build -p vmux_history` runs the web_dist pipeline in build.rs)."
+        "vmux_history: wasm32 only — from repo root run `cargo build -p vmux_history --target wasm32-unknown-unknown` (native `cargo build -p vmux_history` runs the dist pipeline in build.rs)."
     );
 }

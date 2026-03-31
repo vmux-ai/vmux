@@ -556,6 +556,17 @@ impl Plugin for SessionPlugin {
 }
 
 #[cfg(test)]
+mod ecs_tests {
+    use super::*;
+
+    #[test]
+    fn session_plugin_registers_in_app() {
+        let mut app = App::new();
+        app.add_plugins(SessionPlugin);
+    }
+}
+
+#[cfg(test)]
 #[test]
 fn flat_from_ron_struct_body_parses_unquoted_keys() {
     let body = r#"default_webview_url: "https://a.com", pane_border_spacing_px: 8.0, window_padding_px: 8.0, window_padding_top_px: 28.0, pane_border_radius_px: 8.0"#;
