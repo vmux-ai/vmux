@@ -353,3 +353,14 @@ impl Plugin for SettingsPlugin {
             .add_systems(Update, apply_settings_file_reloads);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_plugin_registers_in_app() {
+        let mut app = App::new();
+        app.add_plugins(SettingsPlugin);
+    }
+}

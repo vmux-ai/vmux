@@ -8,7 +8,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use web_sys::window;
 
-use crate::payload::{BridgeMsg, HistoryEntryWire, apply_history_payload};
+use crate::payload::{BridgeMsg, HistoryEntryWire, apply_history_payload, apply_history_progress_payload};
 
 /// Random `u32` for [`request_history_sync_from_host`]; stays exact through JS `Number`.
 pub fn random_history_sync_nonce() -> u32 {
@@ -41,15 +41,26 @@ pub fn try_install_cef_history_listener(tx: UnboundedSender<serde_json::Value>) 
         return false;
     };
 
+    let history_tx = tx.clone();
     let closure = Closure::wrap(Box::new(move |e: JsValue| {
         let payload = serde_wasm_bindgen::from_value(e).unwrap_or(serde_json::Value::Null);
         let msg = serde_json::json!({ "type": "history", "payload": payload });
-        let _ = tx.unbounded_send(msg);
+        let _ = history_tx.unbounded_send(msg);
     }) as Box<dyn FnMut(JsValue)>);
 
     let cb = closure.as_ref().unchecked_ref();
     let _ = listen_fn.call2(&cef, &JsValue::from_str("vmux_history"), cb);
     closure.forget();
+
+    let progress_tx = tx.clone();
+    let progress_closure = Closure::wrap(Box::new(move |e: JsValue| {
+        let payload = serde_wasm_bindgen::from_value(e).unwrap_or(serde_json::Value::Null);
+        let msg = serde_json::json!({ "type": "progress", "payload": payload });
+        let _ = progress_tx.unbounded_send(msg);
+    }) as Box<dyn FnMut(JsValue)>);
+    let progress_cb = progress_closure.as_ref().unchecked_ref();
+    let _ = listen_fn.call2(&cef, &JsValue::from_str("vmux_history_progress"), progress_cb);
+    progress_closure.forget();
     true
 }
 
@@ -144,6 +155,9 @@ pub async fn run_history_bridge_loop(
     bridge_sync_pending: Signal<Option<u32>>,
     host_snapshot_received: Signal<bool>,
     history_stream_complete: Signal<bool>,
+    progress_stage: Signal<String>,
+    progress_message: Signal<String>,
+    progress_percent: Signal<u8>,
 ) {
     use futures_util::StreamExt;
 
@@ -160,6 +174,14 @@ pub async fn run_history_bridge_loop(
                     bridge_sync_pending,
                     host_snapshot_received,
                     history_stream_complete,
+                );
+            }
+            BridgeMsg::Progress { payload } => {
+                apply_history_progress_payload(
+                    payload,
+                    progress_stage,
+                    progress_message,
+                    progress_percent,
                 );
             }
         }

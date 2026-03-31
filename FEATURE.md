@@ -1,0 +1,17 @@
+- Layout: Tmux style tiling window manager
+    - Session
+    - Window
+    - Pane
+    - Tab
+- Browser
+    - Webview
+    - Command Palette
+    - Navigation
+    - History
+    - Status Bar
+    - Session Persistence
+- [ ] Terminal
+- [ ] Editor
+- [ ] AI agent
+- Keybindngs
+- Settings

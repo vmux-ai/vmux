@@ -1,6 +1,6 @@
 [package]
 name = "vmux_history"
-description = "vmux — Dioxus history UI + VmuxHistoryServerPlugin / VmuxHistoryUiPlugin"
+description = "vmux — Dioxus history UI + HistoryServerPlugin / HistoryUiPlugin"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -25,6 +25,7 @@ bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
 crossbeam-channel = { workspace = true }
 leafwing-input-manager = { workspace = true }
+vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_input = { path = "../vmux_input" }
 vmux_layout = { path = "../vmux_layout" }

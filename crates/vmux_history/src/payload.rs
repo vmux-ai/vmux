@@ -40,10 +40,21 @@ pub struct VmuxHistoryPayload {
     pub history_stream_done: bool,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct VmuxHistoryProgressPayload {
+    #[serde(default)]
+    pub stage: String,
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub percent: Option<u8>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum BridgeMsg {
     History { payload: serde_json::Value },
+    Progress { payload: serde_json::Value },
 }
 
 pub fn apply_history_payload(
@@ -93,5 +104,26 @@ pub fn apply_history_payload(
         history_stream_complete.set(p.history_stream_done);
     } else if p.history_stream_done {
         history_stream_complete.set(true);
+    }
+}
+
+pub fn apply_history_progress_payload(
+    raw: serde_json::Value,
+    mut stage: Signal<String>,
+    mut message: Signal<String>,
+    mut percent: Signal<u8>,
+) {
+    let p: VmuxHistoryProgressPayload = match raw {
+        serde_json::Value::String(s) => serde_json::from_str(&s).unwrap_or_default(),
+        v => serde_json::from_value(v).unwrap_or_default(),
+    };
+    if !p.stage.trim().is_empty() {
+        stage.set(p.stage);
+    }
+    if !p.message.trim().is_empty() {
+        message.set(p.message);
+    }
+    if let Some(v) = p.percent {
+        percent.set(v.min(100));
     }
 }

@@ -1,4 +1,4 @@
-//! Bevy plugins: [`VmuxHistoryServerPlugin`] (embedded HTTP + pane URL) and [`VmuxHistoryUiPlugin`]
+//! Bevy plugins: [`HistoryServerPlugin`] (embedded HTTP + pane URL) and [`HistoryUiPlugin`]
 //! (tiled history pane: [`WebviewPane`] + [`History`](vmux_layout::History), hotkeys, host IPC).
 
 use std::collections::{HashMap, HashSet};
@@ -10,12 +10,13 @@ use std::time::Instant;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
+use vmux_command::AppCommandRequestQueue;
 use serde::Serialize;
 use vmux_core::{
     NavigationHistory, NavigationHistoryEntry, NavigationHistoryPath, NavigationHistorySaveQueue,
     SessionSavePath, SessionSaveQueue, WebviewDocumentUrlEmit,
 };
-use vmux_input::{AppAction, AppInputRoot, sync_cef_osr_focus_with_active_pane};
+use vmux_input::{AppCommand, AppInputRoot, sync_cef_osr_focus_with_active_pane};
 use vmux_layout::{
     Active, CEF_PAGE_ZOOM_LEVEL, History, HistoryPaneNeedsUrl, HistoryPaneOpenedAt, LayoutAxis,
     LayoutTree,
@@ -61,7 +62,7 @@ fn history_payload_skip_stream_done_true(d: &bool) -> bool {
     *d
 }
 
-const HISTORY_CHROME_UNAVAILABLE_HTML: &str = r#"<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><style>html,body{margin:0;background:#1a1a1a;color:#9aa0a6;font:12px system-ui,-apple-system,sans-serif;height:100%;}body{display:flex;align-items:center;justify-content:center;text-align:center;padding:8px 12px;}p{margin:0;line-height:1.4;}small{display:block;margin-top:6px;opacity:.75;font-size:11px;}</style></head><body><div><p>History UI did not load.</p><small>Set <code style="color:#bdc1c6">VMUX_HISTORY_UI_URL</code> or rebuild with <code style="color:#bdc1c6">crates/vmux_history/web_dist/</code> present.</small></div></body></html>"#;
+const HISTORY_CHROME_UNAVAILABLE_HTML: &str = r#"<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><style>html,body{margin:0;background:#1a1a1a;color:#9aa0a6;font:12px system-ui,-apple-system,sans-serif;height:100%;}body{display:flex;align-items:center;justify-content:center;text-align:center;padding:8px 12px;}p{margin:0;line-height:1.4;}small{display:block;margin-top:6px;opacity:.75;font-size:11px;}</style></head><body><div><p>History UI did not load.</p><small>Set <code style="color:#bdc1c6">VMUX_HISTORY_UI_URL</code> or rebuild with <code style="color:#bdc1c6">crates/vmux_history/dist/</code> present.</small></div></body></html>"#;
 
 /// `data:text/html;charset=utf-8,…` so the history pane does not use `cef://` inline URLs (see `spawn_history_pane`).
 fn data_url_utf8_html(html: &str) -> String {
@@ -145,17 +146,23 @@ struct HistoryHostPayload {
     history_stream_done: bool,
 }
 
-/// On-disk UI roots (same order as [`startup_history_server`]).
-///
-/// Native `cargo build -p vmux_history` runs **`build.rs`**, which writes **`web_dist/`** (default: `wasm-bindgen` + Tailwind; or `dx` when **`VMUX_HISTORY_USE_DX=1`**). A stale **`dist/`** from
-/// an old `dx` run must **not** shadow **`web_dist/`** — that older layout is easy to mistake for
-/// “missing” favicons, timestamps, and Clear history (different bundle).
-fn history_web_dist_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(crate::DIST_WEB_DIR_NAME)
+#[derive(Serialize)]
+struct HistoryProgressPayload {
+    stage: &'static str,
+    message: String,
+    percent: u8,
 }
 
-fn history_dx_dist_dir() -> PathBuf {
+/// On-disk UI roots (same order as [`startup_history_server`]).
+///
+/// Native `cargo build -p vmux_history` runs **`build.rs`**, which writes **`dist/`**
+/// (`wasm-bindgen` + Tailwind). Keep `web_dist/` as a compatibility fallback for older local trees.
+fn history_dist_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(crate::DIST_DIR_NAME)
+}
+
+fn history_web_dist_fallback_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(crate::DIST_WEB_DIR_NAME)
 }
 
 /// True when `index.html` was post-processed by `scripts/inline-history-css.mjs` (single-document load for CEF).
@@ -166,26 +173,30 @@ fn history_index_has_inlined_css(index_html: &Path) -> bool {
 }
 
 fn history_ui_filesystem_root() -> Option<PathBuf> {
-    let web = history_web_dist_dir();
+    let dist = history_dist_dir();
+    let dist_index = dist.join("index.html");
+    if dist_index.is_file() {
+        if history_index_has_inlined_css(&dist_index) {
+            return Some(dist);
+        }
+        bevy::log::warn!(
+            "vmux history: {} is missing inlined CSS (expected `<style id=\"vmux-history-inline\">` from `npm run build:css`); not using this folder so the embedded bundle can load instead. Run `cargo build -p vmux_history` to refresh dist.",
+            dist_index.display()
+        );
+    }
+    let web = history_web_dist_fallback_dir();
     let web_index = web.join("index.html");
     if web_index.is_file() {
         if history_index_has_inlined_css(&web_index) {
+            bevy::log::warn!(
+                "vmux history: using legacy web_dist fallback at {}; rebuild vmux_history to refresh dist/.",
+                web.display()
+            );
             return Some(web);
         }
         bevy::log::warn!(
-            "vmux history: {} is missing inlined CSS (expected `<style id=\"vmux-history-inline\">` from `npm run build:css`); not using this folder so the embedded bundle can load instead. Run `cargo build -p vmux_history` to refresh web_dist.",
+            "vmux history: {} is missing inlined CSS; ignoring this legacy web_dist folder.",
             web_index.display()
-        );
-    }
-    let dx = history_dx_dist_dir();
-    let dx_index = dx.join("index.html");
-    if dx_index.is_file() {
-        if history_index_has_inlined_css(&dx_index) {
-            return Some(dx);
-        }
-        bevy::log::warn!(
-            "vmux history: {} is missing inlined CSS; ignoring this dx dist folder.",
-            dx_index.display()
         );
     }
     None
@@ -204,7 +215,7 @@ fn startup_history_server(mut commands: Commands, mut pending: ResMut<PendingEmb
     let root = history_ui_filesystem_root().or_else(extract_embedded_history_dist);
     let Some(root) = root else {
         bevy::log::warn!(
-            "vmux history: no UI bundle (run `cargo build -p vmux_history` to populate web_dist via build.rs, or set VMUX_HISTORY_UI_URL; need web_dist/ or embedded web_dist)"
+            "vmux history: no UI bundle (run `cargo build -p vmux_history` to populate dist via build.rs, or set VMUX_HISTORY_UI_URL; need dist/ or embedded dist)"
         );
         commands.insert_resource(HistoryUiChromeUnavailable(true));
         return;
@@ -230,12 +241,14 @@ fn spawn_history_ui_cef_warmup(
     ready: Res<HistoryUiBaseUrl>,
     unavailable: Res<HistoryUiChromeUnavailable>,
     existing: Query<(), With<HistoryUiWarmupWebview>>,
+    history_panes: Query<Entity, (With<WebviewPane>, With<History>, Without<HistoryPaneStandby>)>,
 ) {
-    // Standby pane supersedes the older warmup browser path.
-    if !std::env::var("VMUX_HISTORY_DISABLE_PANE_STANDBY")
+    let standby_enabled = !std::env::var("VMUX_HISTORY_DISABLE_PANE_STANDBY")
         .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-    {
+        .unwrap_or(false);
+    // If standby is enabled and there are no restored history panes, standby covers first-open warmup.
+    // Keep CEF warmup for session-restored history panes to compile WASM before they are focused.
+    if standby_enabled && history_panes.is_empty() {
         return;
     }
     if std::env::var("VMUX_HISTORY_DISABLE_CEF_WARMUP")
@@ -395,9 +408,12 @@ fn apply_history_url_to_panes(
 
 /// Host emit can fire before the WASM page calls `cef.listen`, so the first payload is dropped.
 /// The UI emits `vmux_request_history` once the listener is installed; we clear dedupe state and resend.
+///
+/// Include **standby** history webviews: the Dioxus app boots off-layout first; rejecting the first
+/// `vmux_request_history` here left `wasm_sync_webviews` empty after promotion into a split.
 fn on_vmux_request_history(
     trigger: On<Receive<WebviewDocumentUrlEmit>>,
-    history: Query<(), (With<WebviewPane>, With<History>, Without<HistoryPaneStandby>)>,
+    history: Query<(), (With<WebviewPane>, With<History>)>,
     mut state: ResMut<HistoryUiEmitState>,
 ) {
     let ev = trigger.event();
@@ -422,7 +438,7 @@ fn on_vmux_request_history(
 /// Chromium throttles the history renderer).
 fn nudge_history_emit_for_osr_wasm_timers(
     mut state: ResMut<HistoryUiEmitState>,
-    history: Query<Entity, (With<WebviewPane>, With<History>, Without<HistoryPaneStandby>)>,
+    history: Query<Entity, (With<WebviewPane>, With<History>)>,
 ) {
     let mut ids: Vec<Entity> = history.iter().collect();
     if ids.is_empty() {
@@ -492,12 +508,28 @@ fn trigger_vmux_history_emit(
     commands.trigger(HostEmitEvent::new(wv, "vmux_history", payload));
 }
 
+fn trigger_vmux_history_progress_emit(
+    commands: &mut Commands,
+    wv: Entity,
+    stage: &'static str,
+    message: impl Into<String>,
+    percent: u8,
+) {
+    let payload = HistoryProgressPayload {
+        stage,
+        message: message.into(),
+        percent: percent.min(100),
+    };
+    commands.trigger(HostEmitEvent::new(wv, "vmux_history_progress", &payload));
+}
+
 fn emit_history_to_panes(
     mut commands: Commands,
     mut state: ResMut<HistoryUiEmitState>,
     mut perf: ResMut<HistoryPanePerfLog>,
     hist: Res<NavigationHistory>,
     targets: Query<Entity, (With<WebviewPane>, With<History>, Without<HistoryPaneStandby>)>,
+    any_history: Query<Entity, With<History>>,
     opened: Query<&HistoryPaneOpenedAt>,
     browsers: NonSend<Browsers>,
 ) {
@@ -506,16 +538,22 @@ fn emit_history_to_panes(
 
     if target_list.is_empty() {
         state.last_target_entities.clear();
-        state.last_revision = Some(hist.revision);
-        state.wasm_sync_webviews.clear();
         state.stream = None;
         perf.stall_warned.clear();
         perf.first_host_emit_logged.clear();
+        // Standby (off-layout) history webviews still run WASM and send `vmux_request_history`.
+        // Do not advance dedupe or wipe wasm sync until no [`History`] webviews exist — otherwise
+        // promotion into a split never sees a matching `wasm_sync_webviews` entry.
+        if any_history.is_empty() {
+            state.last_revision = Some(hist.revision);
+            state.wasm_sync_webviews.clear();
+        }
         return;
     }
 
     if state.last_target_entities != target_list {
-        state.wasm_sync_webviews.clear();
+        let new_set: HashSet<Entity> = target_list.iter().copied().collect();
+        state.wasm_sync_webviews.retain(|e| new_set.contains(e));
     }
 
     if let Some(st) = &state.stream {
@@ -555,6 +593,17 @@ fn emit_history_to_panes(
         return;
     }
 
+    // Safety gate: do not host-emit until each history webview has announced that its
+    // `cef.listen("vmux_history", ...)` bridge is installed (`vmux_request_history`).
+    // Emitting earlier can hit fragile renderer lifecycle windows and has produced V8 fatals.
+    if !target_list
+        .iter()
+        .all(|e| state.wasm_sync_webviews.contains(e))
+    {
+        state.stream = None;
+        return;
+    }
+
     // Continue streaming older rows (same revision + panes).
     if let Some(ref mut st) = state.stream {
         if st.revision == hist.revision && st.targets == target_list {
@@ -568,7 +617,16 @@ fn emit_history_to_panes(
             let take = HISTORY_STREAM_CHUNK_LEN.min(n - st.next_offset);
             let chunk = history_wire_slice(&hist.entries, st.next_offset, take);
             let done = st.next_offset + take >= n;
+            let loaded_after = st.next_offset + take;
+            let pct = ((loaded_after as f32 / n as f32) * 100.0).clamp(0.0, 100.0) as u8;
             for wv in target_list.iter().copied() {
+                trigger_vmux_history_progress_emit(
+                    &mut commands,
+                    wv,
+                    "stream",
+                    format!("Fetching history... ({loaded_after}/{n})"),
+                    pct.max(80),
+                );
                 let payload = HistoryHostPayload {
                     entries: chunk.clone(),
                     sync_nonce: None,
@@ -595,6 +653,13 @@ fn emit_history_to_panes(
     let n = hist.entries.len();
     if n == 0 {
         for wv in target_list.iter().copied() {
+            trigger_vmux_history_progress_emit(
+                &mut commands,
+                wv,
+                "ready",
+                "History loaded.",
+                100,
+            );
             let sync_nonce = state.pending_history_sync_nonce.remove(&wv);
             let payload = HistoryHostPayload {
                 entries: Vec::new(),
@@ -613,8 +678,16 @@ fn emit_history_to_panes(
     let first_len = HISTORY_STREAM_FIRST_LEN.min(n);
     let chunk0 = history_wire_slice(&hist.entries, 0, first_len);
     let done_immediately = first_len >= n;
+    let first_pct = ((first_len as f32 / n as f32) * 100.0).clamp(0.0, 100.0) as u8;
 
     for wv in target_list.iter().copied() {
+        trigger_vmux_history_progress_emit(
+            &mut commands,
+            wv,
+            "snapshot",
+            format!("Fetching history... ({first_len}/{n})"),
+            if done_immediately { 100 } else { first_pct.max(70) },
+        );
         let sync_nonce = state.pending_history_sync_nonce.remove(&wv);
         let payload = HistoryHostPayload {
             entries: chunk0.clone(),
@@ -733,7 +806,7 @@ struct ToggleHistoryHotkeyAssets<'w> {
 
 #[derive(SystemParam)]
 struct ToggleHistoryHotkeyQueries<'w, 's> {
-    state: Query<'w, 's, &'static ActionState<AppAction>, With<AppInputRoot>>,
+    state: Query<'w, 's, &'static ActionState<AppCommand>, With<AppInputRoot>>,
     layout_q: Query<'w, 's, &'static mut LayoutTree, With<Root>>,
     history_panes: Query<'w, 's, Entity, (With<WebviewPane>, With<History>)>,
     all_panes: Query<'w, 's, Entity, With<Pane>>,
@@ -758,9 +831,40 @@ fn toggle_history_pane_hotkey(
     let Ok(s) = queries.state.single() else {
         return;
     };
-    if !s.just_pressed(&AppAction::ToggleHistory) {
+    if !s.just_pressed(&AppCommand::ToggleHistory) {
         return;
     }
+    apply_toggle_history_pane(
+        &mut commands,
+        &mut queries.layout_q,
+        &queries.history_panes,
+        &queries.all_panes,
+        &queries.active,
+        &queries.chrome_or_border,
+        &mut assets.meshes,
+        &mut assets.materials,
+        &mut assets.loading_bar_materials,
+        &mut assets.snapshot,
+        &queries.pane_last,
+        &queries.webview_src,
+        queries.path.as_ref(),
+        &mut assets.session_queue,
+        &assets.settings,
+        assets.hist_ui.0.as_deref(),
+        queries.standby_history.iter().next(),
+    );
+}
+
+fn toggle_history_pane_requested(
+    mut requests: ResMut<AppCommandRequestQueue>,
+    mut commands: Commands,
+    mut assets: ToggleHistoryHotkeyAssets,
+    mut queries: ToggleHistoryHotkeyQueries,
+) {
+    if !requests.toggle_history_requested {
+        return;
+    }
+    requests.toggle_history_requested = false;
     apply_toggle_history_pane(
         &mut commands,
         &mut queries.layout_q,
@@ -823,12 +927,13 @@ fn on_vmux_open_in_pane(
     });
 }
 
-/// Embedded HTTP for the history UI (`dist/` if present, else embedded `web_dist/`, or
+/// Embedded HTTP for the history UI (`dist/` if present, else legacy `web_dist/`, else embedded
+/// `dist/`, or
 /// `VMUX_HISTORY_UI_URL`) and applying the resolved base URL to history panes.
 #[derive(Default)]
-pub struct VmuxHistoryServerPlugin;
+pub struct HistoryServerPlugin;
 
-impl Plugin for VmuxHistoryServerPlugin {
+impl Plugin for HistoryServerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HistoryUiBaseUrl>()
             .init_resource::<HistoryUiUrlReceiver>()
@@ -840,12 +945,12 @@ impl Plugin for VmuxHistoryServerPlugin {
     }
 }
 
-/// Tiled history overlay: navigation payload to the UI, hotkey, and [`VmuxHostedWebPlugin`] surface
+/// Tiled history pane: navigation payload to the UI, hotkey, and [`VmuxHostedWebPlugin`] surface
 /// registration.
 #[derive(Default)]
-pub struct VmuxHistoryUiPlugin;
+pub struct HistoryUiPlugin;
 
-impl Plugin for VmuxHistoryUiPlugin {
+impl Plugin for HistoryUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HistoryUiEmitState>()
             .init_resource::<HistoryPanePerfLog>()
@@ -860,6 +965,7 @@ impl Plugin for VmuxHistoryUiPlugin {
                     spawn_history_pane_standby.after(spawn_history_ui_cef_warmup),
                     timeout_history_embedded.after(poll_history_url),
                     toggle_history_pane_hotkey,
+                    toggle_history_pane_requested.after(toggle_history_pane_hotkey),
                     apply_history_url_to_panes
                         .after(poll_history_url)
                         .after(timeout_history_embedded),
@@ -885,6 +991,28 @@ impl Plugin for VmuxHistoryUiPlugin {
     }
 }
 
-impl VmuxHostedWebPlugin for VmuxHistoryUiPlugin {
-    const SURFACE: VmuxWebviewSurface = VmuxWebviewSurface::HistoryOverlay;
+impl VmuxHostedWebPlugin for HistoryUiPlugin {
+    const SURFACE: VmuxWebviewSurface = VmuxWebviewSurface::HistoryPane;
+}
+
+/// Embedded history server + tiled history pane UI (adds [`HistoryServerPlugin`] and
+/// [`HistoryUiPlugin`]).
+#[derive(Default)]
+pub struct HistoryPlugin;
+
+impl Plugin for HistoryPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((HistoryServerPlugin, HistoryUiPlugin));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_plugins_register_in_app() {
+        let mut app = App::new();
+        app.add_plugins((HistoryServerPlugin, HistoryUiPlugin));
+    }
 }

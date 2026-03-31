@@ -1,14 +1,14 @@
-//! Static history UI (`web_dist/`) shipped in the binary; extracted to a temp dir for loopback HTTP.
+//! Static history UI (`dist/`) shipped in the binary; extracted to a temp dir for loopback HTTP.
 
 use std::path::PathBuf;
 
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
-#[folder = "web_dist"]
+#[folder = "dist"]
 struct HistoryWebDist;
 
-/// Writes embedded `web_dist` files to a fresh temp directory and returns its path.
+/// Writes embedded `dist` files to a fresh temp directory and returns its path.
 pub fn extract_embedded_history_dist() -> Option<PathBuf> {
     if HistoryWebDist::iter().next().is_none() {
         return None;

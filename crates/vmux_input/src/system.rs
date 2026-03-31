@@ -15,7 +15,7 @@ use vmux_layout::{
 };
 use vmux_settings::VmuxAppSettings;
 
-use crate::component::{AppAction, AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixState};
+use crate::component::{AppCommand, AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixState};
 
 /// Asset stores used when spawning panes from tmux chord handlers (keeps system param count low).
 #[derive(SystemParam)]
@@ -34,61 +34,61 @@ pub struct TmuxChordInput<'w> {
 }
 
 pub(crate) fn spawn_app_input(mut commands: Commands) {
-    let mut input_map = InputMap::<AppAction>::default();
+    let mut input_map = InputMap::<AppCommand>::default();
     input_map.insert(
-        AppAction::Quit,
+        AppCommand::Quit,
         ButtonlikeChord::modified(ModifierKey::Super, KeyCode::KeyQ),
     );
     input_map.insert(
-        AppAction::Quit,
+        AppCommand::Quit,
         ButtonlikeChord::modified(ModifierKey::Control, KeyCode::KeyQ),
     );
     #[cfg(target_os = "macos")]
     input_map.insert(
-        AppAction::ToggleCommandPalette,
+        AppCommand::ToggleCommandPalette,
         ButtonlikeChord::modified(ModifierKey::Super, KeyCode::KeyT),
     );
     #[cfg(not(target_os = "macos"))]
     input_map.insert(
-        AppAction::ToggleCommandPalette,
+        AppCommand::ToggleCommandPalette,
         ButtonlikeChord::modified(ModifierKey::Control, KeyCode::KeyT),
     );
     #[cfg(target_os = "macos")]
     input_map.insert(
-        AppAction::FocusCommandPaletteUrl,
+        AppCommand::FocusCommandPaletteUrl,
         ButtonlikeChord::modified(ModifierKey::Super, KeyCode::KeyL),
     );
     #[cfg(not(target_os = "macos"))]
     input_map.insert(
-        AppAction::FocusCommandPaletteUrl,
+        AppCommand::FocusCommandPaletteUrl,
         ButtonlikeChord::modified(ModifierKey::Control, KeyCode::KeyL),
     );
     #[cfg(target_os = "macos")]
     input_map.insert(
-        AppAction::ToggleHistory,
+        AppCommand::ToggleHistory,
         ButtonlikeChord::modified(ModifierKey::Super, KeyCode::KeyY),
     );
     #[cfg(not(target_os = "macos"))]
     input_map.insert(
-        AppAction::ToggleHistory,
+        AppCommand::ToggleHistory,
         ButtonlikeChord::new([ModifierKey::Control, ModifierKey::Shift, KeyCode::KeyH]),
     );
     commands.spawn((
         AppInputRoot,
         VmuxPrefixState::default(),
         input_map,
-        ActionState::<AppAction>::default(),
+        ActionState::<AppCommand>::default(),
     ));
 }
 
 pub(crate) fn exit_on_quit_action(
-    query: Query<&ActionState<AppAction>, With<AppInputRoot>>,
+    query: Query<&ActionState<AppCommand>, With<AppInputRoot>>,
     mut app_exit: MessageWriter<AppExit>,
 ) {
     let Ok(state) = query.single() else {
         return;
     };
-    if state.just_pressed(&AppAction::Quit) {
+    if state.just_pressed(&AppCommand::Quit) {
         app_exit.write(AppExit::Success);
     }
 }

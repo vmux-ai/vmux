@@ -4,7 +4,7 @@
 //! centered globally, not clipped to the active pane (same logical basis as
 //! [`vmux_layout::layout_viewport_for_workspace`]).
 //!
-//! Register [`VmuxCommandPlugin`] after [`vmux_input::VmuxInputPlugin`]. On [`Startup`], run
+//! Register [`CommandPlugin`] after [`vmux_input::InputPlugin`]. On [`Startup`], run
 //! [`setup`] after the main scene camera exists (e.g. after `vmux`’s `spawn_camera`).
 
 use bevy::app::AppExit;
@@ -24,12 +24,12 @@ use bevy::ui::{
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::{RequestNavigate, WebviewExtendStandardMaterial, WebviewSource};
 use leafwing_input_manager::prelude::ActionState;
+use leafwing_input_manager::Actionlike;
 use vmux_core::{
-    Active, AppInputRoot, NavigationHistory, SessionSavePath, SessionSaveQueue,
+    Active, NavigationHistory, SessionSavePath, SessionSaveQueue,
     VmuxCommandPaletteState, favicon_url_for_page_url, page_host_for_favicon_url,
 };
-use vmux_history::{apply_toggle_history_pane, HistoryUiBaseUrl};
-use vmux_input::AppAction;
+use vmux_core::input_root::AppInputRoot;
 use vmux_layout::{
     apply_pane_layout, layout_viewport_for_workspace, layout_workspace_pane_rects, try_cycle_pane_focus,
     try_kill_active_pane, try_mirror_pane_layout, try_rotate_window, try_select_pane_direction,
@@ -38,6 +38,122 @@ use vmux_layout::{
     PaneChromeStrip, PaneFocusIncoming, PaneLastUrl, PaneSwapDir, Root, SessionLayoutSnapshot,
     VmuxAppSettings, VmuxWebview, VmuxWorldCamera, WebviewPane,
 };
+
+#[derive(Actionlike, Reflect, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AppCommand {
+    Quit,
+    /// Centered command palette (⌘T on macOS, Ctrl+T elsewhere).
+    ToggleCommandPalette,
+    /// Command palette with the active pane’s current URL in the field (⌘L on macOS, Ctrl+L elsewhere).
+    FocusCommandPaletteUrl,
+    /// History pane (⌘Y on macOS, Ctrl+Shift+H elsewhere).
+    ToggleHistory,
+    SplitHorizontal,
+    SplitVertical,
+    CycleNextPane,
+    SelectPane(PaneSwapDir),
+    SwapPane(PaneSwapDir),
+    ToggleZoom,
+    MirrorLayout,
+    RotateBackward,
+    RotateForward,
+    KillActivePane,
+}
+
+impl AppCommand {
+    /// Search keywords used by the command palette command filter.
+    pub const fn palette_match_blob(self) -> &'static str {
+        match self {
+            AppCommand::Quit => "quit exit shutdown close q app",
+            AppCommand::ToggleCommandPalette => "command palette search open launcher t",
+            AppCommand::FocusCommandPaletteUrl => "focus url omnibox address bar l",
+            AppCommand::ToggleHistory => "history pane browse visited pages y",
+            AppCommand::SplitHorizontal => "split horizontal pane side column percent tmux",
+            AppCommand::SplitVertical => "split vertical pane row stack quote tmux",
+            AppCommand::CycleNextPane => "cycle next pane focus window o alternate",
+            AppCommand::SelectPane(PaneSwapDir::Left) => "focus pane left select move arrow",
+            AppCommand::SelectPane(PaneSwapDir::Right) => "focus pane right select move arrow",
+            AppCommand::SelectPane(PaneSwapDir::Up) => "focus pane up select move arrow",
+            AppCommand::SelectPane(PaneSwapDir::Down) => "focus pane down select move arrow",
+            AppCommand::SwapPane(PaneSwapDir::Left) => "swap pane left exchange position ctrl",
+            AppCommand::SwapPane(PaneSwapDir::Right) => "swap pane right exchange position ctrl",
+            AppCommand::SwapPane(PaneSwapDir::Up) => "swap pane up exchange position ctrl",
+            AppCommand::SwapPane(PaneSwapDir::Down) => "swap pane down exchange position ctrl",
+            AppCommand::ToggleZoom => "zoom maximize resize pane full z",
+            AppCommand::MirrorLayout => "mirror flip swap halves layout m",
+            AppCommand::RotateBackward => "rotate layout backward cycle panes bracket",
+            AppCommand::RotateForward => "rotate layout forward cycle panes bracket",
+            AppCommand::KillActivePane => "kill close pane remove x",
+        }
+    }
+
+    /// Command palette display title and current platform shortcut text.
+    pub const fn palette_title_shortcut(self) -> (&'static str, &'static str) {
+        match self {
+            AppCommand::Quit => (
+                "Quit vmux",
+                if cfg!(target_os = "macos") {
+                    "⌘Q"
+                } else {
+                    "Ctrl+Q"
+                },
+            ),
+            AppCommand::ToggleCommandPalette => (
+                "Toggle command palette",
+                if cfg!(target_os = "macos") {
+                    "⌘T"
+                } else {
+                    "Ctrl+T"
+                },
+            ),
+            AppCommand::FocusCommandPaletteUrl => (
+                "Focus URL in command palette",
+                if cfg!(target_os = "macos") {
+                    "⌘L"
+                } else {
+                    "Ctrl+L"
+                },
+            ),
+            AppCommand::ToggleHistory => (
+                "History",
+                if cfg!(target_os = "macos") {
+                    "⌘Y"
+                } else {
+                    "Ctrl+Shift+H"
+                },
+            ),
+            AppCommand::SplitHorizontal => ("Split pane horizontally", "Ctrl+B, then Shift+5 (%)"),
+            AppCommand::SplitVertical => ("Split pane vertically", "Ctrl+B, then Shift+' (\")"),
+            AppCommand::CycleNextPane => ("Next pane", "Ctrl+B, then O"),
+            AppCommand::SelectPane(PaneSwapDir::Left) => ("Focus pane left", "Ctrl+B, then ←"),
+            AppCommand::SelectPane(PaneSwapDir::Right) => ("Focus pane right", "Ctrl+B, then →"),
+            AppCommand::SelectPane(PaneSwapDir::Up) => ("Focus pane up", "Ctrl+B, then ↑"),
+            AppCommand::SelectPane(PaneSwapDir::Down) => ("Focus pane down", "Ctrl+B, then ↓"),
+            AppCommand::SwapPane(PaneSwapDir::Left) => {
+                ("Swap with left pane", "Ctrl+B, then Ctrl+←")
+            }
+            AppCommand::SwapPane(PaneSwapDir::Right) => {
+                ("Swap with right pane", "Ctrl+B, then Ctrl+→")
+            }
+            AppCommand::SwapPane(PaneSwapDir::Up) => {
+                ("Swap with pane above", "Ctrl+B, then Ctrl+↑")
+            }
+            AppCommand::SwapPane(PaneSwapDir::Down) => {
+                ("Swap with pane below", "Ctrl+B, then Ctrl+↓")
+            }
+            AppCommand::ToggleZoom => ("Toggle zoom pane", "Ctrl+B, then Z"),
+            AppCommand::MirrorLayout => ("Mirror split", "Ctrl+B, then M"),
+            AppCommand::RotateBackward => ("Rotate layout backward", "Ctrl+B, then } or R"),
+            AppCommand::RotateForward => ("Rotate layout forward", "Ctrl+B, then { or Shift+R"),
+            AppCommand::KillActivePane => ("Kill pane", "Ctrl+B, then X"),
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct AppCommandRequestQueue {
+    pub toggle_history_requested: bool,
+}
 
 /// Open panes (switch tab), then omnibox / web / GitHub or history / commands / close.
 const MAX_PALETTE_TABS: usize = 8;
@@ -87,22 +203,6 @@ struct CommandPaletteScroll {
     delta: Vec2,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PaletteChordCmd {
-    Quit,
-    ToggleHistory,
-    SplitHorizontal,
-    SplitVertical,
-    CycleNextPane,
-    SelectPane(PaneSwapDir),
-    SwapPane(PaneSwapDir),
-    ToggleZoom,
-    MirrorLayout,
-    RotateBackward,
-    RotateForward,
-    KillActivePane,
-}
-
 #[derive(Clone)]
 enum RowAction {
     Omnibox { new_pane: bool },
@@ -110,14 +210,14 @@ enum RowAction {
     OpenUrl { url: String, new_pane: bool },
     /// Focus an open main-pane webview (tabs column).
     FocusPane(Entity),
-    PaletteChord(PaletteChordCmd),
+    Command(AppCommand),
     /// Hidden padding row (must not be selectable as visible).
     Noop,
     Close,
 }
 
 #[derive(Resource, Default)]
-struct PaletteChordPending(Option<PaletteChordCmd>);
+struct PalettePendingAction(Option<RowAction>);
 
 /// Ordering for palette [`Update`] systems. [`submit`] / [`execute_palette_chord_pending`] use large
 /// `SystemParam` lists; chaining them as tuples hits trait limits, so we use explicit sets instead
@@ -143,6 +243,12 @@ struct CommandPaletteBackdrop;
 
 #[derive(Component)]
 struct CommandPaletteQueryText;
+
+#[derive(Component)]
+struct CommandPaletteQueryTextRight;
+
+#[derive(Component)]
+struct CommandPaletteQueryPlaceholder;
 
 #[derive(Component)]
 struct CommandPaletteCaret;
@@ -225,6 +331,50 @@ fn is_printable_char(chr: char) -> bool {
         || ('\u{f0000}'..='\u{ffffd}').contains(&chr)
         || ('\u{100000}'..='\u{10fffd}').contains(&chr);
     !is_in_private_use_area && !chr.is_ascii_control()
+}
+
+fn query_len_chars(s: &str) -> usize {
+    s.chars().count()
+}
+
+fn query_char_to_byte(s: &str, char_idx: usize) -> usize {
+    if char_idx == 0 {
+        return 0;
+    }
+    match s.char_indices().nth(char_idx) {
+        Some((i, _)) => i,
+        None => s.len(),
+    }
+}
+
+fn normalized_selection(anchor: Option<usize>, caret: usize) -> Option<(usize, usize)> {
+    let a = anchor?;
+    if a == caret {
+        None
+    } else if a < caret {
+        Some((a, caret))
+    } else {
+        Some((caret, a))
+    }
+}
+
+fn set_query_caret(palette: &mut VmuxCommandPaletteState, next: usize) {
+    let len = query_len_chars(&palette.input.query);
+    palette.input.caret = next.min(len);
+}
+
+fn delete_query_selection(palette: &mut VmuxCommandPaletteState) -> bool {
+    let Some((start, end)) =
+        normalized_selection(palette.input.selection_anchor, palette.input.caret)
+    else {
+        return false;
+    };
+    let bs = query_char_to_byte(&palette.input.query, start);
+    let be = query_char_to_byte(&palette.input.query, end);
+    palette.input.query.replace_range(bs..be, "");
+    palette.input.caret = start;
+    palette.input.selection_anchor = None;
+    true
 }
 
 /// `github.com/user` or `github.com/user/` with no further path segment → suggest repos (Arc-style).
@@ -405,65 +555,21 @@ fn collect_command_palette_tabs(
     out
 }
 
-#[cfg(target_os = "macos")]
-const QUIT_KEYS: &str = "⌘Q";
-#[cfg(not(target_os = "macos"))]
-const QUIT_KEYS: &str = "Ctrl+Q";
-
-#[cfg(target_os = "macos")]
-const HIST_KEYS: &str = "⌘Y";
-#[cfg(not(target_os = "macos"))]
-const HIST_KEYS: &str = "Ctrl+Shift+H";
-
-fn palette_cmd_match_blob(cmd: PaletteChordCmd) -> &'static str {
+fn palette_cmd_match_blob(cmd: &RowAction) -> &'static str {
     match cmd {
-        PaletteChordCmd::Quit => "quit exit shutdown close q app",
-        PaletteChordCmd::ToggleHistory => "history overlay browse visited pages y",
-        PaletteChordCmd::SplitHorizontal => "split horizontal pane side column percent tmux",
-        PaletteChordCmd::SplitVertical => "split vertical pane row stack quote tmux",
-        PaletteChordCmd::CycleNextPane => "cycle next pane focus window o alternate",
-        PaletteChordCmd::SelectPane(PaneSwapDir::Left) => "focus pane left select move arrow",
-        PaletteChordCmd::SelectPane(PaneSwapDir::Right) => "focus pane right select move arrow",
-        PaletteChordCmd::SelectPane(PaneSwapDir::Up) => "focus pane up select move arrow",
-        PaletteChordCmd::SelectPane(PaneSwapDir::Down) => "focus pane down select move arrow",
-        PaletteChordCmd::SwapPane(PaneSwapDir::Left) => "swap pane left exchange position ctrl",
-        PaletteChordCmd::SwapPane(PaneSwapDir::Right) => "swap pane right exchange position ctrl",
-        PaletteChordCmd::SwapPane(PaneSwapDir::Up) => "swap pane up exchange position ctrl",
-        PaletteChordCmd::SwapPane(PaneSwapDir::Down) => "swap pane down exchange position ctrl",
-        PaletteChordCmd::ToggleZoom => "zoom maximize resize pane full z",
-        PaletteChordCmd::MirrorLayout => "mirror flip swap halves layout m",
-        PaletteChordCmd::RotateBackward => "rotate layout backward cycle panes bracket",
-        PaletteChordCmd::RotateForward => "rotate layout forward cycle panes bracket",
-        PaletteChordCmd::KillActivePane => "kill close pane remove x",
+        RowAction::Command(cmd) => cmd.palette_match_blob(),
+        _ => "",
     }
 }
 
-fn palette_cmd_title_subtitle(cmd: PaletteChordCmd) -> (&'static str, &'static str) {
+fn palette_cmd_title_subtitle(cmd: &RowAction) -> (&'static str, &'static str) {
     match cmd {
-        PaletteChordCmd::Quit => ("Quit vmux", QUIT_KEYS),
-        PaletteChordCmd::ToggleHistory => ("History", HIST_KEYS),
-        PaletteChordCmd::SplitHorizontal => {
-            ("Split pane horizontally", "Ctrl+B, then Shift+5 (%)")
-        }
-        PaletteChordCmd::SplitVertical => ("Split pane vertically", "Ctrl+B, then Shift+' (\")"),
-        PaletteChordCmd::CycleNextPane => ("Next pane", "Ctrl+B, then O"),
-        PaletteChordCmd::SelectPane(PaneSwapDir::Left) => ("Focus pane left", "Ctrl+B, then ←"),
-        PaletteChordCmd::SelectPane(PaneSwapDir::Right) => ("Focus pane right", "Ctrl+B, then →"),
-        PaletteChordCmd::SelectPane(PaneSwapDir::Up) => ("Focus pane up", "Ctrl+B, then ↑"),
-        PaletteChordCmd::SelectPane(PaneSwapDir::Down) => ("Focus pane down", "Ctrl+B, then ↓"),
-        PaletteChordCmd::SwapPane(PaneSwapDir::Left) => ("Swap with left pane", "Ctrl+B, then Ctrl+←"),
-        PaletteChordCmd::SwapPane(PaneSwapDir::Right) => ("Swap with right pane", "Ctrl+B, then Ctrl+→"),
-        PaletteChordCmd::SwapPane(PaneSwapDir::Up) => ("Swap with pane above", "Ctrl+B, then Ctrl+↑"),
-        PaletteChordCmd::SwapPane(PaneSwapDir::Down) => ("Swap with pane below", "Ctrl+B, then Ctrl+↓"),
-        PaletteChordCmd::ToggleZoom => ("Toggle zoom pane", "Ctrl+B, then Z"),
-        PaletteChordCmd::MirrorLayout => ("Mirror split", "Ctrl+B, then M"),
-        PaletteChordCmd::RotateBackward => ("Rotate layout backward", "Ctrl+B, then } or R"),
-        PaletteChordCmd::RotateForward => ("Rotate layout forward", "Ctrl+B, then { or Shift+R"),
-        PaletteChordCmd::KillActivePane => ("Kill pane", "Ctrl+B, then X"),
+        RowAction::Command(cmd) => cmd.palette_title_shortcut(),
+        _ => ("", ""),
     }
 }
 
-fn palette_cmd_matches(cmd: PaletteChordCmd, body_lower: &str) -> bool {
+fn palette_cmd_matches(cmd: &RowAction, body_lower: &str) -> bool {
     if body_lower.is_empty() {
         return false;
     }
@@ -484,32 +590,32 @@ fn palette_cmd_matches(cmd: PaletteChordCmd, body_lower: &str) -> bool {
         .all(|t| hay.contains(t))
 }
 
-fn palette_cmds_matching(body: &str) -> Vec<PaletteChordCmd> {
-    const ORDER: &[PaletteChordCmd] = &[
-        PaletteChordCmd::Quit,
-        PaletteChordCmd::ToggleHistory,
-        PaletteChordCmd::SplitHorizontal,
-        PaletteChordCmd::SplitVertical,
-        PaletteChordCmd::CycleNextPane,
-        PaletteChordCmd::SelectPane(PaneSwapDir::Left),
-        PaletteChordCmd::SelectPane(PaneSwapDir::Right),
-        PaletteChordCmd::SelectPane(PaneSwapDir::Up),
-        PaletteChordCmd::SelectPane(PaneSwapDir::Down),
-        PaletteChordCmd::SwapPane(PaneSwapDir::Left),
-        PaletteChordCmd::SwapPane(PaneSwapDir::Right),
-        PaletteChordCmd::SwapPane(PaneSwapDir::Up),
-        PaletteChordCmd::SwapPane(PaneSwapDir::Down),
-        PaletteChordCmd::ToggleZoom,
-        PaletteChordCmd::MirrorLayout,
-        PaletteChordCmd::RotateBackward,
-        PaletteChordCmd::RotateForward,
-        PaletteChordCmd::KillActivePane,
+fn palette_cmds_matching(body: &str) -> Vec<RowAction> {
+    const ORDER: &[RowAction] = &[
+        RowAction::Command(AppCommand::Quit),
+        RowAction::Command(AppCommand::ToggleHistory),
+        RowAction::Command(AppCommand::SplitHorizontal),
+        RowAction::Command(AppCommand::SplitVertical),
+        RowAction::Command(AppCommand::CycleNextPane),
+        RowAction::Command(AppCommand::SelectPane(PaneSwapDir::Left)),
+        RowAction::Command(AppCommand::SelectPane(PaneSwapDir::Right)),
+        RowAction::Command(AppCommand::SelectPane(PaneSwapDir::Up)),
+        RowAction::Command(AppCommand::SelectPane(PaneSwapDir::Down)),
+        RowAction::Command(AppCommand::SwapPane(PaneSwapDir::Left)),
+        RowAction::Command(AppCommand::SwapPane(PaneSwapDir::Right)),
+        RowAction::Command(AppCommand::SwapPane(PaneSwapDir::Up)),
+        RowAction::Command(AppCommand::SwapPane(PaneSwapDir::Down)),
+        RowAction::Command(AppCommand::ToggleZoom),
+        RowAction::Command(AppCommand::MirrorLayout),
+        RowAction::Command(AppCommand::RotateBackward),
+        RowAction::Command(AppCommand::RotateForward),
+        RowAction::Command(AppCommand::KillActivePane),
     ];
     let b = body.to_ascii_lowercase();
     ORDER
         .iter()
-        .copied()
-        .filter(|c| palette_cmd_matches(*c, &b))
+        .cloned()
+        .filter(|c| palette_cmd_matches(c, &b))
         .take(MAX_PALETTE_CMD_ROWS)
         .collect()
 }
@@ -770,7 +876,7 @@ fn build_palette_rows(
     }
 
     for cmd in palette_cmds_matching(body) {
-        let (title, sub) = palette_cmd_title_subtitle(cmd);
+        let (title, sub) = palette_cmd_title_subtitle(&cmd);
         rows.push(PaletteRowSpec {
             visible: true,
             icon: ICON_CMD,
@@ -778,7 +884,7 @@ fn build_palette_rows(
             primary: title.to_string(),
             secondary: sub.to_string(),
             enter: ENTER_NAV,
-            action: RowAction::PaletteChord(cmd),
+            action: cmd,
         });
     }
     while rows.len() < IDX_CLOSE {
@@ -853,6 +959,16 @@ fn visible_index_of_row(rows: &[PaletteRowSpec; ROWS_MAX], row_idx: usize) -> Op
         v += 1;
     }
     None
+}
+
+fn select_default_query_row(palette: &mut VmuxCommandPaletteState, rows: &[PaletteRowSpec; ROWS_MAX]) {
+    // Query-first UX: when the user edits text, Enter should trigger navigation/search, not tab focus.
+    let preferred = MAX_PALETTE_TABS;
+    if rows.get(preferred).is_some_and(|r| r.visible) {
+        palette.selection = preferred;
+        return;
+    }
+    palette.selection = row_index_from_visible_selection(rows, 0);
 }
 
 fn step_palette_visible_selection(
@@ -1120,12 +1236,12 @@ pub fn setup(mut commands: Commands, hist: Res<NavigationHistory>) {
                         .with_children(|query| {
                             query.spawn((
                                 CommandPaletteQueryText,
-                                Text::new("Search or enter URL…"),
+                                Text::new(""),
                                 TextFont {
                                     font_size: 16.0,
                                     ..default()
                                 },
-                                TextColor(Color::srgba(0.62, 0.63, 0.68, 1.0)),
+                                TextColor(ROW_TEXT),
                             ));
                             query.spawn((
                                 CommandPaletteCaret,
@@ -1136,6 +1252,24 @@ pub fn setup(mut commands: Commands, hist: Res<NavigationHistory>) {
                                 },
                                 BackgroundColor(ROW_TEXT),
                                 Visibility::Hidden,
+                            ));
+                            query.spawn((
+                                CommandPaletteQueryTextRight,
+                                Text::new(""),
+                                TextFont {
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(ROW_TEXT),
+                            ));
+                            query.spawn((
+                                CommandPaletteQueryPlaceholder,
+                                Text::new("Search or enter URL..."),
+                                TextFont {
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgba(0.62, 0.63, 0.68, 1.0)),
                             ));
                         });
                     });
@@ -1225,11 +1359,7 @@ fn clamp_palette_list_scroll_to_selection(
         *last_clamp_sig = None;
         return;
     }
-    let sig = (
-        palette.query.clone(),
-        palette.selection,
-        hist.revision,
-    );
+    let sig = (palette.input.query.clone(), palette.selection, hist.revision);
     if last_clamp_sig.as_ref() == Some(&sig) {
         return;
     }
@@ -1246,7 +1376,7 @@ fn clamp_palette_list_scroll_to_selection(
     } else {
         Vec::new()
     };
-    let rows = build_palette_rows(&palette.query, &hist, &tabs);
+    let rows = build_palette_rows(&palette.input.query, &hist, &tabs);
     let sel = palette.selection;
     if sel >= ROWS_MAX || !rows[sel].visible {
         return;
@@ -1356,7 +1486,7 @@ fn sync_visibility(
 }
 
 fn toggle_hotkey(
-    state: Query<&ActionState<AppAction>, With<AppInputRoot>>,
+    state: Query<&ActionState<AppCommand>, With<AppInputRoot>>,
     time: Res<Time>,
     mut palette: ResMut<VmuxCommandPaletteState>,
     mut list_scroll: Query<&mut ScrollPosition, With<CommandPaletteListScroll>>,
@@ -1364,12 +1494,14 @@ fn toggle_hotkey(
     let Ok(s) = state.single() else {
         return;
     };
-    if s.just_pressed(&AppAction::ToggleCommandPalette) {
+    if s.just_pressed(&AppCommand::ToggleCommandPalette) {
         palette.open = !palette.open;
         if palette.open {
-            palette.query.clear();
+            palette.input.query.clear();
+            palette.input.caret = 0;
+            palette.input.selection_anchor = None;
             palette.selection = 0;
-            palette.caret_blink_t0 = time.elapsed_secs();
+            palette.input.caret_blink_t0 = time.elapsed_secs();
             if let Ok(mut sp) = list_scroll.single_mut() {
                 sp.0 = Vec2::ZERO;
             }
@@ -1378,7 +1510,7 @@ fn toggle_hotkey(
 }
 
 fn focus_url_hotkey(
-    state: Query<&ActionState<AppAction>, With<AppInputRoot>>,
+    state: Query<&ActionState<AppCommand>, With<AppInputRoot>>,
     time: Res<Time>,
     mut palette: ResMut<VmuxCommandPaletteState>,
     active: Query<Entity, (With<Pane>, With<Active>)>,
@@ -1388,7 +1520,7 @@ fn focus_url_hotkey(
     let Ok(s) = state.single() else {
         return;
     };
-    if !s.just_pressed(&AppAction::FocusCommandPaletteUrl) {
+    if !s.just_pressed(&AppCommand::FocusCommandPaletteUrl) {
         return;
     }
     let Ok(ent) = active.single() else {
@@ -1399,9 +1531,12 @@ fn focus_url_hotkey(
         .map(|p| p.0.clone())
         .unwrap_or_default();
     palette.open = true;
-    palette.query = url;
+    palette.input.query = url;
+    let end = query_len_chars(&palette.input.query);
+    palette.input.caret = end;
+    palette.input.selection_anchor = Some(0);
     palette.selection = MAX_PALETTE_TABS;
-    palette.caret_blink_t0 = time.elapsed_secs();
+    palette.input.caret_blink_t0 = time.elapsed_secs();
     if let Ok(mut sp) = list_scroll.single_mut() {
         sp.0 = Vec2::ZERO;
     }
@@ -1419,7 +1554,7 @@ fn sync_command_palette_caret(
         *vis = Visibility::Hidden;
         return;
     }
-    let t = time.elapsed_secs() - palette.caret_blink_t0;
+    let t = time.elapsed_secs() - palette.input.caret_blink_t0;
     let show = ((t / PALETTE_CARET_PHASE_SECS) as u32) % 2 == 0;
     *vis = if show {
         Visibility::Visible
@@ -1457,7 +1592,7 @@ fn handle_keyboard(
     } else {
         Vec::new()
     };
-    let rows = build_palette_rows(&palette.query, &hist, &tabs);
+    let rows = build_palette_rows(&palette.input.query, &hist, &tabs);
     let vis_count = visible_row_count(&rows);
 
     for ev in reader.read() {
@@ -1470,49 +1605,149 @@ fn handle_keyboard(
             return;
         }
 
+        let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        let shortcut_mod_held = super_or_ctrl_held(&keys);
         let ctrl_held =
             keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+        let query_len = query_len_chars(&palette.input.query);
 
         // Arrow / Ctrl+N / Ctrl+P: driven by KeyboardInput (includes `repeat: true`) so OS hold-to-repeat works.
         match ev.key_code {
             KeyCode::ArrowUp => {
+                palette.input.selection_anchor = None;
                 step_palette_visible_selection(&mut palette, &rows, vis_count, true);
             }
             KeyCode::ArrowDown => {
+                palette.input.selection_anchor = None;
                 step_palette_visible_selection(&mut palette, &rows, vis_count, false);
             }
             KeyCode::KeyP if ctrl_held => {
+                palette.input.selection_anchor = None;
                 step_palette_visible_selection(&mut palette, &rows, vis_count, true);
             }
             KeyCode::KeyN if ctrl_held => {
+                palette.input.selection_anchor = None;
                 step_palette_visible_selection(&mut palette, &rows, vis_count, false);
             }
+            KeyCode::ArrowLeft => {
+                if shift_held {
+                    if palette.input.selection_anchor.is_none() {
+                        palette.input.selection_anchor = Some(palette.input.caret);
+                    }
+                    let next = palette.input.caret.saturating_sub(1);
+                    set_query_caret(&mut palette, next);
+                } else if let Some((start, _)) =
+                    normalized_selection(palette.input.selection_anchor, palette.input.caret)
+                {
+                    palette.input.caret = start;
+                    palette.input.selection_anchor = None;
+                } else {
+                    let next = palette.input.caret.saturating_sub(1);
+                    set_query_caret(&mut palette, next);
+                    palette.input.selection_anchor = None;
+                }
+            }
+            KeyCode::ArrowRight => {
+                if shift_held {
+                    if palette.input.selection_anchor.is_none() {
+                        palette.input.selection_anchor = Some(palette.input.caret);
+                    }
+                    let next = (palette.input.caret + 1).min(query_len);
+                    set_query_caret(&mut palette, next);
+                } else if let Some((_, end)) =
+                    normalized_selection(palette.input.selection_anchor, palette.input.caret)
+                {
+                    palette.input.caret = end;
+                    palette.input.selection_anchor = None;
+                } else {
+                    let next = (palette.input.caret + 1).min(query_len);
+                    set_query_caret(&mut palette, next);
+                    palette.input.selection_anchor = None;
+                }
+            }
+            KeyCode::Home => {
+                if shift_held {
+                    if palette.input.selection_anchor.is_none() {
+                        palette.input.selection_anchor = Some(palette.input.caret);
+                    }
+                } else {
+                    palette.input.selection_anchor = None;
+                }
+                palette.input.caret = 0;
+            }
+            KeyCode::End => {
+                if shift_held {
+                    if palette.input.selection_anchor.is_none() {
+                        palette.input.selection_anchor = Some(palette.input.caret);
+                    }
+                } else {
+                    palette.input.selection_anchor = None;
+                }
+                palette.input.caret = query_len;
+            }
             _ => {
+                if shortcut_mod_held && ev.key_code == KeyCode::KeyA {
+                    palette.input.selection_anchor = Some(0);
+                    palette.input.caret = query_len;
+                    continue;
+                }
                 if matches!(&ev.logical_key, Key::Backspace) {
-                    palette.query.pop();
+                    let deleted_selection = delete_query_selection(&mut palette);
+                    if deleted_selection || palette.input.caret > 0 {
+                        if !deleted_selection {
+                        let prev = palette.input.caret - 1;
+                        let bs = query_char_to_byte(&palette.input.query, prev);
+                        let be = query_char_to_byte(&palette.input.query, palette.input.caret);
+                        palette.input.query.replace_range(bs..be, "");
+                        palette.input.caret = prev;
+                        }
+                        let updated_rows = build_palette_rows(&palette.input.query, &hist, &tabs);
+                        select_default_query_row(&mut palette, &updated_rows);
+                    }
+                    palette.input.selection_anchor = None;
+                    continue;
+                }
+                if matches!(&ev.logical_key, Key::Delete) {
+                    let deleted_selection = delete_query_selection(&mut palette);
+                    if deleted_selection || palette.input.caret < query_len {
+                        if !deleted_selection {
+                            let bs = query_char_to_byte(&palette.input.query, palette.input.caret);
+                            let be = query_char_to_byte(&palette.input.query, palette.input.caret + 1);
+                            palette.input.query.replace_range(bs..be, "");
+                        }
+                        let updated_rows = build_palette_rows(&palette.input.query, &hist, &tabs);
+                        select_default_query_row(&mut palette, &updated_rows);
+                    }
+                    palette.input.selection_anchor = None;
                     continue;
                 }
                 if vis_count == 0 {
+                    continue;
+                }
+                if shortcut_mod_held {
                     continue;
                 }
                 if ctrl_held {
                     continue;
                 }
 
-                if ev.key_code == KeyCode::KeyT && super_or_ctrl_held(&keys) {
-                    continue;
-                }
-                if ev.key_code == KeyCode::KeyL && super_or_ctrl_held(&keys) {
-                    continue;
-                }
-
                 match (&ev.logical_key, &ev.text) {
                     (_, Some(t)) if !t.is_empty() => {
+                        delete_query_selection(&mut palette);
+                        let mut query_edited = false;
                         for ch in t.chars() {
                             if is_printable_char(ch) {
-                                palette.query.push(ch);
+                                let b = query_char_to_byte(&palette.input.query, palette.input.caret);
+                                palette.input.query.insert(b, ch);
+                                palette.input.caret += 1;
+                                query_edited = true;
                             }
                         }
+                        if query_edited {
+                            let updated_rows = build_palette_rows(&palette.input.query, &hist, &tabs);
+                            select_default_query_row(&mut palette, &updated_rows);
+                        }
+                        palette.input.selection_anchor = None;
                     }
                     _ => {}
                 }
@@ -1526,7 +1761,7 @@ fn navigate_palette_url(
     commands: &mut Commands,
     url: String,
     new_pane: bool,
-    active: &Query<Entity, (With<Pane>, With<Active>, With<VmuxWebview>)>,
+    active: &Query<Entity, (With<Pane>, With<Active>, With<VmuxWebview>, Without<History>)>,
     layout_q: &mut Query<&mut LayoutTree, With<Root>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -1578,7 +1813,8 @@ fn navigate_palette_url(
 /// `Query<'w, 's, &'s _>` hits lifetime errors on recent Rust + Bevy 0.18.
 #[allow(clippy::type_complexity)]
 fn execute_palette_chord_pending(
-    mut pending: ResMut<PaletteChordPending>,
+    mut pending: ResMut<PalettePendingAction>,
+    mut app_action_requests: ResMut<AppCommandRequestQueue>,
     (
         mut commands,
         mut meshes,
@@ -1618,7 +1854,6 @@ fn execute_palette_chord_pending(
         history_panes,
         chrome_or_border,
         mut app_exit,
-        hist_ui,
     ): (
         Query<Entity, (With<WebviewPane>, With<History>)>,
         Query<
@@ -1626,7 +1861,6 @@ fn execute_palette_chord_pending(
             Or<(With<PaneChromeStrip>, With<PaneChromeLoadingBar>)>,
         >,
         MessageWriter<AppExit>,
-        Res<HistoryUiBaseUrl>,
     ),
 ) {
     let cmd = pending.0.take();
@@ -1636,31 +1870,13 @@ fn execute_palette_chord_pending(
     let default_url = settings.browser.default_webview_url.as_str();
 
     match cmd {
-        PaletteChordCmd::Quit => {
+        RowAction::Command(AppCommand::Quit) => {
             app_exit.write(AppExit::Success);
         }
-        PaletteChordCmd::ToggleHistory => {
-            apply_toggle_history_pane(
-                &mut commands,
-                &mut layout_q,
-                &history_panes,
-                &panes,
-                &active,
-                &chrome_or_border,
-                &mut meshes,
-                &mut materials,
-                &mut loading_bar_materials,
-                &mut snapshot,
-                &pane_last,
-                &webview_src,
-                path.as_ref(),
-                &mut session_queue,
-                &settings,
-                hist_ui.0.as_deref(),
-                None,
-            );
+        RowAction::Command(AppCommand::ToggleHistory) => {
+            app_action_requests.toggle_history_requested = true;
         }
-        PaletteChordCmd::SplitHorizontal => {
+        RowAction::Command(AppCommand::SplitHorizontal) => {
             let Ok(mut tree) = layout_q.single_mut() else {
                 return;
             };
@@ -1684,7 +1900,7 @@ fn execute_palette_chord_pending(
                 default_url,
             );
         }
-        PaletteChordCmd::SplitVertical => {
+        RowAction::Command(AppCommand::SplitVertical) => {
             let Ok(mut tree) = layout_q.single_mut() else {
                 return;
             };
@@ -1708,7 +1924,7 @@ fn execute_palette_chord_pending(
                 default_url,
             );
         }
-        PaletteChordCmd::CycleNextPane => {
+        RowAction::Command(AppCommand::CycleNextPane) => {
             let Ok(mut tree) = layout_q.single_mut() else {
                 return;
             };
@@ -1717,7 +1933,7 @@ fn execute_palette_chord_pending(
             };
             try_cycle_pane_focus(&mut commands, &mut tree, cur);
         }
-        PaletteChordCmd::SelectPane(dir) => {
+        RowAction::Command(AppCommand::SelectPane(dir)) => {
             let Ok(window) = window.single() else {
                 return;
             };
@@ -1744,7 +1960,7 @@ fn execute_palette_chord_pending(
                 prefer,
             );
         }
-        PaletteChordCmd::SwapPane(dir) => {
+        RowAction::Command(AppCommand::SwapPane(dir)) => {
             let Ok(mut tree) = layout_q.single_mut() else {
                 return;
             };
@@ -1764,7 +1980,7 @@ fn execute_palette_chord_pending(
                 default_url,
             );
         }
-        PaletteChordCmd::ToggleZoom => {
+        RowAction::Command(AppCommand::ToggleZoom) => {
             let Ok(mut tree) = layout_q.single_mut() else {
                 return;
             };
@@ -1773,7 +1989,7 @@ fn execute_palette_chord_pending(
             };
             try_toggle_zoom_pane(&mut tree, active_ent);
         }
-        PaletteChordCmd::MirrorLayout => {
+        RowAction::Command(AppCommand::MirrorLayout) => {
             let Ok(mut tree) = layout_q.single_mut() else {
                 return;
             };
@@ -1792,7 +2008,7 @@ fn execute_palette_chord_pending(
                 default_url,
             );
         }
-        PaletteChordCmd::RotateBackward => {
+        RowAction::Command(AppCommand::RotateBackward) => {
             let Ok(mut tree) = layout_q.single_mut() else {
                 return;
             };
@@ -1813,7 +2029,7 @@ fn execute_palette_chord_pending(
                 default_url,
             );
         }
-        PaletteChordCmd::RotateForward => {
+        RowAction::Command(AppCommand::RotateForward) => {
             let Ok(mut tree) = layout_q.single_mut() else {
                 return;
             };
@@ -1834,7 +2050,7 @@ fn execute_palette_chord_pending(
                 default_url,
             );
         }
-        PaletteChordCmd::KillActivePane => {
+        RowAction::Command(AppCommand::KillActivePane) => {
             let Ok(mut tree) = layout_q.single_mut() else {
                 return;
             };
@@ -1858,6 +2074,7 @@ fn execute_palette_chord_pending(
                 default_url,
             );
         }
+        _ => {}
     }
 }
 
@@ -1880,7 +2097,7 @@ fn submit(
         history_panes,
         main_webviews,
     ): (
-        Query<Entity, (With<Pane>, With<Active>, With<VmuxWebview>)>,
+        Query<Entity, (With<Pane>, With<Active>, With<VmuxWebview>, Without<History>)>,
         Query<Entity, With<Pane>>,
         Query<&mut LayoutTree, With<Root>>,
         ResMut<Assets<Mesh>>,
@@ -1897,7 +2114,7 @@ fn submit(
         ResMut<SessionSaveQueue>,
         Res<VmuxAppSettings>,
         Res<NavigationHistory>,
-        ResMut<PaletteChordPending>,
+        ResMut<PalettePendingAction>,
     ),
 ) {
     if !palette.open || !keys.just_pressed(KeyCode::Enter) {
@@ -1916,7 +2133,7 @@ fn submit(
     } else {
         Vec::new()
     };
-    let rows = build_palette_rows(&palette.query, &hist, &tabs);
+    let rows = build_palette_rows(&palette.input.query, &hist, &tabs);
     if palette.selection >= ROWS_MAX {
         return;
     }
@@ -1928,7 +2145,7 @@ fn submit(
 
     match action {
         RowAction::Omnibox { new_pane } => {
-            if let Some(url) = omnibox_url(&palette.query) {
+            if let Some(url) = omnibox_url(&palette.input.query) {
                 navigate_palette_url(
                     &mut commands,
                     url,
@@ -1950,7 +2167,7 @@ fn submit(
             }
         }
         RowAction::WebSearch { new_pane } => {
-            if let Some(url) = web_search_url(&palette.query) {
+            if let Some(url) = web_search_url(&palette.input.query) {
                 navigate_palette_url(
                     &mut commands,
                     url,
@@ -1998,8 +2215,8 @@ fn submit(
             commands.entity(target).insert(Active);
             palette.open = false;
         }
-        RowAction::PaletteChord(cmd) => {
-            chord_pending.0 = Some(cmd);
+        RowAction::Command(cmd) => {
+            chord_pending.0 = Some(RowAction::Command(cmd));
             palette.open = false;
         }
         RowAction::Noop => {}
@@ -2011,6 +2228,30 @@ fn submit(
 
 type DisjointQueryText = (
     With<CommandPaletteQueryText>,
+    Without<CommandPaletteQueryTextRight>,
+    Without<CommandPaletteQueryPlaceholder>,
+    Without<CommandPaletteCaret>,
+    Without<PaletteRowIcon>,
+    Without<PaletteRowPrimary>,
+    Without<PaletteRowSecondary>,
+    Without<PaletteRowEnterHint>,
+);
+
+type DisjointQueryTextRight = (
+    With<CommandPaletteQueryTextRight>,
+    Without<CommandPaletteQueryText>,
+    Without<CommandPaletteQueryPlaceholder>,
+    Without<CommandPaletteCaret>,
+    Without<PaletteRowIcon>,
+    Without<PaletteRowPrimary>,
+    Without<PaletteRowSecondary>,
+    Without<PaletteRowEnterHint>,
+);
+
+type DisjointQueryPlaceholderText = (
+    With<CommandPaletteQueryPlaceholder>,
+    Without<CommandPaletteRow>,
+    Without<PaletteRowFavicon>,
     Without<PaletteRowIcon>,
     Without<PaletteRowPrimary>,
     Without<PaletteRowSecondary>,
@@ -2063,7 +2304,11 @@ fn refresh_labels(
     main_webviews: Query<Entity, With<VmuxWebview>>,
     settings: Res<VmuxAppSettings>,
     asset_server: Res<AssetServer>,
-    mut q: Query<&mut Text, DisjointQueryText>,
+    (mut q_left, mut q_right, mut q_placeholder): (
+        Query<&mut Text, DisjointQueryText>,
+        Query<&mut Text, DisjointQueryTextRight>,
+        Query<&mut Visibility, DisjointQueryPlaceholderText>,
+    ),
     mut primary: Query<(&PaletteRowPrimary, &mut Text), DisjointPrimaryText>,
     mut secondary: Query<(&PaletteRowSecondary, &mut Text), DisjointSecondaryText>,
     mut enter_hints: Query<(&PaletteRowEnterHint, &mut Text), DisjointEnterHintText>,
@@ -2091,19 +2336,38 @@ fn refresh_labels(
     } else {
         Vec::new()
     };
-    let rows = build_palette_rows(&palette.query, &hist, &tabs);
+    let rows = build_palette_rows(&palette.input.query, &hist, &tabs);
     let mut sel = palette.selection;
     if !rows.get(sel).map(|r| r.visible).unwrap_or(false) {
         sel = row_index_from_visible_selection(&rows, 0);
     }
     palette.selection = sel;
 
-    if let Ok(mut t) = q.single_mut() {
-        if palette.query.is_empty() {
-            *t = Text::new("Search or enter URL...");
+    let qlen = query_len_chars(&palette.input.query);
+    if palette.input.caret > qlen {
+        palette.input.caret = qlen;
+    }
+    if palette
+        .input
+        .selection_anchor
+        .is_some_and(|a| a > qlen || a == palette.input.caret)
+    {
+        palette.input.selection_anchor = None;
+    }
+    let left_b = query_char_to_byte(&palette.input.query, palette.input.caret);
+    let (left, right) = palette.input.query.split_at(left_b);
+    if let Ok(mut t) = q_left.single_mut() {
+        *t = Text::new(left.to_string());
+    }
+    if let Ok(mut t) = q_right.single_mut() {
+        *t = Text::new(right.to_string());
+    }
+    if let Ok(mut vis) = q_placeholder.single_mut() {
+        *vis = if palette.input.query.is_empty() {
+            Visibility::Visible
         } else {
-            *t = Text::new(palette.query.clone());
-        }
+            Visibility::Hidden
+        };
     }
 
     for (CommandPaletteRow(i), mut vis, mut node) in &mut row_nodes {
@@ -2295,12 +2559,13 @@ fn style_rows(
 
 /// Command palette resource and [`Update`] systems. Add [`setup`] on [`Startup`] after the world camera.
 #[derive(Default)]
-pub struct VmuxCommandPlugin;
+pub struct CommandPlugin;
 
-impl Plugin for VmuxCommandPlugin {
+impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NavigationHistory>()
-            .init_resource::<PaletteChordPending>()
+            .init_resource::<PalettePendingAction>()
+            .init_resource::<AppCommandRequestQueue>()
             .init_resource::<VmuxCommandPaletteState>();
         app.add_observer(on_command_palette_scroll);
         app.add_systems(
@@ -2350,6 +2615,141 @@ impl Plugin for VmuxCommandPlugin {
         app.add_systems(
             Update,
             style_rows.in_set(CommandPalettePipeline::StyleRows),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::input::ButtonState;
+    use bevy::input::keyboard::Key;
+    use std::time::Duration;
+
+    #[test]
+    fn sync_visibility_system_tracks_open_state() {
+        let mut app = App::new();
+        app.init_resource::<VmuxCommandPaletteState>();
+        let root = app.world_mut().spawn((CommandPaletteRoot, Visibility::Visible)).id();
+        app.add_systems(Update, sync_visibility);
+
+        app.world_mut().resource_mut::<VmuxCommandPaletteState>().open = false;
+        app.update();
+        assert_eq!(*app.world().entity(root).get::<Visibility>().unwrap(), Visibility::Hidden);
+
+        app.world_mut().resource_mut::<VmuxCommandPaletteState>().open = true;
+        app.update();
+        assert_eq!(
+            *app.world().entity(root).get::<Visibility>().unwrap(),
+            Visibility::Visible
+        );
+    }
+
+    #[test]
+    fn sync_command_palette_caret_system_blinks() {
+        let mut app = App::new();
+        app.init_resource::<Time>();
+        app.insert_resource(VmuxCommandPaletteState {
+            open: true,
+            input: vmux_core::command_palette::CommandPaletteInputState {
+                caret_blink_t0: 0.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let caret = app
+            .world_mut()
+            .spawn((CommandPaletteCaret, Visibility::Hidden))
+            .id();
+        app.add_systems(Update, sync_command_palette_caret);
+
+        app.update();
+        assert_eq!(
+            *app.world().entity(caret).get::<Visibility>().unwrap(),
+            Visibility::Visible
+        );
+
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_secs_f32(PALETTE_CARET_PHASE_SECS));
+        app.update();
+        assert_eq!(
+            *app.world().entity(caret).get::<Visibility>().unwrap(),
+            Visibility::Hidden
+        );
+    }
+
+    #[test]
+    fn style_rows_system_highlights_selected_row() {
+        let mut app = App::new();
+        app.insert_resource(VmuxCommandPaletteState {
+            open: true,
+            selection: 1,
+            ..Default::default()
+        });
+
+        let row0 = app
+            .world_mut()
+            .spawn((CommandPaletteRow(0), BackgroundColor(ROW_BG), Visibility::Visible))
+            .id();
+        let row1 = app
+            .world_mut()
+            .spawn((CommandPaletteRow(1), BackgroundColor(ROW_BG), Visibility::Visible))
+            .id();
+        let icon0 = app
+            .world_mut()
+            .spawn((PaletteRowIcon(0), TextColor(ROW_TEXT)))
+            .id();
+        let icon1 = app
+            .world_mut()
+            .spawn((PaletteRowIcon(1), TextColor(ROW_TEXT)))
+            .id();
+
+        app.add_systems(Update, style_rows);
+        app.update();
+
+        assert_eq!(app.world().entity(row0).get::<BackgroundColor>().unwrap().0, ROW_BG);
+        assert_eq!(
+            app.world().entity(row1).get::<BackgroundColor>().unwrap().0,
+            ROW_BG_SELECTED
+        );
+        assert_eq!(app.world().entity(icon0).get::<TextColor>().unwrap().0, ROW_TEXT);
+        assert_eq!(
+            app.world().entity(icon1).get::<TextColor>().unwrap().0,
+            ROW_TEXT_SELECTED
+        );
+    }
+
+    #[test]
+    fn handle_keyboard_typing_reselects_query_row() {
+        let mut app = App::new();
+        app.init_resource::<ButtonInput<KeyCode>>();
+        app.init_resource::<Messages<KeyboardInput>>();
+        app.init_resource::<NavigationHistory>();
+        app.init_resource::<VmuxAppSettings>();
+        app.insert_resource(VmuxCommandPaletteState {
+            open: true,
+            selection: 0,
+            ..Default::default()
+        });
+        app.add_systems(Update, handle_keyboard);
+
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::KeyV,
+            logical_key: Key::Character("v".into()),
+            state: ButtonState::Pressed,
+            text: Some("v".into()),
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+
+        app.update();
+
+        let palette = app.world().resource::<VmuxCommandPaletteState>();
+        assert_eq!(palette.input.query, "v");
+        assert_eq!(
+            palette.selection, MAX_PALETTE_TABS,
+            "typing in palette should move selection to omnibox/search row"
         );
     }
 }

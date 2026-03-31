@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Inlines web_dist/history.css into web_dist/index.html so CEF loads one document shell.
- * A separate <link href="history.css"> often 404s (missing file, incomplete web_dist) and yields
+ * Inlines dist/history.css into dist/index.html so CEF loads one document shell.
+ * A separate <link href="history.css"> often 404s (missing file, incomplete dist) and yields
  * unstyled blue links (browser defaults) even when Tailwind output exists.
  */
 import fs from "fs";
@@ -9,19 +9,19 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.join(__dirname, "..", "web_dist");
+const root = path.join(__dirname, "..", "dist");
 const cssPath = path.join(root, "history.css");
 const htmlPath = path.join(root, "index.html");
 
 if (!fs.existsSync(cssPath)) {
   console.error(
-    "inline-history-css: web_dist/history.css missing — run tailwind first (tailwindcss … -o web_dist/history.css)",
+    "inline-history-css: dist/history.css missing — run tailwind first (tailwindcss … -o dist/history.css)",
   );
   process.exit(1);
 }
 if (!fs.existsSync(htmlPath)) {
   console.error(
-    "inline-history-css: web_dist/index.html missing — run a native `cargo build -p vmux_history` (see crates/vmux_history/build.rs)",
+    "inline-history-css: dist/index.html missing — run a native `cargo build -p vmux_history` (see crates/vmux_history/build.rs)",
   );
   process.exit(1);
 }

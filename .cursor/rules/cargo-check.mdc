@@ -1,14 +1,17 @@
 ---
-description: Run cargo check after Rust or Cargo manifest changes
-globs: "**/*.rs,**/Cargo.toml,**/Cargo.lock"
-alwaysApply: false
+description: Run Rust checks and tests before ending tasks
+alwaysApply: true
 ---
 
-# Verify builds with cargo check
+# Verify Rust work before finishing
 
-After changing Rust sources or workspace or crate manifests, run a compile check from the repo root before finishing:
+Before ending a task that changes Rust code, run verification commands from the repo root:
 
-- Default: `cargo check` (or `cargo check -p <crate>` when edits are confined to one workspace member).
-- If `CEF_PATH` points at a missing tree and the build fails in `cef-dll-sys`, use `env -u CEF_PATH cargo check` (or match whatever the project `Makefile` / docs use for local checks).
+- First resolve Cargo in non-interactive shells:
+  - Prefer `cargo` from `PATH`.
+  - If missing, use `"$HOME/.cargo/bin/cargo"` (or run with `PATH="$HOME/.cargo/bin:$PATH"`).
+- Build check: `cargo check` (or `cargo check -p <crate>` when edits are confined to one workspace member). If `cargo` is not on `PATH`, run `"$HOME/.cargo/bin/cargo" check ...`.
+- Tests: `cargo test` (or `cargo test -p <crate>` when edits are confined to one workspace member). If `cargo` is not on `PATH`, run `"$HOME/.cargo/bin/cargo" test ...`.
+- If `CEF_PATH` points at a missing tree and the build fails in `cef-dll-sys`, use `env -u CEF_PATH` with the same command, or match the project `Makefile` / docs.
 
-Do not only suggest the command; run it when you have shell access and fix errors the check reports.
+Do not only suggest commands; run them when shell access is available and fix reported issues before handing off.

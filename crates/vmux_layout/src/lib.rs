@@ -84,7 +84,7 @@ pub struct PaneChromeNeedsUrl;
 #[reflect(Component, Default)]
 pub struct WebviewPane;
 
-/// History overlay leaf: same entity as a normal pane webview, plus this marker ([`VmuxWebviewSurface::HistoryOverlay`]).
+/// History pane leaf: same entity as a normal pane webview, plus this marker ([`VmuxWebviewSurface::HistoryPane`]).
 #[derive(Component, Default, Debug, Clone, Copy, Reflect)]
 #[reflect(Component, Default)]
 pub struct History;
@@ -122,7 +122,7 @@ pub enum LayoutAxis {
 }
 
 /// Direction for tmux **[select-pane](https://man.openbsd.org/tmux.1#select-pane)** / **[swap-pane](https://man.openbsd.org/tmux.1#swap-pane)** (`-L` / `-R` / `-U` / `-D`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect, Serialize, Deserialize)]
 #[reflect(Serialize, Deserialize)]
 pub enum PaneSwapDir {
     Left,
@@ -938,5 +938,38 @@ impl Plugin for LayoutPlugin {
                     cycle_pane_focus.after(VmuxPrefixChordSet),
                 ),
             );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn track_pane_focus_incoming_system_records_previous_focus() {
+        let mut app = App::new();
+        app.init_resource::<PaneFocusIncoming>();
+        app.init_resource::<PaneFocusPrev>();
+        app.add_systems(Update, track_pane_focus_incoming);
+
+        let a = app.world_mut().spawn((Pane, Active)).id();
+        let b = app.world_mut().spawn(Pane).id();
+
+        app.update();
+        assert!(app
+            .world()
+            .resource::<PaneFocusIncoming>()
+            .0
+            .get(&a)
+            .is_none());
+
+        app.world_mut().entity_mut(a).remove::<Active>();
+        app.world_mut().entity_mut(b).insert(Active);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<PaneFocusIncoming>().0.get(&b).copied(),
+            Some(a)
+        );
     }
 }

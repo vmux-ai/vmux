@@ -14,7 +14,7 @@ pub use cef_keyboard_target::{
     sync_cef_osr_focus_with_active_pane, sync_cef_pointer_suppression_for_prefix,
 };
 pub use component::{
-    AppAction, AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixChordSet, VmuxPrefixState,
+    AppCommand, AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixChordSet, VmuxPrefixState,
 };
 pub use system::{TmuxChordInput, ctrl_arrow_focus_commands, tmux_prefix_commands};
 pub use vmux_core::Active;
@@ -26,12 +26,12 @@ use leafwing_input_manager::prelude::*;
 use vmux_layout::{cycle_pane_focus, split_active_pane, sync_cef_sizes_after_pane_layout};
 
 #[derive(Default)]
-pub struct VmuxInputPlugin;
+pub struct InputPlugin;
 
-impl Plugin for VmuxInputPlugin {
+impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.configure_sets(Update, VmuxPrefixChordSet)
-            .add_plugins(InputManagerPlugin::<AppAction>::default())
+            .add_plugins(InputManagerPlugin::<AppCommand>::default())
             .add_systems(Startup, system::spawn_app_input)
             .add_systems(
                 PreUpdate,
@@ -67,5 +67,16 @@ impl Plugin for VmuxInputPlugin {
                     .after(split_active_pane)
                     .after(cycle_pane_focus),
             );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vmux_input_plugin_registers_in_app() {
+        let mut app = App::new();
+        app.add_plugins(InputPlugin);
     }
 }

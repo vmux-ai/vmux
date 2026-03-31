@@ -6,15 +6,15 @@ mod macos_liquid_glass;
 mod system;
 
 pub use core::{CAMERA_DISTANCE, VmuxWorldCamera};
-pub use vmux_command::VmuxCommandPlugin;
-pub use vmux_input::{AppAction, AppInputRoot, VmuxInputPlugin};
+pub use vmux_command::CommandPlugin;
+pub use vmux_input::{AppCommand, AppInputRoot, InputPlugin};
 pub use vmux_layout::LastVisitedUrl;
 pub use vmux_layout::{LayoutPlugin, SessionLayoutSnapshot};
 pub use vmux_session::SessionPlugin;
 pub use vmux_session::{SessionSavePath, SessionSaveQueue};
 pub use vmux_settings::cef_root_cache_path;
 pub use vmux_settings::{SettingsPlugin, VmuxAppSettings};
-pub use vmux_webview::VmuxWebviewPlugin;
+pub use vmux_browser::{BrowserPlugin, WebviewPlugin};
 
 use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
@@ -40,9 +40,9 @@ fn vmux_primary_window() -> Window {
 }
 
 #[derive(Default)]
-pub struct VmuxScenePlugin;
+pub struct ScenePlugin;
 
-impl Plugin for VmuxScenePlugin {
+impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Startup,
@@ -77,11 +77,23 @@ impl Plugin for VmuxPlugin {
                     ..default()
                 }),
             SettingsPlugin,
-            VmuxInputPlugin,
-            VmuxCommandPlugin,
-            VmuxScenePlugin,
+            InputPlugin,
+            CommandPlugin,
+            LayoutPlugin,
+            ScenePlugin,
             SessionPlugin,
-            VmuxWebviewPlugin::default(),
+            BrowserPlugin::default(),
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scene_plugin_registers_in_app() {
+        let mut app = App::new();
+        app.add_plugins(ScenePlugin);
     }
 }
