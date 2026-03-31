@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -51,6 +51,29 @@ struct HistoryPaneStandby;
 const HISTORY_STREAM_FIRST_LEN: usize = 120;
 /// Subsequent chunks, still ordered newest → older (same as [`NavigationHistory::entries`]).
 const HISTORY_STREAM_CHUNK_LEN: usize = 320;
+
+/// If `vmux_request_history` never reaches the host (strict JSON, dropped IPC), still push history
+/// after the browser has a main frame and the pane has been open this long.
+const WASM_LISTENER_FALLBACK: Duration = Duration::from_secs(5);
+
+/// `wasm_sync_webviews` entry **or** fallback when the listener announce was lost / pane recreated.
+fn history_pane_listener_ready(
+    state: &HistoryUiEmitState,
+    e: Entity,
+    opened: &Query<&HistoryPaneOpenedAt>,
+    browsers: &Browsers,
+) -> bool {
+    if state.wasm_sync_webviews.contains(&e) {
+        return true;
+    }
+    if !browsers.host_emit_ready(&e) {
+        return false;
+    }
+    let Ok(t0) = opened.get(e) else {
+        return false;
+    };
+    t0.0.elapsed() >= WASM_LISTENER_FALLBACK
+}
 
 #[inline]
 fn history_payload_skip_append_false(a: &bool) -> bool {
@@ -115,9 +138,8 @@ struct HistoryUiEmitState {
     last_target_entities: Vec<Entity>,
     /// Per-webview nonce from `vmux_history_sync_nonce`; echoed on the next `vmux_history` emit only for that pane.
     pending_history_sync_nonce: HashMap<Entity, u32>,
-    /// History webviews that have emitted `vmux_request_history` (listener ready). Until **every**
-    /// open history pane is in this set, we clear [`Self::last_revision`] each [`PostUpdate`] so
-    /// [`emit_history_to_panes`] keeps retrying (per-pane WASM; a single bool would stop too early).
+    /// History webviews that have emitted `vmux_request_history` (listener ready). Missing entries
+    /// are covered by [`WASM_LISTENER_FALLBACK`] once CEF reports `host_emit_ready` for that pane.
     wasm_sync_webviews: HashSet<Entity>,
     /// Multi-frame IPC: first chunk is [`HISTORY_STREAM_FIRST_LEN`], then [`HISTORY_STREAM_CHUNK_LEN`].
     stream: Option<HistoryStreamInFlight>,
@@ -432,13 +454,17 @@ fn on_vmux_request_history(
 }
 
 /// Switching focus onto the history pane should refresh the list (same race as initial load).
-/// Until **each** history webview has sent `vmux_request_history`, clear [`HistoryUiEmitState::last_revision`]
-/// **every** [`PostUpdate`] so [`emit_history_to_panes`] cannot get stuck in the dedupe skip (same-frame
-/// emit after a timer nudge restores `last_revision`, then nothing retries for hundreds of ms while
-/// Chromium throttles the history renderer).
+/// Until **each** layout history webview has announced the listener (or the fallback timer elapses),
+/// clear [`HistoryUiEmitState::last_revision`] **every** [`PostUpdate`] so [`emit_history_to_panes`]
+/// cannot get stuck in the dedupe skip.
+///
+/// Only **non-standby** panes are counted so an off-layout standby browser cannot block the visible
+/// history pane forever.
 fn nudge_history_emit_for_osr_wasm_timers(
     mut state: ResMut<HistoryUiEmitState>,
-    history: Query<Entity, (With<WebviewPane>, With<History>)>,
+    history: Query<Entity, (With<WebviewPane>, With<History>, Without<HistoryPaneStandby>)>,
+    opened: Query<&HistoryPaneOpenedAt>,
+    browsers: NonSend<Browsers>,
 ) {
     let mut ids: Vec<Entity> = history.iter().collect();
     if ids.is_empty() {
@@ -448,11 +474,30 @@ fn nudge_history_emit_for_osr_wasm_timers(
     let id_set: HashSet<Entity> = ids.iter().copied().collect();
     state.wasm_sync_webviews.retain(|e| id_set.contains(e));
     ids.sort_unstable();
-    if ids.iter().all(|e| state.wasm_sync_webviews.contains(e)) {
+    if ids.iter().all(|&e| history_pane_listener_ready(&state, e, &opened, &browsers)) {
         return;
     }
     state.last_revision = None;
     state.stream = None;
+}
+
+/// Re-push when [`NavigationHistory::revision`] changes or the set of on-layout history webviews changes
+/// (new split, promotion from standby, session restore).
+fn history_emit_reset_on_navigation_or_targets_changed(
+    mut state: ResMut<HistoryUiEmitState>,
+    hist: Res<NavigationHistory>,
+    targets: Query<Entity, (With<WebviewPane>, With<History>, Without<HistoryPaneStandby>)>,
+    mut prev: Local<Option<(u64, Vec<Entity>)>>,
+) {
+    let rev = hist.revision;
+    let mut cur: Vec<Entity> = targets.iter().collect();
+    cur.sort_unstable();
+    let snapshot = (rev, cur);
+    if prev.as_ref() != Some(&snapshot) {
+        state.last_revision = None;
+        state.stream = None;
+        *prev = Some(snapshot);
+    }
 }
 
 fn invalidate_history_emit_when_focusing_history_pane(
@@ -468,7 +513,10 @@ fn invalidate_history_emit_when_focusing_history_pane(
         .as_ref()
         .is_some_and(|&p| history.contains(p));
     let now_history = history.contains(cur);
-    if now_history && !was_history {
+    // Re-entering the same history pane (already active) does not flip `was_history`; host dedupe
+    // would still skip a resend while WASM is stuck. Clear when focus *lands* on history so any
+    // transition into this pane (including first focus) can emit.
+    if now_history && (!was_history || prev_active.as_ref() != Some(&cur)) {
         state.last_revision = None;
         state.stream = None;
     }
@@ -593,12 +641,11 @@ fn emit_history_to_panes(
         return;
     }
 
-    // Safety gate: do not host-emit until each history webview has announced that its
-    // `cef.listen("vmux_history", ...)` bridge is installed (`vmux_request_history`).
-    // Emitting earlier can hit fragile renderer lifecycle windows and has produced V8 fatals.
+    // Prefer host emit after `vmux_request_history` (listener ready). After a fallback delay with
+    // `host_emit_ready`, emit anyway so the UI is not stuck if JS IPC was lost or a pane was recreated.
     if !target_list
         .iter()
-        .all(|e| state.wasm_sync_webviews.contains(e))
+        .all(|&e| history_pane_listener_ready(&state, e, &opened, &browsers))
     {
         state.stream = None;
         return;
@@ -977,11 +1024,14 @@ impl Plugin for HistoryUiPlugin {
             .add_systems(
                 PostUpdate,
                 (
+                    history_emit_reset_on_navigation_or_targets_changed,
                     nudge_history_emit_for_osr_wasm_timers
+                        .after(history_emit_reset_on_navigation_or_targets_changed)
                         .after(apply_history_url_to_panes)
                         .after(invalidate_history_emit_when_focusing_history_pane)
                         .after(sync_cef_osr_focus_with_active_pane),
                     emit_history_to_panes
+                        .after(history_emit_reset_on_navigation_or_targets_changed)
                         .after(apply_history_url_to_panes)
                         .after(invalidate_history_emit_when_focusing_history_pane)
                         .after(sync_cef_osr_focus_with_active_pane)

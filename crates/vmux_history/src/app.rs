@@ -10,8 +10,10 @@ use dioxus::prelude::*;
 
 use futures_channel::mpsc::unbounded;
 use std::net::IpAddr;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
-use web_sys::window;
+use web_sys::{window, EventTarget};
 
 const MS_PER_DAY: i64 = 86400_000;
 
@@ -28,6 +30,7 @@ const TW_LOADING_BOX: &str = "flex flex-col items-center justify-center gap-3 ro
 const TW_LOADING_TRACK: &str = "h-1 w-36 overflow-hidden rounded-full bg-white/[0.08]";
 const TW_LOADING_PULSE: &str = "vmux-shimmer-bar h-full rounded-full bg-sky-400/35";
 const TW_SHIMMER_TEXT: &str = "vmux-shimmer-text text-[11px] text-white/28";
+const TW_RETRY_BTN: &str = "mt-3 cursor-pointer rounded-lg border border-amber-400/40 bg-amber-400/[0.12] px-3 py-1.5 text-[11px] font-medium text-amber-100/95 transition-colors duration-150 hover:border-amber-400/60 hover:bg-amber-400/20";
 
 /// First paint shows this many rows; avoids mounting hundreds of DOM nodes at once (faster CEF composite).
 const INITIAL_VISIBLE_ROWS: usize = 48;
@@ -261,6 +264,88 @@ fn prepare_history_raw(entries: &[HistoryEntryWire], filter_trimmed: &str) -> Pr
     PreparedRaw { grouped, total_rows }
 }
 
+/// Nudges `vmux_request_history` until `bridge_sync_pending` clears or we mark stalled.
+async fn run_history_resync_timeouts(
+    nonce: u32,
+    mut pending_sig: Signal<Option<u32>>,
+    mut host_msg_sig: Signal<String>,
+    mut host_snap_sig: Signal<bool>,
+    mut stalled_sig: Signal<bool>,
+) {
+    for ms in [16u32, 48, 120] {
+        gloo_timers::future::TimeoutFuture::new(ms).await;
+        request_history_sync_from_host(Some(nonce));
+    }
+    for _ in 0..12 {
+        if pending_sig.peek().is_none() {
+            break;
+        }
+        gloo_timers::future::TimeoutFuture::new(200).await;
+        if pending_sig.peek().is_none() {
+            break;
+        }
+        request_history_sync_from_host(*pending_sig.peek());
+    }
+    if pending_sig.peek().is_some() {
+        gloo_timers::future::TimeoutFuture::new(400).await;
+    }
+    if pending_sig.peek().is_some() {
+        stalled_sig.set(true);
+        host_snap_sig.set(true);
+        pending_sig.set(None);
+        host_msg_sig.set(
+            "History sync is still starting (use Retry or focus another pane, then back)."
+                .to_string(),
+        );
+    }
+}
+
+fn spawn_history_resync_timeouts(
+    nonce: u32,
+    pending_sig: Signal<Option<u32>>,
+    host_msg_sig: Signal<String>,
+    host_snap_sig: Signal<bool>,
+    stalled_sig: Signal<bool>,
+) {
+    spawn(async move {
+        run_history_resync_timeouts(
+            nonce,
+            pending_sig,
+            host_msg_sig,
+            host_snap_sig,
+            stalled_sig,
+        )
+        .await;
+    });
+}
+
+/// User-initiated or window-focus retry after startup sync timed out (focus-only host invalidation
+/// misses the case where the history pane was already active).
+fn retry_history_sync_after_stall(
+    mut bridge_sync_pending: Signal<Option<u32>>,
+    mut host_snapshot_received: Signal<bool>,
+    mut history_stream_complete: Signal<bool>,
+    mut history_sync_stalled: Signal<bool>,
+    mut host_progress_message: Signal<String>,
+    mut host_progress_percent: Signal<u8>,
+) {
+    let nonce = random_history_sync_nonce();
+    bridge_sync_pending.set(Some(nonce));
+    history_sync_stalled.set(false);
+    host_snapshot_received.set(false);
+    history_stream_complete.set(true);
+    host_progress_message.set("Fetching history...".to_string());
+    host_progress_percent.set(65);
+    request_history_sync_from_host(Some(nonce));
+    spawn_history_resync_timeouts(
+        nonce,
+        bridge_sync_pending,
+        host_progress_message,
+        host_snapshot_received,
+        history_sync_stalled,
+    );
+}
+
 fn truncate_and_materialize(
     entries: &[HistoryEntryWire],
     grouped: &[(&'static str, Vec<usize>)],
@@ -378,39 +463,13 @@ pub fn App() -> Element {
                     request_history_sync_from_host(Some(nonce));
                     // Resync timers must not block `run_history_bridge_loop`: pending only clears when
                     // `rx` is drained; a prior sequential loop delayed the UI by up to ~2.4s.
-                    let mut pending_sig = bridge_sync_pending;
-                    let mut host_msg_sig = host_progress_message;
-                    let mut host_snap_sig = host_snapshot_received;
-                    let mut stalled_sig = history_sync_stalled;
-                    spawn(async move {
-                        for ms in [16u32, 48, 120] {
-                            gloo_timers::future::TimeoutFuture::new(ms).await;
-                            request_history_sync_from_host(Some(nonce));
-                        }
-                        for _ in 0..12 {
-                            if pending_sig.peek().is_none() {
-                                break;
-                            }
-                            gloo_timers::future::TimeoutFuture::new(200).await;
-                            if pending_sig.peek().is_none() {
-                                break;
-                            }
-                            request_history_sync_from_host(*pending_sig.peek());
-                        }
-                        // Short final wait before updating status.
-                        if pending_sig.peek().is_some() {
-                            gloo_timers::future::TimeoutFuture::new(400).await;
-                        }
-                        if pending_sig.peek().is_some() {
-                            // Avoid infinite spinner when startup sync is wedged.
-                            stalled_sig.set(true);
-                            host_snap_sig.set(true);
-                            pending_sig.set(None);
-                            host_msg_sig.set(
-                                "History sync is still starting (focus pane to retry).".to_string(),
-                            );
-                        }
-                    });
+                    spawn_history_resync_timeouts(
+                        nonce,
+                        bridge_sync_pending,
+                        host_progress_message,
+                        host_snapshot_received,
+                        history_sync_stalled,
+                    );
                     let rx = rx.take().expect("rx available once listener installs");
                     run_history_bridge_loop(
                         rx,
@@ -452,6 +511,34 @@ pub fn App() -> Element {
                 .await;
             }
         });
+    });
+
+    use_hook(move || {
+        let Some(w) = window() else {
+            return;
+        };
+        let stalled = history_sync_stalled;
+        let entries_sig = entries;
+        let bridge_sync_pending = bridge_sync_pending;
+        let host_snapshot_received = host_snapshot_received;
+        let history_stream_complete = history_stream_complete;
+        let host_progress_message = host_progress_message;
+        let host_progress_percent = host_progress_percent;
+        let closure = Closure::wrap(Box::new(move |_ev: JsValue| {
+            if stalled() && entries_sig().is_empty() {
+                retry_history_sync_after_stall(
+                    bridge_sync_pending,
+                    host_snapshot_received,
+                    history_stream_complete,
+                    stalled,
+                    host_progress_message,
+                    host_progress_percent,
+                );
+            }
+        }) as Box<dyn FnMut(JsValue)>);
+        let target: &EventTarget = w.as_ref();
+        let _ = target.add_event_listener_with_callback("focus", closure.as_ref().unchecked_ref());
+        closure.forget();
     });
 
     use_effect(move || {
@@ -562,7 +649,22 @@ pub fn App() -> Element {
                                 if history_sync_stalled() {
                                     div { class: "flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-amber-300/20 bg-amber-300/[0.04] px-6 py-14 text-center",
                                         span { class: "text-[13px] text-amber-100/90", "Still waiting for history engine." }
-                                        span { class: "text-[11px] text-amber-100/55", "Focus this pane to trigger another sync." }
+                                        span { class: "text-[11px] text-amber-100/55", "Click Retry, switch away and back to this pane, or refocus the window." }
+                                        button {
+                                            class: "{TW_RETRY_BTN}",
+                                            r#type: "button",
+                                            onclick: move |_| {
+                                                retry_history_sync_after_stall(
+                                                    bridge_sync_pending,
+                                                    host_snapshot_received,
+                                                    history_stream_complete,
+                                                    history_sync_stalled,
+                                                    host_progress_message,
+                                                    host_progress_percent,
+                                                );
+                                            },
+                                            "Retry sync"
+                                        }
                                     }
                                 } else {
                                     div { class: "flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center",

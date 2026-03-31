@@ -68,9 +68,8 @@ pub fn apply_history_payload(
         serde_json::Value::String(s) => serde_json::from_str(&s).unwrap_or_default(),
         v => serde_json::from_value(v).unwrap_or_default(),
     };
-    let Some(list) = p.entries else {
-        return;
-    };
+    // Missing `entries` (malformed or minimal JSON) must still ack the sync or the UI stays wedged.
+    let list = p.entries.unwrap_or_default();
     let append = p.history_stream_append;
     let out: Vec<HistoryEntryWire> = list
         .into_iter()

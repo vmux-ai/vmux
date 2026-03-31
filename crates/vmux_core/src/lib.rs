@@ -18,23 +18,6 @@ pub use session::{
     NavigationHistoryPath, NavigationHistorySaveQueue, SessionSavePath, SessionSaveQueue,
 };
 
-use serde::Deserialize;
+mod webview_document_emit;
 
-/// Payload from `window.cef.emit(...)` (single JSON object). Preload uses `{ url }`; history UI uses `{ vmux_open_in_pane }`, etc.
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct WebviewDocumentUrlEmit {
-    #[serde(default)]
-    pub url: Option<String>,
-    /// When set (e.g. from history pane), open this URL in the active main pane.
-    #[serde(default, rename = "vmux_open_in_pane")]
-    pub vmux_open_in_pane: Option<String>,
-    /// History pane asks the host to push the current list (after `cef.listen` is registered).
-    #[serde(default, rename = "vmux_request_history")]
-    pub vmux_request_history: bool,
-    /// Echoed on the next `vmux_history` host emit so the UI can confirm the bridge delivered (`u32` so JS numbers stay exact).
-    #[serde(default, rename = "vmux_history_sync_nonce")]
-    pub vmux_history_sync_nonce: Option<u32>,
-    /// History pane asks the host to wipe persisted visit list.
-    #[serde(default, rename = "vmux_clear_history")]
-    pub vmux_clear_history: bool,
-}
+pub use webview_document_emit::WebviewDocumentUrlEmit;

@@ -1,8 +1,8 @@
 # Vmux: Vibe Multiplexier
 
-- A modern Tmux alternative + Browser
-- Game engine based
-- Bevy ECS architecture
+- A modern Tmux alternative + Chromium based browser
+- Powered by game engine
+- Bevy ECS and Plugin based architecture
 - Dioxus based declarative UI
 - VDD: Vibe driven development
 

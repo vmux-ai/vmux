@@ -7788,15 +7788,13 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_cef",
- "bevy_winit",
  "leafwing-input-manager",
- "liquid-glass-rs",
- "raw-window-handle",
  "vmux_browser",
  "vmux_command",
  "vmux_core",
  "vmux_input",
  "vmux_layout",
+ "vmux_scene",
  "vmux_session",
  "vmux_settings",
 ]
@@ -7829,6 +7827,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -7886,6 +7885,19 @@ dependencies = [
  "vmux_core",
  "vmux_settings",
  "vmux_ui",
+]
+
+[[package]]
+name = "vmux_scene"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_winit",
+ "liquid-glass-rs",
+ "raw-window-handle",
+ "vmux_command",
+ "vmux_layout",
+ "vmux_settings",
 ]
 
 [[package]]

@@ -51,11 +51,20 @@ fn receive_events<E: DeserializeOwned + Send + Sync + 'static>(
     receiver: ResMut<IpcEventRawReceiver>,
 ) {
     while let Ok(event) = receiver.0.try_recv() {
-        if let Ok(payload) = serde_json::from_str::<E>(&event.payload) {
-            commands.trigger(Receive {
-                webview: event.webview,
-                payload,
-            });
+        match serde_json::from_str::<E>(&event.payload) {
+            Ok(payload) => {
+                commands.trigger(Receive {
+                    webview: event.webview,
+                    payload,
+                });
+            }
+            Err(e) => {
+                let head: String = event.payload.chars().take(512).collect();
+                bevy::log::warn!(
+                    "bevy_cef: js emit deserialize failed ({e}) webview={:?} payload={head}",
+                    event.webview
+                );
+            }
         }
     }
 }
