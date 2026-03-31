@@ -24,7 +24,9 @@ mod keyboard;
 
 use crate::browser_process::browsers::devtool_render_handler::DevToolRenderHandlerBuilder;
 use crate::browser_process::display_handler::{DisplayHandlerBuilder, SystemCursorIconSenderInner};
-use crate::browser_process::load_handler::{WebviewLoadHandlerBuilder, WebviewLoadingStateSenderInner};
+use crate::browser_process::load_handler::{
+    WebviewLoadHandlerBuilder, WebviewLoadingStateSenderInner,
+};
 use crate::browser_process::renderer_handler::SharedDeviceScaleFactor;
 pub use keyboard::*;
 
@@ -161,9 +163,50 @@ impl Browsers {
         self.browsers.contains_key(&webview)
     }
 
+    /// `true` when [`Self::emit_event`] can send (main frame exists). If this is `false`,
+    /// [`Self::emit_event`] is a no-op — callers must not treat the payload as delivered.
+    #[inline]
+    pub fn host_emit_ready(&self, webview: &Entity) -> bool {
+        self.browsers
+            .get(webview)
+            .is_some_and(|b| b.client.main_frame().is_some())
+    }
+
     pub fn send_external_begin_frame(&mut self) {
         for browser in self.browsers.values_mut() {
             browser.host.send_external_begin_frame();
+        }
+    }
+
+    /// Align CEF focus with the tiled pane that has keyboard target / `Active` in vmux.
+    ///
+    /// Windowless (OSR) browsers may not composite visible frames until the host calls
+    /// `CefBrowserHost::set_focus`; without this, the active pane can stay stuck until the first
+    /// mouse click or move.
+    ///
+    /// `auxiliary_osr_focus` is for **additional** visible webviews that must keep compositing
+    /// while another pane is active (e.g. a history split next to the main browser). Keyboard
+    /// routing in vmux uses the `CefKeyboardTarget` component, not CEF `set_focus`.
+    ///
+    /// Uses **three passes**: clear all, focus `active`, then focus each auxiliary **in order**
+    /// so the last auxiliary wins if Chromium only tracks one “focused” OSR browser for painting.
+    pub fn sync_osr_focus_to_active_pane(
+        &self,
+        active: Option<Entity>,
+        auxiliary_osr_focus: &[Entity],
+    ) {
+        for (_entity, browser) in &self.browsers {
+            browser.host.set_focus(false as _);
+        }
+        if let Some(a) = active
+            && let Some(browser) = self.browsers.get(&a)
+        {
+            browser.host.set_focus(true as _);
+        }
+        for &h in auxiliary_osr_focus {
+            if let Some(browser) = self.browsers.get(&h) {
+                browser.host.set_focus(true as _);
+            }
         }
     }
 
@@ -250,6 +293,23 @@ impl Browsers {
         {
             argument_list.set_string(0, Some(&id.into().as_str().into()));
             argument_list.set_string(1, Some(&event.to_string().as_str().into()));
+            frame.send_process_message(
+                ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
+                Some(&mut process_message),
+            );
+        };
+    }
+
+    /// Same as [`Self::emit_event`] but passes JSON already serialized (avoids parse + stringify for large payloads).
+    pub fn emit_event_raw_json(&self, webview: &Entity, id: impl Into<String>, json_body: &str) {
+        if let Some(mut process_message) =
+            process_message_create(Some(&PROCESS_MESSAGE_HOST_EMIT.into()))
+            && let Some(argument_list) = process_message.argument_list()
+            && let Some(browser) = self.browsers.get(webview)
+            && let Some(frame) = browser.client.main_frame()
+        {
+            argument_list.set_string(0, Some(&id.into().as_str().into()));
+            argument_list.set_string(1, Some(&json_body.into()));
             frame.send_process_message(
                 ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
                 Some(&mut process_message),

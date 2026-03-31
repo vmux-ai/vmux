@@ -99,8 +99,15 @@ impl Plugin for WebviewPlugin {
         app.world_mut()
             .register_component_hooks::<InlineHtmlId>()
             .on_remove(|mut world: DeferredWorld, ctx: HookContext| {
-                let id = world.get::<InlineHtmlId>(ctx.entity).unwrap().0.clone();
-                world.resource_mut::<InlineHtmlStore>().remove(&id);
+                // `on_remove` runs before the component is dropped; `get` should succeed. If it does
+                // not (e.g. despawn edge cases), skip rather than panic — stale store entries are
+                // bounded and harmless compared to crashing the host.
+                if let Some(id) = world
+                    .get::<InlineHtmlId>(ctx.entity)
+                    .map(|c| c.0.clone())
+                {
+                    world.resource_mut::<InlineHtmlStore>().remove(&id);
+                }
             });
     }
 }

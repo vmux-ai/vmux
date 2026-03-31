@@ -18,7 +18,7 @@
   }
 }
 
-/* Dioxus root: stretch so #bar can fill CEF viewport height (percent height alone often fails). */
+/* Dioxus root: stretch so the app root can fill CEF viewport height (percent height alone often fails). */
 @layer components {
   body {
     display: flex;
@@ -30,20 +30,5 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-  }
-  #bar {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-start !important;
-    box-sizing: border-box;
-    flex: 1;
-    min-height: 0;
-    width: 100%;
-    line-height: 1;
-    text-align: left !important;
-  }
-  #bar * {
-    text-align: left !important;
   }
 }

@@ -1,0 +1,43 @@
+[package]
+name = "vmux_history"
+description = "vmux — Dioxus history UI + VmuxHistoryServerPlugin / VmuxHistoryUiPlugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "vmux_history"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rust-embed = "8"
+bevy = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_cef = { workspace = true }
+bevy_cef_core = { workspace = true }
+crossbeam-channel = { workspace = true }
+leafwing-input-manager = { workspace = true }
+vmux_core = { path = "../vmux_core" }
+vmux_input = { path = "../vmux_input" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_server = { path = "../vmux_server" }
+vmux_settings = { path = "../vmux_settings" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus = { workspace = true }
+gloo-timers = { version = "0.3", features = ["futures"] }
+futures-channel = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+js-sys = "0.3"
+serde_json = { workspace = true }
+serde-wasm-bindgen = "0.6"
+wasm-bindgen = "0.2.115"
+web-sys = { version = "0.3", features = ["Window"] }

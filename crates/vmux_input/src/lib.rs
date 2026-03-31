@@ -11,19 +11,19 @@ mod system;
 
 pub use cef_keyboard_target::{
     consume_keyboard_for_prefix_routing, sync_cef_keyboard_target,
-    sync_cef_pointer_suppression_for_prefix,
+    sync_cef_osr_focus_with_active_pane, sync_cef_pointer_suppression_for_prefix,
 };
 pub use component::{
     AppAction, AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixChordSet, VmuxPrefixState,
 };
-pub use system::{tmux_prefix_commands, TmuxChordInput};
+pub use system::{TmuxChordInput, ctrl_arrow_focus_commands, tmux_prefix_commands};
 pub use vmux_core::Active;
 
 use bevy::input::InputSystems;
 use bevy::prelude::*;
-use bevy_cef::prelude::CefKeyboardInputSet;
+use bevy_cef::prelude::{CefKeyboardInputSet, render_standard_materials};
 use leafwing_input_manager::prelude::*;
-use vmux_layout::{cycle_pane_focus, split_active_pane};
+use vmux_layout::{cycle_pane_focus, split_active_pane, sync_cef_sizes_after_pane_layout};
 
 #[derive(Default)]
 pub struct VmuxInputPlugin;
@@ -48,9 +48,16 @@ impl Plugin for VmuxInputPlugin {
                 ),
             )
             .add_systems(
+                PostUpdate,
+                cef_keyboard_target::sync_cef_osr_focus_with_active_pane
+                    .after(sync_cef_sizes_after_pane_layout)
+                    .before(render_standard_materials),
+            )
+            .add_systems(
                 Update,
                 (
                     system::exit_on_quit_action,
+                    system::ctrl_arrow_focus_commands,
                     system::tmux_prefix_commands.in_set(VmuxPrefixChordSet),
                 ),
             )

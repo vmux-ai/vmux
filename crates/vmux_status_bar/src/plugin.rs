@@ -9,7 +9,7 @@ use bevy_cef::prelude::*;
 use serde::Serialize;
 use vmux_layout::{
     Active, Pane, PaneChromeNeedsUrl, PaneChromeOwner, PaneChromeStrip, PaneLastUrl,
-    VmuxHostedWebPlugin, VmuxWebviewSurface, setup_vmux_panes,
+    VmuxHostedWebPlugin, VmuxWebviewSurface,
 };
 use vmux_server::{EmbeddedServeDirRequest, EmbeddedServeDirStartup, PendingEmbeddedServeDir};
 
@@ -17,7 +17,7 @@ use vmux_server::{EmbeddedServeDirRequest, EmbeddedServeDirStartup, PendingEmbed
 const STATUS_UI_EMBEDDED_WAIT_SECS: f32 = 5.0;
 
 /// Visible fallback when `dist/index.html` is missing, the loopback server never reports a port, or startup is stuck.
-const STATUS_CHROME_UNAVAILABLE_HTML: &str = r#"<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><style>html,body{margin:0;background:#1a1a1a;color:#9aa0a6;font:12px system-ui,-apple-system,sans-serif;height:100%;}body{display:flex;align-items:center;justify-content:center;text-align:center;padding:8px 12px;}p{margin:0;line-height:1.4;}small{display:block;margin-top:6px;opacity:.75;font-size:11px;}</style></head><body><div><p>Status bar UI did not load.</p><small>Run <code style="color:#bdc1c6">make status-ui</code> or set <code style="color:#bdc1c6">VMUX_STATUS_UI_URL</code>.</small></div></body></html>"#;
+const STATUS_CHROME_UNAVAILABLE_HTML: &str = r#"<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><style>html,body{margin:0;background:#1a1a1a;color:#9aa0a6;font:12px system-ui,-apple-system,sans-serif;height:100%;}body{display:flex;align-items:center;justify-content:center;text-align:center;padding:8px 12px;}p{margin:0;line-height:1.4;}small{display:block;margin-top:6px;opacity:.75;font-size:11px;}</style></head><body><div><p>Status bar UI did not load.</p><small>Run <code style="color:#bdc1c6">cargo build -p vmux_status_bar</code> (build.rs refreshes <code style="color:#bdc1c6">dist/</code>) or set <code style="color:#bdc1c6">VMUX_STATUS_UI_URL</code>.</small></div></body></html>"#;
 
 #[derive(Resource, Default)]
 pub struct StatusUiBaseUrl(pub Option<String>);
@@ -86,7 +86,7 @@ fn startup_status_server(mut commands: Commands, mut pending: ResMut<PendingEmbe
 
     let (tx, rx) = crossbeam_channel::bounded::<String>(1);
     let flag = Arc::new(Mutex::new(false));
-    pending.0 = Some(EmbeddedServeDirRequest {
+    pending.0.push(EmbeddedServeDirRequest {
         root: dist,
         tx,
         shutdown: flag,
@@ -202,9 +202,7 @@ impl Plugin for StatusBarHostedPlugin {
             .init_resource::<StatusUiEmitState>()
             .add_systems(
                 Startup,
-                startup_status_server
-                    .in_set(EmbeddedServeDirStartup::FillPending)
-                    .after(setup_vmux_panes),
+                startup_status_server.in_set(EmbeddedServeDirStartup::FillPending),
             )
             .add_systems(
                 Update,

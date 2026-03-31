@@ -1,4 +1,4 @@
-//! Global command-palette state (⌘T / Ctrl+T) shared with input/CEF suppression.
+//! Global command-palette state (⌘T / Ctrl+T, ⌘L / Ctrl+L) shared with input/CEF suppression.
 
 use bevy::prelude::*;
 
@@ -7,6 +7,8 @@ use bevy::prelude::*;
 pub struct VmuxCommandPaletteState {
     pub open: bool,
     pub query: String,
-    /// Index into fixed result rows (see `vmux` palette UI).
+    /// Row index in one list: open-tab slots first, then omnibox / web / history or GitHub / commands / layout / close.
     pub selection: usize,
+    /// [`Time::elapsed_secs`] when the palette was last opened; resets caret blink phase.
+    pub caret_blink_t0: f32,
 }

@@ -1,6 +1,9 @@
 //! JS bridge: clock ticks + `window.cef.listen("vmux_status", …)` via `document::eval`.
+//!
+//! Each `dioxus.send` carries a **RON** document as a JSON string on the wire (Dioxus deserializes to
+//! [`String`]); Rust parses with `ron::from_str` into [`BridgeMsg`](crate::payload::BridgeMsg).
 
-/// Injected into the page so WASM can `recv` JSON messages from JS.
+/// Injected into the page so WASM can `recv` RON messages (as strings) from JS.
 pub const EVAL_SCRIPT: &str = r#"
     function pad(n) { return n < 10 ? "0" + n : String(n); }
     function monthShort(m) {
@@ -12,14 +15,18 @@ pub const EVAL_SCRIPT: &str = r#"
         return w + " " + monthShort(d.getMonth()) + " " + d.getDate() + " "
             + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
     }
+    function ronClock() {
+        return "(Clock(text: " + JSON.stringify(clockStr()) + "))";
+    }
     setInterval(function() {
-        dioxus.send({ type: "clock", text: clockStr() });
+        dioxus.send(ronClock());
     }, 1000);
-    dioxus.send({ type: "clock", text: clockStr() });
+    dioxus.send(ronClock());
     try {
         if (window.cef && typeof window.cef.listen === "function") {
             window.cef.listen("vmux_status", function (e) {
-                dioxus.send({ type: "status", payload: e });
+                var json = JSON.stringify(e);
+                dioxus.send("(Status(payload: " + JSON.stringify(json) + "))");
             });
         }
     } catch (_) {}

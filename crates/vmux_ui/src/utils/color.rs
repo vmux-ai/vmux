@@ -24,26 +24,3 @@ pub fn primary_vec4() -> Vec4 {
 pub fn active_pane_border_vec4() -> Vec4 {
     linear_rgba_to_vec4(PRIMARY)
 }
-
-pub mod loading_bar {
-    //! Pane loading indicator (track + sweep), drawn just above the status strip.
-
-    use super::linear_rgba_to_vec4;
-    use bevy::prelude::*;
-
-    /// Dim band behind the moving highlight.
-    pub const TRACK: LinearRgba = LinearRgba::new(0.06, 0.14, 0.26, 0.62);
-
-    /// Moving segment — same linear accent as [`super::PRIMARY`] (focus ring, highlights).
-    pub const SWEEP: LinearRgba = super::PRIMARY;
-
-    #[inline]
-    pub fn track_vec4() -> Vec4 {
-        linear_rgba_to_vec4(TRACK)
-    }
-
-    #[inline]
-    pub fn sweep_vec4() -> Vec4 {
-        linear_rgba_to_vec4(SWEEP)
-    }
-}

@@ -6,12 +6,13 @@ use bevy::prelude::*;
 use bevy::window::{CompositeAlphaMode, PresentMode, PrimaryWindow};
 use vmux_settings::VmuxAppSettings;
 
-use crate::core::{VmuxWorldCamera, CAMERA_DISTANCE};
+use crate::core::{CAMERA_DISTANCE, VmuxWorldCamera};
 
 /// Older moonshine saves may omit `window_padding_top_px` (loads as 0). Mirror `window_padding_px`.
 pub(crate) fn normalize_window_padding_from_legacy_save(mut settings: ResMut<VmuxAppSettings>) {
-    if settings.window_padding_top_px <= 0.0 && settings.window_padding_px > 0.0 {
-        settings.window_padding_top_px = settings.window_padding_px;
+    let layout = &mut settings.layout;
+    if layout.window_padding_top_px <= 0.0 && layout.window_padding_px > 0.0 {
+        layout.window_padding_top_px = layout.window_padding_px;
     }
 }
 

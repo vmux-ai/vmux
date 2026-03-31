@@ -9,12 +9,12 @@ use bevy_cef_core::prelude::Browsers;
 
 use vmux_core::pane_corner_clip::{PANE_CORNER_CLIP_FULL, PANE_CORNER_CLIP_STATUS_BAR_BOTTOM};
 use vmux_settings::VmuxAppSettings;
-use vmux_ui::design::color;
+use vmux_ui::utils::color;
 
 use crate::loading_bar::{
-    LoadingBarMaterial, LOADING_BAR_ANIM_TIME_SCALE, LOADING_BAR_DEPTH_BIAS_ABOVE_PANE,
-    LOADING_BAR_HEIGHT_PX, PaneChromeLoadingBar,
-    PendingNavigationLoads, webview_surface_is_placeholder,
+    LOADING_BAR_ANIM_TIME_SCALE, LOADING_BAR_DEPTH_BIAS_ABOVE_CHROME, LOADING_BAR_HEIGHT_PX,
+    LoadingBarMaterial, PaneChromeLoadingBar, PendingNavigationLoads,
+    webview_surface_is_placeholder,
 };
 use crate::{
     Active, CAMERA_DISTANCE, DEFAULT_PANE_CHROME_HEIGHT_PX, LayoutTree, Pane, PaneChromeOwner,
@@ -138,14 +138,14 @@ pub fn layout_workspace_pane_rects(
     settings: &VmuxAppSettings,
     entity_alive: impl Fn(Entity) -> bool,
 ) -> Vec<(Entity, PixelRect)> {
-    let s = settings.window_padding_px;
-    let top = settings.window_padding_top_px;
+    let s = settings.layout.window_padding_px;
+    let top = settings.layout.window_padding_top_px;
     let area = layout_root_area(vw, vh, s, top, s, s);
     let mut rects = solve_layout(
         &layout.root,
         area,
         entity_alive,
-        settings.pane_border_spacing_px,
+        settings.layout.pane_border_spacing_px,
         layout.zoom_pane,
     );
     sort_pane_rects_for_render_order(&mut rects);
@@ -284,14 +284,14 @@ pub fn apply_pane_layout(
     let half_w = half_h * aspect;
 
     let entity_alive = |e: Entity| panes.contains(e);
-    let s = settings.window_padding_px;
-    let top = settings.window_padding_top_px;
+    let s = settings.layout.window_padding_px;
+    let top = settings.layout.window_padding_top_px;
     let area = layout_root_area(vw, vh, s, top, s, s);
     let mut rects = solve_layout(
         &layout.root,
         area,
         entity_alive,
-        settings.pane_border_spacing_px,
+        settings.layout.pane_border_spacing_px,
         layout.zoom_pane,
     );
     sort_pane_rects_for_render_order(&mut rects);
@@ -349,7 +349,7 @@ pub fn apply_pane_layout(
             && let Some(mat) = materials.get_mut(handle.id())
         {
             mat.extension.pane_corner_clip = pane_corner_clip_uniform(
-                settings.pane_border_radius_px,
+                settings.layout.pane_border_radius_px,
                 pr_full.w,
                 pr_full.h,
                 PANE_CORNER_CLIP_FULL,
@@ -430,14 +430,14 @@ fn chrome_layout_frame(
     let half_h = CAMERA_DISTANCE * tan_half_fov;
     let half_w = half_h * aspect;
     let entity_alive = |e: Entity| panes.contains(e);
-    let s = settings.window_padding_px;
-    let top = settings.window_padding_top_px;
+    let s = settings.layout.window_padding_px;
+    let top = settings.layout.window_padding_top_px;
     let area = layout_root_area(vw, vh, s, top, s, s);
     let mut rects: Vec<(Entity, PixelRect)> = solve_layout(
         &layout.root,
         area,
         entity_alive,
-        settings.pane_border_spacing_px,
+        settings.layout.pane_border_spacing_px,
         layout.zoom_pane,
     )
     .into_iter()
@@ -511,11 +511,11 @@ pub fn apply_pane_chrome_layout(
         half_w,
         half_h,
         rect_map,
+        pane_index,
         active_pane,
-        ..
     } = frame;
 
-    for (i, (chrome_ent, owner)) in chrome_q.iter().enumerate() {
+    for (chrome_ent, owner) in chrome_q.iter() {
         let Some(pr_full) = rect_map.get(&owner.0).copied() else {
             if let Ok(mut v) = vis.get_mut(chrome_ent) {
                 *v = Visibility::Hidden;
@@ -540,9 +540,10 @@ pub fn apply_pane_chrome_layout(
             continue;
         }
 
-        let is_active = active_pane == Some(owner.0);
+        let show_chrome =
+            active_pane == Some(owner.0) && window.focused;
         if let Ok(mut v) = vis.get_mut(chrome_ent) {
-            *v = if is_active {
+            *v = if show_chrome {
                 Visibility::Visible
             } else {
                 Visibility::Hidden
@@ -572,17 +573,18 @@ pub fn apply_pane_chrome_layout(
             && let Some(mat) = materials.get_mut(handle.id())
         {
             mat.extension.pane_corner_clip = pane_corner_clip_uniform(
-                settings.pane_border_radius_px,
+                settings.layout.pane_border_radius_px,
                 chrome_pr.w,
                 chrome_pr.h,
                 PANE_CORNER_CLIP_STATUS_BAR_BOTTOM,
             );
-            mat.base.depth_bias = 1_000_000.0 + i as f32;
+            let pi = pane_index.get(&owner.0).copied().unwrap_or(0);
+            mat.base.depth_bias = 1_000_000.0 + pi as f32;
         }
     }
 }
 
-/// Indeterminate bar along the bottom of the main content rect (above the status strip), or the tile bottom if there is no strip.
+/// Indeterminate bar: above the status strip when it is shown; otherwise along the bottom of the full pane tile.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
 pub fn apply_pane_loading_bar_layout(
@@ -638,7 +640,7 @@ pub fn apply_pane_loading_bar_layout(
         half_h,
         rect_map,
         pane_index,
-        ..
+        active_pane,
     } = frame;
 
     for (lb_ent, owner) in loading_q.iter() {
@@ -648,15 +650,17 @@ pub fn apply_pane_loading_bar_layout(
             }
             continue;
         };
-        // Bottom of **main content** only — same split + horizontal clamp as chrome, so the bar sits
-        // flush above the status strip without overlapping [`PaneChromeStrip`].
+        let status_strip_shown =
+            active_pane == Some(owner.0) && window.focused;
+
+        // Same split + horizontal clamp as chrome when the strip is visible; otherwise use the full tile.
         let (mut content_pr, _) =
             split_pane_content_and_chrome(pr_full, DEFAULT_PANE_CHROME_HEIGHT_PX);
         let r_edge = pr_full.x + pr_full.w;
         content_pr.x = content_pr.x.clamp(pr_full.x, r_edge);
         content_pr.w = content_pr.w.min(r_edge - content_pr.x).max(0.0);
 
-        let bar_pr = if content_pr.h > 0.0 && content_pr.w > 0.0 {
+        let bar_pr = if status_strip_shown && content_pr.h > 0.0 && content_pr.w > 0.0 {
             let h = LOADING_BAR_HEIGHT_PX.min(content_pr.h.max(0.0));
             if h <= 0.0 {
                 if let Ok(mut v) = loading_vis.get_mut(lb_ent) {
@@ -712,7 +716,7 @@ pub fn apply_pane_loading_bar_layout(
             tf.translation = bt;
             tf.scale = b_scale;
         }
-        let i = pane_index.get(&owner.0).copied().unwrap_or(0);
+        let pane_i = pane_index.get(&owner.0).copied().unwrap_or(0);
         if let Ok(bhandle) = loading_mesh_mat.get(lb_ent)
             && let Some(bmat) = loading_materials.get_mut(bhandle.id())
         {
@@ -722,8 +726,9 @@ pub fn apply_pane_loading_bar_layout(
                 bar_pr.h.max(1.0),
                 0.0,
             );
-            bmat.depth_bias =
-                i as f32 * PANE_DEPTH_BIAS_STRIDE + LOADING_BAR_DEPTH_BIAS_ABOVE_PANE;
+            bmat.depth_bias = 1_000_000.0
+                + pane_i as f32
+                + LOADING_BAR_DEPTH_BIAS_ABOVE_CHROME;
         }
     }
 }

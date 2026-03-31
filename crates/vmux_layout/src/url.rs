@@ -52,6 +52,30 @@ pub fn allowed_navigation_url(url: &str) -> bool {
     )
 }
 
+/// True when `url` is almost certainly a **previous run's** embedded history UI base URL
+/// (`http://127.0.0.1:<ephemeral>/…`), which becomes invalid after restart.
+///
+/// Used to recover old session files that did not persist [`SavedLayoutNode::Leaf::history_pane`](crate::SavedLayoutNode::Leaf).
+pub fn legacy_loopback_embedded_history_ui_url(url: &str) -> bool {
+    let u = url.trim();
+    let rest = if let Some(r) = u.strip_prefix("http://127.0.0.1:") {
+        r
+    } else if let Some(r) = u.strip_prefix("http://localhost:") {
+        r
+    } else {
+        return false;
+    };
+    let port: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if port.is_empty() {
+        return false;
+    }
+    let after_port = &rest[port.len()..];
+    let after_port = after_port.to_ascii_lowercase();
+    after_port.is_empty()
+        || after_port == "/"
+        || after_port == "/index.html"
+}
+
 /// Initial `WebviewSource` URL: last session if valid, else `fallback`.
 pub fn initial_webview_url(last: Option<&LastVisitedUrl>, fallback: &str) -> String {
     let Some(last) = last else {
@@ -68,6 +92,21 @@ pub fn initial_webview_url(last: Option<&LastVisitedUrl>, fallback: &str) -> Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_history_ui_loopback_detected() {
+        assert!(legacy_loopback_embedded_history_ui_url(
+            "http://127.0.0.1:54321/"
+        ));
+        assert!(legacy_loopback_embedded_history_ui_url(
+            "http://127.0.0.1:54321/index.html"
+        ));
+        assert!(legacy_loopback_embedded_history_ui_url("http://localhost:8080/"));
+        assert!(!legacy_loopback_embedded_history_ui_url(
+            "http://127.0.0.1:3000/app"
+        ));
+        assert!(!legacy_loopback_embedded_history_ui_url("https://example.com/"));
+    }
 
     #[test]
     fn youtube_urls_replaced_with_fallback() {

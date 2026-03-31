@@ -17,6 +17,8 @@ pub enum VmuxWebviewSurface {
     MainPane,
     /// Bottom status / chrome strip ([`PaneChromeStrip`](crate::PaneChromeStrip)).
     PaneChrome,
+    /// Tiled history pane ([`WebviewPane`] + [`History`](crate::History)).
+    HistoryOverlay,
 }
 
 /// A Bevy [`Plugin`] that serves a web app from loopback and wires it into a [`VmuxWebviewSurface`].

@@ -5,12 +5,12 @@ use bevy_cef::prelude::*;
 use vmux_core::input_root::{AppInputRoot, VmuxPrefixState};
 use vmux_core::{SessionSavePath, SessionSaveQueue};
 
-use crate::pane_spawn::spawn_pane;
+use crate::pane_spawn::{spawn_history_pane, spawn_pane};
 use crate::url::{allowed_navigation_url, sanitize_embedded_webview_url};
 use crate::{
-    Active, LayoutAxis, LayoutNode, LayoutTree, LoadingBarMaterial, Pane, PaneChromeLoadingBar,
-    PaneChromeOwner, PaneChromeStrip, PaneLastUrl,
-    PaneSwapDir, PixelRect, Root, SessionLayoutSnapshot, layout_node_to_saved,
+    Active, History, LayoutAxis, LayoutNode, LayoutTree, LoadingBarMaterial, Pane, WebviewPane,
+    PaneChromeLoadingBar, PaneChromeOwner, PaneChromeStrip, PaneLastUrl, PaneSwapDir, PixelRect,
+    Root, SavedSessionLeaf, SessionLayoutSnapshot, layout_node_to_saved,
     neighbor_pane_in_direction,
 };
 use vmux_settings::VmuxAppSettings;
@@ -26,24 +26,44 @@ pub fn rebuild_session_snapshot(
     tree: &LayoutTree,
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
+    history_panes: &Query<Entity, (With<WebviewPane>, With<History>)>,
     fallback_webview_url: &str,
 ) -> SessionLayoutSnapshot {
     let root = layout_node_to_saved(&tree.root, |e| {
-        if let Ok(p) = pane_last.get(e) {
+        let history_pane = history_panes.contains(e);
+        if history_pane {
+            return SavedSessionLeaf {
+                url: String::new(),
+                history_pane: true,
+            };
+        }
+        let url = if let Ok(p) = pane_last.get(e) {
             let u = p.0.trim();
             if !u.is_empty() && allowed_navigation_url(u) {
-                return sanitize_embedded_webview_url(&p.0, fallback_webview_url);
+                sanitize_embedded_webview_url(&p.0, fallback_webview_url)
+            } else {
+                String::new()
             }
-        }
-        let raw = webview_src
-            .get(e)
-            .map(webview_source_url)
-            .unwrap_or_else(|_| fallback_webview_url.to_string());
-        let u = raw.trim();
-        if !u.is_empty() && allowed_navigation_url(u) {
-            sanitize_embedded_webview_url(&raw, fallback_webview_url)
         } else {
-            fallback_webview_url.to_string()
+            String::new()
+        };
+        let url = if !url.is_empty() {
+            url
+        } else {
+            let raw = webview_src
+                .get(e)
+                .map(webview_source_url)
+                .unwrap_or_else(|_| fallback_webview_url.to_string());
+            let u = raw.trim();
+            if !u.is_empty() && allowed_navigation_url(u) {
+                sanitize_embedded_webview_url(&raw, fallback_webview_url)
+            } else {
+                fallback_webview_url.to_string()
+            }
+        };
+        SavedSessionLeaf {
+            url,
+            history_pane,
         }
     });
     let mut snap = SessionLayoutSnapshot::default();
@@ -61,7 +81,7 @@ fn tmux_prefix_armed(prefix: &Query<&VmuxPrefixState, With<AppInputRoot>>) -> bo
 }
 
 #[allow(clippy::type_complexity)]
-fn despawn_chrome_for_pane(
+pub fn despawn_chrome_for_pane(
     commands: &mut Commands,
     chrome_or_border: &Query<
         (Entity, &PaneChromeOwner),
@@ -116,6 +136,7 @@ pub fn try_split_active_pane(
     snapshot: &mut SessionLayoutSnapshot,
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
+    history_panes: &Query<Entity, (With<WebviewPane>, With<History>)>,
     path: Option<&Res<SessionSavePath>>,
     session_queue: &mut SessionSaveQueue,
     default_webview_url: &str,
@@ -132,11 +153,109 @@ pub fn try_split_active_pane(
     if layout_tree.split_leaf(active_ent, new_pane, axis) {
         commands.entity(new_pane).insert(Active);
         commands.entity(active_ent).remove::<Active>();
-        *snapshot =
-            rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
+        *snapshot = rebuild_session_snapshot(
+            layout_tree,
+            pane_last,
+            webview_src,
+            history_panes,
+            default_webview_url,
+        );
         if let Some(p) = path {
             session_queue.0.push(p.0.clone());
         }
+    }
+}
+
+/// Split the active leaf 50/50 and put a **history UI** pane in the new slot (see [`crate::spawn_history_pane`]).
+#[allow(clippy::too_many_arguments)]
+pub fn try_split_active_history_pane(
+    commands: &mut Commands,
+    layout_tree: &mut LayoutTree,
+    active_ent: Entity,
+    axis: LayoutAxis,
+    chrome_or_border: &Query<
+        (Entity, &PaneChromeOwner),
+        Or<(With<PaneChromeStrip>, With<PaneChromeLoadingBar>)>,
+    >,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    loading_bar_materials: &mut ResMut<Assets<LoadingBarMaterial>>,
+    snapshot: &mut SessionLayoutSnapshot,
+    pane_last: &Query<&PaneLastUrl>,
+    webview_src: &Query<&WebviewSource>,
+    history_panes: &Query<Entity, (With<WebviewPane>, With<History>)>,
+    path: Option<&Res<SessionSavePath>>,
+    session_queue: &mut SessionSaveQueue,
+    default_webview_url: &str,
+    history_ui_url: Option<&str>,
+) -> bool {
+    clear_zoom_pane(layout_tree);
+    let new_pane = spawn_history_pane(
+        commands,
+        meshes,
+        materials,
+        loading_bar_materials,
+        false,
+        history_ui_url,
+    );
+    if layout_tree.split_leaf(active_ent, new_pane, axis) {
+        commands.entity(new_pane).insert(Active);
+        commands.entity(active_ent).remove::<Active>();
+        *snapshot = rebuild_session_snapshot(
+            layout_tree,
+            pane_last,
+            webview_src,
+            history_panes,
+            default_webview_url,
+        );
+        if let Some(p) = path {
+            session_queue.0.push(p.0.clone());
+        }
+        true
+    } else {
+        despawn_chrome_for_pane(commands, chrome_or_border, new_pane);
+        commands.entity(new_pane).despawn();
+        false
+    }
+}
+
+/// Same as [`try_split_active_history_pane`], but reuses an already spawned history pane entity
+/// (e.g. a startup standby browser) instead of creating a new CEF instance.
+#[allow(clippy::too_many_arguments)]
+pub fn try_split_active_history_existing_pane(
+    commands: &mut Commands,
+    layout_tree: &mut LayoutTree,
+    active_ent: Entity,
+    axis: LayoutAxis,
+    history_pane: Entity,
+    snapshot: &mut SessionLayoutSnapshot,
+    pane_last: &Query<&PaneLastUrl>,
+    webview_src: &Query<&WebviewSource>,
+    history_panes: &Query<Entity, (With<WebviewPane>, With<History>)>,
+    path: Option<&Res<SessionSavePath>>,
+    session_queue: &mut SessionSaveQueue,
+    default_webview_url: &str,
+) -> bool {
+    clear_zoom_pane(layout_tree);
+    if !history_panes.contains(history_pane) || layout_tree.root.contains_leaf(history_pane) {
+        return false;
+    }
+    if layout_tree.split_leaf(active_ent, history_pane, axis) {
+        commands.entity(history_pane).insert(Active);
+        commands.entity(active_ent).remove::<Active>();
+        *snapshot = rebuild_session_snapshot(
+            layout_tree,
+            pane_last,
+            webview_src,
+            history_panes,
+            default_webview_url,
+        );
+        if let Some(p) = path {
+            session_queue.0.push(p.0.clone());
+        }
+        true
+    } else {
+        false
     }
 }
 
@@ -147,6 +266,7 @@ pub fn try_mirror_pane_layout(
     snapshot: &mut SessionLayoutSnapshot,
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
+    history_panes: &Query<Entity, (With<WebviewPane>, With<History>)>,
     path: Option<&Res<SessionSavePath>>,
     session_queue: &mut SessionSaveQueue,
     default_webview_url: &str,
@@ -155,7 +275,13 @@ pub fn try_mirror_pane_layout(
     if !layout_tree.mirror_deepest_split_around(active_ent) {
         return false;
     }
-    *snapshot = rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
+    *snapshot = rebuild_session_snapshot(
+        layout_tree,
+        pane_last,
+        webview_src,
+        history_panes,
+        default_webview_url,
+    );
     if let Some(p) = path {
         session_queue.0.push(p.0.clone());
     }
@@ -172,6 +298,7 @@ pub fn try_rotate_window(
     snapshot: &mut SessionLayoutSnapshot,
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
+    history_panes: &Query<Entity, (With<WebviewPane>, With<History>)>,
     path: Option<&Res<SessionSavePath>>,
     session_queue: &mut SessionSaveQueue,
     default_webview_url: &str,
@@ -205,7 +332,13 @@ pub fn try_rotate_window(
         commands.entity(active_ent).remove::<Active>();
         commands.entity(new_active).insert(Active);
     }
-    *snapshot = rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
+    *snapshot = rebuild_session_snapshot(
+        layout_tree,
+        pane_last,
+        webview_src,
+        history_panes,
+        default_webview_url,
+    );
     if let Some(p) = path {
         session_queue.0.push(p.0.clone());
     }
@@ -224,9 +357,7 @@ pub fn try_select_pane_direction(
     prefer_if_valid: Option<Entity>,
 ) -> bool {
     clear_zoom_pane(layout_tree);
-    let Some(next) =
-        neighbor_pane_in_direction(rects, active_ent, dir, prefer_if_valid)
-    else {
+    let Some(next) = neighbor_pane_in_direction(rects, active_ent, dir, prefer_if_valid) else {
         return false;
     };
     if next == active_ent {
@@ -245,6 +376,7 @@ pub fn try_swap_active_pane(
     snapshot: &mut SessionLayoutSnapshot,
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
+    history_panes: &Query<Entity, (With<WebviewPane>, With<History>)>,
     path: Option<&Res<SessionSavePath>>,
     session_queue: &mut SessionSaveQueue,
     default_webview_url: &str,
@@ -253,7 +385,13 @@ pub fn try_swap_active_pane(
     if !layout_tree.swap_active_pane(active_ent, dir) {
         return false;
     }
-    *snapshot = rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
+    *snapshot = rebuild_session_snapshot(
+        layout_tree,
+        pane_last,
+        webview_src,
+        history_panes,
+        default_webview_url,
+    );
     if let Some(p) = path {
         session_queue.0.push(p.0.clone());
     }
@@ -289,6 +427,7 @@ pub fn try_kill_active_pane(
     snapshot: &mut SessionLayoutSnapshot,
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
+    history_panes: &Query<Entity, (With<WebviewPane>, With<History>)>,
     chrome_or_border: &Query<
         (Entity, &PaneChromeOwner),
         Or<(With<PaneChromeStrip>, With<PaneChromeLoadingBar>)>,
@@ -318,8 +457,13 @@ pub fn try_kill_active_pane(
         despawn_chrome_for_pane(commands, chrome_or_border, active_ent);
         commands.entity(active_ent).despawn();
         commands.entity(new_pane).insert(Active);
-        *snapshot =
-            rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
+        *snapshot = rebuild_session_snapshot(
+            layout_tree,
+            pane_last,
+            webview_src,
+            history_panes,
+            default_webview_url,
+        );
         if let Some(p) = path {
             session_queue.0.push(p.0.clone());
         }
@@ -339,7 +483,13 @@ pub fn try_kill_active_pane(
     commands.entity(survivor).insert(Active);
     despawn_chrome_for_pane(commands, chrome_or_border, active_ent);
     commands.entity(active_ent).despawn();
-    *snapshot = rebuild_session_snapshot(layout_tree, pane_last, webview_src, default_webview_url);
+    *snapshot = rebuild_session_snapshot(
+        layout_tree,
+        pane_last,
+        webview_src,
+        history_panes,
+        default_webview_url,
+    );
     if let Some(p) = path {
         session_queue.0.push(p.0.clone());
     }
@@ -359,6 +509,7 @@ pub fn split_active_pane(
     mut snapshot: ResMut<SessionLayoutSnapshot>,
     pane_last: Query<&PaneLastUrl>,
     webview_src: Query<&WebviewSource>,
+    history_panes: Query<Entity, (With<WebviewPane>, With<History>)>,
     path: Option<Res<SessionSavePath>>,
     mut session_queue: ResMut<SessionSaveQueue>,
     settings: Res<VmuxAppSettings>,
@@ -384,7 +535,7 @@ pub fn split_active_pane(
         return;
     };
 
-    let url = settings.default_webview_url.as_str();
+    let url = settings.browser.default_webview_url.as_str();
     try_split_active_pane(
         &mut commands,
         &mut tree,
@@ -396,6 +547,7 @@ pub fn split_active_pane(
         &mut snapshot,
         &pane_last,
         &webview_src,
+        &history_panes,
         path.as_ref(),
         &mut session_queue,
         url,

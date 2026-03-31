@@ -6,15 +6,16 @@ use bevy_cef::prelude::*;
 use leafwing_input_manager::prelude::*;
 use vmux_core::{SessionSavePath, SessionSaveQueue};
 use vmux_layout::{
-    layout_viewport_for_workspace, layout_workspace_pane_rects, try_cycle_pane_focus,
-    try_kill_active_pane, try_mirror_pane_layout, try_rotate_window, try_select_pane_direction,
-    try_split_active_pane, try_swap_active_pane, try_toggle_zoom_pane, Active, LayoutAxis,
-    LayoutTree, LoadingBarMaterial, Pane, PaneChromeLoadingBar, PaneChromeOwner, PaneChromeStrip,
-    PaneFocusIncoming, PaneLastUrl, PaneSwapDir, Root, SessionLayoutSnapshot, VmuxWorldCamera,
+    Active, History, LayoutAxis, LayoutTree, LoadingBarMaterial, Pane, WebviewPane,
+    PaneChromeLoadingBar, PaneChromeOwner, PaneChromeStrip, PaneFocusIncoming, PaneLastUrl,
+    PaneSwapDir, Root, SessionLayoutSnapshot, VmuxWorldCamera, layout_viewport_for_workspace,
+    layout_workspace_pane_rects, try_cycle_pane_focus, try_kill_active_pane,
+    try_mirror_pane_layout, try_rotate_window, try_select_pane_direction, try_split_active_pane,
+    try_swap_active_pane, try_toggle_zoom_pane,
 };
 use vmux_settings::VmuxAppSettings;
 
-use crate::component::{AppAction, AppInputRoot, VmuxPrefixState, PREFIX_TIMEOUT_SECS};
+use crate::component::{AppAction, AppInputRoot, PREFIX_TIMEOUT_SECS, VmuxPrefixState};
 
 /// Asset stores used when spawning panes from tmux chord handlers (keeps system param count low).
 #[derive(SystemParam)]
@@ -52,6 +53,26 @@ pub(crate) fn spawn_app_input(mut commands: Commands) {
         AppAction::ToggleCommandPalette,
         ButtonlikeChord::modified(ModifierKey::Control, KeyCode::KeyT),
     );
+    #[cfg(target_os = "macos")]
+    input_map.insert(
+        AppAction::FocusCommandPaletteUrl,
+        ButtonlikeChord::modified(ModifierKey::Super, KeyCode::KeyL),
+    );
+    #[cfg(not(target_os = "macos"))]
+    input_map.insert(
+        AppAction::FocusCommandPaletteUrl,
+        ButtonlikeChord::modified(ModifierKey::Control, KeyCode::KeyL),
+    );
+    #[cfg(target_os = "macos")]
+    input_map.insert(
+        AppAction::ToggleHistory,
+        ButtonlikeChord::modified(ModifierKey::Super, KeyCode::KeyY),
+    );
+    #[cfg(not(target_os = "macos"))]
+    input_map.insert(
+        AppAction::ToggleHistory,
+        ButtonlikeChord::new([ModifierKey::Control, ModifierKey::Shift, KeyCode::KeyH]),
+    );
     commands.spawn((
         AppInputRoot,
         VmuxPrefixState::default(),
@@ -82,8 +103,11 @@ pub fn tmux_prefix_commands(
     active: Query<Entity, (With<Pane>, With<Active>)>,
     mut spawn_assets: PaneSpawnAssets,
     mut snapshot: ResMut<SessionLayoutSnapshot>,
-    pane_last: Query<&PaneLastUrl>,
-    webview_src: Query<&WebviewSource>,
+    (pane_last, webview_src, history_panes): (
+        Query<&PaneLastUrl>,
+        Query<&WebviewSource>,
+        Query<Entity, (With<WebviewPane>, With<History>)>,
+    ),
     chrome_or_border_q: Query<
         (Entity, &PaneChromeOwner),
         Or<(With<PaneChromeStrip>, With<PaneChromeLoadingBar>)>,
@@ -98,7 +122,7 @@ pub fn tmux_prefix_commands(
     let Ok(mut prefix) = prefix_q.single_mut() else {
         return;
     };
-    let default_url = settings.default_webview_url.as_str();
+    let default_url = settings.browser.default_webview_url.as_str();
 
     let keys = &input.keys;
     let time = &input.time;
@@ -141,6 +165,7 @@ pub fn tmux_prefix_commands(
             &mut snapshot,
             &pane_last,
             &webview_src,
+            &history_panes,
             path.as_ref(),
             &mut session_queue,
             default_url,
@@ -167,6 +192,7 @@ pub fn tmux_prefix_commands(
             &mut snapshot,
             &pane_last,
             &webview_src,
+            &history_panes,
             path.as_ref(),
             &mut session_queue,
             default_url,
@@ -224,6 +250,7 @@ pub fn tmux_prefix_commands(
                 &mut snapshot,
                 &pane_last,
                 &webview_src,
+                &history_panes,
                 path.as_ref(),
                 &mut session_queue,
                 default_url,
@@ -262,6 +289,7 @@ pub fn tmux_prefix_commands(
             &mut snapshot,
             &pane_last,
             &webview_src,
+            &history_panes,
             path.as_ref(),
             &mut session_queue,
             default_url,
@@ -286,6 +314,7 @@ pub fn tmux_prefix_commands(
             &mut snapshot,
             &pane_last,
             &webview_src,
+            &history_panes,
             path.as_ref(),
             &mut session_queue,
             default_url,
@@ -308,6 +337,7 @@ pub fn tmux_prefix_commands(
             &mut snapshot,
             &pane_last,
             &webview_src,
+            &history_panes,
             path.as_ref(),
             &mut session_queue,
             default_url,
@@ -332,6 +362,7 @@ pub fn tmux_prefix_commands(
             &mut snapshot,
             &pane_last,
             &webview_src,
+            &history_panes,
             path.as_ref(),
             &mut session_queue,
             default_url,
@@ -357,10 +388,72 @@ pub fn tmux_prefix_commands(
             &mut snapshot,
             &pane_last,
             &webview_src,
+            &history_panes,
             &chrome_or_border_q,
             path.as_ref(),
             &mut session_queue,
             default_url,
         );
     }
+}
+
+/// Direct pane focus movement with Ctrl+Arrow (without tmux prefix).
+#[allow(clippy::too_many_arguments)]
+pub fn ctrl_arrow_focus_commands(
+    keys: Res<ButtonInput<KeyCode>>,
+    prefix_q: Query<&VmuxPrefixState, With<AppInputRoot>>,
+    mut commands: Commands,
+    mut layout_q: Query<&mut LayoutTree, With<Root>>,
+    active: Query<Entity, (With<Pane>, With<Active>)>,
+    settings: Res<VmuxAppSettings>,
+    pane_focus_incoming: Res<PaneFocusIncoming>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    camera: Query<&Camera, With<VmuxWorldCamera>>,
+    panes: Query<Entity, With<Pane>>,
+) {
+    let Ok(prefix) = prefix_q.single() else {
+        return;
+    };
+    if prefix.awaiting {
+        return;
+    }
+
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    if !ctrl {
+        return;
+    }
+
+    let arrow_dir = if keys.just_pressed(KeyCode::ArrowLeft) {
+        Some(PaneSwapDir::Left)
+    } else if keys.just_pressed(KeyCode::ArrowRight) {
+        Some(PaneSwapDir::Right)
+    } else if keys.just_pressed(KeyCode::ArrowUp) {
+        Some(PaneSwapDir::Up)
+    } else if keys.just_pressed(KeyCode::ArrowDown) {
+        Some(PaneSwapDir::Down)
+    } else {
+        None
+    };
+    let Some(dir) = arrow_dir else {
+        return;
+    };
+
+    let Ok(window) = window.single() else {
+        return;
+    };
+    let Ok(camera) = camera.single() else {
+        return;
+    };
+    let Some((vw, vh)) = layout_viewport_for_workspace(window, camera) else {
+        return;
+    };
+    let Ok(mut tree) = layout_q.single_mut() else {
+        return;
+    };
+    let Ok(active_ent) = active.single() else {
+        return;
+    };
+    let rects = layout_workspace_pane_rects(vw, vh, &tree, &settings, |e| panes.get(e).is_ok());
+    let prefer = pane_focus_incoming.0.get(&active_ent).copied();
+    try_select_pane_direction(&mut commands, &mut tree, active_ent, dir, &rects, prefer);
 }

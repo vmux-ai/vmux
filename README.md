@@ -12,6 +12,8 @@ Cargo [workspace](https://doc.rust-lang.org/cargo/reference/workspaces.html) (si
 
 ### Development
 
+**Dioxus web UIs** (`vmux_status_bar`, `vmux_history`): native builds run each crate’s `build.rs`. You need the **`wasm-bindgen` CLI** (see those crates’ READMEs / `Cargo.lock`), e.g. `cargo install wasm-bindgen-cli --version 0.2.115 --locked`. Optional: `VMUX_HISTORY_USE_DX=1` uses the **`dx`** binary for history only.
+
 See [Makefile](Makefile) for more targets.
 
 ```sh

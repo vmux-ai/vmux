@@ -1,6 +1,6 @@
 [application]
-name = "vmux_status_bar"
+name = "vmux_history"
 default_platform = "web"
 
 [web.app]
-title = "vmux status"
+title = "vmux history"

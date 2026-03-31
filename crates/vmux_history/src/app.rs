@@ -1,0 +1,571 @@
+//! History list UI (grouped by day, search, open in active pane).
+
+use crate::cef::{
+    emit_clear_history, emit_open_in_pane, random_history_sync_nonce,
+    request_history_sync_from_host, run_history_bridge_loop, try_install_cef_history_listener,
+};
+use crate::payload::HistoryEntryWire;
+
+use dioxus::prelude::*;
+
+use futures_channel::mpsc::unbounded;
+use std::net::IpAddr;
+use wasm_bindgen::JsValue;
+use web_sys::window;
+
+const MS_PER_DAY: i64 = 86400_000;
+
+// Tailwind-only layout (see `assets/input.css` for base html/body only).
+const TW_ROOT: &str = "flex h-full min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,#16171c_0%,#0e0f12_48%,#0c0d10_100%)]";
+const TW_HEADER: &str = "sticky top-0 z-20 shrink-0 border-b border-white/[0.06] bg-[linear-gradient(180deg,#16171c_0%,#15161b_72%,#141518_100%)] px-4 pb-3 pt-4";
+const TW_CLEAR_BTN: &str = "shrink-0 cursor-pointer rounded-lg border border-red-400/35 bg-red-400/[0.08] px-[0.65rem] py-[0.35rem] text-[11px] font-medium text-red-300/95 transition-colors duration-150 hover:border-red-400/55 hover:bg-red-400/[0.14] hover:text-red-200 disabled:cursor-not-allowed disabled:border-white/[0.08] disabled:bg-white/[0.03] disabled:text-white/25 disabled:opacity-[0.35]";
+const TW_SEARCH: &str = "w-full rounded-xl border border-white/[0.08] bg-white/[0.04] py-[0.65rem] pl-9 pr-3 text-[13px] text-white/90 shadow-[inset_0_1px_2px_rgba(0,0,0,0.2)] outline-none placeholder:text-white/35 focus:border-sky-400/35 focus:bg-white/[0.06]";
+const TW_ROW_BTN: &str = "group m-0 flex w-full max-w-full min-w-0 cursor-pointer appearance-none flex-col items-stretch gap-[0.35rem] rounded-xl border border-white/[0.06] bg-white/[0.03] py-[0.65rem] px-3 text-left font-inherit text-inherit shadow-[0_1px_3px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:border-sky-400/28 hover:bg-sky-400/[0.07]";
+const TW_FAVICON: &str = "mt-px h-[18px] w-[18px] shrink-0 rounded object-contain border border-white/[0.08] bg-white/[0.06] transition-colors duration-150 group-hover:border-sky-400/25 group-hover:bg-sky-400/[0.08]";
+const TW_LOAD_MORE: &str = "mt-1.5 block w-full cursor-pointer rounded-[10px] border border-white/12 bg-white/[0.05] py-2 px-3 text-center text-xs text-white/78 transition-colors duration-150 hover:border-sky-400/35 hover:bg-sky-400/10 hover:text-white/90";
+const TW_STREAM_HINT: &str = "mt-2 text-center text-[10px] text-white/30";
+const TW_LOADING_BOX: &str = "flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center";
+const TW_LOADING_TRACK: &str = "h-1 w-36 overflow-hidden rounded-full bg-white/[0.08]";
+const TW_LOADING_PULSE: &str = "h-full w-2/5 rounded-full bg-sky-400/35 animate-pulse";
+
+/// First paint shows this many rows; avoids mounting hundreds of DOM nodes at once (faster CEF composite).
+const INITIAL_VISIBLE_ROWS: usize = 48;
+const LOAD_MORE_ROWS: usize = 72;
+
+fn day_label(now_ms: i64, entry_ms: i64) -> &'static str {
+    let age = (now_ms - entry_ms).max(0) / MS_PER_DAY;
+    if age < 1 {
+        "Today"
+    } else if age < 2 {
+        "Yesterday"
+    } else {
+        "Older"
+    }
+}
+
+/// Local date + time (medium date, short time), e.g. `Mar 30, 2026, 3:45 PM`.
+fn format_visit_stamp(ms: i64) -> String {
+    if ms <= 0 {
+        return String::new();
+    }
+    let d = js_sys::Date::new(&JsValue::from_f64(ms as f64));
+    let opts = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &opts,
+        &JsValue::from_str("dateStyle"),
+        &JsValue::from_str("medium"),
+    );
+    let _ = js_sys::Reflect::set(
+        &opts,
+        &JsValue::from_str("timeStyle"),
+        &JsValue::from_str("short"),
+    );
+    d.to_locale_string("en-US", &opts.into())
+        .as_string()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "—".to_string())
+}
+
+fn visit_stamp_display(ms: i64) -> String {
+    let s = format_visit_stamp(ms);
+    if s.is_empty() {
+        "No visit time recorded".to_string()
+    } else {
+        s
+    }
+}
+
+fn visit_title_tooltip(ms: i64, url: &str) -> String {
+    if ms <= 0 {
+        return url.to_string();
+    }
+    let d = js_sys::Date::new(&JsValue::from_f64(ms as f64));
+    let iso = d.to_iso_string();
+    let iso = iso.as_string().unwrap_or_default();
+    if iso.is_empty() {
+        url.to_string()
+    } else {
+        format!("{iso} — {url}")
+    }
+}
+
+fn row_tooltip(
+    visit_ms: i64,
+    url: &str,
+    favicon_cached_at_ms: Option<i64>,
+) -> String {
+    let mut t = visit_title_tooltip(visit_ms, url);
+    if let Some(fc) = favicon_cached_at_ms.filter(|&x| x > 0) {
+        let d = js_sys::Date::new(&JsValue::from_f64(fc as f64));
+        if let Some(iso) = d.to_iso_string().as_string() {
+            if !iso.is_empty() {
+                t.push_str("\nFavicon cached: ");
+                t.push_str(&iso);
+            }
+        }
+    }
+    t
+}
+
+fn confirm_clear_history() -> bool {
+    let Some(w) = window() else {
+        return false;
+    };
+    w.confirm_with_message("Clear all history? This cannot be undone.")
+        .unwrap_or(false)
+}
+
+/// Same host rules as `vmux_core::favicon_url_for_page_url` (this crate’s WASM build does not link `vmux_core`).
+fn page_host_for_favicon_url(url: &str) -> Option<String> {
+    let t = url.trim();
+    if t.is_empty() || t.starts_with("data:") || t.starts_with("about:") {
+        return None;
+    }
+    let rest = t
+        .strip_prefix("https://")
+        .or_else(|| t.strip_prefix("http://"))
+        .unwrap_or("");
+    let host_end = rest.find('/').unwrap_or(rest.len());
+    let host = rest[..host_end].rsplit('@').next().unwrap_or("").trim();
+    if host.is_empty() {
+        return None;
+    }
+    let host = if let Some(inner) = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
+        inner
+    } else {
+        host
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return None;
+    }
+    if host.parse::<IpAddr>().is_ok() {
+        return None;
+    }
+    Some(host.to_ascii_lowercase())
+}
+
+fn favicon_url_for_page_url(url: &str) -> Option<String> {
+    let host = page_host_for_favicon_url(url)?;
+    Some(format!(
+        "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://{host}/&size=32"
+    ))
+}
+
+fn url_display_parts(url: &str) -> (String, String) {
+    let u = url.trim();
+    if let Some(rest) = u
+        .strip_prefix("https://")
+        .or_else(|| u.strip_prefix("http://"))
+    {
+        if let Some((host, path)) = rest.split_once('/') {
+            (host.to_string(), format!("/{}", path))
+        } else {
+            (rest.to_string(), "/".to_string())
+        }
+    } else {
+        (u.to_string(), String::new())
+    }
+}
+
+/// Case-insensitive substring match for URLs without allocating a lowercased copy of `url`
+/// (hot path when the filter is non-empty and the list is large). Non-ASCII needles fall back
+/// to full Unicode lowercasing.
+fn url_matches_filter(url: &str, needle_lower: &str) -> bool {
+    if needle_lower.is_empty() {
+        return true;
+    }
+    if !needle_lower.is_ascii() {
+        return url.to_lowercase().contains(needle_lower);
+    }
+    let n = needle_lower.as_bytes();
+    let hay = url.as_bytes();
+    if n.len() > hay.len() {
+        return false;
+    }
+    hay.windows(n.len()).any(|w| {
+        w.iter()
+            .zip(n.iter())
+            .all(|(a, b)| a.to_ascii_lowercase() == *b)
+    })
+}
+
+/// Filter + day grouping by index (no cloning of [`HistoryEntryWire`] — can be thousands of URLs).
+fn filter_and_group_by_day_indices(
+    now_ms: i64,
+    entries: &[HistoryEntryWire],
+    needle_lower: &str,
+) -> Vec<(&'static str, Vec<usize>)> {
+    let mut out: Vec<(&'static str, Vec<usize>)> = Vec::new();
+    for (i, entry) in entries.iter().enumerate() {
+        if !url_matches_filter(&entry.url, needle_lower) {
+            continue;
+        }
+        let label = day_label(now_ms, entry.visited_at_ms);
+        match out.last_mut() {
+            Some((l, rows)) if *l == label => rows.push(i),
+            _ => out.push((label, vec![i])),
+        }
+    }
+    out
+}
+
+#[derive(Clone, PartialEq)]
+struct HistoryRowModel {
+    /// Stable key for list reconciliation (`url` + `visited_at` can repeat).
+    row_key: String,
+    url: String,
+    stamp: String,
+    title: String,
+    host: String,
+    path: String,
+    favicon_url: Option<String>,
+    favicon_cached_at_ms: Option<i64>,
+}
+
+fn build_row_model(entry: &HistoryEntryWire, stable_index: usize) -> HistoryRowModel {
+    let (host, path) = url_display_parts(&entry.url);
+    let favicon_url = entry
+        .favicon_url
+        .clone()
+        .or_else(|| favicon_url_for_page_url(&entry.url));
+    HistoryRowModel {
+        row_key: format!("h{stable_index}"),
+        url: entry.url.clone(),
+        stamp: visit_stamp_display(entry.visited_at_ms),
+        title: row_tooltip(
+            entry.visited_at_ms,
+            &entry.url,
+            entry.favicon_cached_at_ms,
+        ),
+        host,
+        path,
+        favicon_url,
+        favicon_cached_at_ms: entry.favicon_cached_at_ms,
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct PreparedRaw {
+    grouped: Vec<(&'static str, Vec<usize>)>,
+    total_rows: usize,
+}
+
+/// Filter + day grouping only (indices only). Row strings are built only for the visible slice.
+fn prepare_history_raw(entries: &[HistoryEntryWire], filter_trimmed: &str) -> PreparedRaw {
+    let now_ms = js_sys::Date::now() as i64;
+    let q = filter_trimmed.to_lowercase();
+    let grouped = filter_and_group_by_day_indices(now_ms, entries, &q);
+    let total_rows: usize = grouped.iter().map(|(_, r)| r.len()).sum();
+    PreparedRaw { grouped, total_rows }
+}
+
+fn truncate_and_materialize(
+    entries: &[HistoryEntryWire],
+    grouped: &[(&'static str, Vec<usize>)],
+    limit: usize,
+) -> Vec<(&'static str, Vec<HistoryRowModel>)> {
+    let mut out = Vec::new();
+    let mut count = 0usize;
+    for &(heading, ref row_indices) in grouped {
+        if count >= limit {
+            break;
+        }
+        let mut chunk: Vec<HistoryRowModel> = Vec::new();
+        for &idx in row_indices {
+            if count >= limit {
+                break;
+            }
+            let Some(entry) = entries.get(idx) else {
+                continue;
+            };
+            chunk.push(build_row_model(entry, count));
+            count += 1;
+        }
+        if !chunk.is_empty() {
+            out.push((heading, chunk));
+        }
+    }
+    out
+}
+
+#[component]
+fn HistoryRow(model: HistoryRowModel) -> Element {
+    let HistoryRowModel {
+        url,
+        stamp,
+        title,
+        host,
+        path,
+        favicon_url,
+        favicon_cached_at_ms: _,
+        ..
+    } = model;
+    rsx! {
+        button {
+            class: "{TW_ROW_BTN}",
+            role: "listitem",
+            r#type: "button",
+            title: "{title}",
+            onclick: move |_| emit_open_in_pane(&url),
+            div { class: "flex w-full min-w-0 items-start justify-between gap-x-3 gap-y-2",
+                div { class: "flex min-w-0 flex-1 items-start gap-2",
+                    if let Some(src) = favicon_url {
+                        img {
+                            class: "{TW_FAVICON}",
+                            src: "{src}",
+                            alt: "",
+                            loading: "lazy",
+                            decoding: "async",
+                        }
+                    } else {
+                        div { class: "{TW_FAVICON}" }
+                    }
+                    div { class: "min-w-0 flex-1",
+                        div { class: "truncate text-[13px] font-medium text-sky-300/95 group-hover:text-sky-200", "{host}" }
+                        if !path.is_empty() {
+                            div { class: "truncate font-mono text-[11px] text-white/45 group-hover:text-white/55", "{path}" }
+                        }
+                    }
+                }
+                div { class: "max-w-[42%] shrink-0 truncate text-right text-[10px] tabular-nums leading-snug text-white/48 whitespace-nowrap group-hover:text-white/62", "{stamp}" }
+            }
+            div { class: "min-w-0 w-full truncate font-mono text-[10px] leading-snug text-white/26 group-hover:text-white/34", "{url}" }
+        }
+    }
+}
+
+#[component]
+pub fn App() -> Element {
+    let mut entries = use_signal(Vec::<HistoryEntryWire>::new);
+    let mut bridge_sync_pending = use_signal(|| None::<u32>);
+    let mut cef_listener_ready = use_signal(|| false);
+    let mut host_snapshot_received = use_signal(|| false);
+    // `false` while the host is still appending older rows after the first IPC chunk.
+    let mut history_stream_complete = use_signal(|| true);
+    let mut filter = use_signal(String::new);
+    let mut visible_limit = use_signal(|| INITIAL_VISIBLE_ROWS);
+
+    // `use_hook`: run once per mount. `use_effect` would resubscribe when captured signals change
+    // and could orphan the CEF listener + channel (see `try_install_cef_history_listener`).
+    use_hook(move || {
+        let (tx, rx) = unbounded();
+        spawn(async move {
+            // Poll quickly: `cef` appears soon after navigation; 32ms×120 was ~4s worst-case
+            // before we even asked the host for history.
+            let mut rx = Some(rx);
+            for attempt in 0..200 {
+                if try_install_cef_history_listener(tx.clone()) {
+                    let nonce = random_history_sync_nonce();
+                    bridge_sync_pending.set(Some(nonce));
+                    cef_listener_ready.set(true);
+                    request_history_sync_from_host(Some(nonce));
+                    // Resync timers must not block `run_history_bridge_loop`: pending only clears when
+                    // `rx` is drained; a prior sequential loop delayed the UI by up to ~2.4s.
+                    let mut pending_sig = bridge_sync_pending;
+                    let mut host_snap_sig = host_snapshot_received;
+                    spawn(async move {
+                        for ms in [16u32, 48, 120] {
+                            gloo_timers::future::TimeoutFuture::new(ms).await;
+                            request_history_sync_from_host(Some(nonce));
+                        }
+                        for _ in 0..12 {
+                            if pending_sig.peek().is_none() {
+                                break;
+                            }
+                            gloo_timers::future::TimeoutFuture::new(200).await;
+                            if pending_sig.peek().is_none() {
+                                break;
+                            }
+                            request_history_sync_from_host(*pending_sig.peek());
+                        }
+                        // Short final wait before showing empty (avoids long spinner if IPC is wedged).
+                        if pending_sig.peek().is_some() {
+                            gloo_timers::future::TimeoutFuture::new(400).await;
+                        }
+                        if pending_sig.peek().is_some() {
+                            host_snap_sig.set(true);
+                            pending_sig.set(None);
+                        }
+                    });
+                    let rx = rx.take().expect("rx available once listener installs");
+                    run_history_bridge_loop(
+                        rx,
+                        entries,
+                        bridge_sync_pending,
+                        host_snapshot_received,
+                        history_stream_complete,
+                    )
+                    .await;
+                    return;
+                }
+                // Tight early polling so we register `cef.listen` and emit `vmux_request_history`
+                // soon after CEF injects `window.cef` (was 8ms×80 ≈ 640ms before first batch).
+                let delay = if attempt < 60 {
+                    0
+                } else if attempt < 160 {
+                    4
+                } else {
+                    20
+                };
+                gloo_timers::future::TimeoutFuture::new(delay).await;
+            }
+            cef_listener_ready.set(true);
+            host_snapshot_received.set(true);
+            if let Some(rx) = rx {
+                run_history_bridge_loop(
+                    rx,
+                    entries,
+                    bridge_sync_pending,
+                    host_snapshot_received,
+                    history_stream_complete,
+                )
+                .await;
+            }
+        });
+    });
+
+    use_effect(move || {
+        let _ = filter();
+        visible_limit.set(INITIAL_VISIBLE_ROWS);
+    });
+
+    let prepared = use_memo(move || {
+        let list = entries();
+        prepare_history_raw(&list, filter().trim())
+    });
+    let visible_grouped = use_memo(move || {
+        let list = entries();
+        let p = prepared.read();
+        truncate_and_materialize(&list, &p.grouped, visible_limit())
+    });
+
+    let total_rows = prepared.read().total_rows;
+    let limit = visible_limit();
+    let has_more = total_rows > limit;
+    let next_batch = LOAD_MORE_ROWS.min(total_rows.saturating_sub(limit));
+    let grouped_for_view = visible_grouped.read();
+    let filter_trimmed = filter().trim().to_string();
+    let chrome_loading = !cef_listener_ready();
+    let list_loading = cef_listener_ready() && !host_snapshot_received();
+
+    rsx! {
+        div {
+            id: "root",
+            class: "{TW_ROOT}",
+            if chrome_loading {
+                div {
+                    class: "flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center px-4 py-10",
+                    div {
+                        class: "{TW_LOADING_BOX}",
+                        aria_busy: "true",
+                        aria_label: "Starting history UI",
+                        span { class: "text-[13px] text-white/55", "Starting…" }
+                        div { class: "{TW_LOADING_TRACK}",
+                            div { class: "{TW_LOADING_PULSE}" }
+                        }
+                        span { class: "text-[11px] text-white/28", "Connecting to the host" }
+                    }
+                }
+            } else {
+                div {
+                    class: "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+                    header {
+                        class: "{TW_HEADER}",
+                        div { class: "flex flex-wrap items-start justify-between gap-3",
+                            div { class: "min-w-0 flex-[1_1_12rem]",
+                                h1 { class: "m-0 text-[13px] font-semibold tracking-[-0.02em] text-white/95", "History" }
+                                p { class: "mb-0 mt-0.5 text-[11px] text-white/38", "Recent visits · click to open in this pane" }
+                            }
+                            button {
+                                class: "{TW_CLEAR_BTN}",
+                                r#type: "button",
+                                disabled: entries().is_empty() || list_loading,
+                                onclick: move |_| {
+                                    if !confirm_clear_history() {
+                                        return;
+                                    }
+                                    emit_clear_history();
+                                    entries.set(Vec::new());
+                                    history_stream_complete.set(true);
+                                },
+                                "Clear history"
+                            }
+                        }
+                        div { class: "relative mt-3",
+                            input {
+                                id: "search",
+                                class: "{TW_SEARCH}",
+                                r#type: "text",
+                                placeholder: "Filter by URL…",
+                                value: filter,
+                                oninput: move |ev: Event<FormData>| {
+                                    filter.set(ev.value());
+                                },
+                            }
+                            span { class: "pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-white/28", "⌕" }
+                        }
+                    }
+                    div {
+                        id: "hm-list",
+                        class: "min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 pb-5 pt-1",
+                        role: "list",
+                        if list_loading {
+                            div {
+                                class: "{TW_LOADING_BOX}",
+                                aria_busy: "true",
+                                aria_label: "Loading history",
+                                span { class: "text-[13px] text-white/55", "Loading visits…" }
+                                div { class: "{TW_LOADING_TRACK}",
+                                    div { class: "{TW_LOADING_PULSE}" }
+                                }
+                                span { class: "text-[11px] text-white/28", "Fetching list from the host" }
+                            }
+                        } else if grouped_for_view.is_empty() {
+                            if filter_trimmed.is_empty() {
+                                div { class: "flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center",
+                                    span { class: "text-[13px] text-white/50", "No history yet." }
+                                    span { class: "text-[11px] text-white/28", "Browse in another pane to build history." }
+                                }
+                            } else {
+                                div { class: "flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center",
+                                    span { class: "text-[13px] text-white/50", "No entries match your filter." }
+                                    span { class: "text-[11px] text-white/28", "Try a shorter or different URL fragment." }
+                                }
+                            }
+                        } else {
+                            for (gi, (heading, rows)) in grouped_for_view.iter().cloned().enumerate() {
+                                section {
+                                    key: "g{gi}",
+                                    class: "mb-[1.1rem] min-w-0 last:mb-0",
+                                    div { class: "sticky top-0 z-10 mb-1.5 flex items-center gap-2 bg-[linear-gradient(180deg,rgba(14,15,18,0.97)_60%,transparent)] px-1 pb-0 pt-2",
+                                        span { class: "text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35", "{heading}" }
+                                        span { class: "h-px flex-1 bg-gradient-to-r from-white/12 to-transparent" }
+                                    }
+                                    div { class: "flex min-w-0 flex-col gap-2",
+                                        for model in rows {
+                                            HistoryRow { key: "{model.row_key}", model }
+                                        }
+                                    }
+                                }
+                            }
+                            if has_more {
+                                button {
+                                    class: "{TW_LOAD_MORE}",
+                                    r#type: "button",
+                                    onclick: move |_| {
+                                        visible_limit
+                                            .set((visible_limit() + LOAD_MORE_ROWS).min(total_rows));
+                                    },
+                                    "Show more ({next_batch})"
+                                }
+                            }
+                            if !history_stream_complete() && !entries().is_empty() {
+                                div { class: "{TW_STREAM_HINT}", "Loading older visits…" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

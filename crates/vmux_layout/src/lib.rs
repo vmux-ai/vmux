@@ -8,6 +8,7 @@ mod loading_bar;
 mod pane_layout;
 mod pane_lifecycle;
 mod pane_ops;
+mod pane_pointer_focus;
 mod pane_spawn;
 pub mod tmux;
 mod url;
@@ -20,12 +21,12 @@ use bevy_cef::prelude::render_standard_materials;
 use serde::{Deserialize, Serialize};
 use vmux_core::VmuxPrefixChordSet;
 
-pub use loading_bar::{
-    LoadingBarMaterial, LOADING_BAR_ANIM_TIME_SCALE, LOADING_BAR_DEPTH_BIAS_ABOVE_PANE,
-    LOADING_BAR_HEIGHT_PX, PaneChromeLoadingBar,
-    PendingNavigationLoads,
-};
 pub use hosted_web_ui::{VmuxHostedWebPlugin, VmuxWebviewSurface};
+pub use loading_bar::{
+    LOADING_BAR_ANIM_TIME_SCALE, LOADING_BAR_DEPTH_BIAS_ABOVE_CHROME, LOADING_BAR_HEIGHT_PX,
+    LoadingBarMaterial, PaneChromeLoadingBar, PendingNavigationLoads,
+};
+pub use loading_bar::color as loading_bar_color;
 pub use pane_layout::{
     CHROME_BORDER_OUTSET_PX, PANE_Z_STRIDE, apply_pane_chrome_layout, apply_pane_layout,
     apply_pane_loading_bar_layout, clamp_webview_backing_size, layout_viewport_for_workspace,
@@ -35,13 +36,17 @@ pub use pane_layout::{
 pub use pane_ops::{
     cycle_pane_focus, rebuild_session_snapshot, split_active_pane, try_cycle_pane_focus,
     try_kill_active_pane, try_mirror_pane_layout, try_rotate_window, try_select_pane_direction,
-    try_split_active_pane, try_swap_active_pane, try_toggle_zoom_pane,
+    try_split_active_history_existing_pane, try_split_active_history_pane, try_split_active_pane, try_swap_active_pane,
+    try_toggle_zoom_pane,
 };
 pub use pane_spawn::{
     CEF_PAGE_ZOOM_LEVEL, TEXT_INPUT_EMACS_BINDINGS_PRELOAD, URL_TRACK_PRELOAD, VmuxWebview,
-    setup_vmux_panes, spawn_pane, spawn_saved_recursive,
+    setup_vmux_panes, spawn_history_pane, spawn_pane, spawn_saved_recursive,
 };
-pub use url::{allowed_navigation_url, initial_webview_url, sanitize_embedded_webview_url};
+pub use url::{
+    allowed_navigation_url, initial_webview_url, legacy_loopback_embedded_history_ui_url,
+    sanitize_embedded_webview_url,
+};
 pub use vmux_core::Active;
 pub use vmux_settings::{VmuxAppSettings, default_webview_url};
 
@@ -73,6 +78,25 @@ pub struct PaneChromeOwner(pub Entity);
 #[derive(Component, Default, Debug, Clone, Copy, Reflect)]
 #[reflect(Component, Default)]
 pub struct PaneChromeNeedsUrl;
+
+/// Main tiled CEF webview (content plane). Every leaf webview has this with [`Pane`] and [`VmuxWebview`].
+#[derive(Component, Default, Debug, Clone, Copy, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewPane;
+
+/// History overlay leaf: same entity as a normal pane webview, plus this marker ([`VmuxWebviewSurface::HistoryOverlay`]).
+#[derive(Component, Default, Debug, Clone, Copy, Reflect)]
+#[reflect(Component, Default)]
+pub struct History;
+
+/// Set until the history UI base URL is applied from the embedded server or env.
+#[derive(Component, Default, Debug, Clone, Copy, Reflect)]
+#[reflect(Component, Default)]
+pub struct HistoryPaneNeedsUrl;
+
+/// Wall time when the history pane leaf was spawned (used to log host→pane emit latency).
+#[derive(Component)]
+pub struct HistoryPaneOpenedAt(pub std::time::Instant);
 
 /// Default height in **layout pixels** of the [`PaneChromeStrip`] overlay at the bottom of each pane tile.
 /// Sized for the ~11px status bar (`vmux_status_bar`) with a little padding.
@@ -418,12 +442,127 @@ pub enum SavedLayoutNode {
     },
     Leaf {
         url: String,
+        /// When true, restore with [`spawn_history_pane`](crate::spawn_history_pane) so the embedded
+        /// UI picks up a fresh loopback base URL after restart.
+        #[serde(default)]
+        history_pane: bool,
     },
+}
+
+/// Per-leaf metadata when building [`SavedLayoutNode`] from the live layout tree.
+#[derive(Debug, Clone)]
+pub struct SavedSessionLeaf {
+    pub url: String,
+    pub history_pane: bool,
 }
 
 impl SavedLayoutNode {
     pub fn leaf_url(url: impl Into<String>) -> Self {
-        SavedLayoutNode::Leaf { url: url.into() }
+        SavedLayoutNode::Leaf {
+            url: url.into(),
+            history_pane: false,
+        }
+    }
+}
+
+fn leaf_looks_like_restored_history_placeholder(url: &str, default_url: &str) -> bool {
+    let u = url.trim();
+    u.is_empty()
+        || u.eq_ignore_ascii_case("about:blank")
+        || legacy_loopback_embedded_history_ui_url(u)
+        || u.to_ascii_lowercase().starts_with("data:text/html")
+        || u.eq_ignore_ascii_case(default_url.trim())
+}
+
+fn leaf_is_other_live_browsing_url(url: &str, default_url: &str) -> bool {
+    let u = url.trim();
+    !u.is_empty()
+        && allowed_navigation_url(u)
+        && !u.eq_ignore_ascii_case(default_url.trim())
+}
+
+/// Older session writes stored the history slot as [`vmux_settings::VmuxBrowserSettings::default_webview_url`] with
+/// `history_pane: false` (history URLs are not [`allowed_navigation_url`]). Re-label that leaf on restore.
+fn fix_mislabeled_history_panes(node: SavedLayoutNode, default_url: &str) -> SavedLayoutNode {
+    match node {
+        SavedLayoutNode::Split {
+            axis,
+            ratio,
+            left,
+            right,
+        } => {
+            let left = fix_mislabeled_history_panes(*left, default_url);
+            let right = fix_mislabeled_history_panes(*right, default_url);
+            if let (
+                SavedLayoutNode::Leaf {
+                    url: u1,
+                    history_pane: h1,
+                },
+                SavedLayoutNode::Leaf {
+                    url: u2,
+                    history_pane: h2,
+                },
+            ) = (&left, &right)
+            {
+                if !*h1 && !*h2 {
+                    if legacy_loopback_embedded_history_ui_url(u1.as_str()) {
+                        return SavedLayoutNode::Split {
+                            axis,
+                            ratio,
+                            left: Box::new(SavedLayoutNode::Leaf {
+                                url: String::new(),
+                                history_pane: true,
+                            }),
+                            right: Box::new(right),
+                        };
+                    }
+                    if legacy_loopback_embedded_history_ui_url(u2.as_str()) {
+                        return SavedLayoutNode::Split {
+                            axis,
+                            ratio,
+                            left: Box::new(left),
+                            right: Box::new(SavedLayoutNode::Leaf {
+                                url: String::new(),
+                                history_pane: true,
+                            }),
+                        };
+                    }
+                    let p1 = leaf_looks_like_restored_history_placeholder(u1, default_url);
+                    let p2 = leaf_looks_like_restored_history_placeholder(u2, default_url);
+                    let r1 = leaf_is_other_live_browsing_url(u1, default_url);
+                    let r2 = leaf_is_other_live_browsing_url(u2, default_url);
+                    if p1 && r2 && !p2 {
+                        return SavedLayoutNode::Split {
+                            axis,
+                            ratio,
+                            left: Box::new(SavedLayoutNode::Leaf {
+                                url: String::new(),
+                                history_pane: true,
+                            }),
+                            right: Box::new(right),
+                        };
+                    }
+                    if p2 && r1 && !p1 {
+                        return SavedLayoutNode::Split {
+                            axis,
+                            ratio,
+                            left: Box::new(left),
+                            right: Box::new(SavedLayoutNode::Leaf {
+                                url: String::new(),
+                                history_pane: true,
+                            }),
+                        };
+                    }
+                }
+            }
+            SavedLayoutNode::Split {
+                axis,
+                ratio,
+                left: Box::new(left),
+                right: Box::new(right),
+            }
+        }
+        leaf => leaf,
     }
 }
 
@@ -450,7 +589,20 @@ impl SessionLayoutSnapshot {
         if s.is_empty() {
             return None;
         }
-        ron::from_str(s).ok()
+        match ron::from_str::<SavedLayoutNode>(s) {
+            Ok(n) => Some(n),
+            Err(e) => {
+                warn!("SessionLayoutSnapshot: invalid layout_ron: {e}");
+                None
+            }
+        }
+    }
+
+    /// Like [`parsed_root`](Self::parsed_root), then corrects history panes mis-saved as the default
+    /// start page (see [`fix_mislabeled_history_panes`]).
+    pub fn parsed_root_for_restore(&self, default_webview_url: &str) -> Option<SavedLayoutNode> {
+        self.parsed_root()
+            .map(|n| fix_mislabeled_history_panes(n, default_webview_url))
     }
 }
 
@@ -561,7 +713,9 @@ fn pick_best_directional_neighbor(candidates: &[(Entity, f32, f32)]) -> Option<E
     for &(e, overlap, gap) in candidates {
         let take = match best {
             None => true,
-            Some((_, bo, bg)) => overlap > bo + 1.0e-3 || (overlap - bo).abs() <= 1.0e-3 && gap < bg,
+            Some((_, bo, bg)) => {
+                overlap > bo + 1.0e-3 || (overlap - bo).abs() <= 1.0e-3 && gap < bg
+            }
         };
         if take {
             best = Some((e, overlap, gap));
@@ -697,16 +851,16 @@ fn solve_layout_inner(
 }
 
 /// Build a session snapshot from the runtime tree and per-entity URL resolution.
-pub fn layout_node_to_saved<F>(node: &LayoutNode, mut url_for: F) -> SavedLayoutNode
+pub fn layout_node_to_saved<F>(node: &LayoutNode, mut leaf_for: F) -> SavedLayoutNode
 where
-    F: FnMut(Entity) -> String,
+    F: FnMut(Entity) -> SavedSessionLeaf,
 {
-    layout_node_to_saved_inner(node, &mut url_for)
+    layout_node_to_saved_inner(node, &mut leaf_for)
 }
 
 fn layout_node_to_saved_inner(
     node: &LayoutNode,
-    url_for: &mut dyn FnMut(Entity) -> String,
+    leaf_for: &mut dyn FnMut(Entity) -> SavedSessionLeaf,
 ) -> SavedLayoutNode {
     match node {
         LayoutNode::Split {
@@ -717,10 +871,16 @@ fn layout_node_to_saved_inner(
         } => SavedLayoutNode::Split {
             axis: *axis,
             ratio: *ratio,
-            left: Box::new(layout_node_to_saved_inner(left, url_for)),
-            right: Box::new(layout_node_to_saved_inner(right, url_for)),
+            left: Box::new(layout_node_to_saved_inner(left, leaf_for)),
+            right: Box::new(layout_node_to_saved_inner(right, leaf_for)),
         },
-        LayoutNode::Leaf(e) => SavedLayoutNode::Leaf { url: url_for(*e) },
+        LayoutNode::Leaf(e) => {
+            let meta = leaf_for(*e);
+            SavedLayoutNode::Leaf {
+                url: meta.url,
+                history_pane: meta.history_pane,
+            }
+        }
     }
 }
 
@@ -737,6 +897,9 @@ impl Plugin for LayoutPlugin {
             .register_type::<PaneChromeLoadingBar>()
             .register_type::<PaneChromeOwner>()
             .register_type::<PaneChromeNeedsUrl>()
+            .register_type::<WebviewPane>()
+            .register_type::<History>()
+            .register_type::<HistoryPaneNeedsUrl>()
             .register_type::<Root>()
             .register_type::<PaneLastUrl>()
             .register_type::<LayoutAxis>()
@@ -747,13 +910,15 @@ impl Plugin for LayoutPlugin {
             .init_resource::<PaneFocusPrev>()
             .init_resource::<PendingNavigationLoads>()
             .add_observer(pane_lifecycle::warn_if_pane_despawn_still_in_layout)
-            .add_systems(Startup, setup_vmux_panes)
             .add_systems(
                 PostUpdate,
                 (
-                    track_pane_focus_incoming.before(apply_pane_layout),
+                    pane_pointer_focus::update_active_pane_under_cursor
+                        .after(camera_system),
+                    track_pane_focus_incoming
+                        .after(pane_pointer_focus::update_active_pane_under_cursor),
                     apply_pane_layout
-                        .after(camera_system)
+                        .after(track_pane_focus_incoming)
                         .before(render_standard_materials),
                     apply_pane_loading_bar_layout
                         .after(apply_pane_layout)

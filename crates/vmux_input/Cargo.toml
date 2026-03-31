@@ -11,6 +11,7 @@ path = "src/lib.rs"
 [dependencies]
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
+bevy_cef_core = { workspace = true }
 leafwing-input-manager = { workspace = true }
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }

@@ -49,7 +49,7 @@ pub(crate) fn add_webview_load_watchdog(
 ) {
     let now = time.elapsed_secs();
     for entity in &q {
-        commands.entity(entity).insert(WebviewLoadWatchdog {
+        commands.entity(entity).try_insert(WebviewLoadWatchdog {
             next_deadline_secs: now + FIRST_CHECK_DELAY_SECS,
             initial_reloads: 0,
             did_navigate_fallback: false,
@@ -75,7 +75,7 @@ pub(crate) fn webview_load_watchdog_tick(
     >,
 ) {
     let now = time.elapsed_secs();
-    let fallback_url = settings.default_webview_url.trim();
+    let fallback_url = settings.browser.default_webview_url.trim();
 
     for (entity, source, mesh_mat, mut watchdog) in &mut q {
         let Some(mat) = materials.get(mesh_mat.id()) else {
@@ -83,7 +83,7 @@ pub(crate) fn webview_load_watchdog_tick(
         };
 
         if !webview_texture_is_placeholder(&images, mat) {
-            commands.entity(entity).remove::<WebviewLoadWatchdog>();
+            commands.entity(entity).try_remove::<WebviewLoadWatchdog>();
             continue;
         }
 
@@ -128,7 +128,7 @@ pub(crate) fn webview_load_watchdog_tick(
         // 4) Guaranteed visible content: inline HTML (always renders without network).
         commands
             .entity(entity)
-            .insert(WebviewSource::inline(UNREACHABLE_HTML));
-        commands.entity(entity).remove::<WebviewLoadWatchdog>();
+            .try_insert(WebviewSource::inline(UNREACHABLE_HTML));
+        commands.entity(entity).try_remove::<WebviewLoadWatchdog>();
     }
 }

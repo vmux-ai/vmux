@@ -30,4 +30,8 @@ vmux_layout = { path = "../vmux_layout" }
 vmux_server = { path = "../vmux_server" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-dioxus = { version = "0.7.4", features = ["web"] }
+dioxus = { workspace = true }
+ron = { workspace = true }
+vmux_ui = { path = "../vmux_ui", default-features = false }
+# Keep in sync with `wasm-bindgen` CLI used by `build.rs` (same as `vmux_history`).
+wasm-bindgen = "0.2.115"

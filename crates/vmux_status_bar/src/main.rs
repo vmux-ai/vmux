@@ -12,11 +12,12 @@ fn main() {
     dioxus::launch(app::App);
 }
 
-/// Native `cargo check` / `cargo build` do not compile the Dioxus stack; use
-/// `dx build --platform web` or `cargo build --target wasm32-unknown-unknown`.
+/// This `main` is only used for the wasm32 Dioxus bundle. Host `cargo build -p vmux_status_bar` still
+/// builds the library + `build.rs` (wasm-bindgen → `dist/`); this stub runs if you execute the host
+/// binary target by mistake.
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     eprintln!(
-        "vmux_status_bar: this binary is the Dioxus web UI; build for wasm32-unknown-unknown (e.g. dx build --platform web)."
+        "vmux_status_bar: this binary is the Dioxus web UI; build for wasm32 (see crate `build.rs`)."
     );
 }

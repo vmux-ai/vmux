@@ -2,13 +2,17 @@
 
 mod load_watchdog;
 mod navigation_loading;
+mod startup;
 mod system;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{CefExtensions, CefPlugin, CommandLineConfig, JsEmitEventPlugin};
 pub use system::{go_back, go_forward, reload};
+pub use startup::{setup_vmux_panes_startup, startup_drain_embedded_ui_urls};
+pub use vmux_history::{HistoryUiBaseUrl, VmuxHistoryServerPlugin, VmuxHistoryUiPlugin};
 pub use vmux_layout::{CEF_PAGE_ZOOM_LEVEL, LayoutPlugin, VmuxWebview, rebuild_session_snapshot};
 pub use vmux_layout::{VmuxHostedWebPlugin, VmuxWebviewSurface};
+pub use vmux_layout::loading_bar_color;
 pub use vmux_server::{
     EmbeddedServeDirRequest, EmbeddedServeDirStartup, PendingEmbeddedServeDir, VmuxServerPlugin,
     VmuxServerShutdownRegistry, register_shutdown_flag, spawn_embedded_serve_dir_system,
@@ -47,7 +51,10 @@ impl Plugin for VmuxWebviewPlugin {
             LayoutPlugin,
             JsEmitEventPlugin::<vmux_core::WebviewDocumentUrlEmit>::default(),
             StatusBarHostedPlugin,
+            VmuxHistoryServerPlugin,
+            VmuxHistoryUiPlugin,
         ));
+        startup::register(app);
         navigation_loading::register(app);
         app.add_systems(
             Update,

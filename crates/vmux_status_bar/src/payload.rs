@@ -10,11 +10,12 @@ pub struct VmuxStatusPayload {
     pub active_url: Option<String>,
 }
 
+/// Messages from the injected bridge script, **RON** text on the Rust side (see `bridge.rs`).
 #[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
 pub enum BridgeMsg {
     Clock { text: String },
-    Status { payload: serde_json::Value },
+    /// JSON text of the host payload (`VmuxStatusPayload` or legacy shapes).
+    Status { payload: String },
 }
 
 fn host_for_display(url: &str) -> Option<String> {
@@ -43,11 +44,17 @@ fn user_host_line(user: &str, host: &str) -> String {
     }
 }
 
+/// Applies a host status JSON string (object or string URL) to the strip signals.
 pub fn apply_payload(
-    raw: serde_json::Value,
+    payload_json: &str,
     mut user_host: Signal<String>,
     mut win_label: Signal<String>,
 ) {
+    let raw: serde_json::Value = match serde_json::from_str(payload_json) {
+        Ok(v) => v,
+        Err(_) => serde_json::Value::String(payload_json.to_string()),
+    };
+
     let p: VmuxStatusPayload = match raw {
         serde_json::Value::String(s) => {
             serde_json::from_str(&s).unwrap_or_else(|_| VmuxStatusPayload {

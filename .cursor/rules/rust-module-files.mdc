@@ -1,0 +1,22 @@
+---
+description: Rust modules use <name>.rs roots, not mod.rs
+globs: "**/*.rs"
+alwaysApply: false
+---
+
+# Rust module files: no `mod.rs`
+
+- **Do not** add or use `**/mod.rs` as a directory’s module root.
+- **Do** use a file named after the module: `<mod_name>.rs` next to its parent (e.g. `components.rs` beside `components/` for submodules, or a single `components.rs` with no directory).
+
+```text
+# ❌ BAD
+src/foo/mod.rs
+crates/mycrate/src/bar/mod.rs
+
+# ✅ GOOD
+src/foo.rs                    # + optional src/foo/baz.rs for children
+crates/mycrate/src/bar.rs     # + optional crates/mycrate/src/bar/baz.rs
+```
+
+In `lib.rs` or the parent module, keep normal `mod foo;` / `pub mod foo;` declarations; only the **on-disk root** for a directory module must be `foo.rs`, not `foo/mod.rs`.

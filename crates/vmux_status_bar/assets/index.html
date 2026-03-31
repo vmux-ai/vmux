@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width"/>
+  <title>vmux status</title>
+  <style>html,body{margin:0;height:100%;background:#0a0a0a}</style>
+  <link rel="modulepreload" href="vmux_status_bar.js" crossorigin="anonymous"/>
+  <link rel="preload" href="vmux_status_bar_bg.wasm" as="fetch" type="application/wasm" crossorigin="anonymous"/>
+</head>
+<body class="h-full min-h-0">
+  <div id="main" class="h-full min-h-0"></div>
+  <script type="module">
+    import init from './vmux_status_bar.js';
+    await init();
+  </script>
+</body>
+</html>

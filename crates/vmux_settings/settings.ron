@@ -1,11 +1,15 @@
 (
-    default_webview_url: "https://www.google.com",
-    // Spacing between panes at each split (layout px). Named like tmux pane-border-* (e.g. pane-border-style).
-    pane_border_spacing_px: 8.0,
-    // Inset from the window left/right/bottom inner edge to the pane grid (layout px).
-    window_padding_px: 8.0,
-    // Top inset (layout px). Often larger than window_padding_px with full-size content + transparent titlebar (macOS traffic lights).
-    window_padding_top_px: 28.0,
-    // Rounded corners on each pane tile (layout px). Clamped to half the shorter edge (tmux has no radius option).
-    pane_border_radius_px: 8.0,
+    browser: (
+        default_webview_url: "https://www.google.com",
+    ),
+    layout: (
+        // Spacing between panes at each split (layout px). Named like tmux pane-border-* (e.g. pane-border-style).
+        pane_border_spacing_px: 8.0,
+        // Inset from the window left/right/bottom inner edge to the pane grid (layout px).
+        window_padding_px: 8.0,
+        // Top inset (layout px). Often larger than window_padding_px with full-size content + transparent titlebar (macOS traffic lights).
+        window_padding_top_px: 28.0,
+        // Rounded corners on each pane tile (layout px). Clamped to half the shorter edge (tmux has no radius option).
+        pane_border_radius_px: 8.0,
+    ),
 )

@@ -8,9 +8,11 @@ use vmux_settings::VmuxAppSettings;
 
 use crate::loading_bar::{LoadingBarMaterial, PaneChromeLoadingBar};
 use crate::{
-    Active, LastVisitedUrl, LayoutNode, LayoutTree, Pane, PaneChromeNeedsUrl, PaneChromeOwner,
-    PaneChromeStrip, PaneLastUrl, Root, SavedLayoutNode, SessionLayoutSnapshot,
-    allowed_navigation_url, initial_webview_url, sanitize_embedded_webview_url,
+    Active, History, HistoryPaneNeedsUrl, HistoryPaneOpenedAt, LastVisitedUrl, LayoutNode,
+    LayoutTree, Pane, WebviewPane,
+    PaneChromeNeedsUrl, PaneChromeOwner, PaneChromeStrip, PaneLastUrl, Root, SavedLayoutNode,
+    SessionLayoutSnapshot, allowed_navigation_url, initial_webview_url,
+    legacy_loopback_embedded_history_ui_url, sanitize_embedded_webview_url,
 };
 
 /// Marker for the primary vmux webview entity.
@@ -34,64 +36,6 @@ pub const TEXT_INPUT_EMACS_BINDINGS_PRELOAD: &str = include_str!(concat!(
 
 /// Placeholder until `vmux_webview` sets the real status URL from the embedded server or env.
 const CHROME_LOADING_HTML: &str = r#"<!DOCTYPE html><html><head><meta charset="utf-8"/><style>html,body{margin:0;background:#1a1a1a;height:100%;}</style></head><body></body></html>"#;
-
-/// Keep [`Active`] and [`CefKeyboardTarget`] aligned with the pane under the pointer **before** CEF
-/// receives keys. `Pointer<Move>` alone misses click-to-focus without a move; `Pointer<Press>` covers that.
-fn apply_active_pane_for_pointer(
-    ent: Entity,
-    commands: &mut Commands,
-    active: &Query<Entity, (With<Pane>, With<Active>)>,
-) {
-    if active.contains(ent) {
-        commands.entity(ent).insert(CefKeyboardTarget);
-        return;
-    }
-    for e in active.iter() {
-        commands.entity(e).remove::<Active>();
-        commands.entity(e).remove::<CefKeyboardTarget>();
-    }
-    commands.entity(ent).insert((Active, CefKeyboardTarget));
-}
-
-fn activate_pane_on_pointer_move(
-    trigger: On<Pointer<Move>>,
-    mut commands: Commands,
-    active: Query<Entity, (With<Pane>, With<Active>)>,
-) {
-    apply_active_pane_for_pointer(trigger.entity, &mut commands, &active);
-}
-
-fn activate_pane_on_pointer_press(
-    trigger: On<Pointer<Press>>,
-    mut commands: Commands,
-    active: Query<Entity, (With<Pane>, With<Active>)>,
-) {
-    apply_active_pane_for_pointer(trigger.entity, &mut commands, &active);
-}
-
-fn activate_owner_pane_on_pointer_move(
-    trigger: On<Pointer<Move>>,
-    mut commands: Commands,
-    owner: Query<&PaneChromeOwner>,
-    active: Query<Entity, (With<Pane>, With<Active>)>,
-) {
-    let Ok(o) = owner.get(trigger.entity) else {
-        return;
-    };
-    apply_active_pane_for_pointer(o.0, &mut commands, &active);
-}
-
-fn activate_owner_pane_on_pointer_press(
-    trigger: On<Pointer<Press>>,
-    mut commands: Commands,
-    owner: Query<&PaneChromeOwner>,
-    active: Query<Entity, (With<Pane>, With<Active>)>,
-) {
-    let Ok(o) = owner.get(trigger.entity) else {
-        return;
-    };
-    apply_active_pane_for_pointer(o.0, &mut commands, &active);
-}
 
 fn spawn_pane_chrome(
     commands: &mut Commands,
@@ -122,9 +66,7 @@ fn spawn_pane_chrome(
                 },
                 extension: WebviewMaterial::default(),
             })),
-        ))
-        .observe(activate_owner_pane_on_pointer_move)
-        .observe(activate_owner_pane_on_pointer_press);
+        ));
     commands.spawn((
         PaneChromeLoadingBar,
         PaneChromeOwner(pane),
@@ -144,6 +86,7 @@ pub fn spawn_pane(
 ) -> Entity {
     let mut b = commands.spawn((
         VmuxWebview,
+        WebviewPane,
         Pane,
         Visibility::Visible,
         PaneLastUrl(start_url.to_string()),
@@ -166,16 +109,59 @@ pub fn spawn_pane(
     if with_active {
         b.insert((Active, CefKeyboardTarget));
     }
-    b.observe(activate_pane_on_pointer_move)
-        .observe(activate_pane_on_pointer_press);
     let pane_id = b.id();
-    spawn_pane_chrome(
-        commands,
-        meshes,
-        materials,
-        loading_bar_materials,
-        pane_id,
-    );
+    spawn_pane_chrome(commands, meshes, materials, loading_bar_materials, pane_id);
+    pane_id
+}
+
+/// New layout leaf for the Dioxus history UI: **no** [`URL_TRACK_PRELOAD`] (avoids polluting [`NavigationHistory`](vmux_core::NavigationHistory)).
+///
+/// When `initial_url` is **None** (or empty), uses `about:blank` until [`HistoryPaneNeedsUrl`] is
+/// cleared by `vmux_history` so the pane never depends on `cef://localhost/__inline__/…` (secondary
+/// panes can hit `ERR_UNKNOWN_URL_SCHEME` for that scheme).
+///
+/// When `initial_url` is set (embedded HTTP base from startup drain or `VMUX_HISTORY_UI_URL`), loads
+/// the UI immediately — same readiness model as the status bar chrome.
+pub fn spawn_history_pane(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<WebviewExtendStandardMaterial>,
+    loading_bar_materials: &mut Assets<LoadingBarMaterial>,
+    with_active: bool,
+    initial_url: Option<&str>,
+) -> Entity {
+    let trimmed = initial_url.map(str::trim).filter(|s| !s.is_empty());
+    let needs_placeholder = trimmed.is_none();
+    let start = trimmed.unwrap_or("about:blank").to_string();
+    let mut b = commands.spawn((
+        VmuxWebview,
+        WebviewPane,
+        Pane,
+        History,
+        HistoryPaneOpenedAt(std::time::Instant::now()),
+        Visibility::Visible,
+        PaneLastUrl(start.clone()),
+        WebviewSource::new(start),
+        PreloadScripts::from([TEXT_INPUT_EMACS_BINDINGS_PRELOAD.to_string()]),
+        ZoomLevel(CEF_PAGE_ZOOM_LEVEL),
+        Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE))),
+        MeshMaterial3d(materials.add(WebviewExtendStandardMaterial {
+            base: StandardMaterial {
+                unlit: true,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            },
+            extension: WebviewMaterial::default(),
+        })),
+    ));
+    if needs_placeholder {
+        b.insert(HistoryPaneNeedsUrl);
+    }
+    if with_active {
+        b.insert((Active, CefKeyboardTarget));
+    }
+    let pane_id = b.id();
+    spawn_pane_chrome(commands, meshes, materials, loading_bar_materials, pane_id);
     pane_id
 }
 
@@ -187,6 +173,7 @@ pub fn spawn_saved_recursive(
     node: &SavedLayoutNode,
     first_active: &mut bool,
     default_webview_url: &str,
+    history_ui_base: Option<&str>,
 ) -> LayoutNode {
     match node {
         SavedLayoutNode::Split {
@@ -205,6 +192,7 @@ pub fn spawn_saved_recursive(
                 left,
                 first_active,
                 default_webview_url,
+                history_ui_base,
             )),
             right: Box::new(spawn_saved_recursive(
                 commands,
@@ -214,17 +202,35 @@ pub fn spawn_saved_recursive(
                 right,
                 first_active,
                 default_webview_url,
+                history_ui_base,
             )),
         },
-        SavedLayoutNode::Leaf { url } => {
+        SavedLayoutNode::Leaf { url, history_pane } => {
+            let active = *first_active;
+            *first_active = false;
             let u = url.trim();
+            const DATA_HTML: &str = "data:text/html";
+            let inline_history_html = u.len() >= DATA_HTML.len()
+                && u[..DATA_HTML.len()].eq_ignore_ascii_case(DATA_HTML);
+            if *history_pane
+                || legacy_loopback_embedded_history_ui_url(u)
+                || u.eq_ignore_ascii_case("about:blank")
+                || inline_history_html
+            {
+                return LayoutNode::leaf(spawn_history_pane(
+                    commands,
+                    meshes,
+                    materials,
+                    loading_bar_materials,
+                    active,
+                    history_ui_base,
+                ));
+            }
             let start = if !u.is_empty() && allowed_navigation_url(u) {
                 sanitize_embedded_webview_url(u, default_webview_url)
             } else {
                 default_webview_url.to_string()
             };
-            let active = *first_active;
-            *first_active = false;
             LayoutNode::leaf(spawn_pane(
                 commands,
                 meshes,
@@ -238,6 +244,7 @@ pub fn spawn_saved_recursive(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Called from `vmux_webview` after embedded UI URLs are drained (`EmbeddedServeDirStartup::DrainChannels`).
 pub fn setup_vmux_panes(
     mut commands: Commands,
     mut snapshot: ResMut<SessionLayoutSnapshot>,
@@ -248,8 +255,9 @@ pub fn setup_vmux_panes(
     path: Option<Res<SessionSavePath>>,
     mut session_queue: ResMut<SessionSaveQueue>,
     settings: Res<VmuxAppSettings>,
+    history_ui_base: Option<&str>,
 ) {
-    let fallback = settings.default_webview_url.as_str();
+    let fallback = settings.browser.default_webview_url.as_str();
     let mut migrated = false;
     if snapshot.parsed_root().is_none()
         && let Some(last) = last.as_ref()
@@ -261,7 +269,7 @@ pub fn setup_vmux_panes(
             migrated = true;
         }
     }
-    let root_node = if let Some(saved) = snapshot.parsed_root() {
+    let root_node = if let Some(saved) = snapshot.parsed_root_for_restore(fallback) {
         let mut first_active = true;
         spawn_saved_recursive(
             &mut commands,
@@ -271,6 +279,7 @@ pub fn setup_vmux_panes(
             &saved,
             &mut first_active,
             fallback,
+            history_ui_base,
         )
     } else {
         let start_url = initial_webview_url(last.as_deref(), fallback);

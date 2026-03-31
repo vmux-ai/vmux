@@ -1,6 +1,6 @@
 [package]
 name = "vmux_ui"
-description = "vmux — UI design tokens (colors, spacing, …) shared across chrome and overlays"
+description = "vmux — utils (Bevy tokens), hooks/components (Dioxus WASM)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,5 +8,14 @@ license.workspace = true
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = ["bevy"]
+bevy = ["dep:bevy"]
+
 [dependencies]
-bevy = { workspace = true }
+bevy = { workspace = true, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

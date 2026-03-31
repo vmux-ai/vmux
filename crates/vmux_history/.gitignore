@@ -1,0 +1,7 @@
+node_modules/
+target/
+dist/
+web_dist/
+
+# History UI ships via web_dist/ (Tailwind from `assets/input.css` + Dioxus `class:` utilities in `src/`).
+assets/history_ui.css

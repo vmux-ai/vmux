@@ -13,9 +13,60 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+/// Webview / URL defaults (user `settings.ron` → `browser:`).
+#[derive(Clone, Debug, Reflect)]
+#[reflect(Default)]
+pub struct VmuxBrowserSettings {
+    pub default_webview_url: String,
+}
+
+impl Default for VmuxBrowserSettings {
+    fn default() -> Self {
+        Self {
+            default_webview_url: "https://www.google.com".to_string(),
+        }
+    }
+}
+
+/// Pane grid and window chrome insets (user `settings.ron` → `layout:`).
+#[derive(Clone, Debug, Reflect)]
+#[reflect(Default)]
+pub struct VmuxLayoutSettings {
+    /// Logical pixels between adjacent panes at each split (0 = flush). Named like tmux `pane-border-*` options.
+    pub pane_border_spacing_px: f32,
+    /// Inset from the window **left, right, and bottom** inner edges to the pane grid (layout px).
+    pub window_padding_px: f32,
+    /// Inset from the window **top** inner edge (layout px). Use a larger value than [`window_padding_px`]
+    /// when the title bar / traffic lights overlap content (e.g. full-size content view on macOS).
+    pub window_padding_top_px: f32,
+    /// Corner radius for pane tiles in layout pixels (0 = square).
+    pub pane_border_radius_px: f32,
+}
+
+impl Default for VmuxLayoutSettings {
+    fn default() -> Self {
+        Self {
+            pane_border_spacing_px: 8.0,
+            window_padding_px: 8.0,
+            window_padding_top_px: 28.0,
+            pane_border_radius_px: 8.0,
+        }
+    }
+}
+
 #[derive(Deserialize)]
-struct BundledSettings {
+struct NestedBundledRon {
+    browser: BrowserRon,
+    layout: LayoutRon,
+}
+
+#[derive(Deserialize)]
+struct BrowserRon {
     default_webview_url: String,
+}
+
+#[derive(Deserialize)]
+struct LayoutRon {
     /// Logical pixels between adjacent panes at each split (0 = flush). Mirrors tmux `pane-border-*` naming.
     #[serde(alias = "pane_gap_px")]
     pane_border_spacing_px: f32,
@@ -26,6 +77,18 @@ struct BundledSettings {
     #[serde(default)]
     window_padding_top_px: f32,
     /// Corner radius for pane tiles in layout pixels (0 = square).
+    pane_border_radius_px: f32,
+}
+
+#[derive(Deserialize)]
+struct FlatBundledSettings {
+    default_webview_url: String,
+    #[serde(alias = "pane_gap_px")]
+    pane_border_spacing_px: f32,
+    #[serde(alias = "window_edge_gap_px")]
+    window_padding_px: f32,
+    #[serde(default)]
+    window_padding_top_px: f32,
     pane_border_radius_px: f32,
 }
 
@@ -40,47 +103,38 @@ fn resolve_window_padding_top_px(window_padding_px: f32, window_padding_top_px: 
     }
 }
 
+/// Resolves legacy `window_padding_top_px: 0` to match horizontal padding (RON / flat session files).
+#[inline]
+pub fn resolve_window_padding_top_px_for_load(
+    window_padding_px: f32,
+    window_padding_top_px: f32,
+) -> f32 {
+    resolve_window_padding_top_px(window_padding_px, window_padding_top_px)
+}
+
 fn bundled_settings() -> &'static VmuxAppSettings {
     BUNDLED_SETTINGS.get_or_init(|| {
         const EMBEDDED: &str = include_str!("../settings.ron");
-        let bundled: BundledSettings = ron::de::from_str(EMBEDDED)
-            .unwrap_or_else(|e| panic!("vmux_settings: invalid bundled settings.ron: {e}"));
-        VmuxAppSettings {
-            default_webview_url: bundled.default_webview_url,
-            pane_border_spacing_px: bundled.pane_border_spacing_px,
-            window_padding_px: bundled.window_padding_px,
-            window_padding_top_px: resolve_window_padding_top_px(
-                bundled.window_padding_px,
-                bundled.window_padding_top_px,
-            ),
-            pane_border_radius_px: bundled.pane_border_radius_px,
-        }
+        parse_settings_ron(EMBEDDED)
+            .unwrap_or_else(|e| panic!("vmux_settings: invalid bundled settings.ron: {e}"))
     })
 }
 
 /// Bundled default webview URL from `settings.ron` (same string as [`VmuxAppSettings::default`] until overridden at runtime).
 pub fn default_webview_url() -> &'static str {
-    bundled_settings().default_webview_url.as_str()
+    bundled_settings().browser.default_webview_url.as_str()
 }
 
 /// User-tunable app settings. Saved with [`SessionLayoutSnapshot`] in `last_session.ron` (moonshine).
 ///
-/// Field names follow tmux’s hyphenated options as snake_case (`pane-border-*` → `pane_border_*`,
-/// `window-*` → `window_*`). Older `settings.ron` keys `pane_gap_px` / `window_edge_gap_px` still
+/// Field names under [`VmuxLayoutSettings`] follow tmux’s hyphenated options as snake_case (`pane-border-*` → `pane_border_*`,
+/// `window-*` → `window_*`). Older flat `settings.ron` keys `pane_gap_px` / `window_edge_gap_px` still
 /// deserialize via serde aliases.
 #[derive(Resource, Clone, Debug, Reflect)]
 #[reflect(Resource, Default)]
 pub struct VmuxAppSettings {
-    pub default_webview_url: String,
-    /// Logical pixels between adjacent panes at each split (0 = flush). Named like tmux `pane-border-*` options.
-    pub pane_border_spacing_px: f32,
-    /// Inset from the window **left, right, and bottom** inner edges to the pane grid (layout px).
-    pub window_padding_px: f32,
-    /// Inset from the window **top** inner edge (layout px). Use a larger value than [`window_padding_px`]
-    /// when the title bar / traffic lights overlap content (e.g. full-size content view on macOS).
-    pub window_padding_top_px: f32,
-    /// Corner radius for pane tiles in layout pixels (0 = square).
-    pub pane_border_radius_px: f32,
+    pub browser: VmuxBrowserSettings,
+    pub layout: VmuxLayoutSettings,
 }
 
 impl Default for VmuxAppSettings {
@@ -100,16 +154,36 @@ pub fn resolved_settings_path() -> PathBuf {
 }
 
 fn parse_settings_ron(s: &str) -> Result<VmuxAppSettings, ron::error::SpannedError> {
-    let parsed: BundledSettings = ron::de::from_str(s)?;
+    if let Ok(nested) = ron::de::from_str::<NestedBundledRon>(s) {
+        return Ok(VmuxAppSettings {
+            browser: VmuxBrowserSettings {
+                default_webview_url: nested.browser.default_webview_url,
+            },
+            layout: VmuxLayoutSettings {
+                pane_border_spacing_px: nested.layout.pane_border_spacing_px,
+                window_padding_px: nested.layout.window_padding_px,
+                window_padding_top_px: resolve_window_padding_top_px(
+                    nested.layout.window_padding_px,
+                    nested.layout.window_padding_top_px,
+                ),
+                pane_border_radius_px: nested.layout.pane_border_radius_px,
+            },
+        });
+    }
+    let flat: FlatBundledSettings = ron::de::from_str(s)?;
     Ok(VmuxAppSettings {
-        default_webview_url: parsed.default_webview_url,
-        pane_border_spacing_px: parsed.pane_border_spacing_px,
-        window_padding_px: parsed.window_padding_px,
-        window_padding_top_px: resolve_window_padding_top_px(
-            parsed.window_padding_px,
-            parsed.window_padding_top_px,
-        ),
-        pane_border_radius_px: parsed.pane_border_radius_px,
+        browser: VmuxBrowserSettings {
+            default_webview_url: flat.default_webview_url,
+        },
+        layout: VmuxLayoutSettings {
+            pane_border_spacing_px: flat.pane_border_spacing_px,
+            window_padding_px: flat.window_padding_px,
+            window_padding_top_px: resolve_window_padding_top_px(
+                flat.window_padding_px,
+                flat.window_padding_top_px,
+            ),
+            pane_border_radius_px: flat.pane_border_radius_px,
+        },
     })
 }
 
@@ -266,7 +340,9 @@ pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<VmuxAppSettings>()
+        app.register_type::<VmuxBrowserSettings>()
+            .register_type::<VmuxLayoutSettings>()
+            .register_type::<VmuxAppSettings>()
             .init_resource::<VmuxAppSettings>()
             .configure_sets(PreStartup, VmuxCacheDirInitSet)
             .add_systems(PreStartup, init_vmux_cache_dir.in_set(VmuxCacheDirInitSet))

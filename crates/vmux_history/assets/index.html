@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width"/>
+  <title>vmux history</title>
+  <!-- Instant paint before Tailwind + WASM (avoids long blank gray). -->
+  <style>html,body{margin:0;height:100%;background:#141518}</style>
+  <!-- Start fetching before the module graph is parsed.
+       `crossorigin` must match wasm-bindgen’s `fetch()` (CORS anonymous) or Chrome discards the preload and refetches (slow + console noise). -->
+  <link rel="modulepreload" href="vmux_history.js" crossorigin="anonymous"/>
+  <link rel="preload" href="vmux_history_bg.wasm" as="fetch" type="application/wasm" crossorigin="anonymous"/>
+  <!-- npm run build:css inlines Tailwind output here (replaces the link below). -->
+  <link rel="stylesheet" href="history.css"/>
+</head>
+<body class="h-full min-h-0">
+  <!-- Dioxus web mounts to #main by default (see dioxus_web::Config::default). -->
+  <div id="main" class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"></div>
+  <script type="module">
+    import init from './vmux_history.js';
+    await init();
+  </script>
+</body>
+</html>

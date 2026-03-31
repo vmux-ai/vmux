@@ -34,7 +34,5 @@ impl Plugin for HostEmitPlugin {
 }
 
 fn host_emit(trigger: On<HostEmitEvent>, browsers: NonSend<Browsers>) {
-    if let Ok(v) = serde_json::to_value(&trigger.payload) {
-        browsers.emit_event(&trigger.webview, trigger.id.clone(), &v);
-    }
+    browsers.emit_event_raw_json(&trigger.webview, trigger.id.clone(), &trigger.payload);
 }
