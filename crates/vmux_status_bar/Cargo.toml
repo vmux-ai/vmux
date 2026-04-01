@@ -3,7 +3,6 @@ name = "vmux_status_bar"
 description = "Status bar: Dioxus WASM UI + re-exports hosted status plugin from vmux_ui"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 publish = false
 build = "build.rs"
 

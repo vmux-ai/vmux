@@ -3,7 +3,6 @@ name = "vmux_browser"
 description = "vmux — browser stack facade (BrowserPlugin + WebviewPlugin)"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 
 [lib]
 path = "src/lib.rs"

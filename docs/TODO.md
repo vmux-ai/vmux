@@ -6,12 +6,11 @@
     - Search icon placement
 - `vmux_input`
     - Keybindings doesn't work the same in FR keyboard (e.g. ctrl+b,%)
-    - leader key(ctrl+b) should be replacable by settings.ron
 
 ### Improvement
 
 - `vmux_command`
-    - Better suggestion algo when no search input is typed
+    - Better suggestion when no search input is typed
         - Most relavent, most popular etc.
     - Assign appropriate icon for each action type
     - [Key mode plan](./plans/keybindings.plan.md)
@@ -19,6 +18,8 @@
     - [Layout refactoring](./plans/layout-naming.plan.md)
 - `vmux_webview`
     - Prevent website from getting stretched on NewPane, ClosePane
+- `vmux_input`
+    - leader key(ctrl+b) should be replacable by settings.ron
 
 ### Feature
 
@@ -27,17 +28,63 @@
     - Show storybook like ui in pane for debugging
 - `vmux_terminal`
     - Add terminal pane to provide terminal emulator
-    - PoC
+    - MVP
 - `vmux_layout`
     - Tmux parity
 - `vmux_browser`
-    - Chromium plugin support
+    - Chromium Extensions Support
+- `vmux_help`
+    - UI
+- `vmux_settings`
+    - UI
+- `vmux_onboarding`
+    - Welcome flow
+    - "Import from Another Browser"
+        - Target
+            - Bookmarks
+            - Logins
+            - History
+            - Extensions
+        - Browser Support
+            - Chrome
+            - Safari
+            - Firefox
+            - Brave
+            - Edge
+            - Opera
+            - Opera GX
+            - Vivaldi
+
+### Chore
+
+- Deploy to crates.io
+- `vmux_desktop`
+    - Release bundle
+    - Publish app
+    - Optional: CI/CD
+- `vmux_ui`, `vmux_server`
+    - Simplify startup methods
+- `vmux_docs`
+    - Publish website
+- `vmux_cli`
+    - Installer
+    - `vmux` command
 
 ## v0.2: Text Editor, AI Agent
 
 ### Feature
 
 - `vmux_editor`
-    - Text editor
+    - Text editor MVP
+
+### Chore
+
+- Updator
+    - Handles db migration if necessary
+
+## v0.3: AI Agent
+
+### Feature
+
 - `vmux_ai_agent`
-    - Chat based AI agent panel
+    - Chat based AI agent panel MVP

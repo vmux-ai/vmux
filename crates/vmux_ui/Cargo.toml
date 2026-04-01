@@ -3,7 +3,6 @@ name = "vmux_ui"
 description = "vmux — native (Bevy tokens), UI library host, webview (Dioxus WASM hooks/components)"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 publish = false
 build = "build.rs"
 

@@ -3,7 +3,6 @@ name = "vmux_layout"
 description = "vmux — hierarchical pane layout tree, solver, and session snapshot types"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 
 [lib]
 path = "src/lib.rs"

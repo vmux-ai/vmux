@@ -3,7 +3,6 @@ name = "vmux_scene"
 description = "vmux — 3D scene bootstrap (camera, light, window)"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 
 [lib]
 path = "src/lib.rs"

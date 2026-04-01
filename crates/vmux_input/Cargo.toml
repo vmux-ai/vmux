@@ -3,7 +3,6 @@ name = "vmux_input"
 description = "vmux — leafwing input, quit shortcuts, and tmux-style chord scheduling"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 
 [lib]
 path = "src/lib.rs"

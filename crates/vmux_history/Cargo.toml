@@ -3,7 +3,6 @@ name = "vmux_history"
 description = "vmux — Dioxus history UI + thin HistoryServerPlugin (bundle path + embed)"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 publish = false
 
 [lib]

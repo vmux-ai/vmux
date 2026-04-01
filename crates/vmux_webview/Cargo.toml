@@ -3,7 +3,6 @@ name = "vmux_webview"
 description = "vmux — CEF webview plane spawn and layout"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 
 [lib]
 path = "src/lib.rs"

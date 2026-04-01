@@ -3,7 +3,6 @@ name = "vmux_server"
 description = "Embedded loopback HTTP servers for vmux webviews"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 
 [dependencies]
 axum = { workspace = true }

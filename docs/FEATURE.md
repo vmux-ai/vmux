@@ -10,6 +10,5 @@
     - History
     - Status Bar
     - Session Persistence
-    - [ ] Chromium plugin support
 - Keybindngs
 - Settings

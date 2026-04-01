@@ -3,7 +3,6 @@ name = "vmux_command"
 description = "vmux — command palette (Arc-style) UI and input"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 
 [lib]
 path = "src/lib.rs"
