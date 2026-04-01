@@ -11,5 +11,8 @@
 See [Makefile](Makefile) for more targets.
 
 ```sh
+# Check prerequisites
+make run-doctor
+
 make run-mac
 ```
