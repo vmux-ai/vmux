@@ -1,8 +1,8 @@
-//! vmux binary entrypoint.
+//! vmux_desktop binary entrypoint.
 
 use bevy::prelude::*;
 
-use vmux::VmuxPlugin;
+use vmux_desktop::VmuxPlugin;
 
 fn main() {
     #[cfg(not(target_os = "macos"))]

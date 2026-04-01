@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# macOS: build and run vmux (development) or build release bundle and open the .app.
+# macOS: build and run vmux_desktop (development) or build release bundle and open the .app.
 #
 # Development (default): needs CEF under ~/.local/share and bevy_cef_debug_render_process
 # in the framework Libraries folder (see README "First checkout — run for development").
@@ -24,8 +24,8 @@ usage() {
 	cat <<'EOF'
 Usage: macos.sh [command]
 
-  dev       Build and run with CEF debug mode (cargo run -p vmux --features debug). Default.
-  bundle    cargo build -p vmux --release, run bevy_cef_bundle_app, open Vmux.app
+  dev       Build and run with CEF debug mode (cargo run -p vmux_desktop --features debug). Default.
+  bundle    cargo build -p vmux_desktop --release, run bevy_cef_bundle_app, open Vmux.app
   help      Show this help
 
 Environment (optional):
@@ -59,8 +59,8 @@ ensure_dev_prereqs() {
 cmd_dev() {
 	ensure_dev_prereqs
 	cd "$ROOT"
-	echo "==> cargo run -p vmux --features debug"
-	cargo run -p vmux --features debug
+	echo "==> cargo run -p vmux_desktop --features debug"
+	cargo run -p vmux_desktop --features debug
 }
 
 cmd_bundle() {

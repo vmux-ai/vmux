@@ -1,8 +1,6 @@
 //! vmux — Bevy + embedded CEF webview library.
 
-pub mod core;
-
-pub use core::{CAMERA_DISTANCE, VmuxWorldCamera};
+pub use vmux_core::{CAMERA_DISTANCE, VmuxWorldCamera};
 pub use vmux_command::CommandPlugin;
 pub use vmux_input::{AppCommand, AppInputRoot, InputPlugin, KeyAction};
 pub use vmux_layout::LastVisitedUrl;

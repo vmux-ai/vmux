@@ -1,5 +1,5 @@
 [package]
-name = "vmux"
+name = "vmux_desktop"
 description = "vmux — Bevy + embedded CEF webview"
 version.workspace = true
 edition.workspace = true
@@ -8,7 +8,7 @@ edition.workspace = true
 path = "src/lib.rs"
 
 [[bin]]
-name = "vmux"
+name = "vmux_desktop"
 path = "src/main.rs"
 
 [features]
