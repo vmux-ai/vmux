@@ -9,8 +9,8 @@ use vmux_settings::VmuxAppSettings;
 use crate::loading_bar::{LoadingBarMaterial, PaneChromeLoadingBar};
 use crate::{
     Active, History, HistoryPaneNeedsUrl, HistoryPaneOpenedAt, LastVisitedUrl, LayoutNode,
-    LayoutTree, Pane, Webview,
-    PaneChromeNeedsUrl, PaneChromeOwner, PaneChromeStrip, PaneLastUrl, Root, SavedLayoutNode,
+    Layout, Pane, Profile, Tab, Webview, Workspace,
+    PaneChromeNeedsUrl, PaneChromeOwner, PaneChromeStrip, PaneLastUrl, SavedLayoutNode,
     SessionLayoutSnapshot, allowed_navigation_url, initial_webview_url,
     legacy_loopback_embedded_history_ui_url, sanitize_embedded_webview_url,
 };
@@ -83,6 +83,7 @@ pub fn spawn_pane(
     let mut b = commands.spawn((
         Webview,
         Pane,
+        Tab,
         Visibility::Visible,
         PaneLastUrl(start_url.to_string()),
         WebviewSource::new(start_url.to_string()),
@@ -131,6 +132,7 @@ pub fn spawn_history_pane(
     let mut b = commands.spawn((
         Webview,
         Pane,
+        Tab,
         History,
         HistoryPaneOpenedAt(std::time::Instant::now()),
         Visibility::Visible,
@@ -287,14 +289,17 @@ pub fn setup_vmux_panes(
         ))
     };
 
-    commands.spawn((
-        Root,
-        LayoutTree {
-            root: root_node,
-            revision: 0,
-            zoom_pane: None,
-        },
-    ));
+    commands.spawn(Workspace).with_children(|parent| {
+        parent.spawn((
+            crate::Window,
+            Layout {
+                root: root_node,
+                revision: 0,
+                zoom_pane: None,
+            },
+        ));
+        parent.spawn(Profile);
+    });
 
     if migrated && let Some(p) = path.as_ref() {
         session_queue.0.push(p.0.clone());

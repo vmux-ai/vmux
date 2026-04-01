@@ -8,9 +8,9 @@ use vmux_core::{SessionSavePath, SessionSaveQueue};
 use crate::pane_spawn::{spawn_history_pane, spawn_pane};
 use crate::url::{allowed_navigation_url, sanitize_embedded_webview_url};
 use crate::{
-    Active, History, LayoutAxis, LayoutNode, LayoutTree, LoadingBarMaterial, Pane, Webview,
+    Active, History, LayoutAxis, LayoutNode, Layout, LoadingBarMaterial, Pane, Webview,
     PaneChromeLoadingBar, PaneChromeOwner, PaneChromeStrip, PaneLastUrl, PaneSwapDir, PixelRect,
-    Root, SavedSessionLeaf, SessionLayoutSnapshot, layout_node_to_saved,
+    SavedSessionLeaf, SessionLayoutSnapshot, layout_node_to_saved,
     neighbor_pane_in_direction,
 };
 use vmux_settings::VmuxAppSettings;
@@ -23,7 +23,7 @@ fn webview_source_url(src: &WebviewSource) -> String {
 
 /// Rebuild [`SessionLayoutSnapshot`] from the current layout tree and pane URLs.
 pub fn rebuild_session_snapshot(
-    tree: &LayoutTree,
+    tree: &Layout,
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
     history_panes: &Query<Entity, (With<Pane>, With<Webview>, With<History>)>,
@@ -96,14 +96,14 @@ pub fn despawn_chrome_for_pane(
     }
 }
 
-fn clear_zoom_pane(layout_tree: &mut LayoutTree) {
+fn clear_zoom_pane(layout_tree: &mut Layout) {
     if layout_tree.zoom_pane.take().is_some() {
         layout_tree.bump();
     }
 }
 
 /// Tmux **`resize-pane -Z`**: toggle zoom so the active pane fills the window; not persisted.
-pub fn try_toggle_zoom_pane(layout_tree: &mut LayoutTree, active_ent: Entity) -> bool {
+pub fn try_toggle_zoom_pane(layout_tree: &mut Layout, active_ent: Entity) -> bool {
     let mut leaves = Vec::new();
     layout_tree.root.collect_leaves(&mut leaves);
     if leaves.len() < 2 {
@@ -127,7 +127,7 @@ pub fn try_toggle_zoom_pane(layout_tree: &mut LayoutTree, active_ent: Entity) ->
 #[allow(clippy::too_many_arguments)]
 pub fn try_split_active_pane(
     commands: &mut Commands,
-    layout_tree: &mut LayoutTree,
+    layout_tree: &mut Layout,
     active_ent: Entity,
     axis: LayoutAxis,
     meshes: &mut ResMut<Assets<Mesh>>,
@@ -170,7 +170,7 @@ pub fn try_split_active_pane(
 #[allow(clippy::too_many_arguments)]
 pub fn try_split_active_history_pane(
     commands: &mut Commands,
-    layout_tree: &mut LayoutTree,
+    layout_tree: &mut Layout,
     active_ent: Entity,
     axis: LayoutAxis,
     chrome_or_border: &Query<
@@ -224,7 +224,7 @@ pub fn try_split_active_history_pane(
 #[allow(clippy::too_many_arguments)]
 pub fn try_split_active_history_existing_pane(
     commands: &mut Commands,
-    layout_tree: &mut LayoutTree,
+    layout_tree: &mut Layout,
     active_ent: Entity,
     axis: LayoutAxis,
     history_pane: Entity,
@@ -259,9 +259,9 @@ pub fn try_split_active_history_existing_pane(
     }
 }
 
-/// Mirror the two halves of the innermost split that contains the active pane (see [`LayoutTree::mirror_deepest_split_around`]).
+/// Mirror the two halves of the innermost split that contains the active pane (see [`Layout::mirror_deepest_split_around`]).
 pub fn try_mirror_pane_layout(
-    layout_tree: &mut LayoutTree,
+    layout_tree: &mut Layout,
     active_ent: Entity,
     snapshot: &mut SessionLayoutSnapshot,
     pane_last: &Query<&PaneLastUrl>,
@@ -292,7 +292,7 @@ pub fn try_mirror_pane_layout(
 /// focus like tmux (`PREV` of active for `-D`, `NEXT` for `-U` in the pane list before rotation).
 pub fn try_rotate_window(
     commands: &mut Commands,
-    layout_tree: &mut LayoutTree,
+    layout_tree: &mut Layout,
     active_ent: Entity,
     down: bool,
     snapshot: &mut SessionLayoutSnapshot,
@@ -350,7 +350,7 @@ pub fn try_rotate_window(
 /// `prefer_if_valid`: see [`neighbor_pane_in_direction`](crate::neighbor_pane_in_direction).
 pub fn try_select_pane_direction(
     commands: &mut Commands,
-    layout_tree: &mut LayoutTree,
+    layout_tree: &mut Layout,
     active_ent: Entity,
     dir: PaneSwapDir,
     rects: &[(Entity, PixelRect)],
@@ -370,7 +370,7 @@ pub fn try_select_pane_direction(
 
 /// Tmux **[swap-pane](https://man.openbsd.org/tmux.1#swap-pane)** (`-L` / `-R` / `-U` / `-D`): exchange the active pane with its neighbor in that direction.
 pub fn try_swap_active_pane(
-    layout_tree: &mut LayoutTree,
+    layout_tree: &mut Layout,
     active_ent: Entity,
     dir: PaneSwapDir,
     snapshot: &mut SessionLayoutSnapshot,
@@ -398,7 +398,7 @@ pub fn try_swap_active_pane(
     true
 }
 
-pub fn try_cycle_pane_focus(commands: &mut Commands, layout_tree: &mut LayoutTree, cur: Entity) {
+pub fn try_cycle_pane_focus(commands: &mut Commands, layout_tree: &mut Layout, cur: Entity) {
     clear_zoom_pane(layout_tree);
     let mut leaves = Vec::new();
     layout_tree.root.collect_leaves(&mut leaves);
@@ -419,7 +419,7 @@ pub fn try_cycle_pane_focus(commands: &mut Commands, layout_tree: &mut LayoutTre
 #[allow(clippy::type_complexity)]
 pub fn try_kill_active_pane(
     commands: &mut Commands,
-    layout_tree: &mut LayoutTree,
+    layout_tree: &mut Layout,
     active_ent: Entity,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -501,7 +501,7 @@ pub fn split_active_pane(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     prefix: Query<&VmuxPrefixState, With<AppInputRoot>>,
-    mut layout_q: Query<&mut LayoutTree, With<Root>>,
+    mut layout_q: Query<&mut Layout, With<crate::Window>>,
     active: Query<Entity, (With<Pane>, With<Active>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -557,7 +557,7 @@ pub fn split_active_pane(
 pub fn cycle_pane_focus(
     keys: Res<ButtonInput<KeyCode>>,
     prefix: Query<&VmuxPrefixState, With<AppInputRoot>>,
-    mut layout_q: Query<&mut LayoutTree, With<Root>>,
+    mut layout_q: Query<&mut Layout, With<crate::Window>>,
     active: Query<Entity, (With<Pane>, With<Active>)>,
     mut commands: Commands,
 ) {

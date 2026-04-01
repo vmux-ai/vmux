@@ -73,7 +73,7 @@ pub struct PaneChromeOwner(pub Entity);
 #[reflect(Component, Default)]
 pub struct PaneChromeNeedsUrl;
 
-/// Primary CEF webview on a tile: the leaf entity has [`Pane`] + [`Webview`] (and chrome is separate).
+/// Primary CEF webview on a tile: the leaf entity has [`Pane`] + [`Tab`] + [`Webview`] (and chrome is separate).
 #[derive(Component, Default, Debug, Clone, Copy, Reflect)]
 #[reflect(Component, Default)]
 pub struct Webview;
@@ -101,10 +101,31 @@ pub struct HistoryPaneOpenedAt(pub std::time::Instant);
 /// Sized for the ~11px status bar (`vmux_status_bar`) with a little padding.
 pub const DEFAULT_PANE_CHROME_HEIGHT_PX: f32 = 28.0;
 
-/// Singleton anchor for subsystems (e.g. layout host with [`LayoutTree`]).
+/// Top-level workspace: holds [`Window`] (tiling + [`Layout`]) and [`Profile`] (identity / storage scope).
 #[derive(Component, Default, Debug, Clone, Copy, Reflect)]
 #[reflect(Component, Default)]
-pub struct Root;
+pub struct Workspace;
+
+/// Tiling surface inside a [`Workspace`]; owns the [`Layout`] (splits reference [`Pane`] leaves).
+///
+/// This is **not** [`bevy::window::Window`] (the OS window); import this type as `vmux_layout::Window`
+/// or `crate::Window` in layout code so it is not confused with Bevy’s window component.
+#[derive(Component, Default, Debug, Clone, Copy, Reflect)]
+#[reflect(Component, Default)]
+pub struct Window;
+
+/// Browser-style profile (ex-session): identity, prefs, future account scope. Sibling of [`Window`] under [`Workspace`].
+#[derive(Component, Default, Debug, Clone, Copy, Reflect)]
+#[reflect(Component, Default)]
+pub struct Profile;
+
+/// Navigable surface inside a [`Pane`] (v1: colocated on the same entity as [`Pane`] + [`Webview`]; may become a child entity for multi-tab).
+#[derive(Component, Default, Debug, Clone, Copy, Reflect)]
+#[reflect(Component, Default)]
+pub struct Tab;
+
+/// Deprecated alias for [`Workspace`]; prefer [`Workspace`] in new code.
+pub type Root = Workspace;
 
 /// Last known document URL for session persistence (updated from JS emit).
 #[derive(Component, Default, Debug, Clone, Reflect)]
@@ -189,9 +210,9 @@ impl LayoutNode {
     }
 }
 
-/// Layout tree on the [`Root`] entity.
+/// Layout tree on a [`Window`] (tiling host) entity.
 #[derive(Component, Debug, Clone)]
-pub struct LayoutTree {
+pub struct Layout {
     pub root: LayoutNode,
     pub revision: u64,
     /// When set, [`solve_layout`] assigns the full root area to this pane only (tmux **`resize-pane -Z`**).
@@ -199,7 +220,7 @@ pub struct LayoutTree {
     pub zoom_pane: Option<Entity>,
 }
 
-impl LayoutTree {
+impl Layout {
     pub fn bump(&mut self) {
         self.revision = self.revision.wrapping_add(1);
     }
@@ -900,7 +921,10 @@ impl Plugin for LayoutPlugin {
             .register_type::<History>()
             .register_type::<HistoryPaneStandby>()
             .register_type::<HistoryPaneNeedsUrl>()
-            .register_type::<Root>()
+            .register_type::<Workspace>()
+            .register_type::<Window>()
+            .register_type::<Profile>()
+            .register_type::<Tab>()
             .register_type::<PaneLastUrl>()
             .register_type::<LayoutAxis>()
             .register_type::<SessionLayoutSnapshot>()

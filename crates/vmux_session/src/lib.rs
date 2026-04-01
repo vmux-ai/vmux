@@ -11,7 +11,7 @@ pub use vmux_core::{
     NavigationHistoryPath, NavigationHistorySaveQueue, SessionSavePath, SessionSaveQueue,
 };
 use vmux_layout::{
-    History, LayoutTree, Pane, PaneLastUrl, Root, SessionLayoutSnapshot, Webview,
+    History, Layout, Pane, PaneLastUrl, SessionLayoutSnapshot, Webview,
     allowed_navigation_url,
 };
 use vmux_settings::{VmuxAppSettings, VmuxCacheDir, VmuxCacheDirInitSet};
@@ -126,7 +126,7 @@ fn on_webview_document_url(
     trigger: On<Receive<WebviewDocumentUrlEmit>>,
     mut snapshot: ResMut<SessionLayoutSnapshot>,
     mut pane_queries: ParamSet<(Query<&mut PaneLastUrl>, Query<&PaneLastUrl>)>,
-    layout_q: Query<&LayoutTree, With<Root>>,
+    layout_q: Query<&Layout, With<vmux_layout::Window>>,
     webview_src: Query<&WebviewSource>,
     history_overlay: Query<Entity, (With<Pane>, With<Webview>, With<History>)>,
     (path, settings): (Res<SessionSavePath>, Res<VmuxAppSettings>),
@@ -183,7 +183,7 @@ fn on_webview_document_url(
 /// `Event` system, so `add_observer(On<AppExit>)` is not applicable; `MessageReader` in `Last` is correct.
 fn save_session_on_app_exit(
     mut snapshot: ResMut<SessionLayoutSnapshot>,
-    layout_q: Query<&LayoutTree, With<Root>>,
+    layout_q: Query<&Layout, With<vmux_layout::Window>>,
     pane_last: Query<&PaneLastUrl>,
     webview_src: Query<&WebviewSource>,
     history_panes: Query<Entity, (With<Pane>, With<Webview>, With<History>)>,
@@ -206,7 +206,7 @@ fn save_session_on_app_exit(
                 );
             }
             Err(e) => {
-                warn!("vmux_session: skip layout snapshot rebuild on exit (no Root / LayoutTree?): {e}");
+                warn!("vmux_session: skip layout snapshot rebuild on exit (no layout Window / Layout?): {e}");
             }
         }
         save_session_snapshot_to_file(&mut commands, path.0.clone());

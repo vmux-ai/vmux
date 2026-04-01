@@ -31,7 +31,8 @@ pub use server::{HistoryServerPlugin, history_bundle_root};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use vmux_ui::hosted::history::{
-    HistoryUiBaseUrl, HistoryUiPlugin, HistoryUiUrlReceiver, OpenHistoryMode, apply_open_history_pane,
+    HistoryUiBaseUrl, HistoryUiEmitState, HistoryUiPlugin, HistoryUiUrlReceiver, OpenHistoryMode,
+    apply_open_history_pane,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

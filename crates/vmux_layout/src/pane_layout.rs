@@ -17,8 +17,8 @@ use crate::loading_bar::{
     webview_surface_is_placeholder,
 };
 use crate::{
-    Active, CAMERA_DISTANCE, DEFAULT_PANE_CHROME_HEIGHT_PX, LayoutTree, Pane, PaneChromeOwner,
-    PaneChromeStrip, PixelRect, Root, VmuxWorldCamera, solve_layout,
+    Active, CAMERA_DISTANCE, DEFAULT_PANE_CHROME_HEIGHT_PX, Layout, Pane, PaneChromeOwner,
+    PaneChromeStrip, PixelRect, VmuxWorldCamera, solve_layout,
 };
 
 /// Bundles [`Res`] params for [`apply_pane_loading_bar_layout`] so the system stays within Bevy’s
@@ -60,8 +60,8 @@ const MAX_CEF_BACKING_LONG_SIDE: f32 = 1536.0;
 
 /// Pixel size for pane ↔ world mapping.
 ///
-/// Prefer [`Window`] width/height when valid so layout tracks resize immediately. On some frames
-/// during window resize, `Camera::logical_viewport_size()` can lag behind [`Window`]; using the
+/// Prefer [`bevy::window::Window`] width/height when valid so layout tracks resize immediately. On some frames
+/// during window resize, `Camera::logical_viewport_size()` can lag behind [`bevy::window::Window`]; using the
 /// smaller/stale viewport for `solve_layout` while normalizing with a different effective size
 /// widens pane and chrome strips (notably the active pane’s status bar spilling past the split).
 /// Root [`PixelRect`] for [`solve_layout`], inset from the window by per-edge padding (clamped).
@@ -130,11 +130,11 @@ pub fn layout_viewport_for_workspace(window: &Window, camera: &Camera) -> Option
     }
 }
 
-/// Pane rectangles for the current [`LayoutTree`] in workspace pixels (matches [`apply_pane_layout`]).
+/// Pane rectangles for the current [`Layout`] in workspace pixels (matches [`apply_pane_layout`]).
 pub fn layout_workspace_pane_rects(
     vw: f32,
     vh: f32,
-    layout: &LayoutTree,
+    layout: &Layout,
     settings: &VmuxAppSettings,
     entity_alive: impl Fn(Entity) -> bool,
 ) -> Vec<(Entity, PixelRect)> {
@@ -245,7 +245,7 @@ pub fn split_pane_content_and_chrome(
 pub fn apply_pane_layout(
     window: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &Projection), (With<Camera3d>, With<VmuxWorldCamera>)>,
-    layout_q: Query<&LayoutTree, With<Root>>,
+    layout_q: Query<&Layout, With<crate::Window>>,
     settings: Res<VmuxAppSettings>,
     panes: Query<Entity, With<Pane>>,
     active: Query<Entity, (With<Pane>, With<Active>)>,
@@ -415,7 +415,7 @@ struct ChromeLayoutFrame {
 fn chrome_layout_frame(
     window: &Window,
     camera: &Camera,
-    layout: &LayoutTree,
+    layout: &Layout,
     settings: &VmuxAppSettings,
     panes: &Query<Entity, With<Pane>>,
     active: &Query<Entity, (With<Pane>, With<Active>)>,
@@ -467,7 +467,7 @@ fn chrome_layout_frame(
 pub fn apply_pane_chrome_layout(
     window: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &Projection), (With<Camera3d>, With<VmuxWorldCamera>)>,
-    layout_q: Query<&LayoutTree, With<Root>>,
+    layout_q: Query<&Layout, With<crate::Window>>,
     settings: Res<VmuxAppSettings>,
     active: Query<Entity, (With<Pane>, With<Active>)>,
     panes: Query<Entity, With<Pane>>,
@@ -590,7 +590,7 @@ pub fn apply_pane_chrome_layout(
 pub fn apply_pane_loading_bar_layout(
     window: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &Projection), (With<Camera3d>, With<VmuxWorldCamera>)>,
-    layout_q: Query<&LayoutTree, With<Root>>,
+    layout_q: Query<&Layout, With<crate::Window>>,
     settings: Res<VmuxAppSettings>,
     time: Res<Time>,
     active: Query<Entity, (With<Pane>, With<Active>)>,

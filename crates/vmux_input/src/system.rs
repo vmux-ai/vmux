@@ -6,9 +6,9 @@ use bevy_cef::prelude::*;
 use leafwing_input_manager::prelude::*;
 use vmux_core::{SessionSavePath, SessionSaveQueue, VmuxWorldCamera};
 use vmux_layout::{
-    Active, History, LayoutAxis, LayoutTree, LoadingBarMaterial, Pane, Webview,
+    Active, History, LayoutAxis, Layout, LoadingBarMaterial, Pane, Webview,
     PaneChromeLoadingBar, PaneChromeOwner, PaneChromeStrip, PaneFocusIncoming, PaneLastUrl,
-    PaneSwapDir, Root, SessionLayoutSnapshot, layout_viewport_for_workspace,
+    PaneSwapDir, SessionLayoutSnapshot, layout_viewport_for_workspace,
     layout_workspace_pane_rects, try_cycle_pane_focus, try_kill_active_pane,
     try_mirror_pane_layout, try_rotate_window, try_select_pane_direction, try_split_active_pane,
     try_swap_active_pane, try_toggle_zoom_pane,
@@ -78,7 +78,7 @@ pub fn tmux_prefix_commands(
     input: TmuxChordInput,
     mut prefix_q: Query<&mut VmuxPrefixState, With<AppInputRoot>>,
     mut commands: Commands,
-    mut layout_q: Query<&mut LayoutTree, With<Root>>,
+    mut layout_q: Query<&mut Layout, With<vmux_layout::Window>>,
     active: Query<Entity, (With<Pane>, With<Active>)>,
     mut spawn_assets: PaneSpawnAssets,
     mut snapshot: ResMut<SessionLayoutSnapshot>,
@@ -365,7 +365,7 @@ pub fn ctrl_arrow_focus_commands(
     keys: Res<ButtonInput<KeyCode>>,
     prefix_q: Query<&VmuxPrefixState, With<AppInputRoot>>,
     mut commands: Commands,
-    mut layout_q: Query<&mut LayoutTree, With<Root>>,
+    mut layout_q: Query<&mut Layout, With<vmux_layout::Window>>,
     active: Query<Entity, (With<Pane>, With<Active>)>,
     settings: Res<VmuxAppSettings>,
     pane_focus_incoming: Res<PaneFocusIncoming>,

@@ -14,7 +14,7 @@ use vmux_core::Active;
 use vmux_core::VmuxCommandPaletteState;
 
 use crate::{
-    LayoutTree, Pane, PixelRect, Root, VmuxWorldCamera, layout_viewport_for_workspace,
+    Layout, Pane, PixelRect, VmuxWorldCamera, layout_viewport_for_workspace,
     layout_workspace_pane_rects,
 };
 use vmux_settings::VmuxAppSettings;
@@ -57,7 +57,7 @@ pub(super) struct PanePointerFocusCache {
 impl PanePointerFocusCache {
     fn rebuild_rects(
         &mut self,
-        tree: &LayoutTree,
+        tree: &Layout,
         vw: f32,
         vh: f32,
         settings: &VmuxAppSettings,
@@ -74,7 +74,7 @@ impl PanePointerFocusCache {
 
     fn needs_rect_rebuild(
         &self,
-        tree: &LayoutTree,
+        tree: &Layout,
         vw: f32,
         vh: f32,
         settings: &VmuxAppSettings,
@@ -93,7 +93,7 @@ pub(super) fn update_active_pane_under_cursor(
     mut commands: Commands,
     window: Query<&Window, With<PrimaryWindow>>,
     camera: Query<&Camera, With<VmuxWorldCamera>>,
-    layout_q: Query<&LayoutTree, With<Root>>,
+    layout_q: Query<&Layout, With<crate::Window>>,
     settings: Res<VmuxAppSettings>,
     panes: Query<Entity, With<Pane>>,
     active: Query<Entity, (With<Pane>, With<Active>)>,
@@ -189,7 +189,7 @@ pub(super) fn update_active_pane_under_cursor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{LayoutAxis, LayoutNode, LayoutTree, Root, VmuxWorldCamera};
+    use crate::{LayoutAxis, LayoutNode, Layout, VmuxWorldCamera, Workspace};
     use bevy::window::PrimaryWindow;
 
     fn active_pane(world: &mut World) -> Entity {
@@ -207,24 +207,26 @@ mod tests {
         app.add_systems(PostUpdate, update_active_pane_under_cursor);
 
         app.world_mut()
-            .spawn((Window::default(), PrimaryWindow));
+            .spawn((bevy::window::Window::default(), PrimaryWindow));
         app.world_mut().spawn((Camera::default(), VmuxWorldCamera));
 
         let left = app.world_mut().spawn((Pane, Active)).id();
         let right = app.world_mut().spawn(Pane).id();
-        app.world_mut().spawn((
-            Root,
-            LayoutTree {
-                root: LayoutNode::Split {
-                    axis: LayoutAxis::Horizontal,
-                    ratio: 0.5,
-                    left: Box::new(LayoutNode::Leaf(left)),
-                    right: Box::new(LayoutNode::Leaf(right)),
+        app.world_mut().spawn(Workspace).with_children(|parent| {
+            parent.spawn((
+                crate::Window,
+                Layout {
+                    root: LayoutNode::Split {
+                        axis: LayoutAxis::Horizontal,
+                        ratio: 0.5,
+                        left: Box::new(LayoutNode::Leaf(left)),
+                        right: Box::new(LayoutNode::Leaf(right)),
+                    },
+                    revision: 1,
+                    zoom_pane: None,
                 },
-                revision: 1,
-                zoom_pane: None,
-            },
-        ));
+            ));
+        });
 
         {
             let world = app.world_mut();

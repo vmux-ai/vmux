@@ -10,8 +10,6 @@
     - History
     - Status Bar
     - Session Persistence
-- [ ] Terminal
-- [ ] Editor
-- [ ] AI agent
+    - [ ] Chromium plugin support
 - Keybindngs
 - Settings

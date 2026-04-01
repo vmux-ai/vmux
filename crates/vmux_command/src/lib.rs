@@ -38,8 +38,8 @@ use vmux_layout::{
     apply_pane_layout, layout_viewport_for_workspace, layout_workspace_pane_rects, try_cycle_pane_focus,
     try_kill_active_pane, try_mirror_pane_layout, try_rotate_window, try_select_pane_direction,
     try_split_active_pane, try_swap_active_pane, try_toggle_zoom_pane, History, LayoutAxis,
-    LayoutTree, LoadingBarMaterial, Pane, PaneChromeLoadingBar, PaneChromeOwner,
-    PaneChromeStrip, PaneFocusIncoming, PaneLastUrl, PaneSwapDir, Root, SessionLayoutSnapshot,
+    Layout, LoadingBarMaterial, Pane, PaneChromeLoadingBar, PaneChromeOwner,
+    PaneChromeStrip, PaneFocusIncoming, PaneLastUrl, PaneSwapDir, SessionLayoutSnapshot,
     VmuxAppSettings, Webview,
 };
 use vmux_settings::VmuxBindingSettings;
@@ -742,7 +742,7 @@ fn palette_tab_title(url: &str) -> String {
 }
 
 fn collect_command_palette_tabs(
-    tree: &LayoutTree,
+    tree: &Layout,
     pane_last: &Query<&PaneLastUrl>,
     webview_src: &Query<&WebviewSource>,
     history_panes: &Query<Entity, (With<Pane>, With<Webview>, With<History>)>,
@@ -1730,7 +1730,7 @@ fn sync_command_palette_camera_viewport(
 fn clamp_palette_list_scroll_to_selection(
     palette: Res<VmuxCommandPaletteState>,
     hist: Res<NavigationHistory>,
-    layout_q: Query<&LayoutTree, With<Root>>,
+    layout_q: Query<&Layout, With<vmux_layout::Window>>,
     pane_last: Query<&PaneLastUrl>,
     webview_src: Query<&WebviewSource>,
     history_panes: Query<Entity, (With<Pane>, With<Webview>, With<History>)>,
@@ -2064,7 +2064,7 @@ fn handle_keyboard(
     time: Res<Time>,
     mut list_scroll: Query<&mut ScrollPosition, With<CommandPaletteListScroll>>,
     hist: Res<NavigationHistory>,
-    layout_q: Query<&LayoutTree, With<Root>>,
+    layout_q: Query<&Layout, With<vmux_layout::Window>>,
     pane_last: Query<&PaneLastUrl>,
     webview_src: Query<&WebviewSource>,
     history_panes: Query<Entity, (With<Pane>, With<Webview>, With<History>)>,
@@ -2320,7 +2320,7 @@ fn apply_pending_ui_library_navigation(
         history_panes,
     ): (
         Query<Entity, (With<Pane>, With<Active>, With<Webview>, Without<History>)>,
-        Query<&mut LayoutTree, With<Root>>,
+        Query<&mut Layout, With<vmux_layout::Window>>,
         ResMut<Assets<Mesh>>,
         ResMut<Assets<WebviewExtendStandardMaterial>>,
         ResMut<Assets<LoadingBarMaterial>>,
@@ -2379,7 +2379,7 @@ fn navigate_palette_url(
     url: String,
     new_pane: bool,
     active: &Query<Entity, (With<Pane>, With<Active>, With<Webview>, Without<History>)>,
-    layout_q: &mut Query<&mut LayoutTree, With<Root>>,
+    layout_q: &mut Query<&mut Layout, With<vmux_layout::Window>>,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     loading_bar_materials: &mut ResMut<Assets<LoadingBarMaterial>>,
@@ -2454,7 +2454,7 @@ fn execute_palette_chord_pending(
         ResMut<Assets<Mesh>>,
         ResMut<Assets<WebviewExtendStandardMaterial>>,
         ResMut<Assets<LoadingBarMaterial>>,
-        Query<&mut LayoutTree, With<Root>>,
+        Query<&mut Layout, With<vmux_layout::Window>>,
         Query<Entity, (With<Pane>, With<Active>)>,
         ResMut<SessionLayoutSnapshot>,
         Query<&PaneLastUrl>,
@@ -2727,7 +2727,7 @@ fn submit(
     ): (
         Query<Entity, (With<Pane>, With<Active>, With<Webview>, Without<History>)>,
         Query<Entity, With<Pane>>,
-        Query<&mut LayoutTree, With<Root>>,
+        Query<&mut Layout, With<vmux_layout::Window>>,
         ResMut<Assets<Mesh>>,
         ResMut<Assets<WebviewExtendStandardMaterial>>,
         ResMut<Assets<LoadingBarMaterial>>,
@@ -2978,7 +2978,7 @@ type DisjointPaletteRowFaviconLabel = (
 fn refresh_labels(
     mut palette: ResMut<VmuxCommandPaletteState>,
     hist: Res<NavigationHistory>,
-    layout_q: Query<&LayoutTree, With<Root>>,
+    layout_q: Query<&Layout, With<vmux_layout::Window>>,
     pane_last: Query<&PaneLastUrl>,
     webview_src: Query<&WebviewSource>,
     history_panes: Query<Entity, (With<Pane>, With<Webview>, With<History>)>,

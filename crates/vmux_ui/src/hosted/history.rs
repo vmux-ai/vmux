@@ -15,8 +15,8 @@ use vmux_core::{
 use vmux_input::{AppInputRoot, KeyAction, sync_cef_osr_focus_with_active_pane};
 use vmux_layout::{
     Active, History, HistoryPaneNeedsUrl, HistoryPaneOpenedAt, HistoryPaneStandby, LayoutAxis,
-    LayoutTree, LoadingBarMaterial, Pane, PaneChromeLoadingBar, PaneChromeOwner, PaneChromeStrip,
-    PaneLastUrl, Root, SessionLayoutSnapshot,
+    Layout, LoadingBarMaterial, Pane, PaneChromeLoadingBar, PaneChromeOwner, PaneChromeStrip,
+    PaneLastUrl, SessionLayoutSnapshot,
     Webview, spawn_history_pane,
     try_split_active_history_existing_pane, try_split_active_history_pane,
 };
@@ -128,8 +128,10 @@ struct HistoryPanePerfLog {
     first_host_emit_logged: HashSet<Entity>,
 }
 
+/// Resource driving host→history WASM payload dedupe and streaming; required as the first argument to
+/// [`apply_open_history_pane`] when calling it outside this plugin.
 #[derive(Resource, Default)]
-struct HistoryUiEmitState {
+pub struct HistoryUiEmitState {
     last_revision: Option<u64>,
     /// When history panes are created after the last navigation, revision is unchanged; re-emit so new webviews receive the payload.
     last_target_entities: Vec<Entity>,
@@ -358,6 +360,38 @@ fn on_vmux_request_history(
 ///
 /// Only **non-standby** panes are counted so an off-layout standby browser cannot block the visible
 /// history pane forever.
+/// After restart or navigation, CEF may report [`Browsers::host_emit_ready`] only once OSR focus has
+/// visited the history browser (`sync_osr_focus_to_active_pane`). If we already advanced dedupe
+/// (`last_revision`) while `main_frame` was still missing, or skipped emit, the UI stays empty until
+/// something else clears dedupe (e.g. clicking the pane). Clear when readiness **transitions** so the
+/// next [`emit_history_to_panes`] pass can resend.
+fn nudge_history_emit_when_history_host_emit_ready_rises(
+    mut state: ResMut<HistoryUiEmitState>,
+    history: Query<
+        Entity,
+        (
+            With<Pane>,
+            With<Webview>,
+            With<History>,
+            Without<HistoryPaneStandby>,
+        ),
+    >,
+    browsers: NonSend<Browsers>,
+    mut prev: Local<HashMap<Entity, bool>>,
+) {
+    let id_set: HashSet<Entity> = history.iter().collect();
+    prev.retain(|e, _| id_set.contains(e));
+    for e in history.iter() {
+        let now = browsers.host_emit_ready(&e);
+        let was = prev.get(&e).copied().unwrap_or(false);
+        if now && !was {
+            state.last_revision = None;
+            state.stream = None;
+        }
+        prev.insert(e, now);
+    }
+}
+
 fn nudge_history_emit_for_osr_wasm_timers(
     mut state: ResMut<HistoryUiEmitState>,
     history: Query<
@@ -725,8 +759,9 @@ pub enum OpenHistoryMode {
 /// Focus the history pane if it exists (when [`OpenHistoryMode::FocusOrOpen`]), otherwise split in a new history pane.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_open_history_pane(
+    emit_state: &mut HistoryUiEmitState,
     commands: &mut Commands,
-    layout_q: &mut Query<&mut LayoutTree, With<Root>>,
+    layout_q: &mut Query<&mut Layout, With<vmux_layout::Window>>,
     history_panes: &Query<Entity, (With<Pane>, With<Webview>, With<History>)>,
     all_panes: &Query<Entity, With<Pane>>,
     active: &Query<Entity, (With<Pane>, With<Active>)>,
@@ -758,6 +793,10 @@ pub fn apply_open_history_pane(
         && let Some(hist) = history_panes.iter().find(|e| tree.root.contains_leaf(*e))
     {
         if active_ent == hist {
+            // User hit “open history” while already on the history pane; still allow a resync
+            // (same race as initial load).
+            emit_state.last_revision = None;
+            emit_state.stream = None;
             return;
         }
         for p in all_panes.iter() {
@@ -816,12 +855,13 @@ struct OpenHistoryHotkeyAssets<'w> {
     session_queue: ResMut<'w, SessionSaveQueue>,
     settings: Res<'w, VmuxAppSettings>,
     hist_ui: Res<'w, HistoryUiBaseUrl>,
+    emit_state: ResMut<'w, HistoryUiEmitState>,
 }
 
 #[derive(SystemParam)]
 struct OpenHistoryHotkeyQueries<'w, 's> {
     state: Query<'w, 's, &'static ActionState<KeyAction>, With<AppInputRoot>>,
-    layout_q: Query<'w, 's, &'static mut LayoutTree, With<Root>>,
+    layout_q: Query<'w, 's, &'static mut Layout, With<vmux_layout::Window>>,
     history_panes: Query<'w, 's, Entity, (With<Pane>, With<Webview>, With<History>)>,
     all_panes: Query<'w, 's, Entity, With<Pane>>,
     active: Query<'w, 's, Entity, (With<Pane>, With<Active>)>,
@@ -858,6 +898,7 @@ fn open_history_pane_hotkey(
         return;
     };
     apply_open_history_pane(
+        &mut assets.emit_state,
         &mut commands,
         &mut queries.layout_q,
         &queries.history_panes,
@@ -895,6 +936,7 @@ fn open_history_pane_requested(
         return;
     };
     apply_open_history_pane(
+        &mut assets.emit_state,
         &mut commands,
         &mut queries.layout_q,
         &queries.history_panes,
@@ -1016,12 +1058,16 @@ impl Plugin for HistoryUiPlugin {
                         .after(apply_history_url_to_panes)
                         .after(invalidate_history_emit_when_focusing_history_pane)
                         .after(sync_cef_osr_focus_with_active_pane),
+                    nudge_history_emit_when_history_host_emit_ready_rises
+                        .after(sync_cef_osr_focus_with_active_pane)
+                        .after(nudge_history_emit_for_osr_wasm_timers),
                     emit_history_to_panes
                         .after(history_emit_reset_on_navigation_or_targets_changed)
                         .after(apply_history_url_to_panes)
                         .after(invalidate_history_emit_when_focusing_history_pane)
                         .after(sync_cef_osr_focus_with_active_pane)
-                        .after(nudge_history_emit_for_osr_wasm_timers),
+                        .after(nudge_history_emit_for_osr_wasm_timers)
+                        .after(nudge_history_emit_when_history_host_emit_ready_rises),
                 ),
             );
     }

@@ -256,6 +256,14 @@ struct PreparedRaw {
     total_rows: usize,
 }
 
+/// Single memo output: avoids two [`use_memo`] hooks both reading `entries`/`filter`, which can
+/// panic in the Dioxus reactive layer (see comment on nested memos below).
+#[derive(Clone, PartialEq)]
+struct PreparedHistoryView {
+    total_rows: usize,
+    visible_grouped: Vec<(&'static str, Vec<HistoryRowModel>)>,
+}
+
 /// Filter + day grouping only (indices only). Row strings are built only for the visible slice.
 fn prepare_history_raw(entries: &[HistoryEntryWire], filter_trimmed: &str) -> PreparedRaw {
     let now_ms = js_sys::Date::now() as i64;
@@ -553,21 +561,20 @@ pub fn App() -> Element {
 
     let prepared = use_memo(move || {
         let list = entries();
-        prepare_history_raw(&list, filter().trim())
-    });
-    // Do not read `prepared` inside another `use_memo` — nested memo reads can panic in the
-    // reactive layer (dioxus memo + subscription ordering). Recompute the same filter/group here.
-    let visible_grouped = use_memo(move || {
-        let list = entries();
         let p = prepare_history_raw(&list, filter().trim());
-        truncate_and_materialize(&list, &p.grouped, visible_limit())
+        let visible_grouped = truncate_and_materialize(&list, &p.grouped, visible_limit());
+        PreparedHistoryView {
+            total_rows: p.total_rows,
+            visible_grouped,
+        }
     });
 
-    let total_rows = prepared.read().total_rows;
+    let prepared_inner = prepared.read();
+    let total_rows = prepared_inner.total_rows;
+    let grouped_for_view = prepared_inner.visible_grouped.clone();
     let limit = visible_limit();
     let has_more = total_rows > limit;
     let next_batch = LOAD_MORE_ROWS.min(total_rows.saturating_sub(limit));
-    let grouped_for_view = visible_grouped.read();
     let filter_trimmed = filter().trim().to_string();
     let chrome_loading = !cef_listener_ready();
     let list_loading = cef_listener_ready() && !host_snapshot_received();

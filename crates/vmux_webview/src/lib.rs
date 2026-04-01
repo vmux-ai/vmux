@@ -74,7 +74,8 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>();
         app.add_systems(Update, (go_back, go_forward, reload));
-        app.world_mut().spawn((Pane, Webview, vmux_core::Active));
+        app.world_mut()
+            .spawn((Pane, Webview, vmux_layout::Tab, vmux_core::Active));
         app.update();
     }
 }
