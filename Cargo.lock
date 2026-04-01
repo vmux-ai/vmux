@@ -7890,23 +7890,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vmux"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bevy_cef",
- "leafwing-input-manager",
- "vmux_browser",
- "vmux_command",
- "vmux_core",
- "vmux_input",
- "vmux_layout",
- "vmux_scene",
- "vmux_session",
- "vmux_settings",
-]
-
-[[package]]
 name = "vmux_browser"
 version = "0.1.0"
 dependencies = [
@@ -7937,6 +7920,23 @@ dependencies = [
  "bevy",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "vmux_desktop"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "leafwing-input-manager",
+ "vmux_browser",
+ "vmux_command",
+ "vmux_core",
+ "vmux_input",
+ "vmux_layout",
+ "vmux_scene",
+ "vmux_session",
+ "vmux_settings",
 ]
 
 [[package]]

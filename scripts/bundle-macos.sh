@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build release vmux and bundle CEF into Vmux.app using bevy_cef_bundle_app.
+# Build release vmux_desktop and bundle CEF into Vmux.app using bevy_cef_bundle_app.
 # Prerequisites: export-cef-dir (see README), cargo-installed bevy_cef_render_process + bevy_cef_bundle_app.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,12 +17,12 @@ PLIST_SRC="${PLIST_SRC:-$ROOT/packaging/macos/Info.plist}"
 
 cd "$ROOT"
 
-echo "==> cargo build -p vmux --release"
-cargo build -p vmux --release
+echo "==> cargo build -p vmux_desktop --release"
+cargo build -p vmux_desktop --release
 
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
-cp -f "$ROOT/target/release/vmux" "$APP_BUNDLE/Contents/MacOS/vmux"
-chmod +x "$APP_BUNDLE/Contents/MacOS/vmux"
+cp -f "$ROOT/target/release/vmux_desktop" "$APP_BUNDLE/Contents/MacOS/vmux_desktop"
+chmod +x "$APP_BUNDLE/Contents/MacOS/vmux_desktop"
 cp -f "$PLIST_SRC" "$APP_BUNDLE/Contents/Info.plist"
 
 if ! command -v bevy_cef_bundle_app >/dev/null 2>&1; then

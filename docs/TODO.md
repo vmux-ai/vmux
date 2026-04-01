@@ -88,3 +88,8 @@
 
 - `vmux_ai_agent`
     - Chat based AI agent panel MVP
+
+## v0.X
+
+- Windows support
+- Linux support
