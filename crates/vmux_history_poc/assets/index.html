@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>History</title>
+</head>
+<body>
+  <h1>History</h1>
+  <p>URL: <span id="url">…</span></p>
+  <p>
+    <button type="button" id="push-js">Push update from JS</button>
+  </p>
+  <script>
+    (function () {
+      var el = document.getElementById("url");
+      function setUrl(u) {
+        el.textContent = u;
+      }
+      window.cef.listen("history", function (data) {
+        if (data && typeof data.url === "string") {
+          setUrl(data.url);
+        }
+      });
+      document.getElementById("push-js").onclick = function () {
+        var next = "from-js-" + Date.now();
+        window.cef.emit({ url: next });
+      };
+    })();
+  </script>
+</body>
+</html>

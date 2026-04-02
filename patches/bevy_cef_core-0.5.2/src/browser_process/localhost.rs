@@ -19,6 +19,49 @@ use serde::{Deserialize, Serialize};
 use std::os::raw::c_int;
 use std::sync::{Arc, Mutex};
 
+use crate::util::{HOST_VMUX_HISTORY, VMUX_HISTORY_DEFAULT_DOCUMENT};
+
+/// Map navigated custom-scheme URLs to a Bevy [`AssetServer`] load path.
+///
+/// - `cef://localhost/embedded/…` → `embedded://…` ([embedded assets](https://bevy.org/examples/assets/embedded-asset/)).
+/// - `cef://localhost/…` (otherwise) → path as-is (disk assets under the app asset root).
+/// - `vmux://history/` (host root, Chrome-style) → `embedded://<VMUX_HISTORY_DEFAULT_DOCUMENT>`.
+/// - `vmux://history/<path>` → `embedded://<path>` when the remainder has no scheme.
+///
+/// The `vmux` scheme requires a render subprocess built from this repo’s patched `bevy_cef_core`
+/// (`patches/bevy_cef_debug_render_process-0.5.2`); see the workspace `Makefile`
+/// `install-debug-render-process` target.
+pub(crate) fn asset_load_path_from_request_url(url: &str) -> String {
+    const CEF_LOCAL: &str = concat!("cef", "://", "localhost", "/");
+    const EMBEDDED_LEAF: &str = "embedded/";
+    const EMBEDDED_SCHEME: &str = "embedded://";
+
+    if let Some(rest) = url.strip_prefix(CEF_LOCAL) {
+        if let Some(tail) = rest.strip_prefix(EMBEDDED_LEAF) {
+            format!("{EMBEDDED_SCHEME}{tail}")
+        } else {
+            rest.to_string()
+        }
+    } else if let Some(rest) = url.strip_prefix("vmux://") {
+        let path_part = rest.split(['?', '#']).next().unwrap_or(rest);
+        let history_slash = format!("{HOST_VMUX_HISTORY}/");
+        let tail = path_part
+            .strip_prefix(&history_slash)
+            .or_else(|| path_part.strip_prefix(HOST_VMUX_HISTORY))
+            .unwrap_or(path_part);
+        let tail = tail.trim_start_matches('/').trim_end_matches('/');
+        if tail.starts_with(EMBEDDED_SCHEME) {
+            tail.to_string()
+        } else if tail.is_empty() {
+            format!("{EMBEDDED_SCHEME}{VMUX_HISTORY_DEFAULT_DOCUMENT}")
+        } else {
+            format!("{EMBEDDED_SCHEME}{tail}")
+        }
+    } else {
+        String::new()
+    }
+}
+
 /// `cef://` scheme response asset.
 #[derive(Asset, Reflect, Debug, Clone, Serialize, Deserialize)]
 #[reflect(Debug, Serialize, Deserialize)]
@@ -199,10 +242,7 @@ impl ImplResourceHandler for LocalResourceHandlerBuilder {
                 let (tx, rx) = async_channel::bounded(1);
                 let _ = requester
                     .send(CefRequest {
-                        uri: url
-                            .strip_prefix("cef://localhost/")
-                            .unwrap_or_default()
-                            .to_string(),
+                        uri: asset_load_path_from_request_url(&url),
                         responser: Responser(tx),
                     })
                     .await;
@@ -277,5 +317,56 @@ impl ImplResourceHandler for LocalResourceHandlerBuilder {
     #[inline]
     fn get_raw(&self) -> *mut _cef_resource_handler_t {
         self.object.cast()
+    }
+}
+
+#[cfg(test)]
+mod custom_scheme_url_tests {
+    use super::asset_load_path_from_request_url;
+    use crate::util::VMUX_HISTORY_DEFAULT_DOCUMENT;
+
+    #[test]
+    fn vmux_history_root_maps_to_default_embedded_document() {
+        for url in [
+            "vmux://history/",
+            "vmux://history",
+            "vmux://history/?q=1",
+            "vmux://history#frag",
+        ] {
+            assert_eq!(
+                asset_load_path_from_request_url(url),
+                format!("embedded://{VMUX_HISTORY_DEFAULT_DOCUMENT}"),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn vmux_history_subpath_maps_to_embedded() {
+        assert_eq!(
+            asset_load_path_from_request_url("vmux://history/other/page.html"),
+            "embedded://other/page.html"
+        );
+    }
+
+    #[test]
+    fn cef_localhost_embedded_prefix() {
+        assert_eq!(
+            asset_load_path_from_request_url("cef://localhost/embedded/crate/foo.html"),
+            "embedded://crate/foo.html"
+        );
+    }
+
+    #[test]
+    fn cef_localhost_disk_style_path() {
+        assert_eq!(
+            asset_load_path_from_request_url("cef://localhost/index.html"),
+            "index.html"
+        );
+    }
+
+    #[test]
+    fn unknown_scheme_yields_empty() {
+        assert_eq!(asset_load_path_from_request_url("https://example.com/"), "");
     }
 }

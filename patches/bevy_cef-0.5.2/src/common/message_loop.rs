@@ -86,6 +86,23 @@ fn cef_initialize(args: &Args, cef_app: &mut cef::App, root_cache_path: Option<&
             .unwrap_or_else(|e| panic!("failed to create root_cache_path directory '{path}': {e}"));
     }
 
+    #[cfg(feature = "debug")]
+    let browser_subprocess_path = {
+        let subprocess = debug_render_process_path();
+        assert!(
+            subprocess.is_file(),
+            "CEF macOS debug render process missing at {}.\n\
+The helper must live under the framework Libraries/ folder (not only in target/debug/): Chromium loads libGLESv2 and related dylibs relative to the subprocess path; a helper next to your app breaks GPU/subprocess startup and often yields ERR_UNKNOWN_URL_SCHEME for vmux://.\n\
+Fix: make install-debug-render-process  (or: cargo build -p bevy_cef_debug_render_process && cp target/debug/bevy_cef_debug_render_process '{}')",
+            subprocess.display(),
+            debug_render_process_path().display(),
+        );
+        subprocess
+            .to_str()
+            .expect("debug render subprocess path must be UTF-8")
+            .to_string()
+    };
+
     let settings = Settings {
         #[cfg(feature = "debug")]
         framework_dir_path: debug_chromium_embedded_framework_dir_path()
@@ -93,7 +110,7 @@ fn cef_initialize(args: &Args, cef_app: &mut cef::App, root_cache_path: Option<&
             .unwrap()
             .into(),
         #[cfg(feature = "debug")]
-        browser_subprocess_path: debug_render_process_path().to_str().unwrap().into(),
+        browser_subprocess_path: browser_subprocess_path.as_str().into(),
         #[cfg(feature = "debug")]
         no_sandbox: true as _,
         root_cache_path: root_cache_path.unwrap_or_default().into(),

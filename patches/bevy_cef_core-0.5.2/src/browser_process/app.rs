@@ -2,7 +2,7 @@ use crate::browser_process::CefExtensions;
 use crate::browser_process::CommandLineConfig;
 use crate::browser_process::MessageLoopTimer;
 use crate::browser_process::browser_process_handler::BrowserProcessHandlerBuilder;
-use crate::util::{SCHEME_CEF, cef_scheme_flags};
+use crate::util::{SCHEME_CEF, SCHEME_VMUX, cef_scheme_flags};
 use cef::rc::{Rc, RcImpl};
 use cef::{
     BrowserProcessHandler, CefString, CommandLine, ImplApp, ImplCommandLine, ImplSchemeRegistrar,
@@ -82,6 +82,7 @@ impl ImplApp for BrowserProcessAppBuilder {
     fn on_register_custom_schemes(&self, registrar: Option<&mut SchemeRegistrar>) {
         if let Some(registrar) = registrar {
             registrar.add_custom_scheme(Some(&SCHEME_CEF.into()), cef_scheme_flags() as _);
+            registrar.add_custom_scheme(Some(&SCHEME_VMUX.into()), cef_scheme_flags() as _);
         }
     }
 

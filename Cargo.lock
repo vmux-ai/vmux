@@ -804,6 +804,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_cef_debug_render_process"
+version = "0.5.2"
+dependencies = [
+ "bevy_cef_core",
+ "cef",
+ "cef-dll-sys",
+]
+
+[[package]]
 name = "bevy_color"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7960,6 +7969,15 @@ dependencies = [
  "vmux_utils",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "vmux_history_poc"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "serde",
 ]
 
 [[package]]

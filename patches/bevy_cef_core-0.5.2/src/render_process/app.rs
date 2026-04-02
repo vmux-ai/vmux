@@ -1,5 +1,5 @@
 use crate::prelude::RenderProcessHandlerBuilder;
-use crate::util::{SCHEME_CEF, cef_scheme_flags};
+use crate::util::{SCHEME_CEF, SCHEME_VMUX, cef_scheme_flags};
 use cef::rc::{Rc, RcImpl};
 use cef::{ImplApp, ImplSchemeRegistrar, RenderProcessHandler, SchemeRegistrar, WrapApp};
 use cef_dll_sys::{_cef_app_t, cef_base_ref_counted_t};
@@ -41,6 +41,7 @@ impl ImplApp for RenderProcessAppBuilder {
     fn on_register_custom_schemes(&self, registrar: Option<&mut SchemeRegistrar>) {
         if let Some(registrar) = registrar {
             registrar.add_custom_scheme(Some(&SCHEME_CEF.into()), cef_scheme_flags() as _);
+            registrar.add_custom_scheme(Some(&SCHEME_VMUX.into()), cef_scheme_flags() as _);
         }
     }
 

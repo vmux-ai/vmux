@@ -1,3 +1,21 @@
+//! CEF custom URL schemes used with Bevy assets.
+//!
+//! Chromium requires **two** registrations (see [CEF scheme registration](https://cef-builds.spotifycdn.com/docs/145.0/classCefApp.html)):
+//!
+//! 1. **`on_register_custom_schemes`** — in **every** process (browser + render). Implemented on
+//!    [`BrowserProcessAppBuilder`](crate::browser_process::app::BrowserProcessAppBuilder) and
+//!    [`RenderProcessAppBuilder`](crate::render_process::app::RenderProcessAppBuilder) via
+//!    [`cef_scheme_flags`].
+//! 2. **Scheme handler factories** — per [`RequestContext`](cef::RequestContext) *and* process-wide via
+//!    [`cef::register_scheme_handler_factory`](cef::register_scheme_handler_factory) (see
+//!    [`Browsers::create_browser`](crate::browser_process::browsers::Browsers::create_browser)) so
+//!    `vmux://` is recognized everywhere Chromium resolves URLs.
+//!
+//! On macOS debug builds, install the workspace `bevy_cef_debug_render_process` **inside** the CEF
+//! framework’s `Libraries/` directory (`make install-debug-render-process`). Chromium resolves GPU
+//! and other dylibs relative to the helper executable; placing the helper only in `target/debug/`
+//! breaks that lookup and can surface as `ERR_UNKNOWN_URL_SCHEME` for custom schemes.
+
 pub mod v8_accessor;
 mod v8_handler_wrapper;
 pub mod v8_interceptor;
@@ -23,6 +41,18 @@ pub const EXTENSIONS_SWITCH: &str = "bevy-cef-extensions";
 pub const SCHEME_CEF: &str = "cef";
 
 pub const HOST_CEF: &str = "localhost";
+
+/// vmux-hosted pages (e.g. embedded Bevy assets) under this scheme / authority.
+pub const SCHEME_VMUX: &str = "vmux";
+
+/// Host segment for history UI / embedded history assets (`vmux://history/…`).
+pub const HOST_VMUX_HISTORY: &str = "history";
+
+/// Full URL prefix including trailing slash (`vmux://history/`).
+pub const VMUX_HISTORY_URL_PREFIX: &str = "vmux://history/";
+
+/// Embedded asset path served for `vmux://history/` (no path), like `chrome://settings/` having a fixed internal page.
+pub const VMUX_HISTORY_DEFAULT_DOCUMENT: &str = "history/index.html";
 
 pub fn cef_scheme_flags() -> u32 {
     CEF_SCHEME_OPTION_STANDARD as u32

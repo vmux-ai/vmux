@@ -1,0 +1,22 @@
+# Debug CEF render subprocess for macOS dev. Must link the same `bevy_cef_core` as the host app
+# so `on_register_custom_schemes` matches (e.g. extra `vmux` scheme). Build with:
+#   cargo build -p bevy_cef_debug_render_process
+# then copy the binary into the CEF framework (see root `Makefile` `install-debug-render-process`).
+[package]
+name = "bevy_cef_debug_render_process"
+description = "Debug render process for vmux-patched bevy_cef_core"
+version = "0.5.2"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+authors = ["notelm"]
+repository = "https://github.com/not-elm/bevy_cef"
+publish = false
+
+[[bin]]
+name = "bevy_cef_debug_render_process"
+path = "src/main.rs"
+
+[dependencies]
+bevy_cef_core = { path = "../bevy_cef_core-0.5.2", features = ["debug"] }
+cef = "145.6.1+145.0.28"
+cef-dll-sys = { version = "145.6.1+145.0.28", features = ["sandbox"] }

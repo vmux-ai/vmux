@@ -15,7 +15,9 @@ members = [
     "crates/vmux_webview",
     "crates/vmux_status_bar",
     "crates/vmux_history",
+    "crates/vmux_history_poc",
     "crates/vmux_ui",
+    "patches/bevy_cef_debug_render_process-0.5.2",
 ]
 default-members = ["crates/vmux_desktop"]
 resolver = "3"

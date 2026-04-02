@@ -12,13 +12,14 @@ use cef::{
     DictionaryValue, ImplBrowser, ImplBrowserHost, ImplDictionaryValue, ImplFrame, ImplListValue,
     ImplProcessMessage, ImplRequestContext, MouseButtonType, ProcessId, Range, RequestContext,
     RequestContextSettings, WindowInfo, browser_host_create_browser_sync, dictionary_value_create,
-    process_message_create,
+    process_message_create, register_scheme_handler_factory,
 };
 use cef_dll_sys::{cef_event_flags_t, cef_mouse_button_type_t};
 #[allow(deprecated)]
 use raw_window_handle::RawWindowHandle;
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Once;
 
 mod devtool_render_handler;
 mod keyboard;
@@ -34,6 +35,8 @@ pub use keyboard::*;
 /// CEF [`BrowserSettings::background_color`] is ARGB (`A` in the high byte). Matches the dark
 /// gray used by bevy_cef’s webview placeholder texture (sRGB 43, 44, 47) so OSR clears are not white.
 const CEF_OSR_BACKGROUND_COLOR_ARGB: u32 = 0xFF2B2C2F;
+
+static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
 
 /// Disk profile root for [`RequestContextSettings::cache_path`], aligned with `CefPlugin::root_cache_path` in the `bevy_cef` crate.
 /// Inserted by that plugin; when `bevy_cef_core` is used without it, initialize via `init_resource` (default `None`).
@@ -97,6 +100,34 @@ impl Browsers {
             system_cursor_icon_sender,
             webview_loading_state_sender,
         );
+
+        // `RequestContext::register_scheme_handler_factory` is not always enough: some navigations
+        // still consult the process-wide factories registered via `cef_register_scheme_handler_factory`
+        // (see CEF capi). Without this, `vmux://` can yield ERR_UNKNOWN_URL_SCHEME despite
+        // `on_register_custom_schemes` and per-context registration.
+        let requester_for_global = requester.clone();
+        REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES.call_once(move || {
+            let mut cef_factory = LocalSchemaHandlerBuilder::build(requester_for_global.clone());
+            let ok_cef = register_scheme_handler_factory(
+                Some(&SCHEME_CEF.into()),
+                Some(&HOST_CEF.into()),
+                Some(&mut cef_factory),
+            );
+            assert_eq!(
+                ok_cef, 1,
+                "cef_register_scheme_handler_factory(cef) failed with code {ok_cef}"
+            );
+            let mut vmux_factory = LocalSchemaHandlerBuilder::build(requester_for_global);
+            let ok_vmux = register_scheme_handler_factory(
+                Some(&SCHEME_VMUX.into()),
+                None,
+                Some(&mut vmux_factory),
+            );
+            assert_eq!(
+                ok_vmux, 1,
+                "cef_register_scheme_handler_factory(vmux) failed with code {ok_vmux}"
+            );
+        });
 
         // Holds the per-browser ephemeral context when not using `shared_disk_context`.
         #[allow(unused_assignments)]
@@ -597,6 +628,14 @@ impl Browsers {
             context.register_scheme_handler_factory(
                 Some(&SCHEME_CEF.into()),
                 Some(&HOST_CEF.into()),
+                Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
+            );
+            // `domain_name: None` matches every `vmux://` host. A specific host caused
+            // `ERR_UNKNOWN_URL_SCHEME` in some builds despite matching `register_scheme_handler_factory` —
+            // Chromium’s internal URL normalization did not always line up with `Some("history")`.
+            context.register_scheme_handler_factory(
+                Some(&SCHEME_VMUX.into()),
+                None,
                 Some(&mut LocalSchemaHandlerBuilder::build(requester)),
             );
         }
@@ -612,6 +651,14 @@ impl Browsers {
             context.register_scheme_handler_factory(
                 Some(&SCHEME_CEF.into()),
                 Some(&HOST_CEF.into()),
+                Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
+            );
+            // `domain_name: None` matches every `vmux://` host. A specific host caused
+            // `ERR_UNKNOWN_URL_SCHEME` in some builds despite matching `register_scheme_handler_factory` —
+            // Chromium’s internal URL normalization did not always line up with `Some("history")`.
+            context.register_scheme_handler_factory(
+                Some(&SCHEME_VMUX.into()),
+                None,
                 Some(&mut LocalSchemaHandlerBuilder::build(requester)),
             );
         }

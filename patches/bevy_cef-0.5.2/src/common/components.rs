@@ -1,5 +1,7 @@
 use bevy::prelude::*;
-use bevy_cef_core::prelude::{HOST_CEF, SCHEME_CEF};
+use bevy_cef_core::prelude::{
+    HOST_CEF, HOST_VMUX_HISTORY, SCHEME_CEF, SCHEME_VMUX, VMUX_HISTORY_URL_PREFIX,
+};
 use serde::{Deserialize, Serialize};
 
 pub(crate) struct WebviewCoreComponentsPlugin;
@@ -67,6 +69,42 @@ impl WebviewSource {
     /// The given path is interpreted as `cef://localhost/<path>`.
     pub fn local(path: impl Into<String>) -> Self {
         Self::Url(format!("{SCHEME_CEF}://{HOST_CEF}/{}", path.into()))
+    }
+
+    /// Serves a Bevy [`embedded`](https://bevy.org/examples/assets/embedded-asset/) asset.
+    ///
+    /// Navigates to `cef://localhost/embedded/<path>`, which the CEF localhost handler resolves
+    /// to `embedded://<path>` for [`AssetServer::load`]. Use the same logical path you passed to
+    /// `EmbeddedAssetRegistry::insert_asset`
+    /// (for example `history/index.html`).
+    pub fn embedded(path: impl Into<String>) -> Self {
+        let p = path.into();
+        Self::Url(format!("{SCHEME_CEF}://{HOST_CEF}/embedded/{p}"))
+    }
+
+    /// Chrome-style internal URL: navigates to **`vmux://history/`** only (what the user sees), like `chrome://settings/`.
+    ///
+    /// The host root is mapped in `bevy_cef_core` to `VMUX_HISTORY_DEFAULT_DOCUMENT`.
+    pub fn vmux_history_root() -> Self {
+        Self::Url(VMUX_HISTORY_URL_PREFIX.to_string())
+    }
+
+    /// Internal `vmux://…` URL for a **named host** (e.g. `"history"`, future `"status_bar"`).
+    ///
+    /// Prefer this at webview spawn sites so apps do not import URL-prefix constants. For history,
+    /// `vmux_service_root("history")` matches [`Self::vmux_history_root`] (trailing slash is optional
+    /// for loading the default document).
+    pub fn vmux_service_root(host: impl Into<String>) -> Self {
+        let h = host.into();
+        Self::Url(format!("{SCHEME_VMUX}://{h}"))
+    }
+
+    /// `vmux://history/<path>` where `path` is the segment after `embedded://` for Bevy’s embedded source
+    /// (for example `history/index.html`). Prefer [`Self::vmux_history_root`] when you want the
+    /// visible URL to stay `vmux://history/`.
+    pub fn vmux_history_embedded(path: impl Into<String>) -> Self {
+        let p = path.into();
+        Self::Url(format!("{SCHEME_VMUX}://{HOST_VMUX_HISTORY}/{p}"))
     }
 
     /// Creates an inline HTML source.

@@ -48,10 +48,8 @@ ensure_dev_prereqs() {
 		echo "error: macOS debug render helper not found:" >&2
 		echo "  $DEBUG_RENDER" >&2
 		echo >&2
-		echo "Install and copy (one-time):" >&2
-		echo "  cargo install bevy_cef_debug_render_process" >&2
-		echo "  cp \"\$HOME/.cargo/bin/bevy_cef_debug_render_process\" \\" >&2
-		echo "    \"$DEBUG_RENDER\"" >&2
+		echo "Install from vmux-patched bevy_cef_core (one-time):" >&2
+		echo "  make install-debug-render-process" >&2
 		exit 1
 	fi
 }

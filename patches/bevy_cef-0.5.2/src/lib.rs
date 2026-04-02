@@ -27,7 +27,8 @@ pub mod prelude {
         navigation::*, webview::prelude::*,
     };
     pub use bevy_cef_core::prelude::{
-        CefDiskProfileRoot, CefExtensions, CommandLineConfig, WebviewLoadingStateEvent,
+        CefDiskProfileRoot, CefExtensions, CommandLineConfig, VMUX_HISTORY_DEFAULT_DOCUMENT,
+        WebviewLoadingStateEvent,
     };
 }
 
