@@ -14,10 +14,9 @@ use vmux_core::{
 };
 use vmux_input::{AppInputRoot, KeyAction, sync_cef_osr_focus_with_active_pane};
 use vmux_layout::{
-    Active, History, HistoryPaneNeedsUrl, HistoryPaneOpenedAt, HistoryPaneStandby, LayoutAxis,
-    Layout, LoadingBarMaterial, Pane, PaneChromeLoadingBar, PaneChromeOwner, PaneChromeStrip,
-    PaneLastUrl, SessionLayoutSnapshot,
-    Webview, spawn_history_pane,
+    Active, History, HistoryPaneNeedsUrl, HistoryPaneOpenedAt, HistoryPaneStandby, Layout,
+    LayoutAxis, LoadingBarMaterial, Pane, PaneChromeLoadingBar, PaneChromeOwner, PaneChromeStrip,
+    PaneLastUrl, SessionLayoutSnapshot, Webview, spawn_history_pane,
     try_split_active_history_existing_pane, try_split_active_history_pane,
 };
 use vmux_server::{DioxusUiWarmupSet, dioxus_embedded_warmup_system};
@@ -190,7 +189,15 @@ fn spawn_history_pane_standby(
     ready: Res<HistoryUiBaseUrl>,
     unavailable: Res<HistoryUiChromeUnavailable>,
     panes: Query<Entity, (With<Pane>, With<Webview>, With<History>)>,
-    standby: Query<Entity, (With<History>, With<Pane>, With<Webview>, With<HistoryPaneStandby>)>,
+    standby: Query<
+        Entity,
+        (
+            With<History>,
+            With<Pane>,
+            With<Webview>,
+            With<HistoryPaneStandby>,
+        ),
+    >,
 ) {
     if std::env::var("VMUX_HISTORY_DISABLE_PANE_STANDBY")
         .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
@@ -268,7 +275,12 @@ pub fn history_dioxus_warmup_should_spawn(world: &mut World) -> Option<String> {
         .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
     if standby_enabled {
-        let mut q = world.query_filtered::<Entity, (With<Pane>, With<Webview>, With<History>, Without<HistoryPaneStandby>)>();
+        let mut q = world.query_filtered::<Entity, (
+            With<Pane>,
+            With<Webview>,
+            With<History>,
+            Without<HistoryPaneStandby>,
+        )>();
         if q.iter(world).next().is_none() {
             return None;
         }
@@ -284,7 +296,11 @@ pub fn history_dioxus_warmup_should_spawn(world: &mut World) -> Option<String> {
         return None;
     }
     let ready = world.get_resource::<HistoryUiBaseUrl>()?;
-    let url = ready.0.as_deref().map(str::trim).filter(|s| !s.is_empty())?;
+    let url = ready
+        .0
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
     Some(url.to_string())
 }
 
@@ -877,7 +893,12 @@ struct OpenHistoryHotkeyQueries<'w, 's> {
         'w,
         's,
         Entity,
-        (With<History>, With<Pane>, With<Webview>, With<HistoryPaneStandby>),
+        (
+            With<History>,
+            With<Pane>,
+            With<Webview>,
+            With<HistoryPaneStandby>,
+        ),
     >,
     path: Option<Res<'w, SessionSavePath>>,
 }

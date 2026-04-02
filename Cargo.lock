@@ -7949,6 +7949,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_examples"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_cef_core",
+ "ron 0.8.1",
+ "serde",
+ "vmux_history_poc",
+]
+
+[[package]]
 name = "vmux_history"
 version = "0.1.0"
 dependencies = [
@@ -7980,12 +7992,11 @@ dependencies = [
  "bevy_cef_core",
  "bevy_ecs",
  "dioxus",
- "js-sys",
+ "ron 0.8.1",
  "serde",
- "serde_json",
+ "vmux_ui",
  "vmux_utils",
  "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -8097,6 +8108,7 @@ dependencies = [
  "hostname",
  "js-sys",
  "leafwing-input-manager",
+ "ron 0.8.1",
  "rust-embed",
  "serde",
  "serde_json",

@@ -36,10 +36,7 @@ fn startup_drain_ui_library_url(
     }
 }
 
-fn poll_ui_library_url(
-    mut ready: ResMut<VmuxUiLibraryBaseUrl>,
-    rx: ResMut<UiLibraryUrlReceiver>,
-) {
+fn poll_ui_library_url(mut ready: ResMut<VmuxUiLibraryBaseUrl>, rx: ResMut<UiLibraryUrlReceiver>) {
     if ready.0.is_some() {
         return;
     }

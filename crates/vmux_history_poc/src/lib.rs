@@ -1,7 +1,13 @@
-//! Minimal Bevy + CEF + Dioxus POC: **JS Emit** (UI ready) and **Host Emit** (history snapshot).
-//!
-//! Native `cargo build -p vmux_history_poc` runs **`build.rs`** (`dx build` → **`dist/`**). The Bevy
-//! host embeds that tree so `vmux://history/` resolves HTML, WASM, and hashed assets.
+pub const HISTORY_EVENT: &str = "history";
 
-/// Relative directory name for the Dioxus web bundle (`build.rs` writes here).
-pub const DIST_DIR_NAME: &str = "dist";
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct HistoryEvent {
+    pub url: String,
+    pub history: Vec<String>,
+}
+
+#[cfg(target_arch = "wasm32")]
+mod app;
+
+#[cfg(target_arch = "wasm32")]
+pub use app::App;

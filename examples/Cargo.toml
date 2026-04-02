@@ -1,0 +1,21 @@
+[package]
+name = "vmux_examples"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "history"
+path = "history.rs"
+
+[features]
+default = ["debug"]
+debug = ["bevy_cef/debug", "vmux_history_poc/debug"]
+
+[dependencies]
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+bevy_cef_core = { workspace = true }
+ron = { workspace = true }
+serde = { workspace = true }
+vmux_history_poc = { path = "../crates/vmux_history_poc" }

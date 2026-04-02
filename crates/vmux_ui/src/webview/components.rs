@@ -2,13 +2,13 @@
 //!
 //! Gallery-only folders live under `components/<name>/`; vmux helpers are flat modules (`row`, `stack`, …).
 
-pub mod util;
+pub mod divider;
+pub mod input_shell;
+pub mod panel;
 pub mod row;
 pub mod stack;
 pub mod text;
-pub mod panel;
-pub mod input_shell;
-pub mod divider;
+pub mod util;
 
 pub mod accordion;
 pub mod alert_dialog;

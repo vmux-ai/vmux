@@ -48,6 +48,7 @@ time = { version = "0.3", default-features = false, features = ["wasm-bindgen"] 
 # [DioxusLabs/components](https://github.com/DioxusLabs/components) @ ccdb07f: `dioxus-primitives` + vendored gallery sources under `src/webview/components/` (from upstream `preview/src/components`).
 # `default-features = true` enables `dioxus/router` (navbar primitive). `web` wires `time` for wasm.
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = true, features = ["web"] }
+ron = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 wasm-bindgen = "0.2.115"

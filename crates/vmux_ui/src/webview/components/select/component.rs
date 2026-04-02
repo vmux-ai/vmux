@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
+use dioxus_primitives::icon;
 use dioxus_primitives::select::{
     self, SelectGroupLabelProps, SelectGroupProps, SelectListProps, SelectOptionProps, SelectProps,
     SelectTriggerProps, SelectValueProps,
 };
-use dioxus_primitives::icon;
 
 #[component]
 pub fn Select<T: Clone + PartialEq + 'static>(props: SelectProps<T>) -> Element {

@@ -36,7 +36,6 @@ categories = [
 ]
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/not-elm/bevy_cef"
-resolver = "2"
 
 [features]
 debug = ["bevy_cef_core/debug"]
@@ -123,7 +122,7 @@ default-features = false
 features = ["mesh_picking"]
 
 [dependencies.cef]
-version = "145.6.1+145.0.28"
+version = "145.6.1"
 
 [dependencies.raw-window-handle]
 version = "0.6"

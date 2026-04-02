@@ -1,42 +1,23 @@
-//! Dioxus UI: register `cef.listen` for host history, then `cef.emit({})` so Bevy can mark the webview
-//! ready and push history via Host Emit ([communication patterns](https://not-elm.github.io/bevy_cef/communication/)).
+#![allow(non_snake_case)]
 
-use crate::bridge::{HOST_HISTORY_CHANNEL, use_core_bridge};
 use dioxus::prelude::*;
-use serde::Deserialize;
-
-const LOADING_CEF_MSG: &str = "Waiting for `window.cef`…";
-
-#[derive(Clone, Debug, Deserialize)]
-struct HostHistoryPayload {
-    #[allow(dead_code)]
-    url: Option<String>,
-    history: Option<Vec<String>>,
-}
+use crate::{HistoryEvent, HISTORY_EVENT};
+use vmux_ui::hooks::use_event_listener;
 
 #[component]
 pub fn App() -> Element {
-    let bevy_state = use_core_bridge::<HostHistoryPayload, _>(HOST_HISTORY_CHANNEL, |data| {
-        println!("Host history: {:?}", data);
+    let mut history = use_signal(Vec::<String>::new);
+    let listener = use_event_listener::<HistoryEvent, _>(HISTORY_EVENT, move |data| {
+        history.set(data.history);
     });
-
-    let caption = if let Some(e) = (bevy_state.error)() {
-        e
-    } else if (bevy_state.is_loading)() {
-        LOADING_CEF_MSG.to_string()
-    } else if (bevy_state.state)().is_none() {
-        "Waiting for host history…".to_string()
-    } else {
-        "Listening to host updates…".to_string()
-    };
 
     rsx! {
         document::Stylesheet { href: asset!("/assets/input.css") }
         div { class: "p-4 font-sans text-neutral-200",
             h1 { class: "mb-2 text-xl", "History POC" }
-            if (bevy_state.is_loading)() {
+            if (listener.is_loading)() {
                 p { class: "whitespace-pre text-neutral-400",
-                    for (i, ch) in LOADING_CEF_MSG.chars().enumerate() {
+                    for (i, ch) in "Waiting for `window.cef`…".chars().enumerate() {
                         span {
                             key: "{i}",
                             class: "wave-y-char",
@@ -45,12 +26,10 @@ pub fn App() -> Element {
                         }
                     }
                 }
+            } else if let Some(err) = (listener.error)() {
+                p { class: "text-red-300", "{err}" }
             } else {
-                p { "{caption}" }
-                for h in (bevy_state.state)()
-                    .map(|p| p.history.unwrap_or_default())
-                    .unwrap_or_default()
-                {
+                for h in history() {
                     p { "{h}" }
                 }
             }

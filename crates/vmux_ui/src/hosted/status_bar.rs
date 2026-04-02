@@ -12,7 +12,7 @@ use vmux_layout::{
     VmuxHostedWebPlugin, VmuxWebviewSurface,
 };
 use vmux_server::{
-    DioxusWarmupDescriptor, DioxusUiWarmupSet, EmbeddedDioxusUiSurface, EmbeddedServeDirStartup,
+    DioxusUiWarmupSet, DioxusWarmupDescriptor, EmbeddedDioxusUiSurface, EmbeddedServeDirStartup,
     PendingEmbeddedServeDir, ServePlugin, push_pending_embedded_serve_dir,
     register_serve_plugin_dioxus_warmup,
 };
@@ -105,7 +105,11 @@ pub fn status_dioxus_warmup_should_spawn(world: &mut World) -> Option<String> {
         return None;
     }
     let ready = world.get_resource::<StatusUiBaseUrl>()?;
-    let url = ready.0.as_deref().map(str::trim).filter(|s| !s.is_empty())?;
+    let url = ready
+        .0
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
     Some(url.to_string())
 }
 

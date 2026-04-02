@@ -2,9 +2,11 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use vmux_utils::{
-    dx_web_public_dir, replace_dist_from_dx_public, run_dx_web_bundle, workspace_root_from_manifest_dir,
+    dx_web_public_dir, replace_dist_from_dx_public, run_dx_web_bundle,
+    workspace_root_from_manifest_dir,
 };
 
 fn main() {
@@ -28,8 +30,13 @@ fn main() {
         return;
     }
 
-    run_dx_web_bundle(&workspace_root, "vmux_history_poc", release, &[]);
-    let public = dx_web_public_dir(&workspace_root, "vmux_history_poc", release);
+    run_dx_web_bundle(
+        &workspace_root,
+        "vmux_history_poc",
+        release,
+        &["--bin", "vmux_history_app"],
+    );
+    let public = dx_web_public_dir(&workspace_root, "vmux_history_app", release);
     let dist = manifest_dir.join("dist");
     let shell = manifest_dir.join("assets/index.html");
     replace_dist_from_dx_public(&public, &dist, &shell);
@@ -94,16 +101,33 @@ fn dist_dependency_paths(manifest_dir: &Path) -> Vec<PathBuf> {
     v
 }
 
+fn newest_bg_wasm_mtime(dir: &Path) -> Option<SystemTime> {
+    let wasm_dir = dir.join("wasm");
+    if !wasm_dir.is_dir() {
+        return None;
+    }
+    let mut newest: Option<SystemTime> = None;
+    let rd = fs::read_dir(&wasm_dir).ok()?;
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.ends_with("_bg.wasm") {
+            if let Ok(t) = e.metadata().and_then(|m| m.modified()) {
+                newest = Some(newest.map_or(t, |n: SystemTime| n.max(t)));
+            }
+        }
+    }
+    newest
+}
+
 fn needs_dist_rebuild(manifest_dir: &Path, workspace_root: &Path, release: bool) -> bool {
     let dist = manifest_dir.join("dist");
-    let wasm_out = dist.join("vmux_history_poc_bg.wasm");
     let index = dist.join("index.html");
-    if !wasm_out.is_file() || !index.is_file() {
-        return true;
-    }
-    let Ok(wasm_mtime) = fs::metadata(&wasm_out).and_then(|m| m.modified()) else {
+    let Some(wasm_mtime) = newest_bg_wasm_mtime(&dist) else {
         return true;
     };
+    if !index.is_file() {
+        return true;
+    }
     for p in dist_dependency_paths(manifest_dir) {
         if let Ok(t) = fs::metadata(&p).and_then(|m| m.modified()) {
             if t > wasm_mtime {
@@ -111,14 +135,9 @@ fn needs_dist_rebuild(manifest_dir: &Path, workspace_root: &Path, release: bool)
             }
         }
     }
-    let dx_public = dx_web_public_dir(workspace_root, "vmux_history_poc", release);
-    let dx_wasm = dx_public.join("wasm").join("vmux_history_poc_bg.wasm");
-    if dx_wasm.is_file() {
-        if let (Ok(dx_t), Ok(dist_t)) = (
-            fs::metadata(&dx_wasm).and_then(|m| m.modified()),
-            fs::metadata(&wasm_out).and_then(|m| m.modified()),
-        ) && dx_t > dist_t
-        {
+    let dx_public = dx_web_public_dir(workspace_root, "vmux_history_poc_web", release);
+    if let Some(dx_mtime) = newest_bg_wasm_mtime(&dx_public) {
+        if dx_mtime > wasm_mtime {
             return true;
         }
     }

@@ -17,6 +17,7 @@ members = [
     "crates/vmux_history",
     "crates/vmux_history_poc",
     "crates/vmux_ui",
+    "examples",
     "patches/bevy_cef_debug_render_process-0.5.2",
 ]
 default-members = ["crates/vmux_desktop"]

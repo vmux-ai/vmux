@@ -6,9 +6,9 @@ use crate::payload::{BridgeMsg, apply_payload};
 use dioxus::prelude::*;
 use vmux_ui::dioxus_ext::{attributes, merge_attributes};
 use vmux_ui::webview::components::{
+    UiRow,
     badge::{Badge, BadgeVariant},
     separator::Separator,
-    UiRow,
 };
 use vmux_ui::webview::hooks::use_eval_loop;
 

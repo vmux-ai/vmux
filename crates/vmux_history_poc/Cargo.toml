@@ -10,12 +10,12 @@ build = "build.rs"
 default = []
 debug = ["bevy_cef/debug"]
 
+[[bin]]
+name = "vmux_history_app"
+path = "src/main.rs"
+
 [lib]
 path = "src/lib.rs"
-
-[[bin]]
-name = "vmux_history_poc"
-path = "src/main.rs"
 
 [build-dependencies]
 vmux_utils = { path = "../vmux_utils" }
@@ -28,12 +28,10 @@ bevy = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
-serde_json = { workspace = true }
+ron = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
-js-sys = "0.3"
 serde = { workspace = true }
-serde_json = { workspace = true }
+vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = "0.2.115"
-web-sys = { version = "0.3", features = ["Window"] }

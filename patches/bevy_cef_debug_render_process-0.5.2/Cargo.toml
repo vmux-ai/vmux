@@ -18,5 +18,5 @@ path = "src/main.rs"
 
 [dependencies]
 bevy_cef_core = { path = "../bevy_cef_core-0.5.2", features = ["debug"] }
-cef = "145.6.1+145.0.28"
-cef-dll-sys = { version = "145.6.1+145.0.28", features = ["sandbox"] }
+cef = "145.6.1"
+cef-dll-sys = { version = "145.6.1", features = ["sandbox"] }

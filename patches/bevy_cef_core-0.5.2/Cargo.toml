@@ -35,7 +35,6 @@ categories = [
 ]
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/not-elm/bevy_cef"
-resolver = "2"
 
 [features]
 debug = []
@@ -65,10 +64,10 @@ default-features = false
 version = "0.18"
 
 [dependencies.cef]
-version = "145.6.1+145.0.28"
+version = "145.6.1"
 
 [dependencies.cef-dll-sys]
-version = "145.6.1+145.0.28"
+version = "145.6.1"
 features = ["sandbox"]
 
 [dependencies.raw-window-handle]
