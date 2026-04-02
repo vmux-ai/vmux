@@ -70,7 +70,9 @@ pub fn sync_cef_pointer_suppression_for_prefix(
     let prefix_on = first_prefix || chord_continuation;
     let on = prefix_on || palette_on;
     pointer.0 = on;
-    keyboard.0 = on || palette_hotkey;
+    // Keep keyboard suppression focused on command-palette ownership.
+    // Prefix routing is handled in app logic; suppressing here can starve normal pane typing.
+    keyboard.0 = palette_on || palette_hotkey;
 }
 
 /// Match CEF OSR focus to the active pane so windowless browsers paint without waiting for a click.
