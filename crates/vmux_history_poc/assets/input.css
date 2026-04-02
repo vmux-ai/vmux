@@ -27,4 +27,19 @@
     flex-direction: column;
     min-height: 0;
   }
+
+  @keyframes wave-y {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-0.22em);
+    }
+  }
+
+  .wave-y-char {
+    display: inline-block;
+    animation: wave-y 1.1s ease-in-out infinite;
+  }
 }
