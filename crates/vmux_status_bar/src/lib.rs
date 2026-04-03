@@ -1,4 +1,4 @@
-//! Status bar for vmux: **WASM UI** (`src/main.rs`, Dioxus + `wasm-bindgen` via `build.rs`) + **native** [`StatusBarServerPlugin`](vmux_ui::hosted::status_bar::StatusBarServerPlugin).
+//! Status bar for vmux: **WASM UI** (`src/main.rs`, Dioxus + `wasm-bindgen` via `build.rs`) + **native** [`StatusBarServerPlugin`](vmux_ui_native::hosted::status_bar::StatusBarServerPlugin).
 //!
 //! ## Exports
 //! - **UI:** native `cargo build -p vmux_status_bar` runs `build.rs` (wasm32 + `wasm-bindgen` → [`DIST_DIR_NAME`]). Served by [`StatusBarServerPlugin`].
@@ -11,7 +11,7 @@ pub const DIST_DIR_NAME: &str = "dist";
 pub mod pane_corner_clip;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use vmux_ui::hosted::status_bar::{
+pub use vmux_ui_native::hosted::status_bar::{
     StatusBarServerPlugin, StatusUiBaseUrl, StatusUiUrlReceiver,
 };
 

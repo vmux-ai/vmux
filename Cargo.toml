@@ -18,6 +18,7 @@ members = [
     "crates/vmux_history",
     "crates/vmux_history_poc",
     "crates/vmux_ui",
+    "crates/vmux_ui_native",
     "patches/bevy_cef_debug_render_process-0.5.2",
 ]
 default-members = ["crates/vmux_desktop"]
@@ -53,6 +54,10 @@ opt-level = "z"
 codegen-units = 1
 
 [profile.release.package.vmux_ui]
+opt-level = "z"
+codegen-units = 1
+
+[profile.release.package.vmux_ui_native]
 opt-level = "z"
 codegen-units = 1
 

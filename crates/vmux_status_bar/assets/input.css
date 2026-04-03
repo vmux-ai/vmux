@@ -11,7 +11,7 @@
 
   html,
   body {
-    @apply m-0 h-full min-h-screen overflow-hidden bg-tmux-bg p-0 text-tmux-fg antialiased;
+    @apply m-0 h-full min-h-screen overflow-hidden bg-[#4e9a06] p-0 text-[#0a0a0a] antialiased;
     font-family: theme("fontFamily.status");
     font-size: 11px;
     line-height: 1;

@@ -88,6 +88,7 @@ fn tracked_paths(manifest_dir: &Path) -> Vec<PathBuf> {
         manifest_dir.join("tailwind.config.js"),
         manifest_dir.join("assets/index.html"),
         manifest_dir.join("assets/input.css"),
+        manifest_dir.join("../vmux_ui/assets/theme.css"),
     ];
     collect_rs_files(&manifest_dir.join("src"), &mut v);
     v.sort();

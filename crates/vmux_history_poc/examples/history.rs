@@ -4,7 +4,9 @@ use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
 use bevy::render::alpha::AlphaMode;
 use bevy_cef::prelude::*;
+use chrono::{DateTime, Duration, Utc};
 use serde::Deserialize;
+use url::Url;
 use vmux_history_poc::HistoryPlugin;
 use vmux_history_poc::event::{HISTORY_EVENT, HistoryEvent};
 use vmux_webview_app::WebviewAppEmbedSet;
@@ -27,6 +29,7 @@ fn main() {
             (
                 spawn_camera,
                 spawn_history_webview.after(WebviewAppEmbedSet),
+                spawn_sample_history_visits,
             ),
         )
         .add_systems(Update, push_history_via_host_emit)
@@ -42,10 +45,26 @@ struct HistoryPocUiReady;
 #[derive(Component)]
 struct HistoryPocHistorySent;
 
-#[derive(Component)]
-struct HistoryPocEntry {
-    url: String,
+#[derive(Bundle)]
+struct VisitBundle {
+    visit: Visit,
+    metadata: PageMetadata,
+    created_at: CreatedAt,
 }
+
+#[derive(Component, Clone, Copy)]
+struct Visit;
+
+#[allow(dead_code)]
+#[derive(Component, Clone, Debug)]
+struct PageMetadata {
+    url: Url,
+    title: String,
+    favicon_url: Option<String>,
+}
+
+#[derive(Component, Clone, Copy, Debug)]
+struct CreatedAt(DateTime<Utc>);
 
 fn on_history_ui_ready(trigger: On<Receive<HistoryUiReady>>, mut commands: Commands) {
     let wv = trigger.event().webview;
@@ -63,13 +82,18 @@ fn push_history_via_host_emit(
             Without<HistoryPocHistorySent>,
         ),
     >,
-    history_q: Query<&HistoryPocEntry>,
+    history_q: Query<(&PageMetadata, &CreatedAt), With<Visit>>,
 ) {
     for wv in ready.iter() {
         if !browsers.has_browser(wv) || !browsers.host_emit_ready(&wv) {
             continue;
         }
-        let history: Vec<String> = history_q.iter().map(|h| h.url.clone()).collect();
+        let mut rows: Vec<(&PageMetadata, &CreatedAt)> = history_q.iter().collect();
+        rows.sort_by_key(|(_, created)| std::cmp::Reverse(created.0));
+        let history: Vec<String> = rows
+            .into_iter()
+            .map(|(meta, _)| meta.url.as_str().to_owned())
+            .collect();
         let url = history.join(", ");
         let payload = HistoryEvent { url, history };
         let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
@@ -153,4 +177,28 @@ fn spawn_camera(mut commands: Commands) {
         Camera3d::default(),
         Transform::from_translation(Vec3::new(0., 0., 3.)).looking_at(Vec3::ZERO, Vec3::Y),
     ));
+}
+
+fn spawn_sample_history_visits(mut commands: Commands) {
+    let now = Utc::now();
+    let samples = [
+        (
+            "https://example.com/",
+            "Example",
+            Some("https://example.com/favicon.ico"),
+        ),
+        ("https://bevyengine.org/", "Bevy", None),
+        ("https://rust-lang.org/", "Rust", None),
+    ];
+    for (i, (href, title, favicon_url)) in samples.iter().enumerate() {
+        commands.spawn(VisitBundle {
+            visit: Visit,
+            metadata: PageMetadata {
+                url: Url::parse(href).unwrap(),
+                title: (*title).to_owned(),
+                favicon_url: favicon_url.map(String::from),
+            },
+            created_at: CreatedAt(now - Duration::minutes(i as i64)),
+        });
+    }
 }

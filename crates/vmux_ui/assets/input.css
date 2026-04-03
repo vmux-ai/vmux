@@ -1,3 +1,5 @@
+@import "./theme.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,7 +7,7 @@
 @layer base {
   html,
   body {
-    @apply m-0 h-full antialiased text-[#e8eaed] text-[13px] leading-[1.4];
+    @apply m-0 h-full antialiased bg-background text-foreground text-ui;
     font-family: system-ui, -apple-system, sans-serif;
   }
 }

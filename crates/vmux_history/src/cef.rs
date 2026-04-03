@@ -4,7 +4,7 @@ use dioxus::prelude::Signal;
 use futures_channel::mpsc::UnboundedSender;
 use wasm_bindgen::JsValue;
 
-use vmux_ui::webview::cef_bridge::{try_cef_emit_keyed, try_cef_listen};
+use vmux_ui::cef_bridge::{try_cef_emit_keyed, try_cef_listen};
 
 use crate::payload::{
     BridgeMsg, HistoryEntryWire, apply_history_payload, apply_history_progress_payload,

@@ -1,0 +1,58 @@
+---
+description: Tailwind in RSX and CSS — inline utilities, theme tokens only, no module-level class consts
+globs: "crates/vmux_ui/**/*.rs,crates/vmux_ui/**/*.css,crates/vmux_history/**/*.rs,crates/vmux_history_poc/**/*.rs,crates/vmux_status_bar/**/*.rs"
+alwaysApply: false
+---
+
+# Tailwind and RSX
+
+## Inline utilities
+
+In Dioxus `rsx!`, use **Tailwind utility class strings** on elements (`class:` / merged attributes) for layout, spacing, typography, and colors — not separate stylesheets or ad-hoc CSS for the same concerns.
+
+- Put utilities **in the RSX tree** (literals or small helpers that only concatenate utilities), merged with `class:` / `attributes!` / `merge_attributes` as the component already does.
+- Do **not** add or reintroduce **per-component `style.css`** (or large custom rules) for things that map one-to-one to utilities.
+- **Theme and globals** stay in shared CSS (`input.css`, `theme.css`, Tailwind preset) for design tokens, base layers, and cases utilities cannot cover.
+
+Variant-heavy components may keep a **small** Rust helper (e.g. `enum` → `&'static str` of utilities) when duplication in RSX would be worse; still use **Tailwind tokens**, not bespoke CSS classes defined only in CSS files.
+
+```rust
+rsx! {
+  div { class: "flex gap-2 rounded-md border border-border p-3",
+    span { class: "text-sm text-muted-foreground", "{label}" }
+  }
+}
+```
+
+## Theme tokens only
+
+In class strings (RSX `class:`, merged attributes, and Tailwind-in-CSS), use **design tokens** from `crates/vmux_ui/tailwind.preset.js` and `assets/theme.css` — not one-off literals or default palette names that bypass the theme.
+
+**Do**
+
+- **Colors (semantic):** `text-foreground`, `text-muted-foreground`, `text-primary`, `text-primary-foreground`, `bg-background`, `bg-card`, `border-border`, `ring-ring`, `text-destructive`, `bg-sidebar`, chart/sidebar variants as defined in the preset.
+- **Typography:** Tailwind scale (`text-xs`, `text-sm`, `text-base`, …) or preset sizes `text-ui`, `text-ui-xs`, `text-ui-xxs` when you need fixed UI sizes.
+- **Radius:** `rounded-sm` … `rounded-4xl` (tied to `--radius` in the preset).
+
+**Do not**
+
+- **Arbitrary values** in utilities: `text-[11px]`, `w-[37px]`, `bg-[#fff]`, `text-[oklch(...)]`, `gap-[3px]`, etc.
+- **Raw / default palette** that fights theming: `text-white`, `text-black`, `bg-white`, `text-gray-500`, `slate-*`, `zinc-*`, and similar non-token colors.
+
+```text
+✅ text-sm text-primary    ✅ text-ui-xs text-muted-foreground    ✅ bg-card border-border
+❌ text-[11px]             ❌ text-white                         ❌ bg-[#0a0a0a]
+```
+
+If no token fits, **extend the preset** (`theme.extend.colors`, `fontSize`, etc.) or add CSS variables in `theme.css`, then use the new utility — do not ship arbitrary-value classes for recurring design decisions.
+
+## No module-level class constants
+
+Do **not** introduce file-level `const NAME: &str = "…"` (or `static`) whose value is only a Tailwind utility string used to populate `class:` / merged attributes. Put the **full utility string on the element** in `rsx!` so structure and styling stay in one place.
+
+**Exceptions**
+
+- `include_str!` for real CSS (keyframes, layers), not a substitute for utilities.
+- Non-utility string constants (e.g. numeric widths in `style`, `aria` values, IDs) when they are not Tailwind class lists.
+
+If the same long class string repeats many times in one file, prefer a **local** `fn` or small `enum` → `&'static str` **inside the component module** only when duplication is clearly worse than repetition — still avoid a dedicated file that only exports TW string constants.

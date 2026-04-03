@@ -36,6 +36,7 @@ fn main() {
 }
 
 fn tracked_inputs(manifest_dir: &Path) -> Vec<PathBuf> {
+    let workspace_root = workspace_root_from_manifest_dir(manifest_dir);
     vec![
         manifest_dir.join("src/main.rs"),
         manifest_dir.join("src/app.rs"),
@@ -46,6 +47,8 @@ fn tracked_inputs(manifest_dir: &Path) -> Vec<PathBuf> {
         manifest_dir.join("assets/index.html"),
         manifest_dir.join("assets/input.css"),
         manifest_dir.join("tailwind.config.js"),
+        workspace_root.join("crates/vmux_ui/assets/theme.css"),
+        workspace_root.join("crates/vmux_ui/tailwind.preset.js"),
     ]
 }
 

@@ -1,5 +1,5 @@
 //! Embedded HTTP for the history UI (`dist/` / embedded / `VMUX_HISTORY_UI_URL`).
-//! Host wiring lives in [`vmux_ui::hosted::history`]; this crate only resolves the bundle path and registers the serve plugin.
+//! Host wiring lives in [`vmux_ui_native::hosted::history`]; this crate only resolves the bundle path and registers the serve plugin.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,8 +13,8 @@ use vmux_server::{
     PendingEmbeddedServeDir, ServePlugin, push_pending_embedded_serve_dir,
     register_serve_plugin_dioxus_warmup,
 };
-use vmux_ui::extract_embedded_dist_to_temp;
-use vmux_ui::hosted::history::{
+use vmux_ui_native::extract_embedded_dist_to_temp;
+use vmux_ui_native::hosted::history::{
     HistoryUiBaseUrl, HistoryUiChromeUnavailable, HistoryUiUrlReceiver,
     history_dioxus_warmup_should_spawn,
 };
@@ -137,7 +137,7 @@ impl VmuxHostedWebPlugin for HistoryServerPlugin {
 mod tests {
     use super::*;
     use vmux_server::ServerPlugin;
-    use vmux_ui::hosted::history::HistoryUiPlugin;
+    use vmux_ui_native::hosted::history::HistoryUiPlugin;
 
     #[test]
     fn history_server_and_ui_plugins_register_in_app() {

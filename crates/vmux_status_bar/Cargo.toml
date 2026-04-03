@@ -1,6 +1,6 @@
 [package]
 name = "vmux_status_bar"
-description = "Status bar: Dioxus WASM UI + re-exports hosted status plugin from vmux_ui"
+description = "Status bar: Dioxus WASM UI + re-exports hosted status plugin from vmux_ui_native"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -24,7 +24,7 @@ url = "2"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
-vmux_ui = { path = "../vmux_ui", default-features = false, features = ["bevy"] }
+vmux_ui_native = { path = "../vmux_ui_native" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }

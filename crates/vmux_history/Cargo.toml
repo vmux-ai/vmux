@@ -26,7 +26,7 @@ crossbeam-channel = { workspace = true }
 rust-embed = "8"
 vmux_layout = { path = "../vmux_layout" }
 vmux_server = { path = "../vmux_server" }
-vmux_ui = { path = "../vmux_ui", default-features = false, features = ["bevy"] }
+vmux_ui_native = { path = "../vmux_ui_native" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }

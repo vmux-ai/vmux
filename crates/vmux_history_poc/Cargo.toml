@@ -33,7 +33,9 @@ vmux_webview_app = { path = "../vmux_webview_app" }
 bevy = { workspace = true }
 bevy_cef = { workspace = true, features = ["debug"] }
 bevy_ecs = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 ron = { workspace = true }
+url = "2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }

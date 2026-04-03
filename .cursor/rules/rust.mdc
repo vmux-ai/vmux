@@ -1,0 +1,70 @@
+---
+description: Rust layout (no mod.rs), verify with cargo, style and item order, minimal comments
+alwaysApply: true
+---
+
+# Rust and project conventions
+
+## Module files: no `mod.rs`
+
+Do **not** add or use `**/mod.rs` as a directory’s module root. Use `<mod_name>.rs` next to its parent (e.g. `components.rs` beside `components/` for submodules, or a single `components.rs` with no directory).
+
+```text
+❌ src/foo/mod.rs
+✅ src/foo.rs   (+ optional src/foo/baz.rs for children)
+```
+
+In `lib.rs` or the parent module, keep `mod foo;` / `pub mod foo;`; only the **on-disk root** for a directory module must be `foo.rs`, not `foo/mod.rs`.
+
+## Verify Rust work before finishing
+
+Before ending a task that changes Rust code, run verification from the repo root:
+
+- Prefer `cargo` from `PATH`; if missing, use `"$HOME/.cargo/bin/cargo"` or `PATH="$HOME/.cargo/bin:$PATH"`.
+- Build: `cargo check` (or `cargo check -p <crate>` when edits are confined to one member).
+- Tests: `cargo test` (or `cargo test -p <crate>` when confined to one member).
+- If `CEF_PATH` points at a missing tree and the build fails in `cef-dll-sys`, use `env -u CEF_PATH` with the same command, or match the project `Makefile` / docs.
+
+Do not only suggest commands; run them when shell access is available and fix reported issues before handing off.
+
+## Comments: avoid adding them
+
+When changing or adding code:
+
+- Do **not** add `//` or `/* */` that restate what the code does, section banners, or obvious explanations.
+- Do **not** add `///` or `//!` on private helpers or on public items when the name and types already make the contract obvious.
+- **Prefer** renaming, extracting functions, or tightening types so intent is clear without comments.
+
+**Exceptions:** license or required legal blocks; a short comment for non-obvious rationale (workaround, invariant, safety contract) that cannot be expressed in types or API.
+
+Do not delete existing comments unrelated to your edit unless the user asks you to clean them up.
+
+## Module item order
+
+After `use` (and `mod` declarations if any), order items **top to bottom** from **structure and public surface** down to **implementation details**.
+
+**Earlier (higher in the file):**
+
+- `struct`, `enum`, `type` aliases that define the module’s shape
+- `impl` blocks for those types (or immediately after each type)
+- Entry points: `fn main`, `#[component]` roots, plugin `build`, orchestration functions
+
+**Naming for that top band:** **PascalCase** for root components and type-like public items (`pub fn App`, not `pub fn app`). Keep `fn main` as `main`. Lower in the file, functions and locals stay `snake_case`; `const` / `static` use `SCREAMING_SNAKE_CASE`.
+
+**Later (lower in the file):**
+
+- File-level `const` / `static` used only as implementation detail
+- Small private helpers that support the items above
+
+When a type must reference a `const` (e.g. array length), keep the `const` immediately above that type or use a pattern the compiler accepts without inverting the file’s intent.
+
+```rust
+use …;
+
+fn main() { … }
+
+#[component]
+pub fn App() -> Element { … }
+```
+
+Avoid burying `main` and the root component under unrelated consts/helpers.

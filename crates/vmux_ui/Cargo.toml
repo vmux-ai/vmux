@@ -1,6 +1,6 @@
 [package]
 name = "vmux_ui"
-description = "vmux — native (Bevy tokens), UI library host, webview (Dioxus WASM hooks/components)"
+description = "vmux — Dioxus WASM UI library (webview components, CEF hooks)"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -16,38 +16,16 @@ path = "src/lib.rs"
 name = "vmux_ui"
 path = "src/main.rs"
 
-[features]
-default = ["bevy"]
-bevy = ["dep:bevy"]
-
-[dependencies]
-bevy = { workspace = true, optional = true }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bevy_cef = { workspace = true }
-bevy_cef_core = { workspace = true }
-bevy_ecs = { workspace = true }
-crossbeam-channel = { workspace = true }
-hostname = "0.4"
-leafwing-input-manager = { workspace = true }
-rust-embed = "8"
-serde = { workspace = true }
-vmux_command = { path = "../vmux_command" }
-vmux_core = { path = "../vmux_core" }
-vmux_input = { path = "../vmux_input" }
-vmux_layout = { path = "../vmux_layout" }
-vmux_server = { path = "../vmux_server" }
-vmux_settings = { path = "../vmux_settings" }
-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Window"] }
 dioxus = { workspace = true }
-# Calendar / DatePicker demos (same types as dioxus-primitives calendar).
-time = { version = "0.3", default-features = false, features = ["wasm-bindgen"] }
-# [DioxusLabs/components](https://github.com/DioxusLabs/components) @ ccdb07f: `dioxus-primitives` + vendored gallery sources under `src/webview/components/` (from upstream `preview/src/components`).
-# `default-features = true` enables `dioxus/router` (navbar primitive). `web` wires `time` for wasm.
-dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = true, features = ["web"] }
+time = { version = "0.3", default-features = false, features = [
+    "wasm-bindgen",
+] }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = true, features = [
+    "web",
+] }
 ron = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

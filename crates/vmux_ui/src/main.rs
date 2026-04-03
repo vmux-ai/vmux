@@ -1,13 +1,8 @@
-//! Web binary entry: [`dioxus::launch`] → [`app::App`] (wasm32 only).
-
-#[cfg(target_arch = "wasm32")]
-mod app;
-#[cfg(target_arch = "wasm32")]
-mod gallery;
+//! Web binary entry: [`dioxus::launch`] → [`vmux_ui::components::app::App`] (wasm32 only).
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
-    dioxus::launch(app::App);
+    dioxus::launch(vmux_ui::components::app::App);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

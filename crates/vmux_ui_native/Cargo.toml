@@ -1,0 +1,26 @@
+[package]
+name = "vmux_ui_native"
+description = "vmux — Bevy-native UI hosting (CEF Dioxus bundles, embedded dist, design tokens)"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+bevy_cef_core = { workspace = true }
+bevy_ecs = { workspace = true }
+crossbeam-channel = { workspace = true }
+hostname = "0.4"
+leafwing-input-manager = { workspace = true }
+rust-embed = "8"
+serde = { workspace = true }
+vmux_command = { path = "../vmux_command" }
+vmux_core = { path = "../vmux_core" }
+vmux_input = { path = "../vmux_input" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_server = { path = "../vmux_server" }
+vmux_settings = { path = "../vmux_settings" }

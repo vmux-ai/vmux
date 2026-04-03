@@ -94,7 +94,7 @@ pub struct DioxusWarmupDescriptor {
 }
 
 /// Populated when hosted plugins call [`register_serve_plugin_dioxus_warmup`] or
-/// `vmux_ui::register_ui_plugin_dioxus_warmup` (after [`ServerPlugin`] initialized this resource).
+/// `vmux_ui_native::register_ui_plugin_dioxus_warmup` (after [`ServerPlugin`] initialized this resource).
 /// [`ServerPlugin`] runs [`dioxus_embedded_warmup_system`].
 #[derive(Resource, Default)]
 pub struct DioxusWarmupRegistry(pub Vec<DioxusWarmupDescriptor>);

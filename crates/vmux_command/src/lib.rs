@@ -434,7 +434,7 @@ fn ui_library_url_for_query(query: &str, base: Option<&str>) -> Option<String> {
     Some(format!("{b}/"))
 }
 
-/// Prefer resource / palette copy, then the same env overrides as [`vmux_ui::UiLibraryServerPlugin`].
+/// Prefer resource / palette copy, then the same env overrides as [`vmux_ui_native::UiLibraryServerPlugin`].
 fn ui_library_stored_base<'a>(
     ui_res: &'a VmuxUiLibraryBaseUrl,
     palette: &'a VmuxCommandPaletteState,

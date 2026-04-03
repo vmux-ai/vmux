@@ -13,18 +13,20 @@ pub fn App() -> Element {
 
     rsx! {
         document::Stylesheet { href: asset!("/assets/input.css") }
-        div { class: "p-4",
-            h1 { class: "mb-2 text-xl", "History POC" }
+        div { class: "flex min-h-full min-w-0 flex-col items-stretch gap-4 p-4",
+            span { class: "text-xl font-semibold", "History POC" }
             if (listener.is_loading)() {
-                p {
-                    class: "whitespace-pre text-pulse-neutral",
-                    "Waiting for `window.cef`…"
+                div { class: "flex min-w-0 flex-col items-stretch gap-3",
+                    span { class: "text-ui text-muted-foreground", "Connecting…" }
+                    span { class: "text-ui-xs text-muted-foreground/50 animate-pulse", "Waiting for `window.cef`…" }
                 }
             } else if let Some(err) = (listener.error)() {
-                p { class: "text-red-300", "{err}" }
+                span { class: "text-destructive", "{err}" }
             } else {
-                for h in history() {
-                    p { "{h}" }
+                div { class: "flex min-w-0 flex-col items-stretch gap-1",
+                    for h in history() {
+                        span { class: "whitespace-pre-wrap font-mono text-sm text-chart-3/90", "{h}" }
+                    }
                 }
             }
         }

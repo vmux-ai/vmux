@@ -1,0 +1,51 @@
+.dnd-list {
+  width: 100%;
+}
+
+.dnd-list-ul {
+  padding-left: 0;
+}
+
+.dnd-list-item {
+  display: flex;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  color: var(--muted-foreground);
+  cursor: grab;
+  list-style: none;
+  outline: none;
+  user-select: none;
+}
+
+.dnd-list-item[data-focus-visible="true"],
+.dnd-list-item:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.dnd-list-item[data-is-grabbing="true"] {
+  cursor: grabbing;
+  opacity: 0.6;
+  outline: 2px dashed var(--ring);
+}
+
+.drop-indicator {
+  position: relative;
+  z-index: 1;
+  height: 2px;
+  margin: -1px 0;
+  background-color: var(--ring);
+}
+
+.drop-indicator::before {
+  position: absolute;
+  top: -4px;
+  left: -6px;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 6px solid var(--ring);
+  content: "";
+}

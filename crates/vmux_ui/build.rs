@@ -4,7 +4,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use vmux_utils::{
-    dx_web_public_dir, replace_dist_from_dx_public, run_dx_web_bundle, workspace_root_from_manifest_dir,
+    dx_web_public_dir, replace_dist_from_dx_public, run_dx_web_bundle,
+    workspace_root_from_manifest_dir,
 };
 
 fn main() {
@@ -68,19 +69,22 @@ fn tracked_paths(manifest_dir: &Path) -> Vec<PathBuf> {
         manifest_dir.join("Cargo.toml"),
         manifest_dir.join("Dioxus.toml"),
         manifest_dir.join("tailwind.config.js"),
+        manifest_dir.join("tailwind.preset.js"),
         manifest_dir.join("assets/index.html"),
         manifest_dir.join("assets/input.css"),
+        manifest_dir.join("assets/theme.css"),
     ];
     collect_rs_files(&manifest_dir.join("src").join("gallery"), &mut v);
+    collect_rs_files(&manifest_dir.join("src").join("components"), &mut v);
+    collect_rs_files(&manifest_dir.join("src").join("hooks"), &mut v);
     for f in [
         "main.rs",
-        "app.rs",
         "lib.rs",
         "server.rs",
         "ui.rs",
-        "native.rs",
-        "webview.rs",
-        "gallery.rs",
+        "components.rs",
+        "util.rs",
+        "cef_bridge.rs",
     ] {
         v.push(manifest_dir.join("src").join(f));
     }

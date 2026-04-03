@@ -7,19 +7,15 @@ use crate::cef::{
 use crate::payload::HistoryEntryWire;
 
 use dioxus::prelude::*;
+use futures_channel::mpsc::unbounded;
+use std::net::IpAddr;
 use vmux_ui::dioxus_ext::{attributes, merge_attributes};
-use vmux_ui::webview::components::{
+use vmux_ui::components::{
     button::{Button, ButtonVariant},
     icon::{Icon, ViewBox},
     input::Input,
     label::Label,
-    UiDivider, UiDividerVariant, UiInputShell, UiPanel, UiRow, UiStack, UiText, UiTextSize,
-    UiTextTone,
 };
-use vmux_ui::webview::web_color;
-
-use futures_channel::mpsc::unbounded;
-use std::net::IpAddr;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use wasm_bindgen::closure::Closure;
@@ -29,16 +25,21 @@ const MS_PER_DAY: i64 = 86400_000;
 
 // Tailwind-only layout (see `assets/input.css` for base html/body only).
 const TW_ROOT: &str = "flex h-full min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,#16171c_0%,#0e0f12_48%,#0c0d10_100%)]";
-const TW_HEADER: &str = "sticky top-0 z-20 shrink-0 border-b border-white/[0.06] bg-[linear-gradient(180deg,#16171c_0%,#15161b_72%,#141518_100%)] px-4 pb-3 pt-4";
-const TW_CLEAR_BTN: &str = "shrink-0 cursor-pointer rounded-lg border border-red-400/35 bg-red-400/[0.08] px-[0.65rem] py-[0.35rem] text-[11px] font-medium text-red-300/95 transition-colors duration-150 hover:border-red-400/55 hover:bg-red-400/[0.14] hover:text-red-200 disabled:cursor-not-allowed disabled:border-white/[0.08] disabled:bg-white/[0.03] disabled:text-white/25 disabled:opacity-[0.35]";
-const TW_SEARCH: &str = "w-full rounded-xl border border-white/[0.08] bg-white/[0.04] py-[0.65rem] pl-9 pr-3 text-[13px] text-white/90 shadow-[inset_0_1px_2px_rgba(0,0,0,0.2)] outline-none placeholder:text-white/35 focus:border-sky-400/35 focus:bg-white/[0.06]";
-const TW_ROW_BTN: &str = "group m-0 flex w-full max-w-full min-w-0 cursor-pointer appearance-none flex-col items-stretch gap-[0.35rem] rounded-xl border border-white/[0.06] bg-white/[0.03] py-[0.65rem] px-3 text-left font-inherit text-inherit shadow-[0_1px_3px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:border-sky-400/28 hover:bg-sky-400/[0.07]";
-const TW_FAVICON: &str = "mt-px h-[18px] w-[18px] shrink-0 rounded object-contain border border-white/[0.08] bg-white/[0.06] transition-colors duration-150 group-hover:border-sky-400/25 group-hover:bg-sky-400/[0.08]";
-const TW_LOAD_MORE: &str = "mt-1.5 block w-full cursor-pointer rounded-[10px] border border-white/12 bg-white/[0.05] py-2 px-3 text-center text-xs text-white/78 transition-colors duration-150 hover:border-sky-400/35 hover:bg-sky-400/10 hover:text-white/90";
-const TW_STREAM_HINT: &str = "mt-2 text-center text-[10px] text-white/30";
-const TW_RETRY_BTN: &str = "mt-3 cursor-pointer rounded-lg border border-amber-400/40 bg-amber-400/[0.12] px-3 py-1.5 text-[11px] font-medium text-amber-100/95 transition-colors duration-150 hover:border-amber-400/60 hover:bg-amber-400/20";
+const TW_HEADER: &str = "sticky top-0 z-20 shrink-0 border-b border-border/60 bg-[linear-gradient(180deg,#16171c_0%,#15161b_72%,#141518_100%)] px-4 pb-3 pt-4";
+const TW_CLEAR_BTN: &str = "shrink-0 cursor-pointer rounded-lg border border-destructive/40 bg-destructive/10 px-[0.65rem] py-[0.35rem] text-ui-xs font-medium text-destructive transition-colors duration-150 hover:border-destructive/60 hover:bg-destructive/20 disabled:cursor-not-allowed disabled:border-border disabled:bg-muted/30 disabled:text-muted-foreground disabled:opacity-[0.35]";
+const TW_SEARCH: &str = "w-full rounded-xl border border-border bg-muted/40 py-[0.65rem] pl-9 pr-3 text-ui text-foreground shadow-[inset_0_1px_2px_rgba(0,0,0,0.2)] outline-none placeholder:text-muted-foreground focus:border-ring focus:bg-muted/60";
+const TW_ROW_BTN: &str = "group m-0 flex w-full max-w-full min-w-0 cursor-pointer appearance-none flex-col items-stretch gap-[0.35rem] rounded-xl border border-border/60 bg-muted/20 py-[0.65rem] px-3 text-left font-inherit text-inherit shadow-[0_1px_3px_rgba(0,0,0,0.12)] transition-colors duration-150 hover:border-ring/30 hover:bg-accent";
+const TW_FAVICON: &str = "mt-px h-[18px] w-[18px] shrink-0 rounded object-contain border border-border bg-muted/50 transition-colors duration-150 group-hover:border-ring/30 group-hover:bg-accent/80";
+const TW_LOAD_MORE: &str = "mt-1.5 block w-full cursor-pointer rounded-[10px] border border-border bg-muted/40 py-2 px-3 text-center text-xs text-foreground/80 transition-colors duration-150 hover:border-ring hover:bg-accent hover:text-foreground";
+const TW_STREAM_HINT: &str = "mt-2 text-center text-ui-xxs text-muted-foreground/80";
+const TW_RETRY_BTN: &str = "mt-3 cursor-pointer rounded-lg border border-chart-5/40 bg-chart-5/10 px-3 py-1.5 text-ui-xs font-medium text-chart-5 transition-colors duration-150 hover:border-chart-5/60 hover:bg-chart-5/20";
+const TW_PANEL_SHELL: &str = "flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-14 text-center";
+const TW_HISTORY_STACK: &str = "flex min-w-0 flex-col items-center gap-3";
+const TW_HISTORY_STACK_TIGHT: &str = "flex min-w-0 flex-col items-center gap-2";
+const TW_GROUP_HEAD: &str = "flex min-w-0 flex-row flex-nowrap sticky top-0 z-10 mb-1.5 items-center gap-2 bg-gradient-to-b from-background/95 to-transparent px-1 pb-0 pt-2";
+const TW_GROUP_RULE: &str = "h-px min-w-0 flex-1 bg-gradient-to-r from-border to-transparent";
+const TW_SEARCH_LEADING: &str = "pointer-events-none absolute inset-y-0 left-0 z-[1] flex w-9 shrink-0 items-center justify-center text-muted-foreground";
 
-/// `id` shared by [`Label`] and the filter field ([`Input`] + [`UiInputShell`]).
 const HISTORY_SEARCH_ID: &str = "history-search";
 
 /// First paint shows this many rows; avoids mounting hundreds of DOM nodes at once (faster CEF composite).
@@ -418,15 +419,15 @@ fn HistoryRow(model: HistoryRowModel) -> Element {
                         div { class: "{TW_FAVICON}" }
                     }
                     div { class: "min-w-0 flex-1",
-                        div { class: "truncate text-[13px] font-medium text-sky-300/95 group-hover:text-sky-200", "{host}" }
+                        div { class: "truncate text-ui font-medium text-primary group-hover:text-foreground", "{host}" }
                         if !path.is_empty() {
-                            div { class: "truncate font-mono text-[11px] text-white/45 group-hover:text-white/55", "{path}" }
+                            div { class: "truncate font-mono text-ui-xs text-muted-foreground group-hover:text-muted-foreground/90", "{path}" }
                         }
                     }
                 }
-                div { class: "max-w-[42%] shrink-0 truncate text-right text-[10px] tabular-nums leading-snug text-white/48 whitespace-nowrap group-hover:text-white/62", "{stamp}" }
+                div { class: "max-w-[42%] shrink-0 truncate text-right text-ui-xxs tabular-nums leading-snug text-muted-foreground/80 whitespace-nowrap group-hover:text-muted-foreground", "{stamp}" }
             }
-            div { class: "min-w-0 w-full truncate font-mono text-[10px] leading-snug text-white/26 group-hover:text-white/34", "{url}" }
+            div { class: "min-w-0 w-full truncate font-mono text-ui-xxs leading-snug text-muted-foreground/40 group-hover:text-muted-foreground/60", "{url}" }
         }
     }
 }
@@ -592,27 +593,18 @@ pub fn App() -> Element {
             if chrome_loading {
                 div {
                     class: "flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center px-4 py-10",
-                    UiPanel {
-                        aria_busy: Some(true),
-                        aria_label: Some("Starting history UI".to_string()),
-                        UiStack {
-                            class: "items-center gap-3",
-                            UiText {
-                                tone: UiTextTone::Muted,
-                                size: UiTextSize::Sm,
-                                "Starting…"
-                            }
+                    div {
+                        class: "{TW_PANEL_SHELL}",
+                        aria_busy: "true",
+                        aria_label: "Starting history UI",
+                        div { class: "{TW_HISTORY_STACK}",
+                            span { class: "text-ui text-muted-foreground", "Starting…" }
                             div {
-                                class: "{web_color::LOADING_TRACK}",
-                                div { class: "{web_color::LOADING_PULSE}", style: "{chrome_progress_width}" }
+                                class: "h-1 w-36 overflow-hidden rounded-full bg-muted",
+                                div { class: "h-full rounded-full bg-primary/35 animate-pulse", style: "{chrome_progress_width}" }
                             }
-                            span { class: "{web_color::SHIMMER_TEXT}", "{chrome_agentic}" }
-                            UiText {
-                                class: "tabular-nums text-white/20",
-                                tone: UiTextTone::Inherit,
-                                size: UiTextSize::Xxs,
-                                "{chrome_progress_percent()}%"
-                            }
+                            span { class: "text-ui-xs text-muted-foreground/50 animate-pulse", "{chrome_agentic}" }
+                            span { class: "tabular-nums text-ui-xxs text-muted-foreground/40", "{chrome_progress_percent()}%" }
                         }
                     }
                 }
@@ -623,8 +615,8 @@ pub fn App() -> Element {
                         class: "{TW_HEADER} flex flex-col gap-3",
                         div { class: "flex flex-wrap items-start justify-between gap-3",
                             div { class: "min-w-0 flex-[1_1_12rem]",
-                                h1 { class: "m-0 text-[13px] font-semibold tracking-[-0.02em] text-white/95", "History" }
-                                p { class: "mb-0 mt-0.5 text-[11px] text-white/38", "Recent visits · click to open in this pane" }
+                                h1 { class: "m-0 text-ui font-semibold tracking-[-0.02em] text-foreground", "History" }
+                                p { class: "mb-0 mt-0.5 text-ui-xs text-muted-foreground", "Recent visits · click to open in this pane" }
                             }
                             {
                                 let clear_disabled = entries().is_empty() || list_loading;
@@ -657,8 +649,8 @@ pub fn App() -> Element {
                             class: "sr-only",
                             "Filter history by URL"
                         }
-                        UiInputShell {
-                            leading: rsx! {
+                        div { class: "relative",
+                            span { class: "{TW_SEARCH_LEADING}", aria_hidden: true,
                                 Icon {
                                     view_box: ViewBox::new(0, 0, 24, 24),
                                     stroke_width: 2.,
@@ -666,22 +658,20 @@ pub fn App() -> Element {
                                     circle { cx: 11, cy: 11, r: 8 }
                                     path { d: "m21 21-4.3-4.3" }
                                 }
-                            },
-                            input: rsx! {
-                                Input {
-                                    oninput: move |ev: FormEvent| {
-                                        filter.set(ev.value());
-                                    },
-                                    attributes: merge_attributes(vec![attributes!(input {
-                                        id: HISTORY_SEARCH_ID,
-                                        class: TW_SEARCH,
-                                        r#type: "text",
-                                        placeholder: "Filter by URL…",
-                                        value: filter,
-                                    })]),
-                                    children: rsx! {},
-                                }
-                            },
+                            }
+                            Input {
+                                oninput: move |ev: FormEvent| {
+                                    filter.set(ev.value());
+                                },
+                                attributes: merge_attributes(vec![attributes!(input {
+                                    id: HISTORY_SEARCH_ID,
+                                    class: TW_SEARCH,
+                                    r#type: "text",
+                                    placeholder: "Filter by URL…",
+                                    value: filter,
+                                })]),
+                                children: rsx! {},
+                            }
                         }
                     }
                     div {
@@ -689,47 +679,27 @@ pub fn App() -> Element {
                         class: "min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 pb-5 pt-1",
                         role: "list",
                         if list_loading {
-                            UiPanel {
-                                aria_busy: Some(true),
-                                aria_label: Some("Loading history".to_string()),
-                                UiStack {
-                                    class: "items-center gap-3",
-                                    UiText {
-                                        tone: UiTextTone::Muted,
-                                        size: UiTextSize::Sm,
-                                        "Loading visits…"
-                                    }
+                            div {
+                                class: "{TW_PANEL_SHELL}",
+                                aria_busy: "true",
+                                aria_label: "Loading history",
+                                div { class: "{TW_HISTORY_STACK}",
+                                    span { class: "text-ui text-muted-foreground", "Loading visits…" }
                                     div {
-                                        class: "{web_color::LOADING_TRACK}",
-                                        div { class: "{web_color::LOADING_PULSE}", style: "{host_progress_width}" }
+                                        class: "h-1 w-36 overflow-hidden rounded-full bg-muted",
+                                        div { class: "h-full rounded-full bg-primary/35 animate-pulse", style: "{host_progress_width}" }
                                     }
-                                    span { class: "{web_color::SHIMMER_TEXT}", "{host_agentic}" }
-                                    UiText {
-                                        class: "tabular-nums text-white/20",
-                                        tone: UiTextTone::Inherit,
-                                        size: UiTextSize::Xxs,
-                                        "{host_progress_percent()}%"
-                                    }
+                                    span { class: "text-ui-xs text-muted-foreground/50 animate-pulse", "{host_agentic}" }
+                                    span { class: "tabular-nums text-ui-xxs text-muted-foreground/40", "{host_progress_percent()}%" }
                                 }
                             }
                         } else if grouped_for_view.is_empty() {
                             if filter_trimmed.is_empty() {
                                 if history_sync_stalled() {
-                                    UiPanel {
-                                        replace_default: true,
-                                        class: Some("flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-amber-300/20 bg-amber-300/[0.04] px-6 py-14 text-center".to_string()),
-                                        UiStack {
-                                            class: "items-center gap-2",
-                                            UiText {
-                                                class: "text-[13px] text-amber-100/90",
-                                                tone: UiTextTone::Inherit,
-                                                size: UiTextSize::Inherit,
-                                                "Still waiting for history engine."
-                                            }
-                                            UiText {
-                                                class: "text-[11px] text-amber-100/55",
-                                                tone: UiTextTone::Inherit,
-                                                size: UiTextSize::Inherit,
+                                    div { class: "flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-chart-5/25 bg-chart-5/[0.06] px-6 py-14 text-center",
+                                        div { class: "{TW_HISTORY_STACK_TIGHT}",
+                                            span { class: "text-ui text-foreground", "Still waiting for history engine." }
+                                            span { class: "text-ui-xs text-muted-foreground",
                                                 "Click Retry, switch away and back to this pane, or refocus the window."
                                             }
                                             Button {
@@ -753,44 +723,18 @@ pub fn App() -> Element {
                                         }
                                     }
                                 } else {
-                                    UiPanel {
-                                        replace_default: true,
-                                        class: Some("flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center".to_string()),
-                                        UiStack {
-                                            class: "items-center gap-2",
-                                            UiText {
-                                                class: "text-[13px] text-white/50",
-                                                tone: UiTextTone::Inherit,
-                                                size: UiTextSize::Inherit,
-                                                "No history yet."
-                                            }
-                                            UiText {
-                                                class: "text-[11px] text-white/28",
-                                                tone: UiTextTone::Inherit,
-                                                size: UiTextSize::Inherit,
-                                                "Browse in another pane to build history."
-                                            }
+                                    div { class: "flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-14 text-center",
+                                        div { class: "{TW_HISTORY_STACK_TIGHT}",
+                                            span { class: "text-ui text-muted-foreground", "No history yet." }
+                                            span { class: "text-ui-xs text-muted-foreground/60", "Browse in another pane to build history." }
                                         }
                                     }
                                 }
                             } else {
-                                UiPanel {
-                                    replace_default: true,
-                                    class: Some("flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center".to_string()),
-                                    UiStack {
-                                        class: "items-center gap-2",
-                                        UiText {
-                                            class: "text-[13px] text-white/50",
-                                            tone: UiTextTone::Inherit,
-                                            size: UiTextSize::Inherit,
-                                            "No entries match your filter."
-                                        }
-                                        UiText {
-                                            class: "text-[11px] text-white/28",
-                                            tone: UiTextTone::Inherit,
-                                            size: UiTextSize::Inherit,
-                                            "Try a shorter or different URL fragment."
-                                        }
+                                div { class: "flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border bg-muted/20 px-6 py-14 text-center",
+                                    div { class: "{TW_HISTORY_STACK_TIGHT}",
+                                        span { class: "text-ui text-muted-foreground", "No entries match your filter." }
+                                        span { class: "text-ui-xs text-muted-foreground/60", "Try a shorter or different URL fragment." }
                                     }
                                 }
                             }
@@ -799,15 +743,9 @@ pub fn App() -> Element {
                                 section {
                                     key: "g{gi}",
                                     class: "mb-[1.1rem] min-w-0 last:mb-0",
-                                    UiRow {
-                                        class: "sticky top-0 z-10 mb-1.5 items-center gap-2 bg-[linear-gradient(180deg,rgba(14,15,18,0.97)_60%,transparent)] px-1 pb-0 pt-2",
-                                        UiText {
-                                            class: "text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35",
-                                            tone: UiTextTone::Inherit,
-                                            size: UiTextSize::Inherit,
-                                            "{heading}"
-                                        }
-                                        UiDivider { variant: UiDividerVariant::HorizontalFade }
+                                    div { class: "{TW_GROUP_HEAD}",
+                                        span { class: "text-ui-xxs font-semibold uppercase tracking-[0.14em] text-muted-foreground", "{heading}" }
+                                        span { class: "{TW_GROUP_RULE}" }
                                     }
                                     div { class: "flex min-w-0 flex-col gap-2",
                                         for model in rows {
