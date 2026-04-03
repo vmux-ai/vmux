@@ -1,4 +1,4 @@
-.PHONY: run-mac run-doctor build-mac-debug build bundle-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps
+.PHONY: run-mac run-windows run-doctor build-mac-debug build-windows-debug build bundle-mac setup-cef setup-windows install-debug-render-process doctor-mac doctor-windows ensure-run-mac-deps ensure-run-windows-deps ensure-run-windows-build-deps
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 RUSTUP_BIN := $(or $(shell command -v rustup 2>/dev/null),$(HOME)/.cargo/bin/rustup)
@@ -8,14 +8,22 @@ DX_VERSION := 0.7.4
 CEF_FRAMEWORK_DIR := $(HOME)/.local/share/Chromium Embedded Framework.framework
 CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 
-# Status bar / history / UI library `dist/` folders are built by each crate’s `build.rs` via **`dx build`** when you compile `vmux_desktop` (needs `dioxus-cli` on PATH).
-
-# Build then exec the binary instead of `cargo run` so the foreground process is vmux_desktop (not Cargo).
 run-mac: build-mac-debug
 	exec env -u CEF_PATH ./target/debug/vmux_desktop
 
 build-mac-debug: ensure-run-mac-deps
 	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop --features debug
+
+ifeq ($(OS),Windows_NT)
+ensure-run-windows-build-deps:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-windows.ps1 -BuildDeps
+
+build-windows-debug: ensure-run-windows-build-deps
+	cmd /C "set CEF_PATH=&& "$(CARGO_BIN)" build -p vmux_desktop --features debug"
+
+run-windows: build-windows-debug
+	powershell -NoProfile -ExecutionPolicy Bypass -Command "Remove-Item Env:CEF_PATH -ErrorAction SilentlyContinue; & (Join-Path -Path (Get-Location) -ChildPath 'target/debug/vmux_desktop.exe')"
+endif
 
 build: ensure-run-mac-deps
 	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop --release
@@ -24,19 +32,29 @@ bundle-mac:
 	chmod +x scripts/bundle-macos.sh
 	./scripts/bundle-macos.sh
 
-# One-time CEF download (macOS paths; pin matches bevy_cef 0.5.x)
 setup-cef:
 	"$(CARGO_BIN)" install export-cef-dir@145.6.1+145.0.28 --force
 	"$(EXPORT_CEF_BIN)" --force "$$HOME/.local/share"
 
-# After setup-cef: copy debug render helper for macOS dev (see README)
 install-debug-render-process:
 	"$(CARGO_BIN)" install bevy_cef_debug_render_process
 	cp "$$HOME/.cargo/bin/bevy_cef_debug_render_process" \
 	  "$$HOME/.local/share/Chromium Embedded Framework.framework/Libraries/bevy_cef_debug_render_process"
 
-# Friendly prerequisite report (colors / emoji when terminal); README: make run-doctor
+ifeq ($(OS),Windows_NT)
+run-doctor: doctor-windows
+else
 run-doctor: doctor-mac
+endif
+
+doctor-windows:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-windows.ps1
+
+ensure-run-windows-deps:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-windows.ps1 -Install
+
+setup-windows:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor-windows.ps1 -CefOnly
 
 doctor-mac:
 	@chmod +x scripts/doctor-mac.sh
@@ -44,7 +62,6 @@ doctor-mac:
 		DX_BIN="$(DX_BIN)" CEF_FRAMEWORK_DIR="$(CEF_FRAMEWORK_DIR)" \
 		CEF_DEBUG_RENDER="$(CEF_DEBUG_RENDER)" ./scripts/doctor-mac.sh
 
-# Non-interactive bootstrap so `make run-mac` works even after dependency bumps.
 ensure-run-mac-deps:
 	@echo "Checking build dependencies for run-mac..."
 	@if [ ! -x "$(CARGO_BIN)" ]; then \

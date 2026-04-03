@@ -66,7 +66,10 @@ static STATUS_HOST: LazyLock<String> = LazyLock::new(|| {
 });
 
 fn status_bar_dist_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dist")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("vmux_status_bar")
+        .join("dist")
 }
 
 fn startup_status_server(mut commands: Commands, mut pending: ResMut<PendingEmbeddedServeDir>) {

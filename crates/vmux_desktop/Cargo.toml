@@ -3,6 +3,7 @@ name = "vmux_desktop"
 description = "vmux — Bevy + embedded CEF webview"
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
 
 [lib]
 path = "src/lib.rs"

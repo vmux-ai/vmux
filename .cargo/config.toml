@@ -1,0 +1,2 @@
+[alias]
+run-desktop-debug = "run -p vmux_desktop --features debug"

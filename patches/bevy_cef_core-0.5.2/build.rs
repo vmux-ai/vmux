@@ -13,8 +13,11 @@ mod windows {
 
     const RENDER_PROCESS_BINARY: &str = "bevy_cef_render_process.exe";
 
+    const RUNTIME_SUBDIRS: &[&str] = &["locales", "Resources"];
+
     pub fn copy_cef_files() {
         println!("cargo:rerun-if-changed=build.rs");
+        println!("cargo:rerun-if-env-changed=CEF_DIR");
         println!("cargo:rerun-if-env-changed=USERPROFILE");
 
         let Some(cef_dir) = find_cef_dir() else {
@@ -24,28 +27,30 @@ mod windows {
         let target_dir = find_target_profile_dir();
         let examples_dir = target_dir.join("examples");
 
-        println!(
-            "cargo:warning=Copying CEF files from {:?} to {:?}",
-            cef_dir, target_dir
-        );
         copy_cef_runtime_files(&cef_dir, &target_dir);
         copy_render_process_binary(&cef_dir, &target_dir);
 
-        println!("cargo:warning=Copying CEF files into {:?}", examples_dir);
         fs::create_dir_all(&examples_dir).unwrap();
         copy_cef_runtime_files(&target_dir, &examples_dir);
         copy_render_process_binary(&target_dir, &examples_dir);
     }
 
     fn find_cef_dir() -> Option<PathBuf> {
+        if let Ok(dir) = env::var("CEF_DIR") {
+            let p = PathBuf::from(dir.trim());
+            if p.is_dir() {
+                println!("cargo:rerun-if-changed={}", p.display());
+                return Some(p);
+            }
+        }
+
         let home = env::var("USERPROFILE").ok()?;
-        let cef_dir = PathBuf::from(home).join(".local/share/cef");
+        let cef_dir = PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("cef");
         println!("cargo:rerun-if-changed={}", cef_dir.display());
         if !cef_dir.exists() {
-            println!(
-                "cargo:warning=CEF directory not found at {:?}. Run `make setup-windows` first. Skipping CEF file copy.",
-                cef_dir
-            );
             return None;
         }
         Some(cef_dir)
@@ -74,8 +79,6 @@ mod windows {
     }
 
     fn copy_render_process_binary(src: &Path, dst: &Path) {
-        // Check both the directory root and bin/ subdirectory
-        // (cargo install --root places binaries in <root>/bin/)
         let binary = src.join(RENDER_PROCESS_BINARY);
         let binary_in_bin = src.join("bin").join(RENDER_PROCESS_BINARY);
         let binary = if binary.exists() {
@@ -83,25 +86,27 @@ mod windows {
         } else if binary_in_bin.exists() {
             binary_in_bin
         } else {
-            println!(
-                "cargo:warning=Render process binary not found at {:?}. \
-                 Run `cargo install bevy_cef_render_process` and copy to CEF directory, \
-                 or run `make setup-windows`. Window flash may occur on startup.",
-                binary
-            );
             return;
         };
         let dest = dst.join(RENDER_PROCESS_BINARY);
-        if dest.exists() {
-            let src_modified = fs::metadata(&binary).unwrap().modified().unwrap();
-            let dst_modified = fs::metadata(&dest).unwrap().modified().unwrap();
-            if dst_modified >= src_modified {
-                return;
-            }
-        }
-        fs::copy(&binary, &dest).unwrap_or_else(|e| {
+        copy_if_newer(&binary, &dest).unwrap_or_else(|e| {
             panic!("Failed to copy {:?} to {:?}: {}", binary, dest, e);
         });
+    }
+
+    fn copy_if_newer(src: &Path, dest: &Path) -> std::io::Result<()> {
+        if dest.exists() {
+            let src_modified = fs::metadata(src)?.modified()?;
+            let dst_modified = fs::metadata(dest)?.modified()?;
+            if dst_modified >= src_modified {
+                return Ok(());
+            }
+        }
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(src, dest)?;
+        Ok(())
     }
 
     fn copy_cef_runtime_files(src: &Path, dst: &Path) {
@@ -113,24 +118,40 @@ mod windows {
             let entry = entry.unwrap();
             let path = entry.path();
             let file_name = entry.file_name();
+            let name = file_name.to_string_lossy();
 
             if path.is_dir() {
-                if file_name == "locales" {
+                if RUNTIME_SUBDIRS
+                    .iter()
+                    .any(|d| name.eq_ignore_ascii_case(d))
+                {
                     let dest_dir = dst.join(&file_name);
                     fs::create_dir_all(&dest_dir).unwrap();
-                    copy_cef_runtime_files(&path, &dest_dir);
+                    copy_tree_preserving_runtime(&path, &dest_dir);
                 }
-                // Skip other directories (include/, cmake/, libcef_dll/)
             } else if is_runtime_file(&path) {
                 let dest = dst.join(&file_name);
-                if dest.exists() {
-                    let src_modified = fs::metadata(&path).unwrap().modified().unwrap();
-                    let dst_modified = fs::metadata(&dest).unwrap().modified().unwrap();
-                    if dst_modified >= src_modified {
-                        continue;
-                    }
-                }
-                fs::copy(&path, &dest).unwrap_or_else(|e| {
+                copy_if_newer(&path, &dest).unwrap_or_else(|e| {
+                    panic!("Failed to copy {:?} to {:?}: {}", path, dest, e);
+                });
+            }
+        }
+    }
+
+    fn copy_tree_preserving_runtime(src: &Path, dst: &Path) {
+        for entry in fs::read_dir(src).unwrap_or_else(|e| {
+            panic!("Failed to read directory {:?}: {}", src, e);
+        }) {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            let file_name = entry.file_name();
+            if path.is_dir() {
+                let dest_dir = dst.join(&file_name);
+                fs::create_dir_all(&dest_dir).unwrap();
+                copy_tree_preserving_runtime(&path, &dest_dir);
+            } else {
+                let dest = dst.join(&file_name);
+                copy_if_newer(&path, &dest).unwrap_or_else(|e| {
                     panic!("Failed to copy {:?} to {:?}: {}", path, dest, e);
                 });
             }

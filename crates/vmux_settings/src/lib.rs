@@ -335,29 +335,40 @@ pub struct VmuxCacheDir(pub Option<PathBuf>);
 pub struct VmuxCacheDirInitSet;
 
 fn vmux_cache_base_dir() -> Option<PathBuf> {
-    std::env::var("HOME").ok().map(|home| {
-        if cfg!(target_os = "macos") {
-            PathBuf::from(home).join("Library/Caches/vmux")
-        } else {
-            PathBuf::from(home).join(".cache/vmux")
-        }
-    })
+    if cfg!(target_os = "windows") {
+        let local = std::env::var("LOCALAPPDATA").ok().map(PathBuf::from);
+        return local
+            .or_else(|| {
+                std::env::var("USERPROFILE").ok().map(|p| {
+                    PathBuf::from(p).join("AppData").join("Local")
+                })
+            })
+            .map(|p| p.join("vmux").join("cache"));
+    }
+    if cfg!(target_os = "macos") {
+        return std::env::var("HOME")
+            .ok()
+            .map(|home| PathBuf::from(home).join("Library").join("Caches").join("vmux"));
+    }
+    std::env::var("HOME")
+        .ok()
+        .map(|home| PathBuf::from(home).join(".cache").join("vmux"))
 }
 
 fn init_vmux_cache_dir(mut commands: Commands) {
     commands.insert_resource(VmuxCacheDir(vmux_cache_base_dir()));
 }
 
-/// User-writable CEF disk cache root (`<vmux cache>/cef`), with temp-dir fallback when `HOME` is unset.
-///
-/// Matches the layout implied by [`VmuxCacheDir`]; safe to call before [`PreStartup`](Schedule) inserts that resource (e.g. when configuring CEF at app startup).
 pub fn cef_root_cache_path() -> Option<String> {
     vmux_cache_base_dir()
         .map(|base| base.join("cef").to_string_lossy().into_owned())
         .or_else(|| {
-            std::env::temp_dir()
-                .to_str()
-                .map(|p| format!("{p}/vmux_cef"))
+            Some(
+                std::env::temp_dir()
+                    .join("vmux_cef")
+                    .to_string_lossy()
+                    .into_owned(),
+            )
         })
 }
 
