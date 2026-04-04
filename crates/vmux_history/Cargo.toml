@@ -1,44 +1,43 @@
 [package]
 name = "vmux_history"
-description = "vmux — Dioxus history UI + thin HistoryServerPlugin (bundle path + embed)"
+description = "Minimal Bevy + CEF + Dioxus POC (history host message bridge)"
 version.workspace = true
 edition.workspace = true
 publish = false
 build = "build.rs"
 
-[build-dependencies]
-vmux_utils = { path = "../vmux_utils" }
+[features]
+default = []
+debug = []
+web = []
+
+[[bin]]
+name = "vmux_history_app"
+path = "src/main.rs"
+required-features = ["web"]
 
 [lib]
 path = "src/lib.rs"
 
-[[bin]]
-name = "vmux_history"
-path = "src/main.rs"
+[build-dependencies]
+vmux_utils = { path = "../vmux_utils" }
 
 [dependencies]
 serde = { workspace = true }
-serde_json = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true }
-crossbeam-channel = { workspace = true }
-rust-embed = "8"
-vmux_layout = { path = "../vmux_layout" }
-vmux_server = { path = "../vmux_server" }
-vmux_ui_native = { path = "../vmux_ui_native" }
+bevy_cef = { workspace = true, features = ["debug"] }
+bevy_ecs = { workspace = true }
+chrono = { workspace = true }
+ron = { workspace = true }
+url = { workspace = true }
+vmux_webview_app = { path = "../vmux_webview_app" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+bevy = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }
-gloo-timers = { version = "0.3", features = ["futures"] }
-futures-channel = "0.3"
-futures-util = { version = "0.3", default-features = false, features = [
-    "std",
-    "async-await",
-] }
-js-sys = "0.3"
-serde_json = { workspace = true }
-serde-wasm-bindgen = "0.6"
 wasm-bindgen = "0.2.115"
-web-sys = { version = "0.3", features = ["Window", "EventTarget"] }

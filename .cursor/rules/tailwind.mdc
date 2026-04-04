@@ -1,6 +1,6 @@
 ---
 description: Tailwind in RSX and CSS — inline utilities, theme tokens only, no module-level class consts
-globs: "crates/vmux_ui/**/*.rs,crates/vmux_ui/**/*.css,crates/vmux_history/**/*.rs,crates/vmux_history_poc/**/*.rs,crates/vmux_status_bar/**/*.rs"
+globs: "crates/vmux_ui/**/*.rs,crates/vmux_ui/**/*.css,crates/vmux_history/**/*.rs,crates/vmux_status_bar/**/*.rs"
 alwaysApply: false
 ---
 

@@ -1,36 +1,31 @@
-//! History pane: **web UI** (Dioxus WASM in `dist/` via **`dx build`**; native builds run `build.rs`)
-//! + native [`server::HistoryServerPlugin`] and [`vmux_ui_native::hosted::history::HistoryUiPlugin`].
-
-#[cfg(not(target_arch = "wasm32"))]
-pub mod server;
+pub mod event;
 
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
-
-/// Embedded history server + tiled history pane UI (adds [`server::HistoryServerPlugin`] and
-/// [`HistoryUiPlugin`](vmux_ui_native::hosted::history::HistoryUiPlugin)).
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Default)]
-pub struct HistoryPlugin;
+use chrono::{DateTime, Utc};
 
 #[cfg(not(target_arch = "wasm32"))]
-impl Plugin for HistoryPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins((
-            server::HistoryServerPlugin,
-            vmux_ui_native::hosted::history::HistoryUiPlugin,
-        ));
+#[derive(Component, Clone, Copy, Debug)]
+pub struct CreatedAt(pub DateTime<Utc>);
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Copy, Debug)]
+pub struct LastActivatedAt(pub DateTime<Utc>);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for CreatedAt {
+    fn default() -> Self {
+        Self(Utc::now())
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use server::{HistoryServerPlugin, history_bundle_root};
+impl Default for LastActivatedAt {
+    fn default() -> Self {
+        Self(Utc::now())
+    }
+}
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use vmux_ui_native::hosted::history::{
-    HistoryUiBaseUrl, HistoryUiEmitState, HistoryUiPlugin, HistoryUiUrlReceiver, OpenHistoryMode,
-    apply_open_history_pane,
-};
-
-#[cfg(not(target_arch = "wasm32"))]
-pub use vmux_layout::{VmuxHostedWebPlugin, VmuxWebviewSurface};
+include!("plugin.rs");

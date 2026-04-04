@@ -1,6 +1,0 @@
-node_modules/
-target/
-dist/
-
-# History UI ships via dist/ (Tailwind from `assets/input.css` + Dioxus `class:` utilities in `src/`).
-assets/history_ui.css
