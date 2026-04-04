@@ -1,27 +1,78 @@
 #[cfg(target_os = "macos")]
-mod macos_liquid_glass;
-mod system;
-
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
+
+#[cfg(target_os = "macos")]
+use bevy::window::RawHandleWrapper;
+#[cfg(target_os = "macos")]
+use liquid_glass_rs::{GlassOptions, GlassViewManager};
+#[cfg(target_os = "macos")]
+use raw_window_handle::RawWindowHandle;
+#[cfg(target_os = "macos")]
+use std::marker::PhantomData;
+#[cfg(target_os = "macos")]
+use std::rc::Rc;
+
 #[derive(Default)]
 pub struct ScenePlugin;
 
+#[cfg(target_os = "macos")]
+struct LiquidGlassMainThread(PhantomData<Rc<()>>);
+
+#[cfg(target_os = "macos")]
+impl Default for LiquidGlassMainThread {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Startup,
-            (
-                system::normalize_window_padding_from_legacy_save,
-                system::configure_primary_window,
-                system::sync_clear_color_from_primary_window,
-                system::spawn_camera,
-                vmux_command::setup.after(system::spawn_camera),
-                system::spawn_directional_light,
-            )
-                .chain(),
-        );
+        app.add_systems(Startup, (spawn_camera, spawn_directional_light).chain());
+
         #[cfg(target_os = "macos")]
-        app.add_systems(Update, macos_liquid_glass::apply_macos_liquid_glass);
+        app.insert_resource(ClearColor(Color::NONE))
+            .insert_non_send_resource(LiquidGlassMainThread::default())
+            .add_systems(Update, apply_liquid_glass);
+    }
+}
+
+fn spawn_camera(mut commands: Commands) {
+    {
+        commands.spawn((
+            Camera3d::default(),
+            Tonemapping::None,
+            Transform::from_translation(Vec3::new(0., 0., 3.0)).looking_at(Vec3::ZERO, Vec3::Y),
+        ));
+    }
+}
+
+fn spawn_directional_light(mut commands: Commands) {
+    commands.spawn((
+        DirectionalLight::default(),
+        Transform::from_translation(Vec3::new(1., 1., 1.)).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+}
+
+#[cfg(target_os = "macos")]
+fn apply_liquid_glass(
+    _main_thread: NonSend<LiquidGlassMainThread>,
+    query: Query<(Entity, &RawHandleWrapper), Added<Window>>,
+) {
+    for (entity, wrapper) in query.iter() {
+        let ptr = match wrapper.get_window_handle() {
+            RawWindowHandle::AppKit(h) => h.ns_view.as_ptr().cast::<std::ffi::c_void>(),
+            _ => continue,
+        };
+        if ptr.is_null() {
+            continue;
+        }
+
+        let manager = GlassViewManager::new();
+        match manager.add_glass_view(ptr, GlassOptions::default()) {
+            Ok(_) => info!("Liquid Glass successfully applied to window: {:?}", entity),
+            Err(e) => bevy_log::error!("Window {:?} not ready for glass: {:?}", entity, e),
+        }
     }
 }
 

@@ -8075,6 +8075,7 @@ name = "vmux_scene"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_log",
  "bevy_winit",
  "liquid-glass-rs",
  "raw-window-handle",

@@ -3,20 +3,181 @@ use std::path::PathBuf;
 use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
 use bevy::render::alpha::AlphaMode;
-use bevy::window::{PrimaryWindow, Window, WindowPlugin};
+use bevy::window::{CompositeAlphaMode, PrimaryWindow, Window as NativeWindow, WindowPlugin};
 use bevy_cef::prelude::*;
 use chrono::{DateTime, Duration, Utc};
 use url::Url;
-use vmux_core::{CAMERA_DISTANCE, NavigationHistory, VmuxWorldCamera};
+use vmux_core::{CAMERA_DISTANCE, VmuxWorldCamera};
 use vmux_history_poc::HistoryPlugin;
 use vmux_history_poc::event::{HISTORY_EVENT, HistoryEvent};
 use vmux_scene::ScenePlugin;
-use vmux_settings::SettingsPlugin;
 use vmux_webview_app::{JsEmitUiReadyPlugin, UiReady, WebviewAppEmbedSet};
+
+#[derive(Message)]
+enum AppCommand {
+    LayoutCommand(LayoutCommand),
+}
+
+#[derive(Message)]
+enum LayoutCommand {
+    NewSpace { name: String },
+}
+
+struct CommandPlugin;
+
+impl Plugin for CommandPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<AppCommand>();
+    }
+}
+
+struct LayoutPlugin;
+
+impl Plugin for LayoutPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, new_space_on_startup).add_systems(
+            Update,
+            (
+                handle_new_space,
+                spawn_window_on_new_space,
+                spawn_pane_on_new_window,
+                spawn_tab_on_new_pane,
+                spawn_browser_on_new_tab,
+            ),
+        );
+    }
+}
+
+fn handle_new_space(mut commands: Commands) {
+    commands.spawn(SpaceBundle {
+        space: Space,
+        name: Name::new("Default Space"),
+    });
+}
+
+fn spawn_window_on_new_space(mut commands: Commands, query: Query<Entity, Added<Space>>) {
+    for space in query.iter() {
+        commands.entity(space).with_children(|parent| {
+            parent.spawn(WindowBundle {
+                window: Window,
+                name: Name::new("Default Window"),
+            });
+        });
+    }
+}
+
+fn spawn_pane_on_new_window(mut commands: Commands, query: Query<Entity, Added<Window>>) {
+    for window in query.iter() {
+        commands.entity(window).with_children(|parent| {
+            parent.spawn(PaneBundle {
+                pane: Pane::Horizontal,
+                weight: Weight(1.0),
+            });
+        });
+    }
+}
+
+fn spawn_tab_on_new_pane(mut commands: Commands, query: Query<Entity, Added<Pane>>) {
+    for window in query.iter() {
+        commands.entity(window).with_children(|parent| {
+            parent.spawn(TabBundle {
+                tab: Tab,
+                weight: Weight(0.5),
+                name: Name::new("New Tab"),
+                created_at: CreatedAt(Utc::now()),
+            });
+        });
+    }
+}
+
+fn spawn_browser_on_new_tab(
+    mut commands: Commands,
+    query: Query<Entity, Added<Tab>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for tab in query.iter() {
+        commands.entity(tab).with_children(|parent| {
+            parent.spawn(BrowserBundle {
+                browser: Browser,
+                source: WebviewSource::new("https://example.com/"),
+                mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE))),
+                material: MeshMaterial3d(materials.add(WebviewExtendStandardMaterial {
+                    base: StandardMaterial {
+                        unlit: true,
+                        alpha_mode: AlphaMode::Blend,
+                        ..default()
+                    },
+                    extension: WebviewMaterial::default(),
+                })),
+            });
+        });
+    }
+}
+
+#[derive(Bundle)]
+pub struct TabBundle {
+    pub tab: Tab,
+    pub weight: Weight,
+    pub name: Name,
+    pub created_at: CreatedAt,
+}
+
+#[derive(Bundle)]
+struct BrowserBundle {
+    browser: Browser,
+    source: WebviewSource,
+    mesh: Mesh3d,
+    material: MeshMaterial3d<WebviewExtendStandardMaterial>,
+}
+
+#[derive(Bundle)]
+struct PaneBundle {
+    pane: Pane,
+    weight: Weight,
+}
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pane {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Bundle)]
+struct WindowBundle {
+    window: Window,
+    name: Name,
+}
+
+#[derive(Component)]
+struct Window;
+
+#[derive(Bundle)]
+struct SpaceBundle {
+    space: Space,
+    name: Name,
+}
+
+#[derive(Component)]
+struct Space;
 
 fn main() {
     #[cfg(not(target_os = "macos"))]
     early_exit_if_subprocess();
+
+    let primary_window = NativeWindow {
+        transparent: true,
+        composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
+        decorations: true,
+        titlebar_shown: false,
+        movable_by_window_background: true,
+        fullsize_content_view: true,
+        ..default()
+    };
+    let window_plugin = WindowPlugin {
+        primary_window: Some(primary_window),
+        ..default()
+    };
 
     App::new()
         .add_plugins((
@@ -24,42 +185,29 @@ fn main() {
                 .set(WebAssetPlugin {
                     silence_startup_warning: true,
                 })
-                .set(WindowPlugin {
-                    primary_window: Some(vmux_primary_window()),
-                    ..default()
-                }),
-            SettingsPlugin,
-            NavigationHistoryInit,
-            HistoryPlugin,
-            BrowserPlugin,
+                .set(window_plugin),
             ScenePlugin,
+            CommandPlugin,
+            // LayoutPlugin,
+            // HistoryPlugin,
+            // BrowserPlugin,
         ))
-        .add_systems(
-            Startup,
-            (
-                spawn_history_webview.after(WebviewAppEmbedSet),
-                spawn_sample_history_visits,
-            ),
-        )
-        .add_systems(Update, (fit_window_to_viewport, push_history_via_host_emit))
+        // .add_systems(Startup, spawn_sample_history_visits)
+        // .add_systems(Update, push_history_via_host_emit)
         .run();
 }
 
-#[cfg(target_os = "macos")]
-fn vmux_primary_window() -> Window {
-    Window {
-        transparent: true,
-        decorations: true,
-        titlebar_transparent: true,
-        fullsize_content_view: true,
-        ..default()
-    }
+fn new_space_on_startup(mut msg: MessageWriter<AppCommand>) {
+    msg.write(AppCommand::LayoutCommand(LayoutCommand::NewSpace {
+        name: "New Space".to_string(),
+    }));
 }
 
-#[cfg(not(target_os = "macos"))]
-fn vmux_primary_window() -> Window {
-    Window::default()
-}
+#[derive(Component, Clone, Copy, Debug)]
+struct Tab;
+
+#[derive(Component, Clone, Copy, Debug)]
+struct Weight(f32);
 
 #[allow(dead_code)]
 #[derive(Component, Clone, Copy, Debug)]
@@ -113,90 +261,6 @@ fn push_history_via_host_emit(
 #[derive(Component)]
 struct Browser;
 
-#[derive(Component)]
-struct FullViewportHistoryWebview;
-
-#[derive(Bundle)]
-struct BrowserBundle {
-    browser: Browser,
-    webview: WebviewBundle,
-}
-
-#[derive(Bundle)]
-struct WebviewBundle {
-    source: WebviewSource,
-    mesh: Mesh3d,
-    material: MeshMaterial3d<WebviewExtendStandardMaterial>,
-}
-
-fn fit_window_to_viewport(
-    mut q: Query<&mut Transform, With<FullViewportHistoryWebview>>,
-    window: Query<&Window, With<PrimaryWindow>>,
-    camera_q: Query<(&Camera, &Projection), With<VmuxWorldCamera>>,
-) {
-    let Ok(window) = window.single() else {
-        return;
-    };
-    let Ok((camera, projection)) = camera_q.single() else {
-        return;
-    };
-    let Projection::Perspective(perspective) = projection else {
-        return;
-    };
-
-    let mut vw = window.width();
-    let mut vh = window.height();
-    if !(vw.is_finite() && vh.is_finite()) || vw <= 0.0 || vh <= 0.0 {
-        if let Some(s) = camera.logical_viewport_size()
-            && s.x > 0.0
-            && s.y > 0.0
-            && s.x.is_finite()
-            && s.y.is_finite()
-        {
-            vw = s.x;
-            vh = s.y;
-        } else {
-            return;
-        }
-    }
-
-    let aspect = vw / vh;
-    let tan_half_fov = (perspective.fov * 0.5).tan();
-    let half_h = CAMERA_DISTANCE * tan_half_fov;
-    let half_w = half_h * aspect;
-
-    for mut tf in &mut q {
-        tf.translation = Vec3::ZERO;
-        tf.scale = Vec3::new(half_w.max(1.0e-4), half_h.max(1.0e-4), 1.0);
-    }
-}
-
-fn spawn_history_webview(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
-) {
-    commands.spawn((
-        BrowserBundle {
-            browser: Browser,
-            webview: WebviewBundle {
-                source: WebviewSource::new("vmux://history"),
-                mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE))),
-                material: MeshMaterial3d(materials.add(WebviewExtendStandardMaterial {
-                    base: StandardMaterial {
-                        unlit: true,
-                        alpha_mode: AlphaMode::Blend,
-                        ..default()
-                    },
-                    extension: WebviewMaterial::default(),
-                })),
-            },
-        },
-        Transform::default(),
-        FullViewportHistoryWebview,
-    ));
-}
-
 struct BrowserPlugin;
 
 impl Plugin for BrowserPlugin {
@@ -208,15 +272,6 @@ impl Plugin for BrowserPlugin {
                 ..default()
             },
         ));
-    }
-}
-
-#[derive(Default)]
-struct NavigationHistoryInit;
-
-impl Plugin for NavigationHistoryInit {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<NavigationHistory>();
     }
 }
 

@@ -15,5 +15,6 @@ vmux_core = { path = "../vmux_core" }
 vmux_settings = { path = "../vmux_settings" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+bevy_log = "0.18"
 liquid-glass-rs = "0.1.1"
 raw-window-handle = "0.6"

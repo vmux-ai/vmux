@@ -60,25 +60,22 @@ pub struct WindowBundle {
 pub struct PaneBundle {
     pub pane: Pane,
     pub weight: Weight,
-    pub name: Name,
 }
 
 #[derive(Bundle)]
-pub struct BrowserTabBundle {
-    pub tab: Tab,
-    pub browser: Browser,
-    pub metadata: PageMetadata,
-    pub weight: Weight,
-    pub name: Name,
-    pub created_at: CreatedAt,
-}
-
-#[derive(Bundle)]
-pub struct SettingsTabBundle {
+pub struct TabBundle {
     pub tab: Tab,
     pub weight: Weight,
     pub name: Name,
     pub created_at: CreatedAt,
+}
+
+#[derive(Bundle)]
+struct BrowserBundle {
+    browser: Browser,
+    source: WebviewSource,
+    mesh: Mesh3d,
+    material: MeshMaterial3d<WebviewExtendStandardMaterial>,
 }
 
 #[derive(Bundle)]
