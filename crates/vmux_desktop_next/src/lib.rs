@@ -9,7 +9,7 @@ use bevy::window::{CompositeAlphaMode, Window as NativeWindow, WindowPlugin};
 use browser::BrowserPlugin;
 use layout::LayoutPlugin;
 use settings::SettingsPlugin;
-use vmux_history_poc::HistoryPlugin;
+use vmux_history::HistoryPlugin;
 use vmux_scene::ScenePlugin;
 
 pub struct VmuxPlugin;

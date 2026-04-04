@@ -12,7 +12,9 @@ use bevy_cef::prelude::{
 };
 pub use startup::{setup_vmux_panes_startup, startup_drain_embedded_ui_urls};
 pub use system::{go_back, go_forward, reload};
-pub use vmux_history::HistoryUiBaseUrl;
+pub use vmux_ui_native::hosted::history::HistoryUiBaseUrl;
+
+use vmux_ui_native::hosted::history::HistoryUiUrlReceiver;
 pub use vmux_layout::loading_bar_color;
 pub use vmux_layout::{CEF_PAGE_ZOOM_LEVEL, LayoutPlugin, Webview, rebuild_session_snapshot};
 pub use vmux_layout::{VmuxHostedWebPlugin, VmuxWebviewSurface};
@@ -65,6 +67,8 @@ impl Plugin for WebviewPlugin {
             cef_plugin,
             JsEmitEventPlugin::<vmux_core::WebviewDocumentUrlEmit>::default(),
         ));
+        app.init_resource::<HistoryUiBaseUrl>()
+            .init_resource::<HistoryUiUrlReceiver>();
         startup::register(app);
         navigation_loading::register(app);
         app.add_systems(

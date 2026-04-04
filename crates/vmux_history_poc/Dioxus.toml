@@ -1,6 +1,0 @@
-[application]
-name = "vmux_history_poc"
-default_platform = "web"
-
-[web.app]
-title = "vmux history POC"

@@ -7982,7 +7982,7 @@ dependencies = [
  "ron 0.8.1",
  "url",
  "vmux_core",
- "vmux_history_poc",
+ "vmux_history",
  "vmux_scene",
  "vmux_settings",
  "vmux_webview_app",
@@ -8048,37 +8048,13 @@ dependencies = [
  "ron 0.8.1",
  "serde",
  "vmux_core",
- "vmux_history_poc",
+ "vmux_history",
  "vmux_scene",
  "vmux_webview_app",
 ]
 
 [[package]]
 name = "vmux_history"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "crossbeam-channel",
- "dioxus",
- "futures-channel",
- "futures-util",
- "gloo-timers",
- "js-sys",
- "rust-embed",
- "serde",
- "serde-wasm-bindgen",
- "serde_json",
- "vmux_layout",
- "vmux_server",
- "vmux_ui",
- "vmux_ui_native",
- "vmux_utils",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "vmux_history_poc"
 version = "0.1.0"
 dependencies = [
  "bevy",
@@ -8251,11 +8227,11 @@ dependencies = [
  "tokio",
  "tower-http 0.5.2",
  "vmux_core",
- "vmux_history",
  "vmux_layout",
  "vmux_server",
  "vmux_settings",
  "vmux_status_bar",
+ "vmux_ui_native",
 ]
 
 [[package]]

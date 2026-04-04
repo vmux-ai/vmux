@@ -13,7 +13,7 @@ chrono = { workspace = true }
 ron = { workspace = true }
 url = { workspace = true }
 vmux_core = { path = "crates/vmux_core" }
-vmux_history_poc = { path = "crates/vmux_history_poc" }
+vmux_history = { path = "crates/vmux_history" }
 vmux_scene = { path = "crates/vmux_scene" }
 vmux_settings = { path = "crates/vmux_settings" }
 vmux_webview_app = { path = "crates/vmux_webview_app" }
@@ -37,7 +37,6 @@ members = [
     "crates/vmux_webview_app",
     "crates/vmux_status_bar",
     "crates/vmux_history",
-    "crates/vmux_history_poc",
     "crates/vmux_ui",
     "crates/vmux_ui_native",
     "patches/bevy_cef_debug_render_process-0.5.2",
@@ -71,7 +70,7 @@ notify = "6"
 # Dioxus web UIs (`vmux_status_bar`, `vmux_history` wasm): `dioxus-cli` must match this semver (`dx --version`).
 dioxus = { version = "0.7.4", features = ["web"] }
 
-# Smaller / faster-to-parse WASM for the embedded history UI (see `crates/vmux_history/build.rs`).
+# Smaller / faster-to-parse WASM for history Dioxus bundles (see crates' build.rs).
 [profile.release.package.vmux_history]
 opt-level = "z"
 codegen-units = 1

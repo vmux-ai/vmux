@@ -269,7 +269,7 @@ fn timeout_history_embedded(
     }
 }
 
-/// CEF warmup for the history Dioxus bundle when the loopback URL is ready (see `vmux_history::HistoryServerPlugin`).
+/// CEF warmup for the history Dioxus bundle when [`HistoryUiBaseUrl`] has a loopback URL (env or embedded serve).
 pub fn history_dioxus_warmup_should_spawn(world: &mut World) -> Option<String> {
     let standby_enabled = !std::env::var("VMUX_HISTORY_DISABLE_PANE_STANDBY")
         .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))

@@ -15,5 +15,5 @@ crates/vmux_ui/assets/ui_library.css
 crates/vmux_ui/dist/
 crates/vmux_ui/target/
 
-# Dioxus web bundle (`dx build` / `build.rs` in crates/vmux_history_poc)
-crates/vmux_history_poc/dist/
+# Dioxus web bundle (`dx build` / `build.rs`)
+crates/vmux_history/dist/

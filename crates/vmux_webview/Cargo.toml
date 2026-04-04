@@ -27,4 +27,4 @@ vmux_layout = { path = "../vmux_layout" }
 vmux_server = { path = "../vmux_server" }
 vmux_settings = { path = "../vmux_settings" }
 vmux_status_bar = { path = "../vmux_status_bar" }
-vmux_history = { path = "../vmux_history" }
+vmux_ui_native = { path = "../vmux_ui_native" }

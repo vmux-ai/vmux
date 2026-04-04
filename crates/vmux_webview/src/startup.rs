@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy_cef::prelude::WebviewExtendStandardMaterial;
 use vmux_core::{SessionSavePath, SessionSaveQueue};
-use vmux_history::{HistoryUiBaseUrl, HistoryUiUrlReceiver};
+use vmux_ui_native::hosted::history::{HistoryUiBaseUrl, HistoryUiUrlReceiver};
 use vmux_layout::LastVisitedUrl;
 use vmux_layout::{setup_vmux_panes, LoadingBarMaterial, SessionLayoutSnapshot};
 use vmux_server::EmbeddedServeDirStartup;

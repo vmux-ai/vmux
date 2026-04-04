@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use vmux_history_poc::{CreatedAt, LastActivatedAt};
+use vmux_history::{CreatedAt, LastActivatedAt};
 
 pub struct LayoutPlugin;
 

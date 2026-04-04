@@ -18,6 +18,6 @@ directories = "5"
 ron = { workspace = true }
 serde = { workspace = true }
 vmux_core = { path = "../vmux_core" }
-vmux_history_poc = { path = "../vmux_history_poc" }
+vmux_history = { path = "../vmux_history" }
 vmux_scene = { path = "../vmux_scene" }
 vmux_webview_app = { path = "../vmux_webview_app" }
