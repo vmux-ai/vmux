@@ -1,29 +1,26 @@
 [package]
 name = "vmux_desktop"
-description = "vmux — Bevy + embedded CEF webview"
 version.workspace = true
 edition.workspace = true
+publish = false
 
-[lib]
-path = "src/lib.rs"
+[features]
+debug = []
 
 [[bin]]
 name = "vmux_desktop"
 path = "src/main.rs"
 
-[features]
-default = []
-debug = ["bevy_cef/debug", "vmux_browser/debug"]
-
 [dependencies]
 bevy = { workspace = true }
-bevy_cef = { workspace = true }
-leafwing-input-manager = { workspace = true }
-vmux_command = { path = "../vmux_command" }
-vmux_core = { path = "../vmux_core" }
-vmux_input = { path = "../vmux_input" }
-vmux_layout = { path = "../vmux_layout" }
-vmux_session = { path = "../vmux_session" }
-vmux_settings = { path = "../vmux_settings" }
-vmux_browser = { path = "../vmux_browser" }
-vmux_scene = { path = "../vmux_scene" }
+bevy_cef = { workspace = true, features = ["debug"] }
+bevy_log = "0.18"
+directories = "5"
+ron = { workspace = true }
+serde = { workspace = true }
+vmux_history = { path = "../vmux_history" }
+vmux_webview_app = { path = "../vmux_webview_app" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+liquid-glass-rs = "0.1.1"
+raw-window-handle = "0.6"

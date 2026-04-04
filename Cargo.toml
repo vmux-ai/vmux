@@ -12,35 +12,11 @@ bevy_ecs = { workspace = true }
 chrono = { workspace = true }
 ron = { workspace = true }
 url = { workspace = true }
-vmux_core = { path = "crates/vmux_core" }
 vmux_history = { path = "crates/vmux_history" }
-vmux_scene = { path = "crates/vmux_scene" }
-vmux_settings = { path = "crates/vmux_settings" }
 vmux_webview_app = { path = "crates/vmux_webview_app" }
 
 [workspace]
-members = [
-    ".",
-    "crates/vmux_utils",
-    "crates/vmux_core",
-    "crates/vmux_command",
-    "crates/vmux_layout",
-    "crates/vmux_input",
-    "crates/vmux_settings",
-    "crates/vmux_session",
-    "crates/vmux_desktop",
-    "crates/vmux_desktop_next",
-    "crates/vmux_scene",
-    "crates/vmux_server",
-    "crates/vmux_browser",
-    "crates/vmux_webview",
-    "crates/vmux_webview_app",
-    "crates/vmux_status_bar",
-    "crates/vmux_history",
-    "crates/vmux_ui",
-    "crates/vmux_ui_native",
-    "patches/bevy_cef_debug_render_process-0.5.2",
-]
+members = [".", "crates/*", "patches/*"]
 default-members = ["crates/vmux_desktop"]
 resolver = "3"
 
@@ -55,22 +31,30 @@ bevy_winit = { version = "0.18", default-features = true }
 bevy_cef = "0.5.2"
 bevy_cef_core = "0.5.2"
 leafwing-input-manager = "0.20"
-# Session persistence: `bevy_save` on crates.io targets Bevy 0.16.x; vmux uses Bevy 0.18, so we use moonshine-save.
 moonshine-save = "0.6.1"
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "net"] }
-axum = { version = "0.7", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "net",
+] }
+axum = { version = "0.7", default-features = false, features = [
+    "http1",
+    "tokio",
+] }
 tower-http = { version = "0.5", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ron = "0.8"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
 url = "2"
 crossbeam-channel = "0.5"
 notify = "6"
-# Dioxus web UIs (`vmux_status_bar`, `vmux_history` wasm): `dioxus-cli` must match this semver (`dx --version`).
 dioxus = { version = "0.7.4", features = ["web"] }
 
-# Smaller / faster-to-parse WASM for history Dioxus bundles (see crates' build.rs).
 [profile.release.package.vmux_history]
 opt-level = "z"
 codegen-units = 1

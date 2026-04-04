@@ -1,6 +1,0 @@
-node_modules/
-target/
-# Tailwind CLI output (`npm run build:css` from `assets/input.css`)
-assets/status.css
-# Dioxus web bundle (`dx build --platform web`)
-dist/

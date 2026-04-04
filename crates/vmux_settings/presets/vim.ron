@@ -1,2 +1,0 @@
-// Placeholder preset: same as tmux except prefix lead is Ctrl+` (see `preset_bindings("vim")` in code).
-// Copy fields from `settings.ron` `input:` to customize.

@@ -1,2 +1,0 @@
-// Reference: tmux-style prefix (Ctrl+B) + second keys. The app defaults match this; override via
-// `settings.ron` `input:` or set `active_profile: "tmux"` (default).

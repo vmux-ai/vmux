@@ -4,7 +4,6 @@ use bevy::camera::CameraUpdateSystems;
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window as NativeWindow};
 use bevy_cef::prelude::*;
-use vmux_core::pane_corner_clip::PANE_CORNER_CLIP_FULL;
 use vmux_webview_app::JsEmitUiReadyPlugin;
 
 use crate::layout::Tab;
@@ -28,6 +27,7 @@ impl Plugin for BrowserPlugin {
 }
 
 const CAMERA_TO_PLANE: f32 = 3.0;
+const PANE_CORNER_CLIP: f32 = 0.0;
 
 #[derive(Bundle)]
 struct BrowserBundle {
@@ -58,12 +58,7 @@ fn browser_plane_layout(
     let w = layout_px.x.max(1.0e-6);
     let h = layout_px.y.max(1.0e-6);
     let m = w.min(h);
-    let r_px = settings
-        .layout
-        .pane
-        .border_radius
-        .min(m * 0.5)
-        .max(0.0);
+    let r_px = settings.layout.pane.border_radius.min(m * 0.5).max(0.0);
     let world_half = camera_proj
         .single()
         .map(|(_, projection)| world_half_extents_fill_plane(projection, w / h, CAMERA_TO_PLANE))
@@ -90,7 +85,7 @@ fn spawn_browser_on_new_tab(
     let h = plane.layout_px.y.max(1.0e-6);
     for tab in query.iter() {
         let mut mat = WebviewExtendStandardMaterial::default();
-        mat.extension.pane_corner_clip = Vec4::new(plane.r_px, w, h, PANE_CORNER_CLIP_FULL);
+        mat.extension.pane_corner_clip = Vec4::new(plane.r_px, w, h, PANE_CORNER_CLIP);
         commands.entity(tab).with_children(|parent| {
             parent.spawn((
                 BrowserBundle {
@@ -134,7 +129,7 @@ fn sync_browser_plane_to_window(
             *mesh = Mesh::from(Plane3d::new(Vec3::Z, plane.world_half));
         }
         if let Some(mat) = materials.get_mut(&mat_h.0) {
-            mat.extension.pane_corner_clip = Vec4::new(plane.r_px, w, h, PANE_CORNER_CLIP_FULL);
+            mat.extension.pane_corner_clip = Vec4::new(plane.r_px, w, h, PANE_CORNER_CLIP);
         }
     }
 }
