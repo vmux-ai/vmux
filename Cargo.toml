@@ -1,6 +1,30 @@
-# Workspace layout mirrors [Bevy](https://github.com/bevyengine/bevy/): virtual root; crate dirs use underscores (`crates/vmux_input`, etc.).
+# Workspace root package holds repo-level `examples/`; member crates live under `crates/`.
+[package]
+name = "vmux"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[example]]
+name = "v0_1_architecture"
+path = "examples/v0.1-architecture.rs"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+bevy = { workspace = true }
+bevy_cef = { workspace = true, features = ["debug"] }
+bevy_ecs = { workspace = true }
+chrono = { workspace = true }
+ron = { workspace = true }
+url = { workspace = true }
+vmux_core = { path = "crates/vmux_core" }
+vmux_history_poc = { path = "crates/vmux_history_poc" }
+vmux_scene = { path = "crates/vmux_scene" }
+vmux_settings = { path = "crates/vmux_settings" }
+vmux_webview_app = { path = "crates/vmux_webview_app" }
+
 [workspace]
 members = [
+    ".",
     "crates/vmux_utils",
     "crates/vmux_core",
     "crates/vmux_command",
@@ -43,6 +67,8 @@ tower-http = { version = "0.5", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ron = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+url = "2"
 crossbeam-channel = "0.5"
 notify = "6"
 # Dioxus web UIs (`vmux_status_bar`, `vmux_history` wasm): `dioxus-cli` must match this semver (`dx --version`).

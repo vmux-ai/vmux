@@ -95,7 +95,7 @@ Localhost / assets:
 
 Used only when running `vmux_history_poc` (`crates/vmux_history_poc/src/main.rs`), **not** the main `vmux_desktop` graph:
 
-- `HistoryPocUiReady`, `HistoryPocHistorySent`
+- `UiReady`, `HistoryPocHistorySent`
 - A **local** `History { url: String }` — not the same as `vmux_layout::History` (zero-sized marker on the tiled history pane).
 
 ## Common bundles (illustrative)

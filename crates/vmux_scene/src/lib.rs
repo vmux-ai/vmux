@@ -1,13 +1,8 @@
-//! vmux scene bootstrap: primary window tuning, world camera ([`vmux_core::VmuxWorldCamera`]), directional light, macOS liquid glass.
-
 #[cfg(target_os = "macos")]
 mod macos_liquid_glass;
 mod system;
 
 use bevy::prelude::*;
-
-/// Startup systems for the 3D scene: window, clear color, camera, light; chains into
-/// [`vmux_command::setup`]. On macOS, also applies liquid-glass when available.
 #[derive(Default)]
 pub struct ScenePlugin;
 

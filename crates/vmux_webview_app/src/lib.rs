@@ -1,12 +1,20 @@
 use bevy::asset::io::embedded::EmbeddedAssetRegistry;
-use bevy::prelude::*;
+use bevy::prelude::{
+    App, Commands, Component, IntoScheduleConfigs, On, Plugin, Res, ResMut, Resource, Startup,
+    SystemSet,
+};
+use bevy_cef::prelude::{JsEmitEventPlugin, Receive};
 use bevy_cef_core::prelude::{
     CefEmbeddedHost, CefEmbeddedHosts, CefEmbeddedPageConfig, try_set_cef_embedded_page_config,
 };
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WebviewAppEmbedSet;
+
+#[derive(Clone, Copy, Component, Debug, Default, Deserialize)]
+pub struct UiReady {}
 
 #[derive(Clone, Debug)]
 pub struct WebviewAppConfig {
@@ -72,6 +80,24 @@ impl Plugin for WebviewAppPlugin {
                 embed_webview_app_static_assets.in_set(WebviewAppEmbedSet),
             );
     }
+}
+
+pub struct JsEmitUiReadyPlugin;
+
+impl Plugin for JsEmitUiReadyPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(JsEmitEventPlugin::<UiReady>::default())
+            .add_observer(mark_webview_ui_ready_on_js_emit);
+    }
+}
+
+fn mark_webview_ui_ready_on_js_emit(
+    trigger: On<Receive<UiReady>>,
+    mut commands: Commands,
+) {
+    commands
+        .entity(trigger.event().webview)
+        .insert(trigger.event().payload);
 }
 
 fn embedded_default_document(host: &str, index_file_path: &str) -> String {

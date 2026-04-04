@@ -26,20 +26,23 @@ fn main() {
     }
 
     let release = std::env::var("PROFILE").unwrap_or_default() == "release";
-    if !needs_dist_rebuild(&manifest_dir, &workspace_root, release) {
-        return;
-    }
-
-    run_dx_web_bundle(
-        &workspace_root,
-        "vmux_history_poc",
-        release,
-        &["--bin", "vmux_history_app", "--features", "web"],
-    );
-    let public = dx_web_public_dir(&workspace_root, "vmux_history_app", release);
     let dist = manifest_dir.join("dist");
-    let shell = manifest_dir.join("assets/index.html");
-    replace_dist_from_dx_public(&public, &dist, &shell);
+    if needs_dist_rebuild(&manifest_dir, &workspace_root, release) {
+        run_dx_web_bundle(
+            &workspace_root,
+            "vmux_history_poc",
+            release,
+            &["--bin", "vmux_history_app", "--features", "web"],
+        );
+        let public = dx_web_public_dir(&workspace_root, "vmux_history_app", release);
+        let shell = manifest_dir.join("assets/index.html");
+        replace_dist_from_dx_public(&public, &dist, &shell);
+    }
+    if let Err(e) = copy_theme_css_for_embedded_import(&dist, &workspace_root) {
+        println!(
+            "cargo:warning=vmux_history_poc: could not copy theme.css for embedded @import: {e}"
+        );
+    }
 
     if let Ok(rd) = fs::read_dir(&dist) {
         for e in rd.flatten() {
@@ -65,6 +68,23 @@ fn main() {
             }
         }
     }
+}
+
+fn copy_theme_css_for_embedded_import(dist: &Path, workspace_root: &Path) -> std::io::Result<()> {
+    if !dist.is_dir() {
+        return Ok(());
+    }
+    let src = workspace_root.join("crates/vmux_ui/assets/theme.css");
+    if !src.is_file() {
+        return Ok(());
+    }
+    let dest = dist.join("vmux_ui/assets/theme.css");
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(&src, &dest)?;
+    println!("cargo:rerun-if-changed={}", dest.display());
+    Ok(())
 }
 
 fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
