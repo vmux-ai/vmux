@@ -2,57 +2,41 @@ use std::path::PathBuf;
 
 use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
-use bevy::render::alpha::AlphaMode;
-use bevy::window::{CompositeAlphaMode, PrimaryWindow, Window as NativeWindow, WindowPlugin};
+use bevy::window::{CompositeAlphaMode, Window as NativeWindow, WindowPlugin};
 use bevy_cef::prelude::*;
 use chrono::{DateTime, Duration, Utc};
 use url::Url;
-use vmux_core::{CAMERA_DISTANCE, VmuxWorldCamera};
-use vmux_history_poc::HistoryPlugin;
+use vmux_core::pane_corner_clip::PANE_CORNER_CLIP_FULL;
 use vmux_history_poc::event::{HISTORY_EVENT, HistoryEvent};
 use vmux_scene::ScenePlugin;
-use vmux_webview_app::{JsEmitUiReadyPlugin, UiReady, WebviewAppEmbedSet};
+use vmux_webview_app::{JsEmitUiReadyPlugin, UiReady};
 
-#[derive(Message)]
-enum AppCommand {
-    LayoutCommand(LayoutCommand),
-}
-
-#[derive(Message)]
-enum LayoutCommand {
-    NewSpace { name: String },
-}
-
-struct CommandPlugin;
-
-impl Plugin for CommandPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<AppCommand>();
-    }
-}
+const EXAMPLE_PANE_BORDER_RADIUS_PX: f32 = 8.0;
 
 struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, new_space_on_startup).add_systems(
-            Update,
-            (
-                handle_new_space,
-                spawn_window_on_new_space,
-                spawn_pane_on_new_window,
-                spawn_tab_on_new_pane,
-                spawn_browser_on_new_tab,
-            ),
-        );
+        app.add_systems(Startup, spawn_space_on_startup)
+            .add_systems(
+                Update,
+                (
+                    spawn_window_on_new_space,
+                    spawn_pane_on_new_window,
+                    spawn_tab_on_new_pane,
+                ),
+            );
     }
 }
 
-fn handle_new_space(mut commands: Commands) {
-    commands.spawn(SpaceBundle {
-        space: Space,
-        name: Name::new("Default Space"),
-    });
+fn spawn_space_on_startup(mut commands: Commands, q: Query<&Space>) {
+    if q.is_empty() {
+        commands.spawn(SpaceBundle {
+            space: Space,
+            name: Name::new("Space 1"),
+            spatial: SpatialBundle::default(),
+        });
+    }
 }
 
 fn spawn_window_on_new_space(mut commands: Commands, query: Query<Entity, Added<Space>>) {
@@ -61,30 +45,36 @@ fn spawn_window_on_new_space(mut commands: Commands, query: Query<Entity, Added<
             parent.spawn(WindowBundle {
                 window: Window,
                 name: Name::new("Default Window"),
+                spatial: SpatialBundle::default(),
             });
         });
     }
 }
 
-fn spawn_pane_on_new_window(mut commands: Commands, query: Query<Entity, Added<Window>>) {
+fn spawn_pane_on_new_window(
+    mut commands: Commands,
+    query: Query<Entity, Added<Window>>,
+) {
     for window in query.iter() {
         commands.entity(window).with_children(|parent| {
             parent.spawn(PaneBundle {
                 pane: Pane::Horizontal,
                 weight: Weight(1.0),
+                spatial: SpatialBundle::default(),
             });
         });
     }
 }
 
 fn spawn_tab_on_new_pane(mut commands: Commands, query: Query<Entity, Added<Pane>>) {
-    for window in query.iter() {
-        commands.entity(window).with_children(|parent| {
+    for pane in query.iter() {
+        commands.entity(pane).with_children(|parent| {
             parent.spawn(TabBundle {
                 tab: Tab,
                 weight: Weight(0.5),
                 name: Name::new("New Tab"),
                 created_at: CreatedAt(Utc::now()),
+                spatial: SpatialBundle::default(),
             });
         });
     }
@@ -96,31 +86,71 @@ fn spawn_browser_on_new_tab(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
+    let layout_px = WebviewSize::default().0;
+    let w = layout_px.x.max(1.0e-6);
+    let h = layout_px.y.max(1.0e-6);
+    let m = w.min(h);
+    let r_px = EXAMPLE_PANE_BORDER_RADIUS_PX.min(m * 0.5).max(0.0);
     for tab in query.iter() {
+        let mut mat = WebviewExtendStandardMaterial::default();
+        mat.extension.pane_corner_clip = Vec4::new(r_px, w, h, PANE_CORNER_CLIP_FULL);
         commands.entity(tab).with_children(|parent| {
             parent.spawn(BrowserBundle {
                 browser: Browser,
                 source: WebviewSource::new("https://example.com/"),
                 mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::ONE))),
-                material: MeshMaterial3d(materials.add(WebviewExtendStandardMaterial {
-                    base: StandardMaterial {
-                        unlit: true,
-                        alpha_mode: AlphaMode::Blend,
-                        ..default()
-                    },
-                    extension: WebviewMaterial::default(),
-                })),
+                material: MeshMaterial3d(materials.add(mat)),
             });
         });
     }
 }
 
+#[derive(Bundle, Default)]
+struct SpatialBundle {
+    transform: Transform,
+    global_transform: GlobalTransform,
+    visibility: Visibility,
+    inherited_visibility: InheritedVisibility,
+    view_visibility: ViewVisibility,
+}
+
 #[derive(Bundle)]
-pub struct TabBundle {
-    pub tab: Tab,
-    pub weight: Weight,
-    pub name: Name,
-    pub created_at: CreatedAt,
+struct SpaceBundle {
+    space: Space,
+    name: Name,
+    spatial: SpatialBundle,
+}
+
+#[derive(Bundle)]
+struct WindowBundle {
+    window: Window,
+    name: Name,
+    spatial: SpatialBundle,
+}
+
+#[derive(Component)]
+struct Window;
+
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+enum Pane {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Bundle)]
+struct PaneBundle {
+    pane: Pane,
+    weight: Weight,
+    spatial: SpatialBundle,
+}
+
+#[derive(Bundle)]
+struct TabBundle {
+    tab: Tab,
+    weight: Weight,
+    name: Name,
+    created_at: CreatedAt,
+    spatial: SpatialBundle,
 }
 
 #[derive(Bundle)]
@@ -129,33 +159,6 @@ struct BrowserBundle {
     source: WebviewSource,
     mesh: Mesh3d,
     material: MeshMaterial3d<WebviewExtendStandardMaterial>,
-}
-
-#[derive(Bundle)]
-struct PaneBundle {
-    pane: Pane,
-    weight: Weight,
-}
-
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Pane {
-    Horizontal,
-    Vertical,
-}
-
-#[derive(Bundle)]
-struct WindowBundle {
-    window: Window,
-    name: Name,
-}
-
-#[derive(Component)]
-struct Window;
-
-#[derive(Bundle)]
-struct SpaceBundle {
-    space: Space,
-    name: Name,
 }
 
 #[derive(Component)]
@@ -187,20 +190,13 @@ fn main() {
                 })
                 .set(window_plugin),
             ScenePlugin,
-            CommandPlugin,
-            // LayoutPlugin,
+            LayoutPlugin,
+            BrowserPlugin,
             // HistoryPlugin,
-            // BrowserPlugin,
         ))
         // .add_systems(Startup, spawn_sample_history_visits)
         // .add_systems(Update, push_history_via_host_emit)
         .run();
-}
-
-fn new_space_on_startup(mut msg: MessageWriter<AppCommand>) {
-    msg.write(AppCommand::LayoutCommand(LayoutCommand::NewSpace {
-        name: "New Space".to_string(),
-    }));
 }
 
 #[derive(Component, Clone, Copy, Debug)]
@@ -211,7 +207,7 @@ struct Weight(f32);
 
 #[allow(dead_code)]
 #[derive(Component, Clone, Copy, Debug)]
-struct Sent(pub DateTime<Utc>);
+struct Sent(DateTime<Utc>);
 
 #[derive(Bundle)]
 struct VisitBundle {
@@ -271,7 +267,8 @@ impl Plugin for BrowserPlugin {
                 root_cache_path: example_cef_root_cache_path(),
                 ..default()
             },
-        ));
+        ))
+        .add_systems(Update, spawn_browser_on_new_tab);
     }
 }
 
