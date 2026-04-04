@@ -7934,6 +7934,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vmux"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
+ "chrono",
+ "ron 0.8.1",
+ "url",
+ "vmux_core",
+ "vmux_history_poc",
+ "vmux_scene",
+ "vmux_settings",
+ "vmux_webview_app",
+]
+
+[[package]]
 name = "vmux_browser"
 version = "0.1.0"
 dependencies = [
@@ -8192,7 +8209,9 @@ name = "vmux_webview_app"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_cef",
  "bevy_cef_core",
+ "serde",
 ]
 
 [[package]]
