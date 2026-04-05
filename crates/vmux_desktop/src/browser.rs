@@ -40,10 +40,18 @@ struct BrowserBundle {
 #[derive(Component)]
 struct Browser;
 
+#[derive(Component, Clone, Copy, PartialEq)]
+struct BrowserVisualLayout {
+    inner_px: Vec2,
+    border_px: f32,
+    r_px: f32,
+}
+
 pub struct BrowserPlugin;
 
 struct BrowserPlaneLayout {
     layout_px: Vec2,
+    border_px: f32,
     r_px: f32,
     world_half: Vec2,
 }
@@ -53,6 +61,20 @@ impl BrowserPlaneLayout {
         let w = self.layout_px.x.max(1.0e-6);
         let h = self.layout_px.y.max(1.0e-6);
         Vec4::new(self.r_px, w, h, 0.0)
+    }
+
+    fn vmux_border_uniforms(&self) -> (Vec4, Vec4) {
+        let b = self.border_px;
+        if b <= 0.0 {
+            return (Vec4::ZERO, Vec4::ZERO);
+        }
+        let w_i = self.layout_px.x.max(1.0e-6);
+        let h_i = self.layout_px.y.max(1.0e-6);
+        let w_o = w_i + 2.0 * b;
+        let h_o = h_i + 2.0 * b;
+        let params = Vec4::new(1.0, b, w_o, h_o);
+        let color = Color::srgb(0.52, 0.52, 0.58).to_linear().to_vec4();
+        (params, color)
     }
 }
 
@@ -70,18 +92,22 @@ fn browser_plane_layout(
         (fw - 2.0 * inset).max(1.0e-6),
         (fh - 2.0 * inset).max(1.0e-6),
     );
-    let w = layout_px.x;
-    let h = layout_px.y;
-    let m = w.min(h);
+    let w_i = layout_px.x;
+    let h_i = layout_px.y;
+    let border_px = settings.layout.pane.border.max(0.0);
+    let w_o = w_i + 2.0 * border_px;
+    let h_o = h_i + 2.0 * border_px;
+    let m = w_i.min(h_i);
     let r_px = settings.layout.pane.radius.min(m * 0.5).max(0.0);
     let mut world_half = camera_proj
         .single()
         .map(|(_, projection)| world_half_extents_fill_plane(projection, fw / fh, CAMERA_TO_PLANE))
         .unwrap_or_else(|_| Vec2::new(fw * 0.5, fh * 0.5));
-    world_half.x *= w / fw;
-    world_half.y *= h / fh;
+    world_half.x *= w_o / fw;
+    world_half.y *= h_o / fh;
     BrowserPlaneLayout {
         layout_px,
+        border_px,
         r_px,
         world_half,
     }
@@ -100,8 +126,12 @@ fn spawn_browser_on_new_tab(
     let plane = browser_plane_layout(&settings, &window, &camera_proj, &cameras);
     for tab in query.iter() {
         let mut mat = WebviewExtendStandardMaterial::default();
+        mat.base.unlit = true;
         mat.base.alpha_mode = AlphaMode::Blend;
         mat.extension.pane_corner_clip = plane.webview_corner_uniform();
+        let (bp, bc) = plane.vmux_border_uniforms();
+        mat.extension.vmux_border_params = bp;
+        mat.extension.vmux_border_color = bc;
         commands.entity(tab).with_children(|parent| {
             parent.spawn((
                 BrowserBundle {
@@ -111,6 +141,11 @@ fn spawn_browser_on_new_tab(
                     material: MeshMaterial3d(materials.add(mat)),
                 },
                 WebviewSize(plane.layout_px),
+                BrowserVisualLayout {
+                    inner_px: plane.layout_px,
+                    border_px: plane.border_px,
+                    r_px: plane.r_px,
+                },
             ));
         });
     }
@@ -128,22 +163,32 @@ fn sync_browser_plane_to_window(
             &mut WebviewSize,
             &mut Mesh3d,
             &MeshMaterial3d<WebviewExtendStandardMaterial>,
+            &mut BrowserVisualLayout,
         ),
         With<Browser>,
     >,
 ) {
     let plane = browser_plane_layout(&settings, &window, &camera_proj, &cameras);
-    for (mut webview_size, mesh_3d, mat_h) in browsers.iter_mut() {
-        let prev = webview_size.0;
-        if (prev.x - plane.layout_px.x).abs() < 0.5 && (prev.y - plane.layout_px.y).abs() < 0.5 {
+    let stamp = BrowserVisualLayout {
+        inner_px: plane.layout_px,
+        border_px: plane.border_px,
+        r_px: plane.r_px,
+    };
+    for (mut webview_size, mesh_3d, mat_h, mut visual) in browsers.iter_mut() {
+        if *visual == stamp {
             continue;
         }
+        *visual = stamp;
         webview_size.0 = plane.layout_px;
         if let Some(mesh) = meshes.get_mut(&mesh_3d.0) {
             *mesh = Mesh::from(Plane3d::new(Vec3::Z, plane.world_half));
         }
         if let Some(mat) = materials.get_mut(&mat_h.0) {
+            mat.base.unlit = true;
             mat.extension.pane_corner_clip = plane.webview_corner_uniform();
+            let (bp, bc) = plane.vmux_border_uniforms();
+            mat.extension.vmux_border_params = bp;
+            mat.extension.vmux_border_color = bc;
         }
     }
 }

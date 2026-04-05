@@ -36,6 +36,12 @@ pub struct WindowSettings {
 pub struct PaneSettings {
     pub gap: f32,
     pub radius: f32,
+    #[serde(default = "default_pane_border")]
+    pub border: f32,
+}
+
+fn default_pane_border() -> f32 {
+    2.0
 }
 
 const DEFAULT_SETTINGS: &str = include_str!("settings.ron");

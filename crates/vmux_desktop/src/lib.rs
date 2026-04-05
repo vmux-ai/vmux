@@ -1,5 +1,7 @@
 mod browser;
+mod command;
 mod layout;
+mod menu;
 mod scene;
 mod settings;
 
@@ -7,6 +9,8 @@ use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
 use bevy::window::{CompositeAlphaMode, Window as NativeWindow, WindowPlugin};
 
+use crate::command::CommandPlugin;
+use crate::menu::NativeMenuPlugin;
 use crate::scene::ScenePlugin;
 use browser::BrowserPlugin;
 use layout::LayoutPlugin;
@@ -42,6 +46,8 @@ impl Plugin for VmuxPlugin {
             LayoutPlugin,
             BrowserPlugin,
             HistoryPlugin,
+            CommandPlugin,
+            NativeMenuPlugin,
         ));
     }
 }

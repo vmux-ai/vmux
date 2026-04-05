@@ -8,7 +8,7 @@ publish = false
 debug = []
 
 [[bin]]
-name = "vmux_desktop"
+name = "Vmux"
 path = "src/main.rs"
 
 [dependencies]
@@ -16,6 +16,7 @@ bevy = { workspace = true }
 bevy_cef = { workspace = true, features = ["debug"] }
 bevy_log = "0.18"
 directories = "5"
+muda = "0.17"
 ron = { workspace = true }
 serde = { workspace = true }
 vmux_history = { path = "../vmux_history" }

@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::command::AppCommand;
 use vmux_history::{CreatedAt, LastActivatedAt};
 
 pub struct LayoutPlugin;
@@ -10,6 +11,7 @@ impl Plugin for LayoutPlugin {
             .add_systems(
                 Update,
                 (
+                    handle_new_space,
                     spawn_window_on_new_space,
                     spawn_pane_on_new_window,
                     spawn_tab_on_new_pane,
@@ -81,15 +83,26 @@ struct TabBundle {
     last_activated_at: LastActivatedAt,
 }
 
-fn spawn_space_on_startup(mut commands: Commands, q: Query<&Space>) {
+fn spawn_space_on_startup(mut msg: MessageWriter<AppCommand>, q: Query<&Space>) {
     if q.is_empty() {
-        commands.spawn(SpaceBundle {
-            space: Space,
-            name: Name::new("Space 1"),
-            spatial: SpatialBundle::default(),
-            created_at: CreatedAt::default(),
-            last_activated_at: LastActivatedAt::default(),
-        });
+        msg.write(AppCommand::NewSpace);
+    }
+}
+
+fn handle_new_space(mut msg: MessageReader<AppCommand>, mut commands: Commands) {
+    for cmd in msg.read() {
+        match cmd {
+            AppCommand::NewSpace => {
+                commands.spawn(SpaceBundle {
+                    space: Space,
+                    name: Name::new("Space 1"),
+                    spatial: SpatialBundle::default(),
+                    created_at: CreatedAt::default(),
+                    last_activated_at: LastActivatedAt::default(),
+                });
+            }
+            _ => {}
+        }
     }
 }
 
