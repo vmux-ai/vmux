@@ -1,4 +1,4 @@
-use crate::command::{AppCommand, app_command_from_menu_id};
+use crate::command::AppCommand;
 use bevy::prelude::*;
 use muda::{Menu, MenuEvent};
 use parking_lot::Mutex;
@@ -42,7 +42,7 @@ fn forward_menu_events(world: &mut World) {
     };
 
     for event_id in drained {
-        if let Some(cmd) = app_command_from_menu_id(event_id.as_str()) {
+        if let Some(cmd) = AppCommand::from_menu_id(event_id.as_str()) {
             world.trigger(cmd);
         } else {
             warn!(len = event_id.len(), "unknown native menu item");
