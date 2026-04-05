@@ -8,7 +8,7 @@ use bevy::shader::ShaderRef;
 use bevy::ui::UiSystems;
 use bevy::window::{PrimaryWindow, Window as NativeWindow};
 
-use crate::command::{NewSpaceCommand, SplitHorizontallyCommand, SplitVerticallyCommand};
+use crate::command::{AppCommand, PaneCommand, SpaceCommand};
 use crate::settings::{AppSettings, LoadAppSettings};
 use vmux_history::{CreatedAt, LastActivatedAt};
 
@@ -307,17 +307,20 @@ impl Default for TabBundle {
 
 fn spawn_space_on_startup(mut commands: Commands, q: Query<&Space>) {
     if q.is_empty() {
-        commands.trigger(NewSpaceCommand);
+        commands.trigger(AppCommand::Space(SpaceCommand::New));
     }
 }
 
 fn on_new_space_command(
-    _: On<NewSpaceCommand>,
+    trigger: On<AppCommand>,
     mut commands: Commands,
     mut focus_node: ResMut<InFocusNode>,
     settings: Res<AppSettings>,
     camera_q: Query<Entity, With<Camera3d>>,
 ) {
+    let AppCommand::Space(SpaceCommand::New) = *trigger.event() else {
+        return;
+    };
     let Ok(camera) = camera_q.single() else {
         return;
     };
@@ -341,7 +344,7 @@ fn on_new_space_command(
 }
 
 fn on_split_vertically_command(
-    _: On<SplitVerticallyCommand>,
+    trigger: On<AppCommand>,
     mut commands: Commands,
     mut focus_node: ResMut<InFocusNode>,
     children_q: Query<&Children>,
@@ -350,6 +353,9 @@ fn on_split_vertically_command(
     focused_tabs: Query<Entity, With<Focused>>,
     mut pane_orientations: Query<&mut Orientation, With<Pane>>,
 ) {
+    let AppCommand::Pane(PaneCommand::SplitV) = *trigger.event() else {
+        return;
+    };
     split_focused_pane(
         &mut commands,
         &mut *focus_node,
@@ -363,7 +369,7 @@ fn on_split_vertically_command(
 }
 
 fn on_split_horizontally_command(
-    _: On<SplitHorizontallyCommand>,
+    trigger: On<AppCommand>,
     mut commands: Commands,
     mut focus_node: ResMut<InFocusNode>,
     children_q: Query<&Children>,
@@ -372,6 +378,9 @@ fn on_split_horizontally_command(
     focused_tabs: Query<Entity, With<Focused>>,
     mut pane_orientations: Query<&mut Orientation, With<Pane>>,
 ) {
+    let AppCommand::Pane(PaneCommand::SplitH) = *trigger.event() else {
+        return;
+    };
     split_focused_pane(
         &mut commands,
         &mut *focus_node,

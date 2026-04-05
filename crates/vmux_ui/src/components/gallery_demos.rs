@@ -2,10 +2,6 @@
 
 use std::collections::HashSet;
 
-use dioxus::prelude::*;
-use dioxus::signals::ReadSignal;
-use dioxus_primitives::checkbox::CheckboxState;
-use time::{Date, UtcDateTime};
 use crate::components::{
     accordion::{Accordion, AccordionContent, AccordionItem, AccordionTrigger},
     alert_dialog::{
@@ -63,6 +59,10 @@ use crate::components::{
     tooltip::{Tooltip, TooltipContent, TooltipTrigger},
     virtual_list::VirtualList,
 };
+use dioxus::prelude::*;
+use dioxus::signals::ReadSignal;
+use dioxus_primitives::checkbox::CheckboxState;
+use time::{Date, UtcDateTime};
 
 #[component]
 pub fn GalleryDemos() -> Element {

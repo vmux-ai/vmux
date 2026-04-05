@@ -1,7 +1,7 @@
 //! Full UI library gallery (wasm): every widget under [`vmux_ui::components`].
 
-use dioxus::prelude::*;
 use crate::components::{UiText, UiTextSize, UiTextTone};
+use dioxus::prelude::*;
 
 use super::gallery_demos::GalleryDemos;
 

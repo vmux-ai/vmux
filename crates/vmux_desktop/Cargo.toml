@@ -20,7 +20,9 @@ muda = "0.17"
 parking_lot = "0.12"
 ron = { workspace = true }
 serde = { workspace = true }
+strum = { version = "0.27", features = ["derive"] }
 vmux_history = { path = "../vmux_history" }
+vmux_macro = { path = "../vmux_macro" }
 vmux_webview_app = { path = "../vmux_webview_app" }
 
 [target.'cfg(target_os = "macos")'.dependencies]

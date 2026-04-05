@@ -39,9 +39,7 @@ fn main() {
         replace_dist_from_dx_public(&public, &dist, &shell);
     }
     if let Err(e) = copy_theme_css_for_embedded_import(&dist, &workspace_root) {
-        println!(
-            "cargo:warning=vmux_history: could not copy theme.css for embedded @import: {e}"
-        );
+        println!("cargo:warning=vmux_history: could not copy theme.css for embedded @import: {e}");
     }
 
     if let Ok(rd) = fs::read_dir(&dist) {

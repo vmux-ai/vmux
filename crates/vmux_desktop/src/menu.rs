@@ -1,11 +1,10 @@
-use crate::command::{NewSpaceCommand, SplitHorizontallyCommand, SplitVerticallyCommand};
+use crate::command::{AppCommand, app_command_from_menu_id};
 use bevy::prelude::*;
-use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+use muda::{Menu, MenuEvent};
 use parking_lot::Mutex;
 use std::sync::LazyLock;
 
-static PENDING_MENU_EVENTS: LazyLock<Mutex<Vec<String>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
+static PENDING_MENU_EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 #[allow(dead_code)]
 struct NativeMenuResource(Menu);
@@ -20,32 +19,8 @@ impl Plugin for NativeMenuPlugin {
 }
 
 fn setup(world: &mut World) {
-    let menu = Menu::new();
-
-    let app_menu = Submenu::new("Vmux", true);
-    app_menu
-        .append_items(&[
-            &PredefinedMenuItem::about(None, None),
-            &PredefinedMenuItem::separator(),
-            &PredefinedMenuItem::quit(None),
-        ])
-        .unwrap();
-
-    let space_menu = Submenu::new("Space", true);
-    space_menu
-        .append_items(&[&MenuItem::with_id("new_space", "New Space", true, None)])
-        .unwrap();
-
-    let pane_menu = Submenu::new("Pane", true);
-    pane_menu
-        .append_items(&[
-            &MenuItem::with_id("split_vertically", "Split Vertically", true, None),
-            &MenuItem::with_id("split_horizontally", "Split Horizontally", true, None),
-        ])
-        .unwrap();
-
-    menu.append_items(&[&app_menu, &space_menu, &pane_menu])
-        .unwrap();
+    let mut menu = Menu::new();
+    AppCommand::build_native_root_menu(&mut menu).unwrap();
 
     #[cfg(target_os = "macos")]
     menu.init_for_nsapp();
@@ -67,14 +42,10 @@ fn forward_menu_events(world: &mut World) {
     };
 
     for event_id in drained {
-        match event_id.as_str() {
-            "new_space" => world.trigger(NewSpaceCommand),
-            "split_vertically" => world.trigger(SplitVerticallyCommand),
-            "split_horizontally" => world.trigger(SplitHorizontallyCommand),
-            _ => warn!(
-                len = event_id.len(),
-                "unknown native menu item"
-            ),
+        if let Some(cmd) = app_command_from_menu_id(event_id.as_str()) {
+            world.trigger(cmd);
+        } else {
+            warn!(len = event_id.len(), "unknown native menu item");
         }
     }
 }

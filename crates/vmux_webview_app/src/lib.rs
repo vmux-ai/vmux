@@ -91,10 +91,7 @@ impl Plugin for JsEmitUiReadyPlugin {
     }
 }
 
-fn mark_webview_ui_ready_on_js_emit(
-    trigger: On<Receive<UiReady>>,
-    mut commands: Commands,
-) {
+fn mark_webview_ui_ready_on_js_emit(trigger: On<Receive<UiReady>>, mut commands: Commands) {
     commands
         .entity(trigger.event().webview)
         .insert(trigger.event().payload);
