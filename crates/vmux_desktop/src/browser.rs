@@ -7,27 +7,31 @@ use bevy::window::{PrimaryWindow, Window as NativeWindow};
 use bevy_cef::prelude::*;
 use vmux_webview_app::JsEmitUiReadyPlugin;
 
-use crate::layout::Tab;
+use crate::layout::{Outline, OutlineMaterial, Tab};
 use crate::settings::AppSettings;
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            JsEmitUiReadyPlugin,
-            CefPlugin {
-                root_cache_path: example_cef_root_cache_path(),
-                ..default()
-            },
-        ))
-        .add_systems(Update, spawn_browser_on_new_tab)
-        .add_systems(
-            PostUpdate,
-            sync_browser_plane_to_window.after(CameraUpdateSystems),
-        );
+                JsEmitUiReadyPlugin,
+                CefPlugin {
+                    root_cache_path: example_cef_root_cache_path(),
+                    ..default()
+                },
+            ))
+            .add_systems(
+                Update,
+                (spawn_browser_on_new_tab, tick_outline_gradient_time),
+            )
+            .add_systems(
+                PostUpdate,
+                sync_browser_plane_to_window.after(CameraUpdateSystems),
+            );
     }
 }
 
 const CAMERA_TO_PLANE: f32 = 3.0;
+const OUTLINE_Z_BACK: f32 = 0.002;
 
 #[derive(Bundle)]
 struct BrowserBundle {
@@ -50,31 +54,73 @@ struct BrowserVisualLayout {
 pub struct BrowserPlugin;
 
 struct BrowserPlaneLayout {
-    layout_px: Vec2,
+    inner_px: Vec2,
     border_px: f32,
     r_px: f32,
-    world_half: Vec2,
+    inner_world_half: Vec2,
+    outer_world_half: Vec2,
 }
 
 impl BrowserPlaneLayout {
     fn webview_corner_uniform(&self) -> Vec4 {
-        let w = self.layout_px.x.max(1.0e-6);
-        let h = self.layout_px.y.max(1.0e-6);
+        let w = self.inner_px.x.max(1.0e-6);
+        let h = self.inner_px.y.max(1.0e-6);
         Vec4::new(self.r_px, w, h, 0.0)
     }
+}
 
-    fn vmux_border_uniforms(&self) -> (Vec4, Vec4) {
-        let b = self.border_px;
-        if b <= 0.0 {
-            return (Vec4::ZERO, Vec4::ZERO);
+fn outline_material_for_plane(
+    plane: &BrowserPlaneLayout,
+    settings: &AppSettings,
+    time_secs: f32,
+) -> OutlineMaterial {
+    let w_i = plane.inner_px.x.max(1.0e-6);
+    let h_i = plane.inner_px.y.max(1.0e-6);
+    let b = plane.border_px;
+    let w_o = w_i + 2.0 * b;
+    let h_o = h_i + 2.0 * b;
+    let r_i = plane.r_px;
+    let m_o = w_o.min(h_o);
+    let r_o = (r_i + b).min(m_o * 0.5);
+    let c = &settings.layout.pane.outline.color;
+    let border_color = Color::srgb(c.r, c.g, c.b).to_linear().to_vec4();
+    let g = &settings.layout.pane.outline.gradient;
+    let accent = &g.accent;
+    let border_accent = Color::srgb(accent.r, accent.g, accent.b).to_linear().to_vec4();
+    let grad_on = if g.enabled { 1.0 } else { 0.0 };
+    let gradient_params = Vec4::new(grad_on, g.speed, g.cycles.max(0.01), time_secs);
+    let spread = settings.layout.pane.outline.glow.spread.max(0.5);
+    let intensity = settings.layout.pane.outline.glow.intensity.max(0.0);
+    let glow_on = if intensity > 1.0e-4 { 1.0 } else { 0.0 };
+    OutlineMaterial {
+        pane_inner: Vec4::new(r_i, w_i, h_i, 0.0),
+        pane_outer: Vec4::new(r_o, w_o, h_o, 0.0),
+        border_color,
+        glow_params: Vec4::new(glow_on, intensity, spread, 0.0),
+        gradient_params,
+        border_accent,
+        alpha_mode: AlphaMode::Blend,
+    }
+}
+
+fn tick_outline_gradient_time(
+    time: Res<Time>,
+    mut materials: ResMut<Assets<OutlineMaterial>>,
+    outlines: Query<&MeshMaterial3d<OutlineMaterial>, With<Outline>>,
+) {
+    let t = time.elapsed_secs();
+    for mesh_mat in &outlines {
+        let id = mesh_mat.id();
+        let Some(m) = materials.get(id) else {
+            continue;
+        };
+        if m.gradient_params.x <= 0.5 {
+            continue;
         }
-        let w_i = self.layout_px.x.max(1.0e-6);
-        let h_i = self.layout_px.y.max(1.0e-6);
-        let w_o = w_i + 2.0 * b;
-        let h_o = h_i + 2.0 * b;
-        let params = Vec4::new(1.0, b, w_o, h_o);
-        let color = Color::srgb(0.52, 0.52, 0.58).to_linear().to_vec4();
-        (params, color)
+        let Some(m) = materials.get_mut(id) else {
+            continue;
+        };
+        m.gradient_params.w = t;
     }
 }
 
@@ -88,28 +134,29 @@ fn browser_plane_layout(
     let fw = full_px.x.max(1.0e-6);
     let fh = full_px.y.max(1.0e-6);
     let inset = settings.layout.window.padding.max(0.0);
-    let layout_px = Vec2::new(
+    let inner_px = Vec2::new(
         (fw - 2.0 * inset).max(1.0e-6),
         (fh - 2.0 * inset).max(1.0e-6),
     );
-    let w_i = layout_px.x;
-    let h_i = layout_px.y;
-    let border_px = settings.layout.pane.border.max(0.0);
+    let w_i = inner_px.x;
+    let h_i = inner_px.y;
+    let border_px = settings.layout.pane.outline.width.max(0.0);
     let w_o = w_i + 2.0 * border_px;
     let h_o = h_i + 2.0 * border_px;
     let m = w_i.min(h_i);
     let r_px = settings.layout.pane.radius.min(m * 0.5).max(0.0);
-    let mut world_half = camera_proj
+    let base_half = camera_proj
         .single()
         .map(|(_, projection)| world_half_extents_fill_plane(projection, fw / fh, CAMERA_TO_PLANE))
         .unwrap_or_else(|_| Vec2::new(fw * 0.5, fh * 0.5));
-    world_half.x *= w_o / fw;
-    world_half.y *= h_o / fh;
+    let inner_world_half = Vec2::new(base_half.x * w_i / fw, base_half.y * h_i / fh);
+    let outer_world_half = Vec2::new(base_half.x * w_o / fw, base_half.y * h_o / fh);
     BrowserPlaneLayout {
-        layout_px,
+        inner_px,
         border_px,
         r_px,
-        world_half,
+        inner_world_half,
+        outer_world_half,
     }
 }
 
@@ -118,77 +165,135 @@ fn spawn_browser_on_new_tab(
     query: Query<Entity, Added<Tab>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut outline_materials: ResMut<Assets<OutlineMaterial>>,
     settings: Res<AppSettings>,
+    time: Res<Time>,
     window: Query<&NativeWindow, With<PrimaryWindow>>,
     camera_proj: Query<(&Camera, &Projection), With<Camera3d>>,
     cameras: Query<&Camera>,
 ) {
     let plane = browser_plane_layout(&settings, &window, &camera_proj, &cameras);
+    let time_secs = time.elapsed_secs();
     for tab in query.iter() {
         let mut mat = WebviewExtendStandardMaterial::default();
         mat.base.unlit = true;
         mat.base.alpha_mode = AlphaMode::Blend;
         mat.extension.pane_corner_clip = plane.webview_corner_uniform();
-        let (bp, bc) = plane.vmux_border_uniforms();
-        mat.extension.vmux_border_params = bp;
-        mat.extension.vmux_border_color = bc;
-        commands.entity(tab).with_children(|parent| {
-            parent.spawn((
+        let inner_mesh = meshes.add(Plane3d::new(Vec3::Z, plane.inner_world_half));
+        let browser_id = commands
+            .spawn((
                 BrowserBundle {
                     browser: Browser,
                     source: WebviewSource::new(settings.browser.startup_url.as_str()),
-                    mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, plane.world_half))),
+                    mesh: Mesh3d(inner_mesh),
                     material: MeshMaterial3d(materials.add(mat)),
                 },
-                WebviewSize(plane.layout_px),
+                WebviewSize(plane.inner_px),
                 BrowserVisualLayout {
-                    inner_px: plane.layout_px,
+                    inner_px: plane.inner_px,
                     border_px: plane.border_px,
                     r_px: plane.r_px,
                 },
-            ));
-        });
+            ))
+            .id();
+        commands.entity(tab).add_child(browser_id);
+        if plane.border_px > 0.0 {
+            let outline_mat =
+                outline_materials.add(outline_material_for_plane(&plane, &settings, time_secs));
+            let outer_mesh = meshes.add(Plane3d::new(Vec3::Z, plane.outer_world_half));
+            commands.entity(browser_id).with_children(|parent| {
+                parent.spawn((
+                    Outline,
+                    Mesh3d(outer_mesh),
+                    MeshMaterial3d(outline_mat),
+                    Transform::from_translation(Vec3::new(0.0, 0.0, -OUTLINE_Z_BACK)),
+                ));
+            });
+        }
     }
 }
 
 fn sync_browser_plane_to_window(
+    mut commands: Commands,
     settings: Res<AppSettings>,
+    time: Res<Time>,
     window: Query<&NativeWindow, With<PrimaryWindow>>,
     camera_proj: Query<(&Camera, &Projection), With<Camera3d>>,
     cameras: Query<&Camera>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut outline_materials: ResMut<Assets<OutlineMaterial>>,
     mut browsers: Query<
         (
+            Entity,
             &mut WebviewSize,
             &mut Mesh3d,
             &MeshMaterial3d<WebviewExtendStandardMaterial>,
             &mut BrowserVisualLayout,
+            &Children,
         ),
-        With<Browser>,
+        (With<Browser>, Without<Outline>),
+    >,
+    outline_q: Query<
+        (Entity, &Mesh3d, &MeshMaterial3d<OutlineMaterial>),
+        With<Outline>,
     >,
 ) {
     let plane = browser_plane_layout(&settings, &window, &camera_proj, &cameras);
+    let time_secs = time.elapsed_secs();
     let stamp = BrowserVisualLayout {
-        inner_px: plane.layout_px,
+        inner_px: plane.inner_px,
         border_px: plane.border_px,
         r_px: plane.r_px,
     };
-    for (mut webview_size, mesh_3d, mat_h, mut visual) in browsers.iter_mut() {
+    for (browser_entity, mut webview_size, mesh_3d, mat_h, mut visual, children) in browsers.iter_mut()
+    {
         if *visual == stamp {
             continue;
         }
         *visual = stamp;
-        webview_size.0 = plane.layout_px;
+        webview_size.0 = plane.inner_px;
         if let Some(mesh) = meshes.get_mut(&mesh_3d.0) {
-            *mesh = Mesh::from(Plane3d::new(Vec3::Z, plane.world_half));
+            *mesh = Mesh::from(Plane3d::new(Vec3::Z, plane.inner_world_half));
         }
         if let Some(mat) = materials.get_mut(&mat_h.0) {
             mat.base.unlit = true;
             mat.extension.pane_corner_clip = plane.webview_corner_uniform();
-            let (bp, bc) = plane.vmux_border_uniforms();
-            mat.extension.vmux_border_params = bp;
-            mat.extension.vmux_border_color = bc;
+        }
+
+        let mut outline_entity: Option<Entity> = None;
+        for child in children.iter() {
+            if outline_q.contains(child) {
+                outline_entity = Some(child);
+                break;
+            }
+        }
+
+        if plane.border_px > 0.0 {
+            let mat = outline_material_for_plane(&plane, &settings, time_secs);
+            if let Some(oe) = outline_entity {
+                if let Ok((_, om, mat_handle)) = outline_q.get(oe) {
+                    if let Some(m) = meshes.get_mut(&om.0) {
+                        *m = Mesh::from(Plane3d::new(Vec3::Z, plane.outer_world_half));
+                    }
+                    if let Some(pm) = outline_materials.get_mut(&mat_handle.0) {
+                        *pm = mat;
+                    }
+                }
+            } else {
+                let outline_mat = outline_materials.add(mat);
+                let outer_mesh = meshes.add(Plane3d::new(Vec3::Z, plane.outer_world_half));
+                commands.entity(browser_entity).with_children(|parent| {
+                    parent.spawn((
+                        Outline,
+                        Mesh3d(outer_mesh),
+                        MeshMaterial3d(outline_mat),
+                        Transform::from_translation(Vec3::new(0.0, 0.0, -OUTLINE_Z_BACK)),
+                    ));
+                });
+            }
+        } else if let Some(oe) = outline_entity {
+            commands.entity(oe).despawn();
         }
     }
 }

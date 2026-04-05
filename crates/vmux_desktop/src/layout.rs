@@ -1,13 +1,51 @@
+use bevy::asset::*;
+use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
+use bevy::render::alpha::AlphaMode;
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::ShaderRef;
 
 use crate::command::AppCommand;
 use vmux_history::{CreatedAt, LastActivatedAt};
 
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+pub(crate) struct OutlineMaterial {
+    #[uniform(0)]
+    pub pane_inner: Vec4,
+    #[uniform(1)]
+    pub pane_outer: Vec4,
+    #[uniform(2)]
+    pub border_color: Vec4,
+    #[uniform(3)]
+    pub glow_params: Vec4,
+    #[uniform(4)]
+    pub gradient_params: Vec4,
+    #[uniform(5)]
+    pub border_accent: Vec4,
+    pub alpha_mode: AlphaMode,
+}
+
+#[derive(Component)]
+pub(crate) struct Outline;
+
 pub struct LayoutPlugin;
+
+const OUTLINE_SHADER: Handle<Shader> = uuid_handle!("c4a8e901-2b7d-4c1e-9f63-7a2d8e5b1044");
+
+impl Material for OutlineMaterial {
+    fn fragment_shader() -> ShaderRef {
+        OUTLINE_SHADER.into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        self.alpha_mode
+    }
+}
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_space_on_startup)
+        app.add_plugins((MaterialPlugin::<OutlineMaterial>::default(),))
+            .add_systems(Startup, spawn_space_on_startup)
             .add_systems(
                 Update,
                 (
@@ -17,6 +55,7 @@ impl Plugin for LayoutPlugin {
                     spawn_tab_on_new_pane,
                 ),
             );
+        load_internal_asset!(app, OUTLINE_SHADER, "./outline.wgsl", Shader::from_wgsl);
     }
 }
 

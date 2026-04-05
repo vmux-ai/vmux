@@ -9,7 +9,20 @@
         pane: (
             gap: 8.0,
             radius: 8.0,
-            border: 2.0,
+            outline: (
+                width: 2.0,
+                color: (r: 0.78, g: 0.40, b: 0.92),
+                glow: (
+                    spread: 3.0,
+                    intensity: 0.35,
+                ),
+                gradient: (
+                    enabled: true,
+                    speed: 1.2,
+                    cycles: 2.0,
+                    accent: (r: 0.15, g: 0.55, b: 1.0),
+                ),
+            ),
         ),
     ),
 )
