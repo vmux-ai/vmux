@@ -1,6 +1,6 @@
 mod browser;
 mod command;
-mod layout;
+mod layout_next;
 mod menu;
 mod scene;
 mod settings;
@@ -12,10 +12,10 @@ use bevy::window::{CompositeAlphaMode, Window as NativeWindow, WindowPlugin};
 use bevy::winit::WinitSettings;
 
 use crate::command::CommandPlugin;
+use crate::layout_next::LayoutNextPlugin;
 use crate::menu::NativeMenuPlugin;
 use crate::scene::ScenePlugin;
 use browser::BrowserPlugin;
-use layout::LayoutPlugin;
 use settings::SettingsPlugin;
 use vmux_history::HistoryPlugin;
 
@@ -46,10 +46,10 @@ impl Plugin for VmuxPlugin {
             SettingsPlugin,
             ScenePlugin,
             CommandPlugin,
-            LayoutPlugin,
-            BrowserPlugin,
-            HistoryPlugin,
             NativeMenuPlugin,
+            LayoutNextPlugin,
+            // BrowserPlugin,
+            // HistoryPlugin,
         ));
 
         #[cfg(target_os = "macos")]

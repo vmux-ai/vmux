@@ -6,7 +6,7 @@ use bevy::render::alpha::AlphaMode;
 use bevy_cef::prelude::*;
 use vmux_webview_app::JsEmitUiReadyPlugin;
 
-use crate::layout::{LayoutPlane, Tab, TabLayoutSync};
+use crate::layout_next::{LayoutPlane, Tab, TabLayoutSync};
 use crate::settings::AppSettings;
 
 impl Plugin for BrowserPlugin {

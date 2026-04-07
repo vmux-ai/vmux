@@ -13,6 +13,9 @@ use std::marker::PhantomData;
 #[cfg(target_os = "macos")]
 use std::rc::Rc;
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Spawn3dCamera;
+
 #[derive(Default)]
 pub struct ScenePlugin;
 
@@ -28,7 +31,13 @@ impl Default for LiquidGlassMainThread {
 
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (spawn_camera, spawn_directional_light).chain());
+        app.configure_sets(Startup, Spawn3dCamera)
+            .add_systems(
+                Startup,
+                (spawn_camera, spawn_directional_light)
+                    .chain()
+                    .in_set(Spawn3dCamera),
+            );
 
         #[cfg(target_os = "macos")]
         app.insert_resource(ClearColor(Color::NONE))
