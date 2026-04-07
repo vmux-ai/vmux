@@ -137,10 +137,9 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         quote! { ::core::option::Option::None }
     } else {
         let first = &from_menu_clauses[0];
-        let chained = from_menu_clauses[1..].iter().fold(
-            quote! { #first },
-            |acc, c| quote! { #acc.or_else(|| #c) },
-        );
+        let chained = from_menu_clauses[1..]
+            .iter()
+            .fold(quote! { #first }, |acc, c| quote! { #acc.or_else(|| #c) });
         quote! { #chained }
     };
 
