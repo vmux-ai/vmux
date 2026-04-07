@@ -14,6 +14,9 @@ pub enum AppCommand {
 
     #[menu(label = "Pane")]
     Pane(PaneCommand),
+
+    #[menu(label = "Camera")]
+    Camera(CameraCommand),
 }
 
 #[derive(OsSubMenu, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -30,4 +33,11 @@ pub enum PaneCommand {
     SplitV,
     #[menu(id = "split_h", label = "Split Horizontally")]
     SplitH,
+}
+
+#[derive(OsSubMenu, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CameraCommand {
+    #[default]
+    #[menu(id = "reset_camera", label = "Reset Camera")]
+    Reset,
 }
