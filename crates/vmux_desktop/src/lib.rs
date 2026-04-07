@@ -47,7 +47,7 @@ impl Plugin for VmuxPlugin {
             ScenePlugin,
             CommandPlugin,
             NativeMenuPlugin,
-            LayoutNextPlugin,
+            // LayoutNextPlugin,
             // BrowserPlugin,
             // HistoryPlugin,
         ));
