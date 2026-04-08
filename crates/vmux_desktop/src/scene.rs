@@ -12,16 +12,16 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-// #[cfg(target_os = "macos")]
-// use bevy::window::RawHandleWrapper;
-// #[cfg(target_os = "macos")]
-// use liquid_glass_rs::{GlassOptions, GlassViewManager};
-// #[cfg(target_os = "macos")]
-// use raw_window_handle::RawWindowHandle;
-// #[cfg(target_os = "macos")]
-// use std::marker::PhantomData;
-// #[cfg(target_os = "macos")]
-// use std::rc::Rc;
+#[cfg(target_os = "macos")]
+use bevy::window::RawHandleWrapper;
+#[cfg(target_os = "macos")]
+use liquid_glass_rs::{GlassOptions, GlassViewManager};
+#[cfg(target_os = "macos")]
+use raw_window_handle::RawWindowHandle;
+#[cfg(target_os = "macos")]
+use std::marker::PhantomData;
+#[cfg(target_os = "macos")]
+use std::rc::Rc;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Spawn3dCamera;
@@ -45,15 +45,15 @@ struct Bouncing;
 #[derive(Default)]
 pub struct ScenePlugin;
 
-// #[cfg(target_os = "macos")]
-// struct LiquidGlassMainThread(PhantomData<Rc<()>>);
+#[cfg(target_os = "macos")]
+struct LiquidGlassMainThread(PhantomData<Rc<()>>);
 
-// #[cfg(target_os = "macos")]
-// impl Default for LiquidGlassMainThread {
-//     fn default() -> Self {
-//         Self(PhantomData)
-//     }
-// }
+#[cfg(target_os = "macos")]
+impl Default for LiquidGlassMainThread {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
 
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
@@ -65,10 +65,10 @@ impl Plugin for ScenePlugin {
             .add_observer(on_reset_camera)
             .add_observer(on_toggle_free_camera);
 
-        // #[cfg(target_os = "macos")]
-        // app.insert_resource(ClearColor(Color::NONE))
-        //     .insert_non_send_resource(LiquidGlassMainThread::default())
-        //     .add_systems(Update, apply_liquid_glass);
+        #[cfg(target_os = "macos")]
+        app.insert_resource(ClearColor(Color::NONE))
+            .insert_non_send_resource(LiquidGlassMainThread::default())
+            .add_systems(Update, apply_liquid_glass);
     }
 }
 
@@ -83,7 +83,6 @@ fn setup(
         let (scale, dist) = get_camera_distance(&window);
 
         commands.spawn(InfiniteGridBundle::default());
-
         commands.spawn((
             Mesh3d(meshes.add(Sphere::new(0.35))),
             MeshMaterial3d(materials.add(StandardMaterial {
@@ -208,8 +207,7 @@ fn setup(
                 commands.spawn((
                     Mesh3d(bounce_mesh.clone()),
                     MeshMaterial3d(material),
-                    Transform::from_xyz(px, 0.0, pz)
-                        .with_scale(Vec3::splat(scale)),
+                    Transform::from_xyz(px, 0.0, pz).with_scale(Vec3::splat(scale)),
                     Bouncing,
                 ));
             }
@@ -277,27 +275,27 @@ fn on_toggle_free_camera(
     state.enabled = !state.enabled;
 }
 
-// #[cfg(target_os = "macos")]
-// fn apply_liquid_glass(
-//     _main_thread: NonSend<LiquidGlassMainThread>,
-//     query: Query<(Entity, &RawHandleWrapper), Added<Window>>,
-// ) {
-//     for (entity, wrapper) in query.iter() {
-//         let ptr = match wrapper.get_window_handle() {
-//             RawWindowHandle::AppKit(h) => h.ns_view.as_ptr().cast::<std::ffi::c_void>(),
-//             _ => continue,
-//         };
-//         if ptr.is_null() {
-//             continue;
-//         }
+#[cfg(target_os = "macos")]
+fn apply_liquid_glass(
+    _main_thread: NonSend<LiquidGlassMainThread>,
+    query: Query<(Entity, &RawHandleWrapper), Added<Window>>,
+) {
+    for (entity, wrapper) in query.iter() {
+        let ptr = match wrapper.get_window_handle() {
+            RawWindowHandle::AppKit(h) => h.ns_view.as_ptr().cast::<std::ffi::c_void>(),
+            _ => continue,
+        };
+        if ptr.is_null() {
+            continue;
+        }
 
-//         let manager = GlassViewManager::new();
-//         match manager.add_glass_view(ptr, GlassOptions::default()) {
-//             Ok(_) => info!("Liquid Glass successfully applied to window: {:?}", entity),
-//             Err(e) => bevy_log::error!("Window {:?} not ready for glass: {:?}", entity, e),
-//         }
-//     }
-// }
+        let manager = GlassViewManager::new();
+        match manager.add_glass_view(ptr, GlassOptions::default()) {
+            Ok(_) => info!("Liquid Glass successfully applied to window: {:?}", entity),
+            Err(e) => bevy_log::error!("Window {:?} not ready for glass: {:?}", entity, e),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
