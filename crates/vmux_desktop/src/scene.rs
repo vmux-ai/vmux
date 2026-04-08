@@ -70,17 +70,38 @@ fn setup(
     window_q: Query<&Window, With<PrimaryWindow>>,
 ) {
     if let Ok(window) = window_q.single() {
-        let (scale, dist) = display_scale_and_camera_dist(window);
+        let (scale, dist) = get_camera_distance(&window);
 
         commands.spawn(InfiniteGridBundle::default());
+
+        commands.spawn((
+            Mesh3d(meshes.add(Sphere::new(0.35))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.35, 0.38, 0.45),
+                emissive: Color::srgb(1.0, 0.45, 0.05).into(),
+                emissive_exposure_weight: 0.0,
+                ..default()
+            })),
+            Transform::from_xyz(
+                DISPLAY_CENTER.x,
+                DISPLAY_CENTER.y,
+                DISPLAY_CENTER.z - 4.0 - 0.5 * DISPLAY_DEPTH,
+            ),
+        ));
 
         let display_panel = commands
             .spawn((
                 DisplayPanel,
                 Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
                 MeshMaterial3d(materials.add(StandardMaterial {
-                    emissive: LinearRgba::WHITE,
-                    emissive_exposure_weight: 0.0,
+                    base_color: Color::srgba(20.0, 20.0, 20.0, 0.7),
+                    alpha_mode: AlphaMode::Blend,
+                    perceptual_roughness: 0.12,
+                    metallic: 0.0,
+                    specular_transmission: 0.9,
+                    diffuse_transmission: 1.0,
+                    thickness: 0.1,
+                    ior: 1.5,
                     ..default()
                 })),
                 Transform::from_translation(DISPLAY_CENTER).with_scale(scale),
@@ -90,7 +111,13 @@ fn setup(
         commands.spawn((
             WebviewSource::new("https://github.com/not-elm/bevy_cef"),
             Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-            MeshMaterial3d(webview_materials.add(WebviewExtendStandardMaterial::default())),
+            MeshMaterial3d(webview_materials.add(WebviewExtendStandardMaterial {
+                base: StandardMaterial {
+                    unlit: true,
+                    ..default()
+                },
+                ..default()
+            })),
             Transform::from_translation(Vec3::new(0.0, 0.0, 0.5 + 1e-3)),
             ChildOf(display_panel),
         ));
@@ -104,14 +131,14 @@ fn setup(
                 sensitivity: 0.2,
                 friction: 25.0,
                 walk_speed: 0.5,
-                run_speed: 3.0,
+                run_speed: 2.5,
                 ..default()
             },
         ));
     }
 }
 
-fn display_scale_and_camera_dist(window: &Window) -> (Vec3, f32) {
+fn get_camera_distance(window: &Window) -> (Vec3, f32) {
     let width = window.width().max(1.0);
     let height = window.height().max(1.0);
     let aspect = width / height;
@@ -139,7 +166,7 @@ fn fit_to_window_on_resize(
     }
     *last_px = Some((w, h));
 
-    let (scale, _) = display_scale_and_camera_dist(&window);
+    let (scale, _) = get_camera_distance(&window);
     display.translation = DISPLAY_CENTER;
     display.scale = scale;
 }
@@ -152,7 +179,7 @@ fn on_reset_camera(
     let AppCommand::Camera(CameraCommand::Reset) = *trigger.event() else {
         return;
     };
-    let (_, dist) = display_scale_and_camera_dist(&window);
+    let (_, dist) = get_camera_distance(&window);
     **camera = Transform::from_xyz(
         DISPLAY_CENTER.x,
         DISPLAY_CENTER.y,

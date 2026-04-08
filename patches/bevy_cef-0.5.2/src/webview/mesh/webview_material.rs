@@ -59,7 +59,7 @@ pub(crate) fn webview_placeholder_image() -> Image {
         },
         TextureDimension::D2,
         // Bgra8UnormSrgb — matches [`update_webview_image`].
-        &[47, 44, 43, 255],
+        &[0, 0, 0, 0],
         TextureFormat::Bgra8UnormSrgb,
         RenderAssetUsages::all(),
     )
