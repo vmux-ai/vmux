@@ -4,6 +4,7 @@ use bevy::{
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     window::PrimaryWindow,
 };
+use bevy_cef::prelude::*;
 use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin};
 
 // #[cfg(target_os = "macos")]
@@ -20,10 +21,11 @@ use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin};
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Spawn3dCamera;
 
-const DISPLAY_HALF_HEIGHT: f32 = 0.5;
+const DISPLAY_HALF_HEIGHT: f32 = 1.0;
 const DISPLAY_DEPTH: f32 = 0.02;
 const DISPLAY_CENTER: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const FOV_Y: f32 = std::f32::consts::FRAC_PI_4;
+const DISPLAY_FRONT_FACE_Z: f32 = 0.5 * DISPLAY_DEPTH;
 
 #[derive(Component)]
 struct DisplayPanel;
@@ -64,6 +66,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut webview_materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     window_q: Query<&Window, With<PrimaryWindow>>,
 ) {
     if let Ok(window) = window_q.single() {
@@ -71,21 +74,32 @@ fn setup(
 
         commands.spawn(InfiniteGridBundle::default());
 
+        let display_panel = commands
+            .spawn((
+                DisplayPanel,
+                Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    emissive: LinearRgba::WHITE,
+                    emissive_exposure_weight: 0.0,
+                    ..default()
+                })),
+                Transform::from_translation(DISPLAY_CENTER).with_scale(scale),
+            ))
+            .id();
+
         commands.spawn((
-            DisplayPanel,
-            Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                emissive: LinearRgba::WHITE,
-                emissive_exposure_weight: 0.0,
-                ..default()
-            })),
-            Transform::from_translation(DISPLAY_CENTER).with_scale(scale),
+            WebviewSource::new("https://github.com/not-elm/bevy_cef"),
+            Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
+            MeshMaterial3d(webview_materials.add(WebviewExtendStandardMaterial::default())),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 0.5 + 1e-3)),
+            ChildOf(display_panel),
         ));
 
         commands.spawn((
             MainCamera,
             Camera3d::default(),
-            Transform::from_xyz(0.0, 1.0, dist).looking_at(DISPLAY_CENTER, Vec3::Y),
+            Transform::from_xyz(0.0, 1.0, dist + DISPLAY_FRONT_FACE_Z)
+                .looking_at(DISPLAY_CENTER, Vec3::Y),
             FreeCamera {
                 sensitivity: 0.2,
                 friction: 25.0,
@@ -139,8 +153,12 @@ fn on_reset_camera(
         return;
     };
     let (_, dist) = display_scale_and_camera_dist(&window);
-    **camera = Transform::from_xyz(DISPLAY_CENTER.x, DISPLAY_CENTER.y, dist)
-        .looking_at(DISPLAY_CENTER, Vec3::Y);
+    **camera = Transform::from_xyz(
+        DISPLAY_CENTER.x,
+        DISPLAY_CENTER.y,
+        dist + DISPLAY_FRONT_FACE_Z,
+    )
+    .looking_at(DISPLAY_CENTER, Vec3::Y);
 }
 
 // #[cfg(target_os = "macos")]

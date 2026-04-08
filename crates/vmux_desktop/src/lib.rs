@@ -48,7 +48,7 @@ impl Plugin for VmuxPlugin {
             CommandPlugin,
             NativeMenuPlugin,
             // LayoutNextPlugin,
-            // BrowserPlugin,
+            BrowserPlugin,
             // HistoryPlugin,
         ));
 
