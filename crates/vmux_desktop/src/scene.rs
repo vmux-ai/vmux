@@ -29,7 +29,7 @@ use std::marker::PhantomData;
 #[cfg(target_os = "macos")]
 use std::rc::Rc;
 
-const FOV_Y: f32 = std::f32::consts::FRAC_PI_4;
+pub(crate) const FOV_Y: f32 = std::f32::consts::FRAC_PI_4;
 const BOUNCE_DISPLAY_CLEARANCE: f32 = 0.9;
 
 #[derive(Component)]
@@ -55,19 +55,21 @@ impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((FreeCameraPlugin, InfiniteGridPlugin))
             .insert_resource(ClearColor(Color::BLACK))
+            .add_systems(Startup, setup.after(load_settings))
             .add_systems(
                 Startup,
-                ((setup, fit_main_camera, spawn_bloom)
+                (fit_main_camera, spawn_bloom)
                     .chain()
                     .after(load_settings)
-                    .after(fit_display_glass_to_window),),
+                    .after(fit_display_glass_to_window),
             )
             .add_systems(
                 Update,
-                (
-                    fit_main_camera.after(fit_display_glass_to_window),
-                    (on_reset_camera, on_toggle_free_camera).in_set(ReadAppCommands),
-                ),
+                ((on_reset_camera, on_toggle_free_camera).in_set(ReadAppCommands),),
+            )
+            .add_systems(
+                PostUpdate,
+                fit_main_camera.after(fit_display_glass_to_window),
             );
 
         #[cfg(target_os = "macos")]
@@ -77,7 +79,7 @@ impl Plugin for ScenePlugin {
     }
 }
 
-fn setup(mut commands: Commands, window: Single<&Window, With<PrimaryWindow>>) {
+pub(crate) fn setup(mut commands: Commands, window: Single<&Window, With<PrimaryWindow>>) {
     commands.spawn(InfiniteGridBundle::default());
 
     let mut state = FreeCameraState::default();
@@ -257,7 +259,7 @@ fn apply_liquid_glass(
     }
 }
 
-fn frame_main_camera_transform(window: &Window, aspect: f32) -> Transform {
+pub(crate) fn frame_main_camera_transform(window: &Window, aspect: f32) -> Transform {
     let m = window.meters();
     let center = Vec3::new(0.0, m.y * 0.5, 0.0);
 
