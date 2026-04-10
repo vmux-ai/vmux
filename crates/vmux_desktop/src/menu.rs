@@ -1,4 +1,5 @@
-use crate::command::AppCommand;
+use crate::command::{AppCommand, WriteAppCommands};
+use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use muda::{Menu, MenuEvent};
 use parking_lot::Mutex;
@@ -13,8 +14,10 @@ pub struct NativeMenuPlugin;
 
 impl Plugin for NativeMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup)
-            .add_systems(Update, forward_menu_events);
+        app.add_systems(Startup, setup).add_systems(
+            Update,
+            forward_menu_events.in_set(WriteAppCommands),
+        );
     }
 }
 
@@ -43,7 +46,7 @@ fn forward_menu_events(world: &mut World) {
 
     for event_id in drained {
         if let Some(cmd) = AppCommand::from_menu_id(event_id.as_str()) {
-            world.trigger(cmd);
+            world.resource_mut::<Messages<AppCommand>>().write(cmd);
         } else {
             warn!(len = event_id.len(), "unknown native menu item");
         }

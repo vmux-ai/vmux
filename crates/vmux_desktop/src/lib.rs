@@ -1,9 +1,11 @@
-mod browser;
+// mod browser;
 mod command;
-mod layout_next;
+mod layout3;
 mod menu;
+mod rounded;
 mod scene;
 mod settings;
+mod unit;
 
 use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
@@ -11,13 +13,16 @@ use bevy::window::{CompositeAlphaMode, Window as NativeWindow, WindowPlugin};
 #[cfg(target_os = "macos")]
 use bevy::winit::WinitSettings;
 
-use crate::command::CommandPlugin;
-use crate::layout_next::LayoutNextPlugin;
-use crate::menu::NativeMenuPlugin;
-use crate::scene::ScenePlugin;
-use browser::BrowserPlugin;
-use settings::SettingsPlugin;
-use vmux_history::HistoryPlugin;
+use {
+    // browser::BrowserPlugin,
+    command::CommandPlugin,
+    layout3::Layout3Plugin,
+    menu::NativeMenuPlugin,
+    rounded::RoundedMaterialPlugin,
+    scene::ScenePlugin,
+    settings::SettingsPlugin,
+};
+// use vmux_history::HistoryPlugin;
 
 pub struct VmuxPlugin;
 
@@ -43,12 +48,13 @@ impl Plugin for VmuxPlugin {
                     silence_startup_warning: true,
                 })
                 .set(window_plugin),
+            RoundedMaterialPlugin,
             SettingsPlugin,
-            ScenePlugin,
             CommandPlugin,
+            ScenePlugin,
             NativeMenuPlugin,
-            // LayoutNextPlugin,
-            BrowserPlugin,
+            Layout3Plugin,
+            // BrowserPlugin,
             // HistoryPlugin,
         ));
 

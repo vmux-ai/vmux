@@ -2,15 +2,11 @@ use bevy::prelude::*;
 use directories::ProjectDirs;
 use serde::Deserialize;
 
-#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct LoadAppSettings;
-
 pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
-        app.configure_sets(Startup, LoadAppSettings)
-            .add_systems(Startup, load_settings_file.in_set(LoadAppSettings));
+        app.add_systems(Startup, load_settings);
     }
 }
 
@@ -158,7 +154,7 @@ pub struct PaneSettings {
 
 const DEFAULT_SETTINGS: &str = include_str!("settings.ron");
 
-fn load_settings_file(mut commands: Commands) {
+pub fn load_settings(mut commands: Commands) {
     let settings = if let Some(proj) = ProjectDirs::from("dev", "vmux", "vmux-desktop-next") {
         let dir = proj.config_dir();
         if std::fs::create_dir_all(dir).is_err() {

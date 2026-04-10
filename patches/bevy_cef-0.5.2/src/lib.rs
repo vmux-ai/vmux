@@ -2,8 +2,8 @@
 
 mod common;
 mod cursor_icon;
-mod loading_state;
 mod keyboard;
+mod loading_state;
 mod mute;
 mod navigation;
 mod system_param;
@@ -12,8 +12,8 @@ mod zoom;
 
 use crate::common::{LocalHostPlugin, MessageLoopPlugin, WebviewCoreComponentsPlugin};
 use crate::cursor_icon::SystemCursorIconPlugin;
-use crate::loading_state::WebviewLoadingStatePlugin;
 use crate::keyboard::KeyboardPlugin;
+use crate::loading_state::WebviewLoadingStatePlugin;
 use crate::mute::AudioMutePlugin;
 use crate::prelude::{IpcPlugin, NavigationPlugin, WebviewPlugin};
 use crate::zoom::ZoomPlugin;

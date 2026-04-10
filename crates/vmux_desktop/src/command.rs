@@ -1,13 +1,22 @@
 use bevy::prelude::*;
 use vmux_macro::{OsMenu, OsSubMenu};
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct WriteAppCommands;
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ReadAppCommands;
+
 pub struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
-    fn build(&self, _app: &mut App) {}
+    fn build(&self, app: &mut App) {
+        app.add_message::<AppCommand>()
+            .configure_sets(Update, ReadAppCommands.after(WriteAppCommands));
+    }
 }
 
-#[derive(Event, OsMenu, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Message, OsMenu, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppCommand {
     #[menu(label = "Space")]
     Space(SpaceCommand),

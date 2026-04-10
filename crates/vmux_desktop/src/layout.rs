@@ -8,7 +8,7 @@ use bevy::shader::ShaderRef;
 use bevy::ui::UiSystems;
 use bevy::window::{PrimaryWindow, Window as NativeWindow};
 
-use crate::command::{AppCommand, PaneCommand, SpaceCommand};
+use crate::command::{AppCommand, PaneCommand, ReadAppCommands, SpaceCommand};
 use crate::settings::{AppSettings, LoadAppSettings};
 use vmux_history::{CreatedAt, LastActivatedAt};
 
@@ -44,9 +44,15 @@ impl Plugin for LayoutPlugin {
             )
             .add_systems(Update, tick_outline_gradient_time)
             .add_observer(attach_pane_pointer_observer)
-            .add_observer(on_new_space_command)
-            .add_observer(on_split_vertically_command)
-            .add_observer(on_split_horizontally_command);
+            .add_systems(
+                Update,
+                (
+                    on_new_space_command,
+                    on_split_vertically_command,
+                    on_split_horizontally_command,
+                )
+                    .in_set(ReadAppCommands),
+            );
         load_internal_asset!(app, OUTLINE_SHADER, "./outline.wgsl", Shader::from_wgsl);
     }
 }
@@ -305,46 +311,48 @@ impl Default for TabBundle {
     }
 }
 
-fn spawn_space_on_startup(mut commands: Commands, q: Query<&Space>) {
+fn spawn_space_on_startup(mut commands: Commands, q: Query<&Space>, mut writer: MessageWriter<AppCommand>) {
     if q.is_empty() {
-        commands.trigger(AppCommand::Space(SpaceCommand::New));
+        writer.write(AppCommand::Space(SpaceCommand::New));
     }
 }
 
 fn on_new_space_command(
-    trigger: On<AppCommand>,
+    mut reader: MessageReader<AppCommand>,
     mut commands: Commands,
     mut focus_node: ResMut<InFocusNode>,
     settings: Res<AppSettings>,
     camera_q: Query<Entity, With<Camera3d>>,
 ) {
-    let AppCommand::Space(SpaceCommand::New) = *trigger.event() else {
-        return;
-    };
-    let Ok(camera) = camera_q.single() else {
-        return;
-    };
-    let inset = settings.layout.window.padding.max(0.0);
-    let mut pane_entity = Entity::PLACEHOLDER;
-    commands
-        .spawn((SpaceBundle::new(inset), UiTargetCamera(camera)))
-        .with_children(|space| {
-            space
-                .spawn(WindowBundle::default())
-                .with_children(|window| {
-                    window
-                        .spawn(PaneBundle::new(Orientation::default(), 1.0))
-                        .with_children(|pane| {
-                            pane_entity = pane.target_entity();
-                            pane.spawn((TabBundle::default(), Focused));
-                        });
-                });
-        });
-    focus_node.0 = Some(pane_entity);
+    for cmd in reader.read() {
+        let AppCommand::Space(SpaceCommand::New) = *cmd else {
+            continue;
+        };
+        let Ok(camera) = camera_q.single() else {
+            return;
+        };
+        let inset = settings.layout.window.padding.max(0.0);
+        let mut pane_entity = Entity::PLACEHOLDER;
+        commands
+            .spawn((SpaceBundle::new(inset), UiTargetCamera(camera)))
+            .with_children(|space| {
+                space
+                    .spawn(WindowBundle::default())
+                    .with_children(|window| {
+                        window
+                            .spawn(PaneBundle::new(Orientation::default(), 1.0))
+                            .with_children(|pane| {
+                                pane_entity = pane.target_entity();
+                                pane.spawn((TabBundle::default(), Focused));
+                            });
+                    });
+            });
+        focus_node.0 = Some(pane_entity);
+    }
 }
 
 fn on_split_vertically_command(
-    trigger: On<AppCommand>,
+    mut reader: MessageReader<AppCommand>,
     mut commands: Commands,
     mut focus_node: ResMut<InFocusNode>,
     children_q: Query<&Children>,
@@ -353,23 +361,25 @@ fn on_split_vertically_command(
     focused_tabs: Query<Entity, With<Focused>>,
     mut pane_orientations: Query<&mut Orientation, With<Pane>>,
 ) {
-    let AppCommand::Pane(PaneCommand::SplitV) = *trigger.event() else {
-        return;
-    };
-    split_focused_pane(
-        &mut commands,
-        &mut *focus_node,
-        Orientation::Horizontal,
-        &children_q,
-        &tabs,
-        &panes,
-        &focused_tabs,
-        &mut pane_orientations,
-    );
+    for cmd in reader.read() {
+        let AppCommand::Pane(PaneCommand::SplitV) = *cmd else {
+            continue;
+        };
+        split_focused_pane(
+            &mut commands,
+            &mut *focus_node,
+            Orientation::Horizontal,
+            &children_q,
+            &tabs,
+            &panes,
+            &focused_tabs,
+            &mut pane_orientations,
+        );
+    }
 }
 
 fn on_split_horizontally_command(
-    trigger: On<AppCommand>,
+    mut reader: MessageReader<AppCommand>,
     mut commands: Commands,
     mut focus_node: ResMut<InFocusNode>,
     children_q: Query<&Children>,
@@ -378,19 +388,21 @@ fn on_split_horizontally_command(
     focused_tabs: Query<Entity, With<Focused>>,
     mut pane_orientations: Query<&mut Orientation, With<Pane>>,
 ) {
-    let AppCommand::Pane(PaneCommand::SplitH) = *trigger.event() else {
-        return;
-    };
-    split_focused_pane(
-        &mut commands,
-        &mut *focus_node,
-        Orientation::Vertical,
-        &children_q,
-        &tabs,
-        &panes,
-        &focused_tabs,
-        &mut pane_orientations,
-    );
+    for cmd in reader.read() {
+        let AppCommand::Pane(PaneCommand::SplitH) = *cmd else {
+            continue;
+        };
+        split_focused_pane(
+            &mut commands,
+            &mut *focus_node,
+            Orientation::Vertical,
+            &children_q,
+            &tabs,
+            &panes,
+            &focused_tabs,
+            &mut pane_orientations,
+        );
+    }
 }
 
 fn split_focused_pane(
