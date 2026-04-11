@@ -60,6 +60,6 @@ impl Plugin for VmuxPlugin {
         ));
 
         #[cfg(target_os = "macos")]
-        app.insert_resource(WinitSettings::desktop_app());
+        app.insert_resource(WinitSettings::game());
     }
 }

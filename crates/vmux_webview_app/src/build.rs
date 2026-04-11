@@ -28,6 +28,7 @@ pub struct WebviewAppBuilder {
     pub dx_extra_args: &'static [&'static str],
     pub cef_finalize: CefEmbeddedWebviewFinalize,
     pub extra_tracked: Vec<PathBuf>,
+    pub tailwind_postprocess_stale_prefixes: Option<&'static [&'static str]>,
 }
 
 impl WebviewAppBuilder {
@@ -39,6 +40,7 @@ impl WebviewAppBuilder {
             dx_extra_args: &[],
             cef_finalize: CefEmbeddedWebviewFinalize::default(),
             extra_tracked: Vec::new(),
+            tailwind_postprocess_stale_prefixes: None,
         }
     }
 
@@ -56,6 +58,11 @@ impl WebviewAppBuilder {
         for r in rel {
             self.extra_tracked.push(self.manifest_dir.join(r));
         }
+        self
+    }
+
+    pub fn tailwind_postprocess_after_dx(mut self, stale_hashed_css_prefixes: &'static [&'static str]) -> Self {
+        self.tailwind_postprocess_stale_prefixes = Some(stale_hashed_css_prefixes);
         self
     }
 
@@ -101,6 +108,20 @@ impl WebviewAppBuilder {
                 println!("cargo:warning={warning_prefix}: finish CEF dist failed: {e}");
             }
         }
+        if dist.is_dir() {
+            if let Some(prefixes) = self.tailwind_postprocess_stale_prefixes {
+                let dist_assets = dist.join("assets");
+                if let Err(e) = compile_tailwind_index_css(&self.manifest_dir, &dist_assets) {
+                    println!("cargo:warning={warning_prefix}: tailwind compile skipped: {e}");
+                }
+                if let Err(e) = remove_stale_prefixed_css_assets(&dist_assets, prefixes) {
+                    println!("cargo:warning={warning_prefix}: could not remove stale css chunks: {e}");
+                }
+                if shell.is_file() {
+                    merge_cef_shell_index(&dist, &shell, CefMode::Browser);
+                }
+            }
+        }
         emit_dist_rerun_if_changed(&dist);
     }
 
@@ -110,7 +131,9 @@ impl WebviewAppBuilder {
             self.manifest_dir.join("Cargo.toml"),
             self.manifest_dir.join("Dioxus.toml"),
             self.manifest_dir.join("assets/index.html"),
-            self.manifest_dir.join("assets").join(CEF_EMBEDDED_APP_INDEX_CSS),
+            self.manifest_dir
+                .join("assets")
+                .join(CEF_EMBEDDED_APP_INDEX_CSS),
             self.manifest_dir.join("../vmux_ui/assets/theme.css"),
         ];
         v.extend(self.extra_tracked.iter().cloned());
@@ -228,7 +251,8 @@ pub fn resolve_dx_executable() -> PathBuf {
     panic!(
         "vmux: `dx` (dioxus-cli) not found. Install e.g.\n\
          cargo install dioxus-cli --locked --version 0.7.4\n\
-         Or set DX=/path/to/dx"
+         Or set DX=/path/to/dx\n\
+         (vmux does not use npm for web bundles; optional Tailwind is a standalone `tailwindcss` binary.)"
     );
 }
 
@@ -379,10 +403,7 @@ pub fn finish_cef_embedded_webview_dist(
         fs::copy(&index_src, &dest)?;
     }
     if opts.strip_uncompiled_tailwind_css {
-        strip_dx_uncompiled_tailwind_css_assets(
-            dist,
-            &["theme.css", CEF_EMBEDDED_APP_INDEX_CSS],
-        );
+        strip_dx_uncompiled_tailwind_css_assets(dist, &["theme.css", CEF_EMBEDDED_APP_INDEX_CSS]);
     }
     merge_cef_shell_index(dist, shell_index, CefMode::Browser);
     Ok(())
@@ -403,16 +424,10 @@ fn cef_stylesheet_link_tags(dist: &Path, mode: CefMode) -> String {
             names.sort();
         }
         CefMode::WebviewApp => {
-            names.retain(|n| {
-                n == "theme.css" || n == "index.css" || n.starts_with("index-")
-            });
+            names.retain(|n| n == "theme.css" || n == "index.css" || n.starts_with("index-"));
             names.sort_by(|a, b| {
                 fn ord(n: &str) -> (u8, &str) {
-                    if n == "theme.css" {
-                        (0, n)
-                    } else {
-                        (1, n)
-                    }
+                    if n == "theme.css" { (0, n) } else { (1, n) }
                 }
                 ord(a).cmp(&ord(b))
             });
@@ -521,4 +536,70 @@ fn newest_bg_wasm_mtime(dir: &Path) -> Option<SystemTime> {
         }
     }
     newest
+}
+
+fn tailwind_cli() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("TAILWINDCSS") {
+        let pb = PathBuf::from(p);
+        if !pb.as_os_str().is_empty() {
+            return Some(pb);
+        }
+    }
+    let tw = PathBuf::from("tailwindcss");
+    if Command::new(&tw)
+        .arg("--help")
+        .status()
+        .is_ok_and(|s| s.success())
+    {
+        return Some(tw);
+    }
+    None
+}
+
+fn compile_tailwind_index_css(manifest_dir: &Path, dist_assets: &Path) -> io::Result<()> {
+    if !dist_assets.is_dir() {
+        return Ok(());
+    }
+    let Some(tw) = tailwind_cli() else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "tailwindcss not found (install v3 CLI on PATH or set TAILWINDCSS)",
+        ));
+    };
+    let out = dist_assets.join(CEF_EMBEDDED_APP_INDEX_CSS);
+    let status = Command::new(&tw)
+        .args([
+            "-c",
+            "tailwind.config.js",
+            "-i",
+            "assets/index.css",
+            "-o",
+        ])
+        .arg(&out)
+        .arg("--minify")
+        .current_dir(manifest_dir)
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("tailwindcss exited with {status}"),
+        ));
+    }
+    Ok(())
+}
+
+fn remove_stale_prefixed_css_assets(dist_assets: &Path, stale_prefixes: &[&str]) -> io::Result<()> {
+    let Ok(rd) = fs::read_dir(dist_assets) else {
+        return Ok(());
+    };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !name.ends_with(".css") {
+            continue;
+        }
+        if stale_prefixes.iter().any(|p| name.starts_with(p)) {
+            fs::remove_file(e.path())?;
+        }
+    }
+    Ok(())
 }

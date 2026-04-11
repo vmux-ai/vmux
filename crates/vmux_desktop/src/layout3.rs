@@ -44,7 +44,10 @@ impl Plugin for Layout3Plugin {
             (
                 write_tab_hotkeys.in_set(WriteAppCommands),
                 on_viewport_tab_command.in_set(ReadAppCommands),
-                push_tabs_host_emit.after(on_viewport_tab_command),
+                apply_chrome_state_from_cef.after(on_viewport_tab_command),
+                push_tabs_host_emit
+                    .after(on_viewport_tab_command)
+                    .after(apply_chrome_state_from_cef),
             ),
         )
         .add_systems(
@@ -53,6 +56,7 @@ impl Plugin for Layout3Plugin {
                 fit_display_glass_to_window,
                 sync_tab_visibility_and_keyboard_target,
                 sync_children_to_ui,
+                sync_cef_webview_resize_after_ui,
                 sync_webview_pane_corner_clip,
                 sync_osr_webview_focus,
                 kick_tab_startup_navigation,
@@ -103,6 +107,7 @@ struct Active;
 struct PageMetadata {
     title: String,
     url: String,
+    favicon_url: String,
 }
 
 #[derive(Bundle)]
@@ -217,6 +222,7 @@ fn setup(
                 metadata: PageMetadata {
                     title: title.to_string(),
                     url: url.to_string(),
+                    favicon_url: String::new(),
                 },
                 child_of: ChildOf(main_viewport),
                 transform: Transform::default(),
@@ -470,6 +476,31 @@ fn sync_children_to_ui(
     }
 }
 
+fn sync_cef_webview_resize_after_ui(
+    browsers: NonSend<Browsers>,
+    webviews: Query<(Entity, &WebviewSize), (Changed<WebviewSize>, With<Browser>)>,
+    host_window: Query<&HostWindow>,
+    windows: Query<&Window>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
+) {
+    for (entity, size) in webviews.iter() {
+        if !browsers.has_browser(entity) {
+            continue;
+        }
+        let window_entity = host_window
+            .get(entity)
+            .ok()
+            .map(|h| h.0)
+            .or_else(|| primary_window.single().ok());
+        let device_scale_factor = window_entity
+            .and_then(|e| windows.get(e).ok())
+            .map(|w| w.resolution.scale_factor() as f32)
+            .filter(|s| s.is_finite() && *s > 0.0)
+            .unwrap_or(1.0);
+        browsers.resize(&entity, size.0, device_scale_factor);
+    }
+}
+
 fn sync_webview_pane_corner_clip(
     settings: Res<AppSettings>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -548,6 +579,36 @@ fn sync_osr_webview_focus(
     }
 }
 
+fn apply_chrome_state_from_cef(
+    chrome_rx: Res<WebviewChromeStateReceiver>,
+    child_of_q: Query<&ChildOf>,
+    mut tab_meta: Query<&mut PageMetadata, With<Tab>>,
+    browser_q: Query<(), With<Browser>>,
+) {
+    while let Ok(ev) = chrome_rx.0.try_recv() {
+        if !browser_q.contains(ev.webview) {
+            continue;
+        }
+        let Ok(child_of) = child_of_q.get(ev.webview) else {
+            continue;
+        };
+        let tab_root = child_of.parent();
+        let Ok(mut meta) = tab_meta.get_mut(tab_root) else {
+            continue;
+        };
+        if let Some(url) = ev.url {
+            meta.url = url;
+            meta.favicon_url.clear();
+        }
+        if let Some(title) = ev.title {
+            meta.title = title;
+        }
+        if let Some(favicon) = ev.favicon_url {
+            meta.favicon_url = favicon;
+        }
+    }
+}
+
 fn push_tabs_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
@@ -566,6 +627,7 @@ fn push_tabs_host_emit(
             rows.push(TabRow {
                 title: meta.title.clone(),
                 url: meta.url.clone(),
+                favicon_url: meta.favicon_url.clone(),
                 is_active: active.is_some(),
             });
         }

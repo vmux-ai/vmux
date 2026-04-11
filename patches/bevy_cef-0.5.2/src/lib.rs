@@ -1,5 +1,6 @@
 #![allow(clippy::type_complexity)]
 
+mod chrome_state;
 mod common;
 mod cursor_icon;
 mod keyboard;
@@ -13,6 +14,7 @@ mod zoom;
 use crate::common::{LocalHostPlugin, MessageLoopPlugin, WebviewCoreComponentsPlugin};
 use crate::cursor_icon::SystemCursorIconPlugin;
 use crate::keyboard::KeyboardPlugin;
+use crate::chrome_state::WebviewChromeStatePlugin;
 use crate::loading_state::WebviewLoadingStatePlugin;
 use crate::mute::AudioMutePlugin;
 use crate::prelude::{IpcPlugin, NavigationPlugin, WebviewPlugin};
@@ -26,12 +28,12 @@ use bevy_remote::RemotePlugin;
 
 pub mod prelude {
     pub use crate::{
-        CefPlugin, RunOnMainThread, common::*, keyboard::CefKeyboardInputSet, loading_state::*,
-        navigation::*, webview::prelude::*,
+        CefPlugin, RunOnMainThread, chrome_state::*, common::*, keyboard::CefKeyboardInputSet,
+        loading_state::*, navigation::*, webview::prelude::*,
     };
     pub use bevy_cef_core::prelude::{
         Browsers, CefDiskProfileRoot, CefEmbeddedHost, CefEmbeddedHosts, CefEmbeddedPageConfig,
-        CefExtensions, CommandLineConfig, WebviewLoadingStateEvent,
+        CefExtensions, CommandLineConfig, WebviewChromeStateEvent, WebviewLoadingStateEvent,
         compile_time_cef_embedded_scheme, resolved_cef_embedded_page_config,
     };
 }
@@ -81,6 +83,7 @@ impl Plugin for CefPlugin {
             KeyboardPlugin,
             SystemCursorIconPlugin,
             WebviewLoadingStatePlugin,
+            WebviewChromeStatePlugin,
             NavigationPlugin,
             ZoomPlugin,
             AudioMutePlugin,

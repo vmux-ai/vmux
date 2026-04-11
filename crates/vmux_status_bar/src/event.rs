@@ -9,5 +9,7 @@ pub struct TabsHostEvent {
 pub struct TabRow {
     pub title: String,
     pub url: String,
+    #[serde(default)]
+    pub favicon_url: String,
     pub is_active: bool,
 }

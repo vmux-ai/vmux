@@ -1,29 +1,64 @@
 use async_channel::Sender;
 use bevy::log::{error, info, trace, warn};
+use bevy::prelude::Entity;
 use bevy::window::SystemCursorIcon;
 use cef::rc::{ConvertParam, Rc, RcImpl};
 use cef::{
-    Browser, CefString, CursorInfo, CursorType, ImplDisplayHandler, LogSeverity,
-    WrapDisplayHandler, sys,
+    Browser, CefString, CefStringList, CursorInfo, CursorType, Frame, ImplDisplayHandler,
+    LogSeverity, WrapDisplayHandler, sys,
 };
 use cef_dll_sys::{cef_cursor_type_t, cef_log_severity_t};
 use std::os::raw::c_int;
+use std::ptr;
 
 pub type SystemCursorIconSenderInner = Sender<SystemCursorIcon>;
+
+#[derive(Clone, Debug)]
+pub struct WebviewChromeStateEvent {
+    pub webview: Entity,
+    pub url: Option<String>,
+    pub title: Option<String>,
+    pub favicon_url: Option<String>,
+}
+
+pub type WebviewChromeStateSenderInner = Sender<WebviewChromeStateEvent>;
+
+fn first_favicon_url(icon_urls: Option<&mut CefStringList>) -> Option<String> {
+    let list = icon_urls?;
+    let raw: *mut cef_dll_sys::_cef_string_list_t = list.into();
+    let list_ref = unsafe { raw.as_mut() }?;
+    let count = unsafe { cef_dll_sys::cef_string_list_size(list_ref) };
+    if count == 0 {
+        return None;
+    }
+    let mut value = unsafe { std::mem::zeroed::<cef_dll_sys::cef_string_t>() };
+    if unsafe { cef_dll_sys::cef_string_list_value(list_ref, 0, &mut value) } == 0 {
+        return None;
+    }
+    Some(CefString::from(ptr::from_ref(&value)).to_string())
+}
 
 /// ## Reference
 ///
 /// - [`CefDisplayHandler Class Reference`](https://cef-builds.spotifycdn.com/docs/112.3/classCefDisplayHandler.html#af1cc8410a0b1a97166923428d3794636)
 pub struct DisplayHandlerBuilder {
     object: *mut RcImpl<sys::cef_display_handler_t, Self>,
+    webview: Entity,
     cursor_icon: SystemCursorIconSenderInner,
+    chrome_tx: WebviewChromeStateSenderInner,
 }
 
 impl DisplayHandlerBuilder {
-    pub fn build(cursor_icon: SystemCursorIconSenderInner) -> cef::DisplayHandler {
+    pub fn build(
+        webview: Entity,
+        cursor_icon: SystemCursorIconSenderInner,
+        chrome_tx: WebviewChromeStateSenderInner,
+    ) -> cef::DisplayHandler {
         cef::DisplayHandler::new(Self {
             object: core::ptr::null_mut(),
+            webview,
             cursor_icon,
+            chrome_tx,
         })
     }
 }
@@ -46,7 +81,9 @@ impl Clone for DisplayHandlerBuilder {
         };
         Self {
             object,
+            webview: self.webview,
             cursor_icon: self.cursor_icon.clone(),
+            chrome_tx: self.chrome_tx.clone(),
         }
     }
 }
@@ -58,6 +95,45 @@ impl WrapDisplayHandler for DisplayHandlerBuilder {
 }
 
 impl ImplDisplayHandler for DisplayHandlerBuilder {
+    fn on_address_change(
+        &self,
+        _browser: Option<&mut Browser>,
+        _frame: Option<&mut Frame>,
+        url: Option<&CefString>,
+    ) {
+        let url = url.map(|u| u.to_string());
+        let _ = self.chrome_tx.send_blocking(WebviewChromeStateEvent {
+            webview: self.webview,
+            url,
+            title: None,
+            favicon_url: None,
+        });
+    }
+
+    fn on_title_change(&self, _browser: Option<&mut Browser>, title: Option<&CefString>) {
+        let title = title.map(|t| t.to_string());
+        let _ = self.chrome_tx.send_blocking(WebviewChromeStateEvent {
+            webview: self.webview,
+            url: None,
+            title,
+            favicon_url: None,
+        });
+    }
+
+    fn on_favicon_urlchange(
+        &self,
+        _browser: Option<&mut Browser>,
+        icon_urls: Option<&mut CefStringList>,
+    ) {
+        let favicon_url = first_favicon_url(icon_urls);
+        let _ = self.chrome_tx.send_blocking(WebviewChromeStateEvent {
+            webview: self.webview,
+            url: None,
+            title: None,
+            favicon_url,
+        });
+    }
+
     fn on_console_message(
         &self,
         _: Option<&mut Browser>,

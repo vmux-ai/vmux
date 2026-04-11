@@ -10,9 +10,9 @@ use bevy_remote::BrpMessage;
 use cef::{
     Browser, BrowserHost, BrowserSettings, CefString, Client, CompositionUnderline,
     DictionaryValue, ImplBrowser, ImplBrowserHost, ImplDictionaryValue, ImplFrame, ImplListValue,
-    ImplProcessMessage, ImplRequestContext, MouseButtonType, ProcessId, Range, RequestContext,
-    RequestContextSettings, WindowInfo, browser_host_create_browser_sync, dictionary_value_create,
-    process_message_create, register_scheme_handler_factory,
+    ImplProcessMessage, ImplRequestContext, MouseButtonType, PaintElementType, ProcessId, Range,
+    RequestContext, RequestContextSettings, WindowInfo, browser_host_create_browser_sync,
+    dictionary_value_create, process_message_create, register_scheme_handler_factory,
 };
 use cef_dll_sys::{cef_event_flags_t, cef_mouse_button_type_t};
 #[allow(deprecated)]
@@ -25,7 +25,9 @@ mod devtool_render_handler;
 mod keyboard;
 
 use crate::browser_process::browsers::devtool_render_handler::DevToolRenderHandlerBuilder;
-use crate::browser_process::display_handler::{DisplayHandlerBuilder, SystemCursorIconSenderInner};
+use crate::browser_process::display_handler::{
+    DisplayHandlerBuilder, SystemCursorIconSenderInner, WebviewChromeStateSenderInner,
+};
 use crate::browser_process::load_handler::{
     WebviewLoadHandlerBuilder, WebviewLoadingStateSenderInner,
 };
@@ -84,6 +86,7 @@ impl Browsers {
         brp_sender: Sender<BrpMessage>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
+        webview_chrome_state_sender: WebviewChromeStateSenderInner,
         initialize_scripts: &[String],
         _window_handle: Option<RawWindowHandle>,
         disk_profile_root: Option<&str>,
@@ -99,6 +102,7 @@ impl Browsers {
             brp_sender,
             system_cursor_icon_sender,
             webview_loading_state_sender,
+            webview_chrome_state_sender,
         );
 
         // `RequestContext::register_scheme_handler_factory` is not always enough: some navigations
@@ -434,6 +438,8 @@ impl Browsers {
             browser.device_scale.set(device_scale_factor);
             browser.host.notify_screen_info_changed();
             browser.host.was_resized();
+            browser.host.invalidate(PaintElementType::VIEW);
+            browser.host.send_external_begin_frame();
         }
     }
 
@@ -687,6 +693,7 @@ impl Browsers {
         brp_sender: Sender<BrpMessage>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
+        webview_chrome_state_sender: WebviewChromeStateSenderInner,
     ) -> Client {
         ClientHandlerBuilder::new(RenderHandlerBuilder::build(
             webview,
@@ -694,7 +701,11 @@ impl Browsers {
             size.clone(),
             device_scale.clone(),
         ))
-        .with_display_handler(DisplayHandlerBuilder::build(system_cursor_icon_sender))
+        .with_display_handler(DisplayHandlerBuilder::build(
+            webview,
+            system_cursor_icon_sender,
+            webview_chrome_state_sender,
+        ))
         .with_load_handler(WebviewLoadHandlerBuilder::build(
             webview,
             webview_loading_state_sender,
