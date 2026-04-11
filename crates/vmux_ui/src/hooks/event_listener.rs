@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
+use dioxus::core::{Runtime, current_scope_id};
 use dioxus::prelude::*;
 use js_sys::Function;
 use serde::de::DeserializeOwned;
@@ -56,14 +57,19 @@ fn window_cef() -> Result<JsValue, EventListenerError> {
     Ok(cef)
 }
 
-fn host_emit_js_to_ron_str(e: JsValue) -> Option<String> {
-    let s = e.as_string().filter(|s| !s.is_empty()).or_else(|| {
-        js_sys::JSON::stringify(&e)
-            .ok()
-            .and_then(|j| j.as_string())
-            .filter(|s| !s.is_empty())
-    })?;
-    Some(s)
+fn decode_host_emit_js<T: DeserializeOwned>(e: &JsValue) -> Option<T> {
+    if let Some(s) = e.as_string().filter(|t| !t.is_empty()) {
+        if let Ok(v) = ron::de::from_str::<T>(&s) {
+            return Some(v);
+        }
+        if let Ok(v) = serde_json::from_str::<T>(&s) {
+            return Some(v);
+        }
+        return None;
+    }
+    let json = js_sys::JSON::stringify(e).ok()?;
+    let s = json.as_string()?;
+    serde_json::from_str(&s).ok()
 }
 
 fn cef_emit_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
@@ -103,9 +109,7 @@ where
 
     let mut on_event = on_event;
     let closure = Closure::wrap(Box::new(move |e: JsValue| {
-        if let Some(ron_str) = host_emit_js_to_ron_str(e)
-            && let Ok(msg) = ron::de::from_str::<T>(&ron_str)
-        {
+        if let Some(msg) = decode_host_emit_js::<T>(&e) {
             on_event(msg);
         }
     }) as Box<dyn FnMut(JsValue)>);
@@ -136,8 +140,19 @@ where
 
     use_hook(move || {
         let on_event = Rc::clone(&on_event);
+        let Some(rt) = Runtime::try_current() else {
+            is_loading.set(false);
+            error.set(Some(
+                "use_event_listener: no Dioxus runtime (internal error)".into(),
+            ));
+            return;
+        };
+        let scope = current_scope_id();
         match try_cef_listen::<T, _>(name, move |msg| {
-            on_event.borrow_mut()(msg);
+            let on_event = Rc::clone(&on_event);
+            rt.in_scope(scope, || {
+                on_event.borrow_mut()(msg);
+            });
         }) {
             Ok(()) => {
                 is_loading.set(false);

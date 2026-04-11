@@ -78,7 +78,10 @@ impl Plugin for WebviewPlugin {
             .init_resource::<CefDiskProfileRoot>()
             .init_non_send_resource::<Browsers>()
             .add_plugins((MeshWebviewPlugin,))
-            .add_systems(Main, send_external_begin_frame)
+            .add_systems(
+                Main,
+                send_external_begin_frame.after(Main::run_main),
+            )
             .add_systems(
                 Update,
                 (

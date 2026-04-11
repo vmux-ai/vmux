@@ -20,7 +20,7 @@ required-features = ["web"]
 path = "src/lib.rs"
 
 [build-dependencies]
-vmux_utils = { path = "../vmux_utils" }
+vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
 
 [dependencies]
 serde = { workspace = true }

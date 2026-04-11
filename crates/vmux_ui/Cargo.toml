@@ -7,7 +7,7 @@ publish = false
 build = "build.rs"
 
 [build-dependencies]
-vmux_utils = { path = "../vmux_utils" }
+vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
 
 [lib]
 path = "src/lib.rs"

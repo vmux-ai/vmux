@@ -1,9 +1,0 @@
-[package]
-name = "vmux_utils"
-description = "Shared helpers for vmux (build.rs dx web bundles, etc.)"
-version.workspace = true
-edition.workspace = true
-publish = false
-
-[dependencies]
-regex = "1"

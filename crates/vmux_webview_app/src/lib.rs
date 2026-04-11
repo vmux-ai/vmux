@@ -10,6 +10,9 @@ use bevy_cef_core::prelude::{
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "build")]
+pub mod build;
+
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WebviewAppEmbedSet;
 

@@ -13,10 +13,8 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
-use std::{
-    collections::HashSet,
-    path::PathBuf,
-};
+use bevy_cef_core::prelude::RenderTextureMessage;
+use std::{collections::HashSet, path::PathBuf};
 use vmux_status_bar::{
     STATUS_BAR_WEBVIEW_URL, StatusBar, StatusBarBundle,
     event::{TABS_EVENT, TabRow, TabsHostEvent},
@@ -30,7 +28,6 @@ impl Plugin for Layout3Plugin {
         app.add_plugins((
             JsEmitUiReadyPlugin,
             CefPlugin {
-                command_line_config: cef_command_line_config(),
                 root_cache_path: cef_root_cache_path(),
                 ..default()
             },
@@ -47,6 +44,7 @@ impl Plugin for Layout3Plugin {
             (
                 write_tab_hotkeys.in_set(WriteAppCommands),
                 on_viewport_tab_command.in_set(ReadAppCommands),
+                push_tabs_host_emit.after(on_viewport_tab_command),
             ),
         )
         .add_systems(
@@ -58,7 +56,7 @@ impl Plugin for Layout3Plugin {
                 sync_webview_pane_corner_clip,
                 sync_osr_webview_focus,
                 kick_tab_startup_navigation,
-                push_tabs_host_emit,
+                flush_pending_osr_textures,
             )
                 .chain()
                 .after(UiSystems::Layout)
@@ -273,11 +271,13 @@ fn setup(
         ChildOf(display),
         ZIndex(1),
         HostWindow(pw),
+        Browser,
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(0.0),
             right: Val::Px(0.0),
             bottom: Val::Px(0.0),
+            width: Val::Percent(100.0),
             height: Val::Px(STATUS_BAR_HEIGHT_PX),
             ..default()
         },
@@ -299,10 +299,7 @@ fn setup(
     ));
 }
 
-fn write_tab_hotkeys(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut writer: MessageWriter<AppCommand>,
-) {
+fn write_tab_hotkeys(keyboard: Res<ButtonInput<KeyCode>>, mut writer: MessageWriter<AppCommand>) {
     let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
     let meta = keyboard.pressed(KeyCode::SuperLeft) || keyboard.pressed(KeyCode::SuperRight);
     if !keyboard.just_pressed(KeyCode::Tab) || (!ctrl && !meta) {
@@ -329,10 +326,7 @@ fn on_viewport_tab_command(
             AppCommand::Tab(TabCommand::Previous) => -1,
             _ => continue,
         };
-        let tabs: Vec<Entity> = main
-            .iter()
-            .filter(|&e| tab_filter.contains(e))
-            .collect();
+        let tabs: Vec<Entity> = main.iter().filter(|&e| tab_filter.contains(e)).collect();
         if tabs.len() < 2 {
             continue;
         }
@@ -351,6 +345,7 @@ fn on_viewport_tab_command(
 }
 
 fn sync_tab_visibility_and_keyboard_target(
+    browsers: NonSend<Browsers>,
     main: Single<&Children, With<Main>>,
     children_q: Query<&Children>,
     tab_roots: Query<(), With<Tab>>,
@@ -378,6 +373,7 @@ fn sync_tab_visibility_and_keyboard_target(
             } else {
                 Visibility::Hidden
             };
+            browsers.set_osr_not_hidden(&browser_e);
             if is_active && !has_kb {
                 commands.entity(browser_e).insert(CefKeyboardTarget);
             } else if !is_active && has_kb {
@@ -413,20 +409,24 @@ pub fn fit_display_glass_to_window(
 }
 
 fn sync_children_to_ui(
-    mut browser_q: Query<(
-        &mut Transform,
-        &ComputedNode,
-        &UiGlobalTransform,
-        &ChildOf,
-        &mut WebviewSize,
-        Option<&StatusBar>,
-    ), With<Browser>>,
+    mut browser_q: Query<
+        (
+            &mut Transform,
+            &ComputedNode,
+            &UiGlobalTransform,
+            &ChildOf,
+            &mut WebviewSize,
+            Option<&StatusBar>,
+        ),
+        With<Browser>,
+    >,
     tab_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Tab>>,
     glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<DisplayGlass>>,
 ) {
     let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
 
-    for (mut tf, self_computed, self_ui_gt, child_of, mut webview_size, status) in browser_q.iter_mut()
+    for (mut tf, self_computed, self_ui_gt, child_of, mut webview_size, status) in
+        browser_q.iter_mut()
     {
         let parent = child_of.get();
         let (computed, ui_gt) = match tab_rect.get(parent) {
@@ -523,6 +523,7 @@ fn sync_osr_webview_focus(
     browsers: NonSend<Browsers>,
     webviews: Query<Entity, With<WebviewSource>>,
     keyboard_target: Query<Entity, (With<WebviewSource>, With<CefKeyboardTarget>)>,
+    status_chrome: Query<Entity, (With<StatusBar>, With<Browser>)>,
     mut ready: Local<Vec<Entity>>,
     mut auxiliary: Local<Vec<Entity>>,
 ) {
@@ -542,6 +543,9 @@ fn sync_osr_webview_focus(
     auxiliary.clear();
     auxiliary.extend(ready.iter().copied().filter(|&e| e != active));
     browsers.sync_osr_focus_to_active_pane(Some(active), auxiliary.as_slice());
+    for e in status_chrome.iter() {
+        browsers.set_osr_not_hidden(&e);
+    }
 }
 
 fn push_tabs_host_emit(
@@ -571,18 +575,17 @@ fn push_tabs_host_emit(
     if ron_body.as_str() == last.as_str() {
         return;
     }
-    *last = ron_body.clone();
     commands.trigger(HostEmitEvent::new(status_e, TABS_EVENT, &ron_body));
+    *last = ron_body;
 }
 
-fn cef_command_line_config() -> CommandLineConfig {
-    CommandLineConfig::default().with_switch_value(
-        "user-agent",
-        concat!(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ",
-            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        ),
-    )
+fn flush_pending_osr_textures(
+    mut ew: MessageWriter<RenderTextureMessage>,
+    browsers: NonSend<Browsers>,
+) {
+    while let Ok(texture) = browsers.try_receive_texture() {
+        ew.write(texture);
+    }
 }
 
 fn cef_root_cache_path() -> Option<String> {

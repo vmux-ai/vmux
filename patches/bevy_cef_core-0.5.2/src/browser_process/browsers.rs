@@ -214,6 +214,13 @@ impl Browsers {
             .is_some_and(|b| b.client.main_frame().is_some())
     }
 
+    #[inline]
+    pub fn set_osr_not_hidden(&self, webview: &Entity) {
+        if let Some(b) = self.browsers.get(webview) {
+            b.host.was_hidden(0);
+        }
+    }
+
     pub fn send_external_begin_frame(&mut self) {
         for browser in self.browsers.values_mut() {
             browser.host.send_external_begin_frame();
