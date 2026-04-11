@@ -20,6 +20,7 @@ use {
     rounded::RoundedMaterialPlugin,
     scene::ScenePlugin,
     settings::SettingsPlugin,
+    vmux_status_bar::StatusBarPlugin,
 };
 // use vmux_history::HistoryPlugin;
 
@@ -52,6 +53,7 @@ impl Plugin for VmuxPlugin {
             CommandPlugin,
             ScenePlugin,
             NativeMenuPlugin,
+            StatusBarPlugin,
             Layout3Plugin,
             // BrowserPlugin,
             // HistoryPlugin,

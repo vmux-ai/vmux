@@ -59,6 +59,10 @@ dioxus = { version = "0.7.4", features = ["web"] }
 opt-level = "z"
 codegen-units = 1
 
+[profile.release.package.vmux_status_bar]
+opt-level = "z"
+codegen-units = 1
+
 [profile.release.package.vmux_ui]
 opt-level = "z"
 codegen-units = 1

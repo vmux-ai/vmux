@@ -7,11 +7,12 @@ use crate::{
 use bevy::{
     ecs::relationship::Relationship,
     prelude::*,
-    ui::{UiGlobalTransform, UiSystems, UiTargetCamera},
+    ui::{UiGlobalTransform, UiSystems, UiTargetCamera, ZIndex},
     window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
 use std::path::PathBuf;
+use vmux_status_bar::{STATUS_BAR_WEBVIEW_URL, StatusBar, StatusBarBundle};
 use vmux_webview_app::JsEmitUiReadyPlugin;
 
 pub struct Layout3Plugin;
@@ -21,6 +22,7 @@ impl Plugin for Layout3Plugin {
         app.add_plugins((
             JsEmitUiReadyPlugin,
             CefPlugin {
+                command_line_config: cef_command_line_config(),
                 root_cache_path: cef_root_cache_path(),
                 ..default()
             },
@@ -34,7 +36,16 @@ impl Plugin for Layout3Plugin {
         )
         .add_systems(
             PostUpdate,
-            (fit_display_glass_to_window, sync_children_to_ui).after(UiSystems::Layout),
+            (
+                fit_display_glass_to_window,
+                sync_children_to_ui,
+                sync_webview_pane_corner_clip,
+                sync_osr_webview_focus,
+                kick_main_startup_navigation,
+            )
+                .chain()
+                .after(UiSystems::Layout)
+                .before(render_standard_materials),
         );
     }
 }
@@ -67,17 +78,6 @@ struct MainBundle {
 struct Main;
 
 #[derive(Bundle)]
-struct StatusBarBundle {
-    marker: StatusBar,
-    child_of: ChildOf,
-    node: Node,
-    background: BackgroundColor,
-}
-
-#[derive(Component)]
-struct StatusBar;
-
-#[derive(Bundle)]
 struct BrowserBundle {
     marker: Browser,
     source: WebviewSource,
@@ -91,6 +91,7 @@ struct Browser;
 
 fn setup(
     window: Single<&Window, With<PrimaryWindow>>,
+    primary_window: Single<Entity, With<PrimaryWindow>>,
     main_camera: Single<Entity, With<MainCamera>>,
     mut commands: Commands,
     settings: Res<AppSettings>,
@@ -99,6 +100,7 @@ fn setup(
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let m = window.meters();
+    let pw = *primary_window;
 
     let display = commands
         .spawn(DisplayGlassBundle {
@@ -137,37 +139,45 @@ fn setup(
         })
         .id();
 
-    commands.spawn(MainBundle {
-        marker: Main,
-        child_of: ChildOf(display),
-        node: Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            right: Val::Px(0.0),
-            top: Val::Px(0.0),
-            bottom: Val::Px(STATUS_BAR_HEIGHT_PX),
-            ..default()
-        },
-        browser: BrowserBundle {
-            marker: Browser,
-            source: WebviewSource::new(settings.browser.startup_url.as_str()),
-            mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-            material: MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                base: StandardMaterial {
-                    unlit: true,
-                    alpha_mode: AlphaMode::Blend,
+    commands
+        .spawn((
+            ZIndex(0),
+            HostWindow(pw),
+            MainBundle {
+                marker: Main,
+                child_of: ChildOf(display),
+                node: Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(STATUS_BAR_HEIGHT_PX),
                     ..default()
                 },
-                ..default()
-            })),
-            webview_size: WebviewSize(Vec2::new(1280.0, 720.0)),
-        },
-    });
+                browser: BrowserBundle {
+                    marker: Browser,
+                    source: WebviewSource::new(settings.browser.startup_url.as_str()),
+                    mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
+                    material: MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
+                        base: StandardMaterial {
+                            unlit: true,
+                            alpha_mode: AlphaMode::Blend,
+                            depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
+                            ..default()
+                        },
+                        ..default()
+                    })),
+                    webview_size: WebviewSize(Vec2::new(1280.0, 720.0)),
+                },
+            },
+        ))
+        .insert(CefKeyboardTarget);
 
-    commands.spawn(StatusBarBundle {
-        marker: StatusBar,
-        child_of: ChildOf(display),
-        node: Node {
+    commands.spawn((
+        ChildOf(display),
+        ZIndex(1),
+        HostWindow(pw),
+        Node {
             position_type: PositionType::Absolute,
             left: Val::Px(0.0),
             right: Val::Px(0.0),
@@ -175,8 +185,22 @@ fn setup(
             height: Val::Px(STATUS_BAR_HEIGHT_PX),
             ..default()
         },
-        background: BackgroundColor(Color::srgb(0.12, 0.12, 0.14)),
-    });
+        StatusBarBundle {
+            marker: StatusBar,
+            source: WebviewSource::new(STATUS_BAR_WEBVIEW_URL),
+            mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
+            material: MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
+                base: StandardMaterial {
+                    unlit: true,
+                    alpha_mode: AlphaMode::Blend,
+                    depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
+                    ..default()
+                },
+                ..default()
+            })),
+            webview_size: WebviewSize(Vec2::new(1280.0, STATUS_BAR_HEIGHT_PX)),
+        },
+    ));
 }
 
 pub fn fit_display_glass_to_window(
@@ -211,12 +235,15 @@ fn sync_children_to_ui(
         &ChildOf,
         &UiGlobalTransform,
         Option<&mut WebviewSize>,
+        Option<&Main>,
+        Option<&StatusBar>,
     )>,
     glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<DisplayGlass>>,
 ) {
     let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
 
-    for (mut tf, computed, child_of, child_ui_gt, webview_size) in child_q.iter_mut() {
+    for (mut tf, computed, child_of, child_ui_gt, webview_size, main, status) in child_q.iter_mut()
+    {
         if child_of.get() != glass_entity {
             continue;
         }
@@ -241,19 +268,107 @@ fn sync_children_to_ui(
 
         let tx = delta_px.x / glass_size_px.x;
         let ty = -delta_px.y / glass_size_px.y;
-        let z = 0.01 + computed.stack_index as f32 * 0.001;
+        let z = if status.is_some() {
+            WEBVIEW_Z_STATUS
+        } else if main.is_some() {
+            WEBVIEW_Z_MAIN
+        } else {
+            0.01 + computed.stack_index as f32 * 0.001
+        };
         tf.translation = Vec3::new(tx, ty, z);
 
         if let Some(mut size) = webview_size {
-            let logical = size_px * computed.inverse_scale_factor;
-            if size.0 != logical {
-                size.0 = logical;
+            let dip = (size_px * computed.inverse_scale_factor).max(Vec2::splat(1.0));
+            if size.0 != dip {
+                size.0 = dip;
             }
         }
     }
 }
 
+fn sync_webview_pane_corner_clip(
+    settings: Res<AppSettings>,
+    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    main: Query<(&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>), With<Main>>,
+    status: Query<(&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>), With<StatusBar>>,
+) {
+    let r = settings.layout.pane.radius;
+    for (size, mat_h) in &main {
+        let w = size.0.x.max(1.0e-6);
+        let h = size.0.y.max(1.0e-6);
+        if let Some(mat) = materials.get_mut(mat_h.id()) {
+            mat.extension.pane_corner_clip = Vec4::new(0.0, w, h, 0.0);
+        }
+    }
+    for (size, mat_h) in &status {
+        let w = size.0.x.max(1.0e-6);
+        let h = size.0.y.max(1.0e-6);
+        if let Some(mat) = materials.get_mut(mat_h.id()) {
+            mat.extension.pane_corner_clip = Vec4::new(r, w, h, 1.0);
+        }
+    }
+}
+
 const STATUS_BAR_HEIGHT_PX: f32 = 40.0;
+const WEBVIEW_Z_MAIN: f32 = 0.12;
+const WEBVIEW_Z_STATUS: f32 = 0.125;
+const WEBVIEW_MESH_DEPTH_BIAS: f32 = -4.0;
+
+fn kick_main_startup_navigation(
+    browsers: NonSend<Browsers>,
+    q: Query<(Entity, &WebviewSource), With<Main>>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    let Ok((entity, source)) = q.single() else {
+        return;
+    };
+    let WebviewSource::Url(url) = source else {
+        return;
+    };
+    if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        return;
+    }
+    browsers.navigate(&entity, url);
+    *done = true;
+}
+
+fn sync_osr_webview_focus(
+    browsers: NonSend<Browsers>,
+    webviews: Query<Entity, With<WebviewSource>>,
+    keyboard_target: Query<Entity, (With<WebviewSource>, With<CefKeyboardTarget>)>,
+    mut ready: Local<Vec<Entity>>,
+    mut auxiliary: Local<Vec<Entity>>,
+) {
+    ready.clear();
+    ready.extend(webviews.iter().filter(|&e| browsers.has_browser(e)));
+    if ready.is_empty() {
+        return;
+    }
+    ready.sort_by_key(|e| e.to_bits());
+
+    let active = keyboard_target
+        .iter()
+        .filter(|&k| ready.iter().any(|&e| e == k))
+        .min_by_key(|e| e.to_bits())
+        .unwrap_or(ready[0]);
+
+    auxiliary.clear();
+    auxiliary.extend(ready.iter().copied().filter(|&e| e != active));
+    browsers.sync_osr_focus_to_active_pane(Some(active), auxiliary.as_slice());
+}
+
+fn cef_command_line_config() -> CommandLineConfig {
+    CommandLineConfig::default().with_switch_value(
+        "user-agent",
+        concat!(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ",
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        ),
+    )
+}
 
 fn cef_root_cache_path() -> Option<String> {
     #[cfg(target_os = "macos")]

@@ -25,6 +25,7 @@ parking_lot = "0.12"
 ron = { workspace = true }
 serde = { workspace = true }
 vmux_history = { path = "../vmux_history" }
+vmux_status_bar = { path = "../vmux_status_bar" }
 vmux_macro = { path = "../vmux_macro" }
 vmux_webview_app = { path = "../vmux_webview_app" }
 
