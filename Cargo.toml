@@ -54,6 +54,7 @@ url = "2"
 crossbeam-channel = "0.5"
 notify = "6"
 dioxus = { version = "0.7.4", features = ["web"] }
+regex = "1"
 
 [profile.release.package.vmux_history]
 opt-level = "z"

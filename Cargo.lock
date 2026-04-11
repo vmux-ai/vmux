@@ -8671,6 +8671,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_cef",
+ "bevy_cef_core",
  "bevy_infinite_grid",
  "bevy_log",
  "directories",
@@ -8699,7 +8700,6 @@ dependencies = [
  "serde",
  "url",
  "vmux_ui",
- "vmux_utils",
  "vmux_webview_app",
  "wasm-bindgen",
 ]
@@ -8723,7 +8723,6 @@ dependencies = [
  "dioxus",
  "serde",
  "vmux_ui",
- "vmux_utils",
  "vmux_webview_app",
  "wasm-bindgen",
 ]
@@ -8739,16 +8738,9 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
- "vmux_utils",
+ "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
-]
-
-[[package]]
-name = "vmux_utils"
-version = "0.1.0"
-dependencies = [
- "regex",
 ]
 
 [[package]]
@@ -8758,6 +8750,7 @@ dependencies = [
  "bevy",
  "bevy_cef",
  "bevy_cef_core",
+ "regex",
  "serde",
 ]
 

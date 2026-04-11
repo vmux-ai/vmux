@@ -17,6 +17,7 @@ bevy = { workspace = true, features = [
     "free_camera",
 ] }
 bevy_cef = { workspace = true, features = ["debug"] }
+bevy_cef_core = { workspace = true }
 bevy_infinite_grid = "0.18"
 bevy_log = "0.18"
 directories = "5"
