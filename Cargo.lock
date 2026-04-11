@@ -8682,6 +8682,7 @@ dependencies = [
  "serde",
  "vmux_history",
  "vmux_macro",
+ "vmux_status_bar",
  "vmux_webview_app",
 ]
 
@@ -8710,6 +8711,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "vmux_status_bar"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
+ "dioxus",
+ "vmux_ui",
+ "vmux_utils",
+ "vmux_webview_app",
+ "wasm-bindgen",
 ]
 
 [[package]]

@@ -1,8 +1,3 @@
-//! Helpers for `build.rs` scripts that produce Dioxus web `dist/` folders via **`dx build`**.
-//!
-//! Requires [**`dioxus-cli`**](https://crates.io/crates/dioxus-cli) on `PATH` (or the **`DX`** env var).
-//! The CLI vendors Tailwind, `wasm-bindgen`, and related tooling — no Node/npm for these bundles.
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -10,7 +5,6 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-/// Workspace root (parent of `crates/`) from a member crate manifest dir.
 pub fn workspace_root_from_manifest_dir(manifest_dir: &Path) -> PathBuf {
     manifest_dir
         .parent()
@@ -26,7 +20,6 @@ fn dx_version_ok(path: &Path) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Resolve the `dx` executable: **`DX`** env, then `PATH`, then `~/.cargo/bin/dx`.
 pub fn resolve_dx_executable() -> PathBuf {
     if let Ok(dx) = std::env::var("DX") {
         let p = PathBuf::from(dx);
@@ -50,7 +43,6 @@ pub fn resolve_dx_executable() -> PathBuf {
     );
 }
 
-/// `target/dx/<bin_name>/{debug|release}/web/public` after `dx build --platform web`.
 pub fn dx_web_public_dir(workspace_root: &Path, bin_name: &str, release: bool) -> PathBuf {
     let profile = if release { "release" } else { "debug" };
     workspace_root
@@ -62,7 +54,6 @@ pub fn dx_web_public_dir(workspace_root: &Path, bin_name: &str, release: bool) -
         .join("public")
 }
 
-/// Run `dx build --platform web -p <package>` from the workspace root.
 pub fn run_dx_web_bundle(
     workspace_root: &Path,
     package: &str,
@@ -88,10 +79,13 @@ pub fn run_dx_web_bundle(
     }
 }
 
-/// Replace `dist/` with `dx`’s `public/` output, then write the CEF **`shell_index.html`**
-/// with **`__VMUX_DX_ENTRY__`** / **`__VMUX_DX_WASM__`** filled from `dx`’s generated `index.html`
-/// (hashed `assets/` paths or `wasm/` layout — both are handled).
-pub fn replace_dist_from_dx_public(public: &Path, dist: &Path, shell_index: &Path) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CefMode {
+    Browser,
+    WebviewApp,
+}
+
+pub fn copy_dx_public_to_dist(public: &Path, dist: &Path) {
     if !public.is_dir() {
         panic!(
             "vmux: expected dx web output at {} (directory missing after dx build)",
@@ -109,20 +103,20 @@ pub fn replace_dist_from_dx_public(public: &Path, dist: &Path, shell_index: &Pat
     copy_dir_recursive(public, dist).unwrap_or_else(|e| {
         panic!("vmux: copy {} -> {}: {e}", public.display(), dist.display());
     });
-    merge_cef_shell_index(dist, shell_index);
 }
 
-fn merge_cef_shell_index(dist: &Path, shell_index: &Path) {
+pub fn merge_cef_shell_index(dist: &Path, shell_index: &Path, cef_mode: CefMode) {
     let dx_html = fs::read_to_string(dist.join("index.html")).unwrap_or_else(|e| {
         panic!("vmux: read dx index.html in {}: {e}", dist.display());
     });
     let entry_href = dx_module_script_href(&dx_html);
     let wasm_href = find_bg_wasm_href(dist);
+    let style_links = cef_stylesheet_link_tags(dist, cef_mode);
 
     let shell = fs::read_to_string(shell_index).unwrap_or_else(|e| {
         panic!("vmux: read shell {}: {e}", shell_index.display());
     });
-    let merged = shell
+    let mut merged = shell
         .replace("__VMUX_DX_ENTRY__", &entry_href)
         .replace("__VMUX_DX_WASM__", &wasm_href);
     if merged.contains("__VMUX_DX_ENTRY__") || merged.contains("__VMUX_DX_WASM__") {
@@ -131,9 +125,54 @@ fn merge_cef_shell_index(dist: &Path, shell_index: &Path) {
             shell_index.display()
         );
     }
+    if !style_links.is_empty() {
+        merged = merged.replace("</head>", &format!("  {style_links}\n</head>"));
+    }
     fs::write(dist.join("index.html"), merged).unwrap_or_else(|e| {
         panic!("vmux: write merged index.html: {e}");
     });
+}
+
+pub fn replace_dist_from_dx_public(public: &Path, dist: &Path, shell_index: &Path) {
+    copy_dx_public_to_dist(public, dist);
+    merge_cef_shell_index(dist, shell_index, CefMode::Browser);
+}
+
+fn cef_stylesheet_link_tags(dist: &Path, mode: CefMode) -> String {
+    let assets = dist.join("assets");
+    let Ok(rd) = fs::read_dir(&assets) else {
+        return String::new();
+    };
+    let mut names: Vec<String> = rd
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "css"))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    match mode {
+        CefMode::Browser => {
+            names.sort();
+        }
+        CefMode::WebviewApp => {
+            names.retain(|n| {
+                n == "theme.css" || n == "index.css" || n.starts_with("index-")
+            });
+            names.sort_by(|a, b| {
+                fn ord(n: &str) -> (u8, &str) {
+                    if n == "theme.css" {
+                        (0, n)
+                    } else {
+                        (1, n)
+                    }
+                }
+                ord(a).cmp(&ord(b))
+            });
+        }
+    }
+    names
+        .into_iter()
+        .map(|n| format!(r#"<link rel="stylesheet" href="./assets/{n}" crossorigin="anonymous"/>"#))
+        .collect::<Vec<_>>()
+        .join("\n  ")
 }
 
 fn dx_module_script_href(dx_html: &str) -> String {
