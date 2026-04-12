@@ -25,4 +25,15 @@
             ),
         ),
     ),
+    keybindings: (
+        chord_timeout_ms: 1000,
+        bindings: [
+            (command: "tab_next", binding: Direct((key: "Tab", ctrl: true))),
+            (command: "tab_previous", binding: Direct((key: "Tab", ctrl: true, shift: true))),
+            (command: "split_v", binding: Chord((key: "b", ctrl: true), (key: "%"))),
+            (command: "split_h", binding: Chord((key: "b", ctrl: true), (key: "\""))),
+            (command: "toggle_pane", binding: Chord((key: "b", ctrl: true), (key: "o"))),
+            (command: "close_pane", binding: Chord((key: "b", ctrl: true), (key: "x"))),
+        ],
+    ),
 )

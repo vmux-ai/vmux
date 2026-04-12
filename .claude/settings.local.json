@@ -22,7 +22,10 @@
       "Bash(git stash:*)",
       "Bash(git mv:*)",
       "Bash(~/.cargo/bin/cargo check:*)",
-      "Bash(ls crates/vmux_header/dist/wasm/vmux_header_app*)"
+      "Bash(ls crates/vmux_header/dist/wasm/vmux_header_app*)",
+      "Read(//Users/js/.cargo/bin/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//usr/local/bin/**)"
     ]
   }
 }

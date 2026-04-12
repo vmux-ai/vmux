@@ -221,6 +221,8 @@ fn on_reset_camera(
     mut transform: Single<&mut Transform, With<MainCamera>>,
     projection: Single<&Projection, With<MainCamera>>,
     mut camera_state: Single<&mut FreeCameraState, With<MainCamera>>,
+    camera: Single<Entity, With<MainCamera>>,
+    mut commands: Commands,
 ) {
     for cmd in reader.read() {
         let AppCommand::Camera(CameraCommand::Reset) = *cmd else {
@@ -228,6 +230,7 @@ fn on_reset_camera(
         };
 
         camera_state.enabled = false;
+        commands.entity(*camera).remove::<Bloom>();
 
         let aspect = match &*projection {
             Projection::Perspective(p) => p.aspect_ratio,
