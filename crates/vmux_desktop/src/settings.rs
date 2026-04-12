@@ -14,6 +14,83 @@ impl Plugin for SettingsPlugin {
 pub struct AppSettings {
     pub browser: BrowserSettings,
     pub layout: LayoutSettings,
+    #[serde(default)]
+    pub keybindings: KeyBindingSettings,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct KeyBindingSettings {
+    #[serde(default = "default_chord_timeout_ms")]
+    pub chord_timeout_ms: u64,
+    #[serde(default)]
+    pub bindings: Vec<KeyBindingEntry>,
+}
+
+impl Default for KeyBindingSettings {
+    fn default() -> Self {
+        Self {
+            chord_timeout_ms: default_chord_timeout_ms(),
+            bindings: Vec::new(),
+        }
+    }
+}
+
+fn default_chord_timeout_ms() -> u64 {
+    1000
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct KeyBindingEntry {
+    pub command: String,
+    pub binding: KeyBindingDef,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub enum KeyBindingDef {
+    Direct(KeyComboDef),
+    Chord(KeyComboDef, KeyComboDef),
+}
+
+impl KeyBindingDef {
+    pub fn to_key_binding(&self) -> Option<crate::keybinding::KeyBinding> {
+        match self {
+            KeyBindingDef::Direct(combo) => {
+                Some(crate::keybinding::KeyBinding::Direct(combo.to_key_combo()?))
+            }
+            KeyBindingDef::Chord(prefix, second) => Some(crate::keybinding::KeyBinding::Chord(
+                prefix.to_key_combo()?,
+                second.to_key_combo()?,
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct KeyComboDef {
+    pub key: String,
+    #[serde(default)]
+    pub ctrl: bool,
+    #[serde(default)]
+    pub shift: bool,
+    #[serde(default)]
+    pub alt: bool,
+    #[serde(default)]
+    pub super_key: bool,
+}
+
+impl KeyComboDef {
+    fn to_key_combo(&self) -> Option<crate::keybinding::KeyCombo> {
+        let key = crate::keybinding::key_code_from_str(&self.key)?;
+        Some(crate::keybinding::KeyCombo {
+            key,
+            modifiers: crate::keybinding::Modifiers {
+                ctrl: self.ctrl,
+                shift: self.shift,
+                alt: self.alt,
+                super_key: self.super_key,
+            },
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
