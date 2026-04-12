@@ -1,5 +1,6 @@
 mod browser;
 mod command;
+pub(crate) mod keybinding;
 mod layout;
 mod os_menu;
 mod scene;
@@ -11,8 +12,9 @@ use bevy::prelude::*;
 use bevy::window::{CompositeAlphaMode, Window as NativeWindow, WindowPlugin};
 
 use {
-    browser::BrowserPlugin, command::CommandPlugin, layout::LayoutPlugin, os_menu::OsMenuPlugin,
-    scene::ScenePlugin, settings::SettingsPlugin, vmux_header::HeaderPlugin,
+    browser::BrowserPlugin, command::CommandPlugin, keybinding::KeyBindingPlugin,
+    layout::LayoutPlugin, os_menu::OsMenuPlugin, scene::ScenePlugin, settings::SettingsPlugin,
+    vmux_header::HeaderPlugin,
 };
 
 pub struct VmuxPlugin;
@@ -41,6 +43,7 @@ impl Plugin for VmuxPlugin {
                 .set(window_plugin),
             SettingsPlugin,
             CommandPlugin,
+            KeyBindingPlugin,
             ScenePlugin,
             OsMenuPlugin,
             LayoutPlugin,
