@@ -14,17 +14,10 @@
         - Most relavent, most popular etc.
     - Assign appropriate icon for each action type
     - [Key mode plan](./plans/keybindings.plan.md)
-- `vmux_layout`
-    - [Layout refactoring](./plans/layout-naming.plan.md)
-- `vmux_webview`
-    - Prevent website from getting stretched on NewPane, ClosePane
-- `vmux_input`
-    - leader key(ctrl+b) should be replacable by settings.ron
 
 ### Feature
 
 - `vmux_ui`
-    - Refactor existing dioxus based ui plugin (e.g. header, history etc.)
     - Show storybook like ui in pane for debugging
 - `vmux_terminal`
     - Add terminal pane to provide terminal emulator

@@ -192,6 +192,15 @@ fn handle_pane_commands(
                 commands.entity(new_active).insert(Active);
             }
             PaneCommand::Toggle => {}
+            PaneCommand::Zoom => {}
+            PaneCommand::SelectLeft => {}
+            PaneCommand::SelectRight => {}
+            PaneCommand::SelectUp => {}
+            PaneCommand::SelectDown => {}
+            PaneCommand::SwapPrev => {}
+            PaneCommand::SwapNext => {}
+            PaneCommand::RotateForward => {}
+            PaneCommand::RotateBackward => {}
         }
     }
 }

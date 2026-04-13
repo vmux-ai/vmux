@@ -1,9 +1,10 @@
 use crate::{
     command::{AppCommand, ReadAppCommands, SideSheetCommand},
+    layout::display::DisplayGlass,
     layout::pane::{Pane, PaneSplit},
     settings::AppSettings,
 };
-use bevy::{prelude::*, ui::UiSystems};
+use bevy::{ecs::relationship::Relationship, prelude::*, ui::UiSystems};
 use vmux_header::Header;
 
 pub(crate) struct SideSheetPlugin;
@@ -41,8 +42,9 @@ fn sync_side_sheet_visibility(
     settings: Res<AppSettings>,
     mut side_sheet_q: Query<(&mut Visibility, &mut Node), With<SideSheet>>,
     mut header_q: Query<&mut Node, (With<Header>, Without<SideSheet>, Without<Pane>)>,
+    glass_q: Query<Entity, With<DisplayGlass>>,
     mut pane_q: Query<
-        &mut Node,
+        (&mut Node, &ChildOf),
         (With<Pane>, With<PaneSplit>, Without<SideSheet>, Without<Header>),
     >,
 ) {
@@ -66,7 +68,13 @@ fn sync_side_sheet_visibility(
             Val::Px(0.0)
         };
     }
-    for mut node in &mut pane_q {
+    let Ok(glass) = glass_q.single() else {
+        return;
+    };
+    for (mut node, child_of) in &mut pane_q {
+        if child_of.get() != glass {
+            continue;
+        }
         node.margin.left = if open.0 {
             Val::Px(sheet_total)
         } else {
