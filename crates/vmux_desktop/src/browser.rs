@@ -272,6 +272,7 @@ fn sync_osr_webview_focus(
     side_sheet_chrome: Query<Entity, (With<SideSheet>, With<Browser>)>,
     mut ready: Local<Vec<Entity>>,
     mut auxiliary: Local<Vec<Entity>>,
+    mut last_active: Local<Option<Entity>>,
 ) {
     ready.clear();
     ready.extend(webviews.iter().filter(|&e| browsers.has_browser(e)));
@@ -286,9 +287,12 @@ fn sync_osr_webview_focus(
         .min_by_key(|e| e.to_bits())
         .unwrap_or(ready[0]);
 
-    auxiliary.clear();
-    auxiliary.extend(ready.iter().copied().filter(|&e| e != active));
-    browsers.sync_osr_focus_to_active_pane(Some(active), auxiliary.as_slice());
+    if *last_active != Some(active) {
+        auxiliary.clear();
+        auxiliary.extend(ready.iter().copied().filter(|&e| e != active));
+        browsers.sync_osr_focus_to_active_pane(Some(active), auxiliary.as_slice());
+        *last_active = Some(active);
+    }
     for e in status_chrome.iter() {
         browsers.set_osr_not_hidden(&e);
     }

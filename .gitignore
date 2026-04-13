@@ -1,6 +1,7 @@
 /target
 .DS_Store
 *.app
+.claude/settings.local.json
 
 # Tailwind output (run `npm run build:css` in crates/vmux_header)
 crates/vmux_header/assets/status.css
@@ -17,3 +18,4 @@ crates/vmux_ui/target/
 
 # Dioxus web bundle (`dx build` / `build.rs`)
 crates/vmux_history/dist/
+crates/vmux_side_sheet/dist/

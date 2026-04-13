@@ -51,6 +51,12 @@ pub enum SpaceCommand {
 #[derive(OsSubMenu, DefaultKeyBindings, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TabCommand {
     #[default]
+    #[menu(id = "tab_new", label = "New Tab")]
+    New,
+
+    #[menu(id = "tab_close", label = "Close Tab")]
+    Close,
+
     #[menu(id = "tab_next", label = "Select Next Tab")]
     Next,
 
@@ -69,6 +75,24 @@ pub enum PaneCommand {
     Toggle,
     #[menu(id = "close_pane", label = "Close Pane")]
     Close,
+    #[menu(id = "zoom_pane", label = "Zoom Pane")]
+    Zoom,
+    #[menu(id = "select_pane_left", label = "Select Left Pane")]
+    SelectLeft,
+    #[menu(id = "select_pane_right", label = "Select Right Pane")]
+    SelectRight,
+    #[menu(id = "select_pane_up", label = "Select Up Pane")]
+    SelectUp,
+    #[menu(id = "select_pane_down", label = "Select Down Pane")]
+    SelectDown,
+    #[menu(id = "swap_pane_prev", label = "Swap Pane Previous")]
+    SwapPrev,
+    #[menu(id = "swap_pane_next", label = "Swap Pane Next")]
+    SwapNext,
+    #[menu(id = "rotate_forward", label = "Rotate Forward")]
+    RotateForward,
+    #[menu(id = "rotate_backward", label = "Rotate Backward")]
+    RotateBackward,
 }
 
 #[derive(OsSubMenu, DefaultKeyBindings, Debug, Clone, Copy, PartialEq, Eq, Default)]
