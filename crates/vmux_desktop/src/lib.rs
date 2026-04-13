@@ -14,7 +14,8 @@ use bevy::window::{CompositeAlphaMode, Window as NativeWindow, WindowPlugin};
 use {
     browser::BrowserPlugin, command::CommandPlugin, keybinding::KeyBindingPlugin,
     layout::LayoutPlugin, os_menu::OsMenuPlugin, scene::ScenePlugin, settings::SettingsPlugin,
-    vmux_header::HeaderPlugin,
+    vmux_header::HeaderPlugin, vmux_side_sheet::SideSheetWebviewPlugin,
+    vmux_webview_app::WebviewAppRegistryPlugin,
 };
 
 pub struct VmuxPlugin;
@@ -46,9 +47,11 @@ impl Plugin for VmuxPlugin {
             KeyBindingPlugin,
             ScenePlugin,
             OsMenuPlugin,
-            LayoutPlugin,
-            BrowserPlugin,
+            WebviewAppRegistryPlugin,
             HeaderPlugin,
+            SideSheetWebviewPlugin,
+            BrowserPlugin,
+            LayoutPlugin,
         ));
     }
 }

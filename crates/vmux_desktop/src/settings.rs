@@ -102,6 +102,26 @@ pub struct BrowserSettings {
 pub struct LayoutSettings {
     pub window: WindowSettings,
     pub pane: PaneSettings,
+    #[serde(default)]
+    pub side_sheet: SideSheetSettings,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SideSheetSettings {
+    #[serde(default = "default_side_sheet_width")]
+    pub width: f32,
+}
+
+impl Default for SideSheetSettings {
+    fn default() -> Self {
+        Self {
+            width: default_side_sheet_width(),
+        }
+    }
+}
+
+fn default_side_sheet_width() -> f32 {
+    280.0
 }
 
 #[derive(Clone, Debug, Deserialize)]

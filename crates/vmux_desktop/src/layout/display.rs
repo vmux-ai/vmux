@@ -2,10 +2,12 @@ use crate::{
     browser::{browser_bundle, Browser},
     layout::pane::{Active, Pane, PaneSplit, leaf_pane_bundle},
     layout::rounded::{RoundedCorners, RoundedMaterial},
+    layout::side_sheet::SideSheet,
     scene::MainCamera,
     settings::{AppSettings, load_settings},
     unit::{PIXELS_PER_METER, WindowExt},
 };
+use vmux_webview_app::WebviewAppEmbedSet;
 use bevy::{
     prelude::*,
     render::alpha::AlphaMode,
@@ -18,6 +20,7 @@ use vmux_header::{HEADER_HEIGHT_PX, HEADER_WEBVIEW_URL, Header, HeaderBundle};
 pub(crate) const WEBVIEW_Z_MAIN: f32 = 0.12;
 pub(crate) const WEBVIEW_Z_OUTLINE: f32 = 0.13;
 pub(crate) const WEBVIEW_Z_HEADER: f32 = 0.125;
+pub(crate) const WEBVIEW_Z_SIDE_SHEET: f32 = 0.125;
 pub(crate) const WEBVIEW_MESH_DEPTH_BIAS: f32 = -4.0;
 
 pub(crate) struct DisplayPlugin;
@@ -29,7 +32,8 @@ impl Plugin for DisplayPlugin {
             (setup, fit_display_glass_to_window)
                 .chain()
                 .after(load_settings)
-                .after(crate::scene::setup),
+                .after(crate::scene::setup)
+                .after(WebviewAppEmbedSet),
         )
         .add_systems(PostUpdate, fit_display_glass_to_window);
     }
@@ -98,17 +102,48 @@ fn setup(
                 position_type: PositionType::Relative,
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(settings.layout.window.padding)),
+                row_gap: Val::Px(settings.layout.pane.gap),
                 ..default()
             },
             ui_target: UiTargetCamera(*main_camera),
         },
         children![
             (
+                SideSheet,
+                HostWindow(pw),
+                Browser,
+                Node {
+                    width: Val::Px(settings.layout.side_sheet.width),
+                    flex_shrink: 0.0,
+                    display: Display::None,
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(settings.layout.window.padding),
+                    top: Val::Px(settings.layout.window.padding),
+                    bottom: Val::Px(settings.layout.window.padding),
+                    ..default()
+                },
+                ZIndex(2),
+                WebviewSource::new("vmux://side-sheet/"),
+                Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
+                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
+                    base: StandardMaterial {
+                        unlit: true,
+                        alpha_mode: AlphaMode::Blend,
+                        depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
+                        ..default()
+                    },
+                    ..default()
+                })),
+                WebviewSize(Vec2::new(settings.layout.side_sheet.width, 720.0)),
+                Transform::default(),
+                GlobalTransform::default(),
+                Visibility::Hidden,
+            ),
+            (
                 ZIndex(1),
                 HostWindow(pw),
                 Browser,
                 Node {
-                    width: Val::Percent(100.0),
                     height: Val::Px(HEADER_HEIGHT_PX),
                     flex_shrink: 0.0,
                     ..default()
@@ -117,15 +152,17 @@ fn setup(
                     marker: Header,
                     source: WebviewSource::new(HEADER_WEBVIEW_URL),
                     mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-                    material: MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                        base: StandardMaterial {
-                            unlit: true,
-                            alpha_mode: AlphaMode::Blend,
-                            depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
+                    material: MeshMaterial3d(webview_mt.add(
+                        WebviewExtendStandardMaterial {
+                            base: StandardMaterial {
+                                unlit: true,
+                                alpha_mode: AlphaMode::Blend,
+                                depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
+                                ..default()
+                            },
                             ..default()
                         },
-                        ..default()
-                    })),
+                    )),
                     webview_size: WebviewSize(Vec2::new(1280.0, HEADER_HEIGHT_PX)),
                 },
             ),
@@ -137,7 +174,6 @@ fn setup(
                 Transform::default(),
                 GlobalTransform::default(),
                 Node {
-                    width: Val::Percent(100.0),
                     flex_grow: 1.0,
                     min_height: Val::Px(0.0),
                     column_gap: Val::Px(settings.layout.pane.gap),
@@ -147,7 +183,11 @@ fn setup(
                 children![(
                     leaf_pane_bundle(),
                     Active,
-                    children![browser_bundle(&mut meshes, &mut webview_mt, startup_url)],
+                    children![browser_bundle(
+                        &mut meshes,
+                        &mut webview_mt,
+                        startup_url
+                    )],
                 )],
             ),
         ],

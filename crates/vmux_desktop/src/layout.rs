@@ -4,12 +4,14 @@ pub(crate) mod rounded;
 
 pub(crate) mod display;
 pub(crate) mod pane;
+pub(crate) mod side_sheet;
 
 use bevy::prelude::*;
 use display::DisplayPlugin;
 use outline::OutlinePlugin;
 use pane::PanePlugin;
 use rounded::RoundedMaterialPlugin;
+use side_sheet::SideSheetPlugin;
 use tab::TabPlugin;
 use vmux_webview_app::JsEmitUiReadyPlugin;
 
@@ -26,6 +28,7 @@ impl Plugin for LayoutPlugin {
             TabPlugin,
             OutlinePlugin,
             RoundedMaterialPlugin,
+            SideSheetPlugin,
         ));
     }
 }

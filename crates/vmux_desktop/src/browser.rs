@@ -1,7 +1,11 @@
 use crate::{
     layout::{
-        display::{DisplayGlass, WEBVIEW_MESH_DEPTH_BIAS, WEBVIEW_Z_MAIN, WEBVIEW_Z_HEADER},
-        pane::{Active, Pane},
+        display::{
+            DisplayGlass, WEBVIEW_MESH_DEPTH_BIAS, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN,
+            WEBVIEW_Z_SIDE_SHEET,
+        },
+        pane::{Active, Pane, PaneSplit},
+        side_sheet::SideSheet,
     },
     settings::AppSettings,
 };
@@ -19,23 +23,26 @@ use vmux_header::{
     Header, PageMetadata,
     event::{TABS_EVENT, TabRow, TabsHostEvent},
 };
-use vmux_webview_app::UiReady;
+use vmux_side_sheet::event::{PANE_TREE_EVENT, PaneNode, PaneTreeEvent, TabNode};
+use vmux_webview_app::{UiReady, WebviewAppRegistry};
 
 pub(crate) struct BrowserPlugin;
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
+        let embedded_hosts = app
+            .world()
+            .resource::<WebviewAppRegistry>()
+            .embedded_hosts();
         app.add_plugins(CefPlugin {
             root_cache_path: cef_root_cache_path(),
-            embedded_hosts: CefEmbeddedHosts(vec![CefEmbeddedHost {
-                host: "header".into(),
-                default_document: "header/index.html".into(),
-            }]),
+            embedded_hosts,
             ..default()
         })
         .add_systems(
             Update,
-            push_tabs_host_emit.after(vmux_header::system::apply_chrome_state_from_cef),
+            (push_tabs_host_emit, push_pane_tree_emit)
+                .after(vmux_header::system::apply_chrome_state_from_cef),
         )
         .add_systems(
             PostUpdate,
@@ -101,6 +108,7 @@ fn sync_keyboard_target(
     active_pane: Query<Entity, With<Active>>,
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
+    side_sheet_q: Query<(), With<SideSheet>>,
     mut browser_q: Query<(Entity, &mut Visibility, Has<CefKeyboardTarget>), With<Browser>>,
     mut commands: Commands,
 ) {
@@ -108,7 +116,7 @@ fn sync_keyboard_target(
         return;
     };
     for (browser_e, mut visibility, has_kb) in &mut browser_q {
-        if status_q.contains(browser_e) {
+        if status_q.contains(browser_e) || side_sheet_q.contains(browser_e) {
             continue;
         }
         *visibility = Visibility::Inherited;
@@ -132,11 +140,13 @@ fn sync_children_to_ui(
     mut browser_q: Query<
         (
             &mut Transform,
+            &mut Visibility,
             &ComputedNode,
             &UiGlobalTransform,
             &ChildOf,
             &mut WebviewSize,
             Option<&Header>,
+            Option<&SideSheet>,
         ),
         With<Browser>,
     >,
@@ -147,7 +157,7 @@ fn sync_children_to_ui(
     let pad = glass_node.padding;
     let glass_size_px = glass_node.size + pad.min_inset + pad.max_inset;
 
-    for (mut tf, self_computed, self_ui_gt, child_of, mut webview_size, status) in
+    for (mut tf, mut visibility, self_computed, self_ui_gt, child_of, mut webview_size, status, side_sheet) in
         browser_q.iter_mut()
     {
         let parent = child_of.get();
@@ -162,8 +172,10 @@ fn sync_children_to_ui(
 
         let size_px = computed.size;
         if size_px.x <= 0.0 || size_px.y <= 0.0 {
+            *visibility = Visibility::Hidden;
             continue;
         }
+        *visibility = Visibility::Inherited;
 
         let sx = size_px.x / glass_size_px.x;
         let sy = size_px.y / glass_size_px.y;
@@ -177,6 +189,8 @@ fn sync_children_to_ui(
         let ty = -delta_px.y / glass_size_px.y;
         let z = if status.is_some() {
             WEBVIEW_Z_HEADER
+        } else if side_sheet.is_some() {
+            WEBVIEW_Z_SIDE_SHEET
         } else if parent != glass_entity {
             WEBVIEW_Z_MAIN
         } else {
@@ -221,6 +235,10 @@ fn sync_webview_pane_corner_clip(
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     tabs: Query<(&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>), With<Browser>>,
     status: Query<(&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>), With<Header>>,
+    side_sheet: Query<
+        (&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>),
+        With<SideSheet>,
+    >,
 ) {
     let r = settings.layout.pane.radius;
     for (size, mat_h) in &tabs {
@@ -237,6 +255,13 @@ fn sync_webview_pane_corner_clip(
             mat.extension.pane_corner_clip = Vec4::new(r, w, h, 2.0);
         }
     }
+    for (size, mat_h) in &side_sheet {
+        let w = size.0.x.max(1.0e-6);
+        let h = size.0.y.max(1.0e-6);
+        if let Some(mat) = materials.get_mut(mat_h.id()) {
+            mat.extension.pane_corner_clip = Vec4::new(r, w, h, 0.0);
+        }
+    }
 }
 
 fn sync_osr_webview_focus(
@@ -244,6 +269,7 @@ fn sync_osr_webview_focus(
     webviews: Query<Entity, With<WebviewSource>>,
     keyboard_target: Query<Entity, (With<WebviewSource>, With<CefKeyboardTarget>)>,
     status_chrome: Query<Entity, (With<Header>, With<Browser>)>,
+    side_sheet_chrome: Query<Entity, (With<SideSheet>, With<Browser>)>,
     mut ready: Local<Vec<Entity>>,
     mut auxiliary: Local<Vec<Entity>>,
 ) {
@@ -264,6 +290,9 @@ fn sync_osr_webview_focus(
     auxiliary.extend(ready.iter().copied().filter(|&e| e != active));
     browsers.sync_osr_focus_to_active_pane(Some(active), auxiliary.as_slice());
     for e in status_chrome.iter() {
+        browsers.set_osr_not_hidden(&e);
+    }
+    for e in side_sheet_chrome.iter() {
         browsers.set_osr_not_hidden(&e);
     }
 }
@@ -328,6 +357,48 @@ fn push_tabs_host_emit(
         return;
     }
     commands.trigger(HostEmitEvent::new(status_e, TABS_EVENT, &ron_body));
+    *last = ron_body;
+}
+
+fn push_pane_tree_emit(
+    mut commands: Commands,
+    browsers: NonSend<Browsers>,
+    side_sheet: Option<Single<Entity, (With<SideSheet>, With<UiReady>)>>,
+    leaf_panes: Query<(Entity, Has<Active>), (With<Pane>, Without<PaneSplit>)>,
+    browser_q: Query<(&PageMetadata, &ChildOf), With<Browser>>,
+    mut last: Local<String>,
+) {
+    let Some(side_sheet) = side_sheet else {
+        return;
+    };
+    let side_sheet_e = *side_sheet;
+    if !browsers.has_browser(side_sheet_e) || !browsers.host_emit_ready(&side_sheet_e) {
+        return;
+    }
+    let mut panes: Vec<PaneNode> = Vec::new();
+    for (pane_entity, is_active) in &leaf_panes {
+        let tabs: Vec<TabNode> = browser_q
+            .iter()
+            .filter(|(_, child_of)| child_of.get() == pane_entity)
+            .map(|(meta, _)| TabNode {
+                title: meta.title.clone(),
+                url: meta.url.clone(),
+                favicon_url: meta.favicon_url.clone(),
+            })
+            .collect();
+        panes.push(PaneNode {
+            id: pane_entity.to_bits(),
+            is_active,
+            tabs,
+        });
+    }
+    panes.sort_by_key(|p| p.id);
+    let payload = PaneTreeEvent { panes };
+    let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
+    if ron_body.as_str() == last.as_str() {
+        return;
+    }
+    commands.trigger(HostEmitEvent::new(side_sheet_e, PANE_TREE_EVENT, &ron_body));
     *last = ron_body;
 }
 

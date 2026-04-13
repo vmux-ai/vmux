@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en" class="dark h-full">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width"/>
+  <title>vmux side sheet</title>
+  <style>
+    html.dark, html.dark body { height: 100%; margin: 0; min-height: 0; }
+    body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+    #main { flex: 1 1 0%; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+  </style>
+  <link rel="modulepreload" href="./wasm/vmux_side_sheet_app.js" crossorigin="anonymous"/>
+  <link rel="preload" href="./wasm/vmux_side_sheet_app_bg.wasm" as="fetch" type="application/wasm" crossorigin="anonymous"/>
+  <link rel="stylesheet" href="./assets/index.css" crossorigin="anonymous"/>
+  <link rel="stylesheet" href="./assets/theme.css" crossorigin="anonymous"/>
+</head>
+<body class="m-0 flex h-full min-h-0 flex-col overflow-hidden bg-card p-0 text-foreground antialiased">
+  <div id="main" class="flex min-h-0 min-w-0 flex-1 flex-col"></div>
+  <script type="module" async src="./wasm/vmux_side_sheet_app.js"></script>
+</body>
+</html>

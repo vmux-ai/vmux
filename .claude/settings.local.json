@@ -25,7 +25,8 @@
       "Bash(ls crates/vmux_header/dist/wasm/vmux_header_app*)",
       "Read(//Users/js/.cargo/bin/**)",
       "Read(//opt/homebrew/bin/**)",
-      "Read(//usr/local/bin/**)"
+      "Read(//usr/local/bin/**)",
+      "Bash(grep -E \"\\\\.\\(rs|ron\\)$\")"
     ]
   }
 }

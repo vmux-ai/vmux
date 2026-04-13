@@ -8253,6 +8253,7 @@ dependencies = [
  "vmux_header",
  "vmux_history",
  "vmux_macro",
+ "vmux_side_sheet",
  "vmux_webview_app",
 ]
 
@@ -8294,6 +8295,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "vmux_side_sheet"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
+ "dioxus",
+ "serde",
+ "vmux_ui",
+ "vmux_webview_app",
+ "wasm-bindgen",
 ]
 
 [[package]]

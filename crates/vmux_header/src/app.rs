@@ -45,28 +45,7 @@ pub fn App() -> Element {
                     span { class: "text-ui text-destructive", "{err}" }
                 }
             } else {
-                div { class: "flex min-h-0 min-w-0 flex-1 items-center",
-                    div { class: "flex min-h-0 min-w-0 flex-1 flex-row items-stretch gap-1 overflow-x-auto px-3 py-2",
-                        for row in tabs {
-                            div {
-                                class: if row.is_active {
-                                    "flex max-w-40 min-w-0 shrink-0 items-center rounded-md border border-primary bg-muted px-2 py-1 shadow-sm"
-                                } else {
-                                    "flex max-w-40 min-w-0 shrink-0 items-center rounded-md border border-transparent px-2 py-1 text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-                                },
-                                span {
-                                    class: if row.is_active {
-                                        "truncate text-ui font-medium text-foreground"
-                                    } else {
-                                        "truncate text-ui"
-                                    },
-                                    "{row.title}"
-                                }
-                            }
-                        }
-                    }
-                }
-                div { class: "flex min-w-0 shrink-0 items-center justify-center px-3 py-2",
+                div { class: "flex min-h-0 min-w-0 flex-1 items-center justify-center",
                     if let Some(tab) = active_row.as_ref() {
                         div { class: "flex min-w-0 max-w-md items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 shadow-sm",
                             if let Some(src) = favicon_src.as_ref() {
@@ -81,7 +60,6 @@ pub fn App() -> Element {
                         }
                     }
                 }
-                div { class: "min-w-0 flex-1" }
             }
         }
     }

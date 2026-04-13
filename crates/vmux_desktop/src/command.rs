@@ -27,8 +27,18 @@ pub enum AppCommand {
     #[menu(label = "Tab")]
     Tab(TabCommand),
 
+    #[menu(label = "Side Sheet")]
+    SideSheet(SideSheetCommand),
+
     #[menu(label = "Camera")]
     Camera(CameraCommand),
+}
+
+#[derive(OsSubMenu, DefaultKeyBindings, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SideSheetCommand {
+    #[default]
+    #[menu(id = "toggle_side_sheet", label = "Toggle Side Sheet")]
+    Toggle,
 }
 
 #[derive(OsSubMenu, DefaultKeyBindings, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -42,11 +52,9 @@ pub enum SpaceCommand {
 pub enum TabCommand {
     #[default]
     #[menu(id = "tab_next", label = "Select Next Tab")]
-    #[bind(direct = "Ctrl+Tab")]
     Next,
 
     #[menu(id = "tab_previous", label = "Select Previous Tab")]
-    #[bind(direct = "Shift+Ctrl+Tab")]
     Previous,
 }
 
@@ -54,16 +62,12 @@ pub enum TabCommand {
 pub enum PaneCommand {
     #[default]
     #[menu(id = "split_v", label = "Split Vertically")]
-    #[bind(chord = "Ctrl+b, %")]
     SplitV,
     #[menu(id = "split_h", label = "Split Horizontally")]
-    #[bind(chord = "Ctrl+b, \"")]
     SplitH,
     #[menu(id = "toggle_pane", label = "Toggle Pane")]
-    #[bind(chord = "Ctrl+b, o")]
     Toggle,
     #[menu(id = "close_pane", label = "Close Pane")]
-    #[bind(chord = "Ctrl+b, x")]
     Close,
 }
 

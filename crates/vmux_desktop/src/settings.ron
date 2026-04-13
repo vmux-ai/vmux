@@ -24,6 +24,9 @@
                 ),
             ),
         ),
+        side_sheet: (
+            width: 280.0,
+        ),
     ),
     keybindings: (
         chord_timeout_ms: 1000,
@@ -34,6 +37,7 @@
             (command: "split_h", binding: Chord((key: "b", ctrl: true), (key: "\""))),
             (command: "toggle_pane", binding: Chord((key: "b", ctrl: true), (key: "o"))),
             (command: "close_pane", binding: Chord((key: "b", ctrl: true), (key: "x"))),
+            (command: "toggle_side_sheet", binding: Chord((key: "b", ctrl: true), (key: "s"))),
         ],
     ),
 )

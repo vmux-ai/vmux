@@ -4,9 +4,7 @@ use bevy::prelude::{
     SystemSet,
 };
 use bevy_cef::prelude::{JsEmitEventPlugin, Receive};
-use bevy_cef_core::prelude::{
-    CefEmbeddedHost, CefEmbeddedHosts, CefEmbeddedPageConfig, try_set_cef_embedded_page_config,
-};
+use bevy_cef_core::prelude::{CefEmbeddedHost, CefEmbeddedHosts};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -38,46 +36,52 @@ impl WebviewAppConfig {
     }
 }
 
-#[derive(Clone, Debug, Resource)]
-struct WebviewAppLoaded {
+#[derive(Clone, Debug)]
+struct WebviewAppEntry {
     manifest_dir: PathBuf,
     bundle_dir: String,
     host: String,
+    index_file_path: String,
 }
 
-pub struct WebviewAppPlugin {
-    manifest_dir: PathBuf,
-    config: WebviewAppConfig,
+#[derive(Clone, Debug, Resource, Default)]
+pub struct WebviewAppRegistry {
+    entries: Vec<WebviewAppEntry>,
 }
 
-impl WebviewAppPlugin {
-    pub fn new(manifest_dir: impl Into<PathBuf>, config: WebviewAppConfig) -> Self {
-        Self {
+impl WebviewAppRegistry {
+    pub fn register(&mut self, manifest_dir: impl Into<PathBuf>, config: &WebviewAppConfig) {
+        self.entries.push(WebviewAppEntry {
             manifest_dir: manifest_dir.into(),
-            config,
-        }
+            bundle_dir: config.bundle_dir.to_string(),
+            host: config.host.to_string(),
+            index_file_path: config.index_file_path.to_string(),
+        });
+    }
+
+    pub fn embedded_hosts(&self) -> CefEmbeddedHosts {
+        CefEmbeddedHosts(
+            self.entries
+                .iter()
+                .map(|e| {
+                    let index = e.index_file_path.replace('\\', "/");
+                    let index_norm = index.trim_start_matches('/');
+                    CefEmbeddedHost {
+                        host: e.host.clone(),
+                        default_document: embedded_default_document(&e.host, index_norm),
+                    }
+                })
+                .collect(),
+        )
     }
 }
 
-impl Plugin for WebviewAppPlugin {
+pub struct WebviewAppRegistryPlugin;
+
+impl Plugin for WebviewAppRegistryPlugin {
     fn build(&self, app: &mut App) {
-        let index_owned = self.config.index_file_path.replace('\\', "/");
-        let index_norm = index_owned.trim_start_matches('/');
-        let default_document = embedded_default_document(self.config.host, index_norm);
-        try_set_cef_embedded_page_config(CefEmbeddedPageConfig::new(
-            self.config.scheme,
-            CefEmbeddedHosts(vec![CefEmbeddedHost {
-                host: self.config.host.into(),
-                default_document,
-            }]),
-        ));
-        let loaded = WebviewAppLoaded {
-            manifest_dir: self.manifest_dir.clone(),
-            bundle_dir: self.config.bundle_dir.to_string(),
-            host: self.config.host.to_string(),
-        };
-        app.configure_sets(Startup, WebviewAppEmbedSet)
-            .insert_resource(loaded)
+        app.init_resource::<WebviewAppRegistry>()
+            .configure_sets(Startup, WebviewAppEmbedSet)
             .add_systems(
                 Startup,
                 embed_webview_app_static_assets.in_set(WebviewAppEmbedSet),
@@ -109,28 +113,30 @@ fn embedded_default_document(host: &str, index_file_path: &str) -> String {
 }
 
 fn embed_webview_app_static_assets(
-    loaded: Res<WebviewAppLoaded>,
+    registry: Res<WebviewAppRegistry>,
     mut reg: ResMut<EmbeddedAssetRegistry>,
 ) {
-    let bundle_root = loaded.manifest_dir.join(&loaded.bundle_dir);
-    if !bundle_root.is_dir() {
-        bevy::log::warn!("WebviewAppPlugin: skip {:?}: not a directory", bundle_root);
-        return;
-    }
-    let host_trim = loaded.host.trim().trim_matches('/');
-    let prefix = if host_trim.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(host_trim))
-    };
-    if let Err(e) = embed_dir_recursive(
-        &mut reg,
-        &bundle_root,
-        &bundle_root,
-        None,
-        prefix.as_deref(),
-    ) {
-        bevy::log::error!("WebviewAppPlugin: failed to embed {:?}: {e}", bundle_root);
+    for entry in &registry.entries {
+        let bundle_root = entry.manifest_dir.join(&entry.bundle_dir);
+        if !bundle_root.is_dir() {
+            bevy::log::warn!("WebviewAppPlugin: skip {:?}: not a directory", bundle_root);
+            continue;
+        }
+        let host_trim = entry.host.trim().trim_matches('/');
+        let prefix = if host_trim.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(host_trim))
+        };
+        if let Err(e) = embed_dir_recursive(
+            &mut reg,
+            &bundle_root,
+            &bundle_root,
+            None,
+            prefix.as_deref(),
+        ) {
+            bevy::log::error!("WebviewAppPlugin: failed to embed {:?}: {e}", bundle_root);
+        }
     }
 }
 

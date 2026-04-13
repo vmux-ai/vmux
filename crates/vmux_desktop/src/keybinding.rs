@@ -1,5 +1,5 @@
 use crate::command::{AppCommand, WriteAppCommands};
-use crate::settings::AppSettings;
+use crate::settings::{AppSettings, load_settings};
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use std::time::Instant;
@@ -8,7 +8,7 @@ pub struct KeyBindingPlugin;
 
 impl Plugin for KeyBindingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, init_keybindings)
+        app.add_systems(Startup, init_keybindings.after(load_settings))
             .add_systems(Update, process_key_input.in_set(WriteAppCommands));
     }
 }
@@ -54,7 +54,7 @@ impl Default for ChordState {
 
 fn init_keybindings(mut commands: Commands, settings: Option<Res<AppSettings>>) {
     let mut map = KeyBindingMap {
-        bindings: AppCommand::default_key_bindings(),
+        bindings: Vec::new(),
         chord_timeout_ms: 1000,
     };
 
@@ -62,11 +62,7 @@ fn init_keybindings(mut commands: Commands, settings: Option<Res<AppSettings>>) 
         map.chord_timeout_ms = settings.keybindings.chord_timeout_ms;
         for entry in &settings.keybindings.bindings {
             if let Some(binding) = entry.binding.to_key_binding() {
-                if let Some(pos) = map.bindings.iter().position(|(_, id)| *id == entry.command) {
-                    map.bindings[pos] = (binding, entry.command.clone());
-                } else {
-                    map.bindings.push((binding, entry.command.clone()));
-                }
+                map.bindings.push((binding, entry.command.clone()));
             }
         }
     }
