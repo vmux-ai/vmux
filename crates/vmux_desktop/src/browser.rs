@@ -1,4 +1,5 @@
 use crate::{
+    command::{AppCommand, BrowserCommand, ReadAppCommands},
     layout::{
         display::{
             DisplayGlass, WEBVIEW_MESH_DEPTH_BIAS, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN,
@@ -10,7 +11,7 @@ use crate::{
     settings::AppSettings,
 };
 use bevy::{
-    ecs::relationship::Relationship,
+    ecs::{message::Messages, relationship::Relationship},
     prelude::*,
     render::alpha::AlphaMode,
     ui::{UiGlobalTransform, UiSystems},
@@ -21,7 +22,7 @@ use bevy_cef_core::prelude::RenderTextureMessage;
 use std::{collections::HashSet, path::PathBuf};
 use vmux_header::{
     Header, PageMetadata,
-    event::{TABS_EVENT, TabRow, TabsHostEvent},
+    event::{HeaderCommandEvent, TABS_EVENT, TabRow, TabsHostEvent},
 };
 use vmux_side_sheet::event::{PANE_TREE_EVENT, PaneNode, PaneTreeEvent, TabNode};
 use vmux_webview_app::{UiReady, WebviewAppRegistry};
@@ -39,6 +40,12 @@ impl Plugin for BrowserPlugin {
             embedded_hosts,
             ..default()
         })
+        .add_plugins(JsEmitEventPlugin::<HeaderCommandEvent>::default())
+        .add_observer(on_header_command_emit)
+        .add_systems(
+            Update,
+            handle_browser_commands.in_set(ReadAppCommands),
+        )
         .add_systems(
             Update,
             (push_tabs_host_emit, push_pane_tree_emit)
@@ -404,6 +411,47 @@ fn push_pane_tree_emit(
     }
     commands.trigger(HostEmitEvent::new(side_sheet_e, PANE_TREE_EVENT, &ron_body));
     *last = ron_body;
+}
+
+fn handle_browser_commands(
+    mut reader: MessageReader<AppCommand>,
+    active_pane: Query<Entity, With<Active>>,
+    browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
+    mut commands: Commands,
+) {
+    for cmd in reader.read() {
+        let AppCommand::Browser(browser_cmd) = *cmd else {
+            continue;
+        };
+        let Ok(active) = active_pane.single() else {
+            continue;
+        };
+        let Some(webview) = browsers
+            .iter()
+            .find(|(_, co)| co.get() == active)
+            .map(|(e, _)| e)
+        else {
+            continue;
+        };
+        match browser_cmd {
+            BrowserCommand::PrevPage => commands.trigger(RequestGoBack { webview }),
+            BrowserCommand::NextPage => commands.trigger(RequestGoForward { webview }),
+            BrowserCommand::Reload => commands.trigger(RequestReload { webview }),
+        }
+    }
+}
+
+fn on_header_command_emit(
+    trigger: On<Receive<HeaderCommandEvent>>,
+    mut messages: ResMut<Messages<AppCommand>>,
+) {
+    let cmd = match trigger.event().payload.header_command.as_str() {
+        "prev_page" => BrowserCommand::PrevPage,
+        "next_page" => BrowserCommand::NextPage,
+        "reload" => BrowserCommand::Reload,
+        _ => return,
+    };
+    messages.write(AppCommand::Browser(cmd));
 }
 
 fn cef_root_cache_path() -> Option<String> {

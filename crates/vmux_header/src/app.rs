@@ -1,8 +1,9 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_header::event::{TABS_EVENT, TabRow, TabsHostEvent};
-use vmux_ui::hooks::use_event_listener;
+use vmux_header::event::{HeaderCommandEvent, TABS_EVENT, TabRow, TabsHostEvent};
+use vmux_ui::components::icon::Icon;
+use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener};
 
 fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
     let s = page_url.trim();
@@ -35,17 +36,37 @@ pub fn App() -> Element {
     let favicon_src = active_row.as_ref().and_then(favicon_src_for_tab);
 
     rsx! {
-        div { class: "box-border flex min-h-0 min-w-0 flex-1 border-b border-border bg-card text-foreground",
+        div { class: "box-border grid min-h-0 min-w-0 flex-1 grid-cols-3 items-center gap-2 border-b border-border bg-card px-2 text-foreground",
             if (listener.is_loading)() {
-                div { class: "flex w-full items-center px-3 py-2",
+                div { class: "col-span-3 flex w-full items-center px-3 py-2",
                     span { class: "text-ui text-muted-foreground", "Connecting…" }
                 }
             } else if let Some(err) = (listener.error)() {
-                div { class: "flex w-full items-center px-3 py-2",
+                div { class: "col-span-3 flex w-full items-center px-3 py-2",
                     span { class: "text-ui text-destructive", "{err}" }
                 }
             } else {
-                div { class: "flex min-h-0 min-w-0 flex-1 items-center justify-center",
+                div { class: "flex min-w-0 items-center gap-1 justify-self-start",
+                    NavButton { label: "Back", command: "prev_page",
+                        Icon { class: "h-4 w-4",
+                            path { d: "M19 12H5" }
+                            path { d: "M12 19l-7-7 7-7" }
+                        }
+                    }
+                    NavButton { label: "Forward", command: "next_page",
+                        Icon { class: "h-4 w-4",
+                            path { d: "M5 12h14" }
+                            path { d: "M12 5l7 7-7 7" }
+                        }
+                    }
+                    NavButton { label: "Reload", command: "reload",
+                        Icon { class: "h-4 w-4",
+                            path { d: "M21 12a9 9 0 11-3-6.7L21 8" }
+                            path { d: "M21 3v5h-5" }
+                        }
+                    }
+                }
+                div { class: "flex min-w-0 items-center justify-self-center",
                     if let Some(tab) = active_row.as_ref() {
                         div { class: "flex min-w-0 max-w-md items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 shadow-sm",
                             if let Some(src) = favicon_src.as_ref() {
@@ -60,7 +81,26 @@ pub fn App() -> Element {
                         }
                     }
                 }
+                div { class: "flex min-w-0 items-center gap-1 justify-self-end" }
             }
+        }
+    }
+}
+
+#[component]
+fn NavButton(label: &'static str, command: &'static str, children: Element) -> Element {
+    rsx! {
+        button {
+            r#type: "button",
+            aria_label: label,
+            title: label,
+            class: "flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground",
+            onclick: move |_| {
+                let _ = try_cef_emit_serde(&HeaderCommandEvent {
+                    header_command: command.to_string(),
+                });
+            },
+            {children}
         }
     }
 }

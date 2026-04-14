@@ -5,6 +5,19 @@ use serde::de::DeserializeOwned;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
+#[derive(Resource, Default)]
+pub struct IpcEventRawBuffer(pub Vec<IpcEventRaw>);
+
+fn drain_ipc_events(
+    receiver: ResMut<IpcEventRawReceiver>,
+    mut buffer: ResMut<IpcEventRawBuffer>,
+) {
+    buffer.0.clear();
+    while let Ok(event) = receiver.0.try_recv() {
+        buffer.0.push(event);
+    }
+}
+
 #[derive(Debug, EntityEvent)]
 pub struct Receive<M: Sync + Send + 'static> {
     #[event_target]
@@ -36,7 +49,7 @@ pub struct JsEmitEventPlugin<E: DeserializeOwned>(PhantomData<E>);
 
 impl<E: DeserializeOwned + Send + Sync + 'static> Plugin for JsEmitEventPlugin<E> {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, receive_events::<E>);
+        app.add_systems(Update, receive_events::<E>.after(drain_ipc_events));
     }
 }
 
@@ -48,23 +61,14 @@ impl<E: DeserializeOwned> Default for JsEmitEventPlugin<E> {
 
 fn receive_events<E: DeserializeOwned + Send + Sync + 'static>(
     mut commands: Commands,
-    receiver: ResMut<IpcEventRawReceiver>,
+    buffer: Res<IpcEventRawBuffer>,
 ) {
-    while let Ok(event) = receiver.0.try_recv() {
-        match serde_json::from_str::<E>(&event.payload) {
-            Ok(payload) => {
-                commands.trigger(Receive {
-                    webview: event.webview,
-                    payload,
-                });
-            }
-            Err(e) => {
-                let head: String = event.payload.chars().take(512).collect();
-                bevy::log::warn!(
-                    "bevy_cef: js emit deserialize failed ({e}) webview={:?} payload={head}",
-                    event.webview
-                );
-            }
+    for event in &buffer.0 {
+        if let Ok(payload) = serde_json::from_str::<E>(&event.payload) {
+            commands.trigger(Receive {
+                webview: event.webview,
+                payload,
+            });
         }
     }
 }
@@ -75,7 +79,9 @@ impl Plugin for IpcRawEventPlugin {
     fn build(&self, app: &mut App) {
         let (tx, rx) = async_channel::unbounded();
         app.insert_resource(IpcEventRawSender(tx))
-            .insert_resource(IpcEventRawReceiver(rx));
+            .insert_resource(IpcEventRawReceiver(rx))
+            .init_resource::<IpcEventRawBuffer>()
+            .add_systems(Update, drain_ipc_events);
     }
 }
 

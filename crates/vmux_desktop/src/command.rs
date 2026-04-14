@@ -32,6 +32,9 @@ pub enum AppCommand {
 
     #[menu(label = "Camera")]
     Camera(CameraCommand),
+
+    #[menu(label = "Browser")]
+    Browser(BrowserCommand),
 }
 
 #[derive(OsSubMenu, DefaultKeyBindings, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -93,6 +96,19 @@ pub enum PaneCommand {
     RotateForward,
     #[menu(id = "rotate_backward", label = "Rotate Backward")]
     RotateBackward,
+}
+
+#[derive(OsSubMenu, DefaultKeyBindings, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BrowserCommand {
+    #[default]
+    #[menu(id = "browser_prev_page", label = "Previous Page")]
+    PrevPage,
+
+    #[menu(id = "browser_next_page", label = "Next Page")]
+    NextPage,
+
+    #[menu(id = "browser_reload", label = "Reload")]
+    Reload,
 }
 
 #[derive(OsSubMenu, DefaultKeyBindings, Debug, Clone, Copy, PartialEq, Eq, Default)]
