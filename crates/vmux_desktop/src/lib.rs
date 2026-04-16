@@ -9,7 +9,8 @@ mod unit;
 
 use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
-use bevy::window::{CompositeAlphaMode, Window as NativeWindow, WindowPlugin};
+use bevy::window::{CompositeAlphaMode, PrimaryWindow, Window as NativeWindow, WindowPlugin};
+use bevy::winit::WinitWindows;
 
 use {
     browser::BrowserPlugin, command::CommandPlugin, keybinding::KeyBindingPlugin,
@@ -52,6 +53,35 @@ impl Plugin for VmuxPlugin {
             SideSheetWebviewPlugin,
             BrowserPlugin,
             LayoutPlugin,
-        ));
+        ))
+        .add_systems(Update, fit_window_to_screen.run_if(not(resource_exists::<ScreenFitted>)));
     }
+}
+
+#[derive(Resource)]
+struct ScreenFitted;
+
+fn fit_window_to_screen(
+    winit_windows: Option<NonSend<WinitWindows>>,
+    mut window_q: Query<(Entity, &mut NativeWindow), With<PrimaryWindow>>,
+    mut commands: Commands,
+) {
+    let Some(winit_windows) = winit_windows else {
+        return;
+    };
+    let Ok((entity, mut window)) = window_q.single_mut() else {
+        return;
+    };
+    let Some(winit_win) = winit_windows.get_window(entity) else {
+        return;
+    };
+    let Some(monitor) = winit_win.current_monitor() else {
+        return;
+    };
+    let size = monitor.size();
+    let scale = monitor.scale_factor() as f32;
+    let logical_w = size.width as f32 / scale;
+    let logical_h = size.height as f32 / scale;
+    window.resolution.set(logical_w, logical_h);
+    commands.insert_resource(ScreenFitted);
 }
