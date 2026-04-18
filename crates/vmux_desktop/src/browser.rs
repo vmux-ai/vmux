@@ -406,11 +406,33 @@ fn push_tabs_host_emit(
     *last = ron_body;
 }
 
+fn collect_leaf_panes(
+    root: Entity,
+    all_children: &Query<&Children>,
+    leaf_q: &Query<(), (With<Pane>, Without<PaneSplit>)>,
+) -> Vec<Entity> {
+    let mut result = Vec::new();
+    let mut stack = vec![root];
+    while let Some(entity) = stack.pop() {
+        if leaf_q.contains(entity) {
+            result.push(entity);
+        }
+        if let Ok(children) = all_children.get(entity) {
+            for child in children.iter() {
+                stack.push(child);
+            }
+        }
+    }
+    result
+}
+
 fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     side_sheet: Option<Single<Entity, (With<SideSheet>, With<UiReady>)>>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    active_space: Query<Entity, (With<Active>, With<Space>)>,
+    all_children: Query<&Children>,
+    leaf_pane_q: Query<(), (With<Pane>, Without<PaneSplit>)>,
     active_pane_q: Query<Entity, (With<Active>, With<Pane>)>,
     active_tab_q: Query<Entity, (With<Active>, With<Tab>)>,
     pane_children: Query<&Children, With<Pane>>,
@@ -428,8 +450,13 @@ fn push_pane_tree_emit(
     }
     let active_pane = active_pane_q.single().ok();
 
+    let Ok(space) = active_space.single() else {
+        return;
+    };
+    let space_leaf_panes = collect_leaf_panes(space, &all_children, &leaf_pane_q);
+
     let mut panes: Vec<PaneNode> = Vec::new();
-    for pane_entity in &leaf_panes {
+    for &pane_entity in &space_leaf_panes {
         let is_active = active_pane == Some(pane_entity);
         let mut tabs: Vec<TabNode> = Vec::new();
         let mut tab_index: usize = 0;
