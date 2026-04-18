@@ -8,7 +8,7 @@ use crate::{
 use bevy::{
     ecs::relationship::Relationship,
     prelude::*,
-    ui::FlexDirection,
+    ui::{FlexDirection, UiGlobalTransform},
 };
 use std::time::Instant;
 use bevy_cef::prelude::*;
@@ -28,7 +28,7 @@ impl Plugin for PanePlugin {
         app.init_resource::<PaneHoverIntent>()
             .add_systems(
                 Update,
-                (on_pane_cycle, handle_pane_commands).in_set(ReadAppCommands),
+                (on_pane_select, handle_pane_commands).in_set(ReadAppCommands),
             )
             .add_systems(Update, apply_hover_intent)
             .add_observer(on_pane_added)
@@ -250,40 +250,76 @@ fn handle_pane_commands(
     }
 }
 
-fn on_pane_cycle(
+fn on_pane_select(
     mut reader: MessageReader<AppCommand>,
     active_space: Query<Entity, (With<Active>, With<Space>)>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     active_pane: Query<Entity, (With<Active>, With<Pane>)>,
+    pane_pos_q: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let delta: i32 = match cmd {
-            AppCommand::Pane(PaneCommand::SelectRight) | AppCommand::Pane(PaneCommand::SelectDown) => 1,
-            AppCommand::Pane(PaneCommand::SelectLeft) | AppCommand::Pane(PaneCommand::SelectUp) => -1,
+        let direction: Vec2 = match cmd {
+            AppCommand::Pane(PaneCommand::SelectLeft) => Vec2::new(-1.0, 0.0),
+            AppCommand::Pane(PaneCommand::SelectRight) => Vec2::new(1.0, 0.0),
+            AppCommand::Pane(PaneCommand::SelectUp) => Vec2::new(0.0, -1.0),
+            AppCommand::Pane(PaneCommand::SelectDown) => Vec2::new(0.0, 1.0),
             _ => continue,
         };
         let Ok(space) = active_space.single() else {
             continue;
         };
-        let mut panes = collect_space_leaf_panes(space, &all_children, &leaf_pane_q);
+        let panes = collect_space_leaf_panes(space, &all_children, &leaf_pane_q);
         if panes.len() < 2 {
             continue;
         }
-        panes.sort_by_key(|e| e.to_bits());
-        let Ok(current_pane) = active_pane.single() else {
+        let Ok(current) = active_pane.single() else {
             continue;
         };
-        let Some(pos) = panes.iter().position(|&e| e == current_pane) else {
+        let Ok((cur_node, cur_gt)) = pane_pos_q.get(current) else {
             continue;
         };
-        let n = panes.len() as i32;
-        let idx = (pos as i32 + delta).rem_euclid(n) as usize;
-        let target_pane = panes[idx];
+        let cur_center = cur_gt.transform_point2(Vec2::ZERO);
+        let cur_size = cur_node.size;
 
-        commands.entity(current_pane).remove::<Active>();
-        commands.entity(target_pane).insert(Active);
+        let mut best: Option<(Entity, f32)> = None;
+        for &pane in &panes {
+            if pane == current {
+                continue;
+            }
+            let Ok((_, gt)) = pane_pos_q.get(pane) else {
+                continue;
+            };
+            let center = gt.transform_point2(Vec2::ZERO);
+            let delta = center - cur_center;
+
+            let along = delta.dot(direction);
+            if along <= 0.0 {
+                continue;
+            }
+
+            let cross_axis = Vec2::new(-direction.y, direction.x);
+            let cross = delta.dot(cross_axis).abs();
+            let threshold = if direction.x.abs() > 0.5 {
+                cur_size.y * 0.5
+            } else {
+                cur_size.x * 0.5
+            };
+            if cross > threshold {
+                continue;
+            }
+
+            let dist = delta.length();
+            if best.is_none() || dist < best.unwrap().1 {
+                best = Some((pane, dist));
+            }
+        }
+
+        if let Some((target, _)) = best {
+            commands.entity(current).remove::<Active>();
+            commands.entity(target).insert(Active);
+        }
     }
 }
 
