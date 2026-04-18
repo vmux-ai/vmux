@@ -2,6 +2,7 @@ use crate::{
     browser::browser_bundle,
     command::{AppCommand, ReadAppCommands, TabCommand},
     layout::pane::Pane,
+    layout::space::Space,
     settings::AppSettings,
 };
 use bevy::prelude::*;
@@ -22,10 +23,13 @@ pub(crate) struct Tab;
 pub(crate) struct Active;
 
 pub(crate) fn focused_tab(
+    active_space: &Query<Entity, (With<Active>, With<Space>)>,
+    _space_children: &Query<&Children, With<Space>>,
     active_pane: &Query<Entity, (With<Active>, With<Pane>)>,
     pane_children: &Query<&Children, With<Pane>>,
     active_tabs: &Query<Entity, (With<Active>, With<Tab>)>,
 ) -> Option<Entity> {
+    let _space = active_space.single().ok()?;
     let pane = active_pane.single().ok()?;
     let children = pane_children.get(pane).ok()?;
     children.iter().find(|&e| active_tabs.contains(e))
@@ -49,6 +53,8 @@ pub(crate) fn tab_bundle() -> impl Bundle {
 
 fn handle_tab_commands(
     mut reader: MessageReader<AppCommand>,
+    active_space: Query<Entity, (With<Active>, With<Space>)>,
+    space_children: Query<&Children, With<Space>>,
     active_pane: Query<Entity, (With<Active>, With<Pane>)>,
     pane_children: Query<&Children, With<Pane>>,
     active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
@@ -90,7 +96,7 @@ fn handle_tab_commands(
                 let Ok(pane) = active_pane.single() else {
                     continue;
                 };
-                let Some(active_tab) = focused_tab(&active_pane, &pane_children, &active_tabs) else {
+                let Some(active_tab) = focused_tab(&active_space, &space_children, &active_pane, &pane_children, &active_tabs) else {
                     continue;
                 };
                 let Ok(children) = pane_children.get(pane) else {
