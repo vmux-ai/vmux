@@ -5,12 +5,14 @@ pub(crate) mod rounded;
 pub(crate) mod window;
 pub(crate) mod pane;
 pub(crate) mod side_sheet;
+pub(crate) mod space;
 
 use bevy::prelude::*;
 use focus_ring::FocusRingPlugin;
 use pane::PanePlugin;
 use rounded::RoundedMaterialPlugin;
 use side_sheet::SideSheetPlugin;
+use space::SpacePlugin;
 use tab::TabPlugin;
 use vmux_webview_app::JsEmitUiReadyPlugin;
 use window::WindowPlugin;
@@ -24,6 +26,7 @@ impl Plugin for LayoutPlugin {
         app.add_plugins((
             JsEmitUiReadyPlugin,
             WindowPlugin,
+            SpacePlugin,
             PanePlugin,
             TabPlugin,
             FocusRingPlugin,

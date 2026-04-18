@@ -3,6 +3,7 @@ use crate::{
     layout::pane::{Pane, PaneSplit, leaf_pane_bundle},
     layout::rounded::{RoundedCorners, RoundedMaterial},
     layout::side_sheet::SideSheet,
+    layout::space::space_bundle,
     layout::tab::{Active, tab_bundle},
     scene::MainCamera,
     settings::{AppSettings, load_settings},
@@ -178,29 +179,33 @@ fn setup(
                     ..default()
                 },
                 children![(
-                    Pane,
-                    PaneSplit,
-                    HostWindow(pw),
-                    ZIndex(0),
-                    Transform::default(),
-                    GlobalTransform::default(),
-                    Node {
-                        flex_grow: 1.0,
-                        min_height: Val::Px(0.0),
-                        column_gap: Val::Px(settings.layout.pane.gap),
-                        row_gap: Val::Px(settings.layout.pane.gap),
-                        ..default()
-                    },
+                    space_bundle(),
+                    Active,
                     children![(
-                        leaf_pane_bundle(),
-                        Active,
+                        Pane,
+                        PaneSplit,
+                        HostWindow(pw),
+                        ZIndex(0),
+                        Transform::default(),
+                        GlobalTransform::default(),
+                        Node {
+                            flex_grow: 1.0,
+                            min_height: Val::Px(0.0),
+                            column_gap: Val::Px(settings.layout.pane.gap),
+                            row_gap: Val::Px(settings.layout.pane.gap),
+                            ..default()
+                        },
                         children![(
-                            tab_bundle(),
+                            leaf_pane_bundle(),
                             Active,
-                            children![browser_bundle(
-                                &mut meshes,
-                                &mut webview_mt,
-                                startup_url
+                            children![(
+                                tab_bundle(),
+                                Active,
+                                children![browser_bundle(
+                                    &mut meshes,
+                                    &mut webview_mt,
+                                    startup_url
+                                )],
                             )],
                         )],
                     )],
