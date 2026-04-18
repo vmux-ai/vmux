@@ -7,6 +7,7 @@ use crate::{
         },
         pane::{Pane, PaneSplit},
         side_sheet::SideSheet,
+        space::Space,
         tab::{Active, Tab, focused_tab},
     },
     settings::AppSettings,
@@ -121,6 +122,8 @@ pub(crate) fn browser_bundle(
 }
 
 fn sync_keyboard_target(
+    active_space: Query<Entity, (With<Active>, With<Space>)>,
+    space_children: Query<&Children, With<Space>>,
     active_pane: Query<Entity, (With<Active>, With<Pane>)>,
     pane_children: Query<&Children, With<Pane>>,
     active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
@@ -130,7 +133,7 @@ fn sync_keyboard_target(
     browser_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     mut commands: Commands,
 ) {
-    let Some(active_tab_entity) = focused_tab(&active_pane, &pane_children, &active_tabs) else {
+    let Some(active_tab_entity) = focused_tab(&active_space, &space_children, &active_pane, &pane_children, &active_tabs) else {
         return;
     };
     for (browser_e, has_kb) in &browser_q {
@@ -289,6 +292,8 @@ fn sync_webview_pane_corner_clip(
 fn sync_osr_webview_focus(
     browsers: NonSend<Browsers>,
     webviews: Query<Entity, With<WebviewSource>>,
+    active_space: Query<Entity, (With<Active>, With<Space>)>,
+    space_children: Query<&Children, With<Space>>,
     active_pane: Query<Entity, (With<Active>, With<Pane>)>,
     pane_children_q: Query<&Children, With<Pane>>,
     active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
@@ -306,7 +311,7 @@ fn sync_osr_webview_focus(
     }
     ready.sort_by_key(|e| e.to_bits());
 
-    let active = focused_tab(&active_pane, &pane_children_q, &active_tabs)
+    let active = focused_tab(&active_space, &space_children, &active_pane, &pane_children_q, &active_tabs)
         .and_then(|tab| {
             ready.iter().copied().find(|&b| {
                 child_of_q.get(b).ok().map(|co| co.get()) == Some(tab)
@@ -362,6 +367,8 @@ fn push_tabs_host_emit(
     browsers: NonSend<Browsers>,
     status: Single<Entity, (With<Header>, With<UiReady>)>,
     browser_q: Query<(&PageMetadata, &ChildOf), With<Browser>>,
+    active_space: Query<Entity, (With<Active>, With<Space>)>,
+    space_children: Query<&Children, With<Space>>,
     active_pane_q: Query<Entity, (With<Active>, With<Pane>)>,
     pane_children_q: Query<&Children, With<Pane>>,
     active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
@@ -372,7 +379,7 @@ fn push_tabs_host_emit(
     if !browsers.has_browser(status_e) || !browsers.host_emit_ready(&status_e) {
         return;
     }
-    let Some(active_tab_entity) = focused_tab(&active_pane_q, &pane_children_q, &active_tabs) else {
+    let Some(active_tab_entity) = focused_tab(&active_space, &space_children, &active_pane_q, &pane_children_q, &active_tabs) else {
         return;
     };
     let active_pane = active_pane_q.single().ok();
@@ -466,6 +473,8 @@ fn push_pane_tree_emit(
 
 fn handle_browser_commands(
     mut reader: MessageReader<AppCommand>,
+    active_space: Query<Entity, (With<Active>, With<Space>)>,
+    space_children: Query<&Children, With<Space>>,
     active_pane: Query<Entity, (With<Active>, With<Pane>)>,
     pane_children: Query<&Children, With<Pane>>,
     active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
@@ -476,7 +485,7 @@ fn handle_browser_commands(
         let AppCommand::Browser(browser_cmd) = *cmd else {
             continue;
         };
-        let Some(active) = focused_tab(&active_pane, &pane_children, &active_tabs) else {
+        let Some(active) = focused_tab(&active_space, &space_children, &active_pane, &pane_children, &active_tabs) else {
             continue;
         };
         let Some(webview) = browsers
