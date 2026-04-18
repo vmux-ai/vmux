@@ -126,7 +126,29 @@ fn handle_tab_commands(
                 commands.entity(active_tab).despawn();
                 commands.entity(next).insert(Active);
             }
-            TabCommand::Next | TabCommand::Previous => {}
+            TabCommand::Next | TabCommand::Previous => {
+                let Ok(pane) = active_pane.single() else {
+                    continue;
+                };
+                let Ok(children) = pane_children.get(pane) else {
+                    continue;
+                };
+                let tabs: Vec<Entity> = children
+                    .iter()
+                    .filter(|&e| tab_q.contains(e))
+                    .collect();
+                if tabs.len() < 2 {
+                    continue;
+                }
+                let Some(current) = tabs.iter().position(|&e| active_tabs.contains(e)) else {
+                    continue;
+                };
+                let delta: i32 = if tab_cmd == TabCommand::Next { 1 } else { -1 };
+                let n = tabs.len() as i32;
+                let idx = (current as i32 + delta).rem_euclid(n) as usize;
+                commands.entity(tabs[current]).remove::<Active>();
+                commands.entity(tabs[idx]).insert(Active);
+            }
             TabCommand::SelectIndex1
             | TabCommand::SelectIndex2
             | TabCommand::SelectIndex3
