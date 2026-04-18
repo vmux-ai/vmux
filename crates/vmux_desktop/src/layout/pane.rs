@@ -1,6 +1,6 @@
 use crate::{
     browser::browser_bundle,
-    command::{AppCommand, PaneCommand, ReadAppCommands, TabCommand},
+    command::{AppCommand, PaneCommand, ReadAppCommands},
     layout::space::Space,
     layout::tab::{Active, Tab, tab_bundle},
     settings::AppSettings,
@@ -249,8 +249,8 @@ fn on_pane_cycle(
 ) {
     for cmd in reader.read() {
         let delta: i32 = match cmd {
-            AppCommand::Tab(TabCommand::Next) => 1,
-            AppCommand::Tab(TabCommand::Previous) => -1,
+            AppCommand::Pane(PaneCommand::SelectRight) => 1,
+            AppCommand::Pane(PaneCommand::SelectLeft) => -1,
             _ => continue,
         };
         let Ok(space) = active_space.single() else {
