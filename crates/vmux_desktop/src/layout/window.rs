@@ -2,7 +2,7 @@ use crate::{
     browser::{browser_bundle, Browser},
     layout::pane::{Pane, PaneSplit, leaf_pane_bundle},
     layout::rounded::{RoundedCorners, RoundedMaterial},
-    layout::side_sheet::SideSheet,
+    layout::side_sheet::{SideSheet, SideSheetPosition},
     layout::space::space_bundle,
     layout::tab::{Active, tab_bundle},
     scene::MainCamera,
@@ -60,6 +60,12 @@ pub(crate) struct VmuxWindow;
 #[derive(Component)]
 pub(crate) struct Main;
 
+#[derive(Component)]
+pub(crate) struct BottomBar;
+
+#[derive(Component)]
+pub(crate) struct Modal;
+
 fn setup(
     window: Single<&Window, With<PrimaryWindow>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
@@ -115,6 +121,7 @@ fn setup(
         children![
             (
                 SideSheet,
+                SideSheetPosition::Left,
                 HostWindow(pw),
                 Browser,
                 Node {
@@ -210,6 +217,57 @@ fn setup(
                         )],
                     )],
                 )],
+            ),
+            (
+                BottomBar,
+                Node {
+                    height: Val::Px(0.0),
+                    display: Display::None,
+                    ..default()
+                },
+            ),
+            (
+                SideSheet,
+                SideSheetPosition::Right,
+                Node {
+                    width: Val::Px(280.0),
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(settings.layout.window.padding),
+                    top: Val::Px(settings.layout.window.padding),
+                    bottom: Val::Px(settings.layout.window.padding),
+                    display: Display::None,
+                    ..default()
+                },
+            ),
+            (
+                SideSheet,
+                SideSheetPosition::Bottom,
+                Node {
+                    height: Val::Px(200.0),
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(settings.layout.window.padding),
+                    right: Val::Px(settings.layout.window.padding),
+                    bottom: Val::Px(settings.layout.window.padding),
+                    display: Display::None,
+                    ..default()
+                },
+            ),
+            (
+                Modal,
+                Node {
+                    width: Val::Px(600.0),
+                    height: Val::Px(400.0),
+                    position_type: PositionType::Absolute,
+                    left: Val::Percent(50.0),
+                    top: Val::Percent(50.0),
+                    margin: UiRect {
+                        left: Val::Px(-300.0),
+                        top: Val::Px(-200.0),
+                        ..default()
+                    },
+                    display: Display::None,
+                    ..default()
+                },
             ),
         ],
     ));

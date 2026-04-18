@@ -41,6 +41,9 @@ fn handle_space_commands(
         };
         match space_cmd {
             SpaceCommand::New => {}
+            SpaceCommand::Close => {}
+            SpaceCommand::Next => {}
+            SpaceCommand::Previous => {}
         }
     }
 }

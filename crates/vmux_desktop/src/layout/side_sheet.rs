@@ -22,6 +22,13 @@ impl Plugin for SideSheetPlugin {
 #[derive(Component)]
 pub(crate) struct SideSheet;
 
+#[derive(Component, PartialEq, Eq)]
+pub(crate) enum SideSheetPosition {
+    Left,
+    Right,
+    Bottom,
+}
+
 #[derive(Resource)]
 pub(crate) struct SideSheetOpen(pub bool);
 
@@ -39,7 +46,7 @@ fn handle_side_sheet_toggle(
 fn sync_side_sheet_visibility(
     open: Res<SideSheetOpen>,
     settings: Res<AppSettings>,
-    mut side_sheet_q: Query<(&mut Visibility, &mut Node), With<SideSheet>>,
+    mut side_sheet_q: Query<(&SideSheetPosition, &mut Visibility, &mut Node), With<SideSheet>>,
     mut header_q: Query<&mut Node, (With<Header>, Without<SideSheet>, Without<Main>)>,
     mut main_q: Query<&mut Node, (With<Main>, Without<SideSheet>, Without<Header>)>,
 ) {
@@ -47,7 +54,10 @@ fn sync_side_sheet_visibility(
         return;
     }
     let sheet_total = settings.layout.side_sheet.width + settings.layout.pane.gap;
-    for (mut vis, mut node) in &mut side_sheet_q {
+    for (pos, mut vis, mut node) in &mut side_sheet_q {
+        if *pos != SideSheetPosition::Left {
+            continue;
+        }
         if open.0 {
             *vis = Visibility::Inherited;
             node.display = Display::Flex;

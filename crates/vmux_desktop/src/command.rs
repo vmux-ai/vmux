@@ -49,6 +49,15 @@ pub enum SpaceCommand {
     #[default]
     #[menu(id = "new_space", label = "New Space")]
     New,
+
+    #[menu(id = "close_space", label = "Close Space")]
+    Close,
+
+    #[menu(id = "next_space", label = "Next Space")]
+    Next,
+
+    #[menu(id = "prev_space", label = "Previous Space")]
+    Previous,
 }
 
 #[derive(OsSubMenu, DefaultKeyBindings, Debug, Clone, Copy, PartialEq, Eq, Default)]
