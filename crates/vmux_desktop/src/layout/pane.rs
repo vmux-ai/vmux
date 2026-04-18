@@ -10,18 +10,29 @@ use bevy::{
     prelude::*,
     ui::FlexDirection,
 };
+use std::time::Instant;
 use bevy_cef::prelude::*;
 
 pub(crate) struct PanePlugin;
 
+const HOVER_DEBOUNCE_MS: u64 = 80;
+
+#[derive(Resource, Default)]
+struct PaneHoverIntent {
+    target: Option<Entity>,
+    since: Option<Instant>,
+}
+
 impl Plugin for PanePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (on_pane_cycle, handle_pane_commands).in_set(ReadAppCommands),
-        )
-        .add_observer(on_pane_added)
-        .add_observer(on_pane_hover);
+        app.init_resource::<PaneHoverIntent>()
+            .add_systems(
+                Update,
+                (on_pane_cycle, handle_pane_commands).in_set(ReadAppCommands),
+            )
+            .add_systems(Update, apply_hover_intent)
+            .add_observer(on_pane_added)
+            .add_observer(on_pane_hover);
     }
 }
 
@@ -284,19 +295,50 @@ fn on_pane_hover(
     trigger: On<Pointer<Over>>,
     pane_q: Query<(), (With<Pane>, Without<PaneSplit>)>,
     active_pane: Query<Entity, (With<Active>, With<Pane>)>,
-    mut commands: Commands,
+    mut intent: ResMut<PaneHoverIntent>,
 ) {
     let entity = trigger.entity;
     if !pane_q.contains(entity) {
         return;
     }
+    if active_pane.single().ok() == Some(entity) {
+        intent.target = None;
+        return;
+    }
+    if intent.target != Some(entity) {
+        intent.target = Some(entity);
+        intent.since = Some(Instant::now());
+    }
+}
+
+fn apply_hover_intent(
+    mut intent: ResMut<PaneHoverIntent>,
+    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
+    pane_q: Query<(), (With<Pane>, Without<PaneSplit>)>,
+    mut commands: Commands,
+) {
+    let Some(target) = intent.target else {
+        return;
+    };
+    let Some(since) = intent.since else {
+        return;
+    };
+    if since.elapsed().as_millis() < HOVER_DEBOUNCE_MS as u128 {
+        return;
+    }
+    if !pane_q.contains(target) {
+        intent.target = None;
+        return;
+    }
     if let Ok(current) = active_pane.single() {
-        if current == entity {
+        if current == target {
+            intent.target = None;
             return;
         }
         commands.entity(current).remove::<Active>();
     }
-    commands.entity(entity).insert(Active);
+    commands.entity(target).insert(Active);
+    intent.target = None;
 }
 
 fn collect_space_leaf_panes(
