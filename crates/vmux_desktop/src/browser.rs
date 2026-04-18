@@ -526,6 +526,16 @@ fn handle_browser_commands(
             BrowserCommand::PrevPage => commands.trigger(RequestGoBack { webview }),
             BrowserCommand::NextPage => commands.trigger(RequestGoForward { webview }),
             BrowserCommand::Reload => commands.trigger(RequestReload { webview }),
+            BrowserCommand::HardReload => {}
+            BrowserCommand::Stop => {}
+            BrowserCommand::FocusAddressBar => {}
+            BrowserCommand::Find => {}
+            BrowserCommand::ZoomIn => {}
+            BrowserCommand::ZoomOut => {}
+            BrowserCommand::ZoomReset => {}
+            BrowserCommand::DevTools => {}
+            BrowserCommand::ViewSource => {}
+            BrowserCommand::Print => {}
         }
     }
 }

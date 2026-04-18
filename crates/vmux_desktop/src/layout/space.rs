@@ -46,6 +46,7 @@ fn handle_space_commands(
             SpaceCommand::Close => {}
             SpaceCommand::Next => {}
             SpaceCommand::Previous => {}
+            SpaceCommand::Rename => {}
         }
     }
 }

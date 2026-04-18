@@ -37,8 +37,13 @@ fn handle_side_sheet_toggle(
     mut open: ResMut<SideSheetOpen>,
 ) {
     for cmd in reader.read() {
-        if matches!(cmd, AppCommand::SideSheet(SideSheetCommand::Toggle)) {
-            open.0 = !open.0;
+        match cmd {
+            AppCommand::SideSheet(SideSheetCommand::Toggle) => {
+                open.0 = !open.0;
+            }
+            AppCommand::SideSheet(SideSheetCommand::ToggleRight) => {}
+            AppCommand::SideSheet(SideSheetCommand::ToggleBottom) => {}
+            _ => {}
         }
     }
 }

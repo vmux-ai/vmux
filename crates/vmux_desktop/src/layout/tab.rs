@@ -127,6 +127,20 @@ fn handle_tab_commands(
                 commands.entity(next).insert(Active);
             }
             TabCommand::Next | TabCommand::Previous => {}
+            TabCommand::SelectIndex1
+            | TabCommand::SelectIndex2
+            | TabCommand::SelectIndex3
+            | TabCommand::SelectIndex4
+            | TabCommand::SelectIndex5
+            | TabCommand::SelectIndex6
+            | TabCommand::SelectIndex7
+            | TabCommand::SelectIndex8
+            | TabCommand::SelectLast => {}
+            TabCommand::Reopen
+            | TabCommand::Duplicate
+            | TabCommand::Pin
+            | TabCommand::Mute
+            | TabCommand::MoveToPane => {}
         }
     }
 }

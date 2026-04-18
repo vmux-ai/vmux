@@ -230,6 +230,11 @@ fn handle_pane_commands(
             PaneCommand::SwapNext => {}
             PaneCommand::RotateForward => {}
             PaneCommand::RotateBackward => {}
+            PaneCommand::EqualizeSize => {}
+            PaneCommand::ResizeLeft => {}
+            PaneCommand::ResizeRight => {}
+            PaneCommand::ResizeUp => {}
+            PaneCommand::ResizeDown => {}
         }
     }
 }
