@@ -12,7 +12,8 @@ pub(crate) struct TabPlugin;
 
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, handle_tab_commands.in_set(ReadAppCommands));
+        app.add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
+            .add_systems(PostUpdate, sync_tab_visibility);
     }
 }
 
@@ -198,6 +199,21 @@ fn handle_tab_commands(
             | TabCommand::Pin
             | TabCommand::Mute
             | TabCommand::MoveToPane => {}
+        }
+    }
+}
+
+fn sync_tab_visibility(
+    mut tabs: Query<(Has<Active>, &mut Visibility), With<Tab>>,
+) {
+    for (is_active, mut vis) in &mut tabs {
+        let target = if is_active {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != target {
+            *vis = target;
         }
     }
 }
