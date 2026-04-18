@@ -56,6 +56,9 @@ where
 #[derive(Component)]
 pub(crate) struct VmuxWindow;
 
+#[derive(Component)]
+pub(crate) struct Main;
+
 fn setup(
     window: Single<&Window, With<PrimaryWindow>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
@@ -168,29 +171,37 @@ fn setup(
                 },
             ),
             (
-                Pane,
-                PaneSplit,
-                HostWindow(pw),
-                ZIndex(0),
-                Transform::default(),
-                GlobalTransform::default(),
+                Main,
                 Node {
                     flex_grow: 1.0,
                     min_height: Val::Px(0.0),
-                    column_gap: Val::Px(settings.layout.pane.gap),
-                    row_gap: Val::Px(settings.layout.pane.gap),
                     ..default()
                 },
                 children![(
-                    leaf_pane_bundle(),
-                    Active,
+                    Pane,
+                    PaneSplit,
+                    HostWindow(pw),
+                    ZIndex(0),
+                    Transform::default(),
+                    GlobalTransform::default(),
+                    Node {
+                        flex_grow: 1.0,
+                        min_height: Val::Px(0.0),
+                        column_gap: Val::Px(settings.layout.pane.gap),
+                        row_gap: Val::Px(settings.layout.pane.gap),
+                        ..default()
+                    },
                     children![(
-                        tab_bundle(),
+                        leaf_pane_bundle(),
                         Active,
-                        children![browser_bundle(
-                            &mut meshes,
-                            &mut webview_mt,
-                            startup_url
+                        children![(
+                            tab_bundle(),
+                            Active,
+                            children![browser_bundle(
+                                &mut meshes,
+                                &mut webview_mt,
+                                startup_url
+                            )],
                         )],
                     )],
                 )],
