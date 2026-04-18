@@ -249,8 +249,8 @@ fn on_pane_cycle(
 ) {
     for cmd in reader.read() {
         let delta: i32 = match cmd {
-            AppCommand::Pane(PaneCommand::SelectRight) => 1,
-            AppCommand::Pane(PaneCommand::SelectLeft) => -1,
+            AppCommand::Pane(PaneCommand::SelectRight) | AppCommand::Pane(PaneCommand::SelectDown) => 1,
+            AppCommand::Pane(PaneCommand::SelectLeft) | AppCommand::Pane(PaneCommand::SelectUp) => -1,
             _ => continue,
         };
         let Ok(space) = active_space.single() else {
