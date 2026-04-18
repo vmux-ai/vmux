@@ -1,6 +1,7 @@
 use crate::{
-    browser::{browser_bundle, Browser},
+    browser::browser_bundle,
     command::{AppCommand, PaneCommand, ReadAppCommands, TabCommand},
+    layout::tab::{Active, Tab, tab_bundle},
     settings::AppSettings,
 };
 use bevy::{
@@ -19,7 +20,7 @@ impl Plugin for PanePlugin {
             (on_pane_cycle, handle_pane_commands).in_set(ReadAppCommands),
         )
         .add_observer(on_pane_added)
-        .add_observer(on_pane_hover);
+        .add_observer(on_pane_click);
     }
 }
 
@@ -28,9 +29,6 @@ pub(crate) struct Pane;
 
 #[derive(Component)]
 pub(crate) struct PaneSplit;
-
-#[derive(Component)]
-pub(crate) struct Active;
 
 pub(crate) fn leaf_pane_bundle() -> impl Bundle {
     (
@@ -73,14 +71,33 @@ pub(crate) fn first_leaf_descendant(
     entity
 }
 
+pub(crate) fn first_tab_in_pane(
+    pane: Entity,
+    pane_children: &Query<&Children, With<Pane>>,
+    tab_q: &Query<Entity, With<Tab>>,
+) -> Option<Entity> {
+    let children = pane_children.get(pane).ok()?;
+    children.iter().find(|&e| tab_q.contains(e))
+}
+
+pub(crate) fn active_tab_in_pane(
+    pane: Entity,
+    pane_children: &Query<&Children, With<Pane>>,
+    active_tabs: &Query<Entity, (With<Active>, With<Tab>)>,
+) -> Option<Entity> {
+    let children = pane_children.get(pane).ok()?;
+    children.iter().find(|&e| active_tabs.contains(e))
+}
+
 fn handle_pane_commands(
     mut reader: MessageReader<AppCommand>,
-    active_pane: Query<Entity, With<Active>>,
+    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
+    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
     pane_children: Query<&Children, With<Pane>>,
     child_of_q: Query<&ChildOf>,
     pane_q: Query<(), With<Pane>>,
     split_q: Query<(), With<PaneSplit>>,
-    browser_filter: Query<Entity, With<Browser>>,
+    tab_filter: Query<Entity, With<Tab>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     settings: Res<AppSettings>,
     mut commands: Commands,
@@ -103,51 +120,52 @@ fn handle_pane_commands(
                     FlexDirection::Column
                 };
 
-                let existing_browsers: Vec<Entity> = pane_children
+                let existing_tabs: Vec<Entity> = pane_children
                     .get(active)
-                    .map(|c| c.iter().filter(|&e| browser_filter.contains(e)).collect())
+                    .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                     .unwrap_or_default();
 
                 let pane1 = spawn_leaf_pane(&mut commands, active);
                 let pane2 = spawn_leaf_pane(&mut commands, active);
 
-                for browser in existing_browsers {
-                    commands.entity(browser).insert(ChildOf(pane1));
+                for tab in existing_tabs {
+                    commands.entity(tab).insert(ChildOf(pane1));
                 }
 
                 let startup_url = settings.browser.startup_url.as_str();
-                let browser = browser_bundle(&mut meshes, &mut webview_mt, startup_url);
-                commands.spawn((browser, ChildOf(pane2)));
+                let new_tab = commands.spawn((tab_bundle(), Active, ChildOf(pane2))).id();
+                commands.spawn((
+                    browser_bundle(&mut meshes, &mut webview_mt, startup_url),
+                    ChildOf(new_tab),
+                ));
 
-                commands
-                    .entity(active)
-                    .insert(PaneSplit)
-                    .remove::<Active>();
+                commands.entity(active).insert(PaneSplit).remove::<Active>();
                 let gap = Val::Px(settings.layout.pane.gap);
-                commands
-                    .entity(active)
-                    .entry::<Node>()
-                    .and_modify(move |mut n| {
-                        n.flex_direction = direction;
-                        n.column_gap = gap;
-                        n.row_gap = gap;
-                    });
+                commands.entity(active).insert(Node {
+                    flex_grow: 1.0,
+                    flex_direction: direction,
+                    column_gap: gap,
+                    row_gap: gap,
+                    align_items: AlignItems::Stretch,
+                    ..default()
+                });
 
                 commands.entity(pane2).insert(Active);
             }
             PaneCommand::Close => {
-                let Ok(child_of) = child_of_q.get(active) else {
+                let Ok(pane_co) = child_of_q.get(active) else {
                     continue;
                 };
-                let parent = child_of.get();
+                let parent = pane_co.get();
 
                 if !split_q.contains(parent) {
                     commands.entity(active).despawn();
                     let startup_url = settings.browser.startup_url.as_str();
                     let leaf = spawn_leaf_pane(&mut commands, parent);
+                    let tab = commands.spawn((tab_bundle(), Active, ChildOf(leaf))).id();
                     commands.spawn((
                         browser_bundle(&mut meshes, &mut webview_mt, startup_url),
-                        ChildOf(leaf),
+                        ChildOf(tab),
                     ));
                     commands.entity(leaf).insert(Active);
                     continue;
@@ -163,33 +181,43 @@ fn handle_pane_commands(
                     continue;
                 };
 
-                let new_active = if split_q.contains(sibling) {
-                    first_leaf_descendant(sibling, &pane_children, &leaf_panes)
-                } else {
-                    sibling
-                };
-
                 let sibling_children: Vec<Entity> = pane_children
                     .get(sibling)
                     .map(|c| c.iter().collect())
                     .unwrap_or_default();
 
-                for child in sibling_children {
+                for &child in &sibling_children {
                     commands.entity(child).insert(ChildOf(parent));
                 }
 
+                let new_active_pane;
                 if split_q.contains(sibling) {
+                    new_active_pane = first_leaf_descendant(sibling, &pane_children, &leaf_panes);
                     commands.entity(sibling).remove::<ChildOf>();
                     commands.queue(move |world: &mut World| {
                         world.despawn(sibling);
                     });
                 } else {
+                    new_active_pane = parent;
                     commands.entity(parent).remove::<PaneSplit>();
-                    commands.entity(sibling).insert(ChildOf(parent));
+                    commands.entity(parent).insert(Node {
+                        flex_grow: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        align_items: AlignItems::Stretch,
+                        justify_content: JustifyContent::Stretch,
+                        ..default()
+                    });
+                    commands.entity(sibling).despawn();
                 }
 
                 commands.entity(active).despawn();
-                commands.entity(new_active).insert(Active);
+                commands.entity(new_active_pane).insert(Active);
+                let tab = active_tab_in_pane(new_active_pane, &pane_children, &active_tabs)
+                    .or_else(|| first_tab_in_pane(new_active_pane, &pane_children, &tab_filter))
+                    .or_else(|| sibling_children.iter().copied().find(|&e| tab_filter.contains(e)));
+                if let Some(tab) = tab {
+                    commands.entity(tab).insert(Active);
+                }
             }
             PaneCommand::Toggle => {}
             PaneCommand::Zoom => {}
@@ -208,7 +236,7 @@ fn handle_pane_commands(
 fn on_pane_cycle(
     mut reader: MessageReader<AppCommand>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    active_pane: Query<Entity, With<Active>>,
+    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -222,35 +250,36 @@ fn on_pane_cycle(
             continue;
         }
         panes.sort_by_key(|e| e.to_bits());
-        let Ok(current) = active_pane.single() else {
+        let Ok(current_pane) = active_pane.single() else {
             continue;
         };
-        let Some(pos) = panes.iter().position(|&e| e == current) else {
+        let Some(pos) = panes.iter().position(|&e| e == current_pane) else {
             continue;
         };
         let n = panes.len() as i32;
         let idx = (pos as i32 + delta).rem_euclid(n) as usize;
-        let target = panes[idx];
-        commands.entity(current).remove::<Active>();
-        commands.entity(target).insert(Active);
+        let target_pane = panes[idx];
+
+        commands.entity(current_pane).remove::<Active>();
+        commands.entity(target_pane).insert(Active);
     }
 }
 
 fn on_pane_added(trigger: On<Add, Pane>, mut commands: Commands) {
-    commands.entity(trigger.entity).observe(on_pane_hover);
+    commands.entity(trigger.entity).observe(on_pane_click);
 }
 
-fn on_pane_hover(
-    trigger: On<Pointer<Over>>,
+fn on_pane_click(
+    trigger: On<Pointer<Click>>,
     pane_q: Query<(), (With<Pane>, Without<PaneSplit>)>,
-    active_q: Query<Entity, With<Active>>,
+    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
     mut commands: Commands,
 ) {
     let entity = trigger.entity;
     if !pane_q.contains(entity) {
         return;
     }
-    if let Ok(current) = active_q.single() {
+    if let Ok(current) = active_pane.single() {
         if current == entity {
             return;
         }

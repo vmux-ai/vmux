@@ -1,6 +1,6 @@
 use crate::{
     command::{AppCommand, CameraCommand, ReadAppCommands},
-    layout::fit_display_glass_to_window,
+    layout::fit_window_to_screen,
     settings::{AppSettings, load_settings},
     unit::{PIXELS_PER_METER, WindowExt},
 };
@@ -24,10 +24,7 @@ use bevy::window::RawHandleWrapper;
 use liquid_glass_rs::{GlassOptions, GlassViewManager};
 #[cfg(target_os = "macos")]
 use raw_window_handle::RawWindowHandle;
-#[cfg(target_os = "macos")]
-use std::marker::PhantomData;
-#[cfg(target_os = "macos")]
-use std::rc::Rc;
+
 
 pub(crate) const FOV_Y: f32 = std::f32::consts::FRAC_PI_4;
 const BOUNCE_DISPLAY_CLEARANCE: f32 = 2.0;
@@ -45,15 +42,7 @@ struct Bouncing;
 #[derive(Default)]
 pub struct ScenePlugin;
 
-#[cfg(target_os = "macos")]
-struct LiquidGlassMainThread(PhantomData<Rc<()>>);
 
-#[cfg(target_os = "macos")]
-impl Default for LiquidGlassMainThread {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
 
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
@@ -65,7 +54,7 @@ impl Plugin for ScenePlugin {
                 (fit_main_camera, spawn_bloom)
                     .chain()
                     .after(load_settings)
-                    .after(fit_display_glass_to_window),
+                    .after(fit_window_to_screen),
             )
             .add_systems(
                 Update,
@@ -73,13 +62,12 @@ impl Plugin for ScenePlugin {
             )
             .add_systems(
                 PostUpdate,
-                fit_main_camera.after(fit_display_glass_to_window),
+                fit_main_camera.after(fit_window_to_screen),
             );
 
         #[cfg(target_os = "macos")]
         app.insert_resource(ClearColor(Color::NONE))
-            .insert_non_send_resource(LiquidGlassMainThread::default())
-            .add_systems(Update, apply_liquid_glass);
+            .add_observer(apply_liquid_glass);
     }
 }
 
@@ -262,23 +250,25 @@ fn on_toggle_free_camera(
 
 #[cfg(target_os = "macos")]
 fn apply_liquid_glass(
-    _main_thread: NonSend<LiquidGlassMainThread>,
-    query: Query<(Entity, &RawHandleWrapper), Added<Window>>,
+    trigger: On<Add, RawHandleWrapper>,
+    wrapper_q: Query<&RawHandleWrapper>,
 ) {
-    for (entity, wrapper) in query.iter() {
-        let ptr = match wrapper.get_window_handle() {
-            RawWindowHandle::AppKit(h) => h.ns_view.as_ptr().cast::<std::ffi::c_void>(),
-            _ => continue,
-        };
-        if ptr.is_null() {
-            continue;
-        }
+    let entity = trigger.event_target();
+    let Ok(wrapper) = wrapper_q.get(entity) else {
+        return;
+    };
+    let ptr = match wrapper.get_window_handle() {
+        RawWindowHandle::AppKit(h) => h.ns_view.as_ptr().cast::<std::ffi::c_void>(),
+        _ => return,
+    };
+    if ptr.is_null() {
+        return;
+    }
 
-        let manager = GlassViewManager::new();
-        match manager.add_glass_view(ptr, GlassOptions::default()) {
-            Ok(_) => info!("Liquid Glass successfully applied to window: {:?}", entity),
-            Err(e) => bevy_log::error!("Window {:?} not ready for glass: {:?}", entity, e),
-        }
+    let manager = GlassViewManager::new();
+    match manager.add_glass_view(ptr, GlassOptions::default()) {
+        Ok(_) => info!("Liquid Glass successfully applied to window: {:?}", entity),
+        Err(e) => bevy_log::error!("Window {:?} not ready for glass: {:?}", entity, e),
     }
 }
 

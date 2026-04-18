@@ -59,7 +59,7 @@ impl Plugin for VmuxPlugin {
 }
 
 #[derive(Resource)]
-struct ScreenFitted;
+pub(crate) struct ScreenFitted;
 
 fn fit_window_to_screen(
     winit_windows: Option<NonSend<WinitWindows>>,

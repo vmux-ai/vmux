@@ -1,12 +1,13 @@
 use crate::{
     command::{AppCommand, BrowserCommand, ReadAppCommands},
     layout::{
-        display::{
-            DisplayGlass, WEBVIEW_MESH_DEPTH_BIAS, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN,
+        window::{
+            VmuxWindow, WEBVIEW_MESH_DEPTH_BIAS, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN,
             WEBVIEW_Z_SIDE_SHEET,
         },
-        pane::{Active, Pane, PaneSplit},
+        pane::{Pane, PaneSplit},
         side_sheet::SideSheet,
+        tab::{Active, Tab, focused_tab},
     },
     settings::AppSettings,
 };
@@ -24,7 +25,10 @@ use vmux_header::{
     Header, PageMetadata,
     event::{HeaderCommandEvent, TABS_EVENT, TabRow, TabsHostEvent},
 };
-use vmux_side_sheet::event::{PANE_TREE_EVENT, PaneNode, PaneTreeEvent, TabNode};
+use vmux_side_sheet::event::{
+    PANE_TREE_EVENT, PaneNode, PaneTreeEvent, SideSheetCommandEvent,
+    TabNode,
+};
 use vmux_webview_app::{UiReady, WebviewAppRegistry};
 
 pub(crate) struct BrowserPlugin;
@@ -35,13 +39,19 @@ impl Plugin for BrowserPlugin {
             .world()
             .resource::<WebviewAppRegistry>()
             .embedded_hosts();
-        app.add_plugins(CefPlugin {
+        app.configure_sets(
+            Update,
+            CefSystems::CreateAndResize.after(ReadAppCommands),
+        )
+        .add_plugins(CefPlugin {
             root_cache_path: cef_root_cache_path(),
             embedded_hosts,
             ..default()
         })
         .add_plugins(JsEmitEventPlugin::<HeaderCommandEvent>::default())
+        .add_plugins(JsEmitEventPlugin::<SideSheetCommandEvent>::default())
         .add_observer(on_header_command_emit)
+        .add_observer(on_side_sheet_command_emit)
         .add_systems(
             Update,
             handle_browser_commands.in_set(ReadAppCommands),
@@ -111,34 +121,37 @@ pub(crate) fn browser_bundle(
 }
 
 fn sync_keyboard_target(
-    browsers: NonSend<Browsers>,
-    active_pane: Query<Entity, With<Active>>,
+    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
+    pane_children: Query<&Children, With<Pane>>,
+    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
-    mut browser_q: Query<(Entity, &mut Visibility, Has<CefKeyboardTarget>), With<Browser>>,
+    browser_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     mut commands: Commands,
 ) {
-    let Ok(active_entity) = active_pane.single() else {
+    let Some(active_tab_entity) = focused_tab(&active_pane, &pane_children, &active_tabs) else {
         return;
     };
-    for (browser_e, mut visibility, has_kb) in &mut browser_q {
+    for (browser_e, has_kb) in &browser_q {
         if status_q.contains(browser_e) || side_sheet_q.contains(browser_e) {
             continue;
         }
-        *visibility = Visibility::Inherited;
-        browsers.set_osr_not_hidden(&browser_e);
 
         let in_active = child_of_q
             .get(browser_e)
             .ok()
-            .map(|co| co.get() == active_entity)
+            .map(|co| co.get() == active_tab_entity)
             .unwrap_or(false);
 
-        if in_active && !has_kb {
-            commands.entity(browser_e).insert(CefKeyboardTarget);
-        } else if !in_active && has_kb {
-            commands.entity(browser_e).remove::<CefKeyboardTarget>();
+        if in_active {
+            if !has_kb {
+                commands.entity(browser_e).insert(CefKeyboardTarget);
+            }
+        } else {
+            if has_kb {
+                commands.entity(browser_e).remove::<CefKeyboardTarget>();
+            }
         }
     }
 }
@@ -147,7 +160,6 @@ fn sync_children_to_ui(
     mut browser_q: Query<
         (
             &mut Transform,
-            &mut Visibility,
             &ComputedNode,
             &UiGlobalTransform,
             &ChildOf,
@@ -157,18 +169,23 @@ fn sync_children_to_ui(
         ),
         With<Browser>,
     >,
+    child_of_q: Query<&ChildOf>,
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
-    glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<DisplayGlass>>,
+    glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<VmuxWindow>>,
 ) {
     let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
     let pad = glass_node.padding;
     let glass_size_px = glass_node.size + pad.min_inset + pad.max_inset;
 
-    for (mut tf, mut visibility, self_computed, self_ui_gt, child_of, mut webview_size, status, side_sheet) in
+    for (mut tf, self_computed, self_ui_gt, child_of, mut webview_size, status, side_sheet) in
         browser_q.iter_mut()
     {
         let parent = child_of.get();
-        let (computed, ui_gt) = match pane_rect.get(parent) {
+        let pane_entity = child_of_q
+            .get(parent)
+            .map(|co| co.get())
+            .unwrap_or(parent);
+        let (computed, ui_gt) = match pane_rect.get(pane_entity) {
             Ok((cn, gt)) => (cn, gt),
             Err(_) => (self_computed, self_ui_gt),
         };
@@ -179,10 +196,8 @@ fn sync_children_to_ui(
 
         let size_px = computed.size;
         if size_px.x <= 0.0 || size_px.y <= 0.0 {
-            *visibility = Visibility::Hidden;
             continue;
         }
-        *visibility = Visibility::Inherited;
 
         let sx = size_px.x / glass_size_px.x;
         let sy = size_px.y / glass_size_px.y;
@@ -274,12 +289,15 @@ fn sync_webview_pane_corner_clip(
 fn sync_osr_webview_focus(
     browsers: NonSend<Browsers>,
     webviews: Query<Entity, With<WebviewSource>>,
-    keyboard_target: Query<Entity, (With<WebviewSource>, With<CefKeyboardTarget>)>,
-    status_chrome: Query<Entity, (With<Header>, With<Browser>)>,
-    side_sheet_chrome: Query<Entity, (With<SideSheet>, With<Browser>)>,
+    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
+    pane_children_q: Query<&Children, With<Pane>>,
+    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
+    child_of_q: Query<&ChildOf>,
+
     mut ready: Local<Vec<Entity>>,
     mut auxiliary: Local<Vec<Entity>>,
     mut last_active: Local<Option<Entity>>,
+    mut last_ready_set: Local<Vec<Entity>>,
 ) {
     ready.clear();
     ready.extend(webviews.iter().filter(|&e| browsers.has_browser(e)));
@@ -288,22 +306,23 @@ fn sync_osr_webview_focus(
     }
     ready.sort_by_key(|e| e.to_bits());
 
-    let active = keyboard_target
-        .iter()
-        .filter(|&k| ready.iter().any(|&e| e == k))
-        .min_by_key(|e| e.to_bits())
+    let active = focused_tab(&active_pane, &pane_children_q, &active_tabs)
+        .and_then(|tab| {
+            ready.iter().copied().find(|&b| {
+                child_of_q.get(b).ok().map(|co| co.get()) == Some(tab)
+            })
+        })
         .unwrap_or(ready[0]);
 
-    if *last_active != Some(active) {
+    if *last_active == Some(active) && *last_ready_set == *ready {
+    } else {
         auxiliary.clear();
         auxiliary.extend(ready.iter().copied().filter(|&e| e != active));
         browsers.sync_osr_focus_to_active_pane(Some(active), auxiliary.as_slice());
         *last_active = Some(active);
+        last_ready_set.clone_from(&ready);
     }
-    for e in status_chrome.iter() {
-        browsers.set_osr_not_hidden(&e);
-    }
-    for e in side_sheet_chrome.iter() {
+    for &e in ready.iter() {
         browsers.set_osr_not_hidden(&e);
     }
 }
@@ -343,23 +362,32 @@ fn push_tabs_host_emit(
     browsers: NonSend<Browsers>,
     status: Single<Entity, (With<Header>, With<UiReady>)>,
     browser_q: Query<(&PageMetadata, &ChildOf), With<Browser>>,
-    active_pane: Query<(), With<Active>>,
+    active_pane_q: Query<Entity, (With<Active>, With<Pane>)>,
+    pane_children_q: Query<&Children, With<Pane>>,
+    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
+    child_of_q: Query<&ChildOf>,
     mut last: Local<String>,
 ) {
     let status_e = *status;
     if !browsers.has_browser(status_e) || !browsers.host_emit_ready(&status_e) {
         return;
     }
+    let Some(active_tab_entity) = focused_tab(&active_pane_q, &pane_children_q, &active_tabs) else {
+        return;
+    };
+    let active_pane = active_pane_q.single().ok();
     let mut rows: Vec<TabRow> = Vec::new();
     for (meta, child_of) in &browser_q {
-        if !active_pane.contains(child_of.get()) {
+        let tab_entity = child_of.get();
+        let tab_pane = child_of_q.get(tab_entity).ok().map(|co| co.get());
+        if tab_pane != active_pane {
             continue;
         }
         rows.push(TabRow {
             title: meta.title.clone(),
             url: meta.url.clone(),
             favicon_url: meta.favicon_url.clone(),
-            is_active: true,
+            is_active: tab_entity == active_tab_entity,
         });
     }
     let payload = TabsHostEvent { tabs: rows };
@@ -375,8 +403,13 @@ fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     side_sheet: Option<Single<Entity, (With<SideSheet>, With<UiReady>)>>,
-    leaf_panes: Query<(Entity, Has<Active>), (With<Pane>, Without<PaneSplit>)>,
-    browser_q: Query<(&PageMetadata, &ChildOf), With<Browser>>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    active_pane_q: Query<Entity, (With<Active>, With<Pane>)>,
+    active_tab_q: Query<Entity, (With<Active>, With<Tab>)>,
+    pane_children: Query<&Children, With<Pane>>,
+    tab_q: Query<Entity, With<Tab>>,
+    tab_children: Query<&Children>,
+    browser_meta: Query<&PageMetadata, With<Browser>>,
     mut last: Local<String>,
 ) {
     let Some(side_sheet) = side_sheet else {
@@ -386,17 +419,35 @@ fn push_pane_tree_emit(
     if !browsers.has_browser(side_sheet_e) || !browsers.host_emit_ready(&side_sheet_e) {
         return;
     }
+    let active_pane = active_pane_q.single().ok();
+
     let mut panes: Vec<PaneNode> = Vec::new();
-    for (pane_entity, is_active) in &leaf_panes {
-        let tabs: Vec<TabNode> = browser_q
-            .iter()
-            .filter(|(_, child_of)| child_of.get() == pane_entity)
-            .map(|(meta, _)| TabNode {
-                title: meta.title.clone(),
-                url: meta.url.clone(),
-                favicon_url: meta.favicon_url.clone(),
-            })
-            .collect();
+    for pane_entity in &leaf_panes {
+        let is_active = active_pane == Some(pane_entity);
+        let mut tabs: Vec<TabNode> = Vec::new();
+        let mut tab_index: usize = 0;
+        if let Ok(children) = pane_children.get(pane_entity) {
+            for child in children.iter() {
+                if !tab_q.contains(child) {
+                    continue;
+                }
+                let tab_is_active = active_tab_q.contains(child);
+                if let Ok(tab_kids) = tab_children.get(child) {
+                    for browser_e in tab_kids.iter() {
+                        if let Ok(meta) = browser_meta.get(browser_e) {
+                            tabs.push(TabNode {
+                                title: meta.title.clone(),
+                                url: meta.url.clone(),
+                                favicon_url: meta.favicon_url.clone(),
+                                is_active: tab_is_active,
+                                tab_index,
+                            });
+                        }
+                    }
+                }
+                tab_index += 1;
+            }
+        }
         panes.push(PaneNode {
             id: pane_entity.to_bits(),
             is_active,
@@ -415,7 +466,9 @@ fn push_pane_tree_emit(
 
 fn handle_browser_commands(
     mut reader: MessageReader<AppCommand>,
-    active_pane: Query<Entity, With<Active>>,
+    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
+    pane_children: Query<&Children, With<Pane>>,
+    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut commands: Commands,
 ) {
@@ -423,7 +476,7 @@ fn handle_browser_commands(
         let AppCommand::Browser(browser_cmd) = *cmd else {
             continue;
         };
-        let Ok(active) = active_pane.single() else {
+        let Some(active) = focused_tab(&active_pane, &pane_children, &active_tabs) else {
             continue;
         };
         let Some(webview) = browsers
@@ -452,6 +505,56 @@ fn on_header_command_emit(
         _ => return,
     };
     messages.write(AppCommand::Browser(cmd));
+}
+
+fn on_side_sheet_command_emit(
+    trigger: On<Receive<SideSheetCommandEvent>>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    active_pane_q: Query<Entity, (With<Active>, With<Pane>)>,
+    active_tab_q: Query<Entity, (With<Active>, With<Tab>)>,
+    pane_children: Query<&Children, With<Pane>>,
+    tab_q: Query<Entity, With<Tab>>,
+    mut commands: Commands,
+) {
+    let evt = &trigger.event().payload;
+    if evt.command != "activate_tab" {
+        return;
+    }
+    let Ok(pane_id) = evt.pane_id.parse::<u64>() else {
+        return;
+    };
+    let target_pane = leaf_panes
+        .iter()
+        .find(|e| e.to_bits() == pane_id);
+    let Some(target_pane) = target_pane else {
+        return;
+    };
+    let Ok(children) = pane_children.get(target_pane) else {
+        return;
+    };
+    let tab_entities: Vec<Entity> = children
+        .iter()
+        .filter(|&e| tab_q.contains(e))
+        .collect();
+    let Some(&target_tab) = tab_entities.get(evt.tab_index) else {
+        return;
+    };
+    if let Ok(old_pane) = active_pane_q.single() {
+        if old_pane != target_pane {
+            commands.entity(old_pane).remove::<Active>();
+        }
+    }
+    let old_tab_in_pane = pane_children
+        .get(target_pane)
+        .ok()
+        .and_then(|ch| ch.iter().find(|&e| active_tab_q.contains(e)));
+    if let Some(old_tab) = old_tab_in_pane {
+        if old_tab != target_tab {
+            commands.entity(old_tab).remove::<Active>();
+        }
+    }
+    commands.entity(target_pane).insert(Active);
+    commands.entity(target_tab).insert(Active);
 }
 
 fn cef_root_cache_path() -> Option<String> {

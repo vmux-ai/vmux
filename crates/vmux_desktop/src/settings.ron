@@ -39,6 +39,7 @@
             (command: "close_pane", binding: Chord((key: "b", ctrl: true), (key: "x"))),
             (command: "toggle_side_sheet", binding: Chord((key: "b", ctrl: true), (key: "s"))),
             (command: "tab_new", binding: Chord((key: "b", ctrl: true), (key: "c"))),
+            (command: "tab_new", binding: Direct((key: "t", super_key: true))),
             (command: "tab_close", binding: Chord((key: "b", ctrl: true), (key: "&"))),
             (command: "zoom_pane", binding: Chord((key: "b", ctrl: true), (key: "z"))),
             (command: "select_pane_left", binding: Chord((key: "b", ctrl: true), (key: "ArrowLeft"))),

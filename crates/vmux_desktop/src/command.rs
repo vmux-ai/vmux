@@ -54,10 +54,10 @@ pub enum SpaceCommand {
 #[derive(OsSubMenu, DefaultKeyBindings, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TabCommand {
     #[default]
-    #[menu(id = "tab_new", label = "New Tab")]
+    #[menu(id = "tab_new", label = "New Tab", accel = "super+t")]
     New,
 
-    #[menu(id = "tab_close", label = "Close Tab")]
+    #[menu(id = "tab_close", label = "Close Tab", accel = "super+w")]
     Close,
 
     #[menu(id = "tab_next", label = "Select Next Tab")]

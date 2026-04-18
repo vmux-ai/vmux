@@ -1,7 +1,7 @@
 use crate::{
     command::{AppCommand, ReadAppCommands, SideSheetCommand},
-    layout::display::DisplayGlass,
     layout::pane::{Pane, PaneSplit},
+    layout::window::VmuxWindow,
     settings::AppSettings,
 };
 use bevy::{ecs::relationship::Relationship, prelude::*, ui::UiSystems};
@@ -11,7 +11,7 @@ pub(crate) struct SideSheetPlugin;
 
 impl Plugin for SideSheetPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(SideSheetOpen(false))
+        app.insert_resource(SideSheetOpen(true))
             .add_systems(Update, handle_side_sheet_toggle.in_set(ReadAppCommands))
             .add_systems(
                 PostUpdate,
@@ -42,7 +42,7 @@ fn sync_side_sheet_visibility(
     settings: Res<AppSettings>,
     mut side_sheet_q: Query<(&mut Visibility, &mut Node), With<SideSheet>>,
     mut header_q: Query<&mut Node, (With<Header>, Without<SideSheet>, Without<Pane>)>,
-    glass_q: Query<Entity, With<DisplayGlass>>,
+    glass_q: Query<Entity, With<VmuxWindow>>,
     mut pane_q: Query<
         (&mut Node, &ChildOf),
         (With<Pane>, With<PaneSplit>, Without<SideSheet>, Without<Header>),

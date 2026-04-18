@@ -1,7 +1,8 @@
 use crate::{
     layout::{
-        display::{DisplayGlass, WEBVIEW_Z_OUTLINE},
-        pane::Active,
+        window::{VmuxWindow, WEBVIEW_Z_FOCUS_RING},
+        pane::Pane,
+        tab::Active,
     },
     settings::{AppSettings, load_settings},
 };
@@ -15,30 +16,30 @@ use bevy::{
     ui::UiGlobalTransform,
 };
 
-const OUTLINE_SHADER: Handle<Shader> = uuid_handle!("c4a8e901-2b7d-4c1e-9f63-7a2d8e5b1044");
+const FOCUS_RING_SHADER: Handle<Shader> = uuid_handle!("c4a8e901-2b7d-4c1e-9f63-7a2d8e5b1044");
 
-pub(crate) struct OutlinePlugin;
+pub(crate) struct FocusRingPlugin;
 
-impl Plugin for OutlinePlugin {
+impl Plugin for FocusRingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<OutlineMaterial>::default())
+        app.add_plugins(MaterialPlugin::<FocusRingMaterial>::default())
             .add_systems(
                 Startup,
-                spawn_outline
+                spawn_focus_ring
                     .after(load_settings)
                     .after(crate::scene::setup),
             )
-            .add_systems(Update, tick_outline_gradient_time)
+            .add_systems(Update, tick_focus_ring_gradient_time)
             .add_systems(
                 PostUpdate,
-                sync_outline_to_active_pane.after(bevy::ui::UiSystems::Layout),
+                sync_focus_ring_to_active_pane.after(bevy::ui::UiSystems::Layout),
             );
-        load_internal_asset!(app, OUTLINE_SHADER, "outline.wgsl", Shader::from_wgsl);
+        load_internal_asset!(app, FOCUS_RING_SHADER, "focus_ring.wgsl", Shader::from_wgsl);
     }
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
-struct OutlineMaterial {
+struct FocusRingMaterial {
     #[uniform(0)]
     pane_inner: Vec4,
     #[uniform(1)]
@@ -54,9 +55,9 @@ struct OutlineMaterial {
     pub alpha_mode: AlphaMode,
 }
 
-impl Material for OutlineMaterial {
+impl Material for FocusRingMaterial {
     fn fragment_shader() -> ShaderRef {
-        OUTLINE_SHADER.into()
+        FOCUS_RING_SHADER.into()
     }
 
     fn alpha_mode(&self) -> AlphaMode {
@@ -65,20 +66,20 @@ impl Material for OutlineMaterial {
 }
 
 #[derive(Component)]
-struct NomadicOutline;
+struct FocusRing;
 
-fn spawn_outline(
+fn spawn_focus_ring(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut outline_materials: ResMut<Assets<OutlineMaterial>>,
+    mut materials: ResMut<Assets<FocusRingMaterial>>,
     settings: Res<AppSettings>,
     time: Res<Time>,
 ) {
-    let mat = build_outline_material(800.0, 600.0, &settings, time.elapsed_secs());
+    let mat = build_focus_ring_material(800.0, 600.0, &settings, time.elapsed_secs());
     commands.spawn((
-        NomadicOutline,
+        FocusRing,
         Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-        MeshMaterial3d(outline_materials.add(mat)),
+        MeshMaterial3d(materials.add(mat)),
         Transform::default(),
         GlobalTransform::default(),
         Visibility::Hidden,
@@ -87,22 +88,22 @@ fn spawn_outline(
     ));
 }
 
-fn sync_outline_to_active_pane(
-    active_pane: Query<(&ComputedNode, &UiGlobalTransform), With<Active>>,
-    glass: Single<(&ComputedNode, &UiGlobalTransform, &Transform), With<DisplayGlass>>,
+fn sync_focus_ring_to_active_pane(
+    active_pane: Query<(&ComputedNode, &UiGlobalTransform), (With<Active>, With<Pane>)>,
+    glass: Single<(&ComputedNode, &UiGlobalTransform, &Transform), With<VmuxWindow>>,
     settings: Res<AppSettings>,
     time: Res<Time>,
-    mut outline_q: Query<
+    mut ring_q: Query<
         (
             &mut Transform,
-            &MeshMaterial3d<OutlineMaterial>,
+            &MeshMaterial3d<FocusRingMaterial>,
             &mut Visibility,
         ),
-        (With<NomadicOutline>, Without<DisplayGlass>),
+        (With<FocusRing>, Without<VmuxWindow>),
     >,
-    mut outline_materials: ResMut<Assets<OutlineMaterial>>,
+    mut ring_materials: ResMut<Assets<FocusRingMaterial>>,
 ) {
-    let Ok((mut tf, mat_h, mut visibility)) = outline_q.single_mut() else {
+    let Ok((mut tf, mat_h, mut visibility)) = ring_q.single_mut() else {
         return;
     };
     let Ok((pane_computed, pane_ui_gt)) = active_pane.single() else {
@@ -145,24 +146,24 @@ fn sync_outline_to_active_pane(
     let norm_y = -delta_px.y / glass_size_px.y;
     let world_x = glass_tf.translation.x + glass_tf.scale.x * norm_x;
     let world_y = glass_tf.translation.y + glass_tf.scale.y * norm_y;
-    tf.translation = Vec3::new(world_x, world_y, WEBVIEW_Z_OUTLINE);
+    tf.translation = Vec3::new(world_x, world_y, WEBVIEW_Z_FOCUS_RING);
 
     let inner_logical = size_px * pane_computed.inverse_scale_factor;
     let w_i = inner_logical.x.max(1.0e-6);
     let h_i = inner_logical.y.max(1.0e-6);
 
-    if let Some(m) = outline_materials.get_mut(&mat_h.0) {
-        *m = build_outline_material(w_i, h_i, &settings, time.elapsed_secs());
+    if let Some(m) = ring_materials.get_mut(&mat_h.0) {
+        *m = build_focus_ring_material(w_i, h_i, &settings, time.elapsed_secs());
     }
 }
 
-fn tick_outline_gradient_time(
+fn tick_focus_ring_gradient_time(
     time: Res<Time>,
-    mut materials: ResMut<Assets<OutlineMaterial>>,
-    outlines: Query<&MeshMaterial3d<OutlineMaterial>, With<NomadicOutline>>,
+    mut materials: ResMut<Assets<FocusRingMaterial>>,
+    rings: Query<&MeshMaterial3d<FocusRingMaterial>, With<FocusRing>>,
 ) {
     let t = time.elapsed_secs();
-    for mesh_mat in &outlines {
+    for mesh_mat in &rings {
         let id = mesh_mat.id();
         let Some(m) = materials.get(id) else {
             continue;
@@ -177,12 +178,12 @@ fn tick_outline_gradient_time(
     }
 }
 
-fn build_outline_material(
+fn build_focus_ring_material(
     w_i: f32,
     h_i: f32,
     settings: &AppSettings,
     time_secs: f32,
-) -> OutlineMaterial {
+) -> FocusRingMaterial {
     let b = settings.layout.pane.outline.width.max(0.0);
     let w_o = w_i + 2.0 * b;
     let h_o = h_i + 2.0 * b;
@@ -202,7 +203,7 @@ fn build_outline_material(
     let spread = settings.layout.pane.outline.glow.spread.max(0.5);
     let intensity = settings.layout.pane.outline.glow.intensity.max(0.0);
     let glow_on = if intensity > 1.0e-4 { 1.0 } else { 0.0 };
-    OutlineMaterial {
+    FocusRingMaterial {
         pane_inner: Vec4::new(r_i, w_i, h_i, 0.0),
         pane_outer: Vec4::new(r_o, w_o, h_o, 0.0),
         border_color,

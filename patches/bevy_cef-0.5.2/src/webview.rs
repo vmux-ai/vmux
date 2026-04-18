@@ -22,7 +22,7 @@ mod mesh;
 mod webview_sprite;
 
 pub mod prelude {
-    pub use crate::webview::{RequestCloseDevtool, RequestShowDevTool, WebviewPlugin, mesh::*};
+    pub use crate::webview::{CefSystems, RequestCloseDevtool, RequestShowDevTool, WebviewPlugin, mesh::*};
 }
 
 /// A Trigger event to request showing the developer tools in a webview.
@@ -71,6 +71,14 @@ pub struct RequestCloseDevtool {
     pub webview: Entity,
 }
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum CefSystems {
+    /// Runs [`create_webview`], [`resize`], and [`navigate_on_source_change`].
+    /// Order your spawn systems *before* this set so newly created browser entities
+    /// are picked up in the same frame.
+    CreateAndResize,
+}
+
 pub struct WebviewPlugin;
 
 impl Plugin for WebviewPlugin {
@@ -89,7 +97,8 @@ impl Plugin for WebviewPlugin {
                     resize.run_if(any_resized),
                     create_webview,
                     navigate_on_source_change,
-                ),
+                )
+                .in_set(CefSystems::CreateAndResize),
             )
             .add_observer(apply_request_show_devtool)
             .add_observer(apply_request_close_devtool);

@@ -1,8 +1,10 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_side_sheet::event::{PANE_TREE_EVENT, PaneNode, PaneTreeEvent, TabNode};
-use vmux_ui::hooks::use_event_listener;
+use vmux_side_sheet::event::{
+    PANE_TREE_EVENT, PaneNode, PaneTreeEvent, SideSheetCommandEvent, TabNode,
+};
+use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener};
 
 fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
     let s = page_url.trim();
@@ -57,6 +59,7 @@ pub fn App() -> Element {
 #[component]
 fn PaneSection(pane: PaneNode, index: usize) -> Element {
     let label = format!("Pane {}", index + 1);
+    let pane_id = pane.id;
 
     rsx! {
         div { class: "mb-1 flex flex-col",
@@ -70,7 +73,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
             }
             div { class: "flex flex-col gap-px pl-1",
                 for tab in pane.tabs.iter() {
-                    TabRow { tab: tab.clone(), is_active_pane: pane.is_active }
+                    TabRow { tab: tab.clone(), pane_id }
                 }
             }
         }
@@ -78,15 +81,24 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
 }
 
 #[component]
-fn TabRow(tab: TabNode, is_active_pane: bool) -> Element {
+fn TabRow(tab: TabNode, pane_id: u64) -> Element {
     let icon = favicon_src(&tab);
+    let is_active = tab.is_active;
+    let tab_index = tab.tab_index;
 
     rsx! {
         div {
-            class: if is_active_pane {
-                "flex items-center gap-2 rounded-md bg-muted px-2 py-1.5"
+            class: if is_active {
+                "flex cursor-default items-center gap-2 rounded-md bg-muted px-2 py-1.5"
             } else {
-                "flex items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            },
+            onclick: move |_| {
+                let _ = try_cef_emit_serde(&SideSheetCommandEvent {
+                    command: "activate_tab".to_string(),
+                    pane_id: pane_id.to_string(),
+                    tab_index,
+                });
             },
             if let Some(src) = icon.as_ref() {
                 img {
@@ -97,7 +109,7 @@ fn TabRow(tab: TabNode, is_active_pane: bool) -> Element {
                 div { class: "box-border h-4 w-4 shrink-0 rounded-sm border border-border bg-muted" }
             }
             span {
-                class: if is_active_pane {
+                class: if is_active {
                     "min-w-0 truncate text-ui font-medium text-foreground"
                 } else {
                     "min-w-0 truncate text-ui"

@@ -59,8 +59,14 @@ fn impl_os_sub_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
         let id_lit = id.as_str();
         let label = label.as_str();
         let item_ident = format_ident!("os_menu_item_{}", idx);
+        let accel_tokens = if let Some(ref accel) = props.accel {
+            let accel_str = accel.as_str();
+            quote! { Some(#accel_str.parse::<::muda::accelerator::Accelerator>().unwrap()) }
+        } else {
+            quote! { None }
+        };
         items.push(quote! {
-            let #item_ident = ::muda::MenuItem::with_id(#id_lit, #label, true, None);
+            let #item_ident = ::muda::MenuItem::with_id(#id_lit, #label, true, #accel_tokens);
         });
         item_refs.push(quote! { &#item_ident });
 
@@ -179,12 +185,14 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 struct MenuProps {
     id: Option<String>,
     label: Option<String>,
+    accel: Option<String>,
 }
 
 impl MenuProps {
     fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
         let mut id = None;
         let mut label = None;
+        let mut accel = None;
         for attr in attrs {
             if !attr.path().is_ident("menu") {
                 continue;
@@ -196,11 +204,14 @@ impl MenuProps {
                 } else if meta.path.is_ident("label") {
                     let v: LitStr = meta.value()?.parse()?;
                     label = Some(v.value());
+                } else if meta.path.is_ident("accel") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    accel = Some(v.value());
                 }
                 Ok(())
             })?;
         }
-        Ok(MenuProps { id, label })
+        Ok(MenuProps { id, label, accel })
     }
 }
 
