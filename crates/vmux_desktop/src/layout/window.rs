@@ -180,6 +180,8 @@ fn setup(
             ),
             (
                 Main,
+                Transform::default(),
+                GlobalTransform::default(),
                 Node {
                     flex_grow: 1.0,
                     min_height: Val::Px(0.0),

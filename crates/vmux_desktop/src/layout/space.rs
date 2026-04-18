@@ -19,6 +19,8 @@ pub(crate) struct Space;
 pub(crate) fn space_bundle() -> impl Bundle {
     (
         Space,
+        Transform::default(),
+        GlobalTransform::default(),
         Node {
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
