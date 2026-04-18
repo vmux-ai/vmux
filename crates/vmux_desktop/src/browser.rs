@@ -560,6 +560,8 @@ fn on_side_sheet_command_emit(
     active_tab_q: Query<Entity, (With<Active>, With<Tab>)>,
     pane_children: Query<&Children, With<Pane>>,
     tab_q: Query<Entity, With<Tab>>,
+    pane_ui_q: Query<&UiGlobalTransform, With<Pane>>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
@@ -601,6 +603,13 @@ fn on_side_sheet_command_emit(
     }
     commands.entity(target_pane).insert(Active);
     commands.entity(target_tab).insert(Active);
+
+    if let Ok(ui_gt) = pane_ui_q.get(target_pane) {
+        let center = ui_gt.transform_point2(Vec2::ZERO);
+        if let Ok(mut window) = windows.single_mut() {
+            window.set_cursor_position(Some(center));
+        }
+    }
 }
 
 fn cef_root_cache_path() -> Option<String> {
