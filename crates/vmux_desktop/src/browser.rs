@@ -3,7 +3,7 @@ use crate::{
     layout::{
         window::{
             Modal, VmuxWindow, WEBVIEW_MESH_DEPTH_BIAS, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN,
-            WEBVIEW_Z_SIDE_SHEET,
+            WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
         },
         pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_tab_in_pane},
         side_sheet::SideSheet,
@@ -198,6 +198,7 @@ fn sync_children_to_ui(
             &mut WebviewSize,
             Option<&Header>,
             Option<&SideSheet>,
+            Option<&Modal>,
         ),
         With<Browser>,
     >,
@@ -211,7 +212,7 @@ fn sync_children_to_ui(
     let pad = glass_node.padding;
     let glass_size_px = glass_node.size + pad.min_inset + pad.max_inset;
 
-    for (mut tf, self_computed, self_ui_gt, child_of, mut webview_size, status, side_sheet) in
+    for (mut tf, self_computed, self_ui_gt, child_of, mut webview_size, status, side_sheet, modal) in
         browser_q.iter_mut()
     {
         let parent = child_of.get();
@@ -263,7 +264,9 @@ fn sync_children_to_ui(
 
         let tx = delta_px.x / glass_size_px.x;
         let ty = -delta_px.y / glass_size_px.y;
-        let z = if status.is_some() {
+        let z = if modal.is_some() {
+            WEBVIEW_Z_MODAL
+        } else if status.is_some() {
             WEBVIEW_Z_HEADER
         } else if side_sheet.is_some() {
             WEBVIEW_Z_SIDE_SHEET

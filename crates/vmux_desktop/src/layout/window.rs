@@ -26,6 +26,7 @@ pub(crate) const WEBVIEW_Z_MAIN: f32 = 0.12;
 pub(crate) const WEBVIEW_Z_FOCUS_RING: f32 = 0.13;
 pub(crate) const WEBVIEW_Z_HEADER: f32 = 0.125;
 pub(crate) const WEBVIEW_Z_SIDE_SHEET: f32 = 0.125;
+pub(crate) const WEBVIEW_Z_MODAL: f32 = 0.15;
 pub(crate) const WEBVIEW_MESH_DEPTH_BIAS: f32 = -4.0;
 
 pub(crate) struct WindowPlugin;
