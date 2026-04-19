@@ -65,9 +65,26 @@ pub(crate) enum PaneSplitDirection {
     Column,
 }
 
+#[derive(Component, Reflect, Clone, Copy, Debug)]
+#[reflect(Component)]
+#[require(Save)]
+pub(crate) struct PaneSize {
+    pub flex_grow: f32,
+}
+
+impl Default for PaneSize {
+    fn default() -> Self {
+        Self { flex_grow: 1.0 }
+    }
+}
+
+pub(crate) const MIN_PANE_PX: f32 = 60.0;
+pub(crate) const RESIZE_STEP: f32 = 0.05;
+
 pub(crate) fn leaf_pane_bundle() -> impl Bundle {
     (
         Pane::default(),
+        PaneSize::default(),
         Transform::default(),
         GlobalTransform::default(),
         Node {
