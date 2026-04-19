@@ -1,8 +1,9 @@
 use crate::{
+    browser::Loading,
     layout::{
         window::{VmuxWindow, WEBVIEW_Z_FOCUS_RING},
         pane::Pane,
-        tab::Active,
+        tab::{Active, Tab},
     },
     settings::{AppSettings, load_settings},
 };
@@ -75,7 +76,7 @@ fn spawn_focus_ring(
     settings: Res<AppSettings>,
     time: Res<Time>,
 ) {
-    let mat = build_focus_ring_material(800.0, 600.0, &settings, time.elapsed_secs());
+    let mat = build_focus_ring_material(800.0, 600.0, &settings, time.elapsed_secs(), false);
     commands.spawn((
         FocusRing,
         Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
@@ -89,7 +90,7 @@ fn spawn_focus_ring(
 }
 
 fn sync_focus_ring_to_active_pane(
-    active_pane: Query<(&ComputedNode, &UiGlobalTransform), (With<Active>, With<Pane>)>,
+    active_pane: Query<(Entity, &ComputedNode, &UiGlobalTransform), (With<Active>, With<Pane>)>,
     glass: Single<(&ComputedNode, &UiGlobalTransform, &Transform), With<VmuxWindow>>,
     settings: Res<AppSettings>,
     time: Res<Time>,
@@ -102,11 +103,15 @@ fn sync_focus_ring_to_active_pane(
         (With<FocusRing>, Without<VmuxWindow>),
     >,
     mut ring_materials: ResMut<Assets<FocusRingMaterial>>,
+    pane_children: Query<&Children, With<Pane>>,
+    tab_children: Query<&Children, With<Tab>>,
+    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
+    loading_q: Query<(), With<Loading>>,
 ) {
     let Ok((mut tf, mat_h, mut visibility)) = ring_q.single_mut() else {
         return;
     };
-    let Ok((pane_computed, pane_ui_gt)) = active_pane.single() else {
+    let Ok((active_entity, pane_computed, pane_ui_gt)) = active_pane.single() else {
         *visibility = Visibility::Hidden;
         return;
     };
@@ -152,8 +157,16 @@ fn sync_focus_ring_to_active_pane(
     let w_i = inner_logical.x.max(1.0e-6);
     let h_i = inner_logical.y.max(1.0e-6);
 
+    let is_loading = pane_children
+        .get(active_entity)
+        .ok()
+        .and_then(|children| children.iter().find(|&e| active_tabs.contains(e)))
+        .and_then(|tab| tab_children.get(tab).ok())
+        .map(|children| children.iter().any(|e| loading_q.contains(e)))
+        .unwrap_or(false);
+
     if let Some(m) = ring_materials.get_mut(&mat_h.0) {
-        *m = build_focus_ring_material(w_i, h_i, &settings, time.elapsed_secs());
+        *m = build_focus_ring_material(w_i, h_i, &settings, time.elapsed_secs(), is_loading);
     }
 }
 
@@ -183,6 +196,7 @@ fn build_focus_ring_material(
     h_i: f32,
     settings: &AppSettings,
     time_secs: f32,
+    is_loading: bool,
 ) -> FocusRingMaterial {
     let b = settings.layout.pane.outline.width.max(0.0);
     let w_o = w_i + 2.0 * b;
@@ -199,7 +213,8 @@ fn build_focus_ring_material(
         .to_linear()
         .to_vec4();
     let grad_on = if g.enabled { 1.0 } else { 0.0 };
-    let gradient_params = Vec4::new(grad_on, g.speed, g.cycles.max(0.01), time_secs);
+    let speed = if is_loading { g.speed * 3.0 } else { g.speed };
+    let gradient_params = Vec4::new(grad_on, speed, g.cycles.max(0.01), time_secs);
     let spread = settings.layout.pane.outline.glow.spread.max(0.5);
     let intensity = settings.layout.pane.outline.glow.intensity.max(0.0);
     let glow_on = if intensity > 1.0e-4 { 1.0 } else { 0.0 };

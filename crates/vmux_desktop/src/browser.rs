@@ -57,7 +57,10 @@ impl Plugin for BrowserPlugin {
         .add_observer(on_reload_notify_header)
         .add_systems(
             Update,
-            handle_browser_commands.in_set(ReadAppCommands),
+            (
+                handle_browser_commands.in_set(ReadAppCommands),
+                drain_loading_state,
+            ),
         )
         .add_systems(
             Update,
@@ -83,6 +86,9 @@ impl Plugin for BrowserPlugin {
 
 #[derive(Component)]
 pub(crate) struct Browser;
+
+#[derive(Component)]
+pub(crate) struct Loading;
 
 impl Browser {
     pub(crate) fn new(
@@ -362,6 +368,19 @@ fn sync_osr_webview_focus(
     }
     for &e in ready.iter() {
         browsers.set_osr_not_hidden(&e);
+    }
+}
+
+fn drain_loading_state(
+    receiver: Res<WebviewLoadingStateReceiver>,
+    mut commands: Commands,
+) {
+    while let Ok(ev) = receiver.0.try_recv() {
+        if ev.is_loading {
+            commands.entity(ev.webview).insert(Loading);
+        } else {
+            commands.entity(ev.webview).remove::<Loading>();
+        }
     }
 }
 
