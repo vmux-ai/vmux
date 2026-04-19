@@ -533,7 +533,6 @@ fn push_pane_tree_emit(
             tabs,
         });
     }
-    panes.sort_by_key(|p| p.id);
     let payload = PaneTreeEvent { panes };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     if ron_body.as_str() == last.as_str() {
