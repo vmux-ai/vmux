@@ -7,9 +7,14 @@ fn main() {
 
     println!(
         "\n\
-         \x1b[36m \x1b[1m\\   /\x1b[0m\x1b[36m  |\\  /|  |   |  \\ /\x1b[0m\n\
-         \x1b[36m  \x1b[1m\\ /\x1b[0m\x1b[36m   | \\/ |  |   |   X\x1b[0m\n\
-         \x1b[36m   \x1b[1mV\x1b[0m\x1b[36m    |    |  |___|  / \\\x1b[0m\n\
+         \x1b[36m \x1b[1m\\              /\x1b[0m\x1b[36m  |\\            /|  |        |  \\      /\x1b[0m\n\
+         \x1b[36m  \x1b[1m\\            /\x1b[0m\x1b[36m   | \\          / |  |        |   \\    /\x1b[0m\n\
+         \x1b[36m   \x1b[1m\\          /\x1b[0m\x1b[36m    |  \\        /  |  |        |    \\  /\x1b[0m\n\
+         \x1b[36m    \x1b[1m\\        /\x1b[0m\x1b[36m     |   \\      /   |  |        |     \\/\x1b[0m\n\
+         \x1b[36m     \x1b[1m\\      /\x1b[0m\x1b[36m      |    \\    /    |  |        |     /\\\x1b[0m\n\
+         \x1b[36m      \x1b[1m\\    /\x1b[0m\x1b[36m       |     \\  /     |  |        |    /  \\\x1b[0m\n\
+         \x1b[36m       \x1b[1m\\  /\x1b[0m\x1b[36m        |      \\/      |  |        |   /    \\\x1b[0m\n\
+         \x1b[36m        \x1b[1m\\/\x1b[0m\x1b[36m         |              |  |________|  /      \\\x1b[0m\n\
          \n\
          \x1b[2mv{}\x1b[0m\n",
         env!("CARGO_PKG_VERSION")
