@@ -66,6 +66,11 @@ impl Plugin for BrowserPlugin {
         )
         .add_systems(
             Update,
+            sync_page_metadata_to_tab
+                .after(vmux_header::system::apply_chrome_state_from_cef),
+        )
+        .add_systems(
+            Update,
             (push_tabs_host_emit, push_pane_tree_emit)
                 .after(vmux_header::system::apply_chrome_state_from_cef),
         )
@@ -768,6 +773,22 @@ fn on_side_sheet_command_emit(
             hover_intent.last_activation = Some(std::time::Instant::now());
         }
         _ => {}
+    }
+}
+
+fn sync_page_metadata_to_tab(
+    browser_q: Query<(&PageMetadata, &ChildOf), (With<Browser>, Changed<PageMetadata>)>,
+    tab_q: Query<(), With<Tab>>,
+    status_q: Query<(), With<Header>>,
+    side_sheet_q: Query<(), With<SideSheet>>,
+    mut commands: Commands,
+) {
+    for (meta, child_of) in &browser_q {
+        let parent = child_of.get();
+        if !tab_q.contains(parent) || status_q.contains(parent) || side_sheet_q.contains(parent) {
+            continue;
+        }
+        commands.entity(parent).insert(meta.clone());
     }
 }
 

@@ -92,6 +92,7 @@ pub(crate) fn focused_tab(
 pub(crate) fn tab_bundle() -> impl Bundle {
     (
         Tab::default(),
+        vmux_header::PageMetadata::default(),
         Transform::default(),
         GlobalTransform::default(),
         Node {

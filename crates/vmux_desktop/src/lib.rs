@@ -69,6 +69,7 @@ impl Plugin for VmuxPlugin {
         .register_type::<vmux_history::CreatedAt>()
         .register_type::<vmux_history::LastActivatedAt>()
         .register_type::<vmux_history::Visit>()
+        .register_type::<vmux_header::PageMetadata>()
         .add_systems(Update, fit_window_to_screen.run_if(not(resource_exists::<ScreenFitted>)));
     }
 }

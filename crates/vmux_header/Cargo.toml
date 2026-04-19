@@ -29,6 +29,8 @@ serde = { workspace = true }
 bevy = { workspace = true }
 bevy_cef = { workspace = true, features = ["debug"] }
 bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+moonshine-save = { workspace = true }
 vmux_webview_app = { path = "../vmux_webview_app" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
