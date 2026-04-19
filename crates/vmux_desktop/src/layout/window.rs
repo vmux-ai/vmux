@@ -33,7 +33,13 @@ impl Plugin for WindowPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Startup,
-            (setup, spawn_default_session, fit_window_to_screen)
+            (
+                setup,
+                crate::persistence::load_session_on_startup,
+                spawn_default_session,
+                crate::persistence::rebuild_session_views,
+                fit_window_to_screen,
+            )
                 .chain()
                 .after(load_settings)
                 .after(crate::scene::setup)
@@ -256,14 +262,20 @@ fn spawn_default_session(
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
-    // If profiles already exist (loaded from session.ron), skip.
-    if !profile_q.is_empty() {
+    // If profiles already exist (loaded from session.ron) or a session
+    // file is present (entities may still be arriving from the load
+    // observer), skip default session creation.
+    if !profile_q.is_empty() || crate::persistence::session_path().exists() {
         return;
     }
 
     let Ok(main) = main_q.single() else { return };
     let pw = *primary_window;
     let startup_url = settings.browser.startup_url.as_str();
+
+    // Spawn a Profile so that on next launch, this function is skipped
+    // when session.ron is loaded (the guard checks profile_q.is_empty()).
+    commands.spawn(Profile::default_profile());
 
     let space = commands.spawn((
         space_bundle(),

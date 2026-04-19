@@ -74,10 +74,7 @@ impl Plugin for VmuxPlugin {
         .register_type::<vmux_history::Visit>()
         .register_type::<vmux_header::PageMetadata>()
         .register_type::<profile::Profile>()
-        .add_systems(
-            PreStartup,
-            persistence::load_session_on_startup,
-        )
+
         .add_systems(Update, fit_window_to_screen.run_if(not(resource_exists::<ScreenFitted>)));
     }
 }
