@@ -2,8 +2,9 @@ use crate::{
     browser::Loading,
     layout::{
         window::{VmuxWindow, WEBVIEW_Z_FOCUS_RING},
-        pane::Pane,
-        tab::{Active, Tab},
+        pane::{Pane, PaneSplit},
+        space::Space,
+        tab::{Tab, active_among, active_pane_in_space, active_tab_in_pane},
     },
     settings::{AppSettings, load_settings},
 };
@@ -16,6 +17,7 @@ use bevy::{
     shader::ShaderRef,
     ui::UiGlobalTransform,
 };
+use vmux_history::LastActivatedAt;
 
 const FOCUS_RING_SHADER: Handle<Shader> = uuid_handle!("c4a8e901-2b7d-4c1e-9f63-7a2d8e5b1044");
 
@@ -90,7 +92,11 @@ fn spawn_focus_ring(
 }
 
 fn sync_focus_ring_to_active_pane(
-    active_pane: Query<(Entity, &ComputedNode, &UiGlobalTransform), (With<Active>, With<Pane>)>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: Query<&Children>,
+    leaf_panes_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_layout: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     glass: Single<(&ComputedNode, &UiGlobalTransform, &Transform), With<VmuxWindow>>,
     settings: Res<AppSettings>,
     time: Res<Time>,
@@ -105,16 +111,26 @@ fn sync_focus_ring_to_active_pane(
     mut ring_materials: ResMut<Assets<FocusRingMaterial>>,
     pane_children: Query<&Children, With<Pane>>,
     tab_children: Query<&Children, With<Tab>>,
-    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     loading_q: Query<(), With<Loading>>,
 ) {
     let Ok((mut tf, mat_h, mut visibility)) = ring_q.single_mut() else {
         return;
     };
-    let Ok((active_entity, pane_computed, pane_ui_gt)) = active_pane.single() else {
+
+    let active_space = active_among(spaces.iter());
+    let active_pane = active_space.and_then(|s| {
+        active_pane_in_space(s, &all_children, &leaf_panes_q, &pane_ts)
+    });
+    let Some(active_entity) = active_pane else {
         *visibility = Visibility::Hidden;
         return;
     };
+    let Ok((pane_computed, pane_ui_gt)) = pane_layout.get(active_entity) else {
+        *visibility = Visibility::Hidden;
+        return;
+    };
+
     let &(glass_node, glass_ui_gt, glass_tf) = &*glass;
 
     let pad = glass_node.padding;
@@ -157,10 +173,8 @@ fn sync_focus_ring_to_active_pane(
     let w_i = inner_logical.x.max(1.0e-6);
     let h_i = inner_logical.y.max(1.0e-6);
 
-    let is_loading = pane_children
-        .get(active_entity)
-        .ok()
-        .and_then(|children| children.iter().find(|&e| active_tabs.contains(e)))
+    let active_tab = active_tab_in_pane(active_entity, &pane_children, &tab_ts);
+    let is_loading = active_tab
         .and_then(|tab| tab_children.get(tab).ok())
         .map(|children| children.iter().any(|e| loading_q.contains(e)))
         .unwrap_or(false);

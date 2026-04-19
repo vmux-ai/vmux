@@ -1,8 +1,8 @@
 use crate::{
     command::{AppCommand, ReadAppCommands, SpaceCommand},
-    layout::tab::Active,
 };
 use bevy::prelude::*;
+use vmux_history::LastActivatedAt;
 
 pub(crate) struct SpacePlugin;
 
@@ -52,10 +52,11 @@ fn handle_space_commands(
 }
 
 fn sync_space_visibility(
-    mut spaces: Query<(Has<Active>, &mut Node), With<Space>>,
+    mut spaces: Query<(Entity, &LastActivatedAt, &mut Node), With<Space>>,
 ) {
-    for (is_active, mut node) in &mut spaces {
-        let target = if is_active { Display::Flex } else { Display::None };
+    let active = spaces.iter().max_by_key(|(_, ts, _)| ts.0).map(|(e, _, _)| e);
+    for (entity, _, mut node) in &mut spaces {
+        let target = if Some(entity) == active { Display::Flex } else { Display::None };
         if node.display != target {
             node.display = target;
         }

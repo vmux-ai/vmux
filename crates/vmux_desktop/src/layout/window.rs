@@ -4,7 +4,7 @@ use crate::{
     layout::rounded::{RoundedCorners, RoundedMaterial},
     layout::side_sheet::{SideSheet, SideSheetPosition},
     layout::space::space_bundle,
-    layout::tab::{Active, tab_bundle},
+    layout::tab::tab_bundle,
     scene::MainCamera,
     settings::{AppSettings, load_settings},
     unit::{PIXELS_PER_METER, WindowExt},
@@ -18,6 +18,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use vmux_header::{HEADER_HEIGHT_PX, HEADER_WEBVIEW_URL, Header, HeaderBundle};
+use vmux_history::LastActivatedAt;
 
 pub(crate) const WEBVIEW_Z_MAIN: f32 = 0.12;
 pub(crate) const WEBVIEW_Z_FOCUS_RING: f32 = 0.13;
@@ -189,7 +190,7 @@ fn setup(
                 },
                 children![(
                     space_bundle(),
-                    Active,
+                    LastActivatedAt::now(),
                     children![(
                         Pane,
                         PaneSplit,
@@ -206,10 +207,10 @@ fn setup(
                         },
                         children![(
                             leaf_pane_bundle(),
-                            Active,
+                            LastActivatedAt::now(),
                             children![(
                                 tab_bundle(),
-                                Active,
+                                LastActivatedAt::now(),
                                 children![Browser::new(
                                     &mut meshes,
                                     &mut webview_mt,

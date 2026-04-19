@@ -5,10 +5,11 @@ use crate::{
             VmuxWindow, WEBVIEW_MESH_DEPTH_BIAS, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN,
             WEBVIEW_Z_SIDE_SHEET,
         },
-        pane::{Pane, PaneHoverIntent, PaneSplit, active_tab_in_pane, first_leaf_descendant, first_tab_in_pane},
+        pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_tab_in_pane},
         side_sheet::SideSheet,
         space::Space,
-        tab::{Active, Tab, focused_tab, tab_bundle},
+        tab::{Tab, tab_bundle, focused_tab, active_among,
+              active_tab_in_pane, collect_leaf_panes},
     },
     settings::AppSettings,
 };
@@ -27,6 +28,7 @@ use vmux_header::{
     Header, PageMetadata,
     event::{HeaderCommandEvent, RELOAD_EVENT, TABS_EVENT, TabRow, TabsHostEvent},
 };
+use vmux_history::LastActivatedAt;
 use vmux_side_sheet::event::{
     PANE_TREE_EVENT, PaneNode, PaneTreeEvent, SideSheetCommandEvent,
     TabNode,
@@ -133,18 +135,22 @@ impl Browser {
 }
 
 fn sync_keyboard_target(
-    active_space: Query<Entity, (With<Active>, With<Space>)>,
-    space_children: Query<&Children, With<Space>>,
-    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
     browser_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     mut commands: Commands,
 ) {
-    let Some(active_tab_entity) = focused_tab(&active_space, &space_children, &active_pane, &pane_children, &active_tabs) else {
+    let (_, _, active_tab_opt) = focused_tab(
+        &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts,
+    );
+    let Some(active_tab_entity) = active_tab_opt else {
         return;
     };
     for (browser_e, has_kb) in &browser_q {
@@ -185,7 +191,8 @@ fn sync_children_to_ui(
     >,
     child_of_q: Query<&ChildOf>,
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
-    active_tab_q: Query<(), (With<Active>, With<Tab>)>,
+    pane_children: Query<&Children, With<Pane>>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<VmuxWindow>>,
 ) {
     let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
@@ -214,10 +221,17 @@ fn sync_children_to_ui(
             continue;
         }
 
+        // Check if this browser's parent tab is the active tab in its pane
+        let is_active_tab = if parent != glass_entity && status.is_none() && side_sheet.is_none() {
+            active_tab_in_pane(pane_entity, &pane_children, &tab_ts) == Some(parent)
+        } else {
+            true
+        };
+
         let is_inactive_tab = parent != glass_entity
             && status.is_none()
             && side_sheet.is_none()
-            && !active_tab_q.contains(parent);
+            && !is_active_tab;
 
         let sx = size_px.x / glass_size_px.x;
         let sy = size_px.y / glass_size_px.y;
@@ -242,7 +256,7 @@ fn sync_children_to_ui(
         } else if side_sheet.is_some() {
             WEBVIEW_Z_SIDE_SHEET
         } else if parent != glass_entity {
-            if active_tab_q.contains(parent) {
+            if is_active_tab {
                 WEBVIEW_Z_MAIN
             } else {
                 WEBVIEW_Z_MAIN - 0.01
@@ -331,11 +345,12 @@ fn sync_webview_pane_corner_clip(
 fn sync_osr_webview_focus(
     browsers: NonSend<Browsers>,
     webviews: Query<Entity, With<WebviewSource>>,
-    active_space: Query<Entity, (With<Active>, With<Space>)>,
-    space_children: Query<&Children, With<Space>>,
-    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children_q: Query<&Children, With<Pane>>,
-    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: Query<&ChildOf>,
 
     mut ready: Local<Vec<Entity>>,
@@ -350,7 +365,10 @@ fn sync_osr_webview_focus(
     }
     ready.sort_by_key(|e| e.to_bits());
 
-    let active = focused_tab(&active_space, &space_children, &active_pane, &pane_children_q, &active_tabs)
+    let (_, _, active_tab_opt) = focused_tab(
+        &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children_q, &tab_ts,
+    );
+    let active = active_tab_opt
         .and_then(|tab| {
             ready.iter().copied().find(|&b| {
                 child_of_q.get(b).ok().map(|co| co.get()) == Some(tab)
@@ -398,11 +416,12 @@ fn push_tabs_host_emit(
     browsers: NonSend<Browsers>,
     status: Single<Entity, (With<Header>, With<UiReady>)>,
     browser_q: Query<(&PageMetadata, &ChildOf), With<Browser>>,
-    active_space: Query<Entity, (With<Active>, With<Space>)>,
-    space_children: Query<&Children, With<Space>>,
-    active_pane_q: Query<Entity, (With<Active>, With<Pane>)>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children_q: Query<&Children, With<Pane>>,
-    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: Query<&ChildOf>,
     mut last: Local<String>,
 ) {
@@ -410,10 +429,12 @@ fn push_tabs_host_emit(
     if !browsers.has_browser(status_e) || !browsers.host_emit_ready(&status_e) {
         return;
     }
-    let Some(active_tab_entity) = focused_tab(&active_space, &space_children, &active_pane_q, &pane_children_q, &active_tabs) else {
+    let (_, active_pane, active_tab_opt) = focused_tab(
+        &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children_q, &tab_ts,
+    );
+    let Some(active_tab_entity) = active_tab_opt else {
         return;
     };
-    let active_pane = active_pane_q.single().ok();
     let mut rows: Vec<TabRow> = Vec::new();
     for (meta, child_of) in &browser_q {
         let tab_entity = child_of.get();
@@ -437,36 +458,16 @@ fn push_tabs_host_emit(
     *last = ron_body;
 }
 
-fn collect_leaf_panes(
-    root: Entity,
-    all_children: &Query<&Children>,
-    leaf_q: &Query<(), (With<Pane>, Without<PaneSplit>)>,
-) -> Vec<Entity> {
-    let mut result = Vec::new();
-    let mut stack = vec![root];
-    while let Some(entity) = stack.pop() {
-        if leaf_q.contains(entity) {
-            result.push(entity);
-        }
-        if let Ok(children) = all_children.get(entity) {
-            for child in children.iter() {
-                stack.push(child);
-            }
-        }
-    }
-    result
-}
-
 fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     side_sheet: Option<Single<Entity, (With<SideSheet>, With<UiReady>)>>,
-    active_space: Query<Entity, (With<Active>, With<Space>)>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
-    leaf_pane_q: Query<(), (With<Pane>, Without<PaneSplit>)>,
-    active_pane_q: Query<Entity, (With<Active>, With<Pane>)>,
-    active_tab_q: Query<Entity, (With<Active>, With<Tab>)>,
+    leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     tab_q: Query<Entity, With<Tab>>,
     tab_children: Query<&Children>,
     browser_meta: Query<&PageMetadata, With<Browser>>,
@@ -479,16 +480,22 @@ fn push_pane_tree_emit(
     if !browsers.has_browser(side_sheet_e) || !browsers.host_emit_ready(&side_sheet_e) {
         return;
     }
-    let active_pane = active_pane_q.single().ok();
 
-    let Ok(space) = active_space.single() else {
+    let (_, active_pane, _) = focused_tab(
+        &spaces, &all_children, &leaf_pane_q, &pane_ts, &pane_children, &tab_ts,
+    );
+
+    let active_space = active_among(spaces.iter());
+    let Some(space) = active_space else {
         return;
     };
-    let space_leaf_panes = collect_leaf_panes(space, &all_children, &leaf_pane_q);
+    let mut space_leaf_panes = Vec::new();
+    collect_leaf_panes(space, &all_children, &leaf_pane_q, &mut space_leaf_panes);
 
     let mut panes: Vec<PaneNode> = Vec::new();
     for &pane_entity in &space_leaf_panes {
         let is_active = active_pane == Some(pane_entity);
+        let active_tab = active_tab_in_pane(pane_entity, &pane_children, &tab_ts);
         let mut tabs: Vec<TabNode> = Vec::new();
         let mut tab_index: usize = 0;
         if let Ok(children) = pane_children.get(pane_entity) {
@@ -496,7 +503,7 @@ fn push_pane_tree_emit(
                 if !tab_q.contains(child) {
                     continue;
                 }
-                let tab_is_active = active_tab_q.contains(child);
+                let tab_is_active = active_tab == Some(child);
                 if let Ok(tab_kids) = tab_children.get(child) {
                     for browser_e in tab_kids.iter() {
                         if let Ok(meta) = browser_meta.get(browser_e) {
@@ -531,11 +538,12 @@ fn push_pane_tree_emit(
 
 fn handle_browser_commands(
     mut reader: MessageReader<AppCommand>,
-    active_space: Query<Entity, (With<Active>, With<Space>)>,
-    space_children: Query<&Children, With<Space>>,
-    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut commands: Commands,
 ) {
@@ -543,7 +551,10 @@ fn handle_browser_commands(
         let AppCommand::Browser(browser_cmd) = *cmd else {
             continue;
         };
-        let Some(active) = focused_tab(&active_space, &space_children, &active_pane, &pane_children, &active_tabs) else {
+        let (_, _, active_tab_opt) = focused_tab(
+            &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts,
+        );
+        let Some(active) = active_tab_opt else {
             continue;
         };
         let Some(webview) = browsers
@@ -600,9 +611,11 @@ fn on_reload_notify_header(
 fn on_side_sheet_command_emit(
     trigger: On<Receive<SideSheetCommandEvent>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    active_pane_q: Query<Entity, (With<Active>, With<Pane>)>,
-    active_tab_q: Query<Entity, (With<Active>, With<Tab>)>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: Query<&Children>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     tab_q: Query<Entity, With<Tab>>,
     child_of_q: Query<&ChildOf>,
     split_q: Query<(), With<PaneSplit>>,
@@ -634,19 +647,8 @@ fn on_side_sheet_command_emit(
             let Some(&target_tab) = tab_entities.get(evt.tab_index) else {
                 return;
             };
-            if let Ok(old_pane) = active_pane_q.single() {
-                if old_pane != target_pane {
-                    commands.entity(old_pane).remove::<Active>();
-                }
-            }
-            let old_tab_in_pane = children.iter().find(|&e| active_tab_q.contains(e));
-            if let Some(old_tab) = old_tab_in_pane {
-                if old_tab != target_tab {
-                    commands.entity(old_tab).remove::<Active>();
-                }
-            }
-            commands.entity(target_pane).insert(Active);
-            commands.entity(target_tab).insert(Active);
+            commands.entity(target_pane).insert(LastActivatedAt::now());
+            commands.entity(target_tab).insert(LastActivatedAt::now());
 
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
@@ -664,17 +666,17 @@ fn on_side_sheet_command_emit(
             };
 
             if tab_entities.len() > 1 {
-                let was_active = active_tab_q.contains(target_tab);
+                let is_active = active_tab_in_pane(target_pane, &pane_children, &tab_ts) == Some(target_tab);
                 commands.entity(target_tab).despawn();
-                if was_active {
+                if is_active {
                     let next = tab_entities.iter().copied().find(|&e| e != target_tab).unwrap();
-                    commands.entity(next).insert(Active);
+                    commands.entity(next).insert(LastActivatedAt::now());
                 }
             } else if leaf_panes.iter().count() <= 1 {
                 let startup_url = settings.browser.startup_url.as_str();
                 commands.entity(target_tab).despawn();
                 let tab = commands
-                    .spawn((tab_bundle(), Active, ChildOf(target_pane)))
+                    .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
                     .id();
                 commands.spawn((
                     Browser::new(&mut meshes, &mut webview_mt, startup_url),
@@ -697,8 +699,11 @@ fn on_side_sheet_command_emit(
                     return;
                 };
 
-                let target_pane_is_active = active_pane_q.contains(target_pane);
-                let sibling_is_active = active_pane_q.contains(sibling);
+                let (_, current_active_pane, _) = focused_tab(
+                    &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts,
+                );
+                let target_pane_is_active = current_active_pane == Some(target_pane);
+                let sibling_is_active = current_active_pane == Some(sibling);
 
                 let sibling_children: Vec<Entity> = pane_children
                     .get(sibling)
@@ -715,7 +720,7 @@ fn on_side_sheet_command_emit(
                     tab_to_activate = active_tab_in_pane(
                         new_active_pane,
                         &pane_children,
-                        &active_tab_q,
+                        &tab_ts,
                     )
                     .or_else(|| {
                         first_tab_in_pane(new_active_pane, &pane_children, &tab_q)
@@ -729,7 +734,9 @@ fn on_side_sheet_command_emit(
                     tab_to_activate = sibling_children
                         .iter()
                         .copied()
-                        .find(|&e| active_tab_q.contains(e))
+                        .find(|&e| {
+                            tab_ts.get(e).is_ok()
+                        })
                         .or_else(|| {
                             sibling_children
                                 .iter()
@@ -750,9 +757,9 @@ fn on_side_sheet_command_emit(
                 commands.entity(target_pane).despawn();
 
                 if target_pane_is_active || sibling_is_active {
-                    commands.entity(new_active_pane).insert(Active);
+                    commands.entity(new_active_pane).insert(LastActivatedAt::now());
                     if let Some(tab) = tab_to_activate {
-                        commands.entity(tab).insert(Active);
+                        commands.entity(tab).insert(LastActivatedAt::now());
                     }
                 }
             }

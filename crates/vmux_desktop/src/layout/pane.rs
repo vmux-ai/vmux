@@ -2,7 +2,8 @@ use crate::{
     browser::Browser,
     command::{AppCommand, PaneCommand, ReadAppCommands},
     layout::space::Space,
-    layout::tab::{Active, Tab, tab_bundle},
+    layout::tab::{Tab, tab_bundle, active_among, active_pane_in_space, active_tab_in_pane,
+                  focused_tab},
     settings::AppSettings,
 };
 use bevy::{
@@ -13,6 +14,7 @@ use bevy::{
 };
 use std::time::Instant;
 use bevy_cef::prelude::*;
+use vmux_history::LastActivatedAt;
 
 pub(crate) struct PanePlugin;
 
@@ -30,10 +32,8 @@ impl Plugin for PanePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .add_systems(
-                Update,
-                (on_pane_select, handle_pane_commands).in_set(ReadAppCommands),
-            )
+            .add_systems(Update, on_pane_select.in_set(ReadAppCommands))
+            .add_systems(Update, handle_pane_commands.in_set(ReadAppCommands))
             .add_systems(Update, poll_cursor_pane_focus)
             .add_systems(PostUpdate, warp_cursor_to_active_pane);
     }
@@ -67,7 +67,7 @@ pub(crate) fn leaf_pane_bundle() -> impl Bundle {
 }
 
 fn spawn_leaf_pane(commands: &mut Commands, parent: Entity) -> Entity {
-    commands.spawn((leaf_pane_bundle(), ChildOf(parent))).id()
+    commands.spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent))).id()
 }
 
 pub(crate) fn first_leaf_descendant(
@@ -101,25 +101,17 @@ pub(crate) fn first_tab_in_pane(
     children.iter().find(|&e| tab_q.contains(e))
 }
 
-pub(crate) fn active_tab_in_pane(
-    pane: Entity,
-    pane_children: &Query<&Children, With<Pane>>,
-    active_tabs: &Query<Entity, (With<Active>, With<Tab>)>,
-) -> Option<Entity> {
-    let children = pane_children.get(pane).ok()?;
-    children.iter().find(|&e| active_tabs.contains(e))
-}
-
 fn handle_pane_commands(
     mut reader: MessageReader<AppCommand>,
-    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
-    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: Query<&ChildOf>,
-    pane_q: Query<(), With<Pane>>,
     split_q: Query<(), With<PaneSplit>>,
     tab_filter: Query<Entity, With<Tab>>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     settings: Res<AppSettings>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -131,7 +123,10 @@ fn handle_pane_commands(
         let AppCommand::Pane(pane_cmd) = *cmd else {
             continue;
         };
-        let Ok(active) = active_pane.single() else {
+        let (_, active_pane_opt, _) = focused_tab(
+            &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts,
+        );
+        let Some(active) = active_pane_opt else {
             continue;
         };
 
@@ -156,13 +151,13 @@ fn handle_pane_commands(
                 }
 
                 let startup_url = settings.browser.startup_url.as_str();
-                let new_tab = commands.spawn((tab_bundle(), Active, ChildOf(pane2))).id();
+                let new_tab = commands.spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane2))).id();
                 commands.spawn((
                     Browser::new(&mut meshes, &mut webview_mt, startup_url),
                     ChildOf(new_tab),
                 ));
 
-                commands.entity(active).insert(PaneSplit).remove::<Active>();
+                commands.entity(active).insert(PaneSplit);
                 let gap = Val::Px(settings.layout.pane.gap);
                 commands.entity(active).insert(Node {
                     flex_grow: 1.0,
@@ -173,7 +168,7 @@ fn handle_pane_commands(
                     ..default()
                 });
 
-                commands.entity(pane2).insert(Active);
+                commands.entity(pane2).insert(LastActivatedAt::now());
                 hover_intent.target = None;
                 hover_intent.last_activation = Some(Instant::now());
                 pending_warp.target = Some(pane2);
@@ -188,12 +183,12 @@ fn handle_pane_commands(
                     commands.entity(active).despawn();
                     let startup_url = settings.browser.startup_url.as_str();
                     let leaf = spawn_leaf_pane(&mut commands, parent);
-                    let tab = commands.spawn((tab_bundle(), Active, ChildOf(leaf))).id();
+                    let tab = commands.spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(leaf))).id();
                     commands.spawn((
                         Browser::new(&mut meshes, &mut webview_mt, startup_url),
                         ChildOf(tab),
                     ));
-                    commands.entity(leaf).insert(Active);
+                    commands.entity(leaf).insert(LastActivatedAt::now());
                     continue;
                 }
 
@@ -202,7 +197,7 @@ fn handle_pane_commands(
                 };
                 let sibling = siblings
                     .iter()
-                    .find(|&e| e != active && pane_q.contains(e));
+                    .find(|&e| e != active && (leaf_panes.contains(e) || split_q.contains(e)));
                 let Some(sibling) = sibling else {
                     continue;
                 };
@@ -237,12 +232,12 @@ fn handle_pane_commands(
                 }
 
                 commands.entity(active).despawn();
-                commands.entity(new_active_pane).insert(Active);
-                let tab = active_tab_in_pane(new_active_pane, &pane_children, &active_tabs)
+                commands.entity(new_active_pane).insert(LastActivatedAt::now());
+                let tab = active_tab_in_pane(new_active_pane, &pane_children, &tab_ts)
                     .or_else(|| first_tab_in_pane(new_active_pane, &pane_children, &tab_filter))
                     .or_else(|| sibling_children.iter().copied().find(|&e| tab_filter.contains(e)));
                 if let Some(tab) = tab {
-                    commands.entity(tab).insert(Active);
+                    commands.entity(tab).insert(LastActivatedAt::now());
                 }
             }
             PaneCommand::Toggle => {}
@@ -266,10 +261,10 @@ fn handle_pane_commands(
 
 fn on_pane_select(
     mut reader: MessageReader<AppCommand>,
-    active_space: Query<Entity, (With<Active>, With<Space>)>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_pos_q: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     mut commands: Commands,
@@ -282,14 +277,16 @@ fn on_pane_select(
             AppCommand::Pane(PaneCommand::SelectDown) => Vec2::new(0.0, 1.0),
             _ => continue,
         };
-        let Ok(space) = active_space.single() else {
+        let active_space = active_among(spaces.iter());
+        let Some(space) = active_space else {
             continue;
         };
         let panes = collect_space_leaf_panes(space, &all_children, &leaf_pane_q);
         if panes.len() < 2 {
             continue;
         }
-        let Ok(current) = active_pane.single() else {
+        let current = active_pane_in_space(space, &all_children, &leaf_pane_q, &pane_ts);
+        let Some(current) = current else {
             continue;
         };
         let Ok((cur_node, cur_gt)) = pane_pos_q.get(current) else {
@@ -334,8 +331,7 @@ fn on_pane_select(
         if let Some((target, _)) = best {
             hover_intent.target = None;
             hover_intent.last_activation = Some(Instant::now());
-            commands.entity(current).remove::<Active>();
-            commands.entity(target).insert(Active);
+            commands.entity(target).insert(LastActivatedAt::now());
         }
     }
 }
@@ -343,7 +339,7 @@ fn on_pane_select(
 fn poll_cursor_pane_focus(
     windows: Query<&Window, With<PrimaryWindow>>,
     leaf_panes: Query<(Entity, &ComputedNode, &UiGlobalTransform), (With<Pane>, Without<PaneSplit>)>,
-    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     mut intent: ResMut<PaneHoverIntent>,
     mut commands: Commands,
 ) {
@@ -377,7 +373,11 @@ fn poll_cursor_pane_focus(
         return;
     };
 
-    if active_pane.single().ok() == Some(target) {
+    // Check if already the active pane
+    let current_active = active_among(
+        leaf_panes.iter().filter_map(|(e, _, _)| pane_ts.get(e).ok()),
+    );
+    if current_active == Some(target) {
         intent.target = None;
         return;
     }
@@ -395,10 +395,7 @@ fn poll_cursor_pane_focus(
         return;
     }
 
-    if let Ok(current) = active_pane.single() {
-        commands.entity(current).remove::<Active>();
-    }
-    commands.entity(target).insert(Active);
+    commands.entity(target).insert(LastActivatedAt::now());
     intent.target = None;
     intent.last_activation = Some(Instant::now());
 }

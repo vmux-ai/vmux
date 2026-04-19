@@ -1,12 +1,13 @@
 use crate::{
     browser::Browser,
     command::{AppCommand, ReadAppCommands, TabCommand},
-    layout::pane::Pane,
+    layout::pane::{Pane, PaneSplit},
     layout::space::Space,
     settings::AppSettings,
 };
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
+use vmux_history::LastActivatedAt;
 
 pub(crate) struct TabPlugin;
 
@@ -20,20 +21,66 @@ impl Plugin for TabPlugin {
 #[derive(Component)]
 pub(crate) struct Tab;
 
-#[derive(Component)]
-pub(crate) struct Active;
-
-pub(crate) fn focused_tab(
-    active_space: &Query<Entity, (With<Active>, With<Space>)>,
-    _space_children: &Query<&Children, With<Space>>,
-    active_pane: &Query<Entity, (With<Active>, With<Pane>)>,
-    pane_children: &Query<&Children, With<Pane>>,
-    active_tabs: &Query<Entity, (With<Active>, With<Tab>)>,
+/// Returns the entity with the highest `LastActivatedAt` timestamp.
+pub(crate) fn active_among<'a>(
+    entities: impl Iterator<Item = (Entity, &'a LastActivatedAt)>,
 ) -> Option<Entity> {
-    let _space = active_space.single().ok()?;
-    let pane = active_pane.single().ok()?;
-    let children = pane_children.get(pane).ok()?;
-    children.iter().find(|&e| active_tabs.contains(e))
+    entities.max_by_key(|(_, ts)| ts.0).map(|(e, _)| e)
+}
+
+/// Recursively collects leaf panes (panes without PaneSplit) under `root`.
+pub(crate) fn collect_leaf_panes(
+    root: Entity,
+    all_children: &Query<&Children>,
+    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    result: &mut Vec<Entity>,
+) {
+    if leaf_panes.contains(root) {
+        result.push(root);
+    }
+    if let Ok(children) = all_children.get(root) {
+        for child in children.iter() {
+            collect_leaf_panes(child, all_children, leaf_panes, result);
+        }
+    }
+}
+
+/// Find the active pane (max LastActivatedAt) among leaf panes under a space.
+pub(crate) fn active_pane_in_space(
+    space: Entity,
+    all_children: &Query<&Children>,
+    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
+) -> Option<Entity> {
+    let mut panes = Vec::new();
+    collect_leaf_panes(space, all_children, leaf_panes, &mut panes);
+    active_among(panes.iter().filter_map(|&e| pane_ts.get(e).ok()))
+}
+
+/// Find the active tab (max LastActivatedAt) in a pane.
+pub(crate) fn active_tab_in_pane(
+    pane: Entity,
+    pane_children: &Query<&Children, With<Pane>>,
+    tab_ts: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+) -> Option<Entity> {
+    pane_children.get(pane).ok().and_then(|children| {
+        active_among(children.iter().filter_map(|e| tab_ts.get(e).ok()))
+    })
+}
+
+/// Find the globally focused (space, pane, tab) by chaining `active_among()`.
+pub(crate) fn focused_tab(
+    spaces: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: &Query<&Children>,
+    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_children: &Query<&Children, With<Pane>>,
+    tab_ts: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+) -> (Option<Entity>, Option<Entity>, Option<Entity>) {
+    let space = active_among(spaces.iter());
+    let pane = space.and_then(|s| active_pane_in_space(s, all_children, leaf_panes, pane_ts));
+    let tab = pane.and_then(|p| active_tab_in_pane(p, pane_children, tab_ts));
+    (space, pane, tab)
 }
 
 pub(crate) fn tab_bundle() -> impl Bundle {
@@ -55,11 +102,12 @@ pub(crate) fn tab_bundle() -> impl Bundle {
 
 fn handle_tab_commands(
     mut reader: MessageReader<AppCommand>,
-    active_space: Query<Entity, (With<Active>, With<Space>)>,
-    space_children: Query<&Children, With<Space>>,
-    active_pane: Query<Entity, (With<Active>, With<Pane>)>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    active_tabs: Query<Entity, (With<Active>, With<Tab>)>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     tab_q: Query<Entity, With<Tab>>,
     settings: Res<AppSettings>,
     mut commands: Commands,
@@ -71,23 +119,19 @@ fn handle_tab_commands(
             continue;
         };
 
+        let (_, active_pane, active_tab) = focused_tab(
+            &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts,
+        );
+
         match tab_cmd {
             TabCommand::New => {
-                let Ok(pane) = active_pane.single() else {
+                let Some(pane) = active_pane else {
                     continue;
                 };
                 let startup_url = settings.browser.startup_url.as_str();
 
-                if let Ok(children) = pane_children.get(pane) {
-                    for child in children.iter() {
-                        if tab_q.contains(child) && active_tabs.contains(child) {
-                            commands.entity(child).remove::<Active>();
-                        }
-                    }
-                }
-
                 let tab = commands
-                    .spawn((tab_bundle(), Active, ChildOf(pane)))
+                    .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                     .id();
                 commands.spawn((
                     Browser::new(&mut meshes, &mut webview_mt, startup_url),
@@ -95,10 +139,10 @@ fn handle_tab_commands(
                 ));
             }
             TabCommand::Close => {
-                let Ok(pane) = active_pane.single() else {
+                let Some(pane) = active_pane else {
                     continue;
                 };
-                let Some(active_tab) = focused_tab(&active_space, &space_children, &active_pane, &pane_children, &active_tabs) else {
+                let Some(active) = active_tab else {
                     continue;
                 };
                 let Ok(children) = pane_children.get(pane) else {
@@ -110,9 +154,9 @@ fn handle_tab_commands(
                     .collect();
                 if tabs_in_pane.len() <= 1 {
                     let startup_url = settings.browser.startup_url.as_str();
-                    commands.entity(active_tab).despawn();
+                    commands.entity(active).despawn();
                     let tab = commands
-                        .spawn((tab_bundle(), Active, ChildOf(pane)))
+                        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
                     commands.spawn((
                         Browser::new(&mut meshes, &mut webview_mt, startup_url),
@@ -123,13 +167,13 @@ fn handle_tab_commands(
                 let next = tabs_in_pane
                     .iter()
                     .copied()
-                    .find(|&e| e != active_tab)
+                    .find(|&e| e != active)
                     .unwrap();
-                commands.entity(active_tab).despawn();
-                commands.entity(next).insert(Active);
+                commands.entity(active).despawn();
+                commands.entity(next).insert(LastActivatedAt::now());
             }
             TabCommand::Next | TabCommand::Previous => {
-                let Ok(pane) = active_pane.single() else {
+                let Some(pane) = active_pane else {
                     continue;
                 };
                 let Ok(children) = pane_children.get(pane) else {
@@ -142,14 +186,13 @@ fn handle_tab_commands(
                 if tabs.len() < 2 {
                     continue;
                 }
-                let Some(current) = tabs.iter().position(|&e| active_tabs.contains(e)) else {
+                let Some(current) = tabs.iter().position(|&e| Some(e) == active_tab) else {
                     continue;
                 };
                 let delta: i32 = if tab_cmd == TabCommand::Next { 1 } else { -1 };
                 let n = tabs.len() as i32;
                 let idx = (current as i32 + delta).rem_euclid(n) as usize;
-                commands.entity(tabs[current]).remove::<Active>();
-                commands.entity(tabs[idx]).insert(Active);
+                commands.entity(tabs[idx]).insert(LastActivatedAt::now());
             }
             TabCommand::SelectIndex1
             | TabCommand::SelectIndex2
@@ -160,7 +203,7 @@ fn handle_tab_commands(
             | TabCommand::SelectIndex7
             | TabCommand::SelectIndex8
             | TabCommand::SelectLast => {
-                let Ok(pane) = active_pane.single() else {
+                let Some(pane) = active_pane else {
                     continue;
                 };
                 let Ok(children) = pane_children.get(pane) else {
@@ -188,12 +231,7 @@ fn handle_tab_commands(
                 if target_idx >= tabs.len() {
                     continue;
                 }
-                for &t in &tabs {
-                    if active_tabs.contains(t) {
-                        commands.entity(t).remove::<Active>();
-                    }
-                }
-                commands.entity(tabs[target_idx]).insert(Active);
+                commands.entity(tabs[target_idx]).insert(LastActivatedAt::now());
             }
             TabCommand::Reopen
             | TabCommand::Duplicate
@@ -205,14 +243,22 @@ fn handle_tab_commands(
 }
 
 fn sync_tab_picking(
-    mut tabs: Query<(Has<Active>, &mut ZIndex), With<Tab>>,
+    pane_children: Query<&Children, With<Pane>>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    mut tabs: Query<(Entity, &mut ZIndex), With<Tab>>,
 ) {
-    for (is_active, mut z) in &mut tabs {
-        let target = if is_active { ZIndex(1) } else { ZIndex(0) };
-        if *z != target {
-            *z = target;
+    for pane in &leaf_panes {
+        let active = active_tab_in_pane(pane, &pane_children, &tab_ts);
+        if let Ok(children) = pane_children.get(pane) {
+            for child in children.iter() {
+                if let Ok((entity, mut z)) = tabs.get_mut(child) {
+                    let target = if Some(entity) == active { ZIndex(1) } else { ZIndex(0) };
+                    if *z != target {
+                        *z = target;
+                    }
+                }
+            }
         }
     }
 }
-
-
