@@ -18,6 +18,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
+use vmux_command_palette::COMMAND_PALETTE_WEBVIEW_URL;
 use vmux_header::{HEADER_HEIGHT_PX, HEADER_WEBVIEW_URL, Header, HeaderBundle};
 use vmux_history::{CreatedAt, LastActivatedAt};
 
@@ -233,20 +234,33 @@ fn setup(
             ),
             (
                 Modal,
+                HostWindow(pw),
+                Browser,
                 Node {
-                    width: Val::Px(600.0),
-                    height: Val::Px(400.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
                     position_type: PositionType::Absolute,
-                    left: Val::Percent(50.0),
-                    top: Val::Percent(50.0),
-                    margin: UiRect {
-                        left: Val::Px(-300.0),
-                        top: Val::Px(-200.0),
-                        ..default()
-                    },
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
                     display: Display::None,
                     ..default()
                 },
+                ZIndex(3),
+                WebviewSource::new(COMMAND_PALETTE_WEBVIEW_URL),
+                Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
+                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
+                    base: StandardMaterial {
+                        unlit: true,
+                        alpha_mode: AlphaMode::Blend,
+                        depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
+                        ..default()
+                    },
+                    ..default()
+                })),
+                WebviewSize(Vec2::new(800.0, 600.0)),
+                Transform::default(),
+                GlobalTransform::default(),
+                Visibility::Hidden,
             ),
         ],
     ));

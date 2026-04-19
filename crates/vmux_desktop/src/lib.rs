@@ -18,8 +18,9 @@ use bevy::winit::WinitWindows;
 use {
     browser::BrowserPlugin, command::CommandPlugin, keybinding::KeyBindingPlugin,
     layout::LayoutPlugin, os_menu::OsMenuPlugin,
-    persistence::PersistencePlugin, profile::ProfilePlugin,
+    palette::PalettePlugin, persistence::PersistencePlugin, profile::ProfilePlugin,
     scene::ScenePlugin, settings::SettingsPlugin,
+    vmux_command_palette::CommandPaletteWebviewPlugin,
     vmux_header::HeaderPlugin, vmux_side_sheet::SideSheetWebviewPlugin,
     vmux_webview_app::WebviewAppRegistryPlugin,
 };
@@ -60,6 +61,8 @@ impl Plugin for VmuxPlugin {
             WebviewAppRegistryPlugin,
             HeaderPlugin,
             SideSheetWebviewPlugin,
+            CommandPaletteWebviewPlugin,
+            PalettePlugin,
             BrowserPlugin,
             PersistencePlugin,
             ProfilePlugin,

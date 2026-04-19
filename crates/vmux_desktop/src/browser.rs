@@ -2,7 +2,7 @@ use crate::{
     command::{AppCommand, BrowserCommand, ReadAppCommands},
     layout::{
         window::{
-            VmuxWindow, WEBVIEW_MESH_DEPTH_BIAS, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN,
+            Modal, VmuxWindow, WEBVIEW_MESH_DEPTH_BIAS, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN,
             WEBVIEW_Z_SIDE_SHEET,
         },
         pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_tab_in_pane},
@@ -151,9 +151,14 @@ fn sync_keyboard_target(
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
+    modal_q: Query<&Node, With<Modal>>,
     browser_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     mut commands: Commands,
 ) {
+    // Don't reassign keyboard target while palette is open
+    if crate::palette::is_palette_open(&modal_q) {
+        return;
+    }
     let (_, _, active_tab_opt) = focused_tab(
         &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts,
     );

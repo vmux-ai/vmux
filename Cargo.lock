@@ -8268,6 +8268,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_command_palette"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
+ "dioxus",
+ "serde",
+ "vmux_ui",
+ "vmux_webview_app",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "vmux_desktop"
 version = "0.1.0"
 dependencies = [
@@ -8286,6 +8300,7 @@ dependencies = [
  "raw-window-handle",
  "ron 0.8.1",
  "serde",
+ "vmux_command_palette",
  "vmux_header",
  "vmux_history",
  "vmux_macro",

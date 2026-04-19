@@ -31,6 +31,7 @@ serde = { workspace = true }
 vmux_history = { path = "../vmux_history" }
 vmux_header = { path = "../vmux_header" }
 vmux_side_sheet = { path = "../vmux_side_sheet" }
+vmux_command_palette = { path = "../vmux_command_palette" }
 vmux_macro = { path = "../vmux_macro" }
 vmux_webview_app = { path = "../vmux_webview_app" }
 
