@@ -10,7 +10,7 @@
   }
 
   html.dark body {
-    background-color: transparent;
+    background-color: var(--background);
     color: var(--foreground);
     font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
       "Noto Sans", Ubuntu, Cantarell, "Helvetica Neue", sans-serif;

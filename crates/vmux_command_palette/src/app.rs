@@ -132,7 +132,7 @@ pub fn App() -> Element {
 
     rsx! {
         div {
-            class: "flex h-full w-full items-start justify-center bg-black/50 pt-[15%]",
+            class: "flex h-full w-full items-start justify-center pt-[15%]",
             onclick: move |_| { emit_action("dismiss", ""); },
             div {
                 class: "flex w-full max-w-lg flex-col rounded-xl border border-border bg-card shadow-2xl",
