@@ -171,11 +171,13 @@ fn handle_tab_commands(
                     ));
                     continue;
                 }
-                let next = tabs_in_pane
-                    .iter()
-                    .copied()
-                    .find(|&e| e != active)
-                    .unwrap();
+                let next = active_among(
+                    tabs_in_pane
+                        .iter()
+                        .filter(|&&e| e != active)
+                        .filter_map(|&e| tab_ts.get(e).ok()),
+                )
+                .unwrap();
                 commands.entity(active).despawn();
                 commands.entity(next).insert(LastActivatedAt::now());
             }

@@ -1,5 +1,5 @@
 use crate::{
-    command::{AppCommand, CameraCommand, ReadAppCommands},
+    command::{AppCommand, SceneCommand, ReadAppCommands},
     layout::fit_window_to_screen,
     settings::{AppSettings, load_settings},
     unit::{PIXELS_PER_METER, WindowExt},
@@ -213,7 +213,7 @@ fn on_reset_camera(
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let AppCommand::Camera(CameraCommand::Reset) = *cmd else {
+        let AppCommand::Scene(SceneCommand::Reset) = *cmd else {
             continue;
         };
 
@@ -236,7 +236,7 @@ fn on_toggle_free_camera(
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let AppCommand::Camera(CameraCommand::ToggleFreeCamera) = *cmd else {
+        let AppCommand::Scene(SceneCommand::ToggleFreeCamera) = *cmd else {
             continue;
         };
         state.enabled = !state.enabled;

@@ -18,6 +18,15 @@ impl Plugin for CommandPlugin {
 
 #[derive(Message, OsMenu, DefaultKeyBindings, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppCommand {
+    #[menu(label = "Scene")]
+    Scene(SceneCommand),
+
+    #[menu(label = "Window")]
+    Window(WindowCommand),
+
+    #[menu(label = "Side Sheet")]
+    SideSheet(SideSheetCommand),
+
     #[menu(label = "Space")]
     Space(SpaceCommand),
 
@@ -27,17 +36,8 @@ pub enum AppCommand {
     #[menu(label = "Tab")]
     Tab(TabCommand),
 
-    #[menu(label = "Side Sheet")]
-    SideSheet(SideSheetCommand),
-
-    #[menu(label = "Camera")]
-    Camera(CameraCommand),
-
     #[menu(label = "Browser")]
     Browser(BrowserCommand),
-
-    #[menu(label = "Window")]
-    Window(WindowCommand),
 }
 
 #[derive(OsSubMenu, DefaultKeyBindings, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -201,7 +201,7 @@ pub enum SideSheetCommand {
 }
 
 #[derive(OsSubMenu, DefaultKeyBindings, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CameraCommand {
+pub enum SceneCommand {
     #[default]
     #[menu(id = "reset_camera", label = "Reset Camera")]
     Reset,
