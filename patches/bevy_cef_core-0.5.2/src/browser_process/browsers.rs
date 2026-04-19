@@ -478,10 +478,14 @@ impl Browsers {
     ///
     /// - [`GoBack`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowser.html#a85b02760885c070e4ad2a2705cea56cb)
     pub fn go_back(&self, webview: &Entity) {
-        if let Some(browser) = self.browsers.get(webview)
-            && browser.client.can_go_back() == 1
-        {
-            browser.client.go_back();
+        if let Some(browser) = self.browsers.get(webview) {
+            let can = browser.client.can_go_back();
+            bevy::log::info!("[nav] go_back {:?} can_go_back={}", webview, can);
+            if can == 1 {
+                browser.client.go_back();
+            }
+        } else {
+            bevy::log::warn!("[nav] go_back {:?} — browser not found", webview);
         }
     }
 
@@ -491,10 +495,14 @@ impl Browsers {
     ///
     /// - [`GoForward`](https://cef-builds.spotifycdn.com/docs/122.0/classCefBrowser.html#aa8e97fc210ee0e73f16b2d98482419d0)
     pub fn go_forward(&self, webview: &Entity) {
-        if let Some(browser) = self.browsers.get(webview)
-            && browser.client.can_go_forward() == 1
-        {
-            browser.client.go_forward();
+        if let Some(browser) = self.browsers.get(webview) {
+            let can = browser.client.can_go_forward();
+            bevy::log::info!("[nav] go_forward {:?} can_go_forward={}", webview, can);
+            if can == 1 {
+                browser.client.go_forward();
+            }
+        } else {
+            bevy::log::warn!("[nav] go_forward {:?} — browser not found", webview);
         }
     }
 
