@@ -427,6 +427,7 @@ fn on_pane_select(
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_pos_q: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
+    mut pending_warp: ResMut<PendingCursorWarp>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -492,6 +493,7 @@ fn on_pane_select(
             hover_intent.target = None;
             hover_intent.last_activation = Some(Instant::now());
             commands.entity(target).insert(LastActivatedAt::now());
+            pending_warp.target = Some(target);
         }
     }
 }
