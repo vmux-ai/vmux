@@ -35,9 +35,10 @@ use crate::browser_process::renderer_handler::SharedDeviceScaleFactor;
 pub use keyboard::*;
 
 
-/// CEF [`BrowserSettings::background_color`] ARGB. Alpha=0 enables transparent
-/// OSR rendering so webviews show the glass background behind them.
-const CEF_OSR_BACKGROUND_COLOR_ARGB: u32 = 0x00000000;
+/// CEF [`BrowserSettings::background_color`] ARGB. Opaque white gives normal
+/// browser behaviour; pages that want transparency (header, side-sheet) set
+/// `background-color: transparent` in their own CSS.
+const CEF_OSR_BACKGROUND_COLOR_ARGB: u32 = 0xFFFFFFFF;
 
 static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
 
