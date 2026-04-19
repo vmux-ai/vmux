@@ -61,6 +61,7 @@ fn mark_dirty_on_change(
     removed_tabs: RemovedComponents<Tab>,
     removed_panes: RemovedComponents<Pane>,
     changed_meta: Query<(), (Changed<PageMetadata>, With<Tab>)>,
+    changed_size: Query<(), Changed<PaneSize>>,
 ) {
     if !added_tabs.is_empty()
         || !added_panes.is_empty()
@@ -68,6 +69,7 @@ fn mark_dirty_on_change(
         || removed_tabs.len() > 0
         || removed_panes.len() > 0
         || !changed_meta.is_empty()
+        || !changed_size.is_empty()
     {
         auto_save.dirty = true;
         auto_save.debounce.reset();
