@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::scene::SceneFilter;
 use moonshine_save::prelude::*;
 use std::path::PathBuf;
 
@@ -82,7 +83,24 @@ fn do_save(commands: &mut Commands) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    commands.trigger_save(SaveWorld::default_into_file(path));
+    // Use an allowlist to only save our model components.
+    // This avoids serialization failures from Bevy internals
+    // (e.g. VisibilityClass contains TypeId which isn't serializable).
+    let mut save = SaveWorld::default_into_file(path);
+    save.components = SceneFilter::deny_all()
+        .allow::<Save>()
+        .allow::<ChildOf>()
+        .allow::<Children>()
+        .allow::<crate::layout::tab::Tab>()
+        .allow::<crate::layout::space::Space>()
+        .allow::<crate::layout::pane::Pane>()
+        .allow::<crate::layout::pane::PaneSplit>()
+        .allow::<crate::profile::Profile>()
+        .allow::<vmux_header::PageMetadata>()
+        .allow::<vmux_history::CreatedAt>()
+        .allow::<vmux_history::LastActivatedAt>()
+        .allow::<vmux_history::Visit>();
+    commands.trigger_save(save);
 }
 
 /// Check if a session file exists and trigger load on startup.
