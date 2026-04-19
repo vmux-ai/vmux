@@ -19,3 +19,4 @@ crates/vmux_ui/target/
 # Dioxus web bundle (`dx build` / `build.rs`)
 crates/vmux_history/dist/
 crates/vmux_side_sheet/dist/
+.superpowers/
