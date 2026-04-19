@@ -1,11 +1,11 @@
 use crate::{
     browser::Browser,
     command::{AppCommand, ReadAppCommands, TabCommand},
-    layout::pane::{Pane, PaneSplit},
+    layout::pane::{first_leaf_descendant, first_tab_in_pane, Pane, PaneSplit},
     layout::space::Space,
     settings::AppSettings,
 };
-use bevy::prelude::*;
+use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_history::LastActivatedAt;
@@ -116,6 +116,8 @@ fn handle_tab_commands(
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     tab_q: Query<Entity, With<Tab>>,
+    child_of_q: Query<&ChildOf>,
+    split_dir_q: Query<&PaneSplit>,
     settings: Res<AppSettings>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -160,15 +162,75 @@ fn handle_tab_commands(
                     .filter(|&e| tab_q.contains(e))
                     .collect();
                 if tabs_in_pane.len() <= 1 {
-                    let startup_url = settings.browser.startup_url.as_str();
+                    let Ok(pane_co) = child_of_q.get(pane) else {
+                        continue;
+                    };
+                    let parent = pane_co.get();
+
+                    if !split_dir_q.contains(parent) {
+                        // Last pane — recreate tab
+                        let startup_url = settings.browser.startup_url.as_str();
+                        commands.entity(active).despawn();
+                        let tab = commands
+                            .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                            .id();
+                        commands.spawn((
+                            Browser::new(&mut meshes, &mut webview_mt, startup_url),
+                            ChildOf(tab),
+                        ));
+                        continue;
+                    }
+
+                    // Other panes exist — close tab and pane, collapse split
                     commands.entity(active).despawn();
-                    let tab = commands
-                        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id();
-                    commands.spawn((
-                        Browser::new(&mut meshes, &mut webview_mt, startup_url),
-                        ChildOf(tab),
-                    ));
+
+                    let Ok(siblings) = pane_children.get(parent) else {
+                        continue;
+                    };
+                    let sibling = siblings
+                        .iter()
+                        .find(|&e| e != pane && (leaf_panes.contains(e) || split_dir_q.contains(e)));
+                    let Some(sibling) = sibling else {
+                        continue;
+                    };
+
+                    let sibling_children: Vec<Entity> = pane_children
+                        .get(sibling)
+                        .map(|c| c.iter().collect())
+                        .unwrap_or_default();
+
+                    for &child in &sibling_children {
+                        commands.entity(child).insert(ChildOf(parent));
+                    }
+
+                    let new_active_pane;
+                    if split_dir_q.contains(sibling) {
+                        new_active_pane = first_leaf_descendant(sibling, &pane_children, &leaf_panes);
+                        commands.entity(sibling).remove::<ChildOf>();
+                        commands.queue(move |world: &mut World| {
+                            world.despawn(sibling);
+                        });
+                    } else {
+                        new_active_pane = parent;
+                        commands.entity(parent).remove::<PaneSplit>();
+                        commands.entity(parent).insert(Node {
+                            flex_grow: 1.0,
+                            flex_basis: Val::Px(0.0),
+                            align_items: AlignItems::Stretch,
+                            justify_content: JustifyContent::Stretch,
+                            ..default()
+                        });
+                        commands.entity(sibling).despawn();
+                    }
+
+                    commands.entity(pane).despawn();
+                    commands.entity(new_active_pane).insert(LastActivatedAt::now());
+                    let new_tab = active_tab_in_pane(new_active_pane, &pane_children, &tab_ts)
+                        .or_else(|| first_tab_in_pane(new_active_pane, &pane_children, &tab_q))
+                        .or_else(|| sibling_children.iter().copied().find(|&e| tab_q.contains(e)));
+                    if let Some(t) = new_tab {
+                        commands.entity(t).insert(LastActivatedAt::now());
+                    }
                     continue;
                 }
                 let next = active_among(
