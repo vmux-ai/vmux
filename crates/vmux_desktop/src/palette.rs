@@ -51,7 +51,7 @@ pub fn is_palette_open(modal_q: &Query<&Node, With<Modal>>) -> bool {
 
 fn handle_open_palette(
     mut reader: MessageReader<AppCommand>,
-    mut modal_q: Query<(Entity, &mut Node), With<Modal>>,
+    mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
     browsers: NonSend<Browsers>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
@@ -78,13 +78,14 @@ fn handle_open_palette(
             continue;
         };
 
-        let Ok((modal_e, mut modal_node)) = modal_q.single_mut() else {
+        let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut() else {
             continue;
         };
 
         // Toggle: if already open, close it
         if modal_node.display != Display::None {
             modal_node.display = Display::None;
+            *modal_vis = Visibility::Hidden;
             commands.entity(modal_e).remove::<CefKeyboardTarget>();
             // Restore keyboard to active content browser
             let (_, _, active_tab) =
@@ -106,6 +107,7 @@ fn handle_open_palette(
 
         // Open palette
         modal_node.display = Display::Flex;
+        *modal_vis = Visibility::Inherited;
 
         // Remove keyboard target from all content browsers
         for browser_e in &content_browsers {
@@ -188,7 +190,7 @@ fn handle_open_palette(
 
 fn on_palette_action(
     trigger: On<Receive<PaletteActionEvent>>,
-    mut modal_q: Query<(Entity, &mut Node), With<Modal>>,
+    mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -264,8 +266,9 @@ fn on_palette_action(
     }
 
     // Close palette and restore keyboard
-    if let Ok((modal_e, mut modal_node)) = modal_q.single_mut() {
+    if let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut() {
         modal_node.display = Display::None;
+        *modal_vis = Visibility::Hidden;
         commands.entity(modal_e).remove::<CefKeyboardTarget>();
     }
     let (_, _, active_tab) =
