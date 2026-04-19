@@ -361,7 +361,11 @@ fn poll_cursor_pane_focus(
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     mut intent: ResMut<PaneHoverIntent>,
     mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
 ) {
+    if keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) {
+        return;
+    }
     if let Some(last) = intent.last_activation {
         if last.elapsed().as_millis() < HOVER_COOLDOWN_MS as u128 {
             return;
