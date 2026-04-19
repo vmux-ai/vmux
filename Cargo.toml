@@ -27,6 +27,7 @@ edition = "2024"
 [workspace.dependencies]
 bevy = { version = "0.18", default-features = true, features = ["https"] }
 bevy_ecs = { version = "0.18", default-features = true }
+bevy_reflect = { version = "0.18", default-features = true }
 bevy_winit = { version = "0.18", default-features = true }
 bevy_cef = "0.5.2"
 bevy_cef_core = "0.5.2"

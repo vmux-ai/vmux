@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use bevy_cef::prelude::*;
-use chrono::Duration;
 use url::Url;
 use vmux_webview_app::{UiReady, WebviewAppConfig, WebviewAppRegistry};
 
@@ -22,21 +21,9 @@ impl Plugin for HistoryPlugin {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Component, Clone, Copy, Debug)]
-struct Sent(DateTime<Utc>);
+struct Sent(i64);
 
-#[derive(Bundle)]
-struct VisitBundle {
-    visit: Visit,
-    metadata: PageMetadata,
-    created_at: CreatedAt,
-}
-
-#[derive(Component, Clone, Copy)]
-struct Visit;
-
-#[allow(dead_code)]
 #[derive(Component, Clone, Debug)]
 struct PageMetadata {
     url: Url,
@@ -64,12 +51,12 @@ fn push_history_via_host_emit(
         let payload = HistoryEvent { url, history };
         let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
         commands.trigger(HostEmitEvent::new(wv, HISTORY_EVENT, &ron_body));
-        commands.entity(wv).insert(Sent(Utc::now()));
+        commands.entity(wv).insert(Sent(now_millis()));
     }
 }
 
 fn spawn_sample_history_visits(mut commands: Commands) {
-    let now = Utc::now();
+    let now = now_millis();
     let samples = [
         (
             "https://example.com/",
@@ -80,14 +67,14 @@ fn spawn_sample_history_visits(mut commands: Commands) {
         ("https://rust-lang.org/", "Rust", None),
     ];
     for (i, (href, title, favicon_url)) in samples.iter().enumerate() {
-        commands.spawn(VisitBundle {
-            visit: Visit,
-            metadata: PageMetadata {
+        commands.spawn((
+            Visit,
+            PageMetadata {
                 url: Url::parse(href).unwrap(),
                 title: (*title).to_owned(),
                 favicon_url: favicon_url.map(String::from),
             },
-            created_at: CreatedAt(now - Duration::minutes(i as i64)),
-        });
+            CreatedAt(now - (i as i64 * 60_000)),
+        ));
     }
 }
