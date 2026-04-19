@@ -101,6 +101,30 @@ fn spawn_leaf_pane(commands: &mut Commands, parent: Entity) -> Entity {
     commands.spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent))).id()
 }
 
+/// Compute clamped flex_grow values after a resize delta.
+/// Returns (new_pane_grow, new_sibling_grow).
+fn compute_resize(
+    pane_grow: f32,
+    sib_grow: f32,
+    delta: f32,
+    parent_len: f32,
+) -> (f32, f32) {
+    let total = pane_grow + sib_grow;
+    let mut pg = pane_grow + delta;
+    let mut sg = sib_grow - delta;
+
+    let min_grow = MIN_PANE_PX / parent_len.max(1.0) * total;
+    pg = pg.max(min_grow);
+    sg = sg.max(min_grow);
+
+    let new_total = pg + sg;
+    if new_total > 0.0 {
+        pg = pg / new_total * total;
+        sg = sg / new_total * total;
+    }
+    (pg, sg)
+}
+
 pub(crate) fn first_leaf_descendant(
     entity: Entity,
     children_q: &Query<&Children, With<Pane>>,
@@ -141,14 +165,14 @@ fn handle_pane_commands(
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: Query<&ChildOf>,
-    split_q: Query<(), With<PaneSplit>>,
+    split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<Tab>>,
     settings: Res<AppSettings>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
-    mut pending_warp: ResMut<PendingCursorWarp>,
+    mut resize_q: ParamSet<(Query<&mut Node>, Query<&mut PaneSize>, Query<&ComputedNode>, ResMut<PendingCursorWarp>)>,
 ) {
     for cmd in reader.read() {
         let AppCommand::Pane(pane_cmd) = *cmd else {
@@ -207,7 +231,7 @@ fn handle_pane_commands(
                 commands.entity(pane2).insert(LastActivatedAt::now());
                 hover_intent.target = None;
                 hover_intent.last_activation = Some(Instant::now());
-                pending_warp.target = Some(pane2);
+                resize_q.p3().target = Some(pane2);
             }
             PaneCommand::Close => {
                 let Ok(pane_co) = child_of_q.get(active) else {
@@ -215,7 +239,7 @@ fn handle_pane_commands(
                 };
                 let parent = pane_co.get();
 
-                if !split_q.contains(parent) {
+                if !split_dir_q.contains(parent) {
                     commands.entity(active).despawn();
                     let startup_url = settings.browser.startup_url.as_str();
                     let leaf = spawn_leaf_pane(&mut commands, parent);
@@ -233,7 +257,7 @@ fn handle_pane_commands(
                 };
                 let sibling = siblings
                     .iter()
-                    .find(|&e| e != active && (leaf_panes.contains(e) || split_q.contains(e)));
+                    .find(|&e| e != active && (leaf_panes.contains(e) || split_dir_q.contains(e)));
                 let Some(sibling) = sibling else {
                     continue;
                 };
@@ -248,7 +272,7 @@ fn handle_pane_commands(
                 }
 
                 let new_active_pane;
-                if split_q.contains(sibling) {
+                if split_dir_q.contains(sibling) {
                     new_active_pane = first_leaf_descendant(sibling, &pane_children, &leaf_panes);
                     commands.entity(sibling).remove::<ChildOf>();
                     commands.queue(move |world: &mut World| {
@@ -286,11 +310,99 @@ fn handle_pane_commands(
             PaneCommand::SwapNext => {}
             PaneCommand::RotateForward => {}
             PaneCommand::RotateBackward => {}
-            PaneCommand::EqualizeSize => {}
-            PaneCommand::ResizeLeft => {}
-            PaneCommand::ResizeRight => {}
-            PaneCommand::ResizeUp => {}
-            PaneCommand::ResizeDown => {}
+            PaneCommand::EqualizeSize => {
+                let Ok(co) = child_of_q.get(active) else { continue };
+                let parent = co.get();
+                if !split_dir_q.contains(parent) { continue; }
+                let Ok(children) = all_children.get(parent) else { continue };
+                let targets: Vec<Entity> = children.iter().collect();
+                {
+                    let mut nq = resize_q.p0();
+                    for &child in &targets {
+                        if let Ok(mut node) = nq.get_mut(child) {
+                            node.flex_grow = 1.0;
+                        }
+                    }
+                }
+                {
+                    let mut sq = resize_q.p1();
+                    for &child in &targets {
+                        if let Ok(mut ps) = sq.get_mut(child) {
+                            ps.flex_grow = 1.0;
+                        }
+                    }
+                }
+            }
+            PaneCommand::ResizeLeft | PaneCommand::ResizeRight
+            | PaneCommand::ResizeUp | PaneCommand::ResizeDown => {
+                let target_axis = match pane_cmd {
+                    PaneCommand::ResizeLeft | PaneCommand::ResizeRight => PaneSplitDirection::Row,
+                    _ => PaneSplitDirection::Column,
+                };
+                let grows = matches!(
+                    pane_cmd,
+                    PaneCommand::ResizeRight | PaneCommand::ResizeDown
+                );
+
+                let mut child_in_split = active;
+                let mut found_parent: Option<Entity> = None;
+                for _ in 0..10 {
+                    let Ok(co) = child_of_q.get(child_in_split) else { break };
+                    let parent = co.get();
+                    if let Ok(ps) = split_dir_q.get(parent) {
+                        if ps.direction == target_axis {
+                            found_parent = Some(parent);
+                            break;
+                        }
+                    }
+                    child_in_split = parent;
+                }
+                let Some(parent) = found_parent else { continue };
+                let Ok(siblings) = all_children.get(parent) else { continue };
+                let sibs: Vec<Entity> = siblings.iter().collect();
+                let Some(idx) = sibs.iter().position(|&e| e == child_in_split) else { continue };
+
+                let (pane_entity, sibling_entity) = if grows {
+                    if idx + 1 >= sibs.len() { continue; }
+                    (child_in_split, sibs[idx + 1])
+                } else {
+                    if idx == 0 { continue; }
+                    (child_in_split, sibs[idx - 1])
+                };
+
+                // Read current values
+                let parent_len;
+                let pane_grow;
+                let sib_grow;
+                {
+                    let cnq = resize_q.p2();
+                    let ps = cnq.get(parent).map(|cn| cn.size).unwrap_or(Vec2::ZERO);
+                    parent_len = match target_axis {
+                        PaneSplitDirection::Row => ps.x,
+                        PaneSplitDirection::Column => ps.y,
+                    };
+                }
+                {
+                    let nq = resize_q.p0();
+                    pane_grow = nq.get(pane_entity).map_or(1.0, |n| n.flex_grow);
+                    sib_grow = nq.get(sibling_entity).map_or(1.0, |n| n.flex_grow);
+                }
+
+                let total_grow = pane_grow + sib_grow;
+                let step = RESIZE_STEP * total_grow;
+                let (pg, sg) = compute_resize(pane_grow, sib_grow, step, parent_len);
+
+                {
+                    let mut nq = resize_q.p0();
+                    if let Ok(mut n) = nq.get_mut(pane_entity) { n.flex_grow = pg; }
+                    if let Ok(mut n) = nq.get_mut(sibling_entity) { n.flex_grow = sg; }
+                }
+                {
+                    let mut sq = resize_q.p1();
+                    if let Ok(mut ps) = sq.get_mut(pane_entity) { ps.flex_grow = pg; }
+                    if let Ok(mut ps) = sq.get_mut(sibling_entity) { ps.flex_grow = sg; }
+                }
+            }
         }
     }
 }
