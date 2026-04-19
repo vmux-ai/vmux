@@ -272,7 +272,7 @@ fn spawn_default_session(
         ChildOf(main),
     )).id();
 
-    commands.spawn((
+    let split_root = commands.spawn((
         Pane::default(),
         PaneSplit { direction: PaneSplitDirection::Row },
         HostWindow(pw),
@@ -287,12 +287,12 @@ fn spawn_default_session(
             ..default()
         },
         ChildOf(space),
-    ));
+    )).id();
 
     let leaf = commands.spawn((
         leaf_pane_bundle(),
         LastActivatedAt::now(),
-        ChildOf(space),
+        ChildOf(split_root),
     )).id();
 
     let tab = commands.spawn((
