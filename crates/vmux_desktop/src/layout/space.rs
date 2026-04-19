@@ -2,6 +2,7 @@ use crate::{
     command::{AppCommand, ReadAppCommands, SpaceCommand},
 };
 use bevy::prelude::*;
+use moonshine_save::prelude::*;
 use vmux_history::LastActivatedAt;
 
 pub(crate) struct SpacePlugin;
@@ -13,12 +14,16 @@ impl Plugin for SpacePlugin {
     }
 }
 
-#[derive(Component)]
-pub(crate) struct Space;
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+#[require(Save)]
+pub(crate) struct Space {
+    pub name: String,
+}
 
 pub(crate) fn space_bundle() -> impl Bundle {
     (
-        Space,
+        Space::default(),
         Transform::default(),
         GlobalTransform::default(),
         Node {

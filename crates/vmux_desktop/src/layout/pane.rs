@@ -14,6 +14,7 @@ use bevy::{
 };
 use std::time::Instant;
 use bevy_cef::prelude::*;
+use moonshine_save::prelude::*;
 use vmux_history::LastActivatedAt;
 
 pub(crate) struct PanePlugin;
@@ -45,15 +46,28 @@ struct PendingCursorWarp {
     target: Option<Entity>,
 }
 
-#[derive(Component)]
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+#[require(Save)]
 pub(crate) struct Pane;
 
-#[derive(Component)]
-pub(crate) struct PaneSplit;
+#[derive(Component, Reflect)]
+#[reflect(Component)]
+#[require(Save)]
+pub(crate) struct PaneSplit {
+    pub direction: PaneSplitDirection,
+}
+
+#[derive(Reflect, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum PaneSplitDirection {
+    #[default]
+    Row,
+    Column,
+}
 
 pub(crate) fn leaf_pane_bundle() -> impl Bundle {
     (
-        Pane,
+        Pane::default(),
         Transform::default(),
         GlobalTransform::default(),
         Node {
@@ -157,7 +171,12 @@ fn handle_pane_commands(
                     ChildOf(new_tab),
                 ));
 
-                commands.entity(active).insert(PaneSplit);
+                let split_dir = if pane_cmd == PaneCommand::SplitV {
+                    PaneSplitDirection::Row
+                } else {
+                    PaneSplitDirection::Column
+                };
+                commands.entity(active).insert(PaneSplit { direction: split_dir });
                 let gap = Val::Px(settings.layout.pane.gap);
                 commands.entity(active).insert(Node {
                     flex_grow: 1.0,

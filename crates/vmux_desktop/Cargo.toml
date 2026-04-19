@@ -24,6 +24,7 @@ bevy_log = "0.18"
 directories = "5"
 muda = "0.17"
 parking_lot = "0.12"
+bevy_reflect = { workspace = true }
 moonshine-save = { workspace = true }
 ron = { workspace = true }
 serde = { workspace = true }

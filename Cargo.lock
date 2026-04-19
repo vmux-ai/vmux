@@ -8276,6 +8276,7 @@ dependencies = [
  "bevy_cef_core",
  "bevy_infinite_grid",
  "bevy_log",
+ "bevy_reflect",
  "directories",
  "libc",
  "liquid-glass-rs",

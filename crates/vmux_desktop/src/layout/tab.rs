@@ -7,6 +7,7 @@ use crate::{
 };
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
+use moonshine_save::prelude::*;
 use vmux_history::LastActivatedAt;
 
 pub(crate) struct TabPlugin;
@@ -18,8 +19,13 @@ impl Plugin for TabPlugin {
     }
 }
 
-#[derive(Component)]
-pub(crate) struct Tab;
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+#[require(Save)]
+pub(crate) struct Tab {
+    pub scroll_x: f32,
+    pub scroll_y: f32,
+}
 
 /// Returns the entity with the highest `LastActivatedAt` timestamp.
 pub(crate) fn active_among<'a>(
@@ -85,7 +91,7 @@ pub(crate) fn focused_tab(
 
 pub(crate) fn tab_bundle() -> impl Bundle {
     (
-        Tab,
+        Tab::default(),
         Transform::default(),
         GlobalTransform::default(),
         Node {

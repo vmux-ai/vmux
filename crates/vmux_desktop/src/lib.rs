@@ -58,6 +58,14 @@ impl Plugin for VmuxPlugin {
             BrowserPlugin,
             LayoutPlugin,
         ))
+        .register_type::<layout::space::Space>()
+        .register_type::<layout::pane::Pane>()
+        .register_type::<layout::pane::PaneSplit>()
+        .register_type::<layout::pane::PaneSplitDirection>()
+        .register_type::<layout::tab::Tab>()
+        .register_type::<vmux_history::CreatedAt>()
+        .register_type::<vmux_history::LastActivatedAt>()
+        .register_type::<vmux_history::Visit>()
         .add_systems(Update, fit_window_to_screen.run_if(not(resource_exists::<ScreenFitted>)));
     }
 }

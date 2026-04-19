@@ -1,6 +1,6 @@
 use crate::{
     browser::Browser,
-    layout::pane::{Pane, PaneSplit, leaf_pane_bundle},
+    layout::pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle},
     layout::rounded::{RoundedCorners, RoundedMaterial},
     layout::side_sheet::{SideSheet, SideSheetPosition},
     layout::space::space_bundle,
@@ -192,8 +192,8 @@ fn setup(
                     space_bundle(),
                     LastActivatedAt::now(),
                     children![(
-                        Pane,
-                        PaneSplit,
+                        Pane::default(),
+                        PaneSplit { direction: PaneSplitDirection::Row },
                         HostWindow(pw),
                         ZIndex(0),
                         Transform::default(),
