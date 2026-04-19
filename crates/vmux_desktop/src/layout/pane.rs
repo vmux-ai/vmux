@@ -10,7 +10,7 @@ use bevy::{
     ecs::relationship::Relationship,
     prelude::*,
     ui::{FlexDirection, UiGlobalTransform},
-    window::PrimaryWindow,
+    window::{CursorIcon, PrimaryWindow, SystemCursorIcon},
 };
 use std::time::Instant;
 use bevy_cef::prelude::*;
@@ -36,6 +36,7 @@ impl Plugin for PanePlugin {
             .add_systems(Update, on_pane_select.in_set(ReadAppCommands))
             .add_systems(Update, handle_pane_commands.in_set(ReadAppCommands))
             .add_systems(Update, poll_cursor_pane_focus)
+            .add_systems(Update, pane_gap_drag_resize)
             .add_systems(PostUpdate, warp_cursor_to_active_pane);
     }
 }
@@ -80,6 +81,17 @@ impl Default for PaneSize {
 
 pub(crate) const MIN_PANE_PX: f32 = 60.0;
 pub(crate) const RESIZE_STEP: f32 = 0.05;
+
+/// Temporary component inserted on a PaneSplit entity while the user is
+/// dragging the gap between two of its children.
+#[derive(Component)]
+pub(crate) struct PaneDrag {
+    prev_child: Entity,
+    next_child: Entity,
+    start_pos: f32,
+    start_prev_grow: f32,
+    start_next_grow: f32,
+}
 
 pub(crate) fn leaf_pane_bundle() -> impl Bundle {
     (
@@ -491,8 +503,12 @@ fn poll_cursor_pane_focus(
     mut intent: ResMut<PaneHoverIntent>,
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
+    active_drags: Query<(), With<PaneDrag>>,
 ) {
     if keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) {
+        return;
+    }
+    if !active_drags.is_empty() {
         return;
     }
     if let Some(last) = intent.last_activation {
@@ -570,6 +586,127 @@ fn warp_cursor_to_active_pane(
     let center = ui_gt.transform_point2(Vec2::ZERO);
     if let Ok(mut window) = windows.single_mut() {
         window.set_physical_cursor_position(Some(center.as_dvec2()));
+    }
+}
+
+fn pane_gap_drag_resize(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    window_entities: Query<Entity, With<PrimaryWindow>>,
+    splits: Query<(Entity, &PaneSplit, &Children), Without<PaneDrag>>,
+    active_drags: Query<(Entity, &PaneDrag, &PaneSplit)>,
+    child_nodes: Query<(&ComputedNode, &UiGlobalTransform)>,
+    parent_nodes: Query<&ComputedNode>,
+    mut node_q: Query<&mut Node>,
+    mut size_q: Query<&mut PaneSize>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut commands: Commands,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor_pos) = window.physical_cursor_position() else { return };
+    let cursor = Vec2::new(cursor_pos.x as f32, cursor_pos.y as f32);
+
+    // --- Handle active drag ---
+    if let Ok((split_entity, drag, split)) = active_drags.single() {
+        if mouse.pressed(MouseButton::Left) {
+            let pos_along = match split.direction {
+                PaneSplitDirection::Row => cursor.x,
+                PaneSplitDirection::Column => cursor.y,
+            };
+            let parent_size = parent_nodes.get(split_entity)
+                .map(|cn| cn.size).unwrap_or(Vec2::ONE);
+            let parent_len = match split.direction {
+                PaneSplitDirection::Row => parent_size.x,
+                PaneSplitDirection::Column => parent_size.y,
+            }.max(1.0);
+
+            let (pg, sg) = compute_resize(
+                drag.start_prev_grow,
+                drag.start_next_grow,
+                (pos_along - drag.start_pos) / parent_len * (drag.start_prev_grow + drag.start_next_grow),
+                parent_len,
+            );
+
+            if let Ok(mut n) = node_q.get_mut(drag.prev_child) { n.flex_grow = pg; }
+            if let Ok(mut n) = node_q.get_mut(drag.next_child) { n.flex_grow = sg; }
+            if let Ok(mut s) = size_q.get_mut(drag.prev_child) { s.flex_grow = pg; }
+            if let Ok(mut s) = size_q.get_mut(drag.next_child) { s.flex_grow = sg; }
+        } else {
+            commands.entity(split_entity).remove::<PaneDrag>();
+        }
+
+        // Keep resize cursor during drag
+        let icon = match split.direction {
+            PaneSplitDirection::Row => SystemCursorIcon::ColResize,
+            PaneSplitDirection::Column => SystemCursorIcon::RowResize,
+        };
+        if let Ok(we) = window_entities.single() {
+            commands.entity(we).insert(CursorIcon::System(icon));
+        }
+        return;
+    }
+
+    // --- Hover detection + drag initiation ---
+    let mut hovered_dir: Option<PaneSplitDirection> = None;
+    'outer: for (split_entity, split, children) in &splits {
+        let sibs: Vec<Entity> = children.iter().collect();
+        for i in 0..sibs.len().saturating_sub(1) {
+            let Ok((node_a, gt_a)) = child_nodes.get(sibs[i]) else { continue };
+            let Ok((node_b, gt_b)) = child_nodes.get(sibs[i + 1]) else { continue };
+
+            let center_a = gt_a.transform_point2(Vec2::ZERO);
+            let center_b = gt_b.transform_point2(Vec2::ZERO);
+            let half_a = node_a.size * 0.5;
+            let half_b = node_b.size * 0.5;
+
+            let (gap_min, gap_max, cross_min, cross_max) = match split.direction {
+                PaneSplitDirection::Row => (
+                    center_a.x + half_a.x,
+                    center_b.x - half_b.x,
+                    (center_a.y - half_a.y).min(center_b.y - half_b.y),
+                    (center_a.y + half_a.y).max(center_b.y + half_b.y),
+                ),
+                PaneSplitDirection::Column => (
+                    center_a.y + half_a.y,
+                    center_b.y - half_b.y,
+                    (center_a.x - half_a.x).min(center_b.x - half_b.x),
+                    (center_a.x + half_a.x).max(center_b.x + half_b.x),
+                ),
+            };
+
+            let (pos_along, pos_cross) = match split.direction {
+                PaneSplitDirection::Row => (cursor.x, cursor.y),
+                PaneSplitDirection::Column => (cursor.y, cursor.x),
+            };
+
+            if pos_along >= gap_min && pos_along <= gap_max
+                && pos_cross >= cross_min && pos_cross <= cross_max
+            {
+                hovered_dir = Some(split.direction);
+
+                if mouse.just_pressed(MouseButton::Left) {
+                    let prev_grow = node_q.get(sibs[i]).map(|n| n.flex_grow).unwrap_or(1.0);
+                    let next_grow = node_q.get(sibs[i + 1]).map(|n| n.flex_grow).unwrap_or(1.0);
+                    commands.entity(split_entity).insert(PaneDrag {
+                        prev_child: sibs[i],
+                        next_child: sibs[i + 1],
+                        start_pos: pos_along,
+                        start_prev_grow: prev_grow,
+                        start_next_grow: next_grow,
+                    });
+                }
+                break 'outer;
+            }
+        }
+    }
+
+    if let Some(dir) = hovered_dir {
+        let icon = match dir {
+            PaneSplitDirection::Row => SystemCursorIcon::ColResize,
+            PaneSplitDirection::Column => SystemCursorIcon::RowResize,
+        };
+        if let Ok(we) = window_entities.single() {
+            commands.entity(we).insert(CursorIcon::System(icon));
+        }
     }
 }
 
