@@ -68,6 +68,7 @@ impl Plugin for VmuxPlugin {
         .register_type::<layout::pane::Pane>()
         .register_type::<layout::pane::PaneSplit>()
         .register_type::<layout::pane::PaneSplitDirection>()
+        .register_type::<layout::pane::PaneSize>()
         .register_type::<layout::tab::Tab>()
         .register_type::<vmux_history::CreatedAt>()
         .register_type::<vmux_history::LastActivatedAt>()

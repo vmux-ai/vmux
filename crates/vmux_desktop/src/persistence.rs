@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use crate::{
     browser::Browser,
     layout::{
-        pane::{Pane, PaneSplit, PaneSplitDirection},
+        pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection},
         space::Space,
         tab::Tab,
         window::Main,
@@ -110,6 +110,7 @@ fn do_save(commands: &mut Commands) {
         .allow::<Space>()
         .allow::<Pane>()
         .allow::<PaneSplit>()
+        .allow::<PaneSize>()
         .allow::<Profile>()
         .allow::<PageMetadata>()
         .allow::<vmux_history::CreatedAt>()
@@ -136,6 +137,7 @@ pub(crate) fn rebuild_session_views(
     splits_need_view: Query<(Entity, &PaneSplit), Without<Node>>,
     panes_need_view: Query<Entity, (With<Pane>, Without<PaneSplit>, Without<Node>)>,
     tabs_need_view: Query<(Entity, &PageMetadata), (With<Tab>, Without<Node>)>,
+    pane_sizes: Query<&PaneSize>,
     child_of_q: Query<&ChildOf>,
     tab_children_q: Query<&Children, With<Tab>>,
     browser_q: Query<(), With<Browser>>,
@@ -207,12 +209,13 @@ pub(crate) fn rebuild_session_views(
 
     // -- Leaf Pane: add stretch layout --
     for entity in &panes_need_view {
+        let grow = pane_sizes.get(entity).map(|s| s.flex_grow).unwrap_or(1.0);
         let mut ecmds = commands.entity(entity);
         ecmds.insert((
             Transform::default(),
             GlobalTransform::default(),
             Node {
-                flex_grow: 1.0,
+                flex_grow: grow,
                 flex_basis: Val::Px(0.0),
                 align_items: AlignItems::Stretch,
                 justify_content: JustifyContent::Stretch,
