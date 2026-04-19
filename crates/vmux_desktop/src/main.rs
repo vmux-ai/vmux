@@ -5,11 +5,14 @@ fn main() {
     #[cfg(not(target_os = "macos"))]
     early_exit_if_subprocess();
 
-    let logo = r#"
- \  / |\/| | | \/
-  \/  |  | |_| /\
-    "#;
-    println!("{logo}\n  v{}\n", env!("CARGO_PKG_VERSION"));
+    println!(
+        "\n\
+         \x1b[36m \x1b[1m\\  /\x1b[0m\x1b[36m  |\\/| | | \\/\x1b[0m\n\
+         \x1b[36m  \x1b[1m\\/\x1b[0m\x1b[36m   |  | |_| /\\\x1b[0m\n\
+         \n\
+         \x1b[2mv{}\x1b[0m\n",
+        env!("CARGO_PKG_VERSION")
+    );
 
     let mut app = App::new();
     app.add_plugins(VmuxPlugin);
