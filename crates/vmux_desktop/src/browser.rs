@@ -337,7 +337,7 @@ fn sync_webview_pane_corner_clip(
         let w = size.0.x.max(1.0e-6);
         let h = size.0.y.max(1.0e-6);
         if let Some(mat) = materials.get_mut(mat_h.id()) {
-            mat.extension.pane_corner_clip = Vec4::new(r, w, h, 2.0);
+            mat.extension.pane_corner_clip = Vec4::new(r, w, h, 0.0);
         }
     }
     for (size, mat_h) in &side_sheet {
