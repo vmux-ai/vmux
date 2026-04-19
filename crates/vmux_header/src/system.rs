@@ -1,12 +1,10 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use moonshine_save::prelude::*;
 
 pub const HEADER_HEIGHT_PX: f32 = 40.0;
 
 #[derive(Component, Clone, Debug, Reflect, Default)]
 #[reflect(Component)]
-#[require(Save)]
 pub struct PageMetadata {
     pub title: String,
     pub url: String,
