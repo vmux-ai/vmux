@@ -29,12 +29,20 @@ pub(crate) struct PaneHoverIntent {
 impl Plugin for PanePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PaneHoverIntent>()
+            .init_resource::<PendingCursorWarp>()
             .add_systems(
                 Update,
                 (on_pane_select, handle_pane_commands).in_set(ReadAppCommands),
             )
-            .add_systems(Update, poll_cursor_pane_focus);
+            .add_systems(Update, poll_cursor_pane_focus)
+            .add_systems(PostUpdate, warp_cursor_to_active_pane);
     }
+}
+
+/// Signals that the cursor should be warped to the active pane once layout is computed.
+#[derive(Resource, Default)]
+struct PendingCursorWarp {
+    target: Option<Entity>,
 }
 
 #[derive(Component)]
@@ -116,6 +124,8 @@ fn handle_pane_commands(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut hover_intent: ResMut<PaneHoverIntent>,
+    mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
         let AppCommand::Pane(pane_cmd) = *cmd else {
@@ -164,6 +174,9 @@ fn handle_pane_commands(
                 });
 
                 commands.entity(pane2).insert(Active);
+                hover_intent.target = None;
+                hover_intent.last_activation = Some(Instant::now());
+                pending_warp.target = Some(pane2);
             }
             PaneCommand::Close => {
                 let Ok(pane_co) = child_of_q.get(active) else {
@@ -388,6 +401,27 @@ fn poll_cursor_pane_focus(
     commands.entity(target).insert(Active);
     intent.target = None;
     intent.last_activation = Some(Instant::now());
+}
+
+fn warp_cursor_to_active_pane(
+    mut pending: ResMut<PendingCursorWarp>,
+    pane_ui_q: Query<(&ComputedNode, &UiGlobalTransform), (With<Pane>, Without<PaneSplit>)>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+) {
+    let Some(target) = pending.target else {
+        return;
+    };
+    let Ok((node, ui_gt)) = pane_ui_q.get(target) else {
+        return;
+    };
+    if node.size.x <= 0.0 || node.size.y <= 0.0 {
+        return;
+    }
+    pending.target = None;
+    let center = ui_gt.transform_point2(Vec2::ZERO);
+    if let Ok(mut window) = windows.single_mut() {
+        window.set_physical_cursor_position(Some(center.as_dvec2()));
+    }
 }
 
 fn collect_space_leaf_panes(
