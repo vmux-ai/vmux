@@ -28,7 +28,7 @@ use vmux_header::{
     Header, PageMetadata,
     event::{HeaderCommandEvent, RELOAD_EVENT, TABS_EVENT, TabRow, TabsHostEvent},
 };
-use vmux_history::LastActivatedAt;
+use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_side_sheet::event::{
     PANE_TREE_EVENT, PaneNode, PaneTreeEvent, SideSheetCommandEvent,
     TabNode,
@@ -67,7 +67,8 @@ impl Plugin for BrowserPlugin {
         )
         .add_systems(
             Update,
-            sync_page_metadata_to_tab
+            (sync_page_metadata_to_tab, spawn_visit_on_navigation)
+                .chain()
                 .after(vmux_header::system::apply_chrome_state_from_cef),
         )
         .add_systems(
@@ -800,6 +801,33 @@ fn on_side_sheet_command_emit(
             hover_intent.last_activation = Some(std::time::Instant::now());
         }
         _ => {}
+    }
+}
+
+fn spawn_visit_on_navigation(
+    changed_tabs: Query<(Entity, &PageMetadata), (With<Tab>, Changed<PageMetadata>)>,
+    mut last_urls: Local<std::collections::HashMap<u64, String>>,
+    mut commands: Commands,
+) {
+    for (entity, meta) in &changed_tabs {
+        if meta.url.is_empty() || meta.url == "about:blank" {
+            continue;
+        }
+
+        let key = entity.to_bits();
+        let is_new = last_urls
+            .get(&key)
+            .map(|prev| prev != &meta.url)
+            .unwrap_or(true);
+
+        if is_new {
+            last_urls.insert(key, meta.url.clone());
+            commands.spawn((
+                Visit,
+                meta.clone(),
+                CreatedAt::now(),
+            ));
+        }
     }
 }
 

@@ -34,6 +34,7 @@ bevy_ecs = { workspace = true }
 chrono = { workspace = true }
 ron = { workspace = true }
 url = { workspace = true }
+vmux_header = { path = "../vmux_header" }
 vmux_webview_app = { path = "../vmux_webview_app" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
