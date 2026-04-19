@@ -5,6 +5,7 @@ use crate::{
     layout::side_sheet::{SideSheet, SideSheetPosition},
     layout::space::space_bundle,
     layout::tab::tab_bundle,
+    profile::Profile,
     scene::MainCamera,
     settings::{AppSettings, load_settings},
     unit::{PIXELS_PER_METER, WindowExt},
@@ -18,7 +19,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use vmux_header::{HEADER_HEIGHT_PX, HEADER_WEBVIEW_URL, Header, HeaderBundle};
-use vmux_history::LastActivatedAt;
+use vmux_history::{CreatedAt, LastActivatedAt};
 
 pub(crate) const WEBVIEW_Z_MAIN: f32 = 0.12;
 pub(crate) const WEBVIEW_Z_FOCUS_RING: f32 = 0.13;
@@ -32,7 +33,7 @@ impl Plugin for WindowPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Startup,
-            (setup, fit_window_to_screen)
+            (setup, spawn_default_session, fit_window_to_screen)
                 .chain()
                 .after(load_settings)
                 .after(crate::scene::setup)
@@ -67,6 +68,8 @@ pub(crate) struct BottomBar;
 #[derive(Component)]
 pub(crate) struct Modal;
 
+/// Spawns the window shell: VmuxWindow, header, side sheets, Main container.
+/// Does NOT spawn session entities (Profile/Space/Pane/Tab).
 fn setup(
     window: Single<&Window, With<PrimaryWindow>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
@@ -79,7 +82,6 @@ fn setup(
 ) {
     let m = window.meters();
     let pw = *primary_window;
-    let startup_url = settings.browser.startup_url.as_str();
 
     commands.spawn((
         WindowBundle {
@@ -188,38 +190,6 @@ fn setup(
                     min_height: Val::Px(0.0),
                     ..default()
                 },
-                children![(
-                    space_bundle(),
-                    LastActivatedAt::now(),
-                    children![(
-                        Pane::default(),
-                        PaneSplit { direction: PaneSplitDirection::Row },
-                        HostWindow(pw),
-                        ZIndex(0),
-                        Transform::default(),
-                        GlobalTransform::default(),
-                        Node {
-                            flex_grow: 1.0,
-                            min_height: Val::Px(0.0),
-                            column_gap: Val::Px(settings.layout.pane.gap),
-                            row_gap: Val::Px(settings.layout.pane.gap),
-                            ..default()
-                        },
-                        children![(
-                            leaf_pane_bundle(),
-                            LastActivatedAt::now(),
-                            children![(
-                                tab_bundle(),
-                                LastActivatedAt::now(),
-                                children![Browser::new(
-                                    &mut meshes,
-                                    &mut webview_mt,
-                                    startup_url
-                                )],
-                            )],
-                        )],
-                    )],
-                )],
             ),
             (
                 BottomBar,
@@ -273,6 +243,68 @@ fn setup(
                 },
             ),
         ],
+    ));
+}
+
+/// Spawns the default session (Profile/Space/Pane/Tab) if none was loaded.
+fn spawn_default_session(
+    main_q: Query<Entity, With<Main>>,
+    profile_q: Query<(), With<Profile>>,
+    primary_window: Single<Entity, With<PrimaryWindow>>,
+    settings: Res<AppSettings>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    // If profiles already exist (loaded from session.ron), skip.
+    if !profile_q.is_empty() {
+        return;
+    }
+
+    let Ok(main) = main_q.single() else { return };
+    let pw = *primary_window;
+    let startup_url = settings.browser.startup_url.as_str();
+
+    let space = commands.spawn((
+        space_bundle(),
+        LastActivatedAt::now(),
+        CreatedAt::now(),
+        ChildOf(main),
+    )).id();
+
+    commands.spawn((
+        Pane::default(),
+        PaneSplit { direction: PaneSplitDirection::Row },
+        HostWindow(pw),
+        ZIndex(0),
+        Transform::default(),
+        GlobalTransform::default(),
+        Node {
+            flex_grow: 1.0,
+            min_height: Val::Px(0.0),
+            column_gap: Val::Px(settings.layout.pane.gap),
+            row_gap: Val::Px(settings.layout.pane.gap),
+            ..default()
+        },
+        ChildOf(space),
+    ));
+
+    let leaf = commands.spawn((
+        leaf_pane_bundle(),
+        LastActivatedAt::now(),
+        ChildOf(space),
+    )).id();
+
+    let tab = commands.spawn((
+        tab_bundle(),
+        LastActivatedAt::now(),
+        CreatedAt::now(),
+        ChildOf(leaf),
+    )).id();
+
+    commands.spawn((
+        Browser::new(&mut meshes, &mut webview_mt, startup_url),
+        ChildOf(tab),
     ));
 }
 

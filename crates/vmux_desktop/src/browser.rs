@@ -551,6 +551,7 @@ fn handle_browser_commands(
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
+    mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -578,9 +579,21 @@ fn handle_browser_commands(
             BrowserCommand::Stop => {}
             BrowserCommand::FocusAddressBar => {}
             BrowserCommand::Find => {}
-            BrowserCommand::ZoomIn => {}
-            BrowserCommand::ZoomOut => {}
-            BrowserCommand::ZoomReset => {}
+            BrowserCommand::ZoomIn => {
+                if let Ok(mut z) = zoom_q.get_mut(webview) {
+                    z.0 += 0.5;
+                }
+            }
+            BrowserCommand::ZoomOut => {
+                if let Ok(mut z) = zoom_q.get_mut(webview) {
+                    z.0 -= 0.5;
+                }
+            }
+            BrowserCommand::ZoomReset => {
+                if let Ok(mut z) = zoom_q.get_mut(webview) {
+                    z.0 = 0.0;
+                }
+            }
             BrowserCommand::DevTools => commands.trigger(RequestShowDevTool { webview }),
             BrowserCommand::ViewSource => {}
             BrowserCommand::Print => {}
