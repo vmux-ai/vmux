@@ -91,6 +91,7 @@ pub enum BrowserCommand {
     #[menu(id = "browser_reload", label = "Reload", accel = "super+r")]
     Reload,
     #[menu(id = "browser_hard_reload", label = "Hard Reload", accel = "super+shift+r")]
+    #[bind(direct = "Super+Shift+r")]
     HardReload,
     #[menu(id = "browser_stop", label = "Stop Loading")]
     Stop,

@@ -175,4 +175,22 @@ where
 #[derive(Component, Debug, Clone)]
 pub struct WebviewSurface(pub Handle<Image>);
 
+/// Analogous to [`CefKeyboardTarget`] but for pointer events (mouse wheel only, for now).
+///
+/// When **at least one** [`WebviewSource`] entity has this marker, `on_mouse_wheel` only forwards
+/// scroll events to those entities. When **no** entity carries the marker, every webview receives
+/// wheel events (default behavior).
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct CefPointerTarget;
+
+/// Marker: CEF renders with a fully transparent background (`0x00000000`).
+///
+/// Without this marker the default opaque-white background is used.
+/// Add to header, side-sheet, or modal entities so their CSS
+/// `background-color: transparent` actually produces alpha-0 pixels.
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewTransparent;
+
 

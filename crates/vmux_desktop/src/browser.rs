@@ -294,16 +294,13 @@ fn sync_cef_webview_resize_after_ui(
     host_window: Query<&HostWindow>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
-    mut last_sizes: Local<Vec<(u64, Vec2)>>,
+    mut last_entries: Local<Vec<(u64, Vec2, f32)>>,
 ) {
     for (entity, size) in webviews.iter() {
         if !browsers.has_browser(entity) {
             continue;
         }
         let key = entity.to_bits();
-        if last_sizes.iter().any(|(k, s)| *k == key && *s == size.0) {
-            continue;
-        }
         let window_entity = host_window
             .get(entity)
             .ok()
@@ -314,11 +311,18 @@ fn sync_cef_webview_resize_after_ui(
             .map(|w| w.resolution.scale_factor() as f32)
             .filter(|s| s.is_finite() && *s > 0.0)
             .unwrap_or(1.0);
+        if last_entries
+            .iter()
+            .any(|(k, s, sf)| *k == key && *s == size.0 && (*sf - device_scale_factor).abs() < 0.01)
+        {
+            continue;
+        }
         browsers.resize(&entity, size.0, device_scale_factor);
-        if let Some(entry) = last_sizes.iter_mut().find(|(k, _)| *k == key) {
+        if let Some(entry) = last_entries.iter_mut().find(|(k, _, _)| *k == key) {
             entry.1 = size.0;
+            entry.2 = device_scale_factor;
         } else {
-            last_sizes.push((key, size.0));
+            last_entries.push((key, size.0, device_scale_factor));
         }
     }
 }

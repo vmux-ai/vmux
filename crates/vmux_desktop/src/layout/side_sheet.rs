@@ -6,7 +6,7 @@ use crate::{
 use bevy::{
     prelude::*,
     ui::UiSystems,
-    window::{CursorIcon, PrimaryWindow, SystemCursorIcon},
+    window::PrimaryWindow,
 };
 use vmux_header::Header;
 
@@ -71,7 +71,7 @@ fn handle_side_sheet_toggle(
 
 fn side_sheet_drag_resize(
     windows: Query<&Window, With<PrimaryWindow>>,
-    window_entities: Query<Entity, With<PrimaryWindow>>,
+
     open: Res<SideSheetOpen>,
     mut width_res: ResMut<SideSheetWidth>,
     sheet_q: Query<(&SideSheetPosition, &ComputedNode, &UiGlobalTransform), With<SideSheet>>,
@@ -112,20 +112,13 @@ fn side_sheet_drag_resize(
             }
         } else {
             commands.entity(drag_entity).despawn();
-            if let Ok(we) = window_entities.single() {
-                commands.entity(we).remove::<CursorIcon>();
-            }
             return;
         }
 
-        if let Ok(we) = window_entities.single() {
-            commands.entity(we).insert(CursorIcon::System(SystemCursorIcon::ColResize));
-        }
         return;
     }
 
     // Hover detection on right edge of left side sheet
-    let mut on_edge = false;
     for (pos, cn, gt) in &sheet_q {
         if *pos != SideSheetPosition::Left {
             continue;
@@ -141,7 +134,6 @@ fn side_sheet_drag_resize(
             && cursor_y >= top
             && cursor_y <= bottom
         {
-            on_edge = true;
             if mouse.just_pressed(MouseButton::Left) {
                 commands.spawn(SideSheetDrag {
                     start_cursor_x: cursor_x,
@@ -151,11 +143,7 @@ fn side_sheet_drag_resize(
         }
     }
 
-    if on_edge {
-        if let Ok(we) = window_entities.single() {
-            commands.entity(we).insert(CursorIcon::System(SystemCursorIcon::ColResize));
-        }
-    }
+
 }
 
 fn sync_side_sheet_visibility(

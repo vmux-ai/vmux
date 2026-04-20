@@ -35,9 +35,9 @@ use crate::browser_process::renderer_handler::SharedDeviceScaleFactor;
 pub use keyboard::*;
 
 
-/// CEF [`BrowserSettings::background_color`] ARGB. Opaque white gives normal
-/// browser behaviour; pages that want transparency (header, side-sheet) set
-/// `background-color: transparent` in their own CSS.
+/// Default CEF [`BrowserSettings::background_color`] ARGB.
+/// Opaque white so normal web pages render correctly.
+/// UI overlay webviews pass `0x00000000` for transparency.
 const CEF_OSR_BACKGROUND_COLOR_ARGB: u32 = 0xFFFFFFFF;
 
 static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
@@ -92,6 +92,7 @@ impl Browsers {
         initialize_scripts: &[String],
         _window_handle: Option<RawWindowHandle>,
         disk_profile_root: Option<&str>,
+        background_color: Option<u32>,
     ) {
         let size = Rc::new(Cell::new(webview_size));
         let device_scale = Rc::new(Cell::new(device_scale_factor));
@@ -187,7 +188,7 @@ impl Browsers {
             Some(&BrowserSettings {
                 // Cap for OSR; matches ProMotion / 120 Hz displays when the host can sustain it.
                 windowless_frame_rate: 120,
-                background_color: CEF_OSR_BACKGROUND_COLOR_ARGB,
+                background_color: background_color.unwrap_or(CEF_OSR_BACKGROUND_COLOR_ARGB),
                 ..Default::default()
             }),
             Self::create_extra_info(initialize_scripts).as_mut(),

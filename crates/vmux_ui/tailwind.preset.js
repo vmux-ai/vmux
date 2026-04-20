@@ -55,6 +55,12 @@ module.exports = {
           DEFAULT: "var(--scrim)",
           strong: "var(--scrim-strong)",
         },
+        glass: {
+          DEFAULT: "var(--glass)",
+          hover: "var(--glass-hover)",
+          active: "var(--glass-active)",
+          border: "var(--glass-border)",
+        },
       },
       fontSize: {
         ui: ["13px", { lineHeight: "1.4" }],

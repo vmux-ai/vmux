@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use vmux_side_sheet::event::{
     PANE_TREE_EVENT, PaneNode, PaneTreeEvent, SideSheetCommandEvent, TabNode,
 };
+use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener};
 
 fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
@@ -106,7 +107,11 @@ fn TabRow(tab: TabNode, pane_id: u64) -> Element {
                     src: "{src}",
                 }
             } else {
-                div { class: "box-border h-4 w-4 shrink-0 rounded-sm border border-border bg-muted" }
+                Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                    path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }
+                    path { d: "M2 12h20" }
+                    path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" }
+                }
             }
             span {
                 class: if is_active {
