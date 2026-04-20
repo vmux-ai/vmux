@@ -11,7 +11,7 @@ const SHEET_ROOT: &str = "group/sheet fixed inset-0 z-[1000] bg-scrim-strong opa
 
 const SHEET_PANEL_BASE: &str = "fixed z-[1001] flex flex-col gap-4 border-0 bg-background font-sans text-muted-foreground shadow-[0_4px_20px_rgb(0_0_0_/_20%)] will-change-transform";
 
-const SHEET_CLOSE: &str = "absolute right-4 top-4 flex size-6 items-center justify-center rounded border-0 bg-transparent p-0 text-primary transition-colors hover:text-muted-foreground";
+const SHEET_CLOSE: &str = "cursor-pointer absolute right-4 top-4 flex size-6 items-center justify-center rounded border-0 bg-transparent p-0 text-primary transition-colors hover:text-muted-foreground";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum SheetSide {

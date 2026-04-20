@@ -41,7 +41,7 @@ pub fn App() -> Element {
     let favicon_src = active_row.as_ref().and_then(favicon_src_for_tab);
 
     rsx! {
-        div { class: "box-border flex min-h-0 min-w-0 flex-1 items-center gap-2 px-2 text-foreground",
+        div { class: "glass box-border flex min-h-0 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-foreground",
             if (listener.is_loading)() {
                 div { class: "col-span-3 flex w-full items-center px-3 py-2",
                     span { class: "text-ui text-muted-foreground", "Connecting…" }
@@ -78,7 +78,7 @@ pub fn App() -> Element {
                 div { class: "flex min-w-0 flex-1 items-center",
                     if let Some(tab) = active_row.as_ref() {
                         div {
-                            class: "flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-full border border-glass-border bg-glass px-2.5 py-1 shadow-sm",
+                            class: "glass flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 shadow-sm",
                             onclick: move |_| {
                                 let _ = try_cef_emit_serde(&HeaderCommandEvent {
                                     header_command: "focus_address_bar".to_string(),
@@ -108,7 +108,7 @@ fn NavButton(label: &'static str, command: &'static str, children: Element) -> E
             r#type: "button",
             aria_label: label,
             title: label,
-            class: "flex h-7 w-7 items-center justify-center rounded-md border border-glass-border bg-glass text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
+            class: "cursor-pointer flex h-7 w-7 items-center justify-center rounded-md border border-glass-border bg-glass text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
             onclick: move |_| {
                 let _ = try_cef_emit_serde(&HeaderCommandEvent {
                     header_command: command.to_string(),

@@ -62,7 +62,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
     let pane_id = pane.id;
 
     rsx! {
-        div { class: "mb-1 flex flex-col",
+        div { class: "glass mb-2 flex flex-col rounded-lg p-1.5",
             div {
                 class: if pane.is_active {
                     "mb-0.5 rounded-md px-2 py-1 text-ui font-semibold text-foreground"
@@ -71,7 +71,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                 },
                 "{label}"
             }
-            div { class: "flex flex-col gap-px pl-1",
+            div { class: "flex flex-col gap-px",
                 for tab in pane.tabs.iter() {
                     TabRow { tab: tab.clone(), pane_id }
                 }
@@ -89,9 +89,9 @@ fn TabRow(tab: TabNode, pane_id: u64) -> Element {
     rsx! {
         div {
             class: if is_active {
-                "group flex cursor-default items-center gap-2 rounded-md bg-muted px-2 py-1.5"
+                "group flex cursor-default items-center gap-2 rounded-md bg-glass px-2 py-1.5 border border-glass-border"
             } else {
-                "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground"
             },
             onclick: move |_| {
                 let _ = try_cef_emit_serde(&SideSheetCommandEvent {
@@ -117,7 +117,7 @@ fn TabRow(tab: TabNode, pane_id: u64) -> Element {
                 "{tab.title}"
             }
             button {
-                class: "ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-sm opacity-0 transition-colors group-hover:opacity-100 hover:bg-foreground/10 active:bg-transparent",
+                class: "cursor-pointer ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-sm opacity-0 transition-colors group-hover:opacity-100 hover:bg-foreground/10 active:bg-transparent",
                 onclick: move |evt| {
                     evt.stop_propagation();
                     let _ = try_cef_emit_serde(&SideSheetCommandEvent {
