@@ -617,6 +617,7 @@ fn on_header_command_emit(
         "prev_page" => BrowserCommand::PrevPage,
         "next_page" => BrowserCommand::NextPage,
         "reload" => BrowserCommand::Reload,
+        "focus_address_bar" => BrowserCommand::FocusAddressBar,
         _ => return,
     };
     messages.write(AppCommand::Browser(cmd));
