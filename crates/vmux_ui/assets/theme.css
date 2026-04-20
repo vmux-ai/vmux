@@ -69,10 +69,21 @@
   --sidebar-ring: oklch(0.556 0 0);
   --scrim: oklch(0.08 0 0 / 0.72);
   --scrim-strong: oklch(0.05 0 0 / 0.82);
+  --glass: oklch(1 0 0 / 0.25);
+  --glass-hover: oklch(1 0 0 / 0.35);
+  --glass-active: oklch(1 0 0 / 0.45);
+  --glass-border: oklch(1 0 0 / 0.30);
 }
 
 *,
 ::after,
 ::before {
   border-color: var(--border);
+}
+
+.glass {
+  background-color: var(--glass);
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(20px) saturate(1.4);
 }

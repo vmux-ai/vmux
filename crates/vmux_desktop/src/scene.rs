@@ -12,7 +12,7 @@ use bevy::{
     prelude::*,
     window::PrimaryWindow,
 };
-use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin};
+use bevy_infinite_grid::{InfiniteGrid, InfiniteGridBundle, InfiniteGridPlugin};
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -76,7 +76,26 @@ pub(crate) fn setup(
     window: Single<&Window, With<PrimaryWindow>>,
     settings: Res<AppSettings>,
 ) {
-    commands.spawn(InfiniteGridBundle::default());
+    commands.spawn(InfiniteGridBundle {
+        visibility: Visibility::Hidden,
+        ..default()
+    });
+
+    // Distant sun for PBR glass reflections / specular highlights
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 8000.0,
+            shadows_enabled: false,
+            color: Color::srgb(1.0, 0.98, 0.95),
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(
+            EulerRot::XYZ,
+            -0.6,   // pitch down ~35 deg
+            0.4,    // slight yaw
+            0.0,
+        )),
+    ));
 
     let mut state = FreeCameraState::default();
     state.enabled = false;
@@ -175,6 +194,7 @@ fn spawn_bloom(
                 MeshMaterial3d(mats[mat_idx].clone()),
                 Transform::from_translation(pos).with_scale(Vec3::splat(scale)),
                 Bouncing,
+                Visibility::Hidden,
             ));
         }
     }
@@ -233,6 +253,8 @@ fn on_toggle_free_camera(
     mut reader: MessageReader<AppCommand>,
     mut state: Single<&mut FreeCameraState, With<MainCamera>>,
     camera: Single<Entity, With<MainCamera>>,
+    mut bounce_q: Query<&mut Visibility, (With<Bouncing>, Without<InfiniteGrid>)>,
+    mut grid_q: Query<&mut Visibility, (With<InfiniteGrid>, Without<Bouncing>)>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -240,10 +262,18 @@ fn on_toggle_free_camera(
             continue;
         };
         state.enabled = !state.enabled;
-        if state.enabled {
+        let vis = if state.enabled {
             commands.entity(*camera).insert(Bloom::NATURAL);
+            Visibility::Visible
         } else {
             commands.entity(*camera).remove::<Bloom>();
+            Visibility::Hidden
+        };
+        for mut v in &mut bounce_q {
+            *v = vis;
+        }
+        for mut v in &mut grid_q {
+            *v = vis;
         }
     }
 }

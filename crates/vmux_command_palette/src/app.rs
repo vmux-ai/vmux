@@ -118,20 +118,22 @@ pub fn App() -> Element {
   el._ctrlBound = true;
   el.addEventListener('keydown', function(e) {
     if (!e.ctrlKey) return;
-    var k = e.key.toLowerCase();
-    if ('njpkaefbdhwu'.indexOf(k) === -1) return;
+    var c = e.code;
+    var actions = {KeyN:'down',KeyJ:'down',KeyP:'up',KeyK:'up',KeyA:'home',KeyE:'end',KeyF:'fwd',KeyB:'back',KeyD:'del',KeyH:'bksp',KeyW:'delw',KeyU:'delbeg'};
+    var a = actions[c];
+    if (!a) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (k==='n'||k==='j') { el.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})); return; }
-    if (k==='p'||k==='k') { el.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true})); return; }
-    if (k==='a') { el.setSelectionRange(0,0); return; }
-    if (k==='e') { el.setSelectionRange(el.value.length,el.value.length); return; }
-    if (k==='f') { var p=Math.min(el.selectionStart+1,el.value.length); el.setSelectionRange(p,p); return; }
-    if (k==='b') { var p=Math.max(el.selectionStart-1,0); el.setSelectionRange(p,p); return; }
-    if (k==='d') { var s=el.selectionStart,v=el.value; el.value=v.slice(0,s)+v.slice(s+1); el.setSelectionRange(s,s); el.dispatchEvent(new Event('input',{bubbles:true})); return; }
-    if (k==='h') { var s=el.selectionStart; if(s>0){var v=el.value;el.value=v.slice(0,s-1)+v.slice(s);el.setSelectionRange(s-1,s-1);el.dispatchEvent(new Event('input',{bubbles:true}));} return; }
-    if (k==='w') { var s=el.selectionStart,v=el.value,i=s-1; while(i>0&&v[i-1]===' ')i--; while(i>0&&v[i-1]!==' ')i--; el.value=v.slice(0,i)+v.slice(s); el.setSelectionRange(i,i); el.dispatchEvent(new Event('input',{bubbles:true})); return; }
-    if (k==='u') { var s=el.selectionStart; el.value=el.value.slice(s); el.setSelectionRange(0,0); el.dispatchEvent(new Event('input',{bubbles:true})); return; }
+    if (a==='down') { el.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})); return; }
+    if (a==='up') { el.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true})); return; }
+    if (a==='home') { el.setSelectionRange(0,0); return; }
+    if (a==='end') { el.setSelectionRange(el.value.length,el.value.length); return; }
+    if (a==='fwd') { var p=Math.min(el.selectionStart+1,el.value.length); el.setSelectionRange(p,p); return; }
+    if (a==='back') { var p=Math.max(el.selectionStart-1,0); el.setSelectionRange(p,p); return; }
+    if (a==='del') { var s=el.selectionStart,v=el.value; el.value=v.slice(0,s)+v.slice(s+1); el.setSelectionRange(s,s); el.dispatchEvent(new Event('input',{bubbles:true})); return; }
+    if (a==='bksp') { var s=el.selectionStart; if(s>0){var v=el.value;el.value=v.slice(0,s-1)+v.slice(s);el.setSelectionRange(s-1,s-1);el.dispatchEvent(new Event('input',{bubbles:true}));} return; }
+    if (a==='delw') { var s=el.selectionStart,v=el.value,i=s-1; while(i>0&&v[i-1]===' ')i--; while(i>0&&v[i-1]!==' ')i--; el.value=v.slice(0,i)+v.slice(s); el.setSelectionRange(i,i); el.dispatchEvent(new Event('input',{bubbles:true})); return; }
+    if (a==='delbeg') { var s=el.selectionStart; el.value=el.value.slice(s); el.setSelectionRange(0,0); el.dispatchEvent(new Event('input',{bubbles:true})); return; }
   }, true);
 }, 0);"#,
         );
@@ -145,6 +147,14 @@ pub fn App() -> Element {
     let q = query();
     let results = filter_results(&q, &tabs, &commands);
     let sel = selected().min(results.len().saturating_sub(1));
+
+    // Auto-scroll selected item into view when selection changes
+    use_effect(move || {
+        let s = selected();
+        document::eval(&format!(
+            "document.getElementById('palette-item-{s}')?.scrollIntoView({{block:'nearest'}})"
+        ));
+    });
 
     let execute = move |item: &ResultItem| match item {
         ResultItem::Tab {
@@ -206,6 +216,7 @@ pub fn App() -> Element {
                         for (i, item) in results.iter().enumerate() {
                             div {
                                 key: "{i}",
+                                id: "palette-item-{i}",
                                 class: if i == sel {
                                     "flex cursor-pointer items-center justify-between rounded-lg bg-muted px-3 py-2"
                                 } else {

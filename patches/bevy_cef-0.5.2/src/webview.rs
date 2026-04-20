@@ -1,6 +1,7 @@
 use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
     HostWindow, IpcEventRawSender, ResolvedWebviewUri, WebviewSize, WebviewSource,
+    WebviewTransparent,
 };
 use crate::cursor_icon::SystemCursorIconSender;
 use crate::chrome_state::WebviewChromeStateSender;
@@ -142,6 +143,7 @@ fn create_webview(
             &WebviewSize,
             &PreloadScripts,
             Option<&HostWindow>,
+            Has<WebviewTransparent>,
         ),
         Added<ResolvedWebviewUri>,
     >,
@@ -150,7 +152,7 @@ fn create_webview(
 ) {
     WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
-        for (entity, uri, size, initialize_scripts, host_window) in webviews.iter() {
+        for (entity, uri, size, initialize_scripts, host_window, transparent) in webviews.iter() {
             let window_entity = host_window
                 .map(|h| h.0)
                 .or_else(|| primary_window.single().ok());
@@ -181,6 +183,7 @@ fn create_webview(
                 &initialize_scripts.0,
                 host_window,
                 disk_profile.0.as_deref(),
+                if transparent { Some(0x00000000) } else { None },
             );
         }
     });

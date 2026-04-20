@@ -10,7 +10,7 @@ use bevy::{
     ecs::relationship::Relationship,
     prelude::*,
     ui::{FlexDirection, UiGlobalTransform},
-    window::{CursorIcon, PrimaryWindow, SystemCursorIcon},
+    window::PrimaryWindow,
 };
 use std::time::Instant;
 use bevy_cef::prelude::*;
@@ -593,7 +593,7 @@ fn warp_cursor_to_active_pane(
 
 fn pane_gap_drag_resize(
     windows: Query<&Window, With<PrimaryWindow>>,
-    window_entities: Query<Entity, With<PrimaryWindow>>,
+
     splits: Query<(Entity, &PaneSplit, &Children), Without<PaneDrag>>,
     active_drags: Query<(Entity, &PaneDrag, &PaneSplit)>,
     child_nodes: Query<(&ComputedNode, &UiGlobalTransform)>,
@@ -636,19 +636,10 @@ fn pane_gap_drag_resize(
             commands.entity(split_entity).remove::<PaneDrag>();
         }
 
-        // Keep resize cursor during drag
-        let icon = match split.direction {
-            PaneSplitDirection::Row => SystemCursorIcon::ColResize,
-            PaneSplitDirection::Column => SystemCursorIcon::RowResize,
-        };
-        if let Ok(we) = window_entities.single() {
-            commands.entity(we).insert(CursorIcon::System(icon));
-        }
         return;
     }
 
     // --- Hover detection + drag initiation ---
-    let mut hovered_dir: Option<PaneSplitDirection> = None;
     'outer: for (split_entity, split, children) in &splits {
         let sibs: Vec<Entity> = children.iter().collect();
         for i in 0..sibs.len().saturating_sub(1) {
@@ -683,8 +674,6 @@ fn pane_gap_drag_resize(
             if pos_along >= gap_min && pos_along <= gap_max
                 && pos_cross >= cross_min && pos_cross <= cross_max
             {
-                hovered_dir = Some(split.direction);
-
                 if mouse.just_pressed(MouseButton::Left) {
                     let prev_grow = node_q.get(sibs[i]).map(|n| n.flex_grow).unwrap_or(1.0);
                     let next_grow = node_q.get(sibs[i + 1]).map(|n| n.flex_grow).unwrap_or(1.0);
@@ -701,15 +690,7 @@ fn pane_gap_drag_resize(
         }
     }
 
-    if let Some(dir) = hovered_dir {
-        let icon = match dir {
-            PaneSplitDirection::Row => SystemCursorIcon::ColResize,
-            PaneSplitDirection::Column => SystemCursorIcon::RowResize,
-        };
-        if let Ok(we) = window_entities.single() {
-            commands.entity(we).insert(CursorIcon::System(icon));
-        }
-    }
+
 }
 
 fn collect_space_leaf_panes(

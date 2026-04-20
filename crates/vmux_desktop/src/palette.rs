@@ -86,7 +86,10 @@ fn handle_open_palette(
         if modal_node.display != Display::None {
             modal_node.display = Display::None;
             *modal_vis = Visibility::Hidden;
-            commands.entity(modal_e).remove::<CefKeyboardTarget>();
+            commands
+                .entity(modal_e)
+                .remove::<CefKeyboardTarget>()
+                .remove::<CefPointerTarget>();
             // Restore keyboard to active content browser
             let (_, _, active_tab) =
                 focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
@@ -113,7 +116,10 @@ fn handle_open_palette(
         for browser_e in &content_browsers {
             commands.entity(browser_e).remove::<CefKeyboardTarget>();
         }
-        commands.entity(modal_e).insert(CefKeyboardTarget);
+        commands
+            .entity(modal_e)
+            .insert(CefKeyboardTarget)
+            .insert(CefPointerTarget);
 
         // Gather current URL
         let (_, _, active_tab) =
@@ -269,7 +275,10 @@ fn on_palette_action(
     if let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut() {
         modal_node.display = Display::None;
         *modal_vis = Visibility::Hidden;
-        commands.entity(modal_e).remove::<CefKeyboardTarget>();
+        commands
+            .entity(modal_e)
+            .remove::<CefKeyboardTarget>()
+            .remove::<CefPointerTarget>();
     }
     let (_, _, active_tab) =
         focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);

@@ -90,7 +90,11 @@ pub fn App() -> Element {
                                     src: "{src}",
                                 }
                             } else {
-                                div { class: "box-border h-4 w-4 shrink-0 rounded-sm border border-border bg-muted" }
+                                Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                                    path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }
+                                    path { d: "M2 12h20" }
+                                    path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" }
+                                }
                             }
                             span { class: "min-w-0 truncate text-sm text-foreground", "{tab.url}" }
                         }

@@ -12,6 +12,7 @@ use crate::{
 };
 use vmux_webview_app::WebviewAppEmbedSet;
 use bevy::{
+    ecs::relationship::Relationship,
     prelude::*,
     render::alpha::AlphaMode,
     ui::{FlexDirection, UiTargetCamera},
@@ -37,6 +38,7 @@ impl Plugin for WindowPlugin {
             Startup,
             (
                 setup,
+                spawn_glass_panes,
                 crate::persistence::load_session_on_startup,
                 spawn_default_session,
                 crate::persistence::rebuild_session_views,
@@ -47,7 +49,7 @@ impl Plugin for WindowPlugin {
                 .after(crate::scene::setup)
                 .after(WebviewAppEmbedSet),
         )
-        .add_systems(PostUpdate, fit_window_to_screen);
+        .add_systems(PostUpdate, (fit_window_to_screen, sync_glass_pane_clip));
     }
 }
 
@@ -76,6 +78,10 @@ pub(crate) struct BottomBar;
 #[derive(Component)]
 pub(crate) struct Modal;
 
+/// Marker for glass mesh entities spawned behind overlay panels (header, side sheet, modal).
+#[derive(Component)]
+pub(crate) struct GlassPane;
+
 /// Spawns the window shell: VmuxWindow, header, side sheets, Main container.
 /// Does NOT spawn session entities (Profile/Space/Pane/Tab).
 fn setup(
@@ -97,14 +103,14 @@ fn setup(
             mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
             material: MeshMaterial3d(materials.add(RoundedMaterial {
                 base: StandardMaterial {
-                    base_color: Color::srgba(0.08, 0.08, 0.08, 0.4),
+                    base_color: Color::srgba(0.5, 0.5, 0.52, 0.15),
                     alpha_mode: AlphaMode::Blend,
                     cull_mode: None,
-                    perceptual_roughness: 0.12,
-                    metallic: 0.0,
-                    specular_transmission: 0.9,
-                    diffuse_transmission: 1.0,
-                    thickness: 0.1,
+                    perceptual_roughness: 0.1,
+                    metallic: 0.05,
+                    specular_transmission: 0.6,
+                    diffuse_transmission: 0.4,
+                    thickness: 0.02,
                     ior: 1.5,
                     ..default()
                 },
@@ -135,6 +141,7 @@ fn setup(
                 SideSheetPosition::Left,
                 HostWindow(pw),
                 Browser,
+                WebviewTransparent,
                 Node {
                     width: Val::Px(settings.layout.side_sheet.width),
                     flex_shrink: 0.0,
@@ -166,6 +173,7 @@ fn setup(
                 ZIndex(1),
                 HostWindow(pw),
                 Browser,
+                WebviewTransparent,
                 Node {
                     height: Val::Px(HEADER_HEIGHT_PX),
                     flex_shrink: 0.0,
@@ -237,6 +245,7 @@ fn setup(
                 Modal,
                 HostWindow(pw),
                 Browser,
+                WebviewTransparent,
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Percent(100.0),
@@ -333,6 +342,88 @@ fn spawn_default_session(
         Browser::new(&mut meshes, &mut webview_mt, startup_url),
         ChildOf(tab),
     ));
+}
+
+/// Spawns a glass mesh child behind each overlay panel (Header, SideSheet Left, Modal).
+fn spawn_glass_panes(
+    header_q: Query<Entity, With<Header>>,
+    side_sheet_q: Query<(Entity, &SideSheetPosition), (With<SideSheet>, With<Browser>)>,
+    modal_q: Query<Entity, With<Modal>>,
+    settings: Res<AppSettings>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<RoundedMaterial>>,
+) {
+    let r = settings.layout.pane.radius;
+    let plane = meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)));
+
+    let mut spawn_glass = |parent: Entity| {
+        commands.spawn((
+            GlassPane,
+            Mesh3d(plane.clone()),
+            MeshMaterial3d(materials.add(RoundedMaterial {
+                base: StandardMaterial {
+                    base_color: Color::srgba(0.5, 0.5, 0.52, 0.15),
+                    alpha_mode: AlphaMode::Blend,
+                    cull_mode: None,
+                    perceptual_roughness: 0.1,
+                    metallic: 0.05,
+                    specular_transmission: 0.6,
+                    diffuse_transmission: 0.4,
+                    thickness: 0.02,
+                    ior: 1.5,
+                    ..default()
+                },
+                extension: RoundedCorners {
+                    clip: Vec4::new(r, 1.0, 1.0, PIXELS_PER_METER),
+                    ..default()
+                },
+            })),
+            Transform {
+                translation: Vec3::new(0.0, 0.0, -0.002),
+                ..default()
+            },
+            GlobalTransform::default(),
+            ChildOf(parent),
+        ));
+    };
+
+    for entity in &header_q {
+        spawn_glass(entity);
+    }
+    for (entity, pos) in &side_sheet_q {
+        if *pos == SideSheetPosition::Left {
+            spawn_glass(entity);
+        }
+    }
+    // No glass pane for modal — command palette uses a simple dimmed backdrop.
+}
+
+/// Keeps each GlassPane's RoundedCorners clip in sync with its parent panel's computed size.
+fn sync_glass_pane_clip(
+    q: Query<(&ChildOf, &MeshMaterial3d<RoundedMaterial>), With<GlassPane>>,
+    parent_q: Query<&ComputedNode>,
+    settings: Res<AppSettings>,
+    mut materials: ResMut<Assets<RoundedMaterial>>,
+) {
+    let r = settings.layout.pane.radius;
+    for (child_of, handle) in &q {
+        let Ok(computed) = parent_q.get(child_of.get()) else {
+            continue;
+        };
+        let size_px = computed.size;
+        if size_px.x <= 0.0 || size_px.y <= 0.0 {
+            continue;
+        }
+        let w_m = size_px.x / PIXELS_PER_METER;
+        let h_m = size_px.y / PIXELS_PER_METER;
+        if let Some(mat) = materials.get_mut(handle) {
+            let clip = &mut mat.extension.clip;
+            if (clip.x - r).abs() > 0.01 || (clip.y - w_m).abs() > 0.01 || (clip.z - h_m).abs() > 0.01 {
+                *clip = Vec4::new(r, w_m, h_m, PIXELS_PER_METER);
+            }
+        }
+    }
 }
 
 pub(crate) fn fit_window_to_screen(

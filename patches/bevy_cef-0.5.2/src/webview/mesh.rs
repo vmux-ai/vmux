@@ -100,13 +100,15 @@ fn on_mouse_wheel(
     browsers: NonSend<Browsers>,
     pointer: WebviewPointer,
     windows: Query<&Window>,
-    webviews: Query<Entity, (With<WebviewSource>, Or<(With<Mesh3d>, With<Mesh2d>)>)>,
+    webviews_all: Query<Entity, (With<WebviewSource>, Or<(With<Mesh3d>, With<Mesh2d>)>)>,
+    webviews_targeted: Query<Entity, (With<WebviewSource>, With<CefPointerTarget>)>,
     suppress: Res<CefSuppressPointerInput>,
 ) {
     if suppress.0 {
         for _ in er.read() {}
         return;
     }
+    let use_targets = webviews_targeted.iter().next().is_some();
     for event in er.read() {
         let Ok(window) = windows.get(event.window) else {
             continue;
@@ -114,7 +116,12 @@ fn on_mouse_wheel(
         let Some(cursor_pos) = window.cursor_position() else {
             continue;
         };
-        for webview in webviews.iter() {
+        let iter: Box<dyn Iterator<Item = Entity>> = if use_targets {
+            Box::new(webviews_targeted.iter())
+        } else {
+            Box::new(webviews_all.iter())
+        };
+        for webview in iter {
             let Some(pos) = pointer.pointer_pos(webview, cursor_pos) else {
                 continue;
             };
