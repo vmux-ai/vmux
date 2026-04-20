@@ -105,9 +105,35 @@ pub fn App() -> Element {
         query.set(data.url.clone());
         selected.set(0);
         state.set(data);
-        // Focus the input after the DOM updates with new state
+        // Focus input and install raw JS keydown listener for Ctrl bindings.
+        // Dioxus e.modifiers().ctrl() is unreliable in CEF OSR, so we use
+        // event.ctrlKey directly from the DOM KeyboardEvent in capture phase.
         document::eval(
-            r#"setTimeout(() => { let el = document.getElementById('palette-input'); if (el) { el.focus(); el.select(); } }, 0);"#,
+            r#"setTimeout(() => {
+  var el = document.getElementById('palette-input');
+  if (!el) return;
+  el.focus();
+  el.select();
+  if (el._ctrlBound) return;
+  el._ctrlBound = true;
+  el.addEventListener('keydown', function(e) {
+    if (!e.ctrlKey) return;
+    var k = e.key.toLowerCase();
+    if ('njpkaefbdhwu'.indexOf(k) === -1) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (k==='n'||k==='j') { el.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})); return; }
+    if (k==='p'||k==='k') { el.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true})); return; }
+    if (k==='a') { el.setSelectionRange(0,0); return; }
+    if (k==='e') { el.setSelectionRange(el.value.length,el.value.length); return; }
+    if (k==='f') { var p=Math.min(el.selectionStart+1,el.value.length); el.setSelectionRange(p,p); return; }
+    if (k==='b') { var p=Math.max(el.selectionStart-1,0); el.setSelectionRange(p,p); return; }
+    if (k==='d') { var s=el.selectionStart,v=el.value; el.value=v.slice(0,s)+v.slice(s+1); el.setSelectionRange(s,s); el.dispatchEvent(new Event('input',{bubbles:true})); return; }
+    if (k==='h') { var s=el.selectionStart; if(s>0){var v=el.value;el.value=v.slice(0,s-1)+v.slice(s);el.setSelectionRange(s-1,s-1);el.dispatchEvent(new Event('input',{bubbles:true}));} return; }
+    if (k==='w') { var s=el.selectionStart,v=el.value,i=s-1; while(i>0&&v[i-1]===' ')i--; while(i>0&&v[i-1]!==' ')i--; el.value=v.slice(0,i)+v.slice(s); el.setSelectionRange(i,i); el.dispatchEvent(new Event('input',{bubbles:true})); return; }
+    if (k==='u') { var s=el.selectionStart; el.value=el.value.slice(s); el.setSelectionRange(0,0); el.dispatchEvent(new Event('input',{bubbles:true})); return; }
+  }, true);
+}, 0);"#,
         );
     });
 
@@ -136,16 +162,16 @@ pub fn App() -> Element {
 
     rsx! {
         div {
-            class: "flex h-full w-full items-start justify-center bg-black/50 pt-[15%]",
+            class: "flex h-full w-full items-start justify-center bg-black/70 pt-[15%]",
             onclick: move |_| { emit_action("dismiss", ""); },
             div {
-                class: "flex w-full max-w-lg flex-col rounded-xl border border-border bg-card shadow-2xl",
+                class: "glass flex w-full max-w-xl flex-col rounded-xl shadow-2xl",
                 onclick: move |e| { e.stop_propagation(); },
                 div { class: "p-2",
                     input {
                         id: "palette-input",
                         r#type: "text",
-                        class: "w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground",
+                        class: "w-full rounded-lg bg-muted px-3 py-2.5 text-base text-foreground outline-none placeholder:text-muted-foreground",
                         placeholder: "Type a URL, search tabs, or > for commands...",
                         value: "{q}",
                         autofocus: true,
@@ -154,7 +180,6 @@ pub fn App() -> Element {
                             selected.set(0);
                         },
                         onkeydown: move |e| {
-                            let is_ctrl = e.modifiers().ctrl();
                             match e.key() {
                                 Key::Escape => { emit_action("dismiss", ""); }
                                 Key::ArrowDown => {
@@ -162,15 +187,6 @@ pub fn App() -> Element {
                                     selected.set((sel + 1).min(max));
                                 }
                                 Key::ArrowUp => {
-                                    selected.set(sel.saturating_sub(1));
-                                }
-                                Key::Character(c) if is_ctrl && (c == "n" || c == "j") => {
-                                    e.prevent_default();
-                                    let max = results.len().saturating_sub(1);
-                                    selected.set((sel + 1).min(max));
-                                }
-                                Key::Character(c) if is_ctrl && (c == "p" || c == "k") => {
-                                    e.prevent_default();
                                     selected.set(sel.saturating_sub(1));
                                 }
                                 Key::Enter => {
@@ -186,14 +202,14 @@ pub fn App() -> Element {
                     }
                 }
                 if !results.is_empty() {
-                    div { class: "max-h-64 overflow-y-auto border-t border-border p-1",
+                    div { class: "max-h-80 overflow-y-auto border-t border-border p-1",
                         for (i, item) in results.iter().enumerate() {
                             div {
                                 key: "{i}",
                                 class: if i == sel {
-                                    "flex cursor-pointer items-center justify-between rounded-lg bg-muted px-3 py-1.5"
+                                    "flex cursor-pointer items-center justify-between rounded-lg bg-muted px-3 py-2"
                                 } else {
-                                    "flex cursor-pointer items-center justify-between rounded-lg px-3 py-1.5 hover:bg-muted/50"
+                                    "flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 hover:bg-muted/50"
                                 },
                                 onclick: {
                                     let item = item.clone();
@@ -202,18 +218,18 @@ pub fn App() -> Element {
                                 match item {
                                     ResultItem::Tab { title, url, .. } => rsx! {
                                         div { class: "flex min-w-0 flex-col",
-                                            span { class: "truncate text-sm text-foreground", "{title}" }
-                                            span { class: "truncate text-xs text-muted-foreground", "{url}" }
+                                            span { class: "truncate text-base text-foreground", "{title}" }
+                                            span { class: "truncate text-sm text-muted-foreground", "{url}" }
                                         }
-                                        span { class: "ml-2 shrink-0 text-xs text-muted-foreground", "Tab" }
+                                        span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "Tab" }
                                     },
                                     ResultItem::Command { name, shortcut, .. } => rsx! {
-                                        span { class: "text-sm text-foreground", "{name}" }
-                                        span { class: "ml-2 shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground", "{shortcut}" }
+                                        span { class: "text-base text-foreground", "{name}" }
+                                        span { class: "ml-2 shrink-0 rounded bg-muted px-1.5 py-0.5 text-sm text-muted-foreground", "{shortcut}" }
                                     },
                                     ResultItem::Navigate { url } => rsx! {
-                                        span { class: "text-sm text-foreground", "Navigate to {url}" }
-                                        span { class: "ml-2 shrink-0 text-xs text-muted-foreground", "\u{21b5}" }
+                                        span { class: "text-base text-foreground", "Navigate to {url}" }
+                                        span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "\u{21b5}" }
                                     },
                                 }
                             }
