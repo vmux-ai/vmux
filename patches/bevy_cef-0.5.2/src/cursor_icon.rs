@@ -1,6 +1,6 @@
 use async_channel::{Receiver, Sender};
 use bevy::prelude::*;
-use bevy::window::{CursorIcon, SystemCursorIcon};
+use bevy::window::{CursorIcon, SystemCursorIcon, Window};
 
 /// This plugin manages the system cursor icon by receiving updates from CEF and applying them to the application window's cursor icon.
 pub(super) struct SystemCursorIconPlugin;
@@ -23,7 +23,7 @@ pub(crate) struct SystemCursorIconReceiver(pub(crate) Receiver<SystemCursorIcon>
 fn update_cursor_icon(
     mut commands: Commands,
     cursor_icon_receiver: Res<SystemCursorIconReceiver>,
-    windows: Query<Entity>,
+    windows: Query<Entity, With<Window>>,
 ) {
     while let Ok(cursor_icon) = cursor_icon_receiver.0.try_recv() {
         windows.iter().for_each(|window| {

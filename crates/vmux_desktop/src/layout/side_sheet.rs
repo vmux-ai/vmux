@@ -112,6 +112,10 @@ fn side_sheet_drag_resize(
             }
         } else {
             commands.entity(drag_entity).despawn();
+            if let Ok(we) = window_entities.single() {
+                commands.entity(we).remove::<CursorIcon>();
+            }
+            return;
         }
 
         if let Ok(we) = window_entities.single() {
