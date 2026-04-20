@@ -117,7 +117,7 @@ fn TabRow(tab: TabNode, pane_id: u64) -> Element {
                 "{tab.title}"
             }
             button {
-                class: "cursor-pointer ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-sm opacity-0 transition-colors group-hover:opacity-100 hover:bg-foreground/10 active:bg-transparent",
+                class: "cursor-pointer ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-sm opacity-0 transition-colors group-hover:opacity-100 hover:bg-foreground/10 active:bg-transparent",
                 onclick: move |evt| {
                     evt.stop_propagation();
                     let _ = try_cef_emit_serde(&SideSheetCommandEvent {
@@ -126,7 +126,7 @@ fn TabRow(tab: TabNode, pane_id: u64) -> Element {
                         tab_index,
                     });
                 },
-                span { class: "text-[10px] leading-none", "\u{00d7}" }
+                span { class: "text-base leading-none", "\u{00d7}" }
             }
         }
     }
