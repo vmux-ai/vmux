@@ -12,22 +12,11 @@ use bevy::{
     prelude::*,
     window::PrimaryWindow,
 };
-use bevy_infinite_grid::{InfiniteGrid, InfiniteGridBundle, InfiniteGridPlugin};
-use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-};
 
-#[cfg(target_os = "macos")]
-use bevy::window::RawHandleWrapper;
-#[cfg(target_os = "macos")]
-use liquid_glass_rs::{GlassOptions, GlassViewManager};
-#[cfg(target_os = "macos")]
-use raw_window_handle::RawWindowHandle;
+
 
 
 pub(crate) const FOV_Y: f32 = std::f32::consts::FRAC_PI_4;
-const BOUNCE_DISPLAY_CLEARANCE: f32 = 2.0;
 
 fn camera_margin_px(_settings: &AppSettings) -> f32 {
     0.0
@@ -37,7 +26,7 @@ fn camera_margin_px(_settings: &AppSettings) -> f32 {
 pub(crate) struct MainCamera;
 
 #[derive(Component)]
-struct Bouncing;
+struct SceneSunlight;
 
 #[derive(Default)]
 pub struct ScenePlugin;
@@ -46,13 +35,12 @@ pub struct ScenePlugin;
 
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((FreeCameraPlugin, InfiniteGridPlugin))
+        app.add_plugins(FreeCameraPlugin)
             .insert_resource(ClearColor(Color::BLACK))
             .add_systems(Startup, setup.after(load_settings))
             .add_systems(
                 Startup,
-                (fit_main_camera, spawn_bloom)
-                    .chain()
+                fit_main_camera
                     .after(load_settings)
                     .after(fit_window_to_screen),
             )
@@ -66,8 +54,7 @@ impl Plugin for ScenePlugin {
             );
 
         #[cfg(target_os = "macos")]
-        app.insert_resource(ClearColor(Color::NONE))
-            .add_observer(apply_liquid_glass);
+        app.insert_resource(ClearColor(Color::NONE));
     }
 }
 
@@ -76,27 +63,6 @@ pub(crate) fn setup(
     window: Single<&Window, With<PrimaryWindow>>,
     settings: Res<AppSettings>,
 ) {
-    commands.spawn(InfiniteGridBundle {
-        visibility: Visibility::Hidden,
-        ..default()
-    });
-
-    // Distant sun for PBR glass reflections / specular highlights
-    commands.spawn((
-        DirectionalLight {
-            illuminance: 8000.0,
-            shadows_enabled: false,
-            color: Color::srgb(1.0, 0.98, 0.95),
-            ..default()
-        },
-        Transform::from_rotation(Quat::from_euler(
-            EulerRot::XYZ,
-            -0.6,   // pitch down ~35 deg
-            0.4,    // slight yaw
-            0.0,
-        )),
-    ));
-
     let mut state = FreeCameraState::default();
     state.enabled = false;
 
@@ -117,87 +83,6 @@ pub(crate) fn setup(
         },
         state,
     ));
-}
-
-fn spawn_bloom(
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    window: Single<&Window, With<PrimaryWindow>>,
-    mut commands: Commands,
-) {
-    let m = window.meters();
-    let aspect = window.aspect();
-
-    let tan_half_fov = (FOV_Y * 0.5).tan();
-    let d_v = (m.y * 0.5) / tan_half_fov;
-    let d_h = (m.x * 0.5) / (tan_half_fov * aspect);
-    let dist = d_v.max(d_h);
-
-    let clear_half_x = m.x * 0.5 + BOUNCE_DISPLAY_CLEARANCE;
-    let clear_z_min = -BOUNCE_DISPLAY_CLEARANCE;
-    let clear_z_max = dist + BOUNCE_DISPLAY_CLEARANCE;
-    let clear_radius = clear_half_x.hypot(clear_z_max);
-
-    let mats = [
-        materials.add(StandardMaterial {
-            emissive: LinearRgba::rgb(0.0, 0.0, 150.0),
-            ..default()
-        }),
-        materials.add(StandardMaterial {
-            emissive: LinearRgba::rgb(1000.0, 1000.0, 1000.0),
-            ..default()
-        }),
-        materials.add(StandardMaterial {
-            emissive: LinearRgba::rgb(50.0, 0.0, 0.0),
-            ..default()
-        }),
-        materials.add(StandardMaterial {
-            base_color: Color::BLACK,
-            ..default()
-        }),
-    ];
-
-    let bounce_mesh = meshes.add(Sphere::new(0.35));
-
-    let ring_count = 3;
-    let ring_spacing = 2.5;
-    let spheres_per_ring = [24, 32, 40];
-
-    for ring in 0..ring_count {
-        let radius = clear_radius + ring as f32 * ring_spacing;
-        let count = spheres_per_ring[ring];
-
-        for i in 0..count {
-            let angle = std::f32::consts::TAU * (i as f32 / count as f32);
-            let x = angle.cos() * radius;
-            let z = angle.sin() * radius;
-            let pos = Vec3::new(x, 0.0, z);
-
-            // Skip spheres inside the display + camera rectangular footprint
-            if x.abs() < clear_half_x && z > clear_z_min && z < clear_z_max {
-                continue;
-            }
-
-            let mut hasher = DefaultHasher::new();
-            (ring, i).hash(&mut hasher);
-            let hash = hasher.finish();
-
-            let (mat_idx, scale) = match hash % 6 {
-                0 => (0, 0.5),
-                1 => (1, 0.1),
-                2 => (2, 1.0),
-                _ => (3, 1.5),
-            };
-
-            commands.spawn((
-                Mesh3d(bounce_mesh.clone()),
-                MeshMaterial3d(mats[mat_idx].clone()),
-                Transform::from_translation(pos).with_scale(Vec3::splat(scale)),
-                Bouncing,
-                Visibility::Hidden,
-            ));
-        }
-    }
 }
 
 fn fit_main_camera(
@@ -230,6 +115,7 @@ fn on_reset_camera(
     projection: Single<&Projection, With<MainCamera>>,
     mut camera_state: Single<&mut FreeCameraState, With<MainCamera>>,
     camera: Single<Entity, With<MainCamera>>,
+    sunlight_q: Query<Entity, With<SceneSunlight>>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -239,6 +125,10 @@ fn on_reset_camera(
 
         camera_state.enabled = false;
         commands.entity(*camera).remove::<Bloom>();
+
+        for e in &sunlight_q {
+            commands.entity(e).despawn();
+        }
 
         let aspect = match &*projection {
             Projection::Perspective(p) => p.aspect_ratio,
@@ -253,8 +143,7 @@ fn on_toggle_free_camera(
     mut reader: MessageReader<AppCommand>,
     mut state: Single<&mut FreeCameraState, With<MainCamera>>,
     camera: Single<Entity, With<MainCamera>>,
-    mut bounce_q: Query<&mut Visibility, (With<Bouncing>, Without<InfiniteGrid>)>,
-    mut grid_q: Query<&mut Visibility, (With<InfiniteGrid>, Without<Bouncing>)>,
+    sunlight_q: Query<Entity, With<SceneSunlight>>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -262,43 +151,29 @@ fn on_toggle_free_camera(
             continue;
         };
         state.enabled = !state.enabled;
-        let vis = if state.enabled {
+        if state.enabled {
             commands.entity(*camera).insert(Bloom::NATURAL);
-            Visibility::Visible
+            commands.spawn((
+                SceneSunlight,
+                DirectionalLight {
+                    illuminance: 8000.0,
+                    shadows_enabled: false,
+                    color: Color::srgb(1.0, 0.98, 0.95),
+                    ..default()
+                },
+                Transform::from_rotation(Quat::from_euler(
+                    EulerRot::XYZ,
+                    -0.6,
+                    0.4,
+                    0.0,
+                )),
+            ));
         } else {
             commands.entity(*camera).remove::<Bloom>();
-            Visibility::Hidden
-        };
-        for mut v in &mut bounce_q {
-            *v = vis;
+            for e in &sunlight_q {
+                commands.entity(e).despawn();
+            }
         }
-        for mut v in &mut grid_q {
-            *v = vis;
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn apply_liquid_glass(
-    trigger: On<Add, RawHandleWrapper>,
-    wrapper_q: Query<&RawHandleWrapper>,
-) {
-    let entity = trigger.event_target();
-    let Ok(wrapper) = wrapper_q.get(entity) else {
-        return;
-    };
-    let ptr = match wrapper.get_window_handle() {
-        RawWindowHandle::AppKit(h) => h.ns_view.as_ptr().cast::<std::ffi::c_void>(),
-        _ => return,
-    };
-    if ptr.is_null() {
-        return;
-    }
-
-    let manager = GlassViewManager::new();
-    match manager.add_glass_view(ptr, GlassOptions::default()) {
-        Ok(_) => info!("Liquid Glass successfully applied to window: {:?}", entity),
-        Err(e) => bevy_log::error!("Window {:?} not ready for glass: {:?}", entity, e),
     }
 }
 

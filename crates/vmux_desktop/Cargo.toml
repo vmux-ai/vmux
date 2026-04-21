@@ -35,6 +35,4 @@ vmux_command_palette = { path = "../vmux_command_palette" }
 vmux_macro = { path = "../vmux_macro" }
 vmux_webview_app = { path = "../vmux_webview_app" }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-liquid-glass-rs = "0.1.1"
-raw-window-handle = "0.6"
+
