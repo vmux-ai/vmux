@@ -100,11 +100,13 @@ pub fn App() -> Element {
     let mut state = use_signal(PaletteOpenEvent::default);
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
+    let mut is_open = use_signal(|| false);
 
     let _listener = use_event_listener::<PaletteOpenEvent, _>(PALETTE_OPEN_EVENT, move |data| {
         query.set(data.url.clone());
         selected.set(0);
         state.set(data);
+        is_open.set(true);
         // Focus input and install raw JS keydown listener for Ctrl bindings.
         // Dioxus e.modifiers().ctrl() is unreliable in CEF OSR, so we use
         // event.ctrlKey directly from the DOM KeyboardEvent in capture phase.
@@ -156,24 +158,31 @@ pub fn App() -> Element {
         ));
     });
 
-    let execute = move |item: &ResultItem| match item {
-        ResultItem::Tab {
-            pane_id, tab_index, ..
-        } => {
-            emit_action("switch_tab", &format!("{pane_id}:{tab_index}"));
-        }
-        ResultItem::Command { id, .. } => {
-            emit_action("command", id);
-        }
-        ResultItem::Navigate { url } => {
-            emit_action("navigate", url);
+    let mut execute = move |item: &ResultItem| {
+        is_open.set(false);
+        match item {
+            ResultItem::Tab {
+                pane_id, tab_index, ..
+            } => {
+                emit_action("switch_tab", &format!("{pane_id}:{tab_index}"));
+            }
+            ResultItem::Command { id, .. } => {
+                emit_action("command", id);
+            }
+            ResultItem::Navigate { url } => {
+                emit_action("navigate", url);
+            }
         }
     };
 
+    if !is_open() {
+        return rsx! { div { class: "h-full w-full" } };
+    }
+
     rsx! {
         div {
-            class: "flex h-full w-full items-start justify-center bg-black/70 pt-[15%]",
-            onclick: move |_| { emit_action("dismiss", ""); },
+            class: "flex h-full w-full items-start justify-center pt-[15%]",
+            onclick: move |_| { is_open.set(false); emit_action("dismiss", ""); },
             div {
                 class: "glass flex w-full max-w-xl flex-col rounded-xl shadow-2xl",
                 onclick: move |e| { e.stop_propagation(); },
@@ -191,7 +200,7 @@ pub fn App() -> Element {
                         },
                         onkeydown: move |e| {
                             match e.key() {
-                                Key::Escape => { emit_action("dismiss", ""); }
+                                Key::Escape => { is_open.set(false); emit_action("dismiss", ""); }
                                 Key::ArrowDown => {
                                     let max = results.len().saturating_sub(1);
                                     selected.set((sel + 1).min(max));
@@ -239,7 +248,7 @@ pub fn App() -> Element {
                                         span { class: "ml-2 shrink-0 rounded bg-muted px-1.5 py-0.5 text-sm text-muted-foreground", "{shortcut}" }
                                     },
                                     ResultItem::Navigate { url } => rsx! {
-                                        span { class: "text-base text-foreground", "Navigate to {url}" }
+                                        span { class: "min-w-0 break-all text-base text-foreground", "Navigate to {url}" }
                                         span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "\u{21b5}" }
                                     },
                                 }
