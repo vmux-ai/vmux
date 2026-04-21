@@ -24,7 +24,7 @@ use vmux_header::{HEADER_HEIGHT_PX, HEADER_WEBVIEW_URL, Header, HeaderBundle};
 use vmux_history::{CreatedAt, LastActivatedAt};
 
 pub(crate) const WEBVIEW_Z_MAIN: f32 = 0.12;
-pub(crate) const WEBVIEW_Z_FOCUS_RING: f32 = 0.13;
+pub(crate) const WEBVIEW_Z_FOCUS_RING: f32 = 0.122;
 pub(crate) const WEBVIEW_Z_HEADER: f32 = 0.125;
 pub(crate) const WEBVIEW_Z_SIDE_SHEET: f32 = 0.125;
 pub(crate) const WEBVIEW_Z_MODAL: f32 = 0.5;

@@ -191,7 +191,7 @@ pub fn App() -> Element {
                     input {
                         id: "palette-input",
                         r#type: "text",
-                        class: "w-full rounded-lg bg-muted px-3 py-2.5 text-base text-foreground outline-none placeholder:text-muted-foreground",
+                        class: "glass w-full rounded-lg px-3 py-2.5 text-base text-foreground outline-none placeholder:text-muted-foreground",
                         placeholder: "Type a URL, search tabs, or > for commands...",
                         value: "{q}",
                         autofocus: true,
@@ -228,7 +228,7 @@ pub fn App() -> Element {
                                 key: "{i}",
                                 id: "palette-item-{i}",
                                 class: if i == sel {
-                                    "flex cursor-pointer items-center justify-between rounded-lg bg-muted px-3 py-2"
+                                    "glass flex cursor-pointer items-center justify-between rounded-lg px-3 py-2"
                                 } else {
                                     "flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 hover:bg-muted/50"
                                 },
