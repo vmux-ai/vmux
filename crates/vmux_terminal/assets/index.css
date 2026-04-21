@@ -1,0 +1,27 @@
+@import "../../vmux_ui/assets/theme.css";
+@config "../tailwind.config.js";
+@import "tailwindcss";
+@source "../src";
+@source ".";
+
+@layer base {
+  html.dark {
+    color-scheme: dark;
+  }
+
+  html.dark body {
+    background-color: transparent;
+    color: var(--foreground);
+    font-family: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+  }
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
