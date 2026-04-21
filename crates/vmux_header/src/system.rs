@@ -11,6 +11,13 @@ pub struct PageMetadata {
     pub favicon_url: String,
 }
 
+#[derive(Component, Clone, Debug, Reflect, Default)]
+#[reflect(Component)]
+pub struct NavigationState {
+    pub can_go_back: bool,
+    pub can_go_forward: bool,
+}
+
 pub fn apply_chrome_state_from_cef(
     chrome_rx: Res<WebviewChromeStateReceiver>,
     mut browser_meta: Query<&mut PageMetadata>,

@@ -36,7 +36,7 @@ pub fn App() -> Element {
         reload_key.set(reload_key() + 1);
     });
 
-    let TabsHostEvent { tabs } = tabs_state();
+    let TabsHostEvent { tabs, can_go_back, can_go_forward } = tabs_state();
     let active_row = tabs.iter().find(|t| t.is_active).cloned();
     let favicon_src = active_row.as_ref().and_then(favicon_src_for_tab);
 
@@ -52,13 +52,13 @@ pub fn App() -> Element {
                 }
             } else {
                 div { class: "flex min-w-0 items-center gap-1 justify-self-start",
-                    NavButton { label: "Back", command: "prev_page",
+                    NavButton { label: "Back", command: "prev_page", disabled: !can_go_back,
                         Icon { class: "h-4 w-4",
                             path { d: "M19 12H5" }
                             path { d: "M12 19l-7-7 7-7" }
                         }
                     }
-                    NavButton { label: "Forward", command: "next_page",
+                    NavButton { label: "Forward", command: "next_page", disabled: !can_go_forward,
                         Icon { class: "h-4 w-4",
                             path { d: "M5 12h14" }
                             path { d: "M12 5l7 7-7 7" }
@@ -106,17 +106,25 @@ pub fn App() -> Element {
 }
 
 #[component]
-fn NavButton(label: &'static str, command: &'static str, children: Element) -> Element {
+fn NavButton(label: &'static str, command: &'static str, #[props(default)] disabled: bool, children: Element) -> Element {
+    let class = if disabled {
+        "flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/40 transition-colors cursor-default"
+    } else {
+        "cursor-pointer flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground"
+    };
     rsx! {
         button {
             r#type: "button",
             aria_label: label,
             title: label,
-            class: "cursor-pointer flex h-7 w-7 items-center justify-center rounded-md border border-glass-border bg-glass text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
+            disabled: disabled,
+            class: class,
             onclick: move |_| {
-                let _ = try_cef_emit_serde(&HeaderCommandEvent {
-                    header_command: command.to_string(),
-                });
+                if !disabled {
+                    let _ = try_cef_emit_serde(&HeaderCommandEvent {
+                        header_command: command.to_string(),
+                    });
+                }
             },
             {children}
         }

@@ -25,7 +25,7 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::RenderTextureMessage;
 use std::path::PathBuf;
 use vmux_header::{
-    Header, PageMetadata,
+    Header, NavigationState, PageMetadata,
     event::{HeaderCommandEvent, RELOAD_EVENT, TABS_EVENT, TabRow, TabsHostEvent},
 };
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
@@ -418,6 +418,10 @@ fn drain_loading_state(
         } else {
             commands.entity(ev.webview).remove::<Loading>();
         }
+        commands.entity(ev.webview).insert(NavigationState {
+            can_go_back: ev.can_go_back,
+            can_go_forward: ev.can_go_forward,
+        });
     }
 }
 
@@ -434,7 +438,7 @@ fn push_tabs_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     status: Single<Entity, (With<Header>, With<UiReady>)>,
-    browser_q: Query<(&PageMetadata, &ChildOf), With<Browser>>,
+    browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), With<Browser>>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -455,20 +459,29 @@ fn push_tabs_host_emit(
         return;
     };
     let mut rows: Vec<TabRow> = Vec::new();
-    for (meta, child_of) in &browser_q {
+    let mut can_go_back = false;
+    let mut can_go_forward = false;
+    for (meta, child_of, nav_state) in &browser_q {
         let tab_entity = child_of.get();
         let tab_pane = child_of_q.get(tab_entity).ok().map(|co| co.get());
         if tab_pane != active_pane {
             continue;
         }
+        let is_active = tab_entity == active_tab_entity;
+        if is_active {
+            if let Some(ns) = nav_state {
+                can_go_back = ns.can_go_back;
+                can_go_forward = ns.can_go_forward;
+            }
+        }
         rows.push(TabRow {
             title: meta.title.clone(),
             url: meta.url.clone(),
             favicon_url: meta.favicon_url.clone(),
-            is_active: tab_entity == active_tab_entity,
+            is_active,
         });
     }
-    let payload = TabsHostEvent { tabs: rows };
+    let payload = TabsHostEvent { tabs: rows, can_go_back, can_go_forward };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     if ron_body.as_str() == last.as_str() {
         return;

@@ -9,6 +9,10 @@ pub struct HeaderCommandEvent {
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct TabsHostEvent {
     pub tabs: Vec<TabRow>,
+    #[serde(default)]
+    pub can_go_back: bool,
+    #[serde(default)]
+    pub can_go_forward: bool,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

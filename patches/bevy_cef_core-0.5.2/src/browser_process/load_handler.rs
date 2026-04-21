@@ -8,6 +8,8 @@ use std::os::raw::c_int;
 pub struct WebviewLoadingStateEvent {
     pub webview: Entity,
     pub is_loading: bool,
+    pub can_go_back: bool,
+    pub can_go_forward: bool,
 }
 
 pub type WebviewLoadingStateSenderInner = Sender<WebviewLoadingStateEvent>;
@@ -64,13 +66,15 @@ impl ImplLoadHandler for WebviewLoadHandlerBuilder {
         &self,
         _browser: Option<&mut Browser>,
         is_loading: c_int,
-        _can_go_back: c_int,
-        _can_go_forward: c_int,
+        can_go_back: c_int,
+        can_go_forward: c_int,
     ) {
         let loading = is_loading != 0;
         let _ = self.tx.send_blocking(WebviewLoadingStateEvent {
             webview: self.webview,
             is_loading: loading,
+            can_go_back: can_go_back != 0,
+            can_go_forward: can_go_forward != 0,
         });
     }
 
