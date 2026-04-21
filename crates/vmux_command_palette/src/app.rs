@@ -184,7 +184,7 @@ pub fn App() -> Element {
             class: "flex h-full w-full items-start justify-center pt-[15%]",
             onclick: move |_| { is_open.set(false); emit_action("dismiss", ""); },
             div {
-                class: "glass flex w-full max-w-xl flex-col rounded-xl shadow-2xl",
+                class: "glass flex w-full max-w-xl flex-col rounded-lg shadow-2xl",
                 onclick: move |e| { e.stop_propagation(); },
                 div { class: "p-2",
                     input {

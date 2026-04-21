@@ -7,32 +7,32 @@ use bevy::{
     shader::ShaderRef,
 };
 
-pub struct RoundedMaterialPlugin;
+pub struct GlassMaterialPlugin;
 
-impl Plugin for RoundedMaterialPlugin {
+impl Plugin for GlassMaterialPlugin {
     fn build(&self, app: &mut App) {
         load_internal_asset!(
             app,
-            ROUNDED_SHADER_HANDLE,
-            "rounded.wgsl",
+            GLASS_SHADER_HANDLE,
+            "glass.wgsl",
             Shader::from_wgsl
         );
 
-        app.add_plugins(MaterialPlugin::<RoundedMaterial>::default());
+        app.add_plugins(MaterialPlugin::<GlassMaterial>::default());
     }
 }
 
-const ROUNDED_SHADER_HANDLE: Handle<Shader> = uuid_handle!("a3e43dbf-9f06-4d0b-8a17-ef8d5ad4d1f4");
+const GLASS_SHADER_HANDLE: Handle<Shader> = uuid_handle!("a3e43dbf-9f06-4d0b-8a17-ef8d5ad4d1f4");
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone, PartialEq)]
-pub struct RoundedCorners {
+pub struct GlassCorners {
     #[uniform(100)]
     pub clip: Vec4,
     #[uniform(101)]
     pub corner_mode: Vec4,
 }
 
-impl Default for RoundedCorners {
+impl Default for GlassCorners {
     fn default() -> Self {
         Self {
             clip: Vec4::new(0.0, 1.0, 1.0, PIXELS_PER_METER),
@@ -41,10 +41,10 @@ impl Default for RoundedCorners {
     }
 }
 
-impl MaterialExtension for RoundedCorners {
+impl MaterialExtension for GlassCorners {
     fn fragment_shader() -> ShaderRef {
-        ROUNDED_SHADER_HANDLE.into()
+        GLASS_SHADER_HANDLE.into()
     }
 }
 
-pub type RoundedMaterial = ExtendedMaterial<StandardMaterial, RoundedCorners>;
+pub type GlassMaterial = ExtendedMaterial<StandardMaterial, GlassCorners>;

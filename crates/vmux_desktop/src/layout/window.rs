@@ -1,7 +1,7 @@
 use crate::{
     browser::Browser,
     layout::pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle},
-    layout::rounded::{RoundedCorners, RoundedMaterial},
+    layout::glass::{GlassCorners, GlassMaterial},
     layout::side_sheet::{SideSheet, SideSheetPosition},
     layout::space::space_bundle,
     layout::tab::tab_bundle,
@@ -80,7 +80,7 @@ pub(crate) struct Modal;
 
 /// Marker for glass mesh entities spawned behind overlay panels (header, side sheet, modal).
 #[derive(Component)]
-pub(crate) struct GlassPane;
+pub(crate) struct Glass;
 
 /// Spawns the window shell: VmuxWindow, header, side sheets, Main container.
 /// Does NOT spawn session entities (Profile/Space/Pane/Tab).
@@ -91,7 +91,7 @@ fn setup(
     mut commands: Commands,
     settings: Res<AppSettings>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<RoundedMaterial>>,
+    mut materials: ResMut<Assets<GlassMaterial>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let m = window.meters();
@@ -101,7 +101,7 @@ fn setup(
         WindowBundle {
             marker: VmuxWindow,
             mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-            material: MeshMaterial3d(materials.add(RoundedMaterial {
+            material: MeshMaterial3d(materials.add(GlassMaterial {
                 base: StandardMaterial {
                     base_color: Color::srgba(0.5, 0.5, 0.52, 0.15),
                     alpha_mode: AlphaMode::Blend,
@@ -114,7 +114,7 @@ fn setup(
                     ior: 1.5,
                     ..default()
                 },
-                extension: RoundedCorners {
+                extension: GlassCorners {
                     clip: Vec4::new(settings.layout.pane.radius, m.x, m.y, PIXELS_PER_METER),
                     ..default()
                 },
@@ -352,16 +352,16 @@ fn spawn_glass_panes(
     settings: Res<AppSettings>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<RoundedMaterial>>,
+    mut materials: ResMut<Assets<GlassMaterial>>,
 ) {
     let r = settings.layout.pane.radius;
     let plane = meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)));
 
     let mut spawn_glass = |parent: Entity| {
         commands.spawn((
-            GlassPane,
+            Glass,
             Mesh3d(plane.clone()),
-            MeshMaterial3d(materials.add(RoundedMaterial {
+            MeshMaterial3d(materials.add(GlassMaterial {
                 base: StandardMaterial {
                     base_color: Color::srgba(0.5, 0.5, 0.52, 0.15),
                     alpha_mode: AlphaMode::Blend,
@@ -374,7 +374,7 @@ fn spawn_glass_panes(
                     ior: 1.5,
                     ..default()
                 },
-                extension: RoundedCorners {
+                extension: GlassCorners {
                     clip: Vec4::new(r, 1.0, 1.0, PIXELS_PER_METER),
                     ..default()
                 },
@@ -399,12 +399,12 @@ fn spawn_glass_panes(
     // No glass pane for modal — command palette uses a simple dimmed backdrop.
 }
 
-/// Keeps each GlassPane's RoundedCorners clip in sync with its parent panel's computed size.
+/// Keeps each Glass's GlassCorners clip in sync with its parent panel's computed size.
 fn sync_glass_pane_clip(
-    q: Query<(&ChildOf, &MeshMaterial3d<RoundedMaterial>), With<GlassPane>>,
+    q: Query<(&ChildOf, &MeshMaterial3d<GlassMaterial>), With<Glass>>,
     parent_q: Query<&ComputedNode>,
     settings: Res<AppSettings>,
-    mut materials: ResMut<Assets<RoundedMaterial>>,
+    mut materials: ResMut<Assets<GlassMaterial>>,
 ) {
     let r = settings.layout.pane.radius;
     for (child_of, handle) in &q {
@@ -429,9 +429,9 @@ fn sync_glass_pane_clip(
 pub(crate) fn fit_window_to_screen(
     window: Single<&bevy::window::Window, With<PrimaryWindow>>,
     settings: Res<AppSettings>,
-    mut materials: ResMut<Assets<RoundedMaterial>>,
+    mut materials: ResMut<Assets<GlassMaterial>>,
     mut last_size: Local<Vec2>,
-    mut q: Query<(&mut Transform, &MeshMaterial3d<RoundedMaterial>), With<VmuxWindow>>,
+    mut q: Query<(&mut Transform, &MeshMaterial3d<GlassMaterial>), With<VmuxWindow>>,
 ) {
     let m = window.meters();
     if (m.x - last_size.x).abs() < 0.001 && (m.y - last_size.y).abs() < 0.001 {

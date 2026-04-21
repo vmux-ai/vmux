@@ -1,6 +1,6 @@
 pub(crate) mod tab;
 mod focus_ring;
-pub(crate) mod rounded;
+pub(crate) mod glass;
 
 pub(crate) mod window;
 pub(crate) mod pane;
@@ -10,7 +10,7 @@ pub(crate) mod space;
 use bevy::prelude::*;
 use focus_ring::FocusRingPlugin;
 use pane::PanePlugin;
-use rounded::RoundedMaterialPlugin;
+use glass::GlassMaterialPlugin;
 use side_sheet::SideSheetPlugin;
 use space::SpacePlugin;
 use tab::TabPlugin;
@@ -30,7 +30,7 @@ impl Plugin for LayoutPlugin {
             PanePlugin,
             TabPlugin,
             FocusRingPlugin,
-            RoundedMaterialPlugin,
+            GlassMaterialPlugin,
             SideSheetPlugin,
         ));
     }
