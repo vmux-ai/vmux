@@ -204,7 +204,8 @@ pub enum SideSheetCommand {
 #[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SceneCommand {
     #[default]
-    #[menu(id = "toggle_free_camera", label = "Toggle Free Camera")]
+    #[menu(id = "toggle_free_camera", label = "Toggle Camera Mode")]
+    #[bind(chord = "Ctrl+b, Enter")]
     ToggleFreeCamera,
 }
 
