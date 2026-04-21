@@ -204,8 +204,6 @@ pub enum SideSheetCommand {
 #[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SceneCommand {
     #[default]
-    #[menu(id = "reset_camera", label = "Reset Camera")]
-    Reset,
     #[menu(id = "toggle_free_camera", label = "Toggle Free Camera")]
     ToggleFreeCamera,
 }

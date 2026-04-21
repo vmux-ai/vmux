@@ -46,7 +46,7 @@ impl Plugin for ScenePlugin {
             )
             .add_systems(
                 Update,
-                ((on_reset_camera, on_toggle_free_camera).in_set(ReadAppCommands),),
+                (on_toggle_free_camera.in_set(ReadAppCommands),),
             )
             .add_systems(
                 PostUpdate,
@@ -107,41 +107,13 @@ fn fit_main_camera(
     }
 }
 
-fn on_reset_camera(
+fn on_toggle_free_camera(
     mut reader: MessageReader<AppCommand>,
     window: Single<&Window, With<PrimaryWindow>>,
     settings: Res<AppSettings>,
+    mut state: Single<&mut FreeCameraState, With<MainCamera>>,
     mut transform: Single<&mut Transform, With<MainCamera>>,
     projection: Single<&Projection, With<MainCamera>>,
-    mut camera_state: Single<&mut FreeCameraState, With<MainCamera>>,
-    camera: Single<Entity, With<MainCamera>>,
-    sunlight_q: Query<Entity, With<SceneSunlight>>,
-    mut commands: Commands,
-) {
-    for cmd in reader.read() {
-        let AppCommand::Scene(SceneCommand::Reset) = *cmd else {
-            continue;
-        };
-
-        camera_state.enabled = false;
-        commands.entity(*camera).remove::<Bloom>();
-
-        for e in &sunlight_q {
-            commands.entity(e).despawn();
-        }
-
-        let aspect = match &*projection {
-            Projection::Perspective(p) => p.aspect_ratio,
-            _ => window.aspect(),
-        };
-
-        **transform = frame_main_camera_transform(&window, aspect, camera_margin_px(&settings));
-    }
-}
-
-fn on_toggle_free_camera(
-    mut reader: MessageReader<AppCommand>,
-    mut state: Single<&mut FreeCameraState, With<MainCamera>>,
     camera: Single<Entity, With<MainCamera>>,
     sunlight_q: Query<Entity, With<SceneSunlight>>,
     mut commands: Commands,
@@ -173,6 +145,11 @@ fn on_toggle_free_camera(
             for e in &sunlight_q {
                 commands.entity(e).despawn();
             }
+            let aspect = match &*projection {
+                Projection::Perspective(p) => p.aspect_ratio,
+                _ => window.aspect(),
+            };
+            **transform = frame_main_camera_transform(&window, aspect, camera_margin_px(&settings));
         }
     }
 }
