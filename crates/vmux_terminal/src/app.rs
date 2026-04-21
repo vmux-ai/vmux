@@ -18,7 +18,7 @@ pub fn App() -> Element {
 
     let vp = viewport();
 
-    // Install raw JS keydown handler for reliable key capture in CEF OSR.
+    // Install raw JS keydown handler and resize observer.
     use_effect(|| {
         document::eval(
             r#"setTimeout(() => {
@@ -38,6 +38,25 @@ pub fn App() -> Element {
     var text = e.key.length === 1 ? e.key : null;
     window.__cef_emit('term_key', {key: e.code, modifiers: mods, text: text});
   }, true);
+
+  // Measure character cell and emit resize
+  var measure = document.createElement('span');
+  measure.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:inherit';
+  measure.className = 'font-mono text-sm';
+  measure.textContent = 'X';
+  var container = document.querySelector('.font-mono');
+  if (container) container.appendChild(measure);
+  function emitResize() {
+    var cw = measure.getBoundingClientRect().width;
+    var ch = parseFloat(getComputedStyle(container).lineHeight) || measure.getBoundingClientRect().height;
+    if (cw > 0 && ch > 0 && window.__cef_emit) {
+      window.__cef_emit('term_resize', {char_width: cw, char_height: ch});
+    }
+  }
+  emitResize();
+  if (window.ResizeObserver) {
+    new ResizeObserver(emitResize).observe(document.body);
+  }
 }, 100);"#,
         );
     });

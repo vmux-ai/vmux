@@ -37,6 +37,7 @@ pub(crate) struct TerminalState {
 pub(crate) struct PtyHandle {
     rx: Mutex<mpsc::Receiver<Vec<u8>>>,
     writer: Mutex<Box<dyn Write + Send>>,
+    master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
     #[allow(dead_code)]
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
 }
@@ -57,7 +58,8 @@ impl Plugin for TerminalPlugin {
             .add_plugins(JsEmitEventPlugin::<TermResizeEvent>::default())
             .add_systems(Update, (poll_pty_output, sync_terminal_viewport).chain())
             .add_observer(on_term_key_input)
-            .add_observer(on_term_ready);
+            .add_observer(on_term_ready)
+            .add_observer(on_term_resize);
     }
 }
 
@@ -127,6 +129,7 @@ impl Terminal {
                 PtyHandle {
                     rx: Mutex::new(rx),
                     writer: Mutex::new(writer),
+                    master: Mutex::new(pair.master),
                     child: Mutex::new(child),
                 },
                 PageMetadata {
@@ -459,6 +462,46 @@ fn key_event_to_bytes(event: &TermKeyEvent) -> Vec<u8> {
 fn on_term_ready(trigger: On<Add, UiReady>, mut q: Query<&mut TerminalState, With<Terminal>>) {
     let entity = trigger.event_target();
     if let Ok(mut state) = q.get_mut(entity) {
+        state.dirty = true;
+    }
+}
+
+/// Handle resize event from webview (reports char cell dimensions).
+fn on_term_resize(
+    trigger: On<Receive<TermResizeEvent>>,
+    webview_q: Query<&WebviewSize, With<Terminal>>,
+    mut state_q: Query<&mut TerminalState, With<Terminal>>,
+    pty_q: Query<&PtyHandle, With<Terminal>>,
+) {
+    let entity = trigger.event_target();
+    let event = &trigger.payload;
+
+    let Ok(webview_size) = webview_q.get(entity) else {
+        return;
+    };
+
+    if event.char_width <= 0.0 || event.char_height <= 0.0 {
+        return;
+    }
+
+    let cols = (webview_size.0.x / event.char_width).floor().max(1.0) as u16;
+    let rows = (webview_size.0.y / event.char_height).floor().max(1.0) as u16;
+
+    // Resize PTY
+    if let Ok(pty) = pty_q.get(entity) {
+        let master = pty.master.lock().unwrap();
+        let _ = master.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: webview_size.0.x as u16,
+            pixel_height: webview_size.0.y as u16,
+        });
+    }
+
+    // Resize alacritty terminal grid
+    if let Ok(mut state) = state_q.get_mut(entity) {
+        let dims = PtyDimensions { cols, rows };
+        state.term.resize(dims);
         state.dirty = true;
     }
 }
