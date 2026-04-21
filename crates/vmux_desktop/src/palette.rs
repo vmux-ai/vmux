@@ -9,7 +9,7 @@ use crate::{
         window::Modal,
     },
 };
-use bevy::{ecs::message::MessageReader, ecs::relationship::Relationship, prelude::*};
+use bevy::{ecs::message::MessageReader, ecs::relationship::Relationship, prelude::*, ui::UiSystems};
 use bevy_cef::prelude::*;
 use vmux_command_palette::event::{
     PaletteActionEvent, PaletteCommandEntry, PaletteOpenEvent, PaletteTab, PALETTE_OPEN_EVENT,
@@ -17,13 +17,19 @@ use vmux_command_palette::event::{
 use vmux_header::{Header, PageMetadata};
 use vmux_history::LastActivatedAt;
 
+/// Deferred visibility for the palette modal. Counts frames after Display::Flex
+/// so CEF can resize the webview before the modal becomes visible.
+#[derive(Component)]
+struct PendingPaletteReveal(u8);
+
 pub(crate) struct PalettePlugin;
 
 impl Plugin for PalettePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(JsEmitEventPlugin::<PaletteActionEvent>::default())
             .add_observer(on_palette_action)
-            .add_systems(Update, handle_open_palette.in_set(ReadAppCommands));
+            .add_systems(Update, handle_open_palette.in_set(ReadAppCommands))
+            .add_systems(PostUpdate, reveal_palette.after(UiSystems::Layout));
     }
 }
 
@@ -89,7 +95,8 @@ fn handle_open_palette(
             commands
                 .entity(modal_e)
                 .remove::<CefKeyboardTarget>()
-                .remove::<CefPointerTarget>();
+                .remove::<CefPointerTarget>()
+                .remove::<PendingPaletteReveal>();
             // Restore keyboard to active content browser
             let (_, _, active_tab) =
                 focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
@@ -108,9 +115,9 @@ fn handle_open_palette(
             continue;
         }
 
-        // Open palette
+        // Open palette — keep hidden until CEF resizes (see reveal_palette)
         modal_node.display = Display::Flex;
-        *modal_vis = Visibility::Inherited;
+        commands.entity(modal_e).insert(PendingPaletteReveal(0));
 
         // Remove keyboard target from all content browsers
         for browser_e in &content_browsers {
@@ -278,7 +285,8 @@ fn on_palette_action(
         commands
             .entity(modal_e)
             .remove::<CefKeyboardTarget>()
-            .remove::<CefPointerTarget>();
+            .remove::<CefPointerTarget>()
+            .remove::<PendingPaletteReveal>();
     }
     let (_, _, active_tab) =
         focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
@@ -292,6 +300,22 @@ fn on_palette_action(
             if is_child {
                 commands.entity(browser_e).insert(CefKeyboardTarget);
             }
+        }
+    }
+}
+
+/// Waits 2 frames after `Display::Flex` before revealing the palette so that
+/// Bevy UI layout + CEF resize can run while the webview is still invisible.
+fn reveal_palette(
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut Visibility, &mut PendingPaletteReveal), With<Modal>>,
+) {
+    for (entity, mut vis, mut pending) in &mut query {
+        if pending.0 >= 2 {
+            *vis = Visibility::Inherited;
+            commands.entity(entity).remove::<PendingPaletteReveal>();
+        } else {
+            pending.0 += 1;
         }
     }
 }
