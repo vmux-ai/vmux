@@ -2,6 +2,8 @@
 //!
 //! Bevy-side hosting, embedded `dist/` serving, and GPU/UI tokens live in **`vmux_ui_native`**.
 
+pub mod theme;
+
 #[cfg(target_arch = "wasm32")]
 pub mod hooks;
 

@@ -1,6 +1,7 @@
 //! Dioxus hooks for CEF-embedded UIs (host emit, etc.).
 
 pub mod event_listener;
+mod use_theme;
 
 mod eval_loop;
 
@@ -11,3 +12,4 @@ pub use event_listener::{
 };
 
 pub use eval_loop::use_eval_loop;
+pub use use_theme::use_theme;

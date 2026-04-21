@@ -18,7 +18,7 @@ bevy = { workspace = true, features = [
 ] }
 bevy_cef = { workspace = true, features = ["debug"] }
 bevy_cef_core = { workspace = true }
-bevy_infinite_grid = "0.18"
+
 libc = "0.2"
 bevy_log = "0.18"
 directories = "5"
@@ -33,6 +33,7 @@ vmux_header = { path = "../vmux_header" }
 vmux_side_sheet = { path = "../vmux_side_sheet" }
 vmux_command_palette = { path = "../vmux_command_palette" }
 vmux_macro = { path = "../vmux_macro" }
+vmux_ui = { path = "../vmux_ui", default-features = false }
 vmux_webview_app = { path = "../vmux_webview_app" }
 
 

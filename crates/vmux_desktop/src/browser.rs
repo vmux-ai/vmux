@@ -33,6 +33,7 @@ use vmux_side_sheet::event::{
     PANE_TREE_EVENT, PaneNode, PaneTreeEvent, SideSheetCommandEvent,
     TabNode,
 };
+use vmux_ui::theme::{ThemeEvent, THEME_EVENT};
 use vmux_webview_app::{UiReady, WebviewAppRegistry};
 
 pub(crate) struct BrowserPlugin;
@@ -54,6 +55,7 @@ impl Plugin for BrowserPlugin {
         })
         .add_plugins(JsEmitEventPlugin::<HeaderCommandEvent>::default())
         .add_plugins(JsEmitEventPlugin::<SideSheetCommandEvent>::default())
+        .add_observer(on_webview_ready_send_theme)
         .add_observer(on_header_command_emit)
         .add_observer(on_side_sheet_command_emit)
         .add_observer(on_reload_notify_header)
@@ -90,6 +92,22 @@ impl Plugin for BrowserPlugin {
                 .after(UiSystems::Layout)
                 .before(render_standard_materials),
         );
+    }
+}
+
+fn on_webview_ready_send_theme(
+    trigger: On<Add, UiReady>,
+    browsers: NonSend<Browsers>,
+    settings: Res<AppSettings>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+        let payload = ThemeEvent {
+            radius: settings.layout.pane.radius,
+        };
+        let body = ron::ser::to_string(&payload).unwrap_or_default();
+        commands.trigger(HostEmitEvent::new(entity, THEME_EVENT, &body));
     }
 }
 

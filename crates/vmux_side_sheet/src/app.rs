@@ -5,7 +5,7 @@ use vmux_side_sheet::event::{
     PANE_TREE_EVENT, PaneNode, PaneTreeEvent, SideSheetCommandEvent, TabNode,
 };
 use vmux_ui::components::icon::Icon;
-use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener};
+use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
 
 fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
     let s = page_url.trim();
@@ -27,6 +27,7 @@ fn favicon_src(tab: &TabNode) -> Option<String> {
 
 #[component]
 pub fn App() -> Element {
+    use_theme();
     let mut tree_state = use_signal(PaneTreeEvent::default);
     let listener = use_event_listener::<PaneTreeEvent, _>(PANE_TREE_EVENT, move |data| {
         tree_state.set(data);

@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use vmux_header::event::{HeaderCommandEvent, RELOAD_EVENT, TABS_EVENT, TabRow, TabsHostEvent};
 use vmux_ui::components::icon::Icon;
-use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener};
+use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
 
 fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
     let s = page_url.trim();
@@ -26,6 +26,7 @@ fn favicon_src_for_tab(tab: &TabRow) -> Option<String> {
 
 #[component]
 pub fn App() -> Element {
+    use_theme();
     let mut tabs_state = use_signal(TabsHostEvent::default);
     let listener = use_event_listener::<TabsHostEvent, _>(TABS_EVENT, move |data| {
         tabs_state.set(data);

@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use vmux_command_palette::event::{
     PaletteActionEvent, PaletteCommandEntry, PaletteOpenEvent, PaletteTab, PALETTE_OPEN_EVENT,
 };
-use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener};
+use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
 
 #[derive(Clone, PartialEq)]
 enum ResultItem {
@@ -97,6 +97,7 @@ fn emit_action(action: &str, value: &str) {
 
 #[component]
 pub fn App() -> Element {
+    use_theme();
     let mut state = use_signal(PaletteOpenEvent::default);
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);

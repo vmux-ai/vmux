@@ -1125,15 +1125,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_infinite_grid"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a8a470db45cc18c7a9c65b8c60c96d04e40ce7e3c654453d4122463acf08644"
-dependencies = [
- "bevy",
-]
-
-[[package]]
 name = "bevy_input"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8242,7 +8233,6 @@ dependencies = [
  "bevy",
  "bevy_cef",
  "bevy_cef_core",
- "bevy_infinite_grid",
  "bevy_log",
  "bevy_reflect",
  "directories",
@@ -8257,6 +8247,7 @@ dependencies = [
  "vmux_history",
  "vmux_macro",
  "vmux_side_sheet",
+ "vmux_ui",
  "vmux_webview_app",
 ]
 

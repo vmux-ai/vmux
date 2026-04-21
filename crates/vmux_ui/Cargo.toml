@@ -6,6 +6,9 @@ edition.workspace = true
 publish = false
 build = "build.rs"
 
+[dependencies]
+serde = { workspace = true }
+
 [build-dependencies]
 vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
 
