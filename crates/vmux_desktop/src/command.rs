@@ -79,6 +79,9 @@ pub enum TabCommand {
     Mute,
     #[menu(id = "tab_move_to_pane", label = "Move Tab to Pane")]
     MoveToPane,
+    #[menu(id = "tab_new_terminal", label = "New Terminal Tab\tCtrl+B, `")]
+    #[bind(chord = "Ctrl+b, `")]
+    NewTerminal,
 }
 
 #[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
