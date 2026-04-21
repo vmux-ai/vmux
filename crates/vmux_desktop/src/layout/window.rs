@@ -411,12 +411,12 @@ fn sync_glass_pane_clip(
         let Ok(computed) = parent_q.get(child_of.get()) else {
             continue;
         };
-        let size_px = computed.size;
-        if size_px.x <= 0.0 || size_px.y <= 0.0 {
+        let size_logical = computed.size * computed.inverse_scale_factor;
+        if size_logical.x <= 0.0 || size_logical.y <= 0.0 {
             continue;
         }
-        let w_m = size_px.x / PIXELS_PER_METER;
-        let h_m = size_px.y / PIXELS_PER_METER;
+        let w_m = size_logical.x / PIXELS_PER_METER;
+        let h_m = size_logical.y / PIXELS_PER_METER;
         if let Some(mat) = materials.get_mut(handle) {
             let clip = &mut mat.extension.clip;
             if (clip.x - r).abs() > 0.01 || (clip.y - w_m).abs() > 0.01 || (clip.z - h_m).abs() > 0.01 {
