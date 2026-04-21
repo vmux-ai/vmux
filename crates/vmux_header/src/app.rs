@@ -42,7 +42,7 @@ pub fn App() -> Element {
     let favicon_src = active_row.as_ref().and_then(favicon_src_for_tab);
 
     rsx! {
-        div { class: "glass box-border flex min-h-0 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-foreground",
+        div { class: "flex min-h-0 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-foreground",
             if (listener.is_loading)() {
                 div { class: "col-span-3 flex w-full items-center px-3 py-2",
                     span { class: "text-ui text-muted-foreground", "Connecting…" }
