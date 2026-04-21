@@ -116,11 +116,9 @@ pub enum BrowserCommand {
 #[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaneCommand {
     #[default]
-    #[menu(id = "split_v", label = "Split Vertically\tCtrl+B, %")]
-    #[bind(chord = "Ctrl+b, v")]
+    #[menu(id = "split_v", label = "Split Vertically")]
     SplitV,
-    #[menu(id = "split_h", label = "Split Horizontally\tCtrl+B, \"")]
-    #[bind(chord = "Ctrl+b, h")]
+    #[menu(id = "split_h", label = "Split Horizontally")]
     SplitH,
     #[menu(id = "toggle_pane", label = "Toggle Pane\tCtrl+B, T")]
     #[bind(chord = "Ctrl+b, t")]
@@ -132,16 +130,16 @@ pub enum PaneCommand {
     #[bind(chord = "Ctrl+b, z")]
     Zoom,
     #[menu(id = "select_pane_left", label = "Select Left Pane\tCtrl+B, H")]
-    #[bind(chord = "Ctrl+b, ArrowLeft")]
+    #[bind(chord = "Ctrl+b, h")]
     SelectLeft,
     #[menu(id = "select_pane_right", label = "Select Right Pane\tCtrl+B, L")]
-    #[bind(chord = "Ctrl+b, ArrowRight")]
+    #[bind(chord = "Ctrl+b, l")]
     SelectRight,
     #[menu(id = "select_pane_up", label = "Select Up Pane\tCtrl+B, K")]
-    #[bind(chord = "Ctrl+b, ArrowUp")]
+    #[bind(chord = "Ctrl+b, k")]
     SelectUp,
     #[menu(id = "select_pane_down", label = "Select Down Pane\tCtrl+B, J")]
-    #[bind(chord = "Ctrl+b, ArrowDown")]
+    #[bind(chord = "Ctrl+b, j")]
     SelectDown,
     #[menu(id = "swap_pane_prev", label = "Swap Pane Previous\tCtrl+B, {")]
     #[bind(chord = "Ctrl+b, {")]
