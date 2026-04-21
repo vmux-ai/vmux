@@ -55,7 +55,11 @@ url = "2"
 crossbeam-channel = "0.5"
 notify = "6"
 dioxus = { version = "0.7.4", features = ["web"] }
+wasm-bindgen = "0.2"
 regex = "1"
+alacritty_terminal = "0.26"
+portable-pty = "0.9"
+vte = "0.15"
 
 [profile.release.package.vmux_history]
 opt-level = "z"
@@ -74,6 +78,10 @@ opt-level = "z"
 codegen-units = 1
 
 [profile.release.package.vmux_command_palette]
+opt-level = "z"
+codegen-units = 1
+
+[profile.release.package.vmux_terminal]
 opt-level = "z"
 codegen-units = 1
 

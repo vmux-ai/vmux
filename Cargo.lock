@@ -8311,6 +8311,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_terminal"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "dioxus",
+ "serde",
+ "vmux_ui",
+ "vmux_webview_app",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "vmux_ui"
 version = "0.1.0"
 dependencies = [
