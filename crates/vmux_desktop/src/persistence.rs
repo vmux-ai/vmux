@@ -16,8 +16,10 @@ use crate::{
     },
     profile::Profile,
     settings::AppSettings,
+    terminal::Terminal,
 };
 use vmux_header::PageMetadata;
+use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
 
 pub(crate) struct PersistencePlugin;
 
@@ -45,11 +47,11 @@ pub(crate) fn session_path() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         let home = std::env::var_os("HOME").expect("HOME not set");
-        PathBuf::from(home).join("Library/Application Support/vmux/session.ron")
+        PathBuf::from(home).join("Library/Application Support/ai.vmux.desktop/session.ron")
     }
     #[cfg(not(target_os = "macos"))]
     {
-        std::env::temp_dir().join("vmux_cef/session.ron")
+        std::env::temp_dir().join("ai.vmux.desktop/session.ron")
     }
 }
 
@@ -255,15 +257,22 @@ pub(crate) fn rebuild_session_views(
             .unwrap_or(false);
 
         if !has_browser {
-            let url = if meta.url.is_empty() {
-                "about:blank"
+            if meta.url.starts_with(TERMINAL_WEBVIEW_URL.trim_end_matches('/')) {
+                commands.spawn((
+                    Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                    ChildOf(entity),
+                ));
             } else {
-                &meta.url
-            };
-            commands.spawn((
-                Browser::new(&mut meshes, &mut webview_mt, url),
-                ChildOf(entity),
-            ));
+                let url = if meta.url.is_empty() {
+                    "about:blank"
+                } else {
+                    &meta.url
+                };
+                commands.spawn((
+                    Browser::new(&mut meshes, &mut webview_mt, url),
+                    ChildOf(entity),
+                ));
+            }
         }
     }
 

@@ -12,6 +12,7 @@ use crate::{
               active_tab_in_pane, collect_leaf_panes},
     },
     settings::AppSettings,
+    terminal::{Terminal, RestartPty},
 };
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
@@ -35,6 +36,8 @@ use vmux_side_sheet::event::{
 };
 use vmux_ui::theme::{ThemeEvent, THEME_EVENT};
 use vmux_webview_app::{UiReady, WebviewAppRegistry};
+
+
 
 pub(crate) struct BrowserPlugin;
 
@@ -170,11 +173,11 @@ fn sync_keyboard_target(
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
     modal_q: Query<&Node, With<Modal>>,
-    browser_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
+    content_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     mut commands: Commands,
 ) {
-    // Don't reassign keyboard target while palette is open
-    if crate::palette::is_palette_open(&modal_q) {
+    // Don't reassign keyboard target while command bar is open
+    if crate::command_bar::is_command_bar_open(&modal_q) {
         return;
     }
     let (_, _, active_tab_opt) = focused_tab(
@@ -183,7 +186,7 @@ fn sync_keyboard_target(
     let Some(active_tab_entity) = active_tab_opt else {
         return;
     };
-    for (browser_e, has_kb) in &browser_q {
+    for (browser_e, has_kb) in &content_q {
         if status_q.contains(browser_e) || side_sheet_q.contains(browser_e) {
             continue;
         }
@@ -431,12 +434,15 @@ fn drain_loading_state(
     mut commands: Commands,
 ) {
     while let Ok(ev) = receiver.0.try_recv() {
+        let Ok(mut ecmds) = commands.get_entity(ev.webview) else {
+            continue;
+        };
         if ev.is_loading {
-            commands.entity(ev.webview).insert(Loading);
+            ecmds.insert(Loading);
         } else {
-            commands.entity(ev.webview).remove::<Loading>();
+            ecmds.remove::<Loading>();
         }
-        commands.entity(ev.webview).insert(NavigationState {
+        ecmds.insert(NavigationState {
             can_go_back: ev.can_go_back,
             can_go_forward: ev.can_go_forward,
         });
@@ -473,37 +479,40 @@ fn push_tabs_host_emit(
     let (_, active_pane, active_tab_opt) = focused_tab(
         &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children_q, &tab_ts,
     );
-    let Some(active_tab_entity) = active_tab_opt else {
-        return;
-    };
     let mut rows: Vec<TabRow> = Vec::new();
     let mut can_go_back = false;
     let mut can_go_forward = false;
-    for (meta, child_of, nav_state) in &browser_q {
-        let tab_entity = child_of.get();
-        let tab_pane = child_of_q.get(tab_entity).ok().map(|co| co.get());
-        if tab_pane != active_pane {
-            continue;
-        }
-        let is_active = tab_entity == active_tab_entity;
-        if is_active {
-            if let Some(ns) = nav_state {
-                can_go_back = ns.can_go_back;
-                can_go_forward = ns.can_go_forward;
+    if active_tab_opt.is_none() {
+        warn!("[tabs-debug] no active tab, will emit empty TabsHostEvent");
+    }
+    if let Some(active_tab_entity) = active_tab_opt {
+        for (meta, child_of, nav_state) in &browser_q {
+            let tab_entity = child_of.get();
+            let tab_pane = child_of_q.get(tab_entity).ok().map(|co| co.get());
+            if tab_pane != active_pane {
+                continue;
             }
+            let is_active = tab_entity == active_tab_entity;
+            if is_active {
+                if let Some(ns) = nav_state {
+                    can_go_back = ns.can_go_back;
+                    can_go_forward = ns.can_go_forward;
+                }
+            }
+            rows.push(TabRow {
+                title: meta.title.clone(),
+                url: meta.url.clone(),
+                favicon_url: meta.favicon_url.clone(),
+                is_active,
+            });
         }
-        rows.push(TabRow {
-            title: meta.title.clone(),
-            url: meta.url.clone(),
-            favicon_url: meta.favicon_url.clone(),
-            is_active,
-        });
     }
     let payload = TabsHostEvent { tabs: rows, can_go_back, can_go_forward };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     if ron_body.as_str() == last.as_str() {
         return;
     }
+    warn!("[tabs-debug] emitting TabsHostEvent: {} tabs, ron_len={}", payload.tabs.len(), ron_body.len());
     commands.trigger(HostEmitEvent::new(status_e, TABS_EVENT, &ron_body));
     *last = ron_body;
 }
@@ -595,6 +604,7 @@ fn handle_browser_commands(
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
+    terminal_q: Query<(), With<Terminal>>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -614,11 +624,32 @@ fn handle_browser_commands(
         else {
             continue;
         };
+        let is_terminal = terminal_q.contains(webview);
         match browser_cmd {
-            BrowserCommand::PrevPage => commands.trigger(RequestGoBack { webview }),
-            BrowserCommand::NextPage => commands.trigger(RequestGoForward { webview }),
-            BrowserCommand::Reload => commands.trigger(RequestReload { webview }),
-            BrowserCommand::HardReload => commands.trigger(RequestReloadIgnoreCache { webview }),
+            BrowserCommand::PrevPage => {
+                if !is_terminal {
+                    commands.trigger(RequestGoBack { webview });
+                }
+            }
+            BrowserCommand::NextPage => {
+                if !is_terminal {
+                    commands.trigger(RequestGoForward { webview });
+                }
+            }
+            BrowserCommand::Reload => {
+                if is_terminal {
+                    commands.trigger(RestartPty { entity: webview });
+                } else {
+                    commands.trigger(RequestReload { webview });
+                }
+            }
+            BrowserCommand::HardReload => {
+                if is_terminal {
+                    commands.trigger(RestartPty { entity: webview });
+                } else {
+                    commands.trigger(RequestReloadIgnoreCache { webview });
+                }
+            }
             BrowserCommand::Stop => {}
             BrowserCommand::FocusAddressBar => {}
             BrowserCommand::Find => {}
@@ -886,7 +917,9 @@ fn sync_page_metadata_to_tab(
         if !tab_q.contains(parent) || status_q.contains(parent) || side_sheet_q.contains(parent) {
             continue;
         }
-        commands.entity(parent).insert(meta.clone());
+        if let Ok(mut ecmds) = commands.get_entity(parent) {
+            ecmds.insert(meta.clone());
+        }
     }
 }
 
@@ -895,7 +928,7 @@ fn cef_root_cache_path() -> Option<String> {
     {
         std::env::var_os("HOME").map(|home| {
             PathBuf::from(home)
-                .join("Library/Application Support/vmux/profiles/default")
+                .join("Library/Application Support/ai.vmux.desktop/profiles/default")
                 .to_string_lossy()
                 .into_owned()
         })
@@ -904,6 +937,6 @@ fn cef_root_cache_path() -> Option<String> {
     {
         std::env::temp_dir()
             .to_str()
-            .map(|p| format!("{p}/vmux_cef/profiles/default"))
+            .map(|p| format!("{p}/ai.vmux.desktop/profiles/default"))
     }
 }

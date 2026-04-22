@@ -27,8 +27,11 @@ pub fn apply_chrome_state_from_cef(
             continue;
         };
         if let Some(url) = ev.url {
-            meta.url = url;
-            meta.favicon_url.clear();
+            // Don't let CEF overwrite terminal session URLs (managed by terminal.rs)
+            if !meta.url.starts_with("vmux://terminal") {
+                meta.url = url;
+                meta.favicon_url.clear();
+            }
         }
         if let Some(title) = ev.title {
             meta.title = title;

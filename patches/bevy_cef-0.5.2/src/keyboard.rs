@@ -93,12 +93,40 @@ fn send_key_event(
     targeted_buf.clear();
     targeted_buf.extend(webviews_targeted.iter());
     let use_targets = !targeted_buf.is_empty();
+    // Track non-character keys already sent as Pressed this batch to deduplicate.
+    // On macOS, bevy_winit can deliver two KeyboardInput(Pressed) messages for a
+    // single physical press of navigation/editing keys (arrows, Delete, etc.).
+    let mut non_char_pressed: Vec<KeyCode> = Vec::new();
     for event in er.read() {
         // Drain browser-process work before/after each key so IPC isn't still queued when the next
         // frame's Main pump runs (reduces randomly dropped characters under load).
         cef::do_message_loop_work();
         if suppress.0 {
             continue;
+        }
+        // Deduplicate non-character pressed keys.
+        // On macOS, bevy_winit can deliver two Pressed messages for a single
+        // physical press of navigation/editing keys.  The duplicates may arrive
+        // in the same frame (caught by `non_char_pressed` vec) **or** across
+        // consecutive frames (caught by `ButtonInput::just_pressed`).
+        if event.state == ButtonState::Pressed && !event.repeat {
+            if is_non_character_key(event.key_code) {
+                // Same-frame dedup: skip if we already forwarded this key code
+                // in the current batch.
+                if non_char_pressed.contains(&event.key_code) {
+                    cef::do_message_loop_work();
+                    continue;
+                }
+                non_char_pressed.push(event.key_code);
+                // Cross-frame dedup: `ButtonInput::just_pressed` is only true
+                // on the first frame a key transitions to pressed.  A stale
+                // duplicate arriving one frame later will have
+                // `just_pressed == false` because the key is already held.
+                if !input.just_pressed(event.key_code) {
+                    cef::do_message_loop_work();
+                    continue;
+                }
+            }
         }
         if event.key_code == KeyCode::Enter && is_ime_commiting.0 {
             // If the IME is committing, we don't want to send the Enter key event.
@@ -153,6 +181,53 @@ fn send_key_event(
         }
         cef::do_message_loop_work();
     }
+}
+
+/// Returns true for key codes that do not produce character input (navigation,
+/// modifiers, function keys, etc.).  Mirrors `is_not_character_key_code` in
+/// `bevy_cef_core` but kept local to avoid coupling the dedup logic to the
+/// core crate's internal classification.
+fn is_non_character_key(key: KeyCode) -> bool {
+    matches!(
+        key,
+        KeyCode::F1
+            | KeyCode::F2
+            | KeyCode::F3
+            | KeyCode::F4
+            | KeyCode::F5
+            | KeyCode::F6
+            | KeyCode::F7
+            | KeyCode::F8
+            | KeyCode::F9
+            | KeyCode::F10
+            | KeyCode::F11
+            | KeyCode::F12
+            | KeyCode::ArrowLeft
+            | KeyCode::ArrowUp
+            | KeyCode::ArrowRight
+            | KeyCode::ArrowDown
+            | KeyCode::Home
+            | KeyCode::End
+            | KeyCode::PageUp
+            | KeyCode::PageDown
+            | KeyCode::Escape
+            | KeyCode::Tab
+            | KeyCode::Enter
+            | KeyCode::Backspace
+            | KeyCode::Delete
+            | KeyCode::Insert
+            | KeyCode::CapsLock
+            | KeyCode::NumLock
+            | KeyCode::ScrollLock
+            | KeyCode::ShiftLeft
+            | KeyCode::ShiftRight
+            | KeyCode::ControlLeft
+            | KeyCode::ControlRight
+            | KeyCode::AltLeft
+            | KeyCode::AltRight
+            | KeyCode::SuperLeft
+            | KeyCode::SuperRight
+    )
 }
 
 fn ime_event(
