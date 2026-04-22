@@ -13,6 +13,7 @@ categories.workspace = true
 [dependencies]
 bevy = { workspace = true }
 bevy_remote = { workspace = true }
+bevy_winit = { workspace = true }
 uuid = { version = "1" }
 cef = { workspace = true }
 cef-dll-sys = { workspace = true }
@@ -20,6 +21,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 async-channel = { workspace = true }
 raw-window-handle = { workspace = true }
+winit = "0.30"
 
 [features]
 default = []

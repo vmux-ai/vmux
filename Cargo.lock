@@ -811,12 +811,14 @@ dependencies = [
  "async-channel",
  "bevy",
  "bevy_remote",
+ "bevy_winit",
  "cef",
  "cef-dll-sys",
  "raw-window-handle",
  "serde",
  "serde_json",
  "uuid",
+ "winit",
 ]
 
 [[package]]
@@ -8819,6 +8821,7 @@ checksum = "374f6b70e8e0d6bf9461a32988fd553b59ff630964924dad6e4a4eb6bd538d17"
 dependencies = [
  "dlib",
  "log",
+ "once_cell",
  "pkg-config",
 ]
 

@@ -2,6 +2,9 @@ use crate::prelude::{CefExtensions, EXTENSIONS_SWITCH, MessageLoopTimer};
 use cef::rc::{Rc, RcImpl};
 use cef::*;
 use std::sync::mpsc::Sender;
+use winit::event_loop::EventLoopProxy;
+
+pub type WakeProxy = EventLoopProxy<bevy_winit::WinitUserEvent>;
 
 /// ## Reference
 ///
@@ -10,17 +13,20 @@ pub struct BrowserProcessHandlerBuilder {
     object: *mut RcImpl<cef_dll_sys::cef_browser_process_handler_t, Self>,
     message_loop_working_requester: Sender<MessageLoopTimer>,
     extensions: CefExtensions,
+    wake_proxy: Option<WakeProxy>,
 }
 
 impl BrowserProcessHandlerBuilder {
     pub fn build(
         message_loop_working_requester: Sender<MessageLoopTimer>,
         extensions: CefExtensions,
+        wake_proxy: Option<WakeProxy>,
     ) -> BrowserProcessHandler {
         BrowserProcessHandler::new(Self {
             object: core::ptr::null_mut(),
             message_loop_working_requester,
             extensions,
+            wake_proxy,
         })
     }
 }
@@ -52,6 +58,7 @@ impl Clone for BrowserProcessHandlerBuilder {
             object,
             message_loop_working_requester: self.message_loop_working_requester.clone(),
             extensions: self.extensions.clone(),
+            wake_proxy: self.wake_proxy.clone(),
         }
     }
 }
@@ -84,6 +91,9 @@ impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
         let _ = self
             .message_loop_working_requester
             .send(MessageLoopTimer::new(delay_ms));
+        if let Some(proxy) = &self.wake_proxy {
+            let _ = proxy.send_event(bevy_winit::WinitUserEvent::WakeUp);
+        }
     }
 
     #[inline]
