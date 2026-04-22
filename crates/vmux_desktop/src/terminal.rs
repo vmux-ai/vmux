@@ -456,6 +456,38 @@ fn ansi_256_to_rgb(idx: u8) -> [u8; 3] {
     }
 }
 
+fn is_non_character_key(key: KeyCode) -> bool {
+    matches!(
+        key,
+        KeyCode::F1
+            | KeyCode::F2
+            | KeyCode::F3
+            | KeyCode::F4
+            | KeyCode::F5
+            | KeyCode::F6
+            | KeyCode::F7
+            | KeyCode::F8
+            | KeyCode::F9
+            | KeyCode::F10
+            | KeyCode::F11
+            | KeyCode::F12
+            | KeyCode::ArrowLeft
+            | KeyCode::ArrowUp
+            | KeyCode::ArrowRight
+            | KeyCode::ArrowDown
+            | KeyCode::Home
+            | KeyCode::End
+            | KeyCode::PageUp
+            | KeyCode::PageDown
+            | KeyCode::Escape
+            | KeyCode::Tab
+            | KeyCode::Enter
+            | KeyCode::Backspace
+            | KeyCode::Delete
+            | KeyCode::Insert
+    )
+}
+
 /// Handle keyboard input directly from Bevy, bypassing CEF round-trip.
 fn handle_terminal_keyboard(
     mut er: MessageReader<KeyboardInput>,
@@ -468,9 +500,18 @@ fn handle_terminal_keyboard(
     let ctrl = input.pressed(KeyCode::ControlLeft) || input.pressed(KeyCode::ControlRight);
     let alt = input.pressed(KeyCode::AltLeft) || input.pressed(KeyCode::AltRight);
 
+    let mut seen_keys: Vec<KeyCode> = Vec::new();
     for event in er.read() {
         if event.state != ButtonState::Pressed {
             continue;
+        }
+        // Deduplicate non-character keys within the same batch — macOS/bevy_winit
+        // can deliver two Pressed messages for a single physical press.
+        if !event.repeat && is_non_character_key(event.key_code) {
+            if seen_keys.contains(&event.key_code) {
+                continue;
+            }
+            seen_keys.push(event.key_code);
         }
         let bytes = logical_key_to_bytes(&event.logical_key, ctrl, alt);
         if bytes.is_empty() {

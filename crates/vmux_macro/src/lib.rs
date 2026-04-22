@@ -2,10 +2,10 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Fields, LitStr, parse_macro_input};
 
-#[proc_macro_derive(CommandPalette, attributes(menu))]
-pub fn derive_command_palette(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(CommandBar, attributes(menu))]
+pub fn derive_command_bar(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    match impl_command_palette(input) {
+    match impl_command_bar(input) {
         Ok(tokens) => tokens.into(),
         Err(e) => e.to_compile_error().into(),
     }
@@ -502,15 +502,15 @@ impl BindProps {
 }
 
 // ---------------------------------------------------------------------------
-// CommandPalette derive
+// CommandBar derive
 // ---------------------------------------------------------------------------
 
-fn impl_command_palette(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+fn impl_command_bar(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let ident = &input.ident;
     let Data::Enum(data) = &input.data else {
         return Err(syn::Error::new_spanned(
             ident,
-            "CommandPalette only supports enums",
+            "CommandBar only supports enums",
         ));
     };
 
@@ -520,13 +520,13 @@ fn impl_command_palette(input: DeriveInput) -> syn::Result<proc_macro2::TokenStr
         .unwrap_or(true);
 
     if is_leaf {
-        impl_command_palette_leaf(ident, data)
+        impl_command_bar_leaf(ident, data)
     } else {
-        impl_command_palette_root(ident, data)
+        impl_command_bar_root(ident, data)
     }
 }
 
-fn impl_command_palette_leaf(
+fn impl_command_bar_leaf(
     ident: &syn::Ident,
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
@@ -561,14 +561,14 @@ fn impl_command_palette_leaf(
 
     Ok(quote! {
         impl #ident {
-            pub fn palette_entries() -> ::std::vec::Vec<(&'static str, &'static str, &'static str)> {
+            pub fn command_bar_entries() -> ::std::vec::Vec<(&'static str, &'static str, &'static str)> {
                 ::std::vec![#(#entries),*]
             }
         }
     })
 }
 
-fn impl_command_palette_root(
+fn impl_command_bar_root(
     ident: &syn::Ident,
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
@@ -578,7 +578,7 @@ fn impl_command_palette_root(
         let Fields::Unnamed(fields) = &variant.fields else {
             return Err(syn::Error::new_spanned(
                 &variant.fields,
-                "CommandPalette root expects tuple variants",
+                "CommandBar root expects tuple variants",
             ));
         };
         let Some(field) = fields.unnamed.first() else {
@@ -589,13 +589,13 @@ fn impl_command_palette_root(
         };
         let inner_ty = &field.ty;
         extend_calls.push(quote! {
-            entries.extend(<#inner_ty>::palette_entries());
+            entries.extend(<#inner_ty>::command_bar_entries());
         });
     }
 
     Ok(quote! {
         impl #ident {
-            pub fn palette_entries() -> ::std::vec::Vec<(&'static str, &'static str, &'static str)> {
+            pub fn command_bar_entries() -> ::std::vec::Vec<(&'static str, &'static str, &'static str)> {
                 let mut entries = ::std::vec::Vec::new();
                 #(#extend_calls)*
                 entries

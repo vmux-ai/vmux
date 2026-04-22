@@ -194,7 +194,7 @@ fn cef_do_message_loop_work(
 }
 
 /// Close every open CEF browser before [`shutdown`]. Calling `cef::shutdown` while browsers still
-/// exist can crash the process (e.g. quitting from the command palette or ⌘Q).
+/// exist can crash the process (e.g. quitting from the command bar or ⌘Q).
 fn close_all_browsers_then_cef_shutdown(
     mut browsers: NonSendMut<Browsers>,
     mut exits: MessageReader<AppExit>,

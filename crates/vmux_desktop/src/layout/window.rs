@@ -19,7 +19,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
-use vmux_command_palette::COMMAND_PALETTE_WEBVIEW_URL;
+use vmux_command_bar::COMMAND_BAR_WEBVIEW_URL;
 use vmux_header::{HEADER_HEIGHT_PX, HEADER_WEBVIEW_URL, Header, HeaderBundle};
 use vmux_history::{CreatedAt, LastActivatedAt};
 
@@ -255,7 +255,7 @@ fn setup(
                     ..default()
                 },
                 ZIndex(3),
-                WebviewSource::new(COMMAND_PALETTE_WEBVIEW_URL),
+                WebviewSource::new(COMMAND_BAR_WEBVIEW_URL),
                 Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
                 MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
                     base: StandardMaterial {
@@ -395,7 +395,7 @@ fn spawn_glass_panes(
             spawn_glass(entity);
         }
     }
-    // No glass pane for modal — command palette uses a simple dimmed backdrop.
+    // No glass pane for modal — command bar uses a simple dimmed backdrop.
 }
 
 /// Keeps each Glass's GlassCorners clip in sync with its parent panel's computed size.

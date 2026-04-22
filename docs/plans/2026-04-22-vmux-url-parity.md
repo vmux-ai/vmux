@@ -117,14 +117,14 @@ git commit -m "refactor: remove ContentFilter, use With<Browser> (Terminal now h
 
 ---
 
-### Task 3: Update palette URL matching
+### Task 3: Update command bar URL matching
 
 **Files:**
-- Modify: `crates/vmux_desktop/src/palette.rs`
+- Modify: `crates/vmux_desktop/src/command_bar.rs`
 
 - [ ] **Step 1: Update vmux://terminal URL matching to use starts_with**
 
-In `on_palette_action`, change the navigate handler from:
+In `on_command_bar_action`, change the navigate handler from:
 
 ```rust
             if url.trim_end_matches('/') == "vmux://terminal" {
@@ -145,8 +145,8 @@ Run: `cargo check -p vmux_desktop 2>&1 | head -20`
 - [ ] **Step 3: Commit**
 
 ```bash
-git add crates/vmux_desktop/src/palette.rs
-git commit -m "fix: palette navigate handles vmux://terminal with session params"
+git add crates/vmux_desktop/src/command_bar.rs
+git commit -m "fix: command bar navigate handles vmux://terminal with session params"
 ```
 
 ---
@@ -384,9 +384,9 @@ Expected: No errors.
 Confirm these queries now automatically include Terminal (no code change needed, they work because Terminal has Browser marker):
 
 - `sync_page_metadata_to_tab` -- `With<Browser>` includes Terminal
-- `handle_open_palette` `browser_meta` -- `With<Browser>` includes Terminal
-- `handle_open_palette` `content_browsers` -- `With<Browser>` includes Terminal
-- `on_palette_action` `content_browsers` -- `With<Browser>` includes Terminal
+- `handle_open_command_bar` `browser_meta` -- `With<Browser>` includes Terminal
+- `handle_open_command_bar` `content_browsers` -- `With<Browser>` includes Terminal
+- `on_command_bar_action` `content_browsers` -- `With<Browser>` includes Terminal
 - `zoom_q` in `handle_browser_commands` -- `With<Browser>` includes Terminal
 
 - [ ] **Step 3: Run the app and manually verify**
@@ -394,8 +394,8 @@ Confirm these queries now automatically include Terminal (no code change needed,
 Run: `make run-mac`
 
 Manual verification checklist:
-1. Open a terminal tab -- appears in palette tab list
-2. Open palette over terminal, close it -- keyboard focus returns to terminal
+1. Open a terminal tab -- appears in command bar tab list
+2. Open command bar over terminal, close it -- keyboard focus returns to terminal
 3. URL bar shows `vmux://terminal/?session={pid}`
 4. Press Reload -- terminal restarts with fresh prompt
 5. Press Back/Forward -- no action (arrows should be disabled)

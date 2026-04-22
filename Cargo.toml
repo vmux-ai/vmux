@@ -58,7 +58,7 @@ codegen-units = 1
 
 
 
-[profile.release.package.vmux_command_palette]
+[profile.release.package.vmux_command_bar]
 opt-level = "z"
 codegen-units = 1
 

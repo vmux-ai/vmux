@@ -1,0 +1,6 @@
+[application]
+name = "vmux_command_bar"
+default_platform = "web"
+
+[web.app]
+title = "vmux command bar"

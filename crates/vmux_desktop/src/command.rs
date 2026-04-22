@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_macro::{CommandPalette, DefaultKeyBindings, OsMenu, OsSubMenu};
+use vmux_macro::{CommandBar, DefaultKeyBindings, OsMenu, OsSubMenu};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct WriteAppCommands;
@@ -16,7 +16,7 @@ impl Plugin for CommandPlugin {
     }
 }
 
-#[derive(Message, OsMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Message, OsMenu, DefaultKeyBindings, CommandBar, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppCommand {
     #[menu(label = "Scene")]
     Scene(SceneCommand),
@@ -40,7 +40,7 @@ pub enum AppCommand {
     Browser(BrowserCommand),
 }
 
-#[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(OsSubMenu, DefaultKeyBindings, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TabCommand {
     #[default]
     #[menu(id = "tab_new", label = "New Tab", accel = "super+t")]
@@ -84,7 +84,7 @@ pub enum TabCommand {
     NewTerminal,
 }
 
-#[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(OsSubMenu, DefaultKeyBindings, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BrowserCommand {
     #[default]
     #[menu(id = "browser_prev_page", label = "Back", accel = "super+[")]
@@ -116,7 +116,7 @@ pub enum BrowserCommand {
     Print,
 }
 
-#[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(OsSubMenu, DefaultKeyBindings, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaneCommand {
     #[default]
     #[menu(id = "split_v", label = "Split Vertically")]
@@ -173,7 +173,7 @@ pub enum PaneCommand {
     ResizeDown,
 }
 
-#[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(OsSubMenu, DefaultKeyBindings, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpaceCommand {
     #[default]
     #[menu(id = "new_space", label = "New Space\t<leader> c")]
@@ -190,7 +190,7 @@ pub enum SpaceCommand {
     Rename,
 }
 
-#[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(OsSubMenu, DefaultKeyBindings, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SideSheetCommand {
     #[default]
     #[menu(id = "toggle_side_sheet", label = "Toggle Side Sheet\t<leader> s")]
@@ -202,7 +202,7 @@ pub enum SideSheetCommand {
     ToggleBottom,
 }
 
-#[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(OsSubMenu, DefaultKeyBindings, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SceneCommand {
     #[default]
     #[menu(id = "toggle_free_camera", label = "Toggle Camera Mode")]
@@ -210,7 +210,7 @@ pub enum SceneCommand {
     ToggleFreeCamera,
 }
 
-#[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(OsSubMenu, DefaultKeyBindings, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WindowCommand {
     #[default]
     #[menu(id = "new_window", label = "New Window", accel = "super+n")]

@@ -40,6 +40,14 @@ pub fn App() -> Element {
     let TabsHostEvent { tabs, can_go_back, can_go_forward } = tabs_state();
     let active_row = tabs.iter().find(|t| t.is_active).cloned();
     let favicon_src = active_row.as_ref().and_then(favicon_src_for_tab);
+    let mut favicon_error = use_signal(|| false);
+
+    // Reset error state when favicon source changes.
+    let mut prev_src = use_signal(|| None::<String>);
+    if *prev_src.read() != favicon_src {
+        prev_src.set(favicon_src.clone());
+        favicon_error.set(false);
+    }
 
     rsx! {
         div { class: "flex min-h-0 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 text-foreground",
@@ -86,9 +94,18 @@ pub fn App() -> Element {
                                 });
                             },
                             if let Some(src) = favicon_src.as_ref() {
-                                img {
-                                    class: "h-4 w-4 shrink-0 rounded-sm object-contain",
-                                    src: "{src}",
+                                if favicon_error() {
+                                    Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                                        path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }
+                                        path { d: "M2 12h20" }
+                                        path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" }
+                                    }
+                                } else {
+                                    img {
+                                        class: "h-4 w-4 shrink-0 rounded-sm object-contain",
+                                        src: "{src}",
+                                        onerror: move |_| favicon_error.set(true),
+                                    }
                                 }
                             } else {
                                 Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",

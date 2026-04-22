@@ -2,7 +2,7 @@
 
 ## Overview
 
-Make `vmux://*` scheme URLs first-class citizens alongside normal HTTP URLs. Terminal tabs should participate in all the same systems as browser tabs: palette tab list, metadata sync, history, zoom, keyboard focus restore. Each terminal gets a unique session URL. Reload restarts the PTY. Back/Forward disabled on terminals.
+Make `vmux://*` scheme URLs first-class citizens alongside normal HTTP URLs. Terminal tabs should participate in all the same systems as browser tabs: command bar tab list, metadata sync, history, zoom, keyboard focus restore. Each terminal gets a unique session URL. Reload restarts the PTY. Back/Forward disabled on terminals.
 
 ## Scope
 
@@ -35,8 +35,8 @@ Make `vmux://*` scheme URLs first-class citizens alongside normal HTTP URLs. Ter
 ## Fix: Terminal gets Browser marker
 
 Terminal entities spawn with both `Browser` and `Terminal` components. This makes all existing `With<Browser>` queries automatically include terminals. No query changes needed for:
-- `sync_page_metadata_to_tab` (palette tab list, metadata sync)
-- `handle_open_palette` / palette tab listing
+- `sync_page_metadata_to_tab` (command bar tab list, metadata sync)
+- `handle_open_command_bar` / command bar tab listing
 - Keyboard focus restore after palette close
 - Zoom commands
 - Any future `With<Browser>` queries
@@ -109,14 +109,14 @@ The persistence check should be updated to use `starts_with("vmux://terminal")` 
 |------|--------|
 | `crates/vmux_desktop/src/terminal.rs` | Add `Browser` marker to Terminal spawn bundle (same entity that gets `Terminal` component), set session URL on `PageMetadata.url` in the spawn system, add `restart_pty()` function |
 | `crates/vmux_desktop/src/browser.rs` | Remove `ContentFilter` type alias, replace usage with `With<Browser>`. Add `Without<Terminal>` to CEF navigation sync systems. Handle Reload for Terminal. |
-| `crates/vmux_desktop/src/palette.rs` | Update navigate to use `starts_with("vmux://terminal")`. Replace `content_browsers` query filter. |
+| `crates/vmux_desktop/src/command_bar.rs` | Update navigate to use `starts_with("vmux://terminal")`. Replace `content_browsers` query filter. |
 | `crates/vmux_desktop/src/persistence.rs` | Update URL check to `starts_with("vmux://terminal")` |
 
 ## Testing
 
-- Open terminal tab, verify it appears in palette tab list
+- Open terminal tab, verify it appears in command bar tab list
 - Open terminal tab, verify title updates propagate (e.g. `cd /tmp` changes title)
-- Open palette over terminal tab, close palette, verify keyboard input goes to terminal
+- Open command bar over terminal tab, close palette, verify keyboard input goes to terminal
 - Open multiple terminals, verify history has distinct entries with session IDs
 - Press Reload on terminal tab, verify PTY restarts (fresh prompt)
 - Verify Back/Forward arrows are greyed out on terminal tabs

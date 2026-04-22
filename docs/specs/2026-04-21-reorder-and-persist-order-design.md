@@ -114,7 +114,7 @@ pub enum SpaceCommand {
 }
 ```
 
-Removed: `PaneCommand::SwapPrev`, `PaneCommand::SwapNext`. The palette,
+Removed: `PaneCommand::SwapPrev`, `PaneCommand::SwapNext`. The command bar,
 keybinding, and any settings referencing those variants migrate to
 `PaneCommand::Swap(SwapTarget::Prev | Next)`.
 
@@ -275,6 +275,6 @@ Automated: unit test the `indices_for` resolver and the
 7. Wire swap handling into `handle_tab_commands`, `handle_pane_commands`,
    and `handle_space_commands` (the latter currently has empty match
    arms for its variants).
-8. Update palette / keybinding config to reference the new variants.
+8. Update command bar / keybinding config to reference the new variants.
 9. Verify load-time `Children` integrity (see hook-collision caveat).
    If broken, add the post-load fixup and amend this spec.

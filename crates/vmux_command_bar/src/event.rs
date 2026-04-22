@@ -1,14 +1,14 @@
-pub const PALETTE_OPEN_EVENT: &str = "palette-open";
+pub const COMMAND_BAR_OPEN_EVENT: &str = "command-bar-open";
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct PaletteOpenEvent {
+pub struct CommandBarOpenEvent {
     pub url: String,
-    pub tabs: Vec<PaletteTab>,
-    pub commands: Vec<PaletteCommandEntry>,
+    pub tabs: Vec<CommandBarTab>,
+    pub commands: Vec<CommandBarCommandEntry>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct PaletteTab {
+pub struct CommandBarTab {
     pub title: String,
     pub url: String,
     pub pane_id: u64,
@@ -17,14 +17,14 @@ pub struct PaletteTab {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct PaletteCommandEntry {
+pub struct CommandBarCommandEntry {
     pub id: String,
     pub name: String,
     pub shortcut: String,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct PaletteActionEvent {
+pub struct CommandBarActionEvent {
     pub action: String,
     pub value: String,
 }

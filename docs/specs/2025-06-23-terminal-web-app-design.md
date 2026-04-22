@@ -189,7 +189,7 @@ The Dioxus app receives `TermViewportEvent` and renders it as DOM elements:
 
 ### URL
 
-Registered as `vmux://terminal/` in the CEF scheme handler, built and embedded the same way as `vmux://header/`, `vmux://command-palette/`, etc.
+Registered as `vmux://terminal/` in the CEF scheme handler, built and embedded the same way as `vmux://header/`, `vmux://command-bar/`, etc.
 
 ## Tab Integration
 

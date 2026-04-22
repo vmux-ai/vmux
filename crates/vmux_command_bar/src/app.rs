@@ -1,8 +1,9 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_command_palette::event::{
-    PaletteActionEvent, PaletteCommandEntry, PaletteOpenEvent, PaletteTab, PALETTE_OPEN_EVENT,
+use vmux_command_bar::event::{
+    CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent, CommandBarTab,
+    COMMAND_BAR_OPEN_EVENT,
 };
 use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
 
@@ -26,8 +27,8 @@ enum ResultItem {
 
 fn filter_results(
     query: &str,
-    tabs: &[PaletteTab],
-    commands: &[PaletteCommandEntry],
+    tabs: &[CommandBarTab],
+    commands: &[CommandBarCommandEntry],
 ) -> Vec<ResultItem> {
     let q = query.trim();
     if q.is_empty() {
@@ -89,7 +90,7 @@ fn filter_results(
 }
 
 fn emit_action(action: &str, value: &str) {
-    let _ = try_cef_emit_serde(&PaletteActionEvent {
+    let _ = try_cef_emit_serde(&CommandBarActionEvent {
         action: action.to_string(),
         value: value.to_string(),
     });
@@ -98,12 +99,13 @@ fn emit_action(action: &str, value: &str) {
 #[component]
 pub fn App() -> Element {
     use_theme();
-    let mut state = use_signal(PaletteOpenEvent::default);
+    let mut state = use_signal(CommandBarOpenEvent::default);
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
     let mut is_open = use_signal(|| false);
 
-    let _listener = use_event_listener::<PaletteOpenEvent, _>(PALETTE_OPEN_EVENT, move |data| {
+    let _listener =
+        use_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
         query.set(data.url.clone());
         selected.set(0);
         state.set(data);
@@ -113,7 +115,7 @@ pub fn App() -> Element {
         // event.ctrlKey directly from the DOM KeyboardEvent in capture phase.
         document::eval(
             r#"setTimeout(() => {
-  var el = document.getElementById('palette-input');
+  var el = document.getElementById('command-bar-input');
   if (!el) return;
   el.focus();
   el.select();
@@ -142,7 +144,7 @@ pub fn App() -> Element {
         );
     });
 
-    let PaletteOpenEvent {
+    let CommandBarOpenEvent {
         url: _,
         tabs,
         commands,
@@ -155,7 +157,7 @@ pub fn App() -> Element {
     use_effect(move || {
         let s = selected();
         document::eval(&format!(
-            "document.getElementById('palette-item-{s}')?.scrollIntoView({{block:'nearest'}})"
+            "document.getElementById('command-bar-item-{s}')?.scrollIntoView({{block:'nearest'}})"
         ));
     });
 
@@ -189,7 +191,7 @@ pub fn App() -> Element {
                 onclick: move |e| { e.stop_propagation(); },
                 div { class: "p-2",
                     input {
-                        id: "palette-input",
+                        id: "command-bar-input",
                         r#type: "text",
                         class: "glass w-full rounded-lg px-3 py-2.5 text-base text-foreground outline-none placeholder:text-muted-foreground",
                         placeholder: "Type a URL, search tabs, or > for commands...",
@@ -203,10 +205,12 @@ pub fn App() -> Element {
                             match e.key() {
                                 Key::Escape => { is_open.set(false); emit_action("dismiss", ""); }
                                 Key::ArrowDown => {
+                                    e.prevent_default();
                                     let max = results.len().saturating_sub(1);
                                     selected.set((sel + 1).min(max));
                                 }
                                 Key::ArrowUp => {
+                                    e.prevent_default();
                                     selected.set(sel.saturating_sub(1));
                                 }
                                 Key::Enter => {
@@ -226,7 +230,7 @@ pub fn App() -> Element {
                         for (i, item) in results.iter().enumerate() {
                             div {
                                 key: "{i}",
-                                id: "palette-item-{i}",
+                                id: "command-bar-item-{i}",
                                 class: if i == sel {
                                     "glass flex cursor-pointer items-center justify-between rounded-lg px-3 py-2"
                                 } else {
