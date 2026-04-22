@@ -8,7 +8,7 @@ use alacritty_terminal::{
     grid::{Dimensions, Scroll},
     index::{Column, Line},
     term::{Config as TermConfig, Term, cell::Flags as CellFlags},
-    vte::ansi::{Color, Processor},
+    vte::ansi::{Color, NamedColor, Processor},
 };
 use bevy::{
     input::{
@@ -88,7 +88,7 @@ impl Plugin for TerminalPlugin {
                 )
                     .after(InputSystems),
             )
-            .add_systems(Update, (poll_pty_output, sync_terminal_viewport).chain())
+            .add_systems(Update, (poll_pty_output, sync_terminal_viewport, sync_terminal_theme).chain())
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
             .add_observer(on_restart_pty);
@@ -107,7 +107,7 @@ impl Terminal {
         let shell = settings
             .terminal
             .as_ref()
-            .map(|t| t.shell.clone())
+            .map(|t| t.resolve_profile(&t.default_profile).shell)
             .unwrap_or_else(default_shell);
 
         // Create PTY
@@ -271,7 +271,7 @@ fn sync_terminal_viewport(
     let font_family = settings
         .terminal
         .as_ref()
-        .map(|t| t.font_family.clone());
+        .map(|t| t.resolve_profile(&t.default_profile).font_family);
 
     for (entity, mut state) in &mut q {
         if !state.dirty {
@@ -300,8 +300,8 @@ fn build_viewport<T: TermEventListener>(term: &Term<T>) -> TermViewportEvent {
         let row = &grid[Line(row_idx as i32 - offset)];
         let mut spans = Vec::new();
         let mut text = String::new();
-        let mut cur_fg: Option<[u8; 3]> = None;
-        let mut cur_bg: Option<[u8; 3]> = None;
+        let mut cur_fg: TermColor = TermColor::Default;
+        let mut cur_bg: TermColor = TermColor::Default;
         let mut cur_flags: u16 = 0;
 
         for col_idx in 0..num_cols {
@@ -312,8 +312,8 @@ fn build_viewport<T: TermEventListener>(term: &Term<T>) -> TermViewportEvent {
                 continue;
             }
 
-            let fg = color_to_rgb(&cell.fg);
-            let bg = color_to_rgb(&cell.bg);
+            let fg = color_to_term_color(&cell.fg);
+            let bg = color_to_term_color(&cell.bg);
             let flags = cell_flags_to_u16(cell.flags);
 
             if fg != cur_fg || bg != cur_bg || flags != cur_flags {
@@ -359,17 +359,43 @@ fn build_viewport<T: TermEventListener>(term: &Term<T>) -> TermViewportEvent {
     }
 }
 
-fn color_to_rgb(color: &Color) -> Option<[u8; 3]> {
+fn color_to_term_color(color: &Color) -> TermColor {
     match color {
-        Color::Spec(rgb) => Some([rgb.r, rgb.g, rgb.b]),
+        Color::Named(named) => match named {
+            NamedColor::Foreground | NamedColor::DimForeground
+            | NamedColor::BrightForeground => TermColor::Default,
+            NamedColor::Background => TermColor::Default,
+            NamedColor::Cursor => TermColor::Default,
+            other => TermColor::Indexed(named_to_ansi_index(other)),
+        },
+        Color::Indexed(idx) if *idx < 16 => TermColor::Indexed(*idx),
         Color::Indexed(idx) => {
-            if *idx < 16 {
-                None // Use CSS theme defaults for basic 16 colors
-            } else {
-                Some(ansi_256_to_rgb(*idx))
-            }
+            let [r, g, b] = ansi_256_to_rgb(*idx);
+            TermColor::Rgb(r, g, b)
         }
-        Color::Named(_) => None,
+        Color::Spec(rgb) => TermColor::Rgb(rgb.r, rgb.g, rgb.b),
+    }
+}
+
+fn named_to_ansi_index(named: &NamedColor) -> u8 {
+    match named {
+        NamedColor::Black | NamedColor::DimBlack => 0,
+        NamedColor::Red | NamedColor::DimRed => 1,
+        NamedColor::Green | NamedColor::DimGreen => 2,
+        NamedColor::Yellow | NamedColor::DimYellow => 3,
+        NamedColor::Blue | NamedColor::DimBlue => 4,
+        NamedColor::Magenta | NamedColor::DimMagenta => 5,
+        NamedColor::Cyan | NamedColor::DimCyan => 6,
+        NamedColor::White | NamedColor::DimWhite => 7,
+        NamedColor::BrightBlack => 8,
+        NamedColor::BrightRed => 9,
+        NamedColor::BrightGreen => 10,
+        NamedColor::BrightYellow => 11,
+        NamedColor::BrightBlue => 12,
+        NamedColor::BrightMagenta => 13,
+        NamedColor::BrightCyan => 14,
+        NamedColor::BrightWhite => 15,
+        _ => 7, // fallback to white
     }
 }
 
@@ -550,8 +576,13 @@ fn on_term_resize(
         return;
     }
 
-    let cols = (webview_size.0.x / event.char_width).floor().max(1.0) as u16;
-    let rows = (webview_size.0.y / event.char_height).floor().max(1.0) as u16;
+    // Use viewport dimensions from JS when available (accounts for CEF zoom),
+    // otherwise fall back to WebviewSize (DIP).
+    let vw = if event.viewport_width > 0.0 { event.viewport_width } else { webview_size.0.x };
+    let vh = if event.viewport_height > 0.0 { event.viewport_height } else { webview_size.0.y };
+
+    let cols = (vw / event.char_width).floor().max(1.0) as u16;
+    let rows = (vh / event.char_height).floor().max(1.0) as u16;
 
     // Resize PTY
     if let Ok(pty) = pty_q.get(entity) {
@@ -572,6 +603,57 @@ fn on_term_resize(
     }
 }
 
+fn sync_terminal_theme(
+    q: Query<Entity, With<Terminal>>,
+    new_terminals: Query<Entity, Added<Terminal>>,
+    browsers: NonSend<Browsers>,
+    settings: Res<AppSettings>,
+    mut commands: Commands,
+    mut last_theme_hash: Local<u64>,
+) {
+    let Some(terminal_settings) = &settings.terminal else {
+        return;
+    };
+
+    let profile = terminal_settings.resolve_profile(&terminal_settings.default_profile);
+    let theme = crate::themes::resolve_theme(&profile.theme, &terminal_settings.custom_themes);
+
+    // Simple hash to detect theme changes
+    let hash = {
+        let mut h: u64 = 0;
+        for b in &theme.foreground { h = h.wrapping_mul(31).wrapping_add(*b as u64); }
+        for b in &theme.background { h = h.wrapping_mul(31).wrapping_add(*b as u64); }
+        for row in &theme.ansi { for b in row { h = h.wrapping_mul(31).wrapping_add(*b as u64); } }
+        h
+    };
+
+    let theme_changed = hash != *last_theme_hash;
+    if !theme_changed && new_terminals.is_empty() {
+        return;
+    }
+    *last_theme_hash = hash;
+
+    let event = vmux_terminal::event::TermThemeEvent {
+        foreground: theme.foreground,
+        background: theme.background,
+        cursor: theme.cursor,
+        ansi: theme.ansi,
+    };
+    let body = ron::ser::to_string(&event).unwrap_or_default();
+
+    let targets: Vec<Entity> = if theme_changed {
+        q.iter().collect()
+    } else {
+        new_terminals.iter().collect()
+    };
+
+    for entity in targets {
+        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+            commands.trigger(HostEmitEvent::new(entity, TERM_THEME_EVENT, &body));
+        }
+    }
+}
+
 fn on_restart_pty(
     trigger: On<RestartPty>,
     mut q: Query<(&mut TerminalState, &mut PtyHandle, &mut PageMetadata)>,
@@ -588,7 +670,7 @@ fn on_restart_pty(
     let shell = settings
         .terminal
         .as_ref()
-        .map(|t| t.shell.clone())
+        .map(|t| t.resolve_profile(&t.default_profile).shell)
         .unwrap_or_else(default_shell);
 
     // Spawn new PTY

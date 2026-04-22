@@ -140,13 +140,64 @@ pub struct BrowserSettings {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct TerminalSettings {
-    pub shell: String,
+    // Legacy fields for backward compatibility
+    #[serde(default)]
+    pub shell: Option<String>,
+    #[serde(default)]
+    pub font_family: Option<String>,
+    // New fields
+    #[serde(default = "default_profile_name")]
+    pub default_profile: String,
+    #[serde(default)]
+    pub profiles: Vec<TerminalProfile>,
+    #[serde(default)]
+    pub custom_themes: Vec<crate::themes::TerminalColorScheme>,
+}
+
+fn default_profile_name() -> String {
+    "default".to_string()
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct TerminalProfile {
+    pub name: String,
+    #[serde(default = "default_theme")]
+    pub theme: String,
     #[serde(default = "default_terminal_font_family")]
     pub font_family: String,
+    #[serde(default = "default_shell")]
+    pub shell: String,
+}
+
+fn default_theme() -> String {
+    "catppuccin-mocha".to_string()
+}
+
+fn default_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
 }
 
 fn default_terminal_font_family() -> String {
     "JetBrainsMono Nerd Font".to_string()
+}
+
+impl TerminalSettings {
+    /// Get the effective profile, migrating legacy fields if needed.
+    pub fn resolve_profile(&self, name: &str) -> TerminalProfile {
+        // Check explicit profiles
+        if let Some(p) = self.profiles.iter().find(|p| p.name == name) {
+            return p.clone();
+        }
+        // Fallback: build from legacy fields or defaults
+        TerminalProfile {
+            name: name.to_string(),
+            theme: default_theme(),
+            font_family: self.font_family.clone()
+                .unwrap_or_else(default_terminal_font_family),
+            shell: self.shell.clone()
+                .unwrap_or_else(default_shell),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

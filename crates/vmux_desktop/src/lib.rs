@@ -9,6 +9,7 @@ mod os_menu;
 mod scene;
 mod settings;
 mod terminal;
+mod themes;
 mod unit;
 
 use bevy::asset::io::web::WebAssetPlugin;
