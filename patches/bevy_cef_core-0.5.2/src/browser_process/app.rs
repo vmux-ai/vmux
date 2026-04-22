@@ -2,6 +2,7 @@ use crate::browser_process::CefExtensions;
 use crate::browser_process::CommandLineConfig;
 use crate::browser_process::MessageLoopTimer;
 use crate::browser_process::browser_process_handler::BrowserProcessHandlerBuilder;
+use crate::browser_process::browser_process_handler::WakeProxy;
 use crate::util::{SCHEME_CEF, cef_scheme_flags};
 use cef::rc::{Rc, RcImpl};
 use cef::{
@@ -19,6 +20,7 @@ pub struct BrowserProcessAppBuilder {
     message_loop_working_requester: Sender<MessageLoopTimer>,
     config: CommandLineConfig,
     extensions: CefExtensions,
+    wake_proxy: Option<WakeProxy>,
 }
 
 impl BrowserProcessAppBuilder {
@@ -26,12 +28,14 @@ impl BrowserProcessAppBuilder {
         message_loop_working_requester: Sender<MessageLoopTimer>,
         config: CommandLineConfig,
         extensions: CefExtensions,
+        wake_proxy: Option<WakeProxy>,
     ) -> cef::App {
         cef::App::new(Self {
             object: core::ptr::null_mut(),
             message_loop_working_requester,
             config,
             extensions,
+            wake_proxy,
         })
     }
 }
@@ -48,6 +52,7 @@ impl Clone for BrowserProcessAppBuilder {
             message_loop_working_requester: self.message_loop_working_requester.clone(),
             config: self.config.clone(),
             extensions: self.extensions.clone(),
+            wake_proxy: self.wake_proxy.clone(),
         }
     }
 }
@@ -91,6 +96,7 @@ impl ImplApp for BrowserProcessAppBuilder {
         Some(BrowserProcessHandlerBuilder::build(
             self.message_loop_working_requester.clone(),
             self.extensions.clone(),
+            self.wake_proxy.clone(),
         ))
     }
 
