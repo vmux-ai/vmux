@@ -20,4 +20,5 @@ crates/vmux_ui/target/
 crates/vmux_history/dist/
 crates/vmux_side_sheet/dist/
 crates/vmux_command_palette/dist/
+crates/vmux_terminal/dist/
 .superpowers/

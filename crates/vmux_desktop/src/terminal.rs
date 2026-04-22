@@ -4,17 +4,26 @@ use crate::{
 };
 use alacritty_terminal::{
     event::{Event as TermEvent, EventListener as TermEventListener},
-    grid::Dimensions,
+    grid::{Dimensions, Scroll},
     index::{Column, Line},
     term::{Config as TermConfig, Term, cell::Flags as CellFlags},
     vte::ansi::{Color, Processor},
 };
-use bevy::{picking::Pickable, prelude::*, render::alpha::AlphaMode};
+use bevy::{
+    input::{
+        ButtonState, InputSystems,
+        keyboard::{Key, KeyboardInput},
+        mouse::{MouseScrollUnit, MouseWheel},
+    },
+    picking::Pickable,
+    prelude::*,
+    render::alpha::AlphaMode,
+};
 use bevy_cef::prelude::*;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::{
     io::{Read, Write},
-    sync::{mpsc, Mutex},
+    sync::{mpsc, Arc, Mutex},
 };
 use vmux_header::PageMetadata;
 use vmux_terminal::event::*;
@@ -36,28 +45,44 @@ pub(crate) struct TerminalState {
 #[derive(Component)]
 pub(crate) struct PtyHandle {
     rx: Mutex<mpsc::Receiver<Vec<u8>>>,
-    writer: Mutex<Box<dyn Write + Send>>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
     #[allow(dead_code)]
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
 }
 
-/// Event proxy required by alacritty_terminal. We ignore events for now.
+/// Event proxy that forwards PtyWrite responses back to the PTY.
 #[derive(Clone)]
-pub(crate) struct VmuxEventProxy;
+pub(crate) struct VmuxEventProxy {
+    pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
+}
 
 impl TermEventListener for VmuxEventProxy {
-    fn send_event(&self, _event: TermEvent) {}
+    fn send_event(&self, event: TermEvent) {
+        if let TermEvent::PtyWrite(text) = event {
+            if let Ok(mut writer) = self.pty_writer.lock() {
+                let _ = writer.write_all(text.as_bytes());
+            }
+        }
+    }
 }
 
 pub(crate) struct TerminalPlugin;
 
 impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(JsEmitEventPlugin::<TermKeyEvent>::default())
-            .add_plugins(JsEmitEventPlugin::<TermResizeEvent>::default())
+        app.add_plugins(JsEmitEventPlugin::<TermResizeEvent>::default())
+            .add_systems(
+                PreUpdate,
+                (
+                    handle_terminal_keyboard
+                        .run_if(on_message::<KeyboardInput>),
+                    handle_terminal_scroll
+                        .run_if(on_message::<MouseWheel>),
+                )
+                    .after(InputSystems),
+            )
             .add_systems(Update, (poll_pty_output, sync_terminal_viewport).chain())
-            .add_observer(on_term_key_input)
             .add_observer(on_term_ready)
             .add_observer(on_term_resize);
     }
@@ -97,10 +122,11 @@ impl Terminal {
             .master
             .try_clone_reader()
             .expect("failed to clone PTY reader");
-        let writer = pair
-            .master
-            .take_writer()
-            .expect("failed to take PTY writer");
+        let writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(
+            pair.master
+                .take_writer()
+                .expect("failed to take PTY writer"),
+        ));
         drop(pair.slave);
 
         // Spawn background reader thread
@@ -112,10 +138,13 @@ impl Terminal {
             })
             .expect("failed to spawn PTY reader thread");
 
-        // Create alacritty terminal
+        // Create alacritty terminal with event proxy that can write back to PTY
+        let event_proxy = VmuxEventProxy {
+            pty_writer: Arc::clone(&writer),
+        };
         let term_config = TermConfig::default();
         let dims = PtyDimensions { cols, rows };
-        let term = Term::new(term_config, &dims, VmuxEventProxy);
+        let term = Term::new(term_config, &dims, event_proxy);
         let processor = Processor::new();
 
         (
@@ -128,7 +157,7 @@ impl Terminal {
                 },
                 PtyHandle {
                     rx: Mutex::new(rx),
-                    writer: Mutex::new(writer),
+                    writer,
                     master: Mutex::new(pair.master),
                     child: Mutex::new(child),
                 },
@@ -227,8 +256,14 @@ fn poll_pty_output(mut q: Query<(&mut TerminalState, &PtyHandle), With<Terminal>
 fn sync_terminal_viewport(
     mut q: Query<(Entity, &mut TerminalState), With<Terminal>>,
     browsers: NonSend<Browsers>,
+    settings: Res<AppSettings>,
     mut commands: Commands,
 ) {
+    let font_family = settings
+        .terminal
+        .as_ref()
+        .map(|t| t.font_family.clone());
+
     for (entity, mut state) in &mut q {
         if !state.dirty {
             continue;
@@ -238,7 +273,8 @@ fn sync_terminal_viewport(
         }
         state.dirty = false;
 
-        let viewport = build_viewport(&state.term);
+        let mut viewport = build_viewport(&state.term);
+        viewport.font_family = font_family.clone();
         let body = ron::ser::to_string(&viewport).unwrap_or_default();
         commands.trigger(HostEmitEvent::new(entity, TERM_VIEWPORT_EVENT, &body));
     }
@@ -248,10 +284,11 @@ fn build_viewport<T: TermEventListener>(term: &Term<T>) -> TermViewportEvent {
     let grid = term.grid();
     let num_cols = grid.columns();
     let num_lines = grid.screen_lines();
+    let offset = grid.display_offset() as i32;
     let mut lines = Vec::with_capacity(num_lines);
 
     for row_idx in 0..num_lines {
-        let row = &grid[Line(row_idx as i32)];
+        let row = &grid[Line(row_idx as i32 - offset)];
         let mut spans = Vec::new();
         let mut text = String::new();
         let mut cur_fg: Option<[u8; 3]> = None;
@@ -297,17 +334,19 @@ fn build_viewport<T: TermEventListener>(term: &Term<T>) -> TermViewportEvent {
     }
 
     let cursor_point = grid.cursor.point;
+    let scrolled_back = offset > 0;
     TermViewportEvent {
         lines,
         cursor: TermCursor {
             col: cursor_point.column.0 as u16,
             row: cursor_point.line.0 as u16,
             shape: CursorShape::Block,
-            visible: true,
+            visible: !scrolled_back,
         },
         cols: num_cols as u16,
         rows: num_lines as u16,
         title: None,
+        font_family: None,
     }
 }
 
@@ -365,96 +404,114 @@ fn ansi_256_to_rgb(idx: u8) -> [u8; 3] {
     }
 }
 
-/// Handle keyboard input from webview.
-fn on_term_key_input(
-    trigger: On<Receive<TermKeyEvent>>,
-    q: Query<&PtyHandle, With<Terminal>>,
+/// Handle keyboard input directly from Bevy, bypassing CEF round-trip.
+fn handle_terminal_keyboard(
+    mut er: MessageReader<KeyboardInput>,
+    q: Query<&PtyHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
+    input: Res<ButtonInput<KeyCode>>,
 ) {
-    let event = &trigger.payload;
-    let entity = trigger.event_target();
-    let Ok(pty) = q.get(entity) else {
+    if q.is_empty() {
         return;
-    };
+    }
+    let ctrl = input.pressed(KeyCode::ControlLeft) || input.pressed(KeyCode::ControlRight);
+    let alt = input.pressed(KeyCode::AltLeft) || input.pressed(KeyCode::AltRight);
 
-    let bytes = key_event_to_bytes(event);
-    if !bytes.is_empty() {
-        let mut writer = pty.writer.lock().unwrap();
-        let _ = writer.write_all(&bytes);
+    for event in er.read() {
+        if event.state != ButtonState::Pressed {
+            continue;
+        }
+        let bytes = logical_key_to_bytes(&event.logical_key, ctrl, alt);
+        if bytes.is_empty() {
+            continue;
+        }
+        for pty in &q {
+            if let Ok(mut writer) = pty.writer.lock() {
+                let _ = writer.write_all(&bytes);
+            }
+        }
     }
 }
 
-fn key_event_to_bytes(event: &TermKeyEvent) -> Vec<u8> {
-    let ctrl = event.modifiers & MOD_CTRL != 0;
-    let alt = event.modifiers & MOD_ALT != 0;
-
-    // If there's a text character and no ctrl/alt, send it directly
-    if let Some(ref text) = event.text {
-        if !ctrl && !alt && !text.is_empty() {
-            return text.as_bytes().to_vec();
+fn logical_key_to_bytes(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
+    match key {
+        Key::Character(s) => {
+            if ctrl {
+                if let Some(c) = s.chars().next() {
+                    let code = (c.to_ascii_lowercase() as u8)
+                        .wrapping_sub(b'a')
+                        .wrapping_add(1);
+                    if code <= 26 {
+                        let mut v = Vec::new();
+                        if alt {
+                            v.push(0x1b);
+                        }
+                        v.push(code);
+                        return v;
+                    }
+                }
+            }
+            if alt {
+                let mut v = vec![0x1b];
+                v.extend_from_slice(s.as_bytes());
+                return v;
+            }
+            s.as_bytes().to_vec()
         }
-    }
-
-    // Handle special keys
-    let seq: Vec<u8> = match event.key.as_str() {
-        "Enter" => b"\r".to_vec(),
-        "Backspace" => {
+        Key::Enter => b"\r".to_vec(),
+        Key::Backspace => {
             if ctrl {
                 vec![0x08]
             } else {
                 vec![0x7f]
             }
         }
-        "Tab" => b"\t".to_vec(),
-        "Escape" => vec![0x1b],
-        "ArrowUp" => b"\x1b[A".to_vec(),
-        "ArrowDown" => b"\x1b[B".to_vec(),
-        "ArrowRight" => b"\x1b[C".to_vec(),
-        "ArrowLeft" => b"\x1b[D".to_vec(),
-        "Home" => b"\x1b[H".to_vec(),
-        "End" => b"\x1b[F".to_vec(),
-        "PageUp" => b"\x1b[5~".to_vec(),
-        "PageDown" => b"\x1b[6~".to_vec(),
-        "Delete" => b"\x1b[3~".to_vec(),
-        "Insert" => b"\x1b[2~".to_vec(),
-        _ => {
+        Key::Tab => b"\t".to_vec(),
+        Key::Escape => vec![0x1b],
+        Key::Space => {
             if ctrl {
-                if let Some(ref text) = event.text {
-                    if let Some(c) = text.chars().next() {
-                        let code = (c.to_ascii_lowercase() as u8)
-                            .wrapping_sub(b'a')
-                            .wrapping_add(1);
-                        if code <= 26 {
-                            let mut v = Vec::new();
-                            if alt {
-                                v.push(0x1b);
-                            }
-                            v.push(code);
-                            return v;
-                        }
-                    }
+                let mut v = Vec::new();
+                if alt {
+                    v.push(0x1b);
                 }
+                v.push(0);
+                return v;
             }
-            if alt {
-                if let Some(ref text) = event.text {
-                    let mut v = vec![0x1b];
-                    v.extend_from_slice(text.as_bytes());
-                    return v;
-                }
-            }
-            event
-                .text
-                .as_ref()
-                .map(|t| t.as_bytes().to_vec())
-                .unwrap_or_default()
+            b" ".to_vec()
         }
-    };
+        Key::ArrowUp => b"\x1b[A".to_vec(),
+        Key::ArrowDown => b"\x1b[B".to_vec(),
+        Key::ArrowRight => b"\x1b[C".to_vec(),
+        Key::ArrowLeft => b"\x1b[D".to_vec(),
+        Key::Home => b"\x1b[H".to_vec(),
+        Key::End => b"\x1b[F".to_vec(),
+        Key::PageUp => b"\x1b[5~".to_vec(),
+        Key::PageDown => b"\x1b[6~".to_vec(),
+        Key::Delete => b"\x1b[3~".to_vec(),
+        Key::Insert => b"\x1b[2~".to_vec(),
+        _ => Vec::new(),
+    }
+}
 
-    if alt && !seq.is_empty() && seq[0] != 0x1b {
-        let mut v = vec![0x1b];
-        v.extend_from_slice(&seq);
-        v
-    } else {
-        seq
+/// Handle mouse wheel scrolling for the terminal scrollback buffer.
+fn handle_terminal_scroll(
+    mut er: MessageReader<MouseWheel>,
+    mut q: Query<&mut TerminalState, (With<Terminal>, With<CefKeyboardTarget>)>,
+) {
+    if q.is_empty() {
+        return;
+    }
+    for event in er.read() {
+        let lines = match event.unit {
+            MouseScrollUnit::Line => -event.y as i32,
+            MouseScrollUnit::Pixel => (-event.y / 20.0) as i32,
+        };
+        if lines == 0 {
+            continue;
+        }
+        for mut state in &mut q {
+            state.term.scroll_display(Scroll::Delta(lines));
+            state.dirty = true;
+        }
     }
 }
 

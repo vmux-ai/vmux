@@ -14,6 +14,8 @@ pub struct TermViewportEvent {
     pub cols: u16,
     pub rows: u16,
     pub title: Option<String>,
+    #[serde(default)]
+    pub font_family: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

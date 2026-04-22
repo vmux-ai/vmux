@@ -12,7 +12,7 @@
   html.dark body {
     background-color: transparent;
     color: var(--foreground);
-    font-family: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+    font-family: "JetBrains Mono", "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
   }
 }
 

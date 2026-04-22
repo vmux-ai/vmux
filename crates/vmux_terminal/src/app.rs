@@ -18,27 +18,10 @@ pub fn App() -> Element {
 
     let vp = viewport();
 
-    // Install raw JS keydown handler and resize observer.
+    // Install resize observer to report character cell dimensions.
     use_effect(|| {
         document::eval(
             r#"setTimeout(() => {
-  var el = document.getElementById('term-input');
-  if (!el) return;
-  el.focus();
-  if (el._bound) return;
-  el._bound = true;
-  el.addEventListener('keydown', function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    var mods = 0;
-    if (e.ctrlKey) mods |= 1;
-    if (e.altKey) mods |= 2;
-    if (e.shiftKey) mods |= 4;
-    if (e.metaKey) mods |= 8;
-    var text = e.key.length === 1 ? e.key : null;
-    window.__cef_emit('term_key', {key: e.code, modifiers: mods, text: text});
-  }, true);
-
   // Measure character cell and emit resize
   var measure = document.createElement('span');
   measure.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:inherit';
@@ -49,8 +32,8 @@ pub fn App() -> Element {
   function emitResize() {
     var cw = measure.getBoundingClientRect().width;
     var ch = parseFloat(getComputedStyle(container).lineHeight) || measure.getBoundingClientRect().height;
-    if (cw > 0 && ch > 0 && window.__cef_emit) {
-      window.__cef_emit('term_resize', {char_width: cw, char_height: ch});
+    if (cw > 0 && ch > 0 && window.cef && window.cef.emit) {
+      window.cef.emit({char_width: cw, char_height: ch});
     }
   }
   emitResize();
@@ -61,17 +44,13 @@ pub fn App() -> Element {
         );
     });
 
+    let font_style = vp.font_family.as_ref().map(|f| format!("font-family: \"{f}\", monospace;")).unwrap_or_default();
+
     rsx! {
         div {
             class: "relative h-full w-full overflow-hidden bg-background font-mono text-sm leading-tight",
-            onclick: move |_| {
-                document::eval("document.getElementById('term-input')?.focus()");
-            },
-            textarea {
-                id: "term-input",
-                class: "absolute opacity-0 w-0 h-0",
-                autofocus: true,
-            }
+            style: "{font_style}",
+
             div { class: "p-1",
                 for (row_idx , line) in vp.lines.iter().enumerate() {
                     div {

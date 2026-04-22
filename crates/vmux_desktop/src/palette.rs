@@ -1,6 +1,6 @@
 use crate::{
     browser::Browser,
-    command::{AppCommand, BrowserCommand, ReadAppCommands},
+    command::{AppCommand, BrowserCommand, ReadAppCommands, TabCommand},
     layout::{
         pane::{Pane, PaneSplit},
         space::Space,
@@ -235,17 +235,23 @@ fn on_palette_action(
             } else {
                 format!("https://www.google.com/search?q={}", evt.value)
             };
-            let (_, _, active_tab) =
-                focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
-            if let Some(tab) = active_tab {
-                for browser_e in &content_browsers {
-                    let is_child = child_of_q
-                        .get(browser_e)
-                        .ok()
-                        .map(|co| co.get() == tab)
-                        .unwrap_or(false);
-                    if is_child {
-                        commands.entity(browser_e).insert(WebviewSource::new(&url));
+
+            // vmux://terminal/ requires a full Terminal entity with PTY
+            if url.trim_end_matches('/') == "vmux://terminal" {
+                writer.write(AppCommand::Tab(TabCommand::NewTerminal));
+            } else {
+                let (_, _, active_tab) =
+                    focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
+                if let Some(tab) = active_tab {
+                    for browser_e in &content_browsers {
+                        let is_child = child_of_q
+                            .get(browser_e)
+                            .ok()
+                            .map(|co| co.get() == tab)
+                            .unwrap_or(false);
+                        if is_child {
+                            commands.entity(browser_e).insert(WebviewSource::new(&url));
+                        }
                     }
                 }
             }

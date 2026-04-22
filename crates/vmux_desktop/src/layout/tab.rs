@@ -10,6 +10,7 @@ use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_history::LastActivatedAt;
+use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
 
 pub(crate) struct TabPlugin;
 
@@ -153,7 +154,16 @@ fn handle_tab_commands(
                     continue;
                 };
                 let tab = commands
-                    .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                    .spawn((
+                        tab_bundle(),
+                        LastActivatedAt::now(),
+                        vmux_header::PageMetadata {
+                            url: TERMINAL_WEBVIEW_URL.to_string(),
+                            title: "Terminal".to_string(),
+                            ..default()
+                        },
+                        ChildOf(pane),
+                    ))
                     .id();
                 commands.spawn((
                     Terminal::new(&mut meshes, &mut webview_mt, &settings),

@@ -79,8 +79,8 @@ pub enum TabCommand {
     Mute,
     #[menu(id = "tab_move_to_pane", label = "Move Tab to Pane")]
     MoveToPane,
-    #[menu(id = "tab_new_terminal", label = "New Terminal Tab\tCtrl+V, `")]
-    #[bind(chord = "Ctrl+v, `")]
+    #[menu(id = "tab_new_terminal", label = "New Terminal Tab\t<leader> `")]
+    #[bind(chord = "Ctrl+g, `")]
     NewTerminal,
 }
 
@@ -123,64 +123,64 @@ pub enum PaneCommand {
     SplitV,
     #[menu(id = "split_h", label = "Split Horizontally")]
     SplitH,
-    #[menu(id = "toggle_pane", label = "Toggle Pane\tCtrl+V, T")]
-    #[bind(chord = "Ctrl+v, t")]
+    #[menu(id = "toggle_pane", label = "Toggle Pane\t<leader> t")]
+    #[bind(chord = "Ctrl+g, t")]
     Toggle,
-    #[menu(id = "close_pane", label = "Close Pane\tCtrl+V, X")]
-    #[bind(chord = "Ctrl+v, x")]
+    #[menu(id = "close_pane", label = "Close Pane\t<leader> x")]
+    #[bind(chord = "Ctrl+g, x")]
     Close,
-    #[menu(id = "zoom_pane", label = "Zoom Pane\tCtrl+V, Z")]
-    #[bind(chord = "Ctrl+v, z")]
+    #[menu(id = "zoom_pane", label = "Zoom Pane\t<leader> z")]
+    #[bind(chord = "Ctrl+g, z")]
     Zoom,
-    #[menu(id = "select_pane_left", label = "Select Left Pane\tCtrl+V, H")]
-    #[bind(chord = "Ctrl+v, h")]
+    #[menu(id = "select_pane_left", label = "Select Left Pane\t<leader> h")]
+    #[bind(chord = "Ctrl+g, h")]
     SelectLeft,
-    #[menu(id = "select_pane_right", label = "Select Right Pane\tCtrl+V, L")]
-    #[bind(chord = "Ctrl+v, l")]
+    #[menu(id = "select_pane_right", label = "Select Right Pane\t<leader> l")]
+    #[bind(chord = "Ctrl+g, l")]
     SelectRight,
-    #[menu(id = "select_pane_up", label = "Select Up Pane\tCtrl+V, K")]
-    #[bind(chord = "Ctrl+v, k")]
+    #[menu(id = "select_pane_up", label = "Select Up Pane\t<leader> k")]
+    #[bind(chord = "Ctrl+g, k")]
     SelectUp,
-    #[menu(id = "select_pane_down", label = "Select Down Pane\tCtrl+V, J")]
-    #[bind(chord = "Ctrl+v, j")]
+    #[menu(id = "select_pane_down", label = "Select Down Pane\t<leader> j")]
+    #[bind(chord = "Ctrl+g, j")]
     SelectDown,
-    #[menu(id = "swap_pane_prev", label = "Swap Pane Previous\tCtrl+V, {")]
-    #[bind(chord = "Ctrl+v, {")]
+    #[menu(id = "swap_pane_prev", label = "Swap Pane Previous\t<leader> {")]
+    #[bind(chord = "Ctrl+g, {")]
     SwapPrev,
-    #[menu(id = "swap_pane_next", label = "Swap Pane Next\tCtrl+V, }")]
-    #[bind(chord = "Ctrl+v, }")]
+    #[menu(id = "swap_pane_next", label = "Swap Pane Next\t<leader> }")]
+    #[bind(chord = "Ctrl+g, }")]
     SwapNext,
-    #[menu(id = "rotate_forward", label = "Rotate Forward\tCtrl+V, Ctrl+O")]
-    #[bind(chord = "Ctrl+v, Ctrl+o")]
+    #[menu(id = "rotate_forward", label = "Rotate Forward\t<leader> ctrl+o")]
+    #[bind(chord = "Ctrl+g, Ctrl+o")]
     RotateForward,
-    #[menu(id = "rotate_backward", label = "Rotate Backward\tCtrl+V, Alt+O")]
-    #[bind(chord = "Ctrl+v, Alt+o")]
+    #[menu(id = "rotate_backward", label = "Rotate Backward\t<leader> alt+o")]
+    #[bind(chord = "Ctrl+g, Alt+o")]
     RotateBackward,
-    #[menu(id = "equalize_pane_size", label = "Equalize Pane Size\tCtrl+V, =")]
-    #[bind(chord = "Ctrl+v, =")]
+    #[menu(id = "equalize_pane_size", label = "Equalize Pane Size\t<leader> =")]
+    #[bind(chord = "Ctrl+g, =")]
     EqualizeSize,
-    #[menu(id = "resize_pane_left", label = "Resize Pane Left\tCtrl+V, Alt+Left")]
-    #[bind(chord = "Ctrl+v, Alt+ArrowLeft")]
+    #[menu(id = "resize_pane_left", label = "Resize Pane Left\t<leader> alt+left")]
+    #[bind(chord = "Ctrl+g, Alt+ArrowLeft")]
     ResizeLeft,
-    #[menu(id = "resize_pane_right", label = "Resize Pane Right\tCtrl+V, Alt+Right")]
-    #[bind(chord = "Ctrl+v, Alt+ArrowRight")]
+    #[menu(id = "resize_pane_right", label = "Resize Pane Right\t<leader> alt+right")]
+    #[bind(chord = "Ctrl+g, Alt+ArrowRight")]
     ResizeRight,
-    #[menu(id = "resize_pane_up", label = "Resize Pane Up\tCtrl+V, Alt+Up")]
-    #[bind(chord = "Ctrl+v, Alt+ArrowUp")]
+    #[menu(id = "resize_pane_up", label = "Resize Pane Up\t<leader> alt+up")]
+    #[bind(chord = "Ctrl+g, Alt+ArrowUp")]
     ResizeUp,
-    #[menu(id = "resize_pane_down", label = "Resize Pane Down\tCtrl+V, Alt+Down")]
-    #[bind(chord = "Ctrl+v, Alt+ArrowDown")]
+    #[menu(id = "resize_pane_down", label = "Resize Pane Down\t<leader> alt+down")]
+    #[bind(chord = "Ctrl+g, Alt+ArrowDown")]
     ResizeDown,
 }
 
 #[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpaceCommand {
     #[default]
-    #[menu(id = "new_space", label = "New Space\tCtrl+V, C")]
-    #[bind(chord = "Ctrl+v, c")]
+    #[menu(id = "new_space", label = "New Space\t<leader> c")]
+    #[bind(chord = "Ctrl+g, c")]
     New,
-    #[menu(id = "close_space", label = "Close Space\tCtrl+V, &")]
-    #[bind(chord = "Ctrl+v, &")]
+    #[menu(id = "close_space", label = "Close Space\t<leader> &")]
+    #[bind(chord = "Ctrl+g, &")]
     Close,
     #[menu(id = "next_space", label = "Next Space", accel = "ctrl+tab")]
     Next,
@@ -193,8 +193,8 @@ pub enum SpaceCommand {
 #[derive(OsSubMenu, DefaultKeyBindings, CommandPalette, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SideSheetCommand {
     #[default]
-    #[menu(id = "toggle_side_sheet", label = "Toggle Side Sheet\tCtrl+V, S")]
-    #[bind(chord = "Ctrl+v, s")]
+    #[menu(id = "toggle_side_sheet", label = "Toggle Side Sheet\t<leader> s")]
+    #[bind(chord = "Ctrl+g, s")]
     Toggle,
     #[menu(id = "toggle_side_sheet_right", label = "Toggle Right Sheet")]
     ToggleRight,
@@ -206,7 +206,7 @@ pub enum SideSheetCommand {
 pub enum SceneCommand {
     #[default]
     #[menu(id = "toggle_free_camera", label = "Toggle Camera Mode")]
-    #[bind(chord = "Ctrl+v, Enter")]
+    #[bind(chord = "Ctrl+g, Enter")]
     ToggleFreeCamera,
 }
 

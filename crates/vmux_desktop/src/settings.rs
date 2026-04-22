@@ -103,6 +103,12 @@ pub struct BrowserSettings {
 #[derive(Clone, Debug, Deserialize)]
 pub struct TerminalSettings {
     pub shell: String,
+    #[serde(default = "default_terminal_font_family")]
+    pub font_family: String,
+}
+
+fn default_terminal_font_family() -> String {
+    "JetBrainsMono Nerd Font".to_string()
 }
 
 #[derive(Clone, Debug, Deserialize)]
