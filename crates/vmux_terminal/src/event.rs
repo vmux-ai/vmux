@@ -105,11 +105,16 @@ pub const MOD_SUPER: u8 = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TermMouseEvent {
+    /// 0=left, 1=middle, 2=right, 3=none (release/motion), 64=scroll_up, 65=scroll_down
     pub button: u8,
     pub col: u16,
     pub row: u16,
     pub modifiers: u8,
+    /// true for press, false for release
     pub pressed: bool,
+    /// true when this is a motion event (drag if button<3, move if button==3)
+    #[serde(default)]
+    pub moving: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

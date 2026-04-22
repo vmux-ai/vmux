@@ -7,7 +7,7 @@ use alacritty_terminal::{
     event::{Event as TermEvent, EventListener as TermEventListener},
     grid::{Dimensions, Scroll},
     index::{Column, Line},
-    term::{Config as TermConfig, Term, cell::Flags as CellFlags},
+    term::{Config as TermConfig, Term, TermMode, cell::Flags as CellFlags},
     vte::ansi::{Color, NamedColor, Processor},
 };
 use bevy::{
@@ -78,6 +78,7 @@ pub(crate) struct TerminalPlugin;
 impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(JsEmitEventPlugin::<TermResizeEvent>::default())
+            .add_plugins(JsEmitEventPlugin::<TermMouseEvent>::default())
             .add_systems(
                 PreUpdate,
                 (
@@ -91,6 +92,7 @@ impl Plugin for TerminalPlugin {
             .add_systems(Update, (poll_pty_output, sync_terminal_viewport, sync_terminal_theme).chain())
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
+            .add_observer(on_term_mouse)
             .add_observer(on_restart_pty);
     }
 }
@@ -123,6 +125,7 @@ impl Terminal {
 
         let mut cmd = CommandBuilder::new(&shell);
         cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
 
         let child = pair.slave.spawn_command(cmd).expect("failed to spawn shell");
         let pid = child.process_id().unwrap_or(0);
@@ -519,10 +522,11 @@ fn logical_key_to_bytes(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
     }
 }
 
-/// Handle mouse wheel scrolling for the terminal scrollback buffer.
+/// Handle mouse wheel scrolling — forwards to PTY when mouse mode is active,
+/// otherwise scrolls the scrollback buffer.
 fn handle_terminal_scroll(
     mut er: MessageReader<MouseWheel>,
-    mut q: Query<&mut TerminalState, (With<Terminal>, With<CefKeyboardTarget>)>,
+    mut q: Query<(&mut TerminalState, &PtyHandle), (With<Terminal>, With<CefKeyboardTarget>)>,
 ) {
     if q.is_empty() {
         return;
@@ -535,9 +539,90 @@ fn handle_terminal_scroll(
         if lines == 0 {
             continue;
         }
-        for mut state in &mut q {
-            state.term.scroll_display(Scroll::Delta(lines));
+        for (mut state, pty) in &mut q {
+            let mode = *state.term.mode();
+            if mode.intersects(TermMode::MOUSE_MODE) && mode.contains(TermMode::SGR_MOUSE) {
+                // Forward scroll as SGR mouse button 64 (up) / 65 (down) to the PTY
+                let button: u8 = if lines < 0 { 64 } else { 65 };
+                let count = lines.unsigned_abs();
+                let seq = sgr_mouse_sequence(button, 0, 0, 0, true);
+                if let Ok(mut w) = pty.writer.lock() {
+                    for _ in 0..count {
+                        let _ = w.write_all(&seq);
+                    }
+                }
+            } else {
+                state.term.scroll_display(Scroll::Delta(lines));
+            }
             state.dirty = true;
+        }
+    }
+}
+
+/// Encode a mouse event as an SGR escape sequence.
+/// button: SGR button value (0=left, 1=mid, 2=right, 32+=drag, 35=motion, 64/65=scroll)
+fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool) -> Vec<u8> {
+    let mut cb = button as u32;
+    if modifiers & MOD_SHIFT != 0 {
+        cb += 4;
+    }
+    if modifiers & MOD_ALT != 0 {
+        cb += 8;
+    }
+    if modifiers & MOD_CTRL != 0 {
+        cb += 16;
+    }
+    let suffix = if pressed { 'M' } else { 'm' };
+    // SGR coordinates are 1-based
+    format!("\x1b[<{};{};{}{}", cb, col + 1, row + 1, suffix).into_bytes()
+}
+
+/// Handle mouse events from the terminal webview.
+fn on_term_mouse(
+    trigger: On<Receive<TermMouseEvent>>,
+    state_q: Query<&TerminalState, With<Terminal>>,
+    pty_q: Query<&PtyHandle, With<Terminal>>,
+) {
+    let entity = trigger.event_target();
+    let event = &trigger.payload;
+
+    let Ok(state) = state_q.get(entity) else {
+        return;
+    };
+
+    let mode = *state.term.mode();
+    if !mode.intersects(TermMode::MOUSE_MODE) {
+        return;
+    }
+
+    // Only support SGR encoding (used by all modern terminal apps)
+    if !mode.contains(TermMode::SGR_MOUSE) {
+        return;
+    }
+
+    // Filter motion events based on terminal mode
+    if event.moving {
+        let is_drag = event.button < 3;
+        if is_drag && !mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION) {
+            return;
+        }
+        if !is_drag && !mode.contains(TermMode::MOUSE_MOTION) {
+            return;
+        }
+    }
+
+    // Encode SGR button: add 32 for motion/drag events
+    let button = if event.moving {
+        event.button + 32
+    } else {
+        event.button
+    };
+
+    let seq = sgr_mouse_sequence(button, event.col, event.row, event.modifiers, event.pressed);
+
+    if let Ok(pty) = pty_q.get(entity) {
+        if let Ok(mut w) = pty.writer.lock() {
+            let _ = w.write_all(&seq);
         }
     }
 }
@@ -684,6 +769,7 @@ fn on_restart_pty(
 
     let mut cmd = CommandBuilder::new(&shell);
     cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
 
     let child = pair.slave.spawn_command(cmd).expect("failed to spawn shell");
     let pid = child.process_id().unwrap_or(0);

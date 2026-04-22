@@ -421,6 +421,18 @@ pub fn finish_cef_embedded_webview_dist(
         }
         fs::copy(&index_src, &dest)?;
     }
+    // Copy crate-local font files (e.g. bundled Nerd Font for terminal)
+    let local_fonts = manifest_assets.join("fonts");
+    if local_fonts.is_dir() {
+        let dest_dir = dist.join("assets/fonts");
+        fs::create_dir_all(&dest_dir)?;
+        for entry in fs::read_dir(&local_fonts)?.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                fs::copy(&path, dest_dir.join(entry.file_name()))?;
+            }
+        }
+    }
     if opts.strip_uncompiled_tailwind_css {
         strip_dx_uncompiled_tailwind_css_assets(dist, &["theme.css", CEF_EMBEDDED_APP_INDEX_CSS]);
     }

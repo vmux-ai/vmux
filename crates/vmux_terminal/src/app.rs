@@ -4,6 +4,21 @@ use dioxus::prelude::*;
 use vmux_terminal::event::*;
 use vmux_ui::hooks::{use_event_listener, use_theme};
 
+// Tailwind safelist — these classes are generated dynamically via format!() and
+// must appear as literal strings for Tailwind's content scanner to detect them.
+#[rustfmt::skip]
+const _TW_SAFELIST: &[&str] = &[
+    "text-ansi-0",  "text-ansi-1",  "text-ansi-2",  "text-ansi-3",
+    "text-ansi-4",  "text-ansi-5",  "text-ansi-6",  "text-ansi-7",
+    "text-ansi-8",  "text-ansi-9",  "text-ansi-10", "text-ansi-11",
+    "text-ansi-12", "text-ansi-13", "text-ansi-14", "text-ansi-15",
+    "bg-ansi-0",  "bg-ansi-1",  "bg-ansi-2",  "bg-ansi-3",
+    "bg-ansi-4",  "bg-ansi-5",  "bg-ansi-6",  "bg-ansi-7",
+    "bg-ansi-8",  "bg-ansi-9",  "bg-ansi-10", "bg-ansi-11",
+    "bg-ansi-12", "bg-ansi-13", "bg-ansi-14", "bg-ansi-15",
+    "text-term-bg", "bg-term-fg",
+];
+
 #[component]
 pub fn App() -> Element {
     use_theme();
@@ -26,16 +41,46 @@ pub fn App() -> Element {
 
     let vp = viewport();
 
-    // Install resize observer to report character cell dimensions.
+    // Install resize observer and mouse event handlers.
     use_effect(|| {
         document::eval(
             r#"setTimeout(() => {
+  // Load Nerd Font programmatically (CSS @font-face may not resolve
+  // relative URLs correctly under the custom vmux:// scheme).
+  (async function() {
+    try {
+      var variants = [
+        ['JetBrainsMonoNerdFontMono-Regular.woff2', '400', 'normal'],
+        ['JetBrainsMonoNerdFontMono-Bold.woff2', '700', 'normal'],
+        ['JetBrainsMonoNerdFontMono-Italic.woff2', '400', 'italic'],
+        ['JetBrainsMonoNerdFontMono-BoldItalic.woff2', '700', 'italic'],
+      ];
+      for (var v of variants) {
+        var resp = await fetch('./assets/fonts/' + v[0]);
+        if (resp.ok) {
+          var buf = await resp.arrayBuffer();
+          var face = new FontFace('JetBrainsMono NF', buf, {weight: v[1], style: v[2]});
+          await face.load();
+          document.fonts.add(face);
+        }
+      }
+    } catch(e) { /* font loading is best-effort */ }
+  })();
+
   var measure = document.createElement('span');
   measure.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:inherit';
   measure.className = 'font-mono text-sm';
   measure.textContent = 'X';
   var container = document.querySelector('.font-mono');
   if (container) container.appendChild(measure);
+
+  // Shared state for mouse position calculation
+  window.__termCW = 0;
+  window.__termCH = 0;
+  window.__termButtons = 0;
+  window.__termLastCol = -1;
+  window.__termLastRow = -1;
+
   function emitResize() {
     var cw = measure.getBoundingClientRect().width;
     var ch = parseFloat(getComputedStyle(container).lineHeight) || measure.getBoundingClientRect().height;
@@ -45,10 +90,65 @@ pub fn App() -> Element {
     var py = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
     var vw = container.clientWidth - px;
     var vh = container.clientHeight - py;
+    window.__termCW = cw;
+    window.__termCH = ch;
     if (cw > 0 && ch > 0 && window.cef && window.cef.emit) {
       window.cef.emit({char_width: cw, char_height: ch, viewport_width: vw, viewport_height: vh});
     }
   }
+
+  function mousePos(e) {
+    var padEl = container.firstElementChild;
+    if (!padEl || window.__termCW <= 0 || window.__termCH <= 0) return null;
+    var cs = getComputedStyle(padEl);
+    var rect = padEl.getBoundingClientRect();
+    var x = e.clientX - rect.left - parseFloat(cs.paddingLeft);
+    var y = e.clientY - rect.top - parseFloat(cs.paddingTop);
+    return {
+      col: Math.max(0, Math.floor(x / window.__termCW)),
+      row: Math.max(0, Math.floor(y / window.__termCH))
+    };
+  }
+
+  function mouseMods(e) {
+    var m = 0;
+    if (e.ctrlKey) m |= 1;
+    if (e.altKey) m |= 2;
+    if (e.shiftKey) m |= 4;
+    if (e.metaKey) m |= 8;
+    return m;
+  }
+
+  container.addEventListener('mousedown', function(e) {
+    var pos = mousePos(e);
+    if (!pos || !window.cef || !window.cef.emit) return;
+    window.__termButtons |= (1 << e.button);
+    window.cef.emit({button: e.button, col: pos.col, row: pos.row, modifiers: mouseMods(e), pressed: true, moving: false});
+  });
+
+  container.addEventListener('mouseup', function(e) {
+    var pos = mousePos(e);
+    if (!pos || !window.cef || !window.cef.emit) return;
+    window.__termButtons &= ~(1 << e.button);
+    window.cef.emit({button: e.button, col: pos.col, row: pos.row, modifiers: mouseMods(e), pressed: false, moving: false});
+  });
+
+  container.addEventListener('mousemove', function(e) {
+    var pos = mousePos(e);
+    if (!pos || !window.cef || !window.cef.emit) return;
+    // Only emit if cell position changed (throttle)
+    if (pos.col === window.__termLastCol && pos.row === window.__termLastRow) return;
+    window.__termLastCol = pos.col;
+    window.__termLastRow = pos.row;
+    var btn = 3;
+    if (window.__termButtons & 1) btn = 0;
+    else if (window.__termButtons & 4) btn = 2;
+    else if (window.__termButtons & 2) btn = 1;
+    window.cef.emit({button: btn, col: pos.col, row: pos.row, modifiers: mouseMods(e), pressed: true, moving: true});
+  });
+
+  container.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+
   emitResize();
   if (window.ResizeObserver) {
     new ResizeObserver(emitResize).observe(document.body);
@@ -71,7 +171,11 @@ pub fn App() -> Element {
                     s.push_str(&format!("--ansi-{i}:rgb({r},{g},{b});"));
                 }
                 if !t.font_family.is_empty() {
-                    s.push_str(&format!("font-family:\"{}\",monospace;", t.font_family));
+                    // Always include bundled Nerd Font as fallback for PUA glyphs
+                    s.push_str(&format!(
+                        "font-family:\"{}\",\"JetBrainsMono NF\",monospace;",
+                        t.font_family
+                    ));
                 }
                 if t.font_size > 0.0 {
                     s.push_str(&format!("font-size:{}px;", t.font_size));
