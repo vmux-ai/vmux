@@ -257,7 +257,7 @@ pub(crate) fn rebuild_session_views(
             .unwrap_or(false);
 
         if !has_browser {
-            if meta.url.trim_end_matches('/') == TERMINAL_WEBVIEW_URL.trim_end_matches('/') {
+            if meta.url.starts_with(TERMINAL_WEBVIEW_URL.trim_end_matches('/')) {
                 commands.spawn((
                     Terminal::new(&mut meshes, &mut webview_mt, &settings),
                     ChildOf(entity),
