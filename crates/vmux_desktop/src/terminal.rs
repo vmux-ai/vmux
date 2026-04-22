@@ -48,8 +48,13 @@ pub(crate) struct PtyHandle {
     rx: Mutex<mpsc::Receiver<Vec<u8>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
-    #[allow(dead_code)]
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
+}
+
+/// Triggered to restart the PTY process for a terminal entity.
+#[derive(Event)]
+pub(crate) struct RestartPty {
+    pub entity: Entity,
 }
 
 /// Event proxy that forwards PtyWrite responses back to the PTY.
@@ -85,7 +90,8 @@ impl Plugin for TerminalPlugin {
             )
             .add_systems(Update, (poll_pty_output, sync_terminal_viewport).chain())
             .add_observer(on_term_ready)
-            .add_observer(on_term_resize);
+            .add_observer(on_term_resize)
+            .add_observer(on_restart_pty);
     }
 }
 
@@ -564,4 +570,84 @@ fn on_term_resize(
         state.term.resize(dims);
         state.dirty = true;
     }
+}
+
+fn on_restart_pty(
+    trigger: On<RestartPty>,
+    mut q: Query<(&mut TerminalState, &mut PtyHandle, &mut PageMetadata)>,
+    settings: Res<AppSettings>,
+) {
+    let entity = trigger.event().entity;
+    let Ok((mut state, mut pty, mut meta)) = q.get_mut(entity) else {
+        return;
+    };
+
+    // Kill old PTY
+    let _ = pty.child.lock().unwrap().kill();
+
+    let shell = settings
+        .terminal
+        .as_ref()
+        .map(|t| t.shell.clone())
+        .unwrap_or_else(default_shell);
+
+    // Spawn new PTY
+    let pty_system = NativePtySystem::default();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .expect("failed to open PTY");
+
+    let mut cmd = CommandBuilder::new(&shell);
+    cmd.env("TERM", "xterm-256color");
+
+    let child = pair.slave.spawn_command(cmd).expect("failed to spawn shell");
+    let pid = child.process_id().unwrap_or(0);
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .expect("failed to clone PTY reader");
+    let new_writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(
+        pair.master
+            .take_writer()
+            .expect("failed to take PTY writer"),
+    ));
+    drop(pair.slave);
+
+    // Spawn new reader thread
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("pty-reader".into())
+        .spawn(move || {
+            pty_reader_thread(reader, tx);
+        })
+        .expect("failed to spawn PTY reader thread");
+
+    // Reset terminal state
+    let event_proxy = VmuxEventProxy {
+        pty_writer: Arc::clone(&new_writer),
+    };
+    let term_config = TermConfig::default();
+    let dims = PtyDimensions { cols: 80, rows: 24 };
+    let new_term = Term::new(term_config, &dims, event_proxy);
+
+    state.term = new_term;
+    state.processor = Processor::new();
+    state.dirty = true;
+
+    // Replace PtyHandle entirely
+    *pty = PtyHandle {
+        rx: Mutex::new(rx),
+        writer: new_writer,
+        master: Mutex::new(pair.master),
+        child: Mutex::new(child),
+    };
+
+    // Update metadata
+    meta.url = format!("{}?session={}", TERMINAL_WEBVIEW_URL, pid);
+    meta.title = format!("Terminal - {}", shell);
 }

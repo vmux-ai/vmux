@@ -12,7 +12,7 @@ use crate::{
               active_tab_in_pane, collect_leaf_panes},
     },
     settings::AppSettings,
-    terminal::Terminal,
+    terminal::{Terminal, RestartPty},
 };
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
@@ -598,6 +598,7 @@ fn handle_browser_commands(
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
+    terminal_q: Query<(), With<Terminal>>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -617,11 +618,32 @@ fn handle_browser_commands(
         else {
             continue;
         };
+        let is_terminal = terminal_q.contains(webview);
         match browser_cmd {
-            BrowserCommand::PrevPage => commands.trigger(RequestGoBack { webview }),
-            BrowserCommand::NextPage => commands.trigger(RequestGoForward { webview }),
-            BrowserCommand::Reload => commands.trigger(RequestReload { webview }),
-            BrowserCommand::HardReload => commands.trigger(RequestReloadIgnoreCache { webview }),
+            BrowserCommand::PrevPage => {
+                if !is_terminal {
+                    commands.trigger(RequestGoBack { webview });
+                }
+            }
+            BrowserCommand::NextPage => {
+                if !is_terminal {
+                    commands.trigger(RequestGoForward { webview });
+                }
+            }
+            BrowserCommand::Reload => {
+                if is_terminal {
+                    commands.trigger(RestartPty { entity: webview });
+                } else {
+                    commands.trigger(RequestReload { webview });
+                }
+            }
+            BrowserCommand::HardReload => {
+                if is_terminal {
+                    commands.trigger(RestartPty { entity: webview });
+                } else {
+                    commands.trigger(RequestReloadIgnoreCache { webview });
+                }
+            }
             BrowserCommand::Stop => {}
             BrowserCommand::FocusAddressBar => {}
             BrowserCommand::Find => {}
