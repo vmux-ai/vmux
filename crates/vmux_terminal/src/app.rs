@@ -39,8 +39,12 @@ pub fn App() -> Element {
   function emitResize() {
     var cw = measure.getBoundingClientRect().width;
     var ch = parseFloat(getComputedStyle(container).lineHeight) || measure.getBoundingClientRect().height;
-    var vw = document.documentElement.clientWidth;
-    var vh = document.documentElement.clientHeight;
+    var padEl = container.firstElementChild || container;
+    var cs = getComputedStyle(padEl);
+    var px = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+    var py = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    var vw = container.clientWidth - px;
+    var vh = container.clientHeight - py;
     if (cw > 0 && ch > 0 && window.cef && window.cef.emit) {
       window.cef.emit({char_width: cw, char_height: ch, viewport_width: vw, viewport_height: vh});
     }
