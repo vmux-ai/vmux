@@ -37,7 +37,7 @@
     margin: 0;
     background-color: transparent;
     color: var(--term-fg);
-    font-family: "JetBrains Mono", "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono", "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
   }
 
   #main > * {
