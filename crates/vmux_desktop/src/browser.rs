@@ -37,8 +37,7 @@ use vmux_side_sheet::event::{
 use vmux_ui::theme::{ThemeEvent, THEME_EVENT};
 use vmux_webview_app::{UiReady, WebviewAppRegistry};
 
-/// Filter that matches any content entity (Browser or Terminal) inside a tab.
-type ContentFilter = Or<(With<Browser>, With<Terminal>)>;
+
 
 pub(crate) struct BrowserPlugin;
 
@@ -174,7 +173,7 @@ fn sync_keyboard_target(
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
     modal_q: Query<&Node, With<Modal>>,
-    content_q: Query<(Entity, Has<CefKeyboardTarget>), ContentFilter>,
+    content_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     mut commands: Commands,
 ) {
     // Don't reassign keyboard target while palette is open
@@ -222,7 +221,7 @@ fn sync_children_to_ui(
             Option<&SideSheet>,
             Option<&Modal>,
         ),
-        ContentFilter,
+        With<Browser>,
     >,
     child_of_q: Query<&ChildOf>,
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
@@ -312,7 +311,7 @@ fn sync_children_to_ui(
 
 fn sync_cef_webview_resize_after_ui(
     browsers: NonSend<Browsers>,
-    webviews: Query<(Entity, &WebviewSize), ContentFilter>,
+    webviews: Query<(Entity, &WebviewSize), With<Browser>>,
     host_window: Query<&HostWindow>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -352,7 +351,7 @@ fn sync_cef_webview_resize_after_ui(
 fn sync_webview_pane_corner_clip(
     settings: Res<AppSettings>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    tabs: Query<(&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>), ContentFilter>,
+    tabs: Query<(&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>), With<Browser>>,
     status: Query<(&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>), With<Header>>,
     side_sheet: Query<
         (&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>),
@@ -460,7 +459,7 @@ fn push_tabs_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     status: Single<Entity, (With<Header>, With<UiReady>)>,
-    browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), ContentFilter>,
+    browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), With<Browser>>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -524,7 +523,7 @@ fn push_pane_tree_emit(
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     tab_q: Query<Entity, With<Tab>>,
     tab_children: Query<&Children>,
-    browser_meta: Query<&PageMetadata, ContentFilter>,
+    browser_meta: Query<&PageMetadata, With<Browser>>,
     mut last: Local<String>,
 ) {
     let Some(side_sheet) = side_sheet else {
@@ -597,7 +596,7 @@ fn handle_browser_commands(
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
-    browsers: Query<(Entity, &ChildOf), (ContentFilter, Without<Header>, Without<SideSheet>)>,
+    browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     mut commands: Commands,
 ) {
