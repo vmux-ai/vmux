@@ -22,6 +22,18 @@ pub struct TermThemeEvent {
     pub background: [u8; 3],
     pub cursor: [u8; 3],
     pub ansi: [[u8; 3]; 16],
+    #[serde(default)]
+    pub font_family: String,
+    #[serde(default)]
+    pub font_size: f32,
+    #[serde(default)]
+    pub line_height: f32,
+    #[serde(default)]
+    pub padding: f32,
+    #[serde(default)]
+    pub cursor_style: String,
+    #[serde(default)]
+    pub cursor_blink: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -31,8 +43,6 @@ pub struct TermViewportEvent {
     pub cols: u16,
     pub rows: u16,
     pub title: Option<String>,
-    #[serde(default)]
-    pub font_family: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

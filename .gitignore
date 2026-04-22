@@ -1,7 +1,7 @@
 /target
 .DS_Store
 *.app
-.claude/settings.local.json
+.claude/
 
 # Tailwind output (run `npm run build:css` in crates/vmux_header)
 crates/vmux_header/assets/status.css

@@ -47,11 +47,11 @@ pub(crate) fn session_path() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         let home = std::env::var_os("HOME").expect("HOME not set");
-        PathBuf::from(home).join("Library/Application Support/vmux/session.ron")
+        PathBuf::from(home).join("Library/Application Support/ai.vmux.desktop/session.ron")
     }
     #[cfg(not(target_os = "macos"))]
     {
-        std::env::temp_dir().join("vmux_cef/session.ron")
+        std::env::temp_dir().join("ai.vmux.desktop/session.ron")
     }
 }
 

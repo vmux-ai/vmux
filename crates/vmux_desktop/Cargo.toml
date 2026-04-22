@@ -38,5 +38,6 @@ vmux_terminal = { path = "../vmux_terminal" }
 vmux_webview_app = { path = "../vmux_webview_app" }
 alacritty_terminal = { workspace = true }
 portable-pty = { workspace = true }
+notify = { workspace = true }
 
 

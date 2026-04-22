@@ -920,7 +920,7 @@ fn cef_root_cache_path() -> Option<String> {
     {
         std::env::var_os("HOME").map(|home| {
             PathBuf::from(home)
-                .join("Library/Application Support/vmux/profiles/default")
+                .join("Library/Application Support/ai.vmux.desktop/profiles/default")
                 .to_string_lossy()
                 .into_owned()
         })
@@ -929,6 +929,6 @@ fn cef_root_cache_path() -> Option<String> {
     {
         std::env::temp_dir()
             .to_str()
-            .map(|p| format!("{p}/vmux_cef/profiles/default"))
+            .map(|p| format!("{p}/ai.vmux.desktop/profiles/default"))
     }
 }

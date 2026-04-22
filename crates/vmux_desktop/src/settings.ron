@@ -57,15 +57,20 @@
             (command: "rotate_backward", binding: Leader((key: "o", alt: true))),
         ],
     ),
-    terminal: (
-        default_profile: "default",
-        profiles: [
+    terminal: Some((
+        default_theme: "default",
+        themes: [
             (
                 name: "default",
-                theme: "catppuccin-mocha",
+                color_scheme: "catppuccin-mocha",
                 font_family: "JetBrainsMono Nerd Font",
+                font_size: 14.0,
+                line_height: 1.2,
+                padding: 4.0,
+                cursor_style: "block",
+                cursor_blink: true,
                 shell: "/opt/homebrew/bin/nu",
             ),
         ],
-    ),
+    )),
 )

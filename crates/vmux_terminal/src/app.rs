@@ -53,8 +53,6 @@ pub fn App() -> Element {
         );
     });
 
-    let font_style = vp.font_family.as_ref().map(|f| format!("font-family: \"{f}\", monospace;")).unwrap_or_default();
-
     let theme_style = {
         let t = theme();
         match t {
@@ -68,18 +66,31 @@ pub fn App() -> Element {
                 for (i, [r, g, b]) in t.ansi.iter().enumerate() {
                     s.push_str(&format!("--ansi-{i}:rgb({r},{g},{b});"));
                 }
+                if !t.font_family.is_empty() {
+                    s.push_str(&format!("font-family:\"{}\",monospace;", t.font_family));
+                }
+                if t.font_size > 0.0 {
+                    s.push_str(&format!("font-size:{}px;", t.font_size));
+                }
+                if t.line_height > 0.0 {
+                    s.push_str(&format!("line-height:{};", t.line_height));
+                }
                 s
             }
             None => String::new(),
         }
     };
 
+    let padding = theme().map(|t| t.padding).unwrap_or(4.0);
+    let cursor_blink = theme().map(|t| t.cursor_blink).unwrap_or(true);
+    let cursor_style = theme().map(|t| t.cursor_style.clone()).unwrap_or_else(|| "block".into());
+
     rsx! {
         div {
             class: "relative h-full w-full overflow-hidden bg-term-bg text-term-fg font-mono text-sm leading-tight",
-            style: "{font_style}{theme_style}",
+            style: "{theme_style}",
 
-            div { class: "p-1",
+            div { style: "padding:{padding}px;",
                 for (row_idx , line) in vp.lines.iter().enumerate() {
                     div {
                         key: "{row_idx}",
@@ -94,10 +105,21 @@ pub fn App() -> Element {
                             }
                         }
                         if row_idx == vp.cursor.row as usize && vp.cursor.visible {
-                            span {
-                                class: "absolute bg-term-cursor",
-                                style: "left: calc(0.25rem + {vp.cursor.col}ch); color: var(--term-bg); animation: blink 1s step-end infinite;",
-                                "{cursor_char(&vp, row_idx)}"
+                            {
+                                let blink_css = if cursor_blink { "animation:blink 1s step-end infinite;" } else { "" };
+                                let cursor_cls = match cursor_style.as_str() {
+                                    "underline" => "absolute border-b-2 border-term-cursor",
+                                    "bar" => "absolute border-l-2 border-term-cursor",
+                                    _ => "absolute bg-term-cursor",
+                                };
+                                let color_css = if cursor_style == "block" { "color:var(--term-bg);" } else { "" };
+                                rsx! {
+                                    span {
+                                        class: "{cursor_cls}",
+                                        style: "left:calc({padding}px + {vp.cursor.col}ch);{color_css}{blink_css}",
+                                        "{cursor_char(&vp, row_idx)}"
+                                    }
+                                }
                             }
                         }
                     }

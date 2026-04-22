@@ -107,7 +107,7 @@ impl Terminal {
         let shell = settings
             .terminal
             .as_ref()
-            .map(|t| t.resolve_profile(&t.default_profile).shell)
+            .map(|t| t.resolve_theme(&t.default_theme).shell)
             .unwrap_or_else(default_shell);
 
         // Create PTY
@@ -265,14 +265,8 @@ fn poll_pty_output(mut q: Query<(&mut TerminalState, &PtyHandle), With<Terminal>
 fn sync_terminal_viewport(
     mut q: Query<(Entity, &mut TerminalState), With<Terminal>>,
     browsers: NonSend<Browsers>,
-    settings: Res<AppSettings>,
     mut commands: Commands,
 ) {
-    let font_family = settings
-        .terminal
-        .as_ref()
-        .map(|t| t.resolve_profile(&t.default_profile).font_family);
-
     for (entity, mut state) in &mut q {
         if !state.dirty {
             continue;
@@ -282,8 +276,7 @@ fn sync_terminal_viewport(
         }
         state.dirty = false;
 
-        let mut viewport = build_viewport(&state.term);
-        viewport.font_family = font_family.clone();
+        let viewport = build_viewport(&state.term);
         let body = ron::ser::to_string(&viewport).unwrap_or_default();
         commands.trigger(HostEmitEvent::new(entity, TERM_VIEWPORT_EVENT, &body));
     }
@@ -355,7 +348,6 @@ fn build_viewport<T: TermEventListener>(term: &Term<T>) -> TermViewportEvent {
         cols: num_cols as u16,
         rows: num_lines as u16,
         title: None,
-        font_family: None,
     }
 }
 
@@ -615,15 +607,15 @@ fn sync_terminal_theme(
         return;
     };
 
-    let profile = terminal_settings.resolve_profile(&terminal_settings.default_profile);
-    let theme = crate::themes::resolve_theme(&profile.theme, &terminal_settings.custom_themes);
+    let theme = terminal_settings.resolve_theme(&terminal_settings.default_theme);
+    let colors = crate::themes::resolve_theme(&theme.color_scheme, &terminal_settings.custom_themes);
 
     // Simple hash to detect theme changes
     let hash = {
         let mut h: u64 = 0;
-        for b in &theme.foreground { h = h.wrapping_mul(31).wrapping_add(*b as u64); }
-        for b in &theme.background { h = h.wrapping_mul(31).wrapping_add(*b as u64); }
-        for row in &theme.ansi { for b in row { h = h.wrapping_mul(31).wrapping_add(*b as u64); } }
+        for b in &colors.foreground { h = h.wrapping_mul(31).wrapping_add(*b as u64); }
+        for b in &colors.background { h = h.wrapping_mul(31).wrapping_add(*b as u64); }
+        for row in &colors.ansi { for b in row { h = h.wrapping_mul(31).wrapping_add(*b as u64); } }
         h
     };
 
@@ -634,10 +626,16 @@ fn sync_terminal_theme(
     *last_theme_hash = hash;
 
     let event = vmux_terminal::event::TermThemeEvent {
-        foreground: theme.foreground,
-        background: theme.background,
-        cursor: theme.cursor,
-        ansi: theme.ansi,
+        foreground: colors.foreground,
+        background: colors.background,
+        cursor: colors.cursor,
+        ansi: colors.ansi,
+        font_family: theme.font_family.clone(),
+        font_size: theme.font_size,
+        line_height: theme.line_height,
+        padding: theme.padding,
+        cursor_style: theme.cursor_style.clone(),
+        cursor_blink: theme.cursor_blink,
     };
     let body = ron::ser::to_string(&event).unwrap_or_default();
 
@@ -670,7 +668,7 @@ fn on_restart_pty(
     let shell = settings
         .terminal
         .as_ref()
-        .map(|t| t.resolve_profile(&t.default_profile).shell)
+        .map(|t| t.resolve_theme(&t.default_theme).shell)
         .unwrap_or_else(default_shell);
 
     // Spawn new PTY
