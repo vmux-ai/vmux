@@ -27,14 +27,22 @@
     --ansi-15: rgb(166, 173, 200);
   }
 
-  html.dark {
+  html, html.dark {
+    height: 100%;
     color-scheme: dark;
   }
 
-  html.dark body {
+  body, html.dark body {
+    height: 100%;
+    margin: 0;
     background-color: transparent;
     color: var(--term-fg);
     font-family: "JetBrains Mono", "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+  }
+
+  #main > * {
+    flex: 1 1 0%;
+    min-height: 0;
   }
 }
 
