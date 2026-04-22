@@ -4,11 +4,13 @@ use crate::{
     layout::pane::{first_leaf_descendant, first_tab_in_pane, Pane, PaneSplit},
     layout::space::Space,
     settings::AppSettings,
+    terminal::Terminal,
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_history::LastActivatedAt;
+use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
 
 pub(crate) struct TabPlugin;
 
@@ -144,6 +146,23 @@ fn handle_tab_commands(
                     .id();
                 commands.spawn((
                     Browser::new(&mut meshes, &mut webview_mt, startup_url),
+                    ChildOf(tab),
+                ));
+            }
+            TabCommand::NewTerminal => {
+                let Some(pane) = active_pane else {
+                    continue;
+                };
+                let tab = commands
+                    .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                    .id();
+                commands.entity(tab).insert(vmux_header::PageMetadata {
+                    url: TERMINAL_WEBVIEW_URL.to_string(),
+                    title: "Terminal".to_string(),
+                    ..default()
+                });
+                commands.spawn((
+                    Terminal::new(&mut meshes, &mut webview_mt, &settings),
                     ChildOf(tab),
                 ));
             }

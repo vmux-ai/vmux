@@ -5,7 +5,36 @@ pub const TERM_KEY_EVENT: &str = "term_key";
 pub const TERM_MOUSE_EVENT: &str = "term_mouse";
 pub const TERM_RESIZE_EVENT: &str = "term_resize";
 
+pub const TERM_THEME_EVENT: &str = "term_theme";
 pub const TERMINAL_WEBVIEW_URL: &str = "vmux://terminal/";
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub enum TermColor {
+    #[default]
+    Default,
+    Indexed(u8),
+    Rgb(u8, u8, u8),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TermThemeEvent {
+    pub foreground: [u8; 3],
+    pub background: [u8; 3],
+    pub cursor: [u8; 3],
+    pub ansi: [[u8; 3]; 16],
+    #[serde(default)]
+    pub font_family: String,
+    #[serde(default)]
+    pub font_size: f32,
+    #[serde(default)]
+    pub line_height: f32,
+    #[serde(default)]
+    pub padding: f32,
+    #[serde(default)]
+    pub cursor_style: String,
+    #[serde(default)]
+    pub cursor_blink: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TermViewportEvent {
@@ -24,8 +53,8 @@ pub struct TermLine {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TermSpan {
     pub text: String,
-    pub fg: Option<[u8; 3]>,
-    pub bg: Option<[u8; 3]>,
+    pub fg: TermColor,
+    pub bg: TermColor,
     pub flags: u16,
 }
 
@@ -76,15 +105,24 @@ pub const MOD_SUPER: u8 = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TermMouseEvent {
+    /// 0=left, 1=middle, 2=right, 3=none (release/motion), 64=scroll_up, 65=scroll_down
     pub button: u8,
     pub col: u16,
     pub row: u16,
     pub modifiers: u8,
+    /// true for press, false for release
     pub pressed: bool,
+    /// true when this is a motion event (drag if button<3, move if button==3)
+    #[serde(default)]
+    pub moving: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TermResizeEvent {
     pub char_width: f32,
     pub char_height: f32,
+    #[serde(default)]
+    pub viewport_width: f32,
+    #[serde(default)]
+    pub viewport_height: f32,
 }

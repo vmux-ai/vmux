@@ -19,7 +19,7 @@ Window (replaces DisplayGlass, owns glass mesh + Node)
 ├── SideSheet::Left      (stub, shared, absolute, data scoped to Active Space)
 ├── SideSheet::Right     (stub, shared, absolute)
 ├── SideSheet::Bottom    (stub, shared, absolute)
-└── Modal                (stub, shared, absolute, webview command palette)
+└── Modal                (stub, shared, absolute, webview command bar)
 ```
 
 Space is inside Main in the entity tree but logically scopes what all shared chrome displays. Data-push systems (`push_tabs_host_emit`, `push_pane_tree_emit`) filter by the Active chain: Active Space → Active Pane → Active Tab.
@@ -66,7 +66,7 @@ The Left SideSheet replaces the current single SideSheet. It shows the space nav
 
 ### Modal
 
-Window-level overlay for command palette. Stub implementation — entity exists, no behavior. Will be a webview-based command palette (cmd+shift+p style) in the future.
+Window-level overlay for command bar. Stub implementation — entity exists, no behavior. Will be a webview-based command bar (cmd+shift+p style) in the future.
 
 ## Active Component Pattern
 

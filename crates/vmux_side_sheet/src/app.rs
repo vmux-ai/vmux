@@ -87,6 +87,14 @@ fn TabRow(tab: TabNode, pane_id: u64) -> Element {
     let icon = favicon_src(&tab);
     let is_active = tab.is_active;
     let tab_index = tab.tab_index;
+    let mut icon_error = use_signal(|| false);
+
+    // Reset error state when favicon source changes.
+    let mut prev_src = use_signal(|| None::<String>);
+    if *prev_src.read() != icon {
+        prev_src.set(icon.clone());
+        icon_error.set(false);
+    }
 
     rsx! {
         div {
@@ -103,9 +111,18 @@ fn TabRow(tab: TabNode, pane_id: u64) -> Element {
                 });
             },
             if let Some(src) = icon.as_ref() {
-                img {
-                    class: "h-4 w-4 shrink-0 rounded-sm object-contain",
-                    src: "{src}",
+                if icon_error() {
+                    Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                        path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }
+                        path { d: "M2 12h20" }
+                        path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" }
+                    }
+                } else {
+                    img {
+                        class: "h-4 w-4 shrink-0 rounded-sm object-contain",
+                        src: "{src}",
+                        onerror: move |_| icon_error.set(true),
+                    }
                 }
             } else {
                 Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",

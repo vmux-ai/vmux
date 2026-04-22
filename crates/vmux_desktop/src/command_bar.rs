@@ -1,6 +1,6 @@
 use crate::{
     browser::Browser,
-    command::{AppCommand, BrowserCommand, ReadAppCommands},
+    command::{AppCommand, BrowserCommand, ReadAppCommands, TabCommand},
     layout::{
         pane::{Pane, PaneSplit},
         space::Space,
@@ -11,38 +11,39 @@ use crate::{
 };
 use bevy::{ecs::message::MessageReader, ecs::relationship::Relationship, prelude::*, ui::UiSystems};
 use bevy_cef::prelude::*;
-use vmux_command_palette::event::{
-    PaletteActionEvent, PaletteCommandEntry, PaletteOpenEvent, PaletteTab, PALETTE_OPEN_EVENT,
+use vmux_command_bar::event::{
+    CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent, CommandBarTab,
+    COMMAND_BAR_OPEN_EVENT,
 };
 use vmux_header::{Header, PageMetadata};
 use vmux_history::LastActivatedAt;
 
-/// Deferred visibility for the palette modal. Counts frames after Display::Flex
+/// Deferred visibility for the command bar modal. Counts frames after Display::Flex
 /// so CEF can resize the webview before the modal becomes visible.
 #[derive(Component)]
-struct PendingPaletteReveal(u8);
+struct PendingCommandBarReveal(u8);
 
-pub(crate) struct PalettePlugin;
+pub(crate) struct CommandBarPlugin;
 
-impl Plugin for PalettePlugin {
+impl Plugin for CommandBarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(JsEmitEventPlugin::<PaletteActionEvent>::default())
-            .add_observer(on_palette_action)
-            .add_systems(Update, handle_open_palette.in_set(ReadAppCommands))
-            .add_systems(PostUpdate, reveal_palette.after(UiSystems::Layout));
+        app.add_plugins(JsEmitEventPlugin::<CommandBarActionEvent>::default())
+            .add_observer(on_command_bar_action)
+            .add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands))
+            .add_systems(PostUpdate, reveal_command_bar.after(UiSystems::Layout));
     }
 }
 
-pub struct PaletteEntry {
+pub struct CommandBarEntry {
     pub id: &'static str,
     pub name: &'static str,
     pub shortcut: &'static str,
 }
 
-pub fn command_list() -> Vec<PaletteEntry> {
-    AppCommand::palette_entries()
+pub fn command_list() -> Vec<CommandBarEntry> {
+    AppCommand::command_bar_entries()
         .into_iter()
-        .map(|(id, name, shortcut)| PaletteEntry { id, name, shortcut })
+        .map(|(id, name, shortcut)| CommandBarEntry { id, name, shortcut })
         .collect()
 }
 
@@ -50,12 +51,12 @@ pub fn match_command(id: &str) -> Option<AppCommand> {
     AppCommand::from_menu_id(id)
 }
 
-/// Returns true when the palette modal is currently visible.
-pub fn is_palette_open(modal_q: &Query<&Node, With<Modal>>) -> bool {
+/// Returns true when the command bar modal is currently visible.
+pub fn is_command_bar_open(modal_q: &Query<&Node, With<Modal>>) -> bool {
     modal_q.iter().any(|n| n.display != Display::None)
 }
 
-fn handle_open_palette(
+fn handle_open_command_bar(
     mut reader: MessageReader<AppCommand>,
     mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
     browsers: NonSend<Browsers>,
@@ -96,7 +97,7 @@ fn handle_open_palette(
                 .entity(modal_e)
                 .remove::<CefKeyboardTarget>()
                 .remove::<CefPointerTarget>()
-                .remove::<PendingPaletteReveal>();
+                .remove::<PendingCommandBarReveal>();
             // Restore keyboard to active content browser
             let (_, _, active_tab) =
                 focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
@@ -115,9 +116,9 @@ fn handle_open_palette(
             continue;
         }
 
-        // Open palette — keep hidden until CEF resizes (see reveal_palette)
+        // Open command bar — keep hidden until CEF resizes (see reveal_command_bar)
         modal_node.display = Display::Flex;
-        commands.entity(modal_e).insert(PendingPaletteReveal(0));
+        commands.entity(modal_e).insert(PendingCommandBarReveal(0));
 
         // Remove keyboard target from all content browsers
         for browser_e in &content_browsers {
@@ -143,7 +144,7 @@ fn handle_open_palette(
 
         // Gather all tabs
         let active_space = active_among(spaces.iter());
-        let mut palette_tabs = Vec::new();
+        let mut bar_tabs = Vec::new();
         if let Some(space) = active_space {
             let mut space_panes = Vec::new();
             collect_leaf_panes(space, &all_children, &leaf_panes, &mut space_panes);
@@ -162,7 +163,7 @@ fn handle_open_palette(
                         if let Ok(tab_kids) = all_children.get(child) {
                             for browser_e in tab_kids.iter() {
                                 if let Ok(meta) = browser_meta.get(browser_e) {
-                                    palette_tabs.push(PaletteTab {
+                                    bar_tabs.push(CommandBarTab {
                                         title: meta.title.clone(),
                                         url: meta.url.clone(),
                                         pane_id: pane_e.to_bits(),
@@ -179,30 +180,30 @@ fn handle_open_palette(
         }
 
         // Build command list
-        let palette_commands: Vec<PaletteCommandEntry> = command_list()
+        let bar_commands: Vec<CommandBarCommandEntry> = command_list()
             .into_iter()
-            .map(|e| PaletteCommandEntry {
+            .map(|e| CommandBarCommandEntry {
                 id: e.id.into(),
                 name: e.name.into(),
                 shortcut: e.shortcut.into(),
             })
             .collect();
 
-        // Send open event to palette webview
+        // Send open event to command bar webview
         if browsers.has_browser(modal_e) && browsers.host_emit_ready(&modal_e) {
-            let payload = PaletteOpenEvent {
+            let payload = CommandBarOpenEvent {
                 url: current_url,
-                tabs: palette_tabs,
-                commands: palette_commands,
+                tabs: bar_tabs,
+                commands: bar_commands,
             };
             let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-            commands.trigger(HostEmitEvent::new(modal_e, PALETTE_OPEN_EVENT, &ron_body));
+            commands.trigger(HostEmitEvent::new(modal_e, COMMAND_BAR_OPEN_EVENT, &ron_body));
         }
     }
 }
 
-fn on_palette_action(
-    trigger: On<Receive<PaletteActionEvent>>,
+fn on_command_bar_action(
+    trigger: On<Receive<CommandBarActionEvent>>,
     mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
@@ -235,17 +236,23 @@ fn on_palette_action(
             } else {
                 format!("https://www.google.com/search?q={}", evt.value)
             };
-            let (_, _, active_tab) =
-                focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
-            if let Some(tab) = active_tab {
-                for browser_e in &content_browsers {
-                    let is_child = child_of_q
-                        .get(browser_e)
-                        .ok()
-                        .map(|co| co.get() == tab)
-                        .unwrap_or(false);
-                    if is_child {
-                        commands.entity(browser_e).insert(WebviewSource::new(&url));
+
+            // vmux://terminal/ requires a full Terminal entity with PTY
+            if url.starts_with("vmux://terminal") {
+                writer.write(AppCommand::Tab(TabCommand::NewTerminal));
+            } else {
+                let (_, _, active_tab) =
+                    focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
+                if let Some(tab) = active_tab {
+                    for browser_e in &content_browsers {
+                        let is_child = child_of_q
+                            .get(browser_e)
+                            .ok()
+                            .map(|co| co.get() == tab)
+                            .unwrap_or(false);
+                        if is_child {
+                            commands.entity(browser_e).insert(WebviewSource::new(&url));
+                        }
                     }
                 }
             }
@@ -278,7 +285,7 @@ fn on_palette_action(
         _ => {} // "dismiss" and unknown
     }
 
-    // Close palette and restore keyboard
+    // Close command bar and restore keyboard
     if let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut() {
         modal_node.display = Display::None;
         *modal_vis = Visibility::Hidden;
@@ -286,7 +293,7 @@ fn on_palette_action(
             .entity(modal_e)
             .remove::<CefKeyboardTarget>()
             .remove::<CefPointerTarget>()
-            .remove::<PendingPaletteReveal>();
+            .remove::<PendingCommandBarReveal>();
     }
     let (_, _, active_tab) =
         focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
@@ -304,16 +311,16 @@ fn on_palette_action(
     }
 }
 
-/// Waits 2 frames after `Display::Flex` before revealing the palette so that
+/// Waits 2 frames after `Display::Flex` before revealing the command bar so that
 /// Bevy UI layout + CEF resize can run while the webview is still invisible.
-fn reveal_palette(
+fn reveal_command_bar(
     mut commands: Commands,
-    mut query: Query<(Entity, &mut Visibility, &mut PendingPaletteReveal), With<Modal>>,
+    mut query: Query<(Entity, &mut Visibility, &mut PendingCommandBarReveal), With<Modal>>,
 ) {
     for (entity, mut vis, mut pending) in &mut query {
         if pending.0 >= 2 {
             *vis = Visibility::Inherited;
-            commands.entity(entity).remove::<PendingPaletteReveal>();
+            commands.entity(entity).remove::<PendingCommandBarReveal>();
         } else {
             pending.0 += 1;
         }

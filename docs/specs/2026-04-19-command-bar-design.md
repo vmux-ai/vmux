@@ -45,7 +45,7 @@ Cmd+L
 keybinding.rs → AppCommand::Browser(FocusAddressBar)
   │
   ▼
-command_palette.rs (new) :: handle_open_palette
+command_bar.rs (new) :: handle_open_command_bar
   ├── Set Modal Display::Flex
   ├── Add CefKeyboardTarget to palette webview
   ├── Remove CefKeyboardTarget from content browser
@@ -54,14 +54,14 @@ command_palette.rs (new) :: handle_open_palette
   │       commands: [{id, name, shortcut}] }
   │
   ▼
-vmux_command_palette (Dioxus WASM)
+vmux_command_bar (Dioxus WASM)
   ├── Focus <input>, select all
   ├── Render filtered results as user types
-  ├── On Enter/click: emit PaletteCommandEvent
+  ├── On Enter/click: emit CommandBarCommandEvent
   │     { action: "navigate"|"command"|"switch_tab", value: "..." }
   │
   ▼
-command_palette.rs :: on_palette_command_emit
+command_bar.rs :: on_command_bar_command_emit
   ├── "navigate" → change active browser's WebviewSource
   ├── "command"  → write AppCommand to Messages
   ├── "switch_tab" → activate target pane + tab
@@ -72,20 +72,20 @@ command_palette.rs :: on_palette_command_emit
 
 ### Dismiss Flow
 
-Esc key or click outside triggers a `PaletteCommandEvent` with action `"dismiss"`. Same cleanup: hide modal, restore keyboard target.
+Esc key or click outside triggers a `CommandBarCommandEvent` with action `"dismiss"`. Same cleanup: hide modal, restore keyboard target.
 
-## New Crate: vmux_command_palette
+## New Crate: vmux_command_bar
 
 Follows the pattern of `vmux_header` and `vmux_side_sheet`.
 
 ```
-crates/vmux_command_palette/
+crates/vmux_command_bar/
 ├── Cargo.toml
 ├── Dioxus.toml
 ├── src/
 │   ├── main.rs       # Dioxus app entry point
 │   ├── app.rs        # Palette UI component
-│   └── event.rs      # PaletteOpenEvent, PaletteCommandEvent
+│   └── event.rs      # CommandBarOpenEvent, CommandBarCommandEvent
 └── assets/
     └── tailwind.css
 ```
@@ -106,13 +106,13 @@ Single component:
 
 ```rust
 // Bevy → Palette (open with context)
-pub struct PaletteOpenEvent {
+pub struct CommandBarOpenEvent {
     pub url: String,
-    pub tabs: Vec<PaletteTab>,
-    pub commands: Vec<PaletteCommand>,
+    pub tabs: Vec<CommandBarTab>,
+    pub commands: Vec<CommandBarCommand>,
 }
 
-pub struct PaletteTab {
+pub struct CommandBarTab {
     pub title: String,
     pub url: String,
     pub pane_id: u64,
@@ -120,40 +120,40 @@ pub struct PaletteTab {
     pub is_active: bool,
 }
 
-pub struct PaletteCommand {
+pub struct CommandBarCommand {
     pub id: String,        // e.g. "split_right", "reload"
     pub name: String,      // e.g. "Split Pane Right"
     pub shortcut: String,  // e.g. "⌘D"
 }
 
 // Palette → Bevy (user action)
-pub struct PaletteCommandEvent {
+pub struct CommandBarCommandEvent {
     pub action: String,    // "navigate" | "command" | "switch_tab" | "dismiss"
     pub value: String,     // URL, command id, or "pane_id:tab_index"
 }
 ```
 
-## Bevy-Side: CommandPalettePlugin
+## Bevy-Side: CommandBarPlugin
 
-New file: `crates/vmux_desktop/src/command_palette.rs`
+New file: `crates/vmux_desktop/src/command_bar.rs`
 
 ### Components
 
 ```rust
 #[derive(Component)]
-pub struct CommandPalette;  // Marker on the modal entity
+pub struct CommandBar;  // Marker on the modal entity
 ```
 
 ### Plugin Registration
 
 ```rust
-pub struct CommandPalettePlugin;
+pub struct CommandBarPlugin;
 
-impl Plugin for CommandPalettePlugin {
+impl Plugin for CommandBarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(JsEmitEventPlugin::<PaletteCommandEvent>::default())
-            .add_observer(on_palette_command_emit)
-            .add_systems(Update, handle_open_palette.in_set(ReadAppCommands));
+        app.add_plugins(JsEmitEventPlugin::<CommandBarCommandEvent>::default())
+            .add_observer(on_command_bar_command_emit)
+            .add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands));
     }
 }
 ```
@@ -161,14 +161,14 @@ impl Plugin for CommandPalettePlugin {
 ### Modal Entity Setup
 
 Reuse the existing `Modal` entity from window setup. Attach:
-- `CommandPalette` marker
-- `Browser::new()` with `WebviewSource` pointing to `vmux://command-palette/`
+- `CommandBar` marker
+- `Browser::new()` with `WebviewSource` pointing to `vmux://command-bar/`
 - `WebviewSize` appropriate for the overlay (e.g. 600x400)
 - Start with `Display::None`
 
 The palette webview is created once at startup and reused. Opening/closing toggles `Display` and sends `HostEmitEvent` to reset state.
 
-### handle_open_palette System
+### handle_open_command_bar System
 
 Triggered by `AppCommand::Browser(BrowserCommand::FocusAddressBar)`:
 
@@ -178,11 +178,11 @@ Triggered by `AppCommand::Browser(BrowserCommand::FocusAddressBar)`:
 4. Set modal `Display::Flex`
 5. Add `CefKeyboardTarget` to palette browser entity
 6. Remove `CefKeyboardTarget` from active content browser
-7. Send `HostEmitEvent` with `PaletteOpenEvent` payload
+7. Send `HostEmitEvent` with `CommandBarOpenEvent` payload
 
-### on_palette_command_emit Observer
+### on_command_bar_command_emit Observer
 
-Receives `PaletteCommandEvent` from JS:
+Receives `CommandBarCommandEvent` from JS:
 
 | Action | Handler |
 |--------|---------|
@@ -204,28 +204,28 @@ The palette needs exclusive keyboard input while open. The mechanism:
 - `sync_keyboard_target` in `browser.rs` runs every frame and assigns it to the active tab's browser
 - When palette is open, `sync_keyboard_target` must skip reassignment
 
-Add a guard: if `CommandPalette` entity has `Display::Flex` (palette is open), `sync_keyboard_target` returns early without changing keyboard targets. The palette's `CefKeyboardTarget` set by `handle_open_palette` remains until the palette closes.
+Add a guard: if `CommandBar` entity has `Display::Flex` (palette is open), `sync_keyboard_target` returns early without changing keyboard targets. The palette's `CefKeyboardTarget` set by `handle_open_command_bar` remains until the palette closes.
 
 ## Command Registry
 
-Command metadata is auto-generated by the `CommandPalette` derive macro in `vmux_macro`. Each command enum (`TabCommand`, `BrowserCommand`, `PaneCommand`, etc.) derives `CommandPalette`, which generates `palette_entries()` from existing `#[menu(id, label, accel)]` attributes. The `accel` format is converted to display symbols at compile time (e.g. `super+shift+r` becomes `⌘⇧R`).
+Command metadata is auto-generated by the `CommandBar` derive macro in `vmux_macro`. Each command enum (`TabCommand`, `BrowserCommand`, `PaneCommand`, etc.) derives `CommandBar`, which generates `command_bar_entries()` from existing `#[menu(id, label, accel)]` attributes. The `accel` format is converted to display symbols at compile time (e.g. `super+shift+r` becomes `⌘⇧R`).
 
-`crates/vmux_desktop/src/palette.rs` provides the public API:
+`crates/vmux_desktop/src/command_bar.rs` provides the public API:
 
 ```rust
 use crate::command::AppCommand;
 
-pub struct PaletteEntry {
+pub struct CommandBarEntry {
     pub id: &'static str,
     pub name: &'static str,
     pub shortcut: &'static str,
 }
 
 /// All commands from all sub-enums, auto-generated from #[menu] attrs.
-pub fn command_list() -> Vec<PaletteEntry> {
-    AppCommand::palette_entries()
+pub fn command_list() -> Vec<CommandBarEntry> {
+    AppCommand::command_bar_entries()
         .into_iter()
-        .map(|(id, name, shortcut)| PaletteEntry { id, name, shortcut })
+        .map(|(id, name, shortcut)| CommandBarEntry { id, name, shortcut })
         .collect()
 }
 
@@ -239,30 +239,30 @@ No hand-written command lists or match arms are needed. Adding a new command to 
 
 ## Webview App Registration
 
-Register the palette Dioxus app in `WebviewAppRegistry` (same pattern as header/side sheet). The `vmux://command-palette/` scheme serves the built WASM app.
+Register the palette Dioxus app in `WebviewAppRegistry` (same pattern as header/side sheet). The `vmux://command-bar/` scheme serves the built WASM app.
 
 In `crates/vmux_webview_app/`:
-- Add `command-palette` to the embedded host list
-- Build step (`build.rs` or `dx build`) compiles `vmux_command_palette` to WASM
+- Add `command-bar` to the embedded host list
+- Build step (`build.rs` or `dx build`) compiles `vmux_command_bar` to WASM
 
 ## Files to Create
 
 | File | Purpose |
 |------|---------|
-| `crates/vmux_command_palette/Cargo.toml` | Dioxus WASM crate |
-| `crates/vmux_command_palette/Dioxus.toml` | Dioxus build config |
-| `crates/vmux_command_palette/src/main.rs` | App entry |
-| `crates/vmux_command_palette/src/app.rs` | Palette UI |
-| `crates/vmux_command_palette/src/event.rs` | Event types |
-| `crates/vmux_command_palette/assets/tailwind.css` | Styles |
-| `crates/vmux_desktop/src/command_palette.rs` | Bevy plugin |
+| `crates/vmux_command_bar/Cargo.toml` | Dioxus WASM crate |
+| `crates/vmux_command_bar/Dioxus.toml` | Dioxus build config |
+| `crates/vmux_command_bar/src/main.rs` | App entry |
+| `crates/vmux_command_bar/src/app.rs` | Palette UI |
+| `crates/vmux_command_bar/src/event.rs` | Event types |
+| `crates/vmux_command_bar/assets/tailwind.css` | Styles |
+| `crates/vmux_desktop/src/command_bar.rs` | Bevy plugin |
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `crates/vmux_desktop/src/lib.rs` | Register `CommandPalettePlugin` |
+| `crates/vmux_desktop/src/lib.rs` | Register `CommandBarPlugin` |
 | `crates/vmux_desktop/src/browser.rs` | Guard `sync_keyboard_target` when palette is open |
-| `crates/vmux_desktop/src/layout/window.rs` | Attach `CommandPalette` + `Browser` to Modal entity |
-| `crates/vmux_webview_app/` | Register `command-palette` embedded host |
-| `Cargo.toml` (workspace) | Add `vmux_command_palette` member |
+| `crates/vmux_desktop/src/layout/window.rs` | Attach `CommandBar` + `Browser` to Modal entity |
+| `crates/vmux_webview_app/` | Register `command-bar` embedded host |
+| `Cargo.toml` (workspace) | Add `vmux_command_bar` member |

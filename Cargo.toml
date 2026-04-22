@@ -1,22 +1,5 @@
-# Workspace root package holds repo-level `examples/`; member crates live under `crates/`.
-[package]
-name = "vmux"
-version.workspace = true
-edition.workspace = true
-publish = false
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-bevy = { workspace = true }
-bevy_cef = { workspace = true, features = ["debug"] }
-bevy_ecs = { workspace = true }
-chrono = { workspace = true }
-ron = { workspace = true }
-url = { workspace = true }
-vmux_history = { path = "crates/vmux_history" }
-vmux_webview_app = { path = "crates/vmux_webview_app" }
-
 [workspace]
-members = [".", "crates/*", "patches/*"]
+members = ["crates/*", "patches/*"]
 default-members = ["crates/vmux_desktop"]
 resolver = "3"
 
@@ -73,11 +56,13 @@ codegen-units = 1
 opt-level = "z"
 codegen-units = 1
 
-[profile.release.package.vmux_ui_native]
+
+
+[profile.release.package.vmux_command_bar]
 opt-level = "z"
 codegen-units = 1
 
-[profile.release.package.vmux_command_palette]
+[profile.release.package.vmux_terminal]
 opt-level = "z"
 codegen-units = 1
 

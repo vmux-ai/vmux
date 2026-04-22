@@ -189,7 +189,7 @@ The Dioxus app receives `TermViewportEvent` and renders it as DOM elements:
 
 ### URL
 
-Registered as `vmux://terminal/` in the CEF scheme handler, built and embedded the same way as `vmux://header/`, `vmux://command-palette/`, etc.
+Registered as `vmux://terminal/` in the CEF scheme handler, built and embedded the same way as `vmux://header/`, `vmux://command-bar/`, etc.
 
 ## Tab Integration
 
@@ -231,7 +231,7 @@ Systems in `browser.rs` that filter `With<Browser>` need to also handle `With<Te
 ```ron
 (
     keybinding: (
-        leader: "Ctrl+v",
+        leader: "<leader>",
     ),
     terminal: (
         shell: "/opt/homebrew/bin/nu",
@@ -244,11 +244,11 @@ Systems in `browser.rs` that filter `With<Browser>` need to also handle `With<Te
 
 ### Leader Key Configuration
 
-The leader key (currently hardcoded as `Ctrl+B` in `input.rs`) becomes configurable:
+The leader key (currently hardcoded as `<leader>` in `input.rs`) becomes configurable:
 
 - Parse `settings.keybinding.leader` string into a key combination
 - Update chord detection logic to use the configured leader
-- Default: `Ctrl+V`
+- Default: `<leader>`
 - Terminal tabs forward all non-leader key events to the PTY
 
 ## Feature Details

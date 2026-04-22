@@ -1,6 +1,6 @@
 [package]
-name = "vmux_command_palette"
-description = "Bevy + CEF + Dioxus command palette webview"
+name = "vmux_command_bar"
+description = "Bevy + CEF + Dioxus command bar webview"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -12,7 +12,7 @@ debug = []
 web = []
 
 [[bin]]
-name = "vmux_command_palette_app"
+name = "vmux_command_bar_app"
 path = "src/main.rs"
 required-features = ["web"]
 

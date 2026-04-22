@@ -4,15 +4,74 @@
 @source "../src";
 @source ".";
 
+@font-face {
+  font-family: "JetBrainsMono NF";
+  src: url("./fonts/JetBrainsMonoNerdFontMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrainsMono NF";
+  src: url("./fonts/JetBrainsMonoNerdFontMono-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrainsMono NF";
+  src: url("./fonts/JetBrainsMonoNerdFontMono-Italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrainsMono NF";
+  src: url("./fonts/JetBrainsMonoNerdFontMono-BoldItalic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
 @layer base {
-  html.dark {
+  :root {
+    --term-fg: rgb(205, 214, 244);
+    --term-bg: rgb(30, 30, 46);
+    --term-cursor: rgb(245, 224, 220);
+    --ansi-0: rgb(69, 71, 90);
+    --ansi-1: rgb(243, 139, 168);
+    --ansi-2: rgb(166, 227, 161);
+    --ansi-3: rgb(249, 226, 175);
+    --ansi-4: rgb(137, 180, 250);
+    --ansi-5: rgb(245, 194, 231);
+    --ansi-6: rgb(148, 226, 213);
+    --ansi-7: rgb(186, 194, 222);
+    --ansi-8: rgb(88, 91, 112);
+    --ansi-9: rgb(243, 139, 168);
+    --ansi-10: rgb(166, 227, 161);
+    --ansi-11: rgb(249, 226, 175);
+    --ansi-12: rgb(137, 180, 250);
+    --ansi-13: rgb(245, 194, 231);
+    --ansi-14: rgb(148, 226, 213);
+    --ansi-15: rgb(166, 173, 200);
+  }
+
+  html, html.dark {
+    height: 100%;
     color-scheme: dark;
   }
 
-  html.dark body {
+  body, html.dark body {
+    height: 100%;
+    margin: 0;
     background-color: transparent;
-    color: var(--foreground);
-    font-family: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+    color: var(--term-fg);
+    font-family: "JetBrainsMono NF", "JetBrainsMono Nerd Font", "JetBrains Mono", "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+  }
+
+  #main > * {
+    flex: 1 1 0%;
+    min-height: 0;
   }
 }
 
