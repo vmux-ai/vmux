@@ -747,7 +747,7 @@ In `command.rs`, add to the `TabCommand` enum:
 
 ```rust
 #[menu(name = "New Terminal")]
-#[bind(chord = "Ctrl+b, t")]
+#[bind(chord = "<leader>, t")]
 NewTerminal,
 ```
 
@@ -780,7 +780,7 @@ Run: `cargo check --package vmux_desktop 2>&1 | tail -5`
 
 ```bash
 git add -A
-git commit -m "feat: add TabCommand::NewTerminal with Ctrl+B,t binding"
+git commit -m "feat: add TabCommand::NewTerminal with <leader>,t binding"
 ```
 
 ---
@@ -1083,15 +1083,15 @@ git commit -m "feat: use background thread for non-blocking PTY reads"
 - Modify: `crates/vmux_desktop/src/settings.rs`
 - Modify: `crates/vmux_desktop/src/keybinding.rs`
 
-- [ ] **Step 1: Change default leader from Ctrl+B to Ctrl+V**
+- [ ] **Step 1: Change default leader from <leader> to <leader>**
 
-In `command.rs`, replace ALL occurrences of `Ctrl+b` in `#[bind(chord = "...")]` attributes with `Ctrl+v`:
+In `command.rs`, replace ALL occurrences of `<leader>` in `#[bind(chord = "...")]` attributes with `<leader>`:
 
 ```
-Ctrl+b, h  →  Ctrl+v, h
-Ctrl+b, l  →  Ctrl+v, l
-Ctrl+b, k  →  Ctrl+v, k
-Ctrl+b, j  →  Ctrl+v, j
+<leader>, h  →  <leader>, h
+<leader>, l  →  <leader>, l
+<leader>, k  →  <leader>, k
+<leader>, j  →  <leader>, j
 ...etc for all chord bindings
 ```
 
@@ -1103,7 +1103,7 @@ In `settings.rs`, add to `KeyBindingSettings`:
 #[serde(default = "default_leader")]
 pub leader: String,
 
-fn default_leader() -> String { "Ctrl+v".to_string() }
+fn default_leader() -> String { "<leader>".to_string() }
 ```
 
 - [ ] **Step 3: Apply configured leader at runtime**
@@ -1115,7 +1115,7 @@ In `keybinding.rs`, when building `KeyBindingMap` from `AppCommand::default_key_
 ```bash
 cargo check --package vmux_desktop 2>&1 | tail -5
 git add -A
-git commit -m "feat: change leader key to Ctrl+V, make configurable via settings"
+git commit -m "feat: change leader key to <leader>, make configurable via settings"
 ```
 
 ---
@@ -1201,7 +1201,7 @@ Run: `make run-mac`
 
 Test:
 1. Launch vmux
-2. Press `Ctrl+V, t` to open a new terminal tab
+2. Press `<leader>, t` to open a new terminal tab
 3. Verify shell prompt appears
 4. Type commands, verify output renders with colors
 5. Verify cursor position and blinking

@@ -60,9 +60,28 @@ fn init_keybindings(mut commands: Commands, settings: Option<Res<AppSettings>>) 
 
     if let Some(settings) = settings {
         map.chord_timeout_ms = settings.keybindings.chord_timeout_ms;
-        for entry in &settings.keybindings.bindings {
-            if let Some(binding) = entry.binding.to_key_binding() {
-                map.bindings.push((binding, entry.command.clone()));
+
+        // Parse the configured leader key
+        if let Some(leader) = settings.keybindings.leader.to_key_combo() {
+            // Replace chord prefixes in default bindings with the configured leader
+            for (binding, _) in &mut map.bindings {
+                if let KeyBinding::Chord(prefix, _) = binding {
+                    *prefix = leader.clone();
+                }
+            }
+
+            // Add user-specified bindings, resolving Leader(...) with the leader key
+            for entry in &settings.keybindings.bindings {
+                if let Some(binding) = entry.binding.to_key_binding_with_leader(&leader) {
+                    map.bindings.push((binding, entry.command.clone()));
+                }
+            }
+        } else {
+            // Leader parse failed, fall through with defaults
+            for entry in &settings.keybindings.bindings {
+                if let Some(binding) = entry.binding.to_key_binding() {
+                    map.bindings.push((binding, entry.command.clone()));
+                }
             }
         }
     }

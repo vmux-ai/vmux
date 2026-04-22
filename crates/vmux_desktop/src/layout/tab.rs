@@ -154,17 +154,13 @@ fn handle_tab_commands(
                     continue;
                 };
                 let tab = commands
-                    .spawn((
-                        tab_bundle(),
-                        LastActivatedAt::now(),
-                        vmux_header::PageMetadata {
-                            url: TERMINAL_WEBVIEW_URL.to_string(),
-                            title: "Terminal".to_string(),
-                            ..default()
-                        },
-                        ChildOf(pane),
-                    ))
+                    .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                     .id();
+                commands.entity(tab).insert(vmux_header::PageMetadata {
+                    url: TERMINAL_WEBVIEW_URL.to_string(),
+                    title: "Terminal".to_string(),
+                    ..default()
+                });
                 commands.spawn((
                     Terminal::new(&mut meshes, &mut webview_mt, &settings),
                     ChildOf(tab),

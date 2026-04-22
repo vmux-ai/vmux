@@ -22,6 +22,8 @@ pub struct AppSettings {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct KeyBindingSettings {
+    #[serde(default = "default_leader")]
+    pub leader: KeyComboDef,
     #[serde(default = "default_chord_timeout_ms")]
     pub chord_timeout_ms: u64,
     #[serde(default)]
@@ -31,9 +33,20 @@ pub struct KeyBindingSettings {
 impl Default for KeyBindingSettings {
     fn default() -> Self {
         Self {
+            leader: default_leader(),
             chord_timeout_ms: default_chord_timeout_ms(),
             bindings: Vec::new(),
         }
+    }
+}
+
+fn default_leader() -> KeyComboDef {
+    KeyComboDef {
+        key: "g".to_string(),
+        ctrl: true,
+        shift: false,
+        alt: false,
+        super_key: false,
     }
 }
 
@@ -51,6 +64,8 @@ pub struct KeyBindingEntry {
 pub enum KeyBindingDef {
     Direct(KeyComboDef),
     Chord(KeyComboDef, KeyComboDef),
+    /// Chord binding that uses the configured leader key as prefix.
+    Leader(KeyComboDef),
 }
 
 impl KeyBindingDef {
@@ -61,6 +76,29 @@ impl KeyBindingDef {
             }
             KeyBindingDef::Chord(prefix, second) => Some(crate::keybinding::KeyBinding::Chord(
                 prefix.to_key_combo()?,
+                second.to_key_combo()?,
+            )),
+            KeyBindingDef::Leader(_second) => {
+                // Resolved in init_keybindings with the configured leader
+                None
+            }
+        }
+    }
+
+    pub fn to_key_binding_with_leader(
+        &self,
+        leader: &crate::keybinding::KeyCombo,
+    ) -> Option<crate::keybinding::KeyBinding> {
+        match self {
+            KeyBindingDef::Direct(combo) => {
+                Some(crate::keybinding::KeyBinding::Direct(combo.to_key_combo()?))
+            }
+            KeyBindingDef::Chord(prefix, second) => Some(crate::keybinding::KeyBinding::Chord(
+                prefix.to_key_combo()?,
+                second.to_key_combo()?,
+            )),
+            KeyBindingDef::Leader(second) => Some(crate::keybinding::KeyBinding::Chord(
+                leader.clone(),
                 second.to_key_combo()?,
             )),
         }
@@ -81,7 +119,7 @@ pub struct KeyComboDef {
 }
 
 impl KeyComboDef {
-    fn to_key_combo(&self) -> Option<crate::keybinding::KeyCombo> {
+    pub fn to_key_combo(&self) -> Option<crate::keybinding::KeyCombo> {
         let resolved = crate::keybinding::resolve_key(&self.key)?;
         Some(crate::keybinding::KeyCombo {
             key: resolved.key,

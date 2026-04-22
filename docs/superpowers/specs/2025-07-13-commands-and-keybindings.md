@@ -9,11 +9,11 @@ Define the complete command inventory for vmux with Chromium-style keybindings f
 Two binding mechanisms:
 
 - `accel = "super+t"` on `#[menu(...)]` — OS-level menu accelerator via muda. Shown in native menu bar.
-- `#[bind(direct = "super+t")]` or `#[bind(chord = "ctrl+b, v")]` — Custom keybinding system. `direct` for single-combo shortcuts. `chord` for tmux-style leader+key sequences.
+- `#[bind(direct = "super+t")]` or `#[bind(chord = "<leader>, v")]` — Custom keybinding system. `direct` for single-combo shortcuts. `chord` for tmux-style leader+key sequences.
 
 Both can coexist on the same variant. `accel` requires `id` and `label` in `#[menu(...)]`.
 
-For commands with chord bindings but no `accel`, the chord is embedded in the menu label text itself, e.g. `"Split Vertically\tCtrl+B, V"`. This displays the chord right-aligned in the menu item since native accelerators don't support two-step sequences.
+For commands with chord bindings but no `accel`, the chord is embedded in the menu label text itself, e.g. `"Split Vertically\t<leader>, V"`. This displays the chord right-aligned in the menu item since native accelerators don't support two-step sequences.
 
 ## Handler Status Legend
 
@@ -67,31 +67,31 @@ For commands with chord bindings but no `accel`, the chord is embedded in the me
 
 | Variant | menu id | label | accel | Menu Display | bind | Handler |
 |---------|---------|-------|-------|--------------|------|---------|
-| SplitV | split_v | Split Vertically\tCtrl+B, % | | Split Vertically  Ctrl+B, % | ctrl+b, % | ✅ |
-| SplitH | split_h | Split Horizontally\tCtrl+B, " | | Split Horizontally  Ctrl+B, " | ctrl+b, " | ✅ |
-| Close | close_pane | Close Pane\tCtrl+B, X | | Close Pane  Ctrl+B, X | ctrl+b, x | ✅ |
-| Toggle | toggle_pane | Toggle Pane\tCtrl+B, T | | Toggle Pane  Ctrl+B, T | ctrl+b, t | 🔲 |
-| Zoom | zoom_pane | Zoom Pane\tCtrl+B, Z | | Zoom Pane  Ctrl+B, Z | ctrl+b, z | 🔲 |
-| SelectLeft | select_pane_left | Select Left Pane\tCtrl+B, Left | | Select Left Pane  Ctrl+B, Left | ctrl+b, left | ✅ |
-| SelectRight | select_pane_right | Select Right Pane\tCtrl+B, Right | | Select Right Pane  Ctrl+B, Right | ctrl+b, right | ✅ |
-| SelectUp | select_pane_up | Select Up Pane\tCtrl+B, Up | | Select Up Pane  Ctrl+B, Up | ctrl+b, up | ✅ |
-| SelectDown | select_pane_down | Select Down Pane\tCtrl+B, Down | | Select Down Pane  Ctrl+B, Down | ctrl+b, down | ✅ |
-| SwapPrev | swap_pane_prev | Swap Pane Previous\tCtrl+B, { | | Swap Pane Previous  Ctrl+B, { | ctrl+b, { | 🔲 |
-| SwapNext | swap_pane_next | Swap Pane Next\tCtrl+B, } | | Swap Pane Next  Ctrl+B, } | ctrl+b, } | 🔲 |
-| RotateForward | rotate_forward | Rotate Forward\tCtrl+B, Ctrl+O | | Rotate Forward  Ctrl+B, Ctrl+O | ctrl+b, ctrl+o | 🔲 |
-| RotateBackward | rotate_backward | Rotate Backward\tCtrl+B, Opt+O | | Rotate Backward  Ctrl+B, Opt+O | ctrl+b, alt+o | 🔲 |
-| EqualizeSize | equalize_pane_size | Equalize Pane Size\tCtrl+B, = | | Equalize Pane Size  Ctrl+B, = | ctrl+b, = | 🔲 |
-| ResizeLeft | resize_pane_left | Resize Pane Left\tCtrl+B, Opt+Left | | Resize Pane Left  Ctrl+B, Opt+Left | ctrl+b, alt+left | 🔲 |
-| ResizeRight | resize_pane_right | Resize Pane Right\tCtrl+B, Opt+Right | | Resize Pane Right  Ctrl+B, Opt+Right | ctrl+b, alt+right | 🔲 |
-| ResizeUp | resize_pane_up | Resize Pane Up\tCtrl+B, Opt+Up | | Resize Pane Up  Ctrl+B, Opt+Up | ctrl+b, alt+up | 🔲 |
-| ResizeDown | resize_pane_down | Resize Pane Down\tCtrl+B, Opt+Down | | Resize Pane Down  Ctrl+B, Opt+Down | ctrl+b, alt+down | 🔲 |
+| SplitV | split_v | Split Vertically\t<leader>, % | | Split Vertically  <leader>, % | <leader>, % | ✅ |
+| SplitH | split_h | Split Horizontally\t<leader>, " | | Split Horizontally  <leader>, " | <leader>, " | ✅ |
+| Close | close_pane | Close Pane\t<leader>, X | | Close Pane  <leader>, X | <leader>, x | ✅ |
+| Toggle | toggle_pane | Toggle Pane\t<leader>, T | | Toggle Pane  <leader>, T | <leader>, t | 🔲 |
+| Zoom | zoom_pane | Zoom Pane\t<leader>, Z | | Zoom Pane  <leader>, Z | <leader>, z | 🔲 |
+| SelectLeft | select_pane_left | Select Left Pane\t<leader>, Left | | Select Left Pane  <leader>, Left | <leader>, left | ✅ |
+| SelectRight | select_pane_right | Select Right Pane\t<leader>, Right | | Select Right Pane  <leader>, Right | <leader>, right | ✅ |
+| SelectUp | select_pane_up | Select Up Pane\t<leader>, Up | | Select Up Pane  <leader>, Up | <leader>, up | ✅ |
+| SelectDown | select_pane_down | Select Down Pane\t<leader>, Down | | Select Down Pane  <leader>, Down | <leader>, down | ✅ |
+| SwapPrev | swap_pane_prev | Swap Pane Previous\t<leader>, { | | Swap Pane Previous  <leader>, { | <leader>, { | 🔲 |
+| SwapNext | swap_pane_next | Swap Pane Next\t<leader>, } | | Swap Pane Next  <leader>, } | <leader>, } | 🔲 |
+| RotateForward | rotate_forward | Rotate Forward\t<leader>, Ctrl+O | | Rotate Forward  <leader>, Ctrl+O | <leader>, ctrl+o | 🔲 |
+| RotateBackward | rotate_backward | Rotate Backward\t<leader>, Opt+O | | Rotate Backward  <leader>, Opt+O | <leader>, alt+o | 🔲 |
+| EqualizeSize | equalize_pane_size | Equalize Pane Size\t<leader>, = | | Equalize Pane Size  <leader>, = | <leader>, = | 🔲 |
+| ResizeLeft | resize_pane_left | Resize Pane Left\t<leader>, Opt+Left | | Resize Pane Left  <leader>, Opt+Left | <leader>, alt+left | 🔲 |
+| ResizeRight | resize_pane_right | Resize Pane Right\t<leader>, Opt+Right | | Resize Pane Right  <leader>, Opt+Right | <leader>, alt+right | 🔲 |
+| ResizeUp | resize_pane_up | Resize Pane Up\t<leader>, Opt+Up | | Resize Pane Up  <leader>, Opt+Up | <leader>, alt+up | 🔲 |
+| ResizeDown | resize_pane_down | Resize Pane Down\t<leader>, Opt+Down | | Resize Pane Down  <leader>, Opt+Down | <leader>, alt+down | 🔲 |
 
 ### SpaceCommand
 
 | Variant | menu id | label | accel | Menu Display | bind | Handler |
 |---------|---------|-------|-------|--------------|------|---------|
-| New | new_space | New Space\tCtrl+B, C | | New Space  Ctrl+B, C | ctrl+b, c | 🔲 |
-| Close | close_space | Close Space\tCtrl+B, & | | Close Space  Ctrl+B, & | ctrl+b, & | 🔲 |
+| New | new_space | New Space\t<leader>, C | | New Space  <leader>, C | <leader>, c | 🔲 |
+| Close | close_space | Close Space\t<leader>, & | | Close Space  <leader>, & | <leader>, & | 🔲 |
 | Next | next_space | Next Space | ctrl+tab | Next Space  Ctrl+Tab | | 🔲 |
 | Previous | prev_space | Previous Space | ctrl+shift+tab | Previous Space  Ctrl+Shift+Tab | | 🔲 |
 | Rename | rename_space | Rename Space | | Rename Space | | 🔲 |
@@ -100,7 +100,7 @@ For commands with chord bindings but no `accel`, the chord is embedded in the me
 
 | Variant | menu id | label | accel | Menu Display | bind | Handler |
 |---------|---------|-------|-------|--------------|------|---------|
-| Toggle | toggle_side_sheet | Toggle Side Sheet\tCtrl+B, S | | Toggle Side Sheet  Ctrl+B, S | ctrl+b, s | ✅ |
+| Toggle | toggle_side_sheet | Toggle Side Sheet\t<leader>, S | | Toggle Side Sheet  <leader>, S | <leader>, s | ✅ |
 | ToggleRight | toggle_side_sheet_right | Toggle Right Sheet | | Toggle Right Sheet | | 🔲 |
 | ToggleBottom | toggle_side_sheet_bottom | Toggle Bottom Sheet | | Toggle Bottom Sheet | | 🔲 |
 

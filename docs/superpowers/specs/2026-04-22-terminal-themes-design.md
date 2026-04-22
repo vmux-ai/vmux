@@ -2,17 +2,17 @@
 
 ## Overview
 
-Add a CSS-variable-based terminal color theme system with 13 bundled themes, minimal terminal profiles, and proper ANSI 16-color support. Fix FLAG_INVERSE rendering.
+Add a Tailwind-class-based terminal color theme system with 13 bundled themes, minimal terminal profiles, and proper ANSI 16-color support. Fix FLAG_INVERSE rendering.
 
 ## Scope
 
 **In scope:**
 - Terminal color scheme data structure and 13 bundled theme presets
 - Minimal terminal profile (theme + font + shell)
-- CSS variable system for ANSI colors in the webview
+- CSS variable + Tailwind class system for ANSI colors in the webview
 - `TermColor` enum replacing `Option<[u8; 3]>` for cell colors
 - `TermThemeEvent` for delivering theme colors to webview
-- FLAG_INVERSE rendering fix in `span_style()`
+- FLAG_INVERSE rendering fix in `span_classes()`
 - Settings hot-reload for live theme switching
 - Backward compatibility migration for existing `TerminalSettings`
 
@@ -170,58 +170,131 @@ Registration: `JsEmitEventPlugin::<TermThemeEvent>` added to the terminal plugin
 On receiving `TermThemeEvent`, apply CSS variables to the terminal container element:
 
 ```
---fg: rgb(r, g, b)
---bg: rgb(r, g, b)
---cursor: rgb(r, g, b)
+--term-fg: rgb(r, g, b)
+--term-bg: rgb(r, g, b)
+--term-cursor: rgb(r, g, b)
 --ansi-0 through --ansi-15: rgb(r, g, b)
 ```
 
-Implementation: Store theme colors as Dioxus `Signal<Option<TermThemeEvent>>`. On `TermThemeEvent` received via `use_event_listener`, update the signal. The terminal container div reads the signal and applies CSS variables as inline style properties (e.g. `style="--fg:rgb(205,214,244); --bg:rgb(30,30,46); --ansi-0:rgb(69,71,90); ..."`) on the outermost container element. This ensures CSS variables are scoped to the terminal instance.
+Implementation: Store theme colors as Dioxus `Signal<Option<TermThemeEvent>>`. On `TermThemeEvent` received via `use_event_listener`, update the signal. The terminal container div reads the signal and applies CSS variables as inline style properties (e.g. `style="--term-fg:rgb(205,214,244); --term-bg:rgb(30,30,46); --ansi-0:rgb(69,71,90); ..."`) on the outermost container element. This ensures CSS variables are scoped to the terminal instance.
 
-`span_style()` updated:
+#### Rendering with Tailwind classes
+
+The current `span_style()` is replaced by two functions:
+
+- `span_classes(span) -> String` — Tailwind utility classes for indexed ANSI colors and text flags
+- `span_inline_style(span) -> String` — inline styles only for `TermColor::Rgb` (true color / 256-color above 15)
+
+Both functions account for FLAG_INVERSE by swapping fg/bg before rendering.
+
+**Color rendering strategy:**
+
+| `TermColor` variant | Rendering method | Example output |
+|---|---|---|
+| `Default` | Inherits from container | _(no class)_ |
+| `Default` (inverse) | TW class | `text-term-bg` / `bg-term-fg` |
+| `Indexed(i)` | TW class via CSS var | `text-ansi-1` / `bg-ansi-8` |
+| `Rgb(r,g,b)` | Inline style (dynamic) | `color:rgb(243,139,168)` |
+
+**Flag rendering (all TW classes):**
+
+| Flag | Tailwind class |
+|---|---|
+| `FLAG_BOLD` | `font-bold` |
+| `FLAG_ITALIC` | `italic` |
+| `FLAG_UNDERLINE` | `underline` |
+| `FLAG_STRIKETHROUGH` | `line-through` |
+| `FLAG_DIM` | `opacity-50` |
 
 ```rust
-// Foreground
-match &span.fg {
-    TermColor::Default => {},
-    TermColor::Indexed(i) => push "color:var(--ansi-{i})",
-    TermColor::Rgb(r, g, b) => push "color:rgb({r},{g},{b})",
+fn span_classes(span: &TermSpan) -> String {
+    let mut classes = Vec::new();
+
+    let (fg, bg) = if span.flags & FLAG_INVERSE != 0 {
+        (&span.bg, &span.fg)
+    } else {
+        (&span.fg, &span.bg)
+    };
+
+    // Foreground
+    match fg {
+        TermColor::Default => {
+            if span.flags & FLAG_INVERSE != 0 {
+                classes.push("text-term-bg".into());
+            }
+        }
+        TermColor::Indexed(i) => classes.push(format!("text-ansi-{i}")),
+        TermColor::Rgb(..) => {} // handled by span_inline_style()
+    }
+
+    // Background
+    match bg {
+        TermColor::Default => {
+            if span.flags & FLAG_INVERSE != 0 {
+                classes.push("bg-term-fg".into());
+            }
+        }
+        TermColor::Indexed(i) => classes.push(format!("bg-ansi-{i}")),
+        TermColor::Rgb(..) => {} // handled by span_inline_style()
+    }
+
+    // Flags
+    if span.flags & FLAG_BOLD != 0 { classes.push("font-bold".into()); }
+    if span.flags & FLAG_ITALIC != 0 { classes.push("italic".into()); }
+    if span.flags & FLAG_UNDERLINE != 0 { classes.push("underline".into()); }
+    if span.flags & FLAG_STRIKETHROUGH != 0 { classes.push("line-through".into()); }
+    if span.flags & FLAG_DIM != 0 { classes.push("opacity-50".into()); }
+
+    classes.join(" ")
 }
 
-// Background
-match &span.bg {
-    TermColor::Default => {},
-    TermColor::Indexed(i) => push "background-color:var(--ansi-{i})",
-    TermColor::Rgb(r, g, b) => push "background-color:rgb({r},{g},{b})",
+fn span_inline_style(span: &TermSpan) -> String {
+    let mut parts = Vec::new();
+
+    let (fg, bg) = if span.flags & FLAG_INVERSE != 0 {
+        (&span.bg, &span.fg)
+    } else {
+        (&span.fg, &span.bg)
+    };
+
+    if let TermColor::Rgb(r, g, b) = fg {
+        parts.push(format!("color:rgb({r},{g},{b})"));
+    }
+    if let TermColor::Rgb(r, g, b) = bg {
+        parts.push(format!("background:rgb({r},{g},{b})"));
+    }
+
+    parts.join(";")
+}
+```
+
+Each `<span>` in the terminal viewport uses both attributes:
+
+```rust
+span {
+    class: "{span_classes(span)}",
+    style: "{span_inline_style(span)}",
+    "{span.text}"
 }
 ```
 
 ### FLAG_INVERSE fix
 
-In `span_style()`, when `flags & FLAG_INVERSE != 0`, swap fg and bg values before rendering:
+Handled inside `span_classes()` and `span_inline_style()` by swapping fg/bg before rendering (see above). The `Default` + `Default` inverse case emits `text-term-bg bg-term-fg` classes.
 
-```rust
-let (fg, bg) = if flags & FLAG_INVERSE != 0 {
-    (&span.bg, &span.fg)
-} else {
-    (&span.fg, &span.bg)
-};
-```
+## CSS & Tailwind Changes
 
-For `Default` + `Default` inverse case: emit `color:var(--bg); background-color:var(--fg)`.
+### `index.css`
 
-## CSS Changes
-
-### `theme.css`
-
-Add default CSS variable declarations (overridden by `TermThemeEvent`):
+Add default CSS variable declarations in a `@layer base` block (overridden at runtime by `TermThemeEvent` inline styles on the container):
 
 ```css
-:root {
+@layer base {
+  :root {
     /* Catppuccin Mocha defaults - overridden by TermThemeEvent inline styles */
-    --fg: rgb(205, 214, 244);
-    --bg: rgb(30, 30, 46);
-    --cursor: rgb(245, 224, 220);
+    --term-fg: rgb(205, 214, 244);
+    --term-bg: rgb(30, 30, 46);
+    --term-cursor: rgb(245, 224, 220);
     --ansi-0: rgb(69, 71, 90);    /* Black */
     --ansi-1: rgb(243, 139, 168); /* Red */
     --ansi-2: rgb(166, 227, 161); /* Green */
@@ -238,12 +311,40 @@ Add default CSS variable declarations (overridden by `TermThemeEvent`):
     --ansi-13: rgb(245, 194, 231);/* Bright Magenta */
     --ansi-14: rgb(148, 226, 213);/* Bright Cyan */
     --ansi-15: rgb(166, 173, 200);/* Bright White */
+  }
 }
 ```
 
-### `index.css`
+Terminal container background uses `bg-term-bg`, default text color uses `text-term-fg`. Cursor styling uses `bg-term-cursor`.
 
-Terminal container background uses `var(--bg)`, default text color uses `var(--fg)`. Cursor styling uses `var(--cursor)`.
+### `tailwind.preset.js`
+
+Add terminal color tokens to the shared preset, following the existing CSS-var pattern:
+
+```js
+// Inside theme.extend.colors
+"term-fg": "var(--term-fg)",
+"term-bg": "var(--term-bg)",
+"term-cursor": "var(--term-cursor)",
+"ansi-0": "var(--ansi-0)",
+"ansi-1": "var(--ansi-1)",
+"ansi-2": "var(--ansi-2)",
+"ansi-3": "var(--ansi-3)",
+"ansi-4": "var(--ansi-4)",
+"ansi-5": "var(--ansi-5)",
+"ansi-6": "var(--ansi-6)",
+"ansi-7": "var(--ansi-7)",
+"ansi-8": "var(--ansi-8)",
+"ansi-9": "var(--ansi-9)",
+"ansi-10": "var(--ansi-10)",
+"ansi-11": "var(--ansi-11)",
+"ansi-12": "var(--ansi-12)",
+"ansi-13": "var(--ansi-13)",
+"ansi-14": "var(--ansi-14)",
+"ansi-15": "var(--ansi-15)",
+```
+
+This enables classes like `text-ansi-1`, `bg-ansi-8`, `text-term-fg`, `bg-term-bg` etc.
 
 ## Terminal Component Changes
 
@@ -286,9 +387,9 @@ pub struct Terminal {
 | `crates/vmux_desktop/src/settings.rs` | `TerminalProfile`, updated `TerminalSettings`, migration logic |
 | `crates/vmux_desktop/src/lib.rs` | Add `mod themes` |
 | `crates/vmux_terminal/src/event.rs` | `TermColor` enum, `TermThemeEvent`, update `TermSpan` |
-| `crates/vmux_terminal/src/app.rs` | `TermThemeEvent` listener, CSS var application, updated `span_style()`, FLAG_INVERSE |
-| `crates/vmux_terminal/assets/theme.css` | ANSI color CSS variable defaults |
-| `crates/vmux_terminal/assets/index.css` | Use `var(--fg)`, `var(--bg)`, `var(--cursor)` |
+| `crates/vmux_terminal/src/app.rs` | `TermThemeEvent` listener, CSS var application, `span_classes()` + `span_inline_style()` replacing `span_style()`, FLAG_INVERSE |
+| `crates/vmux_terminal/assets/index.css` | ANSI color CSS variable defaults, use `bg-term-bg`, `text-term-fg`, `bg-term-cursor` |
+| `crates/vmux_ui/tailwind.preset.js` | Add `term-fg`, `term-bg`, `term-cursor`, `ansi-0`..`ansi-15` color tokens |
 
 ## Testing
 
