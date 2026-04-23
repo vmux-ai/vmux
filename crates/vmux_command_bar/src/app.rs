@@ -108,14 +108,19 @@ pub fn App() -> Element {
 
     let _listener =
         use_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
-        query.set(data.url.clone());
-        selected.set(0);
-        state.set(data);
-        is_open.set(true);
-        // Focus input and install Ctrl shortcuts via web_sys.
-        // Dioxus e.modifiers().ctrl() is unreliable in CEF OSR, so we
-        // listen directly on the DOM in capture phase.
-        focus_and_install_ctrl_bindings();
+            query.set(data.url.clone());
+            selected.set(0);
+            state.set(data);
+            is_open.set(true);
+        });
+
+    // Focus input and install emacs-style Ctrl shortcuts AFTER Dioxus renders
+    // the input element. Running in the event listener above is too early --
+    // Dioxus hasn't created the DOM element yet.
+    use_effect(move || {
+        if is_open() {
+            focus_and_install_ctrl_bindings();
+        }
     });
 
     let CommandBarOpenEvent {
@@ -181,25 +186,28 @@ pub fn App() -> Element {
                             selected.set(0);
                         },
                         onkeydown: move |e| {
-                            match e.key() {
-                                Key::Escape => { is_open.set(false); emit_action("dismiss", ""); }
-                                Key::ArrowDown => {
-                                    e.prevent_default();
-                                    let max = results.len().saturating_sub(1);
-                                    selected.set((sel + 1).min(max));
+                            let ctrl = e.modifiers().contains(Modifiers::CONTROL);
+                            let go_down = e.key() == Key::ArrowDown
+                                || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
+                            let go_up = e.key() == Key::ArrowUp
+                                || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
+
+                            if go_down {
+                                e.prevent_default();
+                                let max = results.len().saturating_sub(1);
+                                selected.set((sel + 1).min(max));
+                            } else if go_up {
+                                e.prevent_default();
+                                selected.set(sel.saturating_sub(1));
+                            } else if e.key() == Key::Escape {
+                                is_open.set(false);
+                                emit_action("dismiss", "");
+                            } else if e.key() == Key::Enter {
+                                if let Some(item) = results.get(sel) {
+                                    execute(item);
+                                } else if !q.is_empty() {
+                                    emit_action("navigate", &q);
                                 }
-                                Key::ArrowUp => {
-                                    e.prevent_default();
-                                    selected.set(sel.saturating_sub(1));
-                                }
-                                Key::Enter => {
-                                    if let Some(item) = results.get(sel) {
-                                        execute(item);
-                                    } else if !q.is_empty() {
-                                        emit_action("navigate", &q);
-                                    }
-                                }
-                                _ => {}
                             }
                         },
                     }
@@ -250,7 +258,10 @@ pub fn App() -> Element {
 // ---------------------------------------------------------------------------
 
 /// Focus the command-bar input and install emacs-style Ctrl shortcuts
-/// via a capture-phase keydown listener (web_sys).
+/// (cursor movement, deletion) via a capture-phase keydown listener (web_sys).
+///
+/// Ctrl+N/P/J/K (up/down navigation) are handled in the Dioxus `onkeydown`
+/// handler so they can update selection signals directly.
 fn focus_and_install_ctrl_bindings() {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return;
@@ -278,8 +289,6 @@ fn focus_and_install_ctrl_bindings() {
         }
         let code = e.code();
         let action = match code.as_str() {
-            "KeyN" | "KeyJ" => "down",
-            "KeyP" | "KeyK" => "up",
             "KeyA" => "home",
             "KeyE" => "end",
             "KeyF" => "fwd",
@@ -294,24 +303,6 @@ fn focus_and_install_ctrl_bindings() {
         e.stop_immediate_propagation();
 
         match action {
-            "down" => {
-                let _ = input2.dispatch_event(
-                    &web_sys::KeyboardEvent::new_with_keyboard_event_init_dict(
-                        "keydown",
-                        web_sys::KeyboardEventInit::new().key("ArrowDown").bubbles(true),
-                    )
-                    .unwrap(),
-                );
-            }
-            "up" => {
-                let _ = input2.dispatch_event(
-                    &web_sys::KeyboardEvent::new_with_keyboard_event_init_dict(
-                        "keydown",
-                        web_sys::KeyboardEventInit::new().key("ArrowUp").bubbles(true),
-                    )
-                    .unwrap(),
-                );
-            }
             "home" => {
                 let _ = input2.set_selection_range(0, 0);
             }
@@ -338,13 +329,7 @@ fn focus_and_install_ctrl_bindings() {
                 let new_val = format!("{}{}", &v[..s], &v[(s + 1).min(v.len())..]);
                 input2.set_value(&new_val);
                 let _ = input2.set_selection_range(s as u32, s as u32);
-                let _ = input2.dispatch_event(
-                    &web_sys::Event::new_with_event_init_dict(
-                        "input",
-                        web_sys::EventInit::new().bubbles(true),
-                    )
-                    .unwrap(),
-                );
+                dispatch_input_event(&input2);
             }
             "bksp" => {
                 let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
@@ -353,13 +338,7 @@ fn focus_and_install_ctrl_bindings() {
                     let new_val = format!("{}{}", &v[..s - 1], &v[s..]);
                     input2.set_value(&new_val);
                     let _ = input2.set_selection_range((s - 1) as u32, (s - 1) as u32);
-                    let _ = input2.dispatch_event(
-                        &web_sys::Event::new_with_event_init_dict(
-                            "input",
-                            web_sys::EventInit::new().bubbles(true),
-                        )
-                        .unwrap(),
-                    );
+                    dispatch_input_event(&input2);
                 }
             }
             "delw" => {
@@ -376,38 +355,35 @@ fn focus_and_install_ctrl_bindings() {
                 let new_val = format!("{}{}", &v[..i], &v[s..]);
                 input2.set_value(&new_val);
                 let _ = input2.set_selection_range(i as u32, i as u32);
-                let _ = input2.dispatch_event(
-                    &web_sys::Event::new_with_event_init_dict(
-                        "input",
-                        web_sys::EventInit::new().bubbles(true),
-                    )
-                    .unwrap(),
-                );
+                dispatch_input_event(&input2);
             }
             "delbeg" => {
                 let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
                 let v = input2.value();
                 input2.set_value(&v[s..]);
                 let _ = input2.set_selection_range(0, 0);
-                let _ = input2.dispatch_event(
-                    &web_sys::Event::new_with_event_init_dict(
-                        "input",
-                        web_sys::EventInit::new().bubbles(true),
-                    )
-                    .unwrap(),
-                );
+                dispatch_input_event(&input2);
             }
             _ => {}
         }
     }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
 
     let target: &web_sys::EventTarget = input.as_ref();
-    let mut opts = web_sys::AddEventListenerOptions::new();
-    opts.capture(true);
+    let opts = web_sys::AddEventListenerOptions::new();
+    opts.set_capture(true);
     let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
         "keydown",
         closure.as_ref().unchecked_ref(),
         &opts,
     );
     closure.forget();
+}
+
+/// Dispatch a synthetic "input" event so Dioxus picks up value changes.
+fn dispatch_input_event(el: &web_sys::HtmlInputElement) {
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    if let Ok(evt) = web_sys::Event::new_with_event_init_dict("input", &init) {
+        let _ = el.dispatch_event(&evt);
+    }
 }

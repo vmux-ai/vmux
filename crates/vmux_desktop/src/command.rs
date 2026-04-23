@@ -74,16 +74,20 @@ pub enum TabCommand {
     SelectLast,
     #[menu(id = "tab_reopen", label = "Reopen Closed Tab", accel = "super+shift+t")]
     Reopen,
-    #[menu(id = "tab_duplicate", label = "Duplicate Tab")]
+    #[menu(id = "tab_duplicate", label = "Duplicate Tab\t<leader> d")]
+    #[shortcut(chord = "Ctrl+g, d")]
     Duplicate,
-    #[menu(id = "tab_pin", label = "Pin Tab")]
+    #[menu(id = "tab_pin", label = "Pin Tab\t<leader> p")]
+    #[shortcut(chord = "Ctrl+g, p")]
     Pin,
-    #[menu(id = "tab_mute", label = "Mute Tab")]
+    #[menu(id = "tab_mute", label = "Mute Tab\t<leader> m")]
+    #[shortcut(chord = "Ctrl+g, m")]
     Mute,
-    #[menu(id = "tab_move_to_pane", label = "Move Tab to Pane")]
+    #[menu(id = "tab_move_to_pane", label = "Move Tab to Pane\t<leader> !")]
+    #[shortcut(chord = "Ctrl+g, !")]
     MoveToPane,
     #[menu(id = "tab_new_terminal", label = "New Terminal Tab\t<leader> `")]
-    #[bind(chord = "Ctrl+g, `")]
+    #[shortcut(chord = "Ctrl+g, `")]
     NewTerminal,
 }
 
@@ -97,9 +101,8 @@ pub enum BrowserCommand {
     #[menu(id = "browser_reload", label = "Reload", accel = "super+r")]
     Reload,
     #[menu(id = "browser_hard_reload", label = "Hard Reload", accel = "super+shift+r")]
-    #[bind(direct = "Super+Shift+r")]
     HardReload,
-    #[menu(id = "browser_stop", label = "Stop Loading")]
+    #[menu(id = "browser_stop", label = "Stop Loading", accel = "super+.")]
     Stop,
     #[menu(id = "browser_focus_address_bar", label = "Open Location", accel = "super+l")]
     FocusAddressBar,
@@ -122,57 +125,59 @@ pub enum BrowserCommand {
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaneCommand {
     #[default]
-    #[menu(id = "split_v", label = "Split Vertically")]
+    #[menu(id = "split_v", label = "Split Vertically\t<leader> v")]
+    #[shortcut(chord = "Ctrl+g, v")]
     SplitV,
-    #[menu(id = "split_h", label = "Split Horizontally")]
+    #[menu(id = "split_h", label = "Split Horizontally\t<leader> -")]
+    #[shortcut(chord = "Ctrl+g, -")]
     SplitH,
     #[menu(id = "toggle_pane", label = "Toggle Pane\t<leader> t")]
-    #[bind(chord = "Ctrl+g, t")]
+    #[shortcut(chord = "Ctrl+g, t")]
     Toggle,
     #[menu(id = "close_pane", label = "Close Pane\t<leader> x")]
-    #[bind(chord = "Ctrl+g, x")]
+    #[shortcut(chord = "Ctrl+g, x")]
     Close,
     #[menu(id = "zoom_pane", label = "Zoom Pane\t<leader> z")]
-    #[bind(chord = "Ctrl+g, z")]
+    #[shortcut(chord = "Ctrl+g, z")]
     Zoom,
     #[menu(id = "select_pane_left", label = "Select Left Pane\t<leader> h")]
-    #[bind(chord = "Ctrl+g, h")]
+    #[shortcut(chord = "Ctrl+g, h")]
     SelectLeft,
     #[menu(id = "select_pane_right", label = "Select Right Pane\t<leader> l")]
-    #[bind(chord = "Ctrl+g, l")]
+    #[shortcut(chord = "Ctrl+g, l")]
     SelectRight,
     #[menu(id = "select_pane_up", label = "Select Up Pane\t<leader> k")]
-    #[bind(chord = "Ctrl+g, k")]
+    #[shortcut(chord = "Ctrl+g, k")]
     SelectUp,
     #[menu(id = "select_pane_down", label = "Select Down Pane\t<leader> j")]
-    #[bind(chord = "Ctrl+g, j")]
+    #[shortcut(chord = "Ctrl+g, j")]
     SelectDown,
     #[menu(id = "swap_pane_prev", label = "Swap Pane Previous\t<leader> {")]
-    #[bind(chord = "Ctrl+g, {")]
+    #[shortcut(chord = "Ctrl+g, {")]
     SwapPrev,
     #[menu(id = "swap_pane_next", label = "Swap Pane Next\t<leader> }")]
-    #[bind(chord = "Ctrl+g, }")]
+    #[shortcut(chord = "Ctrl+g, }")]
     SwapNext,
     #[menu(id = "rotate_forward", label = "Rotate Forward\t<leader> ctrl+o")]
-    #[bind(chord = "Ctrl+g, Ctrl+o")]
+    #[shortcut(chord = "Ctrl+g, Ctrl+o")]
     RotateForward,
     #[menu(id = "rotate_backward", label = "Rotate Backward\t<leader> alt+o")]
-    #[bind(chord = "Ctrl+g, Alt+o")]
+    #[shortcut(chord = "Ctrl+g, Alt+o")]
     RotateBackward,
     #[menu(id = "equalize_pane_size", label = "Equalize Pane Size\t<leader> =")]
-    #[bind(chord = "Ctrl+g, =")]
+    #[shortcut(chord = "Ctrl+g, =")]
     EqualizeSize,
     #[menu(id = "resize_pane_left", label = "Resize Pane Left\t<leader> alt+left")]
-    #[bind(chord = "Ctrl+g, Alt+ArrowLeft")]
+    #[shortcut(chord = "Ctrl+g, Alt+ArrowLeft")]
     ResizeLeft,
     #[menu(id = "resize_pane_right", label = "Resize Pane Right\t<leader> alt+right")]
-    #[bind(chord = "Ctrl+g, Alt+ArrowRight")]
+    #[shortcut(chord = "Ctrl+g, Alt+ArrowRight")]
     ResizeRight,
     #[menu(id = "resize_pane_up", label = "Resize Pane Up\t<leader> alt+up")]
-    #[bind(chord = "Ctrl+g, Alt+ArrowUp")]
+    #[shortcut(chord = "Ctrl+g, Alt+ArrowUp")]
     ResizeUp,
     #[menu(id = "resize_pane_down", label = "Resize Pane Down\t<leader> alt+down")]
-    #[bind(chord = "Ctrl+g, Alt+ArrowDown")]
+    #[shortcut(chord = "Ctrl+g, Alt+ArrowDown")]
     ResizeDown,
 }
 
@@ -180,16 +185,17 @@ pub enum PaneCommand {
 pub enum SpaceCommand {
     #[default]
     #[menu(id = "new_space", label = "New Space\t<leader> c")]
-    #[bind(chord = "Ctrl+g, c")]
+    #[shortcut(chord = "Ctrl+g, c")]
     New,
     #[menu(id = "close_space", label = "Close Space\t<leader> &")]
-    #[bind(chord = "Ctrl+g, &")]
+    #[shortcut(chord = "Ctrl+g, &")]
     Close,
     #[menu(id = "next_space", label = "Next Space", accel = "ctrl+tab")]
     Next,
     #[menu(id = "prev_space", label = "Previous Space", accel = "ctrl+shift+tab")]
     Previous,
-    #[menu(id = "rename_space", label = "Rename Space")]
+    #[menu(id = "rename_space", label = "Rename Space\t<leader> ,")]
+    #[shortcut(chord = "Ctrl+g, Comma")]
     Rename,
 }
 
@@ -197,11 +203,13 @@ pub enum SpaceCommand {
 pub enum SideSheetCommand {
     #[default]
     #[menu(id = "toggle_side_sheet", label = "Toggle Side Sheet\t<leader> s")]
-    #[bind(chord = "Ctrl+g, s")]
+    #[shortcut(chord = "Ctrl+g, s")]
     Toggle,
-    #[menu(id = "toggle_side_sheet_right", label = "Toggle Right Sheet")]
+    #[menu(id = "toggle_side_sheet_right", label = "Toggle Right Sheet\t<leader> r")]
+    #[shortcut(chord = "Ctrl+g, r")]
     ToggleRight,
-    #[menu(id = "toggle_side_sheet_bottom", label = "Toggle Bottom Sheet")]
+    #[menu(id = "toggle_side_sheet_bottom", label = "Toggle Bottom Sheet\t<leader> b")]
+    #[shortcut(chord = "Ctrl+g, b")]
     ToggleBottom,
 }
 
@@ -209,7 +217,7 @@ pub enum SideSheetCommand {
 pub enum SceneCommand {
     #[default]
     #[menu(id = "toggle_free_camera", label = "Toggle Camera Mode")]
-    #[bind(chord = "Ctrl+g, Enter")]
+    #[shortcut(chord = "Ctrl+g, Enter")]
     ToggleFreeCamera,
 }
 

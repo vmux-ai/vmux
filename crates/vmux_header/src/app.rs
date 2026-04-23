@@ -93,7 +93,12 @@ pub fn App() -> Element {
                                     header_command: "focus_address_bar".to_string(),
                                 });
                             },
-                            if let Some(src) = favicon_src.as_ref() {
+                            if tab.url.starts_with("vmux://terminal") {
+                                Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                                    path { d: "M4 17 10 11 4 5" }
+                                    path { d: "M12 19h8" }
+                                }
+                            } else if let Some(src) = favicon_src.as_ref() {
                                 if favicon_error() {
                                     Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                                         path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }

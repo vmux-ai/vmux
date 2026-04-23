@@ -159,7 +159,7 @@ fn handle_tab_commands(
                     .id();
                 commands.entity(tab).insert(vmux_header::PageMetadata {
                     url: TERMINAL_WEBVIEW_URL.to_string(),
-                    title: "Terminal".to_string(),
+                    title: "Terminal (Session: -)".to_string(),
                     ..default()
                 });
                 commands.spawn((

@@ -188,8 +188,8 @@ impl Terminal {
                     child: Mutex::new(child),
                 },
                 PageMetadata {
-                    title: format!("Terminal - {}", shell),
-                    url: format!("{}?session={}", TERMINAL_WEBVIEW_URL, pid),
+                    title: format!("Terminal (Session: {})", pid),
+                    url: format!("{}session/{}", TERMINAL_WEBVIEW_URL, pid),
                     favicon_url: String::new(),
                 },
                 WebviewSource::new(TERMINAL_WEBVIEW_URL),
@@ -1224,6 +1224,6 @@ fn on_restart_pty(
     };
 
     // Update metadata
-    meta.url = format!("{}?session={}", TERMINAL_WEBVIEW_URL, pid);
-    meta.title = format!("Terminal - {}", shell);
+    meta.url = format!("{}session/{}", TERMINAL_WEBVIEW_URL, pid);
+    meta.title = format!("Terminal (Session: {})", pid);
 }

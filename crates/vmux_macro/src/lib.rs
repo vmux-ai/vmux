@@ -11,7 +11,7 @@ pub fn derive_command_bar(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(DefaultShortcuts, attributes(bind, menu))]
+#[proc_macro_derive(DefaultShortcuts, attributes(shortcut, menu))]
 pub fn derive_default_shortcuts(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match impl_default_shortcuts(input) {
@@ -282,7 +282,7 @@ fn impl_leaf_shortcuts(
         let Some(menu_id) = &menu_props.id else {
             return Err(syn::Error::new_spanned(
                 variant,
-                "variant with #[bind(...)] must also have #[menu(id = \"...\")]",
+                "variant with #[shortcut(...)] must also have #[menu(id = \"...\")]",
             ));
         };
 
@@ -483,7 +483,7 @@ impl BindProps {
         let mut direct = None;
         let mut chord = None;
         for attr in attrs {
-            if !attr.path().is_ident("bind") {
+            if !attr.path().is_ident("shortcut") {
                 continue;
             }
             attr.parse_nested_meta(|meta| {
