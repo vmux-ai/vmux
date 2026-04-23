@@ -1,10 +1,13 @@
 use crate::prelude::{CefExtensions, EXTENSIONS_SWITCH, MessageLoopTimer};
 use cef::rc::{Rc, RcImpl};
 use cef::*;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Sender};
+use std::time::{Duration, Instant};
 use winit::event_loop::EventLoopProxy;
 
 pub type WakeProxy = EventLoopProxy<bevy_winit::WinitUserEvent>;
+
+const WAKE_MIN_INTERVAL: Duration = Duration::from_millis(33);
 
 /// ## Reference
 ///
@@ -13,7 +16,7 @@ pub struct BrowserProcessHandlerBuilder {
     object: *mut RcImpl<cef_dll_sys::cef_browser_process_handler_t, Self>,
     message_loop_working_requester: Sender<MessageLoopTimer>,
     extensions: CefExtensions,
-    wake_proxy: Option<WakeProxy>,
+    wake_request_tx: Option<Sender<()>>,
 }
 
 impl BrowserProcessHandlerBuilder {
@@ -22,13 +25,37 @@ impl BrowserProcessHandlerBuilder {
         extensions: CefExtensions,
         wake_proxy: Option<WakeProxy>,
     ) -> BrowserProcessHandler {
+        let wake_request_tx = wake_proxy.map(spawn_wake_throttler);
+
         BrowserProcessHandler::new(Self {
             object: core::ptr::null_mut(),
             message_loop_working_requester,
             extensions,
-            wake_proxy,
+            wake_request_tx,
         })
     }
+}
+
+fn spawn_wake_throttler(proxy: WakeProxy) -> Sender<()> {
+    let (tx, rx) = mpsc::channel::<()>();
+    std::thread::Builder::new()
+        .name("cef-wake-throttle".into())
+        .spawn(move || {
+            let mut last_fire: Option<Instant> = None;
+            while rx.recv().is_ok() {
+                if let Some(t) = last_fire {
+                    let elapsed = Instant::now().duration_since(t);
+                    if elapsed < WAKE_MIN_INTERVAL {
+                        std::thread::sleep(WAKE_MIN_INTERVAL - elapsed);
+                    }
+                }
+                while rx.try_recv().is_ok() {}
+                let _ = proxy.send_event(bevy_winit::WinitUserEvent::WakeUp);
+                last_fire = Some(Instant::now());
+            }
+        })
+        .expect("failed to spawn cef-wake-throttle thread");
+    tx
 }
 
 impl Rc for BrowserProcessHandlerBuilder {
@@ -58,7 +85,7 @@ impl Clone for BrowserProcessHandlerBuilder {
             object,
             message_loop_working_requester: self.message_loop_working_requester.clone(),
             extensions: self.extensions.clone(),
-            wake_proxy: self.wake_proxy.clone(),
+            wake_request_tx: self.wake_request_tx.clone(),
         }
     }
 }
@@ -91,8 +118,8 @@ impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
         let _ = self
             .message_loop_working_requester
             .send(MessageLoopTimer::new(delay_ms));
-        if let Some(proxy) = &self.wake_proxy {
-            let _ = proxy.send_event(bevy_winit::WinitUserEvent::WakeUp);
+        if let Some(tx) = &self.wake_request_tx {
+            let _ = tx.send(());
         }
     }
 
