@@ -62,9 +62,12 @@ pub fn App() -> Element {
 fn PaneSection(pane: PaneNode, index: usize) -> Element {
     let label = format!("Pane {}", index + 1);
     let pane_id = pane.id;
+    let any_loading = pane.tabs.iter().any(|t| t.is_loading);
 
     rsx! {
-        div { class: if pane.is_active {
+        div { class: if pane.is_active && any_loading {
+                "glass mb-2 flex flex-col rounded-lg p-1.5 pane-loading-ring"
+            } else if pane.is_active {
                 "glass mb-2 flex flex-col rounded-lg p-1.5 ring-2 ring-ring"
             } else {
                 "glass mb-2 flex flex-col rounded-lg p-1.5"

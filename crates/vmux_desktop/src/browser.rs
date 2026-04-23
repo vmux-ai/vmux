@@ -550,7 +550,7 @@ fn push_pane_tree_emit(
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     tab_q: Query<Entity, With<Tab>>,
     tab_children: Query<&Children>,
-    browser_meta: Query<&PageMetadata, With<Browser>>,
+    browser_meta: Query<(&PageMetadata, Has<Loading>), With<Browser>>,
     mut last: Local<String>,
 ) {
     let Some(side_sheet) = side_sheet else {
@@ -586,13 +586,14 @@ fn push_pane_tree_emit(
                 let tab_is_active = active_tab == Some(child);
                 if let Ok(tab_kids) = tab_children.get(child) {
                     for browser_e in tab_kids.iter() {
-                        if let Ok(meta) = browser_meta.get(browser_e) {
+                        if let Ok((meta, loading)) = browser_meta.get(browser_e) {
                             tabs.push(TabNode {
                                 title: meta.title.clone(),
                                 url: meta.url.clone(),
                                 favicon_url: meta.favicon_url.clone(),
                                 is_active: tab_is_active,
                                 tab_index,
+                                is_loading: loading,
                             });
                         }
                     }

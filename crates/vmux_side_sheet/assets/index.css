@@ -15,3 +15,29 @@
     font-family: "Inter", system-ui, -apple-system, sans-serif;
   }
 }
+
+@keyframes loading-sweep {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.pane-loading-ring {
+  --ring-color: var(--ring);
+  box-shadow:
+    0 0 0 2px var(--ring-color),
+    0 0 8px 0 color-mix(in oklch, var(--ring-color) 40%, transparent);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 30%,
+    color-mix(in oklch, var(--ring-color) 60%, transparent) 50%,
+    transparent 70%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: loading-sweep 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}

@@ -23,6 +23,8 @@ pub struct TabNode {
     pub is_active: bool,
     #[serde(default)]
     pub tab_index: usize,
+    #[serde(default)]
+    pub is_loading: bool,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
