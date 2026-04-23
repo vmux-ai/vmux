@@ -112,7 +112,7 @@ pub fn App() -> Element {
         selected.set(0);
         state.set(data);
         is_open.set(true);
-        // Focus input and install Ctrl keybindings via web_sys.
+        // Focus input and install Ctrl shortcuts via web_sys.
         // Dioxus e.modifiers().ctrl() is unreliable in CEF OSR, so we
         // listen directly on the DOM in capture phase.
         focus_and_install_ctrl_bindings();
@@ -246,10 +246,10 @@ pub fn App() -> Element {
 }
 
 // ---------------------------------------------------------------------------
-// Ctrl keybindings helper
+// Ctrl shortcuts helper
 // ---------------------------------------------------------------------------
 
-/// Focus the command-bar input and install emacs-style Ctrl keybindings
+/// Focus the command-bar input and install emacs-style Ctrl shortcuts
 /// via a capture-phase keydown listener (web_sys).
 fn focus_and_install_ctrl_bindings() {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {

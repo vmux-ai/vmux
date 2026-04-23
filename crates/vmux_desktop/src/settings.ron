@@ -28,7 +28,7 @@
             ),
         ),
     ),
-    keybindings: (
+    shortcuts: (
         leader: (key: "g", ctrl: true),
         chord_timeout_ms: 1000,
         bindings: [

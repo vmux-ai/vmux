@@ -1,6 +1,6 @@
 mod browser;
 mod command;
-pub(crate) mod keybinding;
+pub(crate) mod shortcut;
 mod command_bar;
 mod layout;
 mod persistence;
@@ -19,7 +19,7 @@ use bevy::winit::WinitSettings;
 use std::time::Duration;
 
 use {
-    browser::BrowserPlugin, command::CommandPlugin, keybinding::KeyBindingPlugin,
+    browser::BrowserPlugin, command::CommandPlugin, shortcut::ShortcutPlugin,
     layout::LayoutPlugin, os_menu::OsMenuPlugin,
     command_bar::CommandBarInputPlugin, persistence::PersistencePlugin, profile::ProfilePlugin,
     scene::ScenePlugin, settings::SettingsPlugin, terminal::TerminalInputPlugin,
@@ -68,7 +68,7 @@ impl Plugin for VmuxPlugin {
                 }),
             SettingsPlugin,
             CommandPlugin,
-            KeyBindingPlugin,
+            ShortcutPlugin,
             ScenePlugin,
             OsMenuPlugin,
             WebviewAppRegistryPlugin,

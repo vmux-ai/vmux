@@ -11,10 +11,10 @@ pub fn derive_command_bar(input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(DefaultKeyBindings, attributes(bind, menu))]
-pub fn derive_default_key_bindings(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(DefaultShortcuts, attributes(bind, menu))]
+pub fn derive_default_shortcuts(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    match impl_default_key_bindings(input) {
+    match impl_default_shortcuts(input) {
         Ok(tokens) => tokens.into(),
         Err(e) => e.to_compile_error().into(),
     }
@@ -235,12 +235,12 @@ fn heck_variant_snake_case(s: &str) -> String {
     out
 }
 
-fn impl_default_key_bindings(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+fn impl_default_shortcuts(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let ident = &input.ident;
     let Data::Enum(data) = &input.data else {
         return Err(syn::Error::new_spanned(
             ident,
-            "DefaultKeyBindings only supports enums",
+            "DefaultShortcuts only supports enums",
         ));
     };
 
@@ -250,13 +250,13 @@ fn impl_default_key_bindings(input: DeriveInput) -> syn::Result<proc_macro2::Tok
         .unwrap_or(true);
 
     if is_leaf {
-        impl_leaf_key_bindings(ident, data)
+        impl_leaf_shortcuts(ident, data)
     } else {
-        impl_root_key_bindings(ident, data)
+        impl_root_shortcuts(ident, data)
     }
 }
 
-fn impl_leaf_key_bindings(
+fn impl_leaf_shortcuts(
     ident: &syn::Ident,
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
@@ -297,12 +297,12 @@ fn impl_leaf_key_bindings(
             let prefix_tokens = parse_key_combo_tokens(parts[0].trim(), variant)?;
             let second_tokens = parse_key_combo_tokens(parts[1].trim(), variant)?;
             quote! {
-                crate::keybinding::KeyBinding::Chord(#prefix_tokens, #second_tokens)
+                crate::shortcut::Shortcut::Chord(#prefix_tokens, #second_tokens)
             }
         } else {
             let combo_tokens = parse_key_combo_tokens(&binding_str, variant)?;
             quote! {
-                crate::keybinding::KeyBinding::Direct(#combo_tokens)
+                crate::shortcut::Shortcut::Direct(#combo_tokens)
             }
         };
 
@@ -314,14 +314,14 @@ fn impl_leaf_key_bindings(
 
     Ok(quote! {
         impl #ident {
-            pub fn default_key_bindings() -> ::std::vec::Vec<(crate::keybinding::KeyBinding, ::std::string::String)> {
+            pub fn default_shortcuts() -> ::std::vec::Vec<(crate::shortcut::Shortcut, ::std::string::String)> {
                 ::std::vec![#(#binding_entries),*]
             }
         }
     })
 }
 
-fn impl_root_key_bindings(
+fn impl_root_shortcuts(
     ident: &syn::Ident,
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
@@ -331,7 +331,7 @@ fn impl_root_key_bindings(
         let Fields::Unnamed(fields) = &variant.fields else {
             return Err(syn::Error::new_spanned(
                 &variant.fields,
-                "DefaultKeyBindings root expects tuple variants",
+                "DefaultShortcuts root expects tuple variants",
             ));
         };
         let Some(field) = fields.unnamed.first() else {
@@ -342,13 +342,13 @@ fn impl_root_key_bindings(
         };
         let inner_ty = &field.ty;
         extend_calls.push(quote! {
-            bindings.extend(<#inner_ty>::default_key_bindings());
+            bindings.extend(<#inner_ty>::default_shortcuts());
         });
     }
 
     Ok(quote! {
         impl #ident {
-            pub fn default_key_bindings() -> ::std::vec::Vec<(crate::keybinding::KeyBinding, ::std::string::String)> {
+            pub fn default_shortcuts() -> ::std::vec::Vec<(crate::shortcut::Shortcut, ::std::string::String)> {
                 let mut bindings = ::std::vec::Vec::new();
                 #(#extend_calls)*
                 bindings
@@ -461,9 +461,9 @@ fn parse_key_combo_tokens(
     let key_ident = format_ident!("{}", key_str);
 
     Ok(quote! {
-        crate::keybinding::KeyCombo {
+        crate::shortcut::KeyCombo {
             key: ::bevy::input::keyboard::KeyCode::#key_ident,
-            modifiers: crate::keybinding::Modifiers {
+            modifiers: crate::shortcut::Modifiers {
                 ctrl: #ctrl,
                 shift: #shift,
                 alt: #alt,

@@ -18,22 +18,22 @@ pub struct AppSettings {
     pub browser: BrowserSettings,
     pub layout: LayoutSettings,
     #[serde(default)]
-    pub keybindings: KeyBindingSettings,
+    pub shortcuts: ShortcutSettings,
     #[serde(default)]
     pub terminal: Option<TerminalSettings>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct KeyBindingSettings {
+pub struct ShortcutSettings {
     #[serde(default = "default_leader")]
     pub leader: KeyComboDef,
     #[serde(default = "default_chord_timeout_ms")]
     pub chord_timeout_ms: u64,
     #[serde(default)]
-    pub bindings: Vec<KeyBindingEntry>,
+    pub bindings: Vec<ShortcutEntry>,
 }
 
-impl Default for KeyBindingSettings {
+impl Default for ShortcutSettings {
     fn default() -> Self {
         Self {
             leader: default_leader(),
@@ -58,49 +58,49 @@ fn default_chord_timeout_ms() -> u64 {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct KeyBindingEntry {
+pub struct ShortcutEntry {
     pub command: String,
-    pub binding: KeyBindingDef,
+    pub binding: ShortcutDef,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub enum KeyBindingDef {
+pub enum ShortcutDef {
     Direct(KeyComboDef),
     Chord(KeyComboDef, KeyComboDef),
     /// Chord binding that uses the configured leader key as prefix.
     Leader(KeyComboDef),
 }
 
-impl KeyBindingDef {
-    pub fn to_key_binding(&self) -> Option<crate::keybinding::KeyBinding> {
+impl ShortcutDef {
+    pub fn to_shortcut(&self) -> Option<crate::shortcut::Shortcut> {
         match self {
-            KeyBindingDef::Direct(combo) => {
-                Some(crate::keybinding::KeyBinding::Direct(combo.to_key_combo()?))
+            ShortcutDef::Direct(combo) => {
+                Some(crate::shortcut::Shortcut::Direct(combo.to_key_combo()?))
             }
-            KeyBindingDef::Chord(prefix, second) => Some(crate::keybinding::KeyBinding::Chord(
+            ShortcutDef::Chord(prefix, second) => Some(crate::shortcut::Shortcut::Chord(
                 prefix.to_key_combo()?,
                 second.to_key_combo()?,
             )),
-            KeyBindingDef::Leader(_second) => {
-                // Resolved in init_keybindings with the configured leader
+            ShortcutDef::Leader(_second) => {
+                // Resolved in init_shortcuts with the configured leader
                 None
             }
         }
     }
 
-    pub fn to_key_binding_with_leader(
+    pub fn to_shortcut_with_leader(
         &self,
-        leader: &crate::keybinding::KeyCombo,
-    ) -> Option<crate::keybinding::KeyBinding> {
+        leader: &crate::shortcut::KeyCombo,
+    ) -> Option<crate::shortcut::Shortcut> {
         match self {
-            KeyBindingDef::Direct(combo) => {
-                Some(crate::keybinding::KeyBinding::Direct(combo.to_key_combo()?))
+            ShortcutDef::Direct(combo) => {
+                Some(crate::shortcut::Shortcut::Direct(combo.to_key_combo()?))
             }
-            KeyBindingDef::Chord(prefix, second) => Some(crate::keybinding::KeyBinding::Chord(
+            ShortcutDef::Chord(prefix, second) => Some(crate::shortcut::Shortcut::Chord(
                 prefix.to_key_combo()?,
                 second.to_key_combo()?,
             )),
-            KeyBindingDef::Leader(second) => Some(crate::keybinding::KeyBinding::Chord(
+            ShortcutDef::Leader(second) => Some(crate::shortcut::Shortcut::Chord(
                 leader.clone(),
                 second.to_key_combo()?,
             )),
@@ -122,11 +122,11 @@ pub struct KeyComboDef {
 }
 
 impl KeyComboDef {
-    pub fn to_key_combo(&self) -> Option<crate::keybinding::KeyCombo> {
-        let resolved = crate::keybinding::resolve_key(&self.key)?;
-        Some(crate::keybinding::KeyCombo {
+    pub fn to_key_combo(&self) -> Option<crate::shortcut::KeyCombo> {
+        let resolved = crate::shortcut::resolve_key(&self.key)?;
+        Some(crate::shortcut::KeyCombo {
             key: resolved.key,
-            modifiers: crate::keybinding::Modifiers {
+            modifiers: crate::shortcut::Modifiers {
                 ctrl: self.ctrl,
                 shift: self.shift || resolved.implicit_shift,
                 alt: self.alt,

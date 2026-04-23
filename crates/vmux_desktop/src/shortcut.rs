@@ -4,11 +4,11 @@ use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use std::time::Instant;
 
-pub struct KeyBindingPlugin;
+pub struct ShortcutPlugin;
 
-impl Plugin for KeyBindingPlugin {
+impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, init_keybindings.after(load_settings))
+        app.add_systems(Startup, init_shortcuts.after(load_settings))
             .add_systems(Update, process_key_input.in_set(WriteAppCommands));
     }
 }
@@ -28,14 +28,14 @@ pub struct KeyCombo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum KeyBinding {
+pub enum Shortcut {
     Direct(KeyCombo),
     Chord(KeyCombo, KeyCombo),
 }
 
 #[derive(Resource, Debug, Clone)]
-pub struct KeyBindingMap {
-    pub bindings: Vec<(KeyBinding, String)>,
+pub struct ShortcutMap {
+    pub bindings: Vec<(Shortcut, String)>,
     pub chord_timeout_ms: u64,
 }
 
@@ -52,34 +52,34 @@ impl Default for ChordState {
     }
 }
 
-fn init_keybindings(mut commands: Commands, settings: Option<Res<AppSettings>>) {
-    let mut map = KeyBindingMap {
-        bindings: AppCommand::default_key_bindings(),
+fn init_shortcuts(mut commands: Commands, settings: Option<Res<AppSettings>>) {
+    let mut map = ShortcutMap {
+        bindings: AppCommand::default_shortcuts(),
         chord_timeout_ms: 1000,
     };
 
     if let Some(settings) = settings {
-        map.chord_timeout_ms = settings.keybindings.chord_timeout_ms;
+        map.chord_timeout_ms = settings.shortcuts.chord_timeout_ms;
 
         // Parse the configured leader key
-        if let Some(leader) = settings.keybindings.leader.to_key_combo() {
+        if let Some(leader) = settings.shortcuts.leader.to_key_combo() {
             // Replace chord prefixes in default bindings with the configured leader
             for (binding, _) in &mut map.bindings {
-                if let KeyBinding::Chord(prefix, _) = binding {
+                if let Shortcut::Chord(prefix, _) = binding {
                     *prefix = leader.clone();
                 }
             }
 
             // Add user-specified bindings, resolving Leader(...) with the leader key
-            for entry in &settings.keybindings.bindings {
-                if let Some(binding) = entry.binding.to_key_binding_with_leader(&leader) {
+            for entry in &settings.shortcuts.bindings {
+                if let Some(binding) = entry.binding.to_shortcut_with_leader(&leader) {
                     map.bindings.push((binding, entry.command.clone()));
                 }
             }
         } else {
             // Leader parse failed, fall through with defaults
-            for entry in &settings.keybindings.bindings {
-                if let Some(binding) = entry.binding.to_key_binding() {
+            for entry in &settings.shortcuts.bindings {
+                if let Some(binding) = entry.binding.to_shortcut() {
                     map.bindings.push((binding, entry.command.clone()));
                 }
             }
@@ -92,7 +92,7 @@ fn init_keybindings(mut commands: Commands, settings: Option<Res<AppSettings>>) 
 
 fn process_key_input(
     keyboard: Res<ButtonInput<KeyCode>>,
-    bindings: Res<KeyBindingMap>,
+    bindings: Res<ShortcutMap>,
     mut chord_state: ResMut<ChordState>,
     mut writer: MessageWriter<AppCommand>,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
@@ -134,7 +134,7 @@ fn process_key_input(
                     effective.modifiers.super_key = false;
                 }
                 for (binding, cmd_id) in &bindings.bindings {
-                    if let KeyBinding::Chord(b_prefix, b_second) = binding {
+                    if let Shortcut::Chord(b_prefix, b_second) = binding {
                         if b_prefix == prefix && *b_second == effective {
                             if let Some(cmd) = AppCommand::from_menu_id(cmd_id.as_str()) {
                                 writer.write(cmd);
@@ -153,13 +153,13 @@ fn process_key_input(
 
         for (binding, cmd_id) in &bindings.bindings {
             match binding {
-                KeyBinding::Direct(combo) if *combo == pressed => {
+                Shortcut::Direct(combo) if *combo == pressed => {
                     if let Some(cmd) = AppCommand::from_menu_id(cmd_id.as_str()) {
                         writer.write(cmd);
                     }
                     return;
                 }
-                KeyBinding::Chord(prefix, _) if *prefix == pressed => {
+                Shortcut::Chord(prefix, _) if *prefix == pressed => {
                     chord_state.pending_prefix = Some((pressed, Instant::now()));
                     // Suppress keyboard forwarding to CEF while waiting for
                     // the second key of the chord.

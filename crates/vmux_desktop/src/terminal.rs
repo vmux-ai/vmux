@@ -554,7 +554,7 @@ fn handle_terminal_keyboard(
     mut er: MessageReader<KeyboardInput>,
     mut q: Query<(&PtyHandle, &mut TerminalState), (With<Terminal>, With<CefKeyboardTarget>)>,
     input: Res<ButtonInput<KeyCode>>,
-    chord_state: Res<crate::keybinding::ChordState>,
+    chord_state: Res<crate::shortcut::ChordState>,
 ) {
     if q.is_empty() {
         return;
