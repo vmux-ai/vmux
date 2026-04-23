@@ -8,6 +8,8 @@ use crate::{
         tab::{Tab, active_among, collect_leaf_panes, focused_tab},
         window::Modal,
     },
+    settings::AppSettings,
+    terminal::Terminal,
 };
 use bevy::{ecs::message::MessageReader, ecs::relationship::Relationship, prelude::*, ui::UiSystems};
 use bevy_cef::prelude::*;
@@ -17,6 +19,7 @@ use vmux_command_bar::event::{
 };
 use vmux_header::{Header, PageMetadata};
 use vmux_history::LastActivatedAt;
+use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
 
 /// Deferred visibility for the command bar modal. Counts frames after Display::Flex
 /// so CEF can resize the webview before the modal becomes visible.
@@ -93,19 +96,34 @@ fn handle_open_command_bar(
             Without<Modal>,
         ),
     >,
+    mut new_tab_ctx: ResMut<NewTabContext>,
     mut commands: Commands,
 ) {
+    // Determine whether to open: either via FocusAddressBar command or NewTabContext
+    let mut should_open = false;
+    let mut should_toggle = false;
+
     for cmd in reader.read() {
-        let AppCommand::Browser(BrowserCommand::FocusAddressBar) = *cmd else {
-            continue;
-        };
+        if matches!(*cmd, AppCommand::Browser(BrowserCommand::FocusAddressBar)) {
+            should_toggle = true;
+        }
+    }
 
-        let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut() else {
-            continue;
-        };
+    if new_tab_ctx.needs_open {
+        should_open = true;
+        new_tab_ctx.needs_open = false;
+    }
 
-        // Toggle: if already open, close it
-        if modal_node.display != Display::None {
+    if should_toggle {
+        let is_open = modal_q
+            .single()
+            .map(|(_, n, _)| n.display != Display::None)
+            .unwrap_or(false);
+        if is_open {
+            // Close command bar (toggle off)
+            let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut() else {
+                return;
+            };
             modal_node.display = Display::None;
             *modal_vis = Visibility::Hidden;
             commands
@@ -113,7 +131,6 @@ fn handle_open_command_bar(
                 .remove::<CefKeyboardTarget>()
                 .remove::<CefPointerTarget>()
                 .remove::<PendingCommandBarReveal>();
-            // Restore keyboard to active content browser
             let (_, _, active_tab) =
                 focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
             if let Some(tab) = active_tab {
@@ -128,26 +145,42 @@ fn handle_open_command_bar(
                     }
                 }
             }
-            continue;
+            return;
+        } else {
+            should_open = true;
         }
+    }
 
-        // Open command bar — keep hidden until CEF resizes (see reveal_command_bar)
-        modal_node.display = Display::Flex;
-        commands.entity(modal_e).insert(PendingCommandBarReveal(0));
+    if !should_open {
+        return;
+    }
 
-        // Remove keyboard target from all content browsers
-        for browser_e in &content_browsers {
-            commands.entity(browser_e).remove::<CefKeyboardTarget>();
-        }
-        commands
-            .entity(modal_e)
-            .insert(CefKeyboardTarget)
-            .insert(CefPointerTarget);
+    let Ok((modal_e, mut modal_node, _)) = modal_q.single_mut() else {
+        return;
+    };
 
-        // Gather current URL
+    let is_new_tab = new_tab_ctx.tab.is_some();
+
+    // Open command bar — keep hidden until CEF resizes (see reveal_command_bar)
+    modal_node.display = Display::Flex;
+    commands.entity(modal_e).insert(PendingCommandBarReveal(0));
+
+    // Remove keyboard target from all content browsers
+    for browser_e in &content_browsers {
+        commands.entity(browser_e).remove::<CefKeyboardTarget>();
+    }
+    commands
+        .entity(modal_e)
+        .insert(CefKeyboardTarget)
+        .insert(CefPointerTarget);
+
+    // Gather current URL (empty for new tab mode)
+    let current_url = if is_new_tab {
+        String::new()
+    } else {
         let (_, _, active_tab) =
             focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
-        let current_url = active_tab
+        active_tab
             .and_then(|tab| {
                 let Ok(children) = all_children.get(tab) else {
                     return None;
@@ -155,65 +188,68 @@ fn handle_open_command_bar(
                 children.iter().find_map(|e| browser_meta.get(e).ok())
             })
             .map(|meta| meta.url.clone())
-            .unwrap_or_default();
+            .unwrap_or_default()
+    };
 
-        // Gather all tabs
-        let active_space = active_among(spaces.iter());
-        let mut bar_tabs = Vec::new();
-        if let Some(space) = active_space {
-            let mut space_panes = Vec::new();
-            collect_leaf_panes(space, &all_children, &leaf_panes, &mut space_panes);
-            let active_pane = active_tab.and_then(|t| {
-                child_of_q.get(t).ok().map(|co| co.get())
-            });
-            for &pane_e in &space_panes {
-                let is_active_pane = active_pane == Some(pane_e);
-                if let Ok(children) = pane_children.get(pane_e) {
-                    let mut tab_index = 0usize;
-                    for child in children.iter() {
-                        if !tab_q.contains(child) {
-                            continue;
-                        }
-                        let tab_is_active = active_tab == Some(child) && is_active_pane;
-                        if let Ok(tab_kids) = all_children.get(child) {
-                            for browser_e in tab_kids.iter() {
-                                if let Ok(meta) = browser_meta.get(browser_e) {
-                                    bar_tabs.push(CommandBarTab {
-                                        title: meta.title.clone(),
-                                        url: meta.url.clone(),
-                                        pane_id: pane_e.to_bits(),
-                                        tab_index,
-                                        is_active: tab_is_active,
-                                    });
-                                }
+    // Gather all tabs
+    let active_space = active_among(spaces.iter());
+    let mut bar_tabs = Vec::new();
+    if let Some(space) = active_space {
+        let (_, _, active_tab) =
+            focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
+        let active_pane = active_tab.and_then(|t| {
+            child_of_q.get(t).ok().map(|co| co.get())
+        });
+        let mut space_panes = Vec::new();
+        collect_leaf_panes(space, &all_children, &leaf_panes, &mut space_panes);
+        for &pane_e in &space_panes {
+            let is_active_pane = active_pane == Some(pane_e);
+            if let Ok(children) = pane_children.get(pane_e) {
+                let mut tab_index = 0usize;
+                for child in children.iter() {
+                    if !tab_q.contains(child) {
+                        continue;
+                    }
+                    let tab_is_active = active_tab == Some(child) && is_active_pane;
+                    if let Ok(tab_kids) = all_children.get(child) {
+                        for browser_e in tab_kids.iter() {
+                            if let Ok(meta) = browser_meta.get(browser_e) {
+                                bar_tabs.push(CommandBarTab {
+                                    title: meta.title.clone(),
+                                    url: meta.url.clone(),
+                                    pane_id: pane_e.to_bits(),
+                                    tab_index,
+                                    is_active: tab_is_active,
+                                });
                             }
                         }
-                        tab_index += 1;
                     }
+                    tab_index += 1;
                 }
             }
         }
+    }
 
-        // Build command list
-        let bar_commands: Vec<CommandBarCommandEntry> = command_list()
-            .into_iter()
-            .map(|e| CommandBarCommandEntry {
-                id: e.id.into(),
-                name: e.name.into(),
-                shortcut: e.shortcut.into(),
-            })
-            .collect();
+    // Build command list
+    let bar_commands: Vec<CommandBarCommandEntry> = command_list()
+        .into_iter()
+        .map(|e| CommandBarCommandEntry {
+            id: e.id.into(),
+            name: e.name.into(),
+            shortcut: e.shortcut.into(),
+        })
+        .collect();
 
-        // Send open event to command bar webview
-        if browsers.has_browser(modal_e) && browsers.host_emit_ready(&modal_e) {
-            let payload = CommandBarOpenEvent {
-                url: current_url,
-                tabs: bar_tabs,
-                commands: bar_commands,
-            };
-            let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-            commands.trigger(HostEmitEvent::new(modal_e, COMMAND_BAR_OPEN_EVENT, &ron_body));
-        }
+    // Send open event to command bar webview
+    if browsers.has_browser(modal_e) && browsers.host_emit_ready(&modal_e) {
+        let payload = CommandBarOpenEvent {
+            url: current_url,
+            tabs: bar_tabs,
+            commands: bar_commands,
+            new_tab: is_new_tab,
+        };
+        let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
+        commands.trigger(HostEmitEvent::new(modal_e, COMMAND_BAR_OPEN_EVENT, &ron_body));
     }
 }
 
@@ -237,10 +273,18 @@ fn on_command_bar_action(
             Without<Modal>,
         ),
     >,
+    settings: Res<AppSettings>,
+    mut new_tab_ctx: ResMut<NewTabContext>,
     mut writer: MessageWriter<AppCommand>,
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let evt = &trigger.event().payload;
+    let empty_tab = new_tab_ctx.tab;
+    let previous_tab = new_tab_ctx.previous_tab;
+    // Track whether we handle keyboard restore ourselves
+    let mut custom_keyboard_restore = false;
 
     match evt.action.as_str() {
         "navigate" => {
@@ -252,32 +296,98 @@ fn on_command_bar_action(
                 format!("https://www.google.com/search?q={}", evt.value)
             };
 
-            // vmux://terminal/ requires a full Terminal entity with PTY
-            if url.starts_with("vmux://terminal") {
-                writer.write(AppCommand::Terminal(TerminalCommand::New));
+            if let Some(tab_e) = empty_tab {
+                // New tab mode: attach content to the empty tab
+                if url.starts_with("vmux://terminal") {
+                    commands.entity(tab_e).insert(PageMetadata {
+                        url: TERMINAL_WEBVIEW_URL.to_string(),
+                        title: "Terminal (Session: -)".to_string(),
+                        ..default()
+                    });
+                    let term_e = commands
+                        .spawn((
+                            Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                            ChildOf(tab_e),
+                        ))
+                        .id();
+                    commands.entity(term_e).insert(CefKeyboardTarget);
+                } else {
+                    let browser_e = commands
+                        .spawn((
+                            Browser::new(&mut meshes, &mut webview_mt, &url),
+                            ChildOf(tab_e),
+                        ))
+                        .id();
+                    commands.entity(browser_e).insert(CefKeyboardTarget);
+                }
+                commands.entity(tab_e).remove::<BackgroundColor>();
+                new_tab_ctx.tab = None;
+                new_tab_ctx.previous_tab = None;
+                custom_keyboard_restore = true;
             } else {
-                let (_, _, active_tab) =
-                    focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
-                if let Some(tab) = active_tab {
-                    for browser_e in &content_browsers {
-                        let is_child = child_of_q
-                            .get(browser_e)
-                            .ok()
-                            .map(|co| co.get() == tab)
-                            .unwrap_or(false);
-                        if is_child {
-                            commands.entity(browser_e).insert(WebviewSource::new(&url));
+                // Normal mode: navigate or spawn terminal in current tab
+                if url.starts_with("vmux://terminal") {
+                    writer.write(AppCommand::Terminal(TerminalCommand::New));
+                } else {
+                    let (_, _, active_tab) =
+                        focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
+                    if let Some(tab) = active_tab {
+                        for browser_e in &content_browsers {
+                            let is_child = child_of_q
+                                .get(browser_e)
+                                .ok()
+                                .map(|co| co.get() == tab)
+                                .unwrap_or(false);
+                            if is_child {
+                                commands.entity(browser_e).insert(WebviewSource::new(&url));
+                            }
                         }
                     }
                 }
+            }
+        }
+        "terminal" => {
+            // New action: spawn terminal in the empty tab
+            if let Some(tab_e) = empty_tab {
+                commands.entity(tab_e).insert(PageMetadata {
+                    url: TERMINAL_WEBVIEW_URL.to_string(),
+                    title: "Terminal (Session: -)".to_string(),
+                    ..default()
+                });
+                let term_e = commands
+                    .spawn((
+                        Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                        ChildOf(tab_e),
+                    ))
+                    .id();
+                commands.entity(term_e).insert(CefKeyboardTarget);
+                commands.entity(tab_e).remove::<BackgroundColor>();
+                new_tab_ctx.tab = None;
+                new_tab_ctx.previous_tab = None;
+                custom_keyboard_restore = true;
+            } else {
+                // Fallback: create a new terminal tab via existing flow
+                writer.write(AppCommand::Terminal(TerminalCommand::New));
             }
         }
         "command" => {
             if let Some(cmd) = match_command(&evt.value) {
                 writer.write(cmd);
             }
+            // If in new-tab mode and a command was executed, clean up the empty tab
+            if let Some(tab_e) = empty_tab {
+                commands.entity(tab_e).despawn_recursive();
+                new_tab_ctx.tab = None;
+                new_tab_ctx.previous_tab = None;
+            }
         }
         "switch_tab" => {
+            // Despawn empty tab if in new-tab mode
+            if let Some(tab_e) = empty_tab {
+                commands.entity(tab_e).despawn_recursive();
+                new_tab_ctx.tab = None;
+                new_tab_ctx.previous_tab = None;
+            }
             if let Some((pane_bits, tab_idx)) = evt.value.split_once(':') {
                 if let (Ok(pane_id), Ok(tab_index)) =
                     (pane_bits.parse::<u64>(), tab_idx.parse::<usize>())
@@ -297,7 +407,25 @@ fn on_command_bar_action(
                 }
             }
         }
-        _ => {} // "dismiss" and unknown
+        _ => {
+            // "dismiss" and unknown actions
+            if let Some(tab_e) = empty_tab {
+                commands.entity(tab_e).despawn_recursive();
+                new_tab_ctx.tab = None;
+                // Restore keyboard to previous tab's browser
+                if let Some(prev) = previous_tab {
+                    if let Ok(children) = all_children.get(prev) {
+                        for child in children.iter() {
+                            if content_browsers.contains(child) {
+                                commands.entity(child).insert(CefKeyboardTarget);
+                            }
+                        }
+                    }
+                }
+                new_tab_ctx.previous_tab = None;
+                custom_keyboard_restore = true;
+            }
+        }
     }
 
     // Close command bar and restore keyboard
@@ -310,17 +438,19 @@ fn on_command_bar_action(
             .remove::<CefPointerTarget>()
             .remove::<PendingCommandBarReveal>();
     }
-    let (_, _, active_tab) =
-        focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
-    if let Some(tab) = active_tab {
-        for browser_e in &content_browsers {
-            let is_child = child_of_q
-                .get(browser_e)
-                .ok()
-                .map(|co| co.get() == tab)
-                .unwrap_or(false);
-            if is_child {
-                commands.entity(browser_e).insert(CefKeyboardTarget);
+    if !custom_keyboard_restore {
+        let (_, _, active_tab) =
+            focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
+        if let Some(tab) = active_tab {
+            for browser_e in &content_browsers {
+                let is_child = child_of_q
+                    .get(browser_e)
+                    .ok()
+                    .map(|co| co.get() == tab)
+                    .unwrap_or(false);
+                if is_child {
+                    commands.entity(browser_e).insert(CefKeyboardTarget);
+                }
             }
         }
     }
