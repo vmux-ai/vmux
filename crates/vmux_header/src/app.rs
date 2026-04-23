@@ -85,49 +85,43 @@ pub fn App() -> Element {
                     }
                 }
                 div { class: "flex min-w-0 flex-1 items-center",
-                    if let Some(tab) = active_row.as_ref() {
-                        div {
-                            class: "glass flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-full px-3 py-1.5 shadow-sm",
-                            onclick: move |_| {
-                                let _ = try_cef_emit_serde(&HeaderCommandEvent {
-                                    header_command: "focus_address_bar".to_string(),
-                                });
-                            },
-                            if tab.url.starts_with("vmux://terminal") {
-                                Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                                    path { d: "M4 17 10 11 4 5" }
-                                    path { d: "M12 19h8" }
-                                }
-                            } else if let Some(src) = favicon_src.as_ref() {
-                                if favicon_error() {
+                    div {
+                        class: "glass flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-full px-3 py-1.5 shadow-sm",
+                        onclick: move |_| {
+                            let _ = try_cef_emit_serde(&HeaderCommandEvent {
+                                header_command: "focus_address_bar".to_string(),
+                            });
+                        },
+                        if let Some(tab) = active_row.as_ref() {
+                            if !tab.url.is_empty() {
+                                if tab.url.starts_with("vmux://terminal") {
+                                    Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                                        path { d: "M4 17 10 11 4 5" }
+                                        path { d: "M12 19h8" }
+                                    }
+                                } else if let Some(src) = favicon_src.as_ref() {
+                                    if favicon_error() {
+                                        Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                                            path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }
+                                            path { d: "M2 12h20" }
+                                            path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" }
+                                        }
+                                    } else {
+                                        img {
+                                            class: "h-4 w-4 shrink-0 rounded-sm object-contain",
+                                            src: "{src}",
+                                            onerror: move |_| favicon_error.set(true),
+                                        }
+                                    }
+                                } else {
                                     Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                                         path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }
                                         path { d: "M2 12h20" }
                                         path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" }
                                     }
-                                } else {
-                                    img {
-                                        class: "h-4 w-4 shrink-0 rounded-sm object-contain",
-                                        src: "{src}",
-                                        onerror: move |_| favicon_error.set(true),
-                                    }
                                 }
-                            } else {
-                                Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                                    path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }
-                                    path { d: "M2 12h20" }
-                                    path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" }
-                                }
-                            }
-                            if tab.url.is_empty() {
-                                span { class: "min-w-0 truncate text-sm text-foreground", "New tab" }
-                            } else {
                                 span { class: "min-w-0 truncate text-sm text-foreground", "{tab.url}" }
                             }
-                        }
-                    } else {
-                        div {
-                            class: "flex min-w-0 flex-1 items-center rounded-full px-3 py-1.5",
                         }
                     }
                 }

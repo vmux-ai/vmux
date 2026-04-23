@@ -189,7 +189,7 @@ pub fn App() -> Element {
             class: "flex h-full w-full items-start justify-center pt-[15%]",
             onclick: move |_| { is_open.set(false); emit_action("dismiss", ""); },
             div {
-                class: "flex w-full max-w-xl flex-col rounded-xl border border-white/20 bg-white/10 shadow-2xl shadow-black/40 ring-1 ring-white/10 backdrop-blur-2xl backdrop-saturate-150",
+                class: "flex w-full max-w-xl flex-col overflow-hidden rounded-xl border border-white/30 bg-white/30 shadow-2xl shadow-black/60 ring-1 ring-white/20 backdrop-blur-3xl backdrop-saturate-200",
                 onclick: move |e| { e.stop_propagation(); },
                 div { class: "flex items-center gap-2 p-2",
                     span { class: "select-none pl-2 font-mono text-base text-muted-foreground", ">_" }
@@ -339,6 +339,14 @@ fn focus_and_install_ctrl_bindings() {
             "KeyH" => "bksp",
             "KeyW" => "delw",
             "KeyU" => "delbeg",
+            // Suppress Ctrl+N/P/J/K default so CEF doesn't translate
+            // them into synthetic ArrowDown/ArrowUp that double-fire.
+            // Only preventDefault (no stopImmediatePropagation) so the
+            // Dioxus onkeydown handler still receives the event.
+            "KeyN" | "KeyJ" | "KeyP" | "KeyK" => {
+                e.prevent_default();
+                return;
+            }
             _ => return,
         };
         e.prevent_default();
