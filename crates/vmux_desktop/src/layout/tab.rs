@@ -1,6 +1,7 @@
 use crate::{
     browser::Browser,
     command::{AppCommand, ReadAppCommands, TabCommand, TerminalCommand},
+    command_bar::NewTabContext,
     layout::pane::{first_leaf_descendant, first_tab_in_pane, Pane, PaneSplit},
     layout::space::Space,
     settings::AppSettings,
@@ -122,6 +123,7 @@ fn handle_tab_commands(
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
     settings: Res<AppSettings>,
+    mut new_tab_ctx: ResMut<NewTabContext>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -156,14 +158,22 @@ fn handle_tab_commands(
                         ChildOf(tab),
                     ));
                 } else {
-                    let startup_url = settings.browser.startup_url.as_str();
+                    // If there's already an empty tab pending, reuse it
+                    if new_tab_ctx.tab.is_some() {
+                        new_tab_ctx.needs_open = true;
+                        continue;
+                    }
                     let tab = commands
-                        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                        .spawn((
+                            tab_bundle(),
+                            LastActivatedAt::now(),
+                            ChildOf(pane),
+                            BackgroundColor(Color::srgba(0.1, 0.1, 0.1, 0.85)),
+                        ))
                         .id();
-                    commands.spawn((
-                        Browser::new(&mut meshes, &mut webview_mt, startup_url),
-                        ChildOf(tab),
-                    ));
+                    new_tab_ctx.tab = Some(tab);
+                    new_tab_ctx.previous_tab = active_tab;
+                    new_tab_ctx.needs_open = true;
                 }
             }
             TabCommand::Close => {
