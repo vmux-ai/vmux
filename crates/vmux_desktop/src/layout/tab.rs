@@ -1,5 +1,4 @@
 use crate::{
-    browser::Browser,
     command::{AppCommand, ReadAppCommands, TabCommand, TerminalCommand},
     command_bar::NewTabContext,
     layout::pane::{first_leaf_descendant, first_tab_in_pane, Pane, PaneSplit},

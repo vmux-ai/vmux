@@ -376,7 +376,7 @@ fn on_command_bar_action(
             }
             // If in new-tab mode and a command was executed, clean up the empty tab
             if let Some(tab_e) = empty_tab {
-                commands.entity(tab_e).despawn_recursive();
+                commands.entity(tab_e).despawn();
                 new_tab_ctx.tab = None;
                 new_tab_ctx.previous_tab = None;
             }
@@ -384,7 +384,7 @@ fn on_command_bar_action(
         "switch_tab" => {
             // Despawn empty tab if in new-tab mode
             if let Some(tab_e) = empty_tab {
-                commands.entity(tab_e).despawn_recursive();
+                commands.entity(tab_e).despawn();
                 new_tab_ctx.tab = None;
                 new_tab_ctx.previous_tab = None;
             }
@@ -410,7 +410,7 @@ fn on_command_bar_action(
         _ => {
             // "dismiss" and unknown actions
             if let Some(tab_e) = empty_tab {
-                commands.entity(tab_e).despawn_recursive();
+                commands.entity(tab_e).despawn();
                 new_tab_ctx.tab = None;
                 // Restore keyboard to previous tab's browser
                 if let Some(prev) = previous_tab {
