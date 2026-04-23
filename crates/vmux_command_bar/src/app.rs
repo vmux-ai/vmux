@@ -191,13 +191,13 @@ pub fn App() -> Element {
             class: "flex h-full w-full items-start justify-center pt-[15%]",
             onclick: move |_| { is_open.set(false); emit_action("dismiss", ""); },
             div {
-                class: "glass flex w-full max-w-xl flex-col rounded-lg shadow-2xl",
+                class: "flex w-full max-w-xl flex-col rounded-xl border border-white/20 bg-white/10 shadow-2xl shadow-black/40 ring-1 ring-white/10 backdrop-blur-2xl backdrop-saturate-150",
                 onclick: move |e| { e.stop_propagation(); },
                 div { class: "p-2",
                     input {
                         id: "command-bar-input",
                         r#type: "text",
-                        class: "glass w-full rounded-lg px-3 py-2.5 text-base text-foreground outline-none placeholder:text-muted-foreground",
+                        class: "w-full rounded-lg bg-white/5 px-3 py-2.5 text-base text-foreground outline-none placeholder:text-muted-foreground",
                         placeholder: if is_new_tab {
                             "Search or type a URL, or select Terminal..."
                         } else {
@@ -243,9 +243,9 @@ pub fn App() -> Element {
                                 key: "{i}",
                                 id: "command-bar-item-{i}",
                                 class: if i == sel {
-                                    "glass flex cursor-pointer items-center justify-between rounded-lg px-3 py-2"
+                                    "flex cursor-pointer items-center justify-between rounded-lg bg-white/10 px-3 py-2"
                                 } else {
-                                    "flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 hover:bg-muted/50"
+                                    "flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 hover:bg-white/5"
                                 },
                                 onclick: {
                                     let item = item.clone();
