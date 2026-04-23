@@ -211,9 +211,13 @@ pub fn App() -> Element {
                         },
                         onkeydown: move |e| {
                             let ctrl = e.modifiers().contains(Modifiers::CONTROL);
-                            let go_down = e.key() == Key::ArrowDown
+                            // CEF translates Ctrl+N → ArrowDown at the native
+                            // level, so an ArrowDown arrives with Ctrl still
+                            // held. Only accept bare arrows (no Ctrl) to avoid
+                            // double-firing alongside the Ctrl+N match below.
+                            let go_down = (e.key() == Key::ArrowDown && !ctrl)
                                 || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
-                            let go_up = e.key() == Key::ArrowUp
+                            let go_up = (e.key() == Key::ArrowUp && !ctrl)
                                 || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
 
                             if go_down {
