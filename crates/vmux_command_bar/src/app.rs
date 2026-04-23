@@ -269,7 +269,10 @@ pub fn App() -> Element {
                                         span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "Tab" }
                                     },
                                     ResultItem::Command { name, shortcut, .. } => rsx! {
-                                        span { class: "text-base text-foreground", "{name}" }
+                                        div { class: "flex items-center gap-2",
+                                            span { class: "shrink-0 text-base text-muted-foreground", ">_" }
+                                            span { class: "text-base text-foreground", "{name}" }
+                                        }
                                         span { class: "ml-2 shrink-0 rounded bg-muted px-1.5 py-0.5 text-sm text-muted-foreground", "{shortcut}" }
                                     },
                                     ResultItem::Navigate { url } => rsx! {
