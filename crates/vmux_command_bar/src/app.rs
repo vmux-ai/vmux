@@ -11,6 +11,7 @@ use wasm_bindgen::JsCast;
 
 #[derive(Clone, PartialEq)]
 enum ResultItem {
+    Terminal,
     Tab {
         title: String,
         url: String,
@@ -31,18 +32,21 @@ fn filter_results(
     query: &str,
     tabs: &[CommandBarTab],
     commands: &[CommandBarCommandEntry],
+    new_tab: bool,
 ) -> Vec<ResultItem> {
     let q = query.trim();
     if q.is_empty() {
-        let mut items: Vec<ResultItem> = tabs
-            .iter()
-            .map(|t| ResultItem::Tab {
-                title: t.title.clone(),
-                url: t.url.clone(),
-                pane_id: t.pane_id,
-                tab_index: t.tab_index,
-            })
-            .collect();
+        let mut items: Vec<ResultItem> = Vec::new();
+        // In new-tab mode, Terminal is always the first result
+        if new_tab {
+            items.push(ResultItem::Terminal);
+        }
+        items.extend(tabs.iter().map(|t| ResultItem::Tab {
+            title: t.title.clone(),
+            url: t.url.clone(),
+            pane_id: t.pane_id,
+            tab_index: t.tab_index,
+        }));
         items.extend(commands.iter().map(|c| ResultItem::Command {
             id: c.id.clone(),
             name: c.name.clone(),
@@ -58,6 +62,10 @@ fn filter_results(
     let mut items = Vec::new();
 
     if !commands_only {
+        // In new-tab mode, show Terminal if it matches the query
+        if new_tab && "terminal".contains(&search_lower) {
+            items.push(ResultItem::Terminal);
+        }
         for t in tabs {
             if t.title.to_lowercase().contains(&search_lower)
                 || t.url.to_lowercase().contains(&search_lower)
@@ -104,12 +112,14 @@ pub fn App() -> Element {
     let mut state = use_signal(CommandBarOpenEvent::default);
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
+    let mut new_tab = use_signal(|| false);
     let mut is_open = use_signal(|| false);
 
     let _listener =
         use_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
             query.set(data.url.clone());
             selected.set(0);
+            new_tab.set(data.new_tab);
             state.set(data);
             is_open.set(true);
         });
@@ -127,9 +137,11 @@ pub fn App() -> Element {
         url: _,
         tabs,
         commands,
+        new_tab: _,
     } = state();
     let q = query();
-    let results = filter_results(&q, &tabs, &commands);
+    let is_new_tab = new_tab();
+    let results = filter_results(&q, &tabs, &commands, is_new_tab);
     let sel = selected().min(results.len().saturating_sub(1));
 
     // Auto-scroll selected item into view when selection changes.
@@ -148,6 +160,9 @@ pub fn App() -> Element {
     let mut execute = move |item: &ResultItem| {
         is_open.set(false);
         match item {
+            ResultItem::Terminal => {
+                emit_action("terminal", "");
+            }
             ResultItem::Tab {
                 pane_id, tab_index, ..
             } => {
@@ -178,7 +193,11 @@ pub fn App() -> Element {
                         id: "command-bar-input",
                         r#type: "text",
                         class: "glass w-full rounded-lg px-3 py-2.5 text-base text-foreground outline-none placeholder:text-muted-foreground",
-                        placeholder: "Type a URL, search tabs, or > for commands...",
+                        placeholder: if is_new_tab {
+                            "Search or type a URL, or select Terminal..."
+                        } else {
+                            "Type a URL, search tabs, or > for commands..."
+                        },
                         value: "{q}",
                         autofocus: true,
                         oninput: move |e| {
@@ -228,6 +247,13 @@ pub fn App() -> Element {
                                     move |_| { execute(&item); }
                                 },
                                 match item {
+                                    ResultItem::Terminal => rsx! {
+                                        div { class: "flex min-w-0 flex-col",
+                                            span { class: "text-base text-foreground", "Terminal" }
+                                            span { class: "text-sm text-muted-foreground", "Open a new terminal session" }
+                                        }
+                                        span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "\u{2318}T" }
+                                    },
                                     ResultItem::Tab { title, url, .. } => rsx! {
                                         div { class: "flex min-w-0 flex-col",
                                             span { class: "truncate text-base text-foreground", "{title}" }
