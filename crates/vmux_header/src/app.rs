@@ -121,6 +121,11 @@ pub fn App() -> Element {
                             }
                             span { class: "min-w-0 truncate text-sm text-foreground", "{tab.url}" }
                         }
+                    } else {
+                        div {
+                            class: "glass flex min-w-0 flex-1 items-center rounded-full px-3 py-1.5 shadow-sm",
+                            span { class: "text-sm text-muted-foreground", "No page open" }
+                        }
                     }
                 }
             }
