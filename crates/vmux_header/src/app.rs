@@ -120,7 +120,7 @@ pub fn App() -> Element {
                                 }
                             }
                             if tab.url.is_empty() {
-                                span { class: "min-w-0 truncate text-sm text-muted-foreground", "New tab" }
+                                span { class: "min-w-0 truncate text-sm text-foreground", "New tab" }
                             } else {
                                 span { class: "min-w-0 truncate text-sm text-foreground", "{tab.url}" }
                             }

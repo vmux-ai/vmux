@@ -38,7 +38,6 @@ fn filter_results(
     if q.is_empty() {
         let mut items: Vec<ResultItem> = Vec::new();
         if new_tab {
-            items.push(ResultItem::Navigate { url: String::new() });
             items.push(ResultItem::Terminal);
         }
         items.extend(tabs.iter().map(|t| ResultItem::Tab {
@@ -61,11 +60,9 @@ fn filter_results(
 
     let mut items = Vec::new();
 
-    if !commands_only && new_tab {
-        items.push(ResultItem::Navigate { url: search.to_string() });
-        if "terminal".contains(&search_lower) {
-            items.push(ResultItem::Terminal);
-        }
+    // Terminal action goes first when query matches
+    if !commands_only && new_tab && "terminal".contains(&search_lower) {
+        items.push(ResultItem::Terminal);
     }
 
     if !commands_only {
@@ -93,7 +90,8 @@ fn filter_results(
         }
     }
 
-    if !commands_only && !search.is_empty() && !new_tab {
+    // Navigate/search goes last as a fallback
+    if !commands_only && !search.is_empty() {
         items.push(ResultItem::Navigate {
             url: search.to_string(),
         });

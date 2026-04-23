@@ -596,6 +596,7 @@ fn push_pane_tree_emit(
                     continue;
                 }
                 let tab_is_active = active_tab == Some(child);
+                let mut found_browser = false;
                 if let Ok(tab_kids) = tab_children.get(child) {
                     for browser_e in tab_kids.iter() {
                         if let Ok((meta, loading)) = browser_meta.get(browser_e) {
@@ -607,8 +608,20 @@ fn push_pane_tree_emit(
                                 tab_index,
                                 is_loading: loading,
                             });
+                            found_browser = true;
                         }
                     }
+                }
+                // Empty tab (no Browser/Terminal child) — show placeholder
+                if !found_browser {
+                    tabs.push(TabNode {
+                        title: "New tab".to_string(),
+                        url: String::new(),
+                        favicon_url: String::new(),
+                        is_active: tab_is_active,
+                        tab_index,
+                        is_loading: false,
+                    });
                 }
                 tab_index += 1;
             }

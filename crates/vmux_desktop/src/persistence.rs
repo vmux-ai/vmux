@@ -233,6 +233,12 @@ pub(crate) fn rebuild_session_views(
 
     // -- Tab: add absolute-fill node + spawn Browser child --
     for (entity, meta) in &tabs_need_view {
+        // Discard empty tabs (no URL, no content) that were saved mid-session
+        if meta.url.is_empty() {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
         let mut ecmds = commands.entity(entity);
         ecmds.insert((
             Transform::default(),
@@ -263,13 +269,8 @@ pub(crate) fn rebuild_session_views(
                     ChildOf(entity),
                 ));
             } else {
-                let url = if meta.url.is_empty() {
-                    "about:blank"
-                } else {
-                    &meta.url
-                };
                 commands.spawn((
-                    Browser::new(&mut meshes, &mut webview_mt, url),
+                    Browser::new(&mut meshes, &mut webview_mt, &meta.url),
                     ChildOf(entity),
                 ));
             }
