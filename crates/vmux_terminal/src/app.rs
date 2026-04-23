@@ -100,11 +100,21 @@ pub fn App() -> Element {
         .map(|t| t.cursor_style.clone())
         .unwrap_or_else(|| "block".into());
 
+    // Include measured cell dimensions as CSS custom properties so they
+    // survive Dioxus style re-renders and are available for row height,
+    // cursor, and selection overlay positioning.
+    let (cw, ch) = cell_dims();
+    let cell_style = if cw > 0.0 && ch > 0.0 {
+        format!("--cw:{cw}px;--ch:{ch}px;")
+    } else {
+        String::new()
+    };
+
     rsx! {
         div {
             id: CONTAINER_ID,
             class: "relative h-full w-full overflow-hidden bg-term-bg text-term-fg font-mono text-sm leading-tight select-none",
-            style: "{theme_style}",
+            style: "{theme_style}{cell_style}",
 
             onmousedown: move |e: Event<MouseData>| {
                 e.prevent_default();
@@ -163,7 +173,7 @@ pub fn App() -> Element {
                     div {
                         key: "{row_idx}-{row_hash}",
                         class: "relative whitespace-pre",
-                        style: "height: 1.2em;",
+                        style: "height: var(--ch, 1.2em);",
                         for (span_idx , span) in line.spans.iter().enumerate() {
                             {render_span(span, span_idx, is_cursor_row, cursor_col, &vp.cursor.ch, &cursor_style, cursor_blink)}
                         }

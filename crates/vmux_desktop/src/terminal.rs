@@ -1088,6 +1088,7 @@ fn on_term_resize(
 fn sync_terminal_theme(
     q: Query<Entity, With<Terminal>>,
     new_terminals: Query<Entity, Added<Terminal>>,
+    newly_ready: Query<Entity, (With<Terminal>, Added<UiReady>)>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     mut commands: Commands,
@@ -1110,7 +1111,7 @@ fn sync_terminal_theme(
     };
 
     let theme_changed = hash != *last_theme_hash;
-    if !theme_changed && new_terminals.is_empty() {
+    if !theme_changed && new_terminals.is_empty() && newly_ready.is_empty() {
         return;
     }
     *last_theme_hash = hash;
@@ -1132,7 +1133,10 @@ fn sync_terminal_theme(
     let targets: Vec<Entity> = if theme_changed {
         q.iter().collect()
     } else {
-        new_terminals.iter().collect()
+        // Include both newly spawned terminals and terminals whose
+        // browser just became ready (fixes race where the browser
+        // wasn't ready on the first sync attempt).
+        new_terminals.iter().chain(newly_ready.iter()).collect()
     };
 
     for entity in targets {
