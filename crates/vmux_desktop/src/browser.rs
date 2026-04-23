@@ -484,6 +484,7 @@ fn push_tabs_host_emit(
     browsers: NonSend<Browsers>,
     status: Single<Entity, (With<Header>, With<UiReady>)>,
     browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), With<Browser>>,
+    new_tab_ctx: Res<crate::command_bar::NewTabContext>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -525,6 +526,17 @@ fn push_tabs_host_emit(
                 url: meta.url.clone(),
                 favicon_url: meta.favicon_url.clone(),
                 is_active,
+            });
+        }
+    }
+    // If the active tab is an empty new-tab, add a placeholder row
+    if let Some(empty_tab) = new_tab_ctx.tab {
+        if active_tab_opt == Some(empty_tab) && !rows.iter().any(|r| r.is_active) {
+            rows.push(TabRow {
+                title: "New tab".to_string(),
+                url: String::new(),
+                favicon_url: String::new(),
+                is_active: true,
             });
         }
     }
