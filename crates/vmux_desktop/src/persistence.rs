@@ -146,6 +146,7 @@ pub(crate) fn rebuild_session_views(
     tabs_need_view: Query<(Entity, &PageMetadata), (With<Tab>, Without<Node>)>,
     pane_sizes: Query<&PaneSize>,
     child_of_q: Query<&ChildOf>,
+    all_children: Query<&Children>,
     tab_children_q: Query<&Children, With<Tab>>,
     browser_q: Query<(), With<Browser>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
@@ -206,19 +207,12 @@ pub(crate) fn rebuild_session_views(
                 ..default()
             },
         ));
-        // Re-insert ChildOf via commands to trigger relationship hooks
-        // (populates Children on parent). Scene load uses reflect-based
-        // insertion which bypasses hooks.
-        if let Ok(co) = child_of_q.get(entity) {
-            ecmds.insert(ChildOf(co.get()));
-        }
     }
 
     // -- Leaf Pane: add stretch layout --
     for entity in &panes_need_view {
         let grow = pane_sizes.get(entity).map(|s| s.flex_grow).unwrap_or(1.0);
-        let mut ecmds = commands.entity(entity);
-        ecmds.insert((
+        commands.entity(entity).insert((
             Transform::default(),
             GlobalTransform::default(),
             Node {
@@ -229,9 +223,6 @@ pub(crate) fn rebuild_session_views(
                 ..default()
             },
         ));
-        if let Ok(co) = child_of_q.get(entity) {
-            ecmds.insert(ChildOf(co.get()));
-        }
     }
 
     // -- Tab: add absolute-fill node + spawn Browser child --
@@ -256,9 +247,6 @@ pub(crate) fn rebuild_session_views(
             },
             ZIndex(0),
         ));
-        if let Ok(co) = child_of_q.get(entity) {
-            ecmds.insert(ChildOf(co.get()));
-        }
 
         let has_browser = tab_children_q
             .get(entity)
@@ -276,6 +264,30 @@ pub(crate) fn rebuild_session_views(
                     Browser::new(&mut meshes, &mut webview_mt, &meta.url),
                     ChildOf(entity),
                 ));
+            }
+        }
+    }
+
+    // -- Re-insert ChildOf in saved Children order --
+    // Scene load deserializes ChildOf via reflection (bypassing hooks), so
+    // Bevy's relationship system hasn't populated Children from hooks yet.
+    // We re-insert ChildOf via commands so hooks fire and build the UI
+    // hierarchy. By iterating each parent's deserialized Children in order,
+    // the deferred commands preserve the saved sibling order.
+    let mut seen_parents = std::collections::HashSet::new();
+    for entity in splits_need_view.iter().map(|(e, _)| e)
+        .chain(panes_need_view.iter())
+        .chain(tabs_need_view.iter().map(|(e, _)| e))
+    {
+        let Ok(co) = child_of_q.get(entity) else { continue };
+        let parent = co.get();
+        if !seen_parents.insert(parent) {
+            continue;
+        }
+        let Ok(children) = all_children.get(parent) else { continue };
+        for child in children.iter() {
+            if let Ok(co) = child_of_q.get(child) {
+                commands.entity(child).insert(ChildOf(co.get()));
             }
         }
     }
