@@ -13,12 +13,34 @@ use moonshine_save::prelude::*;
 use vmux_history::LastActivatedAt;
 use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
 
+/// Cached result of `focused_tab()`, computed once per frame in `Update`
+/// after all command handlers. Read by push/sync systems to avoid redundant
+/// tree walks.
+#[derive(Resource, Default)]
+pub(crate) struct FocusedTab {
+    pub space: Option<Entity>,
+    pub pane: Option<Entity>,
+    pub tab: Option<Entity>,
+}
+
+/// System set for `compute_focused_tab`. Systems that read `Res<FocusedTab>`
+/// should be ordered `.after(ComputeFocusSet)` in `Update`.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ComputeFocusSet;
+
 pub(crate) struct TabPlugin;
 
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
+            .init_resource::<FocusedTab>()
             .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
+            .add_systems(
+                Update,
+                compute_focused_tab
+                    .in_set(ComputeFocusSet)
+                    .after(ReadAppCommands),
+            )
             .add_systems(PostUpdate, sync_tab_picking);
     }
 }
@@ -91,6 +113,23 @@ pub(crate) fn focused_tab(
     let pane = space.and_then(|s| active_pane_in_space(s, all_children, leaf_panes, pane_ts));
     let tab = pane.and_then(|p| active_tab_in_pane(p, pane_children, tab_ts));
     (space, pane, tab)
+}
+
+fn compute_focused_tab(
+    mut cached: ResMut<FocusedTab>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_children: Query<&Children, With<Pane>>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
+) {
+    let (space, pane, tab) = focused_tab(
+        &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts,
+    );
+    cached.space = space;
+    cached.pane = pane;
+    cached.tab = tab;
 }
 
 pub(crate) fn tab_bundle() -> impl Bundle {

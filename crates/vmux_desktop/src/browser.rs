@@ -8,7 +8,7 @@ use crate::{
         pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_tab_in_pane},
         side_sheet::SideSheet,
         space::Space,
-        tab::{Tab, tab_bundle, focused_tab, active_among,
+        tab::{Tab, tab_bundle, focused_tab,
               active_tab_in_pane, collect_leaf_panes},
     },
     settings::AppSettings,
@@ -79,7 +79,8 @@ impl Plugin for BrowserPlugin {
         .add_systems(
             Update,
             (push_tabs_host_emit, push_pane_tree_emit)
-                .after(vmux_header::system::apply_chrome_state_from_cef),
+                .after(vmux_header::system::apply_chrome_state_from_cef)
+                .after(crate::layout::tab::ComputeFocusSet),
         )
         .add_systems(
             PostUpdate,
@@ -164,12 +165,7 @@ impl Browser {
 
 fn sync_keyboard_target(
     mode: Res<crate::scene::InteractionMode>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    focus: Res<crate::layout::tab::FocusedTab>,
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
@@ -192,9 +188,7 @@ fn sync_keyboard_target(
             return;
         }
     }
-    let (_, _, active_tab_opt) = focused_tab(
-        &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts,
-    );
+    let active_tab_opt = focus.tab;
     let Some(active_tab_entity) = active_tab_opt else {
         return;
     };
@@ -397,10 +391,8 @@ fn sync_webview_pane_corner_clip(
 fn sync_osr_webview_focus(
     browsers: NonSend<Browsers>,
     webviews: Query<Entity, With<WebviewSource>>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
-    all_children: Query<&Children>,
+    focus: Res<crate::layout::tab::FocusedTab>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children_q: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: Query<&ChildOf>,
@@ -417,9 +409,7 @@ fn sync_osr_webview_focus(
     }
     ready.sort_by_key(|e| e.to_bits());
 
-    let (_, _, active_tab_opt) = focused_tab(
-        &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children_q, &tab_ts,
-    );
+    let active_tab_opt = focus.tab;
     let active = active_tab_opt
         .and_then(|tab| {
             ready.iter().copied().find(|&b| {
@@ -497,12 +487,7 @@ fn push_tabs_host_emit(
     status: Single<Entity, (With<Header>, With<UiReady>)>,
     browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), With<Browser>>,
     new_tab_ctx: Res<crate::command_bar::NewTabContext>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children_q: Query<&Children, With<Pane>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    focus: Res<crate::layout::tab::FocusedTab>,
     child_of_q: Query<&ChildOf>,
     mut last: Local<String>,
 ) {
@@ -510,9 +495,8 @@ fn push_tabs_host_emit(
     if !browsers.has_browser(status_e) || !browsers.host_emit_ready(&status_e) {
         return;
     }
-    let (_, active_pane, active_tab_opt) = focused_tab(
-        &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children_q, &tab_ts,
-    );
+    let active_pane = focus.pane;
+    let active_tab_opt = focus.tab;
     let mut rows: Vec<TabRow> = Vec::new();
     let mut can_go_back = false;
     let mut can_go_forward = false;
@@ -566,10 +550,9 @@ fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     side_sheet: Option<Single<Entity, (With<SideSheet>, With<UiReady>)>>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    focus: Res<crate::layout::tab::FocusedTab>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
     tab_q: Query<Entity, With<Tab>>,
@@ -585,12 +568,9 @@ fn push_pane_tree_emit(
         return;
     }
 
-    let (_, active_pane, _) = focused_tab(
-        &spaces, &all_children, &leaf_pane_q, &pane_ts, &pane_children, &tab_ts,
-    );
+    let active_pane = focus.pane;
 
-    let active_space = active_among(spaces.iter());
-    let Some(space) = active_space else {
+    let Some(space) = focus.space else {
         return;
     };
     let mut space_leaf_panes = Vec::new();

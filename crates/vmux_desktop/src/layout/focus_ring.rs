@@ -2,9 +2,8 @@ use crate::{
     browser::Loading,
     layout::{
         window::{VmuxWindow, WEBVIEW_Z_FOCUS_RING},
-        pane::{Pane, PaneSplit},
-        space::Space,
-        tab::{Tab, active_among, active_pane_in_space, active_tab_in_pane},
+        pane::Pane,
+        tab::{Tab, active_tab_in_pane},
     },
     settings::{AppSettings, load_settings},
 };
@@ -96,10 +95,7 @@ fn spawn_focus_ring(
 }
 
 fn sync_focus_ring_to_active_pane(
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
-    all_children: Query<&Children>,
-    leaf_panes_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    focus: Res<crate::layout::tab::FocusedTab>,
     pane_layout: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     glass: Single<(&ComputedNode, &UiGlobalTransform, &Transform), With<VmuxWindow>>,
     settings: Res<AppSettings>,
@@ -122,10 +118,7 @@ fn sync_focus_ring_to_active_pane(
         return;
     };
 
-    let active_space = active_among(spaces.iter());
-    let active_pane = active_space.and_then(|s| {
-        active_pane_in_space(s, &all_children, &leaf_panes_q, &pane_ts)
-    });
+    let active_pane = focus.pane;
     let Some(active_entity) = active_pane else {
         *visibility = Visibility::Hidden;
         return;
