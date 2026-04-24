@@ -7,6 +7,7 @@ use bevy::{
     prelude::*,
     ui::UiSystems,
     window::PrimaryWindow,
+    winit::WinitWindows,
 };
 use vmux_header::Header;
 
@@ -20,7 +21,10 @@ impl Plugin for SideSheetLayoutPlugin {
             .add_systems(Update, side_sheet_drag_resize)
             .add_systems(
                 PostUpdate,
-                sync_side_sheet_visibility.before(UiSystems::Layout),
+                (
+                    sync_side_sheet_visibility.before(UiSystems::Layout),
+                    sync_window_buttons_visibility,
+                ),
             );
     }
 }
@@ -191,5 +195,60 @@ fn sync_side_sheet_visibility(
         } else {
             Val::Px(0.0)
         };
+    }
+}
+
+/// Show/hide macOS traffic-light buttons to match the side-sheet state.
+#[cfg(target_os = "macos")]
+fn sync_window_buttons_visibility(
+    open: Res<SideSheetOpen>,
+    winit_windows: Option<NonSend<WinitWindows>>,
+    window_q: Query<Entity, With<PrimaryWindow>>,
+) {
+    if !open.is_changed() {
+        return;
+    }
+    let Some(winit_windows) = winit_windows else { return };
+    let Ok(entity) = window_q.single() else { return };
+    let Some(winit_win) = winit_windows.get_window(entity) else { return };
+
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let Ok(handle) = winit_win.window_handle() else { return };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else { return };
+
+    // ns_view -> [view window] -> standardWindowButton: for each button type
+    let ns_view = appkit.ns_view.as_ptr() as *mut libc::c_void;
+    unsafe {
+        use objc_ffi::{objc_msgSend, sel};
+        let ns_window = objc_msgSend(ns_view, sel("window"));
+        if ns_window.is_null() {
+            return;
+        }
+        let hidden: libc::c_int = if open.0 { 0 } else { 1 };
+        // NSWindowButton values: Close=0, Miniaturize=1, Zoom=2
+        for button_type in 0u64..=2 {
+            let button = objc_msgSend(ns_window, sel("standardWindowButton:"), button_type);
+            if !button.is_null() {
+                objc_msgSend(button, sel("setHidden:"), hidden);
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn sync_window_buttons_visibility() {}
+
+// -- minimal objc runtime helpers (avoids adding objc2 as a direct dep) ------
+
+#[cfg(target_os = "macos")]
+mod objc_ffi {
+    unsafe extern "C" {
+        pub fn objc_msgSend(obj: *mut libc::c_void, sel: *const libc::c_void, ...) -> *mut libc::c_void;
+        pub fn sel_registerName(name: *const libc::c_char) -> *const libc::c_void;
+    }
+
+    pub fn sel(name: &str) -> *const libc::c_void {
+        let c = std::ffi::CString::new(name).unwrap();
+        unsafe { sel_registerName(c.as_ptr()) }
     }
 }

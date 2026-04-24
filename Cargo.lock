@@ -8437,6 +8437,7 @@ dependencies = [
  "notify 6.1.1",
  "parking_lot",
  "portable-pty",
+ "raw-window-handle",
  "ron 0.8.1",
  "serde",
  "vmux_command_bar",

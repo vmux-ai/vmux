@@ -20,6 +20,7 @@ bevy_cef = { workspace = true, features = ["debug"] }
 bevy_cef_core = { workspace = true }
 
 libc = "0.2"
+raw-window-handle = "0.6"
 bevy_log = "0.18"
 directories = "5"
 muda = "0.17"
