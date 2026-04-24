@@ -8,6 +8,7 @@ pub(crate) mod pane;
 pub(crate) mod side_sheet;
 pub(crate) mod space;
 pub(crate) mod swap;
+pub(crate) mod drag;
 
 use bevy::prelude::*;
 use focus_ring::FocusRingPlugin;

@@ -67,6 +67,10 @@ pub enum LayoutNode {
     },
 }
 
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    derive(bevy_ecs::message::Message)
+)]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind")]
 pub enum SideSheetDragCommand {
