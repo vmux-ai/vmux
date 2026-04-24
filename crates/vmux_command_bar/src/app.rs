@@ -159,6 +159,7 @@ pub fn App() -> Element {
     let mut selected = use_signal(|| 0usize);
     let mut new_tab = use_signal(|| false);
     let mut is_open = use_signal(|| false);
+    let mut nav_mode = use_signal(|| false);
 
     let mut path_completions = use_signal(Vec::<PathEntry>::new);
 
@@ -166,6 +167,7 @@ pub fn App() -> Element {
         use_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
             query.set(data.url.clone());
             selected.set(0);
+            nav_mode.set(false);
             new_tab.set(data.new_tab);
             state.set(data);
             is_open.set(true);
@@ -225,6 +227,20 @@ pub fn App() -> Element {
         }
     };
     let sel = selected().min(results.len().saturating_sub(1));
+    let active_item = results.get(sel).cloned();
+    let nav = nav_mode();
+    let display_text = if nav {
+        match &active_item {
+            Some(ResultItem::Command { name, .. }) => format!("> {name}"),
+            Some(ResultItem::Navigate { url }) => url.clone(),
+            Some(ResultItem::Tab { url, .. }) => url.clone(),
+            Some(ResultItem::Terminal { path }) if path.is_empty() => "Terminal".to_string(),
+            Some(ResultItem::Terminal { path }) => path.clone(),
+            None => q.clone(),
+        }
+    } else {
+        q.clone()
+    };
 
     let ghost_text = {
         let q_trimmed = q.trim();
@@ -292,16 +308,34 @@ pub fn App() -> Element {
                 div { class: "p-2",
                     div { class: "flex items-center gap-2 rounded-lg bg-white/5 px-3",
                         {
-                            let trimmed = q.trim();
                             let icon_class = "h-4 w-4 shrink-0 text-muted-foreground";
-                            if trimmed.starts_with('>') {
+                            let (is_command, is_path, is_url) = if nav {
+                                match &active_item {
+                                    Some(ResultItem::Command { .. }) => (true, false, false),
+                                    Some(ResultItem::Terminal { path }) if path.is_empty() => (true, false, false),
+                                    Some(ResultItem::Terminal { .. }) => (false, true, false),
+                                    Some(ResultItem::Tab { .. }) => (false, false, true),
+                                    Some(ResultItem::Navigate { url }) => {
+                                        let is_u = url.contains("://") || (url.contains('.') && !url.contains(' '));
+                                        (false, false, is_u)
+                                    }
+                                    None => (false, false, false),
+                                }
+                            } else {
+                                let trimmed = q.trim();
+                                let cmd = trimmed.starts_with('>');
+                                let pth = !cmd && (trimmed.starts_with('/') || trimmed.starts_with('~'));
+                                let url = !cmd && !pth && (trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')));
+                                (cmd, pth, url)
+                            };
+                            if is_command {
                                 rsx! { span { class: "select-none font-mono text-base text-muted-foreground", ">_" } }
-                            } else if trimmed.starts_with('/') || trimmed.starts_with('~') {
+                            } else if is_path {
                                 rsx! { Icon { class: icon_class,
                                     path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
                                     path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
                                 } }
-                            } else if trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')) {
+                            } else if is_url {
                                 rsx! { Icon { class: icon_class,
                                     path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }
                                     path { d: "M2 12h20" }
@@ -332,11 +366,12 @@ pub fn App() -> Element {
                                 } else {
                                     "Type a URL, search tabs, or > for commands..."
                                 },
-                                value: "{q}",
+                                value: "{display_text}",
                                 autofocus: true,
                                 oninput: move |e| {
                                     query.set(e.value());
                                     selected.set(0);
+                                    nav_mode.set(false);
                                 },
                                 onkeydown: move |e| {
                                     if e.key() == Key::Tab {
@@ -369,9 +404,11 @@ pub fn App() -> Element {
                                         e.prevent_default();
                                         let max = results.len().saturating_sub(1);
                                         selected.set((sel + 1).min(max));
+                                        nav_mode.set(true);
                                     } else if go_up {
                                         e.prevent_default();
                                         selected.set(sel.saturating_sub(1));
+                                        nav_mode.set(true);
                                     } else if e.key() == Key::Escape {
                                         is_open.set(false);
                                         emit_action("dismiss", "");
@@ -463,7 +500,8 @@ fn focus_and_install_ctrl_bindings() {
     };
     let input: web_sys::HtmlInputElement = el.unchecked_into();
     input.focus().ok();
-    input.select();
+    let len = input.value().len() as u32;
+    let _ = input.set_selection_range(len, len);
 
     // Guard against double-binding.
     if js_sys::Reflect::get(&input, &JsValue::from_str("_ctrlBound"))

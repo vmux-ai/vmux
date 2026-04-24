@@ -190,36 +190,11 @@ fn handle_open_command_bar(
             .single()
             .map(|(_, n, _)| n.display != Display::None)
             .unwrap_or(false);
-        if is_open {
-            // Close command bar (toggle off)
-            let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut() else {
-                return;
-            };
-            modal_node.display = Display::None;
-            *modal_vis = Visibility::Hidden;
-            commands
-                .entity(modal_e)
-                .remove::<CefKeyboardTarget>()
-                .remove::<CefPointerTarget>()
-                .remove::<PendingCommandBarReveal>();
-            let (_, _, active_tab) =
-                focused_tab(&spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts);
-            if let Some(tab) = active_tab {
-                for browser_e in &content_browsers {
-                    let is_child = child_of_q
-                        .get(browser_e)
-                        .ok()
-                        .map(|co| co.get() == tab)
-                        .unwrap_or(false);
-                    if is_child {
-                        commands.entity(browser_e).insert(CefKeyboardTarget);
-                    }
-                }
-            }
-            return;
-        } else {
+        if !is_open {
             should_open = true;
         }
+        // If already open, do nothing — the shortcut should not close the bar.
+        // Users can dismiss with Escape or click-outside.
     }
 
     if !should_open {
