@@ -1,6 +1,6 @@
 use crate::{
-    browser::Browser,
     command::{AppCommand, PaneCommand, ReadAppCommands},
+    command_bar::NewTabContext,
     layout::space::Space,
     layout::tab::{Tab, tab_bundle, active_among, active_pane_in_space, active_tab_in_pane,
                   focused_tab},
@@ -15,7 +15,6 @@ use bevy::{
 };
 use bevy_cef::prelude::CefKeyboardTarget;
 use std::time::Instant;
-use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_history::LastActivatedAt;
 
@@ -188,16 +187,15 @@ fn handle_pane_commands(
     tab_filter: Query<Entity, With<Tab>>,
     settings: Res<AppSettings>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
+    mut new_tab_ctx: ResMut<NewTabContext>,
     mut resize_q: ParamSet<(Query<&mut Node>, Query<&mut PaneSize>, Query<&ComputedNode>, ResMut<PendingCursorWarp>)>,
 ) {
     for cmd in reader.read() {
         let AppCommand::Pane(pane_cmd) = *cmd else {
             continue;
         };
-        let (_, active_pane_opt, _) = focused_tab(
+        let (_, active_pane_opt, active_tab_opt) = focused_tab(
             &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts,
         );
         let Some(active) = active_pane_opt else {
@@ -224,12 +222,10 @@ fn handle_pane_commands(
                     commands.entity(tab).insert(ChildOf(pane1));
                 }
 
-                let startup_url = settings.browser.startup_url.as_str();
                 let new_tab = commands.spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane2))).id();
-                commands.spawn((
-                    Browser::new(&mut meshes, &mut webview_mt, startup_url),
-                    ChildOf(new_tab),
-                ));
+                new_tab_ctx.tab = Some(new_tab);
+                new_tab_ctx.previous_tab = active_tab_opt;
+                new_tab_ctx.needs_open = true;
 
                 let split_dir = if pane_cmd == PaneCommand::SplitV {
                     PaneSplitDirection::Row
@@ -260,14 +256,12 @@ fn handle_pane_commands(
 
                 if !split_dir_q.contains(parent) {
                     commands.entity(active).despawn();
-                    let startup_url = settings.browser.startup_url.as_str();
                     let leaf = spawn_leaf_pane(&mut commands, parent);
                     let tab = commands.spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(leaf))).id();
-                    commands.spawn((
-                        Browser::new(&mut meshes, &mut webview_mt, startup_url),
-                        ChildOf(tab),
-                    ));
                     commands.entity(leaf).insert(LastActivatedAt::now());
+                    new_tab_ctx.tab = Some(tab);
+                    new_tab_ctx.previous_tab = None;
+                    new_tab_ctx.needs_open = true;
                     continue;
                 }
 
