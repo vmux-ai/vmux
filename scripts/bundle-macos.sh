@@ -12,7 +12,7 @@ unset CEF_PATH
 BUILD_DIR="${BUILD_DIR:-$ROOT/build}"
 APP_NAME="${APP_NAME:-Vmux}"
 APP_BUNDLE="${APP_BUNDLE:-$BUILD_DIR/${APP_NAME}.app}"
-BUNDLE_ID_BASE="${BUNDLE_ID_BASE:-com.yourorg.vmux}"
+BUNDLE_ID_BASE="${BUNDLE_ID_BASE:-ai.vmux.desktop}"
 PLIST_SRC="${PLIST_SRC:-$ROOT/packaging/macos/Info.plist}"
 
 cd "$ROOT"

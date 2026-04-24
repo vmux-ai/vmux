@@ -9,7 +9,7 @@
 	<key>CFBundleExecutable</key>
 	<string>Vmux</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.yourorg.vmux</string>
+	<string>ai.vmux.desktop</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -20,6 +20,8 @@
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>CFBundleIconFile</key>
+	<string>Vmux</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>11.0</string>
 	<key>NSHighResolutionCapable</key>
