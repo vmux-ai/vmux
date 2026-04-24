@@ -99,8 +99,8 @@ pub enum TabCommand {
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TerminalCommand {
     #[default]
-    #[menu(id = "terminal_new", label = "New Terminal\t<leader> `")]
-    #[shortcut(chord = "Ctrl+g, `")]
+    #[menu(id = "terminal_new", label = "New Terminal", accel = "ctrl+`")]
+    #[shortcut(direct = "Ctrl+`")]
     New,
     #[menu(id = "terminal_close", label = "Close Terminal")]
     Close,
@@ -137,7 +137,8 @@ pub enum BrowserCommand {
     OpenCommandBar,
     #[menu(id = "browser_open_path_bar", label = "Path Navigator", accel = "super+/")]
     OpenPathBar,
-    #[menu(id = "browser_open_commands", label = "Commands", accel = "super+shift+.")]
+    #[menu(id = "browser_open_commands", label = "Commands")]
+    #[shortcut(direct = ">")]
     OpenCommands,
     #[menu(id = "browser_find", label = "Find", accel = "super+f")]
     Find,
@@ -241,8 +242,8 @@ pub enum SpaceCommand {
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SideSheetCommand {
     #[default]
-    #[menu(id = "toggle_side_sheet", label = "Toggle Side Sheet\t<leader> s")]
-    #[shortcut(chord = "Ctrl+g, s")]
+    #[menu(id = "toggle_side_sheet", label = "Toggle Side Sheet", accel = "super+s")]
+    #[shortcut(direct = "Super+s")]
     Toggle,
     #[menu(id = "toggle_side_sheet_right", label = "Toggle Right Sheet\t<leader> r")]
     #[shortcut(chord = "Ctrl+g, r")]

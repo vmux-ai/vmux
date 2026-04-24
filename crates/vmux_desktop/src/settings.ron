@@ -39,7 +39,6 @@
             (command: "split_h", binding: Leader((key: "\""))),
             (command: "toggle_pane", binding: Leader((key: "o"))),
             (command: "close_pane", binding: Leader((key: "x"))),
-            (command: "toggle_side_sheet", binding: Leader((key: "s"))),
             (command: "tab_new", binding: Leader((key: "c"))),
             (command: "tab_close", binding: Leader((key: "&"))),
             (command: "zoom_pane", binding: Leader((key: "z"))),
