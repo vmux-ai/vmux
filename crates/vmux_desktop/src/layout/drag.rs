@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 use vmux_side_sheet::event::SideSheetDragCommand;
 
+use crate::layout::pane::Pane;
+use crate::layout::tab::Tab;
+
 pub(crate) fn handle_drag_commands(
     mut commands: Commands,
     mut events: MessageReader<SideSheetDragCommand>,
@@ -32,6 +35,13 @@ pub(crate) fn move_tab_impl(
     let from_pane = Entity::from_bits(from_pane_id);
     let to_pane = Entity::from_bits(to_pane_id);
 
+    if !world.get_entity(from_pane).is_ok_and(|e| e.contains::<Pane>()) {
+        return;
+    }
+    if !world.get_entity(to_pane).is_ok_and(|e| e.contains::<Pane>()) {
+        return;
+    }
+
     let Some(tab) = world
         .get::<Children>(from_pane)
         .and_then(|c| c.get(from_index).copied())
@@ -39,14 +49,16 @@ pub(crate) fn move_tab_impl(
         return;
     };
 
+    if !world.get_entity(tab).is_ok_and(|e| e.contains::<Tab>()) {
+        return;
+    }
+
     crate::layout::swap::move_to_index(world, tab, to_pane, to_index);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::pane::Pane;
-    use crate::layout::tab::Tab;
 
     fn spawn_pane_with_tabs(world: &mut World, n: usize) -> (Entity, Vec<Entity>) {
         let pane = world.spawn(Pane).id();
@@ -81,5 +93,29 @@ mod tests {
 
         let p2_kids = world.get::<Children>(p2).unwrap();
         assert_eq!(&**p2_kids, &[t1[0], t2[0]]);
+    }
+
+    #[test]
+    fn move_tab_rejects_non_pane_source() {
+        let mut world = World::new();
+        let not_a_pane = world.spawn_empty().id();
+        let (p, tabs) = spawn_pane_with_tabs(&mut world, 1);
+
+        move_tab_impl(&mut world, not_a_pane.to_bits(), 0, p.to_bits(), 0);
+
+        let kids = world.get::<Children>(p).unwrap();
+        assert_eq!(&**kids, &[tabs[0]]);
+    }
+
+    #[test]
+    fn move_tab_rejects_non_pane_destination() {
+        let mut world = World::new();
+        let (p, _) = spawn_pane_with_tabs(&mut world, 2);
+        let not_a_pane = world.spawn_empty().id();
+
+        move_tab_impl(&mut world, p.to_bits(), 0, not_a_pane.to_bits(), 0);
+
+        let kids = world.get::<Children>(not_a_pane);
+        assert!(kids.is_none() || kids.unwrap().is_empty());
     }
 }
