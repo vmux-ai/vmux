@@ -68,29 +68,47 @@ fn filter_results(
         return items;
     }
 
-    let commands_only = q.starts_with('>');
-    let search = if commands_only { q[1..].trim() } else { q };
+    let starts_with_cmd = q.starts_with('>');
+    let search = if starts_with_cmd { q[1..].trim() } else { q };
     let search_lower = search.to_lowercase();
 
     let mut items = Vec::new();
 
     let is_path = looks_like_path(search);
 
-    if !commands_only && is_path {
+    if !starts_with_cmd && is_path {
         items.push(ResultItem::Terminal {
             path: search.to_string(),
         });
     }
 
-    if !commands_only && !is_path && new_tab && "terminal".contains(&search_lower) {
+    if !starts_with_cmd && !is_path && new_tab && "terminal".contains(&search_lower) {
         items.push(ResultItem::Terminal {
             path: String::new(),
         });
     }
 
-    if !commands_only {
+    // Commands always shown when > prefix
+    if starts_with_cmd {
+        for c in commands {
+            if search.is_empty()
+                || c.name.to_lowercase().contains(&search_lower)
+                || c.id.contains(&search_lower)
+            {
+                items.push(ResultItem::Command {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    shortcut: c.shortcut.clone(),
+                });
+            }
+        }
+    }
+
+    // Tabs (always for non-command mode; as fallback when > has text)
+    if !starts_with_cmd || !search.is_empty() {
         for t in tabs {
-            if t.title.to_lowercase().contains(&search_lower)
+            if search.is_empty()
+                || t.title.to_lowercase().contains(&search_lower)
                 || t.url.to_lowercase().contains(&search_lower)
             {
                 items.push(ResultItem::Tab {
@@ -103,18 +121,21 @@ fn filter_results(
         }
     }
 
-    for c in commands {
-        if c.name.to_lowercase().contains(&search_lower) || c.id.contains(&search_lower) {
-            items.push(ResultItem::Command {
-                id: c.id.clone(),
-                name: c.name.clone(),
-                shortcut: c.shortcut.clone(),
-            });
+    // Commands (non-command mode)
+    if !starts_with_cmd {
+        for c in commands {
+            if c.name.to_lowercase().contains(&search_lower) || c.id.contains(&search_lower) {
+                items.push(ResultItem::Command {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    shortcut: c.shortcut.clone(),
+                });
+            }
         }
     }
 
-    // Navigate/search goes last as a fallback
-    if !commands_only && !search.is_empty() {
+    // Navigate/search as fallback
+    if !search.is_empty() {
         items.push(ResultItem::Navigate {
             url: search.to_string(),
         });

@@ -697,7 +697,9 @@ fn handle_browser_commands(
                 }
             }
             BrowserCommand::Stop => {}
-            BrowserCommand::FocusAddressBar => {}
+            BrowserCommand::FocusAddressBar
+            | BrowserCommand::OpenCommandBar
+            | BrowserCommand::OpenCommands => {}
             BrowserCommand::Find => {}
             BrowserCommand::ZoomIn => {
                 if let Ok(mut z) = zoom_q.get_mut(webview) {

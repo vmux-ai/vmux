@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use directories::ProjectDirs;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Deserialize;
-use std::sync::{mpsc, Mutex};
+use std::sync::{Mutex, mpsc};
 
 pub struct SettingsPlugin;
 
@@ -225,15 +225,16 @@ impl TerminalSettings {
         TerminalTheme {
             name: name.to_string(),
             color_scheme: default_color_scheme(),
-            font_family: self.font_family.clone()
+            font_family: self
+                .font_family
+                .clone()
                 .unwrap_or_else(default_terminal_font_family),
             font_size: default_font_size(),
             line_height: default_line_height(),
             padding: default_padding(),
             cursor_style: default_cursor_style(),
             cursor_blink: default_cursor_blink(),
-            shell: self.shell.clone()
-                .unwrap_or_else(default_shell),
+            shell: self.shell.clone().unwrap_or_else(default_shell),
         }
     }
 }
@@ -401,34 +402,33 @@ struct SettingsWatcher {
 }
 
 pub fn load_settings(mut commands: Commands) {
-    let (settings, config_path) =
-        if let Some(proj) = ProjectDirs::from("ai", "vmux", "desktop") {
-            let dir = proj.config_dir();
-            if std::fs::create_dir_all(dir).is_err() {
-                (load_embedded_settings(), None)
-            } else {
-                let path = dir.join("settings.ron");
-                let s = match std::fs::read_to_string(&path) {
-                    Ok(text) => match ron::de::from_str::<AppSettings>(&text) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            bevy::log::warn!(
-                                "Ignoring invalid config {}: {e}; using embedded defaults",
-                                path.display()
-                            );
-                            load_embedded_settings()
-                        }
-                    },
-                    Err(_) => {
-                        let _ = std::fs::write(&path, DEFAULT_SETTINGS);
+    let (settings, config_path) = if let Some(proj) = ProjectDirs::from("ai", "vmux", "desktop") {
+        let dir = proj.config_dir();
+        if std::fs::create_dir_all(dir).is_err() {
+            (load_embedded_settings(), None)
+        } else {
+            let path = dir.join("settings.ron");
+            let s = match std::fs::read_to_string(&path) {
+                Ok(text) => match ron::de::from_str::<AppSettings>(&text) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        bevy::log::warn!(
+                            "Ignoring invalid config {}: {e}; using embedded defaults",
+                            path.display()
+                        );
                         load_embedded_settings()
                     }
-                };
-                (s, Some(path))
-            }
-        } else {
-            (load_embedded_settings(), None)
-        };
+                },
+                Err(_) => {
+                    let _ = std::fs::write(&path, DEFAULT_SETTINGS);
+                    load_embedded_settings()
+                }
+            };
+            (s, Some(path))
+        }
+    } else {
+        (load_embedded_settings(), None)
+    };
 
     commands.insert_resource(settings);
 
@@ -444,7 +444,9 @@ pub fn load_settings(mut commands: Commands) {
             }
         }) {
             Ok(mut watcher) => {
-                if let Err(e) = watcher.watch(watch_path.parent().unwrap(), RecursiveMode::NonRecursive) {
+                if let Err(e) =
+                    watcher.watch(watch_path.parent().unwrap(), RecursiveMode::NonRecursive)
+                {
                     bevy::log::warn!("Failed to watch settings dir: {e}");
                 } else {
                     bevy::log::info!("Watching {} for changes", path.display());

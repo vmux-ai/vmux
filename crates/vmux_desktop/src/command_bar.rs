@@ -102,10 +102,22 @@ fn handle_open_command_bar(
     // Determine whether to open: either via FocusAddressBar command or NewTabContext
     let mut should_open = false;
     let mut should_toggle = false;
+    let mut url_override: Option<String> = None;
 
     for cmd in reader.read() {
-        if matches!(*cmd, AppCommand::Browser(BrowserCommand::FocusAddressBar)) {
-            should_toggle = true;
+        match *cmd {
+            AppCommand::Browser(BrowserCommand::FocusAddressBar) => {
+                should_toggle = true;
+            }
+            AppCommand::Browser(BrowserCommand::OpenCommandBar) => {
+                should_toggle = true;
+                url_override = Some(String::new());
+            }
+            AppCommand::Browser(BrowserCommand::OpenCommands) => {
+                should_toggle = true;
+                url_override = Some(">".to_string());
+            }
+            _ => {}
         }
     }
 
@@ -175,7 +187,9 @@ fn handle_open_command_bar(
         .insert(CefPointerTarget);
 
     // Gather current URL (empty for new tab mode)
-    let current_url = if is_new_tab {
+    let current_url = if let Some(override_url) = url_override {
+        override_url
+    } else if is_new_tab {
         String::new()
     } else {
         let (_, _, active_tab) =

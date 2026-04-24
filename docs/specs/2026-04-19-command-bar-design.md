@@ -1,4 +1,4 @@
-# Command Palette Design
+# Command Bar Design
 
 ## Overview
 

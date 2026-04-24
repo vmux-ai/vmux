@@ -102,7 +102,7 @@ pub enum TerminalCommand {
     Next,
     #[menu(id = "terminal_prev", label = "Previous Terminal")]
     Previous,
-    #[menu(id = "terminal_clear", label = "Clear Terminal", accel = "super+k")]
+    #[menu(id = "terminal_clear", label = "Clear Terminal")]
     Clear,
     #[menu(id = "terminal_reset", label = "Reset Terminal")]
     Reset,
@@ -127,6 +127,10 @@ pub enum BrowserCommand {
     Stop,
     #[menu(id = "browser_focus_address_bar", label = "Open Location", accel = "super+l")]
     FocusAddressBar,
+    #[menu(id = "browser_open_command_bar", label = "Command Bar", accel = "super+k")]
+    OpenCommandBar,
+    #[menu(id = "browser_open_commands", label = "Commands", accel = "super+shift+.")]
+    OpenCommands,
     #[menu(id = "browser_find", label = "Find", accel = "super+f")]
     Find,
     #[menu(id = "browser_zoom_in", label = "Zoom In", accel = "super+=")]
