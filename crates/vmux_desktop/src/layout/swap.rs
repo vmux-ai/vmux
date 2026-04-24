@@ -1,4 +1,4 @@
-use bevy::{ecs::relationship::Relationship, prelude::*};
+use bevy::prelude::*;
 
 /// Swap two same-type siblings within a parent's Children.
 /// `kind_positions` are indices into Children of entities matching the filter.
@@ -45,10 +45,14 @@ pub(crate) fn resolve_next(active_idx: usize, len: usize) -> Option<(usize, usiz
     (active_idx + 1 < len).then(|| (active_idx, active_idx + 1))
 }
 
+/// Move `child` to `new_parent`'s `Children` at `index`.
+///
+/// Clamps `index` to a valid slot. Works around a Bevy 0.18 `Vec<Entity>::place`
+/// panic when the child is already present and `index >= len`.
 pub(crate) fn move_to_index(
-    world: &mut bevy::prelude::World,
-    child: bevy::prelude::Entity,
-    new_parent: bevy::prelude::Entity,
+    world: &mut World,
+    child: Entity,
+    new_parent: Entity,
     index: usize,
 ) {
     let already_child = world
@@ -63,6 +67,13 @@ pub(crate) fn move_to_index(
     } else {
         index.min(current_len)
     };
+    if already_child {
+        if let Some(children) = world.get::<Children>(new_parent) {
+            if children.get(clamped) == Some(&child) {
+                return;
+            }
+        }
+    }
     world.entity_mut(new_parent).insert_child(clamped, child);
 }
 
@@ -108,5 +119,23 @@ mod tests {
         move_to_index(&mut world, kids[0], parent, 999);
         let children = world.get::<Children>(parent).unwrap();
         assert_eq!(&**children, &[kids[1], kids[0]]);
+    }
+
+    #[test]
+    fn move_to_index_same_position_is_noop() {
+        let mut world = World::new();
+        let (parent, kids) = spawn_parent_with_children(&mut world, 3);
+        move_to_index(&mut world, kids[1], parent, 1);
+        let children = world.get::<Children>(parent).unwrap();
+        assert_eq!(&**children, &[kids[0], kids[1], kids[2]]);
+    }
+
+    #[test]
+    fn move_to_index_to_last_valid_slot() {
+        let mut world = World::new();
+        let (parent, kids) = spawn_parent_with_children(&mut world, 3);
+        move_to_index(&mut world, kids[0], parent, 2);
+        let children = world.get::<Children>(parent).unwrap();
+        assert_eq!(&**children, &[kids[1], kids[2], kids[0]]);
     }
 }
