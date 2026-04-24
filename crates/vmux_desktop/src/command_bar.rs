@@ -15,7 +15,8 @@ use bevy::{ecs::message::MessageReader, ecs::relationship::Relationship, prelude
 use bevy_cef::prelude::*;
 use vmux_command_bar::event::{
     CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent, CommandBarTab,
-    COMMAND_BAR_OPEN_EVENT,
+    PathCompleteRequest, PathCompleteResponse, PathEntry, COMMAND_BAR_OPEN_EVENT,
+    PATH_COMPLETE_RESPONSE,
 };
 use vmux_header::{Header, PageMetadata};
 use vmux_history::LastActivatedAt;
@@ -43,7 +44,9 @@ impl Plugin for CommandBarInputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NewTabContext>()
             .add_plugins(JsEmitEventPlugin::<CommandBarActionEvent>::default())
+            .add_plugins(JsEmitEventPlugin::<PathCompleteRequest>::default())
             .add_observer(on_command_bar_action)
+            .add_observer(on_path_complete_request)
             .add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands))
             .add_systems(PostUpdate, reveal_command_bar.after(UiSystems::Layout));
     }
@@ -544,4 +547,90 @@ fn reveal_command_bar(
             pending.0 += 1;
         }
     }
+}
+
+fn on_path_complete_request(
+    trigger: On<Receive<PathCompleteRequest>>,
+    modal_q: Query<Entity, With<Modal>>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let query = &trigger.event().payload.query;
+    let Ok(modal_e) = modal_q.single() else {
+        return;
+    };
+    if !browsers.has_browser(modal_e) || !browsers.host_emit_ready(&modal_e) {
+        return;
+    }
+
+    let completions = complete_path(query);
+    let payload = PathCompleteResponse { completions };
+    let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
+    commands.trigger(HostEmitEvent::new(modal_e, PATH_COMPLETE_RESPONSE, &ron_body));
+}
+
+fn complete_path(query: &str) -> Vec<PathEntry> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+
+    let (parent_str, prefix) = if let Some(pos) = query.rfind('/') {
+        (&query[..=pos], &query[pos + 1..])
+    } else {
+        ("", query)
+    };
+
+    let resolved_parent = if parent_str.starts_with("~/") || parent_str == "~/" {
+        std::path::PathBuf::from(&home).join(&parent_str[2..])
+    } else if parent_str.starts_with('/') {
+        std::path::PathBuf::from(parent_str)
+    } else if parent_str.is_empty() {
+        std::path::PathBuf::from(&home)
+    } else {
+        std::path::PathBuf::from(&home).join(parent_str)
+    };
+
+    let Ok(entries) = std::fs::read_dir(&resolved_parent) else {
+        return Vec::new();
+    };
+
+    let prefix_lower = prefix.to_lowercase();
+    let mut results: Vec<PathEntry> = Vec::new();
+
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+
+        if !prefix.is_empty() && !name.to_lowercase().starts_with(&prefix_lower) {
+            continue;
+        }
+
+        let display_name = if is_dir {
+            format!("{}/", name)
+        } else {
+            name.clone()
+        };
+
+        let full_path = if parent_str.is_empty() {
+            display_name.clone()
+        } else {
+            format!("{}{}", parent_str, display_name)
+        };
+
+        results.push(PathEntry {
+            name: display_name,
+            is_dir,
+            full_path,
+        });
+    }
+
+    results.sort_by(|a, b| {
+        let a_hidden = a.name.starts_with('.');
+        let b_hidden = b.name.starts_with('.');
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then(a_hidden.cmp(&b_hidden))
+            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    results.truncate(20);
+    results
 }

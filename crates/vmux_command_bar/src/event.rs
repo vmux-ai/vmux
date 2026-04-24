@@ -29,3 +29,23 @@ pub struct CommandBarActionEvent {
     pub action: String,
     pub value: String,
 }
+
+pub const PATH_COMPLETE_REQUEST: &str = "path-complete-request";
+pub const PATH_COMPLETE_RESPONSE: &str = "path-complete-response";
+
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct PathCompleteRequest {
+    pub query: String,
+}
+
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct PathEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub full_path: String,
+}
+
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct PathCompleteResponse {
+    pub completions: Vec<PathEntry>,
+}

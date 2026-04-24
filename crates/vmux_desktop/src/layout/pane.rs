@@ -8,6 +8,7 @@ use crate::{
 };
 use bevy::{
     ecs::relationship::Relationship,
+    input::mouse::AccumulatedMouseMotion,
     prelude::*,
     ui::{FlexDirection, UiGlobalTransform},
     window::PrimaryWindow,
@@ -587,10 +588,11 @@ fn click_pane_in_free_camera(
     leaf_panes: Query<(Entity, &ComputedNode, &UiGlobalTransform), (With<Pane>, Without<PaneSplit>)>,
     kb_targets: Query<Entity, With<CefKeyboardTarget>>,
     mut commands: Commands,
-    mut press_pos: Local<Option<Vec2>>,
+    accumulated_motion: Res<AccumulatedMouseMotion>,
+    mut press_motion: Local<Option<f32>>,
 ) {
     if !free_cam.0 {
-        *press_pos = None;
+        *press_motion = None;
         return;
     }
     let Ok(window) = windows.single() else { return };
@@ -598,16 +600,20 @@ fn click_pane_in_free_camera(
     let cursor = Vec2::new(cursor_pos.x, cursor_pos.y);
 
     if mouse.just_pressed(MouseButton::Left) {
-        *press_pos = Some(cursor);
+        *press_motion = Some(0.0);
         return;
+    }
+
+    if let Some(ref mut total) = *press_motion {
+        *total += accumulated_motion.delta.length();
     }
 
     if !mouse.just_released(MouseButton::Left) {
         return;
     }
-    let Some(start) = press_pos.take() else { return };
-    const CLICK_THRESHOLD: f32 = 5.0;
-    if start.distance(cursor) > CLICK_THRESHOLD {
+    let Some(total_motion) = press_motion.take() else { return };
+    const DRAG_THRESHOLD: f32 = 2.0;
+    if total_motion > DRAG_THRESHOLD {
         return;
     }
 

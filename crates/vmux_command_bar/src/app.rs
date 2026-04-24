@@ -3,7 +3,8 @@
 use dioxus::prelude::*;
 use vmux_command_bar::event::{
     CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent, CommandBarTab,
-    COMMAND_BAR_OPEN_EVENT,
+    PathCompleteRequest, PathCompleteResponse, PathEntry, COMMAND_BAR_OPEN_EVENT,
+    PATH_COMPLETE_RESPONSE,
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
@@ -138,6 +139,8 @@ pub fn App() -> Element {
     let mut new_tab = use_signal(|| false);
     let mut is_open = use_signal(|| false);
 
+    let mut path_completions = use_signal(Vec::<PathEntry>::new);
+
     let _listener =
         use_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
             query.set(data.url.clone());
@@ -146,6 +149,22 @@ pub fn App() -> Element {
             state.set(data);
             is_open.set(true);
         });
+
+    let _path_listener =
+        use_event_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
+            path_completions.set(data.completions);
+        });
+
+    use_effect(move || {
+        let q = query();
+        if !looks_like_path(q.trim()) {
+            path_completions.set(Vec::new());
+            return;
+        }
+        let _ = try_cef_emit_serde(&PathCompleteRequest {
+            query: q.trim().to_string(),
+        });
+    });
 
     // Focus input and install emacs-style Ctrl shortcuts AFTER Dioxus renders
     // the input element. Running in the event listener above is too early --
@@ -164,8 +183,42 @@ pub fn App() -> Element {
     } = state();
     let q = query();
     let is_new_tab = new_tab();
-    let results = filter_results(&q, &tabs, &commands, is_new_tab);
+    let results = {
+        let mut r = filter_results(&q, &tabs, &commands, is_new_tab);
+        let completions = path_completions();
+        if !completions.is_empty() {
+            let path_items: Vec<ResultItem> = completions
+                .iter()
+                .filter(|e| e.is_dir)
+                .take(5)
+                .map(|e| ResultItem::Terminal {
+                    path: e.full_path.clone(),
+                })
+                .collect();
+            r.retain(|item| !matches!(item, ResultItem::Terminal { path } if !path.is_empty()));
+            let mut combined = path_items;
+            combined.extend(r);
+            combined
+        } else {
+            r
+        }
+    };
     let sel = selected().min(results.len().saturating_sub(1));
+
+    let ghost_text = {
+        let q_trimmed = q.trim();
+        let completions = path_completions();
+        if let Some(first) = completions.first() {
+            let full = &first.full_path;
+            if full.to_lowercase().starts_with(&q_trimmed.to_lowercase()) {
+                full[q_trimmed.len()..].to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    };
 
     // Auto-scroll selected item into view when selection changes.
     use_effect(move || {
@@ -240,47 +293,76 @@ pub fn App() -> Element {
                                 } }
                             }
                         }
-                        input {
-                            id: "command-bar-input",
-                            r#type: "text",
-                            class: "w-full py-2.5 text-base text-foreground bg-transparent outline-none placeholder:text-muted-foreground",
-                        placeholder: if is_new_tab {
-                            "Search or type a URL, or select Terminal..."
-                        } else {
-                            "Type a URL, search tabs, or > for commands..."
-                        },
-                        value: "{q}",
-                        autofocus: true,
-                        oninput: move |e| {
-                            query.set(e.value());
-                            selected.set(0);
-                        },
-                        onkeydown: move |e| {
-                            let ctrl = e.modifiers().contains(Modifiers::CONTROL);
-                            let go_down = (e.key() == Key::ArrowDown && !ctrl)
-                                || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
-                            let go_up = (e.key() == Key::ArrowUp && !ctrl)
-                                || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
-
-                            if go_down {
-                                e.prevent_default();
-                                let max = results.len().saturating_sub(1);
-                                selected.set((sel + 1).min(max));
-                            } else if go_up {
-                                e.prevent_default();
-                                selected.set(sel.saturating_sub(1));
-                            } else if e.key() == Key::Escape {
-                                is_open.set(false);
-                                emit_action("dismiss", "");
-                            } else if e.key() == Key::Enter {
-                                if let Some(item) = results.get(sel) {
-                                    execute(item);
-                                } else if !q.is_empty() {
-                                    emit_action("navigate", &q);
+                        div { class: "relative flex-1",
+                            if !ghost_text.is_empty() {
+                                div {
+                                    class: "pointer-events-none absolute inset-0 flex items-center",
+                                    span { class: "invisible text-base", "{q}" }
+                                    span { class: "text-base text-muted-foreground/40", "{ghost_text}" }
                                 }
                             }
-                        },
-                    }
+                            input {
+                                id: "command-bar-input",
+                                r#type: "text",
+                                class: "w-full py-2.5 text-base text-foreground bg-transparent outline-none placeholder:text-muted-foreground",
+                                placeholder: if is_new_tab {
+                                    "Search or type a URL, or select Terminal..."
+                                } else {
+                                    "Type a URL, search tabs, or > for commands..."
+                                },
+                                value: "{q}",
+                                autofocus: true,
+                                oninput: move |e| {
+                                    query.set(e.value());
+                                    selected.set(0);
+                                },
+                                onkeydown: move |e| {
+                                    if e.key() == Key::Tab {
+                                        e.prevent_default();
+                                        let gt = ghost_text.clone();
+                                        if !gt.is_empty() {
+                                            let new_val = format!("{}{}", q, gt);
+                                            query.set(new_val.clone());
+                                            selected.set(0);
+                                            if let Some(el) = web_sys::window()
+                                                .and_then(|w| w.document())
+                                                .and_then(|d| d.get_element_by_id("command-bar-input"))
+                                            {
+                                                let input: web_sys::HtmlInputElement = el.unchecked_into();
+                                                input.set_value(&new_val);
+                                                let len = new_val.len() as u32;
+                                                let _ = input.set_selection_range(len, len);
+                                            }
+                                        }
+                                        return;
+                                    }
+
+                                    let ctrl = e.modifiers().contains(Modifiers::CONTROL);
+                                    let go_down = (e.key() == Key::ArrowDown && !ctrl)
+                                        || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
+                                    let go_up = (e.key() == Key::ArrowUp && !ctrl)
+                                        || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
+
+                                    if go_down {
+                                        e.prevent_default();
+                                        let max = results.len().saturating_sub(1);
+                                        selected.set((sel + 1).min(max));
+                                    } else if go_up {
+                                        e.prevent_default();
+                                        selected.set(sel.saturating_sub(1));
+                                    } else if e.key() == Key::Escape {
+                                        is_open.set(false);
+                                        emit_action("dismiss", "");
+                                    } else if e.key() == Key::Enter {
+                                        if let Some(item) = results.get(sel) {
+                                            execute(item);
+                                        } else if !q.is_empty() {
+                                            emit_action("navigate", &q);
+                                        }
+                                    }
+                                },
+                            }
+                        }
                     }
                 }
                 if !results.is_empty() {
