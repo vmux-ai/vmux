@@ -1,7 +1,7 @@
 use crate::{
     command::{AppCommand, ReadAppCommands, TabCommand, TerminalCommand},
     command_bar::NewTabContext,
-    layout::pane::{first_leaf_descendant, first_tab_in_pane, Pane, PaneSplit},
+    layout::pane::{first_leaf_descendant, first_tab_in_pane, Pane, PaneSplit, PendingCursorWarp},
     layout::space::Space,
     layout::swap::{find_kind_index, resolve_prev, resolve_next, swap_siblings},
     settings::AppSettings,
@@ -127,6 +127,7 @@ fn handle_tab_commands(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
         let (tab_cmd, is_terminal) = match *cmd {
@@ -289,9 +290,9 @@ fn handle_tab_commands(
                 let idx = (current as i32 + delta).rem_euclid(n) as usize;
                 let (target_pane, target_tab) = flat[idx];
                 commands.entity(target_tab).insert(LastActivatedAt::now());
-                // If crossing to a different pane, activate it
                 if active_pane != Some(target_pane) {
                     commands.entity(target_pane).insert(LastActivatedAt::now());
+                    pending_warp.target = Some(target_pane);
                 }
             }
             TabCommand::SelectIndex1

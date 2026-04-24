@@ -50,8 +50,8 @@ impl Plugin for PanePlugin {
 
 /// Signals that the cursor should be warped to the active pane once layout is computed.
 #[derive(Resource, Default)]
-struct PendingCursorWarp {
-    target: Option<Entity>,
+pub(crate) struct PendingCursorWarp {
+    pub target: Option<Entity>,
 }
 
 #[derive(Component, Reflect, Default)]
