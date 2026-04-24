@@ -435,7 +435,7 @@ fn on_command_bar_action(
             }
         }
         "terminal" => {
-            let cwd = if evt.value.is_empty() {
+            let cwd = if evt.value.is_empty() || evt.value.contains("://") {
                 None
             } else {
                 let expanded = if evt.value.starts_with("~/") {

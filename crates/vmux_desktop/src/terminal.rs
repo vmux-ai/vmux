@@ -156,7 +156,9 @@ impl Terminal {
         let mut cmd = CommandBuilder::new(&shell);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
-        let initial_cwd = cwd.map(|d| d.to_path_buf());
+        let initial_cwd = cwd
+            .filter(|d| !d.to_string_lossy().contains("://"))
+            .map(|d| d.to_path_buf());
         if let Some(ref dir) = initial_cwd {
             cmd.cwd(dir);
         }
