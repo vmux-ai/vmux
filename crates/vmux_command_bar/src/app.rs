@@ -304,6 +304,7 @@ pub fn App() -> Element {
                             input {
                                 id: "command-bar-input",
                                 r#type: "text",
+                                "data-ghost": "{ghost_text}",
                                 class: "w-full py-2.5 text-base text-foreground bg-transparent outline-none placeholder:text-muted-foreground",
                                 placeholder: if is_new_tab {
                                     "Search or type a URL, or select Terminal..."
@@ -481,8 +482,17 @@ fn focus_and_install_ctrl_bindings() {
                 let _ = input2.set_selection_range(0, 0);
             }
             "end" => {
-                let len = input2.value().len() as u32;
-                let _ = input2.set_selection_range(len, len);
+                let ghost = input2.get_attribute("data-ghost").unwrap_or_default();
+                if !ghost.is_empty() {
+                    let new_val = format!("{}{}", input2.value(), ghost);
+                    input2.set_value(&new_val);
+                    let len = new_val.len() as u32;
+                    let _ = input2.set_selection_range(len, len);
+                    dispatch_input_event(&input2);
+                } else {
+                    let len = input2.value().len() as u32;
+                    let _ = input2.set_selection_range(len, len);
+                }
             }
             "fwd" => {
                 let p = (input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) + 1)
