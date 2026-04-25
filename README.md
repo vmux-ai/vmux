@@ -1,8 +1,9 @@
 <h1 align="center">Vmux</h1>
 <p align="center">Vibe Multiplexer — AI-native workspace combining browser and terminal panes.</p>
 
-<!-- TODO: Add screenshot or demo GIF -->
-<!-- ![Vmux screenshot](docs/assets/screenshot.png) -->
+<p align="center">
+  <img src="icon.png" alt="Vmux icon" width="128" />
+</p>
 
 ## Features
 
