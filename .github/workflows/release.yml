@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.1.0)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -18,19 +24,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract version from tag
+      - name: Extract version
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Building version: $VERSION"
 
-      - name: Verify Cargo.toml version matches tag
+      - name: Verify Cargo.toml version matches
         run: |
           CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           if [ "$CARGO_VERSION" != "$VERSION" ]; then
-            echo "Error: Cargo.toml version ($CARGO_VERSION) does not match tag ($VERSION)" >&2
+            echo "Error: Cargo.toml version ($CARGO_VERSION) does not match ($VERSION)" >&2
             exit 1
           fi
+
+      - name: Create and push tag
+        if: ${{ inputs.version }}
+        run: |
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -102,7 +118,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           DMG_PATH=$(ls target/release/Vmux_*.dmg)
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "v${VERSION}" \
             --title "Vmux v${VERSION}" \
             --generate-notes \
             "$DMG_PATH" \
