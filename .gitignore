@@ -22,3 +22,5 @@ crates/vmux_side_sheet/dist/
 crates/vmux_command_bar/dist/
 crates/vmux_terminal/dist/
 .superpowers/
+.env
+build/

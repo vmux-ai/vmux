@@ -1,14 +1,15 @@
 [workspace]
 members = ["crates/*", "patches/*"]
+exclude = ["patches/cargo-packager-0.11.8"]
 default-members = ["crates/vmux_desktop"]
 resolver = "3"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "Tiling browser with pane multiplexing"
+description = "AI-native workspace combining browser and terminal panes"
 license = "MIT"
-homepage = "https://github.com/JunichiSugiura/vmux"
+homepage = "https://vmux.ai"
 repository = "https://github.com/JunichiSugiura/vmux"
 
 [workspace.dependencies]

@@ -2,10 +2,11 @@
 name = "vmux_desktop"
 version.workspace = true
 edition.workspace = true
+description.workspace = true
 publish = false
 
 [features]
-debug = []
+debug = ["bevy_cef/debug"]
 
 [[bin]]
 name = "Vmux"
@@ -16,7 +17,7 @@ bevy = { workspace = true, features = [
     "bevy_camera_controller",
     "free_camera",
 ] }
-bevy_cef = { workspace = true, features = ["debug"] }
+bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
 
 libc = "0.2"
@@ -42,5 +43,28 @@ vmux_webview_app = { path = "../vmux_webview_app" }
 alacritty_terminal = { workspace = true }
 portable-pty = { workspace = true }
 notify = { workspace = true }
+
+[package.metadata.packager]
+product-name = "Vmux"
+identifier = "ai.vmux.desktop"
+category = "Productivity"
+copyright = "Copyright 2024-2025 Junichi Sugiura. MIT License."
+homepage = "https://vmux.ai"
+formats = ["app", "dmg"]
+icons = ["../../packaging/macos/Vmux.icns"]
+before-packaging-command = "env -u CEF_PATH cargo build -p vmux_desktop -p bevy_cef_debug_render_process --release"
+before-each-package-command = "bash ../../scripts/inject-cef.sh"
+
+[package.metadata.packager.dmg]
+background = "../../packaging/macos/dmg-background.png"
+
+window-size = { width = 660, height = 400 }
+app-position = { x = 180, y = 180 }
+application-folder-position = { x = 480, y = 180 }
+
+[package.metadata.packager.macos]
+minimum-system-version = "13.0"
+signing-identity = "Developer ID Application: Junichi Sugiura (4BG7FRMF2G)"
+entitlements = "../../packaging/macos/Vmux.entitlements"
 
 

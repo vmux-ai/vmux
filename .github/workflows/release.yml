@@ -61,15 +61,11 @@ jobs:
           cargo install bevy_cef_render_process
           cargo install bevy_cef_bundle_app
 
-      - name: Patch Info.plist version
-        run: |
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" \
-            packaging/macos/Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" \
-            packaging/macos/Info.plist
+      - name: Install cargo-packager (patched for macOS Tahoe)
+        run: cargo install --path patches/cargo-packager-0.11.8
 
-      - name: Build and bundle app
-        run: ./scripts/bundle-macos.sh
+      - name: Package app and DMG
+        run: env -u CEF_PATH cargo packager --release
 
       - name: Import signing certificate
         env:
@@ -94,49 +90,59 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: ./scripts/sign-and-notarize.sh
+        run: APP_BUNDLE=target/release/Vmux.app ./scripts/sign-and-notarize.sh
 
-      - name: Create DMG
+      - name: Create binary tarball
         run: |
-          brew install create-dmg
-          VERSION="$VERSION" ./scripts/create-dmg.sh
-
-      - name: Create binary tarball for auto-updater
-        run: |
-          cd build/Vmux.app/Contents/MacOS
-          tar czf "../../../../vmux_desktop-v${VERSION}-aarch64-apple-darwin.tar.gz" Vmux
+          cd target/release/Vmux.app/Contents/MacOS
+          tar czf "$GITHUB_WORKSPACE/target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz" Vmux
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          DMG_PATH=$(ls target/release/Vmux_*.dmg)
           gh release create "$GITHUB_REF_NAME" \
             --title "Vmux v${VERSION}" \
             --generate-notes \
-            "build/Vmux-${VERSION}-mac.dmg" \
-            "build/vmux_desktop-v${VERSION}-aarch64-apple-darwin.tar.gz"
+            "$DMG_PATH" \
+            "target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz"
 
       - name: Update Homebrew cask
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
-          DMG_SHA=$(shasum -a 256 "build/Vmux-${VERSION}-mac.dmg" | awk '{print $1}')
+          DMG_PATH=$(ls target/release/Vmux_*.dmg)
+          DMG_NAME=$(basename "$DMG_PATH")
+          DMG_SHA=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
 
           git clone "https://x-access-token:${GH_TOKEN}@github.com/JunichiSugiura/homebrew-vmux.git" /tmp/homebrew-vmux
 
-          cat > /tmp/homebrew-vmux/Casks/vmux.rb << EOF
-          cask "vmux" do
-            version "${VERSION}"
-            sha256 "${DMG_SHA}"
+          cat > /tmp/homebrew-vmux/Casks/vmux.rb << 'CASKEOF'
+cask "vmux" do
+  version "VERSION_PLACEHOLDER"
+  sha256 "SHA_PLACEHOLDER"
 
-            url "https://github.com/JunichiSugiura/vmux/releases/download/v#{version}/Vmux-#{version}-mac.dmg"
-            name "Vmux"
-            desc "Tiling browser with pane multiplexing"
-            homepage "https://github.com/JunichiSugiura/vmux"
+  url "https://github.com/JunichiSugiura/vmux/releases/download/v#{version}/DMG_PLACEHOLDER"
+  name "Vmux"
+  desc "AI-native workspace combining browser and terminal panes"
+  homepage "https://vmux.ai"
 
-            app "Vmux.app"
-          end
-          EOF
+  depends_on macos: ">= :ventura"
+
+  app "Vmux.app"
+
+  zap trash: [
+    "~/Library/Application Support/ai.vmux.desktop",
+    "~/Library/Caches/ai.vmux.desktop",
+    "~/Library/Preferences/ai.vmux.desktop.plist",
+  ]
+end
+CASKEOF
+
+          sed -i '' "s/VERSION_PLACEHOLDER/${VERSION}/" /tmp/homebrew-vmux/Casks/vmux.rb
+          sed -i '' "s/SHA_PLACEHOLDER/${DMG_SHA}/" /tmp/homebrew-vmux/Casks/vmux.rb
+          sed -i '' "s/DMG_PLACEHOLDER/${DMG_NAME}/" /tmp/homebrew-vmux/Casks/vmux.rb
 
           cd /tmp/homebrew-vmux
           git config user.name "github-actions[bot]"

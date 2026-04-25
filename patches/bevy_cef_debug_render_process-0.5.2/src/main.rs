@@ -11,9 +11,16 @@ use cef::{args::Args, *};
 fn main() {
     let args = Args::new();
 
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "debug"))]
     let _loader = {
         let loader = DebugLibraryLoader::new();
+        assert!(loader.load());
+        loader
+    };
+    #[cfg(all(target_os = "macos", not(feature = "debug")))]
+    let _loader = {
+        let loader =
+            cef::library_loader::LibraryLoader::new(&std::env::current_exe().unwrap(), true);
         assert!(loader.load());
         loader
     };

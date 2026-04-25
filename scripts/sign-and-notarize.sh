@@ -10,11 +10,11 @@ set -euo pipefail
 #   APPLE_TEAM_ID           - 10-character team identifier
 #
 # Optional:
-#   APP_BUNDLE              - Path to .app (default: build/Vmux.app)
+#   APP_BUNDLE              - Path to .app (default: target/release/Vmux.app)
 #   SKIP_NOTARIZE           - Set to "1" to skip notarization (local testing)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_BUNDLE="${APP_BUNDLE:-$ROOT/build/Vmux.app}"
+APP_BUNDLE="${APP_BUNDLE:-$ROOT/target/release/Vmux.app}"
 ENTITLEMENTS="$ROOT/packaging/macos/Vmux.entitlements"
 
 if [ ! -d "$APP_BUNDLE" ]; then
@@ -85,7 +85,7 @@ if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_APP_PASSWORD:-}" ] || [ -z "${APPLE_T
 fi
 
 echo "==> Creating zip for notarization"
-NOTARIZE_ZIP="$ROOT/build/Vmux-notarize.zip"
+NOTARIZE_ZIP="$ROOT/target/release/Vmux-notarize.zip"
 ditto -c -k --keepParent "$APP_BUNDLE" "$NOTARIZE_ZIP"
 
 echo "==> Submitting for notarization (this may take several minutes)"

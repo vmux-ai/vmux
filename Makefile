@@ -1,4 +1,4 @@
-.PHONY: run-mac run-doctor build-mac-debug build bundle-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps
+.PHONY: run-mac run-mac-local run-doctor build-mac-debug build build-local-mac package-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 RUSTUP_BIN := $(or $(shell command -v rustup 2>/dev/null),$(HOME)/.cargo/bin/rustup)
@@ -20,9 +20,18 @@ build-mac-debug: ensure-run-mac-deps
 build: ensure-run-mac-deps
 	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop --release
 
-bundle-mac:
-	chmod +x scripts/bundle-macos.sh
-	./scripts/bundle-macos.sh
+-include .env
+export
+
+run-mac-local: package-mac
+	open target/release/Vmux.app
+
+package-mac:
+	env -u CEF_PATH cargo packager --release
+
+build-local-mac: package-mac
+	@echo "Signing..."
+	SKIP_NOTARIZE=1 ./scripts/sign-and-notarize.sh
 
 # One-time CEF download (macOS paths; pin matches bevy_cef 0.5.x)
 setup-cef:
@@ -32,7 +41,7 @@ setup-cef:
 # Build from vmux-patched bevy_cef_core (required when adding CEF schemes such as vmux://).
 # Installs into the same path `bevy_cef` debug mode loads on macOS.
 install-debug-render-process:
-	env -u CEF_PATH "$(CARGO_BIN)" build -p bevy_cef_debug_render_process
+	env -u CEF_PATH "$(CARGO_BIN)" build -p bevy_cef_debug_render_process --features debug
 	cp "$(CURDIR)/target/debug/bevy_cef_debug_render_process" \
 	  "$(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process"
 
