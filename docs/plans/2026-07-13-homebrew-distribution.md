@@ -4,7 +4,7 @@
 
 **Goal:** Ship vmux as a signed, notarized macOS app distributed via GitHub Releases and Homebrew cask.
 
-**Architecture:** Tag-triggered GitHub Actions workflow builds the app bundle, signs it with Developer ID, notarizes with Apple, packages as DMG, uploads to GitHub Releases, and auto-updates the Homebrew cask formula in `vmux-ai/homebrew-vmux`.
+**Architecture:** Tag-triggered GitHub Actions workflow builds the app bundle, signs it with Developer ID, notarizes with Apple, packages as DMG, uploads to GitHub Releases, and auto-updates the Homebrew cask formula in `Casks/vmux.rb` (in this repo).
 
 **Tech Stack:** GitHub Actions (macOS runner), `codesign`, `xcrun notarytool`, `hdiutil`, Homebrew cask
 
@@ -459,14 +459,11 @@ jobs:
 
       - name: Update Homebrew cask
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           DMG_SHA=$(shasum -a 256 "build/Vmux-${VERSION}-mac.dmg" | awk '{print $1}')
 
-          # Clone the tap repo
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/vmux-ai/homebrew-vmux.git" /tmp/homebrew-vmux
-
-          cat > /tmp/homebrew-vmux/Casks/vmux.rb << EOF
+          cat > Casks/vmux.rb << EOF
           cask "vmux" do
             version "${VERSION}"
             sha256 "${DMG_SHA}"
@@ -480,11 +477,10 @@ jobs:
           end
           EOF
 
-          cd /tmp/homebrew-vmux
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/vmux.rb
-          git commit -m "Update vmux to ${VERSION}"
+          git diff --cached --quiet || git commit -m "chore: update Homebrew cask to ${VERSION}"
           git push
 ```
 
@@ -497,50 +493,18 @@ git commit -m "feat: add GitHub Actions release workflow"
 
 ---
 
-### Task 6: Create Homebrew Tap Repository
+### Task 6: Homebrew Tap Setup
 
-This task is done outside the vmux repo. You need to create the `vmux-ai/homebrew-vmux` repository on GitHub with an initial cask formula.
+The cask formula lives in this repo at `Casks/vmux.rb`. No separate repository is needed.
 
-- [ ] **Step 1: Create the repo on GitHub**
+- [x] **Step 1: Cask formula created in-repo**
 
-Go to https://github.com/new and create `homebrew-vmux` (public repo).
+The cask is at `Casks/vmux.rb`. The CI workflow updates it on each release.
 
-- [ ] **Step 2: Create initial cask formula**
-
-Clone the repo and create `Casks/vmux.rb`:
-
-```ruby
-cask "vmux" do
-  version "0.1.0"
-  sha256 "PLACEHOLDER"
-
-  url "https://github.com/vmux-ai/vmux/releases/download/v#{version}/Vmux-#{version}-mac.dmg"
-  name "Vmux"
-  desc "Tiling browser with pane multiplexing"
-  homepage "https://github.com/vmux-ai/vmux"
-
-  app "Vmux.app"
-end
-```
-
-- [ ] **Step 3: Create a GitHub Personal Access Token for tap updates**
-
-Go to https://github.com/settings/tokens and create a fine-grained token with:
-- Repository access: `vmux-ai/homebrew-vmux` only
-- Permissions: Contents (read & write)
-
-Add this token as `HOMEBREW_TAP_TOKEN` secret in the `vmux` repository settings.
-
-- [ ] **Step 4: Push initial cask and verify tap works**
+- [ ] **Step 2: Verify tap works**
 
 ```bash
-cd homebrew-vmux
-git add Casks/vmux.rb
-git commit -m "Initial cask formula"
-git push
-
-# Verify
-brew tap vmux-ai/vmux
+brew tap vmux-ai/vmux https://github.com/vmux-ai/vmux
 brew info --cask vmux
 ```
 
@@ -571,7 +535,7 @@ cat cert.b64 | pbcopy
 | `APPLE_ID` | Your Apple ID email |
 | `APPLE_APP_PASSWORD` | Generate at https://appleid.apple.com/account/manage > App-Specific Passwords |
 | `APPLE_TEAM_ID` | 10-character team ID from developer.apple.com/account |
-| `HOMEBREW_TAP_TOKEN` | GitHub PAT from Task 6 Step 3 |
+
 
 ---
 
@@ -645,7 +609,7 @@ Expected: All steps pass. GitHub Release created with DMG and .tar.gz assets.
 - [ ] **Step 3: Verify Homebrew cask was updated**
 
 ```bash
-brew tap vmux-ai/vmux
+brew tap vmux-ai/vmux https://github.com/vmux-ai/vmux
 brew install --cask vmux
 ```
 

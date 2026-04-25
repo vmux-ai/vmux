@@ -9,7 +9,7 @@
 **Tech Stack:** TOML (Cargo), XML (Info.plist), Ruby (Homebrew cask), YAML (GitHub Actions)
 
 **Worktree:** `/Users/junichi.sugiura/Projects/github.com/vmux-ai/vmux/.worktrees/jun/vmx-15-release-pipeline`
-**Homebrew tap:** `/Users/junichi.sugiura/Projects/github.com/vmux-ai/homebrew-vmux/`
+**Homebrew cask:** `Casks/vmux.rb` (in-repo)
 
 ---
 
@@ -167,11 +167,11 @@ git commit -m "chore: add MIT license file"
 ### Task 5: Update Homebrew cask
 
 **Files:**
-- Modify: `/Users/junichi.sugiura/Projects/github.com/vmux-ai/homebrew-vmux/Casks/vmux.rb`
+- Modify: `Casks/vmux.rb`
 
 - [ ] **Step 1: Update cask with new metadata**
 
-Replace contents of `Casks/vmux.rb` with:
+Replace contents of `Casks/vmux.rb` (in this repo) with:
 
 ```ruby
 cask "vmux" do
@@ -197,13 +197,12 @@ end
 
 - [ ] **Step 2: Validate cask syntax**
 
-Run: `cd /Users/junichi.sugiura/Projects/github.com/vmux-ai/homebrew-vmux && brew audit --cask Casks/vmux.rb 2>&1 || true`
+Run: `brew audit --cask Casks/vmux.rb 2>&1 || true`
 Note: May warn about PLACEHOLDER sha256 — that's expected until first release.
 
-- [ ] **Step 3: Commit (in homebrew-vmux repo)**
+- [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/junichi.sugiura/Projects/github.com/vmux-ai/homebrew-vmux
 git add Casks/vmux.rb
 git commit -m "chore: update cask metadata — description, homepage, macOS dep, zap stanza"
 ```
@@ -290,9 +289,7 @@ Update the cask generation to use new description, homepage, and DMG path:
           DMG_NAME=$(basename "$DMG_PATH")
           DMG_SHA=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
 
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/vmux-ai/homebrew-vmux.git" /tmp/homebrew-vmux
-
-          cat > /tmp/homebrew-vmux/Casks/vmux.rb << 'CASKEOF'
+          cat > Casks/vmux.rb << 'CASKEOF'
           cask "vmux" do
             version "VERSION_PLACEHOLDER"
             sha256 "SHA_PLACEHOLDER"
@@ -314,16 +311,15 @@ Update the cask generation to use new description, homepage, and DMG path:
           end
           CASKEOF
 
-          sed -i '' "s/VERSION_PLACEHOLDER/${VERSION}/" /tmp/homebrew-vmux/Casks/vmux.rb
-          sed -i '' "s/SHA_PLACEHOLDER/${DMG_SHA}/" /tmp/homebrew-vmux/Casks/vmux.rb
-          sed -i '' "s/DMG_PLACEHOLDER/${DMG_NAME}/" /tmp/homebrew-vmux/Casks/vmux.rb
+          sed -i '' "s/VERSION_PLACEHOLDER/${VERSION}/" Casks/vmux.rb
+          sed -i '' "s/SHA_PLACEHOLDER/${DMG_SHA}/" Casks/vmux.rb
+          sed -i '' "s/DMG_PLACEHOLDER/${DMG_NAME}/" Casks/vmux.rb
 
-          cd /tmp/homebrew-vmux
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/vmux.rb
-          git diff --cached --quiet || git commit -m "Update vmux to ${VERSION}"
-          git diff --quiet origin/main || git push
+          git diff --cached --quiet || git commit -m "chore: update Homebrew cask to ${VERSION}"
+          git push
 ```
 
 - [ ] **Step 6: Remove the Patch Info.plist version step**

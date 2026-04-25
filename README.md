@@ -16,7 +16,7 @@
 ### Homebrew (macOS)
 
 ```sh
-brew tap vmux-ai/vmux
+brew tap vmux-ai/vmux https://github.com/vmux-ai/vmux
 brew install --cask vmux
 ```
 

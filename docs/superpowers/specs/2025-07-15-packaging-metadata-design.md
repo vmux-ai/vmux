@@ -38,9 +38,9 @@ Add to `[package.metadata.packager]`:
 
 Create standard MIT license file with copyright holder "Junichi Sugiura".
 
-### 5. Homebrew tap (vmux-ai/homebrew-vmux)
+### 5. Homebrew cask (in-repo)
 
-Clone repo, create/update `Casks/vmux.rb`:
+Update `Casks/vmux.rb` in this repo:
 
 ```ruby
 cask "vmux" do
@@ -70,7 +70,7 @@ Replace shell script invocations with cargo-packager:
 - Build step: `cargo packager --release`
 - Sign step: `APP_BUNDLE=target/release/Vmux.app ./scripts/sign-and-notarize.sh`
 - DMG artifact: `target/release/Vmux_0.1.0_aarch64.dmg` (cargo-packager naming)
-- Homebrew update: push cask with sha256 of DMG to tap repo
+- Homebrew update: update `Casks/vmux.rb` in-repo with sha256 of DMG
 
 ## Out of scope
 

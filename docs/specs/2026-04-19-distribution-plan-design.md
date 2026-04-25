@@ -287,7 +287,7 @@ Every tagged version produces a DMG attached to a GitHub Release with auto-gener
 
 ### Homebrew Cask
 
-Create a cask formula in a tap repository (`vmux-ai/homebrew-vmux`):
+The cask formula lives in this repo under `Casks/vmux.rb`:
 
 ```ruby
 cask "vmux" do
@@ -303,7 +303,7 @@ cask "vmux" do
 end
 ```
 
-Usage: `brew tap vmux-ai/vmux && brew install --cask vmux`
+Usage: `brew tap vmux-ai/vmux https://github.com/vmux-ai/vmux && brew install --cask vmux`
 
 The GitHub Actions workflow can auto-update the cask SHA and version after a release.
 

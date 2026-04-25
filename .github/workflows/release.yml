@@ -110,15 +110,13 @@ jobs:
 
       - name: Update Homebrew cask
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           DMG_PATH=$(ls target/release/Vmux_*.dmg)
           DMG_NAME=$(basename "$DMG_PATH")
           DMG_SHA=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
 
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/vmux-ai/homebrew-vmux.git" /tmp/homebrew-vmux
-
-          cat > /tmp/homebrew-vmux/Casks/vmux.rb << 'CASKEOF'
+          cat > Casks/vmux.rb << 'CASKEOF'
 cask "vmux" do
   version "VERSION_PLACEHOLDER"
   sha256 "SHA_PLACEHOLDER"
@@ -140,13 +138,12 @@ cask "vmux" do
 end
 CASKEOF
 
-          sed -i '' "s/VERSION_PLACEHOLDER/${VERSION}/" /tmp/homebrew-vmux/Casks/vmux.rb
-          sed -i '' "s/SHA_PLACEHOLDER/${DMG_SHA}/" /tmp/homebrew-vmux/Casks/vmux.rb
-          sed -i '' "s/DMG_PLACEHOLDER/${DMG_NAME}/" /tmp/homebrew-vmux/Casks/vmux.rb
+          sed -i '' "s/VERSION_PLACEHOLDER/${VERSION}/" Casks/vmux.rb
+          sed -i '' "s/SHA_PLACEHOLDER/${DMG_SHA}/" Casks/vmux.rb
+          sed -i '' "s/DMG_PLACEHOLDER/${DMG_NAME}/" Casks/vmux.rb
 
-          cd /tmp/homebrew-vmux
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/vmux.rb
-          git diff --cached --quiet || git commit -m "Update vmux to ${VERSION}"
-          git diff --quiet origin/main || git push
+          git diff --cached --quiet || git commit -m "chore: update Homebrew cask to ${VERSION}"
+          git push
