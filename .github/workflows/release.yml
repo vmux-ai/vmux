@@ -113,6 +113,42 @@ jobs:
           cd target/release/Vmux.app/Contents/MacOS
           tar czf "$GITHUB_WORKSPACE/target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz" Vmux
 
+      - name: Create app bundle tarball
+        run: |
+          cd target/release
+          tar czf "Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz" Vmux.app
+
+      - name: Sign update artifact (minisign)
+        env:
+          VMUX_UPDATE_PRIVATE_KEY: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY }}
+          VMUX_UPDATE_PRIVATE_KEY_PASSWORD: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY_PASSWORD }}
+        run: |
+          TARBALL="target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
+          cargo packager signer sign "${TARBALL}" \
+            --private-key "${VMUX_UPDATE_PRIVATE_KEY}" \
+            --password "${VMUX_UPDATE_PRIVATE_KEY_PASSWORD}"
+          # Produces ${TARBALL}.sig
+
+      - name: Generate update manifest
+        run: |
+          TARBALL="target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
+          SIG=$(cat "${TARBALL}.sig")
+          URL="https://github.com/vmux-ai/vmux/releases/download/v${VERSION}/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          cat > target/release/update-manifest.json <<EOF
+          {
+            "version": "v${VERSION}",
+            "pub_date": "${DATE}",
+            "platforms": {
+              "darwin-aarch64": {
+                "url": "${URL}",
+                "signature": "${SIG}",
+                "format": "app"
+              }
+            }
+          }
+          EOF
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -122,7 +158,10 @@ jobs:
             --title "Vmux v${VERSION}" \
             --generate-notes \
             "$DMG_PATH" \
-            "target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz"
+            "target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz" \
+            "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz" \
+            "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz.sig" \
+            "target/release/update-manifest.json"
 
       - name: Update Homebrew cask
         env:

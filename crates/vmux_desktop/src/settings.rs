@@ -21,6 +21,8 @@ pub struct AppSettings {
     pub shortcuts: ShortcutSettings,
     #[serde(default)]
     pub terminal: Option<TerminalSettings>,
+    #[serde(default = "default_auto_update")]
+    pub auto_update: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -55,6 +57,10 @@ fn default_leader() -> KeyComboDef {
 
 fn default_chord_timeout_ms() -> u64 {
     1000
+}
+
+fn default_auto_update() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Deserialize)]

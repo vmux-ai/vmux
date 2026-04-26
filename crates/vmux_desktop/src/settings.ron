@@ -72,4 +72,5 @@
             ),
         ],
     )),
+    auto_update: true,
 )

@@ -18,6 +18,7 @@ pub(crate) mod shortcut;
 mod terminal;
 mod themes;
 mod unit;
+pub mod updater;
 
 use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
@@ -90,6 +91,7 @@ impl Plugin for VmuxPlugin {
             PersistencePlugin,
             ProfilePlugin,
             LayoutPlugin,
+            updater::VmuxUpdater::builder().build().plugin(),
         ));
     }
 }
