@@ -124,6 +124,8 @@ jobs:
   build-mac:
     name: Build macOS App
     runs-on: macos-latest
+    env:
+      HAS_SIGNING_CERT: ${{ secrets.APPLE_CERTIFICATE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -161,7 +163,7 @@ jobs:
         run: env -u CEF_PATH cargo packager --release
 
       - name: Import signing certificate
-        if: ${{ secrets.APPLE_CERTIFICATE_BASE64 != '' }}
+        if: env.HAS_SIGNING_CERT == 'true'
         env:
           APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -179,7 +181,7 @@ jobs:
           rm -f "$CERT_FILE"
 
       - name: Sign and notarize
-        if: ${{ secrets.APPLE_CERTIFICATE_BASE64 != '' }}
+        if: env.HAS_SIGNING_CERT == 'true'
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -188,7 +190,7 @@ jobs:
         run: ./scripts/sign-and-notarize.sh
 
       - name: Re-create .dmg from signed .app
-        if: ${{ secrets.APPLE_CERTIFICATE_BASE64 != '' }}
+        if: env.HAS_SIGNING_CERT == 'true'
         run: |
           rm -f target/release/*.dmg
           hdiutil create -volname "Vmux" \
