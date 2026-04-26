@@ -13,3 +13,12 @@ When working on a Linear issue, always use a git worktree for isolation:
 4. Remember: if the worktree is deleted while your shell is inside it, `cd` back to the repo root — `../..` won't work.
 
 Worktree directory: `.worktrees/` (already in `.gitignore`).
+
+## Before Pushing
+
+Always run lint and test before pushing to catch CI failures locally:
+
+```sh
+make lint  # runs fmt --check + clippy -D warnings
+make test  # runs cargo test --workspace
+```

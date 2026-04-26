@@ -1,4 +1,4 @@
-.PHONY: run-mac run-mac-local run-doctor build-mac-debug build build-local-mac package-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps run-website build-website
+.PHONY: run-mac run-mac-local run-doctor build-mac-debug build build-local-mac package-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps run-website build-website lint fmt clippy test
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 RUSTUP_BIN := $(or $(shell command -v rustup 2>/dev/null),$(HOME)/.cargo/bin/rustup)
@@ -44,6 +44,24 @@ install-debug-render-process:
 	env -u CEF_PATH "$(CARGO_BIN)" build -p bevy_cef_debug_render_process --features debug
 	cp "$(CURDIR)/target/debug/bevy_cef_debug_render_process" \
 	  "$(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process"
+
+# Get workspace packages excluding vendored patches
+PKGS = $(shell "$(CARGO_BIN)" metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | .name')
+
+lint: fmt clippy
+
+fmt:
+	@for pkg in $(PKGS); do \
+		"$(CARGO_BIN)" fmt -p "$$pkg" -- --check || exit 1; \
+	done
+
+clippy:
+	@for pkg in $(PKGS); do \
+		env -u CEF_PATH "$(CARGO_BIN)" clippy -p "$$pkg" --all-targets -- -D warnings || exit 1; \
+	done
+
+test:
+	env -u CEF_PATH "$(CARGO_BIN)" test --workspace --exclude bevy_cef_core
 
 # Website
 run-website:
