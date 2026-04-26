@@ -227,8 +227,13 @@ pub fn App() -> Element {
                 .cloned();
             r.retain(|item| !matches!(item, ResultItem::Terminal { path } if !path.is_empty()));
             let mut combined = Vec::new();
-            if let Some(ref entry) = typed_terminal
-                && let ResultItem::Terminal { path: tp } = entry
+            if let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
+>>>>>>> 33d05a4 (fix: resolve clippy errors in command bar pattern matching)
+=======
+            if let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
+=======
+            if let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
+>>>>>>> 33d05a4 (fix: resolve clippy errors in command bar pattern matching)
                 && !path_items
                     .iter()
                     .any(|item| matches!(item, ResultItem::Terminal { path } if path == tp))
