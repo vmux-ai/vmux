@@ -425,7 +425,9 @@ pub fn App() -> Element {
                                         e.prevent_default();
                                         selected.set(sel.saturating_sub(1));
                                         nav_mode.set(true);
-                                    } else if e.key() == Key::Escape {
+                                    } else if e.key() == Key::Escape
+                                        || (ctrl && e.code() == Code::KeyC)
+                                    {
                                         is_open.set(false);
                                         emit_action("dismiss", "");
                                     } else if e.key() == Key::Enter {
@@ -543,7 +545,7 @@ fn focus_and_install_ctrl_bindings() {
             "KeyH" => "bksp",
             "KeyW" => "delw",
             "KeyU" => "delbeg",
-            "KeyN" | "KeyJ" | "KeyP" | "KeyK" => {
+            "KeyC" | "KeyN" | "KeyJ" | "KeyP" | "KeyK" => {
                 e.prevent_default();
                 return;
             }
