@@ -5,6 +5,12 @@ fn main() {
     #[cfg(not(target_os = "macos"))]
     early_exit_if_subprocess();
 
+    // Apply any staged update before starting the app
+    let updater = vmux_desktop::updater::VmuxUpdater::builder().build();
+    if updater.apply_staged_update() {
+        updater.re_exec();
+    }
+
     println!(
         "\n\
          \x1b[36m \x1b[1m\\              /\x1b[0m\x1b[36m  |\\            /|  |        |  \\      /\x1b[0m\n\

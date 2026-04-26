@@ -18,6 +18,7 @@ pub(crate) mod shortcut;
 mod terminal;
 mod themes;
 mod unit;
+pub mod updater;
 
 use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
@@ -25,12 +26,36 @@ use bevy::window::{CompositeAlphaMode, Window as NativeWindow, WindowPlugin};
 use bevy::winit::WinitSettings;
 use std::time::Duration;
 
+    browser::BrowserPlugin, command::CommandPlugin, shortcut::ShortcutPlugin,
+    layout::LayoutPlugin, os_menu::OsMenuPlugin,
+    command_bar::CommandBarInputPlugin, persistence::PersistencePlugin, profile::ProfilePlugin,
+    scene::ScenePlugin, settings::SettingsPlugin, terminal::TerminalInputPlugin,
+
+    vmux_command_bar::CommandBarPlugin,
+    vmux_header::HeaderPlugin, vmux_side_sheet::SideSheetPlugin,
+    vmux_terminal::TerminalPlugin,
+>>>>>>> ba379ef (feat: add auto-update support (VMX-84))
+    vmux_webview_app::WebviewAppRegistryPlugin,
+};
+=======
 use {
     browser::BrowserPlugin, command::CommandPlugin, command_bar::CommandBarInputPlugin,
     layout::LayoutPlugin, os_menu::OsMenuPlugin, persistence::PersistencePlugin,
     profile::ProfilePlugin, scene::ScenePlugin, settings::SettingsPlugin, shortcut::ShortcutPlugin,
     terminal::TerminalInputPlugin, vmux_command_bar::CommandBarPlugin, vmux_header::HeaderPlugin,
     vmux_side_sheet::SideSheetPlugin, vmux_terminal::TerminalPlugin,
+    vmux_webview_app::WebviewAppRegistryPlugin,
+};
+=======
+    browser::BrowserPlugin, command::CommandPlugin, shortcut::ShortcutPlugin,
+    layout::LayoutPlugin, os_menu::OsMenuPlugin,
+    command_bar::CommandBarInputPlugin, persistence::PersistencePlugin, profile::ProfilePlugin,
+    scene::ScenePlugin, settings::SettingsPlugin, terminal::TerminalInputPlugin,
+
+    vmux_command_bar::CommandBarPlugin,
+    vmux_header::HeaderPlugin, vmux_side_sheet::SideSheetPlugin,
+    vmux_terminal::TerminalPlugin,
+>>>>>>> ba379ef (feat: add auto-update support (VMX-84))
     vmux_webview_app::WebviewAppRegistryPlugin,
 };
 
@@ -90,6 +115,7 @@ impl Plugin for VmuxPlugin {
             PersistencePlugin,
             ProfilePlugin,
             LayoutPlugin,
+            updater::VmuxUpdater::builder().build().plugin(),
         ));
     }
 }
