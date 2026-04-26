@@ -34,9 +34,7 @@ package-release-mac:
 	./scripts/package.sh release
 
 build-local-mac: package-local-mac
-	@echo "Signing..."
-	@HASH=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown); \
-	APP_BUNDLE="target/release/Vmux ($$HASH).app" SKIP_NOTARIZE=1 ./scripts/sign-and-notarize.sh
+	@echo "Done. App bundle is already codesigned by cargo-packager + inject-cef."
 
 build-release-mac: package-release-mac
 	@echo "Signing..."
