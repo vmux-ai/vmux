@@ -385,11 +385,7 @@ fn handle_tab_commands(
                     .entity(tabs[target_idx])
                     .insert(LastActivatedAt::now());
             }
-            TabCommand::Reopen
-            | TabCommand::Duplicate
-            | TabCommand::Pin
-            | TabCommand::Mute
-            | TabCommand::MoveToPane => {}
+            TabCommand::Reopen | TabCommand::Duplicate | TabCommand::MoveToPane => {}
             TabCommand::SwapPrev | TabCommand::SwapNext => {
                 let Some(pane) = active_pane else { continue };
                 let Some(tab) = active_tab else { continue };

@@ -227,36 +227,12 @@ pub fn App() -> Element {
                 .cloned();
             r.retain(|item| !matches!(item, ResultItem::Terminal { path } if !path.is_empty()));
             let mut combined = Vec::new();
-            if let Some(ref entry) = typed_terminal {
-                if let ResultItem::Terminal { path: tp } = entry {
-                    if !path_items
-                        .iter()
-                        .any(|item| matches!(item, ResultItem::Terminal { path } if path == tp))
-                    {
-                        combined.push(entry.clone());
-                    }
-                }
->>>>>>> 2e4e40e (feat: hide unimplemented commands from command bar and OS menu)
-            }
-=======
             if let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
                 && !path_items
                     .iter()
                     .any(|item| matches!(item, ResultItem::Terminal { path } if path == tp))
             {
                 combined.push(entry.clone());
-            }
-=======
-            if let Some(ref entry) = typed_terminal {
-                if let ResultItem::Terminal { path: tp } = entry {
-                    if !path_items
-                        .iter()
-                        .any(|item| matches!(item, ResultItem::Terminal { path } if path == tp))
-                    {
-                        combined.push(entry.clone());
-                    }
-                }
->>>>>>> 2e4e40e (feat: hide unimplemented commands from command bar and OS menu)
             }
             combined.extend(path_items);
             combined.extend(r);

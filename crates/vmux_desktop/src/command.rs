@@ -46,6 +46,7 @@ pub enum AppCommand {
     Browser(BrowserCommand),
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TabCommand {
     #[default]
@@ -85,12 +86,12 @@ pub enum TabCommand {
     #[menu(id = "tab_duplicate", label = "Duplicate Tab\t<leader> d", hidden)]
     #[shortcut(chord = "Ctrl+g, d")]
     Duplicate,
-    #[menu(id = "tab_pin", label = "Pin Tab", hidden)]
-    Pin,
-    #[menu(id = "tab_mute", label = "Mute Tab\t<leader> m", hidden)]
-    #[shortcut(chord = "Ctrl+g, m")]
-    Mute,
-    #[menu(id = "tab_move_to_pane", label = "Move Tab to Pane\t<leader> !", hidden)]
+
+    #[menu(
+        id = "tab_move_to_pane",
+        label = "Move Tab to Pane\t<leader> !",
+        hidden
+    )]
     #[shortcut(chord = "Ctrl+g, !")]
     MoveToPane,
     #[menu(id = "tab_swap_prev", label = "Move Tab Left\t<leader> <")]
@@ -101,28 +102,19 @@ pub enum TabCommand {
     SwapNext,
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TerminalCommand {
     #[default]
     #[menu(id = "terminal_new", label = "New Terminal", accel = "ctrl+`")]
     #[shortcut(direct = "Ctrl+`")]
     New,
-    #[menu(id = "terminal_close", label = "Close Terminal", hidden)]
-    Close,
-    #[menu(id = "terminal_next", label = "Next Terminal", hidden)]
-    Next,
-    #[menu(id = "terminal_prev", label = "Previous Terminal", hidden)]
-    Previous,
+
     #[menu(id = "terminal_clear", label = "Clear Terminal", hidden)]
     Clear,
-    #[menu(id = "terminal_reset", label = "Reset Terminal", hidden)]
-    Reset,
-    #[menu(id = "terminal_split_v", label = "Split Terminal Vertically", hidden)]
-    SplitV,
-    #[menu(id = "terminal_split_h", label = "Split Terminal Horizontally", hidden)]
-    SplitH,
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BrowserCommand {
     #[default]
@@ -186,6 +178,7 @@ pub enum BrowserCommand {
     Print,
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaneCommand {
     #[default]
@@ -222,10 +215,18 @@ pub enum PaneCommand {
     #[menu(id = "swap_pane_next", label = "Swap Pane Next\t<leader> }")]
     #[shortcut(chord = "Ctrl+g, }")]
     SwapNext,
-    #[menu(id = "rotate_forward", label = "Rotate Forward\t<leader> ctrl+o", hidden)]
+    #[menu(
+        id = "rotate_forward",
+        label = "Rotate Forward\t<leader> ctrl+o",
+        hidden
+    )]
     #[shortcut(chord = "Ctrl+g, Ctrl+o")]
     RotateForward,
-    #[menu(id = "rotate_backward", label = "Rotate Backward\t<leader> alt+o", hidden)]
+    #[menu(
+        id = "rotate_backward",
+        label = "Rotate Backward\t<leader> alt+o",
+        hidden
+    )]
     #[shortcut(chord = "Ctrl+g, Alt+o")]
     RotateBackward,
     #[menu(id = "equalize_pane_size", label = "Equalize Pane Size\t<leader> =")]
@@ -248,6 +249,7 @@ pub enum PaneCommand {
     ResizeDown,
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpaceCommand {
     #[default]
@@ -272,6 +274,7 @@ pub enum SpaceCommand {
     SwapNext,
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SideSheetCommand {
     #[default]
@@ -313,12 +316,18 @@ pub enum HeaderCommand {
     Toggle,
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WindowCommand {
     #[default]
     #[menu(id = "new_window", label = "New Window", accel = "super+n", hidden)]
     NewWindow,
-    #[menu(id = "close_window", label = "Close Window", accel = "super+shift+w", hidden)]
+    #[menu(
+        id = "close_window",
+        label = "Close Window",
+        accel = "super+shift+w",
+        hidden
+    )]
     CloseWindow,
     #[menu(id = "minimize_window", label = "Minimize", accel = "super+m", hidden)]
     Minimize,
