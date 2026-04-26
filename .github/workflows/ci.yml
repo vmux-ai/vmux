@@ -159,6 +159,10 @@ jobs:
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
 
+      - name: Strip signing config for CI
+        run: |
+          sed -i '' '/signing-identity/d' crates/vmux_desktop/Cargo.toml
+
       - name: Package
         run: env -u CEF_PATH cargo packager --release
 
