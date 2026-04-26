@@ -9,12 +9,12 @@ use std::path::PathBuf;
 use crate::{
     browser::Browser,
     layout::{
+        HeaderState, Open, SideSheetState,
         pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection},
         side_sheet::{SideSheet, SideSheetPosition},
         space::Space,
         tab::Tab,
         window::Main,
-        HeaderState, Open, SideSheetState,
     },
     profile::Profile,
     settings::AppSettings,
@@ -77,10 +77,8 @@ fn mark_dirty_on_change(
     mut removed_open: RemovedComponents<Open>,
     state_entities: Query<Entity, Or<(With<HeaderState>, With<SideSheetState>)>>,
 ) {
-    let open_state_changed = !open_on_state.is_empty()
-        || removed_open
-            .read()
-            .any(|e| state_entities.contains(e));
+    let open_state_changed =
+        !open_on_state.is_empty() || removed_open.read().any(|e| state_entities.contains(e));
 
     if !added_tabs.is_empty()
         || !added_panes.is_empty()

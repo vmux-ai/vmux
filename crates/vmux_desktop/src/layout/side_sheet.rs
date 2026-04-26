@@ -86,7 +86,15 @@ fn side_sheet_drag_resize(
     windows: Query<&Window, With<PrimaryWindow>>,
 
     mut width_res: ResMut<SideSheetWidth>,
-    sheet_q: Query<(&SideSheetPosition, Has<Open>, &ComputedNode, &UiGlobalTransform), With<SideSheet>>,
+    sheet_q: Query<
+        (
+            &SideSheetPosition,
+            Has<Open>,
+            &ComputedNode,
+            &UiGlobalTransform,
+        ),
+        With<SideSheet>,
+    >,
     active_drags: Query<(Entity, &SideSheetDrag)>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut side_sheet_q: Query<(&SideSheetPosition, &mut Node), With<SideSheet>>,
@@ -175,17 +183,17 @@ fn sync_side_sheet_visibility(
     // Determine if the left side sheet opened or closed
     let mut left_open: Option<bool> = None;
     for entity in &added {
-        if let Ok((_, pos, _, _)) = side_sheet_q.get(entity) {
-            if *pos == SideSheetPosition::Left {
-                left_open = Some(true);
-            }
+        if let Ok((_, pos, _, _)) = side_sheet_q.get(entity)
+            && *pos == SideSheetPosition::Left
+        {
+            left_open = Some(true);
         }
     }
     for entity in removed.read() {
-        if let Ok((_, pos, _, _)) = side_sheet_q.get(entity) {
-            if *pos == SideSheetPosition::Left {
-                left_open = Some(false);
-            }
+        if let Ok((_, pos, _, _)) = side_sheet_q.get(entity)
+            && *pos == SideSheetPosition::Left
+        {
+            left_open = Some(false);
         }
     }
 
@@ -240,19 +248,19 @@ fn sync_window_buttons_visibility(
     let mut changed = false;
     let mut is_open = false;
     for entity in &added {
-        if let Ok((pos, _)) = side_sheet_q.get(entity) {
-            if *pos == SideSheetPosition::Left {
-                changed = true;
-                is_open = true;
-            }
+        if let Ok((pos, _)) = side_sheet_q.get(entity)
+            && *pos == SideSheetPosition::Left
+        {
+            changed = true;
+            is_open = true;
         }
     }
     if !changed {
         for entity in removed.read() {
-            if let Ok((pos, _)) = side_sheet_q.get(entity) {
-                if *pos == SideSheetPosition::Left {
-                    changed = true;
-                }
+            if let Ok((pos, _)) = side_sheet_q.get(entity)
+                && *pos == SideSheetPosition::Left
+            {
+                changed = true;
             }
         }
     }
