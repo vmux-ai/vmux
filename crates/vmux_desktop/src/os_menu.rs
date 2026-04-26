@@ -84,12 +84,12 @@ fn rename_app_menu() {
 
     let mtm = MainThreadMarker::new().expect("must be on main thread");
     let ns_app = NSApplication::sharedApplication(mtm);
-    if let Some(main_menu) = ns_app.mainMenu() {
-        if let Some(first_item) = main_menu.itemAtIndex(0) {
-            if let Some(submenu) = first_item.submenu() {
-                submenu.setTitle(&NSString::from_str(&app_name));
-            }
-            first_item.setTitle(&NSString::from_str(&app_name));
+    if let Some(main_menu) = ns_app.mainMenu()
+        && let Some(first_item) = main_menu.itemAtIndex(0)
+    {
+        if let Some(submenu) = first_item.submenu() {
+            submenu.setTitle(&NSString::from_str(&app_name));
         }
+        first_item.setTitle(&NSString::from_str(&app_name));
     }
 }
