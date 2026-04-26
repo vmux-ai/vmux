@@ -173,7 +173,7 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 let app_name = match env!("VMUX_PROFILE") {
                     "release" => "Vmux".to_string(),
                     "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
-                    "dev" => "Vmux Dev".to_string(),
+                    "dev" => "Vmux (Dev)".to_string(),
                     other => format!("Vmux ({})", other),
                 };
                 let mut app_native_submenu = ::muda::Submenu::new(&app_name, true);

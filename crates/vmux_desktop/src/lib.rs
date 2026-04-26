@@ -42,7 +42,7 @@ impl Plugin for VmuxPlugin {
         let title = match env!("VMUX_PROFILE") {
             "release" => "Vmux".to_string(),
             "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
-            "dev" => "Vmux Dev".to_string(),
+            "dev" => "Vmux (Dev)".to_string(),
             other => format!("Vmux ({})", other),
         };
 

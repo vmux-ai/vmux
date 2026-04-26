@@ -21,7 +21,7 @@ fn main() {
         match env!("VMUX_PROFILE") {
             "release" => String::new(),
             "local" => format!(" ({})", env!("VMUX_GIT_HASH")),
-            "dev" => " dev".to_string(),
+            "dev" => " (dev)".to_string(),
             other => format!(" ({})", other),
         }
     );
