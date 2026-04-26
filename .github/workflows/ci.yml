@@ -30,6 +30,8 @@ jobs:
             ~/.cargo/bin
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             target
           key: ${{ runner.os }}-lint-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-lint-
@@ -73,6 +75,8 @@ jobs:
             ~/.cargo/bin
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             target
           key: ${{ runner.os }}-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-test-
@@ -104,6 +108,8 @@ jobs:
             ~/.cargo/bin
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             website/target
           key: website-ci-${{ hashFiles('website/Cargo.lock') }}
           restore-keys: website-ci-
