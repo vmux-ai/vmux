@@ -76,4 +76,13 @@ echo "==> Running cargo packager"
 cd "$ROOT"
 env -u CEF_PATH VMUX_PROFILE="$PROFILE" cargo packager --release
 
+# For local builds (app-only format), inject-cef.sh doesn't run via
+# before-each-package-command because it only fires for DMG format
+# (the .app doesn't exist yet during the app format pass).
+# Run CEF injection manually after cargo-packager finishes.
+if [[ "$PROFILE" == "local" && -d "$VMUX_APP_BUNDLE" ]]; then
+    echo "==> Injecting CEF into .app (local build)"
+    CARGO_PACKAGER_FORMAT=dmg bash "$ROOT/scripts/inject-cef.sh"
+fi
+
 echo "==> Packaging complete: $VMUX_APP_BUNDLE"
