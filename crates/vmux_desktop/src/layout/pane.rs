@@ -1,12 +1,14 @@
 use crate::{
     command::{AppCommand, PaneCommand, ReadAppCommands},
     command_bar::NewTabContext,
+    confirm_close,
     layout::space::Space,
     layout::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     layout::tab::{
         Tab, active_among, active_pane_in_space, active_tab_in_pane, focused_tab, tab_bundle,
     },
     settings::AppSettings,
+    terminal::{Terminal, PtyExited},
 };
 use bevy::{
     ecs::relationship::Relationship,
@@ -194,6 +196,7 @@ fn handle_pane_commands(
         Query<&ComputedNode>,
         ResMut<PendingCursorWarp>,
     )>,
+    live_terminal_q: Query<(), (With<Terminal>, Without<PtyExited>)>,
 ) {
     for cmd in reader.read() {
         let AppCommand::Pane(pane_cmd) = *cmd else {
@@ -262,6 +265,19 @@ fn handle_pane_commands(
                 resize_q.p3().target = Some(pane2);
             }
             PaneCommand::Close => {
+                // Confirm close if any tab in this pane has a live terminal
+                if confirm_close::should_confirm(&settings)
+                    && confirm_close::pane_has_live_terminal(
+                        active,
+                        &pane_children,
+                        &all_children,
+                        &live_terminal_q,
+                    )
+                    && !confirm_close::confirm_close_dialog()
+                {
+                    continue;
+                }
+
                 let Ok(pane_co) = child_of_q.get(active) else {
                     continue;
                 };
