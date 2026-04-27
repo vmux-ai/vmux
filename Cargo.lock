@@ -8927,6 +8927,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
  "vmux_command_bar",
  "vmux_core",
  "vmux_daemon",
