@@ -231,14 +231,13 @@ pub fn App() -> Element {
                 .cloned();
             r.retain(|item| !matches!(item, ResultItem::Terminal { path } if !path.is_empty()));
             let mut combined = Vec::new();
-            if is_dir {
-                if let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
-                    && !path_items
-                        .iter()
-                        .any(|item| matches!(item, ResultItem::Terminal { path } if path == tp))
-                {
-                    combined.push(entry.clone());
-                }
+            if is_dir
+                && let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
+                && !path_items
+                    .iter()
+                    .any(|item| matches!(item, ResultItem::Terminal { path } if path == tp))
+            {
+                combined.push(entry.clone());
             }
             combined.extend(path_items);
             combined.extend(r);
