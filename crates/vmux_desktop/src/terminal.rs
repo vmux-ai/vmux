@@ -270,6 +270,7 @@ fn poll_daemon_messages(
         (Entity, &DaemonSessionHandle, &ChildOf),
         (With<Terminal>, Without<SessionExited>),
     >,
+    mut meta_q: Query<&mut PageMetadata>,
     daemon: Option<Res<DaemonClient>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -277,18 +278,15 @@ fn poll_daemon_messages(
 ) {
     let Some(daemon) = daemon else { return };
 
-    // Handle pending creates
-    for (entity, handle, pending) in &pending_create {
+    // Handle pending creates — send CreateSession, wait for SessionCreated
+    // response which will carry the real session ID.
+    for (entity, _handle, pending) in &pending_create {
         daemon.0.send(ClientMessage::CreateSession {
             shell: pending.shell.clone(),
             cwd: pending.cwd.clone(),
             env: Vec::new(),
             cols: 80,
             rows: 24,
-        });
-        // Also attach immediately to receive viewport patches
-        daemon.0.send(ClientMessage::AttachSession {
-            session_id: handle.session_id,
         });
         commands.entity(entity).remove::<PendingDaemonCreate>();
     }
@@ -308,16 +306,25 @@ fn poll_daemon_messages(
     for msg in daemon.0.drain() {
         match msg {
             DaemonMessage::SessionCreated { session_id } => {
-                // Update the placeholder session_id if we find a pending terminal
-                // The first terminal without a real session gets this one.
-                // In practice CreateSession responses come back in order.
+                // Update the placeholder session_id on the first terminal
+                // that doesn't yet have a real daemon session.
+                // CreateSession responses arrive in order.
                 for (entity, _, _) in &terminals {
-                    // Attach to this session to receive patches
+                    // Attach to receive viewport patches
                     daemon.0.send(ClientMessage::AttachSession { session_id });
-                    // Update handle
+                    // Update handle with real daemon session ID
                     commands
                         .entity(entity)
                         .insert(DaemonSessionHandle { session_id });
+                    // Update PageMetadata URL so session.ron saves the real ID
+                    if let Ok(mut meta) = meta_q.get_mut(entity) {
+                        meta.url =
+                            format!("{}session/{}", TERMINAL_WEBVIEW_URL, session_id);
+                        meta.title = format!(
+                            "Terminal ({})",
+                            &session_id.to_string()[..8]
+                        );
+                    }
                     break;
                 }
             }
