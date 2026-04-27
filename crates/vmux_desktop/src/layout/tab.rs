@@ -50,7 +50,6 @@ impl Plugin for TabPlugin {
                     .in_set(ComputeFocusSet)
                     .after(ReadAppCommands),
             )
-
             .add_systems(PostUpdate, sync_tab_picking);
     }
 }
@@ -592,10 +591,17 @@ pub(crate) fn open_command_bar_if_no_tabs(
     mut new_tab_ctx: ResMut<NewTabContext>,
     mut commands: Commands,
 ) {
+    info!(
+        "[open_command_bar_if_no_tabs] tabs={} leaf_panes={}",
+        tab_q.iter().count(),
+        leaf_panes.iter().count(),
+    );
     if !tab_q.is_empty() {
+        info!("[open_command_bar_if_no_tabs] tabs exist, skipping");
         return;
     }
     let Some(pane) = leaf_panes.iter().next() else {
+        info!("[open_command_bar_if_no_tabs] no leaf panes, skipping");
         return;
     };
     let tab = commands
@@ -604,4 +610,8 @@ pub(crate) fn open_command_bar_if_no_tabs(
     new_tab_ctx.tab = Some(tab);
     new_tab_ctx.previous_tab = None;
     new_tab_ctx.needs_open = true;
+    info!(
+        "[open_command_bar_if_no_tabs] spawned empty tab {:?}, needs_open=true",
+        tab
+    );
 }
