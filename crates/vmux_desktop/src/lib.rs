@@ -8,6 +8,7 @@
 mod browser;
 mod command;
 mod command_bar;
+mod confirm_close;
 mod layout;
 mod os_menu;
 mod persistence;
