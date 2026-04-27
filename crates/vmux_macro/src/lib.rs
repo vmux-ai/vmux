@@ -176,7 +176,13 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     Ok(quote! {
         impl #ident {
             pub(crate) fn build_native_root_menu(menu: &mut ::muda::Menu) -> Result<(), ::muda::Error> {
-                let mut app_native_submenu = ::muda::Submenu::new("Vmux", true);
+                let app_name = match env!("VMUX_PROFILE") {
+                    "release" => "Vmux".to_string(),
+                    "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
+                    "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),
+                    other => format!("Vmux ({})", other),
+                };
+                let mut app_native_submenu = ::muda::Submenu::new(&app_name, true);
                 app_native_submenu.append_items(&[
                     &::muda::PredefinedMenuItem::about(None, None),
                     &::muda::PredefinedMenuItem::separator(),

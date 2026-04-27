@@ -39,7 +39,15 @@ pub struct VmuxPlugin;
 
 impl Plugin for VmuxPlugin {
     fn build(&self, app: &mut App) {
+        let title = match env!("VMUX_PROFILE") {
+            "release" => "Vmux".to_string(),
+            "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
+            "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),
+            other => format!("Vmux ({})", other),
+        };
+
         let primary_window = NativeWindow {
+            title,
             transparent: true,
             composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
             decorations: true,

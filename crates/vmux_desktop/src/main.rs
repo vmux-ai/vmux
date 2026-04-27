@@ -16,8 +16,14 @@ fn main() {
          \x1b[36m       \x1b[1m\\  /\x1b[0m\x1b[36m        |      \\/      |  |        |   /    \\\x1b[0m\n\
          \x1b[36m        \x1b[1m\\/\x1b[0m\x1b[36m         |              |  |________|  /      \\\x1b[0m\n\
          \n\
-         \x1b[2mv{}\x1b[0m\n",
-        env!("CARGO_PKG_VERSION")
+         \x1b[2mv{}{}\x1b[0m\n",
+        env!("CARGO_PKG_VERSION"),
+        match env!("VMUX_PROFILE") {
+            "release" => String::new(),
+            "local" => format!(" ({})", env!("VMUX_GIT_HASH")),
+            "dev" => format!(" dev ({})", env!("VMUX_GIT_HASH")),
+            other => format!(" ({})", other),
+        }
     );
 
     let mut app = App::new();

@@ -1,4 +1,4 @@
-.PHONY: run-mac run-mac-local run-doctor build-mac-debug build build-local-mac package-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps run-website build-website lint lint-fix fmt clippy test
+.PHONY: run-mac run-mac-local run-doctor build-mac-debug build build-local-mac build-release-mac package-local-mac package-release-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps run-website build-website lint lint-fix fmt clippy test
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 RUSTUP_BIN := $(or $(shell command -v rustup 2>/dev/null),$(HOME)/.cargo/bin/rustup)
@@ -23,15 +23,22 @@ build: ensure-run-mac-deps
 -include .env
 export
 
-run-mac-local: package-mac
-	open target/release/Vmux.app
+run-mac-local: package-local-mac
+	@HASH=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown); \
+	open "target/release/Vmux ($$HASH).app"
 
-package-mac:
-	env -u CEF_PATH cargo packager --release
+package-local-mac:
+	./scripts/package.sh local
 
-build-local-mac: package-mac
+package-release-mac:
+	./scripts/package.sh release
+
+build-local-mac: package-local-mac
+	@echo "Done. App bundle is already codesigned by cargo-packager + inject-cef."
+
+build-release-mac: package-release-mac
 	@echo "Signing..."
-	SKIP_NOTARIZE=1 ./scripts/sign-and-notarize.sh
+	./scripts/sign-and-notarize.sh
 
 # One-time CEF download (macOS paths; pin matches bevy_cef 0.5.x)
 setup-cef:

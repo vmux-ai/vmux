@@ -15,8 +15,8 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 # Wrong CEF_PATH breaks cef-dll-sys; default macOS layout is ~/.local/share.
 unset CEF_PATH
 
-APP_BUNDLE="${ROOT}/target/release/Vmux.app"
-BUNDLE_ID_BASE="ai.vmux.desktop"
+APP_BUNDLE="${VMUX_APP_BUNDLE:-${ROOT}/target/release/Vmux.app}"
+BUNDLE_ID_BASE="${VMUX_BUNDLE_ID:-ai.vmux.desktop}"
 HELPER_BIN="${ROOT}/target/release/bevy_cef_debug_render_process"
 
 if [[ ! -d "$APP_BUNDLE" ]]; then
