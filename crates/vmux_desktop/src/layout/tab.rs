@@ -176,9 +176,10 @@ fn handle_tab_commands(
     mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
-        let (tab_cmd, is_terminal) = match *cmd {
-            AppCommand::Tab(t) => (t, false),
-            AppCommand::Terminal(TerminalCommand::New) => (TabCommand::New, true),
+        let (tab_cmd, terminal_mode) = match *cmd {
+            AppCommand::Tab(t) => (t, None),
+            AppCommand::Terminal(TerminalCommand::New) => (TabCommand::New, Some(false)),
+            AppCommand::Terminal(TerminalCommand::NewTab) => (TabCommand::New, Some(true)),
             _ => continue,
         };
 
@@ -196,31 +197,45 @@ fn handle_tab_commands(
                 let Some(pane) = active_pane else {
                     continue;
                 };
-                if is_terminal {
-                    let tab = commands
-                        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id();
-                    commands.entity(tab).insert(vmux_header::PageMetadata {
-                        url: TERMINAL_WEBVIEW_URL.to_string(),
-                        title: "Terminal (Session: -)".to_string(),
-                        ..default()
-                    });
-                    commands.spawn((
-                        Terminal::new(&mut meshes, &mut webview_mt, &settings),
-                        ChildOf(tab),
-                    ));
-                } else {
-                    // If there's already an empty tab pending, reuse it
-                    if new_tab_ctx.tab.is_some() {
-                        new_tab_ctx.needs_open = true;
-                        continue;
+                match terminal_mode {
+                    Some(new_tab) => {
+                        let tab = match (new_tab, active_tab) {
+                            (false, Some(existing)) => {
+                                if let Ok(children) = all_children.get(existing) {
+                                    for child in children.iter() {
+                                        if !tab_q.contains(child) {
+                                            commands.entity(child).despawn();
+                                        }
+                                    }
+                                }
+                                existing
+                            }
+                            _ => commands
+                                .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                                .id(),
+                        };
+                        commands.entity(tab).insert(vmux_header::PageMetadata {
+                            url: TERMINAL_WEBVIEW_URL.to_string(),
+                            title: "Terminal (Session: -)".to_string(),
+                            ..default()
+                        });
+                        commands.spawn((
+                            Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                            ChildOf(tab),
+                        ));
                     }
-                    let tab = commands
-                        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id();
-                    new_tab_ctx.tab = Some(tab);
-                    new_tab_ctx.previous_tab = active_tab;
-                    new_tab_ctx.needs_open = true;
+                    None => {
+                        if new_tab_ctx.tab.is_some() {
+                            new_tab_ctx.needs_open = true;
+                            continue;
+                        }
+                        let tab = commands
+                            .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                            .id();
+                        new_tab_ctx.tab = Some(tab);
+                        new_tab_ctx.previous_tab = active_tab;
+                        new_tab_ctx.needs_open = true;
+                    }
                 }
             }
             TabCommand::Close => {
