@@ -8,7 +8,10 @@ pub const TERM_RESIZE_EVENT: &str = "term_resize";
 pub const TERM_THEME_EVENT: &str = "term_theme";
 pub const TERMINAL_WEBVIEW_URL: &str = "vmux://terminal/";
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, Default, PartialEq,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub enum TermColor {
     #[default]
     Default,
@@ -36,7 +39,10 @@ pub struct TermThemeEvent {
     pub cursor_blink: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, Default,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct TermViewportEvent {
     pub lines: Vec<TermLine>,
     pub cursor: TermCursor,
@@ -48,7 +54,10 @@ pub struct TermViewportEvent {
 }
 
 /// Range of selected cells in viewport coordinates (0-based row/col).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct TermSelectionRange {
     pub start_col: u16,
     pub start_row: u16,
@@ -57,12 +66,18 @@ pub struct TermSelectionRange {
     pub is_block: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, Default,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct TermLine {
     pub spans: Vec<TermSpan>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, Default,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct TermSpan {
     pub text: String,
     pub fg: TermColor,
@@ -84,7 +99,10 @@ pub const FLAG_STRIKETHROUGH: u16 = 8;
 pub const FLAG_DIM: u16 = 16;
 pub const FLAG_INVERSE: u16 = 32;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct TermCursor {
     pub col: u16,
     pub row: u16,
@@ -107,11 +125,28 @@ impl Default for TermCursor {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub enum CursorShape {
     Block,
     Beam,
     Underline,
+}
+
+/// Incremental viewport update. Contains only changed lines plus cursor/selection.
+/// When `full` is true, `changed_lines` contains ALL lines (used on resize/spawn).
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct TermViewportPatch {
+    /// (row_index, line) pairs for rows that changed since last sync.
+    pub changed_lines: Vec<(u16, TermLine)>,
+    pub cursor: TermCursor,
+    pub cols: u16,
+    pub rows: u16,
+    pub selection: Option<TermSelectionRange>,
+    /// When true, changed_lines contains every row (full viewport rebuild).
+    pub full: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
