@@ -59,6 +59,9 @@ fn impl_os_sub_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
             ));
         };
         let props = MenuProps::from_attrs(&variant.attrs)?;
+        if props.hidden {
+            continue;
+        }
         let (Some(id), Some(label)) = (&props.id, &props.label) else {
             return Err(syn::Error::new_spanned(
                 variant,
@@ -85,8 +88,12 @@ fn impl_os_sub_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
         });
     }
 
+    let has_visible = !items.is_empty();
+
     Ok(quote! {
         impl #ident {
+            pub(crate) const HAS_VISIBLE_ITEMS: bool = #has_visible;
+
             pub(crate) fn append_native_menu_leaf(
                 submenu: &mut ::muda::Submenu,
             ) -> Result<(), ::muda::Error> {
@@ -112,7 +119,6 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     };
 
     let mut submenu_blocks = Vec::new();
-    let mut submenu_idents = Vec::new();
     let mut from_menu_clauses = Vec::new();
 
     for variant in &data.variants {
@@ -144,18 +150,18 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             ),
             variant.ident.span(),
         );
-        submenu_idents.push(submenu_ident.clone());
         submenu_blocks.push(quote! {
-            let mut #submenu_ident = ::muda::Submenu::new(#title, true);
-            <#inner_ty>::append_native_menu_leaf(&mut #submenu_ident)?;
+            if <#inner_ty>::HAS_VISIBLE_ITEMS {
+                let mut #submenu_ident = ::muda::Submenu::new(#title, true);
+                <#inner_ty>::append_native_menu_leaf(&mut #submenu_ident)?;
+                submenus.push(::std::boxed::Box::new(#submenu_ident) as ::std::boxed::Box<dyn ::muda::IsMenuItem>);
+            }
         });
 
         from_menu_clauses.push(quote! {
             <#inner_ty>::from_menu_id(id).map(#ident::#variant_ident)
         });
     }
-
-    let submenu_refs: Vec<_> = submenu_idents.iter().map(|i| quote! { &#i }).collect();
 
     let from_menu_body = if from_menu_clauses.is_empty() {
         quote! { ::core::option::Option::None }
@@ -176,11 +182,11 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     &::muda::PredefinedMenuItem::separator(),
                     &::muda::PredefinedMenuItem::quit(None),
                 ])?;
+                let mut submenus: ::std::vec::Vec<::std::boxed::Box<dyn ::muda::IsMenuItem>> = ::std::vec::Vec::new();
+                submenus.push(::std::boxed::Box::new(app_native_submenu));
                 #(#submenu_blocks)*
-                menu.append_items(&[
-                    &app_native_submenu,
-                    #(#submenu_refs),*
-                ])?;
+                let refs: ::std::vec::Vec<&dyn ::muda::IsMenuItem> = submenus.iter().map(|s| s.as_ref()).collect();
+                menu.append_items(&refs)?;
                 Ok(())
             }
 
@@ -195,6 +201,7 @@ struct MenuProps {
     id: Option<String>,
     label: Option<String>,
     accel: Option<String>,
+    hidden: bool,
 }
 
 impl MenuProps {
@@ -202,6 +209,7 @@ impl MenuProps {
         let mut id = None;
         let mut label = None;
         let mut accel = None;
+        let mut hidden = false;
         for attr in attrs {
             if !attr.path().is_ident("menu") {
                 continue;
@@ -216,11 +224,18 @@ impl MenuProps {
                 } else if meta.path.is_ident("accel") {
                     let v: LitStr = meta.value()?.parse()?;
                     accel = Some(v.value());
+                } else if meta.path.is_ident("hidden") {
+                    hidden = true;
                 }
                 Ok(())
             })?;
         }
-        Ok(MenuProps { id, label, accel })
+        Ok(MenuProps {
+            id,
+            label,
+            accel,
+            hidden,
+        })
     }
 }
 
@@ -265,6 +280,10 @@ fn impl_leaf_shortcuts(
     for variant in &data.variants {
         let bind_props = BindProps::from_attrs(&variant.attrs)?;
         let menu_props = MenuProps::from_attrs(&variant.attrs)?;
+
+        if menu_props.hidden {
+            continue;
+        }
 
         let binding_str = match (&bind_props.direct, &bind_props.chord) {
             (Some(_), Some(_)) => {
@@ -534,6 +553,9 @@ fn impl_command_bar_leaf(
 
     for variant in &data.variants {
         let props = MenuProps::from_attrs(&variant.attrs)?;
+        if props.hidden {
+            continue;
+        }
         let (Some(id), Some(label)) = (&props.id, &props.label) else {
             continue;
         };
