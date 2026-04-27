@@ -17,6 +17,7 @@ mod settings;
 pub(crate) mod shortcut;
 mod terminal;
 mod themes;
+mod tray;
 mod unit;
 pub mod updater;
 
