@@ -9,7 +9,9 @@ use std::path::PathBuf;
 use crate::{
     browser::Browser,
     layout::{
+        HeaderState, Open, SideSheetState,
         pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection},
+        side_sheet::{SideSheet, SideSheetPosition},
         space::Space,
         tab::Tab,
         window::Main,
@@ -65,7 +67,19 @@ fn mark_dirty_on_change(
     changed_meta: Query<(), (Changed<PageMetadata>, With<Tab>)>,
     changed_size: Query<(), Changed<PaneSize>>,
     changed_children: Query<(), Changed<Children>>,
+    open_on_state: Query<
+        (),
+        (
+            Or<(With<HeaderState>, With<SideSheetState>)>,
+            Or<(Added<Open>, Changed<Open>)>,
+        ),
+    >,
+    mut removed_open: RemovedComponents<Open>,
+    state_entities: Query<Entity, Or<(With<HeaderState>, With<SideSheetState>)>>,
 ) {
+    let open_state_changed =
+        !open_on_state.is_empty() || removed_open.read().any(|e| state_entities.contains(e));
+
     if !added_tabs.is_empty()
         || !added_panes.is_empty()
         || !added_spaces.is_empty()
@@ -74,6 +88,7 @@ fn mark_dirty_on_change(
         || !changed_meta.is_empty()
         || !changed_size.is_empty()
         || !changed_children.is_empty()
+        || open_state_changed
     {
         auto_save.dirty = true;
         auto_save.debounce.reset();
@@ -115,6 +130,9 @@ fn do_save(commands: &mut Commands) {
         .allow::<PaneSplit>()
         .allow::<PaneSize>()
         .allow::<Profile>()
+        .allow::<Open>()
+        .allow::<HeaderState>()
+        .allow::<SideSheetState>()
         .allow::<PageMetadata>()
         .allow::<vmux_history::CreatedAt>()
         .allow::<vmux_history::LastActivatedAt>()
@@ -309,4 +327,45 @@ pub(crate) fn rebuild_session_views(
         panes_need_view.iter().count(),
         tabs_need_view.iter().count(),
     );
+}
+
+/// Spawn persisted layout-state entities if they don't already exist
+/// (handles first launch and migration from older sessions).
+pub(crate) fn ensure_layout_state_entities(
+    header_state_q: Query<(), With<HeaderState>>,
+    side_sheet_state_q: Query<(), With<SideSheetState>>,
+    mut commands: Commands,
+) {
+    if header_state_q.is_empty() {
+        commands.spawn(HeaderState);
+    }
+    if side_sheet_state_q.is_empty() {
+        commands.spawn(SideSheetState);
+    }
+}
+
+/// Apply persisted open state from state entities to UI entities after load.
+pub(crate) fn apply_persisted_layout_state(
+    header_state_q: Query<Has<Open>, With<HeaderState>>,
+    side_sheet_state_q: Query<Has<Open>, With<SideSheetState>>,
+    header_q: Query<Entity, With<vmux_header::Header>>,
+    side_sheet_q: Query<(Entity, &SideSheetPosition), With<SideSheet>>,
+    mut commands: Commands,
+) {
+    for is_open in &header_state_q {
+        if is_open {
+            for entity in &header_q {
+                commands.entity(entity).insert(Open);
+            }
+        }
+    }
+    for is_open in &side_sheet_state_q {
+        if is_open {
+            for (entity, pos) in &side_sheet_q {
+                if *pos == SideSheetPosition::Left {
+                    commands.entity(entity).insert(Open);
+                }
+            }
+        }
+    }
 }
