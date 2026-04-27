@@ -114,6 +114,20 @@ pub enum CursorShape {
     Underline,
 }
 
+/// Incremental viewport update. Contains only changed lines plus cursor/selection.
+/// When `full` is true, `changed_lines` contains ALL lines (used on resize/spawn).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TermViewportPatch {
+    /// (row_index, line) pairs for rows that changed since last sync.
+    pub changed_lines: Vec<(u16, TermLine)>,
+    pub cursor: TermCursor,
+    pub cols: u16,
+    pub rows: u16,
+    pub selection: Option<TermSelectionRange>,
+    /// When true, changed_lines contains every row (full viewport rebuild).
+    pub full: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TermKeyEvent {
     pub key: String,

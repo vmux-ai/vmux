@@ -8606,6 +8606,7 @@ dependencies = [
  "ron 0.8.1",
  "semver",
  "serde",
+ "serde_json",
  "vmux_command_bar",
  "vmux_core",
  "vmux_header",
