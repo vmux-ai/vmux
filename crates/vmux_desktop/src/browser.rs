@@ -1,5 +1,6 @@
 use crate::{
     command::{AppCommand, BrowserCommand, ReadAppCommands},
+    confirm_close,
     layout::{
         pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_tab_in_pane},
         side_sheet::SideSheet,
@@ -11,7 +12,7 @@ use crate::{
         },
     },
     settings::AppSettings,
-    terminal::{RestartPty, Terminal},
+    terminal::{PtyExited, RestartPty, Terminal},
 };
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
@@ -816,8 +817,11 @@ fn on_side_sheet_command_emit(
     tab_q: Query<Entity, With<Tab>>,
     child_of_q: Query<&ChildOf>,
     split_q: Query<(), With<PaneSplit>>,
-    pane_ui_q: Query<&UiGlobalTransform, With<Pane>>,
-    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    mut close_extra: ParamSet<(
+        Query<'static, 'static, &'static UiGlobalTransform, With<Pane>>,
+        Query<'static, 'static, &'static mut Window, With<PrimaryWindow>>,
+        Query<'static, 'static, (), (With<Terminal>, Without<PtyExited>)>,
+    )>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     settings: Res<AppSettings>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -847,9 +851,9 @@ fn on_side_sheet_command_emit(
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
 
-            if let Ok(ui_gt) = pane_ui_q.get(target_pane) {
+            if let Ok(ui_gt) = close_extra.p0().get(target_pane) {
                 let center = ui_gt.transform_point2(Vec2::ZERO);
-                if let Ok(mut window) = windows.single_mut() {
+                if let Ok(mut window) = close_extra.p1().single_mut() {
                     window.set_physical_cursor_position(Some(center.as_dvec2()));
                 }
             }
@@ -858,6 +862,14 @@ fn on_side_sheet_command_emit(
             let Some(&target_tab) = tab_entities.get(evt.tab_index) else {
                 return;
             };
+
+            // Confirm close if terminal is still running
+            if confirm_close::should_confirm(&settings)
+                && confirm_close::has_live_terminal(target_tab, &all_children, &close_extra.p2())
+                && !confirm_close::confirm_close_dialog()
+            {
+                return;
+            }
 
             if tab_entities.len() > 1 {
                 let is_active =
