@@ -308,6 +308,12 @@ fn handle_tab_commands(
                         e != pane && (leaf_panes.contains(e) || split_dir_q.contains(e))
                     });
                     let Some(sibling) = sibling else {
+                        let tab = commands
+                            .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                            .id();
+                        new_tab_ctx.tab = Some(tab);
+                        new_tab_ctx.previous_tab = None;
+                        new_tab_ctx.needs_open = true;
                         continue;
                     };
 
