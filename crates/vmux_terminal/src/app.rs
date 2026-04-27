@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use unicode_width::UnicodeWidthChar;
 use vmux_terminal::event::*;
 use vmux_ui::cef_bridge::try_cef_emit_keyed;
-use vmux_ui::hooks::{use_event_listener, use_rkyv_event_listener, use_theme};
+use vmux_ui::hooks::{use_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -36,7 +36,7 @@ pub fn App() -> Element {
     let mut viewport = use_signal(TermViewportEvent::default);
     let mut theme = use_signal(|| None::<TermThemeEvent>);
 
-    let _listener = use_rkyv_event_listener::<TermViewportPatch, _>(TERM_VIEWPORT_EVENT, move |patch| {
+    let _listener = use_event_listener::<TermViewportPatch, _>(TERM_VIEWPORT_EVENT, move |patch| {
         viewport.with_mut(|vp| {
             // On full sync or dimension change, rebuild entire viewport.
             if patch.full || vp.cols != patch.cols || vp.rows != patch.rows {

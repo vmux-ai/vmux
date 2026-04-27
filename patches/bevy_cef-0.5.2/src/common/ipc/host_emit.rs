@@ -23,17 +23,6 @@ impl HostEmitEvent {
             payload: serde_json::to_string(payload).unwrap_or_default(),
         }
     }
-
-    /// Creates a new `HostEmitEvent` with a pre-encoded payload string.
-    /// The payload is sent as-is through CEF IPC without additional JSON wrapping.
-    /// Use this for binary-encoded payloads (e.g. base64-encoded rkyv bytes).
-    pub fn new_raw(webview: Entity, id: impl Into<String>, raw_payload: String) -> Self {
-        Self {
-            webview,
-            id: id.into(),
-            payload: raw_payload,
-        }
-    }
 }
 
 pub(super) struct HostEmitPlugin;

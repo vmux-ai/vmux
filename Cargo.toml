@@ -49,8 +49,6 @@ regex = "1"
 alacritty_terminal = "0.26"
 portable-pty = "0.9"
 vte = "0.15"
-rkyv = { version = "0.8", features = ["alloc"] }
-base64 = "0.22"
 
 [profile.release.package.vmux_history]
 opt-level = "z"

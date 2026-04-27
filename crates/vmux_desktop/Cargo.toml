@@ -40,8 +40,6 @@ vmux_macro = { path = "../vmux_macro" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_webview_app = { path = "../vmux_webview_app" }
-rkyv = { workspace = true }
-base64 = { workspace = true }
 
 alacritty_terminal = { workspace = true }
 portable-pty = { workspace = true }

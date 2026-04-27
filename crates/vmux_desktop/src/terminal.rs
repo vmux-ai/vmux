@@ -25,7 +25,6 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use std::{
     io::{Read, Write},
     sync::{Arc, Mutex, mpsc},
@@ -431,11 +430,7 @@ fn sync_terminal_viewport(
             full,
         };
 
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&patch).unwrap();
-        let b64 = BASE64.encode(&bytes);
-        // Wrap in JSON string so emit_event_raw_json delivers it correctly.
-        let json_payload = serde_json::to_string(&b64).unwrap_or_default();
-        commands.trigger(HostEmitEvent::new_raw(entity, TERM_VIEWPORT_EVENT, json_payload));
+        commands.trigger(HostEmitEvent::new(entity, TERM_VIEWPORT_EVENT, &patch));
     }
 }
 
