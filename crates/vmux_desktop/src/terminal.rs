@@ -159,6 +159,8 @@ impl Terminal {
         let mut cmd = CommandBuilder::new(&shell);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        cmd.env("LANG", "en_US.UTF-8");
+        cmd.env("LC_CTYPE", "UTF-8");
         let initial_cwd = cwd
             .filter(|d| !d.to_string_lossy().contains("://"))
             .map(|d| d.to_path_buf());
@@ -1300,6 +1302,8 @@ fn on_restart_pty(
     let mut cmd = CommandBuilder::new(&shell);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    cmd.env("LANG", "en_US.UTF-8");
+    cmd.env("LC_CTYPE", "UTF-8");
 
     let child = pair
         .slave

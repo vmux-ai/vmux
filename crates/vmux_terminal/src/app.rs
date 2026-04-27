@@ -174,14 +174,31 @@ pub fn App() -> Element {
                         // (class/style diffs on keyed children can be missed).
                         let sel_hash = selection_row_hash(&vp.selection, row_idx);
                         let row_hash = line.spans.iter().fold(sel_hash, |h, s| {
-                            h.wrapping_mul(31)
+                            let mut h = h;
+                            // Hash text content so scrolling / text changes invalidate the row
+                            for b in s.text.bytes() {
+                                h = h.wrapping_mul(31).wrapping_add(b as u64);
+                            }
+                            h = h
+                                .wrapping_mul(31)
+                                .wrapping_add(s.col as u64)
+                                .wrapping_mul(31)
+                                .wrapping_add(s.grid_cols as u64)
+                                .wrapping_mul(31)
                                 .wrapping_add(s.flags as u64)
+                                .wrapping_mul(31)
+                                .wrapping_add(match s.fg {
+                                    TermColor::Default => 0,
+                                    TermColor::Indexed(i) => i as u64 + 1,
+                                    TermColor::Rgb(r,g,b) => ((r as u64) << 16) | ((g as u64) << 8) | b as u64,
+                                })
                                 .wrapping_mul(31)
                                 .wrapping_add(match s.bg {
                                     TermColor::Default => 0,
                                     TermColor::Indexed(i) => i as u64 + 1,
                                     TermColor::Rgb(r,g,b) => ((r as u64) << 16) | ((g as u64) << 8) | b as u64,
-                                })
+                                });
+                            h
                         });
                         let sel_range = row_selection_cols(&vp.selection, row_idx, vp.cols);
                         {
