@@ -8,7 +8,7 @@ use crate::{
         Tab, active_among, active_pane_in_space, active_tab_in_pane, focused_tab, tab_bundle,
     },
     settings::AppSettings,
-    terminal::{Terminal, PtyExited},
+    terminal::{PtyExited, Terminal},
 };
 use bevy::{
     ecs::relationship::Relationship,

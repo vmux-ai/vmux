@@ -867,11 +867,7 @@ fn on_side_sheet_command_emit(
 
             // Confirm close if terminal is still running
             let needs_confirm = confirm_close::should_confirm(&settings)
-                && confirm_close::has_live_terminal(
-                    target_tab,
-                    &all_children,
-                    &close_extra.p2(),
-                );
+                && confirm_close::has_live_terminal(target_tab, &all_children, &close_extra.p2());
             if needs_confirm {
                 if close_extra.p3().contains(target_tab) {
                     commands.entity(target_tab).remove::<CloseConfirmed>();

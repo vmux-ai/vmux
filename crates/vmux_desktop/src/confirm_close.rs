@@ -40,10 +40,7 @@ impl Plugin for ConfirmClosePlugin {
 
 /// Check if confirmation is needed based on settings.
 pub fn should_confirm(settings: &AppSettings) -> bool {
-    settings
-        .terminal
-        .as_ref()
-        .is_none_or(|t| t.confirm_close)
+    settings.terminal.as_ref().is_none_or(|t| t.confirm_close)
 }
 
 /// Check if a tab entity has any child terminal that is still running.
@@ -175,7 +172,8 @@ fn process_pending_window_close(world: &mut World) {
     // Clear pending immediately
     world.resource_mut::<PendingWindowClose>().window = None;
 
-    let mut query = world.query_filtered::<(), (With<crate::terminal::Terminal>, Without<PtyExited>)>();
+    let mut query =
+        world.query_filtered::<(), (With<crate::terminal::Terminal>, Without<PtyExited>)>();
     let count = query.iter(world).count();
 
     if (count == 0 || confirm_quit_dialog(count))

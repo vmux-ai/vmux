@@ -19,14 +19,13 @@ pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup)
-            .add_systems(
-                Update,
-                (
-                    forward_menu_events.in_set(WriteAppCommands),
-                    close_with_confirmation,
-                ),
-            );
+        app.add_systems(Startup, setup).add_systems(
+            Update,
+            (
+                forward_menu_events.in_set(WriteAppCommands),
+                close_with_confirmation,
+            ),
+        );
     }
 }
 
@@ -79,7 +78,9 @@ fn handle_quit_request(world: &mut World) {
         }
     }
 
-    world.resource_mut::<Messages<AppExit>>().write(AppExit::Success);
+    world
+        .resource_mut::<Messages<AppExit>>()
+        .write(AppExit::Success);
 }
 
 /// Replacement for bevy's `close_when_requested` that shows a confirmation
