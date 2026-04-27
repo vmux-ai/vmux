@@ -287,6 +287,14 @@ fn handle_tab_commands(
 
                     if !split_dir_q.contains(parent) {
                         commands.entity(active).despawn();
+                        // Last tab in the root pane — show command bar so the
+                        // user can navigate somewhere.
+                        let tab = commands
+                            .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                            .id();
+                        new_tab_ctx.tab = Some(tab);
+                        new_tab_ctx.previous_tab = None;
+                        new_tab_ctx.needs_open = true;
                         continue;
                     }
 
