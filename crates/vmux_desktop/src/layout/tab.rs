@@ -1,11 +1,12 @@
 use crate::{
     command::{AppCommand, ReadAppCommands, TabCommand, TerminalCommand},
     command_bar::NewTabContext,
+    confirm_close,
     layout::pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_tab_in_pane},
     layout::space::Space,
     layout::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     settings::AppSettings,
-    terminal::Terminal,
+    terminal::{PtyExited, Terminal},
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
@@ -173,7 +174,10 @@ fn handle_tab_commands(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    mut pending_warp: ResMut<PendingCursorWarp>,
+    mut extra: ParamSet<(
+        ResMut<'static, PendingCursorWarp>,
+        Query<'static, 'static, (), (With<Terminal>, Without<PtyExited>)>,
+    )>,
 ) {
     for cmd in reader.read() {
         let (tab_cmd, is_terminal) = match *cmd {
@@ -230,6 +234,19 @@ fn handle_tab_commands(
                 let Some(active) = active_tab else {
                     continue;
                 };
+
+                // Confirm close if terminal is still running
+                if confirm_close::should_confirm(&settings)
+                    && confirm_close::has_live_terminal(
+                        active,
+                        &all_children,
+                        &extra.p1(),
+                    )
+                    && !confirm_close::confirm_close_dialog()
+                {
+                    continue;
+                }
+
                 let Ok(children) = pane_children.get(pane) else {
                     continue;
                 };
@@ -361,7 +378,7 @@ fn handle_tab_commands(
                 commands.entity(target_tab).insert(LastActivatedAt::now());
                 if active_pane != Some(target_pane) {
                     commands.entity(target_pane).insert(LastActivatedAt::now());
-                    pending_warp.target = Some(target_pane);
+                    extra.p0().target = Some(target_pane);
                 }
             }
             TabCommand::SelectIndex1
