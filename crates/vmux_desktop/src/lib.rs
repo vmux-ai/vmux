@@ -101,6 +101,7 @@ impl Plugin for VmuxPlugin {
             PersistencePlugin,
             ProfilePlugin,
             LayoutPlugin,
+            confirm_close::ConfirmClosePlugin,
             updater::VmuxUpdater::builder().build().plugin(),
         ));
     }

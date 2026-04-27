@@ -1,7 +1,7 @@
 use crate::{
     command::{AppCommand, ReadAppCommands, TabCommand, TerminalCommand},
     command_bar::NewTabContext,
-    confirm_close,
+    confirm_close::{self, CloseConfirmed, PendingTabClose},
     layout::pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_tab_in_pane},
     layout::space::Space,
     layout::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
@@ -177,6 +177,8 @@ fn handle_tab_commands(
     mut extra: ParamSet<(
         ResMut<'static, PendingCursorWarp>,
         Query<'static, 'static, (), (With<Terminal>, Without<PtyExited>)>,
+        Query<'static, 'static, (), With<CloseConfirmed>>,
+        Query<'static, 'static, (), With<PendingTabClose>>,
     )>,
 ) {
     for cmd in reader.read() {
@@ -237,14 +239,16 @@ fn handle_tab_commands(
 
                 // Confirm close if terminal is still running
                 if confirm_close::should_confirm(&settings)
-                    && confirm_close::has_live_terminal(
-                        active,
-                        &all_children,
-                        &extra.p1(),
-                    )
-                    && !confirm_close::confirm_close_dialog()
+                    && confirm_close::has_live_terminal(active, &all_children, &extra.p1())
                 {
-                    continue;
+                    if extra.p2().contains(active) {
+                        commands.entity(active).remove::<CloseConfirmed>();
+                    } else {
+                        if !extra.p3().contains(active) {
+                            commands.entity(active).insert(PendingTabClose);
+                        }
+                        continue;
+                    }
                 }
 
                 let Ok(children) = pane_children.get(pane) else {

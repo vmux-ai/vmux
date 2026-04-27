@@ -1,7 +1,7 @@
 use crate::{
     command::{AppCommand, PaneCommand, ReadAppCommands},
     command_bar::NewTabContext,
-    confirm_close,
+    confirm_close::{self, CloseConfirmed, PendingPaneClose},
     layout::space::Space,
     layout::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     layout::tab::{
@@ -195,8 +195,10 @@ fn handle_pane_commands(
         Query<&mut PaneSize>,
         Query<&ComputedNode>,
         ResMut<PendingCursorWarp>,
+        Query<'static, 'static, (), (With<Terminal>, Without<PtyExited>)>,
+        Query<'static, 'static, (), With<CloseConfirmed>>,
+        Query<'static, 'static, (), With<PendingPaneClose>>,
     )>,
-    live_terminal_q: Query<(), (With<Terminal>, Without<PtyExited>)>,
 ) {
     for cmd in reader.read() {
         let AppCommand::Pane(pane_cmd) = *cmd else {
@@ -266,16 +268,22 @@ fn handle_pane_commands(
             }
             PaneCommand::Close => {
                 // Confirm close if any tab in this pane has a live terminal
-                if confirm_close::should_confirm(&settings)
+                let needs_confirm = confirm_close::should_confirm(&settings)
                     && confirm_close::pane_has_live_terminal(
                         active,
                         &pane_children,
                         &all_children,
-                        &live_terminal_q,
-                    )
-                    && !confirm_close::confirm_close_dialog()
-                {
-                    continue;
+                        &resize_q.p4(),
+                    );
+                if needs_confirm {
+                    if resize_q.p5().contains(active) {
+                        commands.entity(active).remove::<CloseConfirmed>();
+                    } else {
+                        if !resize_q.p6().contains(active) {
+                            commands.entity(active).insert(PendingPaneClose);
+                        }
+                        continue;
+                    }
                 }
 
                 let Ok(pane_co) = child_of_q.get(active) else {
