@@ -26,6 +26,9 @@ tokio = { version = "1", features = [
     "sync",
     "macros",
     "net",
+    "io-util",
+    "signal",
+    "time",
 ] }
 axum = { version = "0.7", default-features = false, features = [
     "http1",
