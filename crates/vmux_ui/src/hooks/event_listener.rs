@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use dioxus::core::{Runtime, current_scope_id};
 use dioxus::prelude::*;
 use js_sys::Function;
@@ -154,6 +155,84 @@ where
                 on_event.borrow_mut()(msg);
             });
         }) {
+            Ok(()) => {
+                is_loading.set(false);
+                match try_emit_ui_ready() {
+                    Ok(()) => {}
+                    Err(e) => error.set(Some(format!("cef.emit failed: {e}"))),
+                }
+            }
+            Err(e) => {
+                is_loading.set(false);
+                error.set(Some(format!("cef.listen failed: {e}")));
+            }
+        }
+    });
+
+    BevyState { is_loading, error }
+}
+
+/// Decode a base64-encoded rkyv payload from a CEF host-emit event.
+fn decode_rkyv_host_emit<T>(e: &JsValue) -> Option<T>
+where
+    T: rkyv::Archive,
+    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
+{
+    let s = e.as_string()?;
+    let bytes = BASE64.decode(s.as_bytes()).ok()?;
+    // SAFETY: bytes are produced by our own rkyv::to_bytes on the native side.
+    unsafe { rkyv::from_bytes_unchecked::<T, rkyv::rancor::Error>(&bytes).ok() }
+}
+
+/// Like [`use_event_listener`] but decodes the payload using rkyv + base64
+/// instead of RON/JSON serde.
+pub fn use_rkyv_event_listener<T, F>(name: &'static str, on_event: F) -> BevyState
+where
+    T: rkyv::Archive + 'static,
+    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
+    F: FnMut(T) + 'static,
+{
+    let on_event = Rc::new(RefCell::new(on_event));
+    let mut is_loading = use_signal(|| true);
+    let mut error = use_signal(|| None::<String>);
+
+    use_hook(move || {
+        let on_event = Rc::clone(&on_event);
+        let Some(rt) = Runtime::try_current() else {
+            is_loading.set(false);
+            error.set(Some(
+                "use_rkyv_event_listener: no Dioxus runtime (internal error)".into(),
+            ));
+            return;
+        };
+        let scope = current_scope_id();
+
+        let result = (|| -> Result<(), EventListenerError> {
+            let cef = window_cef()?;
+            let Ok(listen) = js_sys::Reflect::get(&cef, &JsValue::from_str("listen")) else {
+                return Err(EventListenerError::NoListenMethod);
+            };
+            let Ok(listen_fn) = listen.dyn_into::<Function>() else {
+                return Err(EventListenerError::ListenNotCallable);
+            };
+
+            let on_event_inner = Rc::clone(&on_event);
+            let closure = Closure::wrap(Box::new(move |e: JsValue| {
+                if let Some(msg) = decode_rkyv_host_emit::<T>(&e) {
+                    let on_event = Rc::clone(&on_event_inner);
+                    rt.in_scope(scope, || {
+                        on_event.borrow_mut()(msg);
+                    });
+                }
+            }) as Box<dyn FnMut(JsValue)>);
+
+            let cb = closure.as_ref().unchecked_ref();
+            let _ = listen_fn.call2(&cef, &JsValue::from_str(name), cb);
+            closure.forget();
+            Ok(())
+        })();
+
+        match result {
             Ok(()) => {
                 is_loading.set(false);
                 match try_emit_ui_ready() {

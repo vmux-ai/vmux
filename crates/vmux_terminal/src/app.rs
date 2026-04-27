@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use unicode_width::UnicodeWidthChar;
 use vmux_terminal::event::*;
 use vmux_ui::cef_bridge::try_cef_emit_keyed;
-use vmux_ui::hooks::{use_event_listener, use_theme};
+use vmux_ui::hooks::{use_event_listener, use_rkyv_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -36,8 +36,32 @@ pub fn App() -> Element {
     let mut viewport = use_signal(TermViewportEvent::default);
     let mut theme = use_signal(|| None::<TermThemeEvent>);
 
-    let _listener = use_event_listener::<TermViewportEvent, _>(TERM_VIEWPORT_EVENT, move |data| {
-        viewport.set(data);
+    let _listener = use_rkyv_event_listener::<TermViewportPatch, _>(TERM_VIEWPORT_EVENT, move |patch| {
+        viewport.with_mut(|vp| {
+            // On full sync or dimension change, rebuild entire viewport.
+            if patch.full || vp.cols != patch.cols || vp.rows != patch.rows {
+                vp.lines.clear();
+                vp.lines.resize(patch.rows as usize, TermLine::default());
+            }
+
+            // Ensure lines vec is large enough.
+            if vp.lines.len() < patch.rows as usize {
+                vp.lines.resize(patch.rows as usize, TermLine::default());
+            }
+
+            // Apply changed lines.
+            for (row_idx, line) in patch.changed_lines {
+                let idx = row_idx as usize;
+                if idx < vp.lines.len() {
+                    vp.lines[idx] = line;
+                }
+            }
+
+            vp.cursor = patch.cursor;
+            vp.cols = patch.cols;
+            vp.rows = patch.rows;
+            vp.selection = patch.selection;
+        });
     });
 
     let _theme_listener = use_event_listener::<TermThemeEvent, _>(TERM_THEME_EVENT, move |data| {
