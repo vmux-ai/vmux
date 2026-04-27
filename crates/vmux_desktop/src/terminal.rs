@@ -25,6 +25,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use std::{
     io::{Read, Write},
     sync::{Arc, Mutex, mpsc},
@@ -52,6 +53,11 @@ pub(crate) struct TerminalState {
     /// Tracked separately because `Selection::to_range()` normalizes order,
     /// making it impossible to know which end the user is extending.
     selection_cursor: Option<Point>,
+    /// Per-row hash of the last synced viewport. Used to detect which lines
+    /// changed and need to be re-sent to the webview.
+    line_hashes: Vec<u64>,
+    /// True when the entire viewport must be re-sent (resize, first frame).
+    full_sync_needed: bool,
 }
 
 /// Receives PTY output from a background reader thread.
@@ -214,6 +220,8 @@ impl Terminal {
                     processor,
                     dirty: true,
                     selection_cursor: None,
+                    line_hashes: Vec::new(),
+                    full_sync_needed: true,
                 },
                 PtyHandle {
                     rx: Mutex::new(rx),
@@ -337,7 +345,7 @@ fn poll_pty_output(
     }
 }
 
-/// Serialize visible viewport and send to webview.
+/// Serialize visible viewport diff and send to webview via rkyv + base64.
 fn sync_terminal_viewport(
     mut q: Query<(Entity, &mut TerminalState), With<Terminal>>,
     browsers: NonSend<Browsers>,
@@ -352,118 +360,177 @@ fn sync_terminal_viewport(
         }
         state.dirty = false;
 
-        let viewport = build_viewport(&state.term);
-        let body = ron::ser::to_string(&viewport).unwrap_or_default();
-        commands.trigger(HostEmitEvent::new(entity, TERM_VIEWPORT_EVENT, &body));
+        // Extract grid dimensions (immutable borrow of state.term).
+        let num_lines;
+        let num_cols;
+        let offset;
+        let cursor_point;
+        let scrolled_back;
+        let cursor_char;
+        {
+            let grid = state.term.grid();
+            num_lines = grid.screen_lines();
+            num_cols = grid.columns();
+            offset = grid.display_offset() as i32;
+            cursor_point = grid.cursor.point;
+            scrolled_back = offset > 0;
+            let cursor_row = &grid[cursor_point.line];
+            let cell = &cursor_row[cursor_point.column];
+            cursor_char = cell.c.to_string();
+        }
+
+        let full = state.full_sync_needed || state.line_hashes.len() != num_lines;
+
+        // Resize hash cache if needed.
+        if state.line_hashes.len() != num_lines {
+            state.line_hashes.resize(num_lines, 0);
+        }
+
+        let mut changed_lines = Vec::new();
+
+        for row_idx in 0..num_lines {
+            let hash = hash_grid_row(&state.term, row_idx, offset);
+            if full || hash != state.line_hashes[row_idx] {
+                state.line_hashes[row_idx] = hash;
+                changed_lines.push((row_idx as u16, build_line(&state.term, row_idx, offset)));
+            }
+        }
+
+        state.full_sync_needed = false;
+
+        // Convert alacritty selection to viewport-relative coordinates.
+        let selection = state
+            .term
+            .selection
+            .as_ref()
+            .and_then(|sel| sel.to_range(&state.term))
+            .map(|range| {
+                let start_row = (range.start.line.0 + offset) as u16;
+                let end_row = (range.end.line.0 + offset) as u16;
+                TermSelectionRange {
+                    start_col: range.start.column.0 as u16,
+                    start_row,
+                    end_col: range.end.column.0 as u16,
+                    end_row,
+                    is_block: range.is_block,
+                }
+            });
+
+        let patch = TermViewportPatch {
+            changed_lines,
+            cursor: TermCursor {
+                col: cursor_point.column.0 as u16,
+                row: cursor_point.line.0 as u16,
+                shape: CursorShape::Block,
+                visible: !scrolled_back,
+                ch: cursor_char,
+            },
+            cols: num_cols as u16,
+            rows: num_lines as u16,
+            selection,
+            full,
+        };
+
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&patch).unwrap();
+        let b64 = BASE64.encode(&bytes);
+        // Wrap in JSON string so emit_event_raw_json delivers it correctly.
+        let json_payload = serde_json::to_string(&b64).unwrap_or_default();
+        commands.trigger(HostEmitEvent::new_raw(entity, TERM_VIEWPORT_EVENT, json_payload));
     }
 }
 
-fn build_viewport<T: TermEventListener>(term: &Term<T>) -> TermViewportEvent {
+/// Compute a fast hash of a single grid row's visible content.
+fn hash_grid_row<T: TermEventListener>(term: &Term<T>, row_idx: usize, offset: i32) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
     let grid = term.grid();
     let num_cols = grid.columns();
-    let num_lines = grid.screen_lines();
-    let offset = grid.display_offset() as i32;
-    let mut lines = Vec::with_capacity(num_lines);
-
-    for row_idx in 0..num_lines {
-        let row = &grid[Line(row_idx as i32 - offset)];
-        let mut spans = Vec::new();
-        let mut text = String::new();
-        let mut cur_fg: TermColor = TermColor::Default;
-        let mut cur_bg: TermColor = TermColor::Default;
-        let mut cur_flags: u16 = 0;
-        let mut span_col_start: u16 = 0;
-        let mut span_grid_cols: u16 = 0;
-
-        for col_idx in 0..num_cols {
-            let cell = &row[Column(col_idx)];
-
-            // Wide char spacers consume a grid column but have no character.
-            if cell.flags.contains(CellFlags::WIDE_CHAR_SPACER) {
-                span_grid_cols += 1;
-                continue;
+    let row = &grid[Line(row_idx as i32 - offset)];
+    for col_idx in 0..num_cols {
+        let cell = &row[Column(col_idx)];
+        cell.c.hash(&mut hasher);
+        std::mem::discriminant(&cell.fg).hash(&mut hasher);
+        match &cell.fg {
+            Color::Named(c) => (*c as u8).hash(&mut hasher),
+            Color::Spec(rgb) => {
+                rgb.r.hash(&mut hasher);
+                rgb.g.hash(&mut hasher);
+                rgb.b.hash(&mut hasher);
             }
-
-            let fg = color_to_term_color(&cell.fg);
-            let bg = color_to_term_color(&cell.bg);
-            let flags = cell_flags_to_u16(cell.flags);
-
-            if fg != cur_fg || bg != cur_bg || flags != cur_flags {
-                if !text.is_empty() {
-                    spans.push(TermSpan {
-                        text: std::mem::take(&mut text),
-                        fg: cur_fg,
-                        bg: cur_bg,
-                        flags: cur_flags,
-                        col: span_col_start,
-                        grid_cols: span_grid_cols,
-                    });
-                    span_col_start = col_idx as u16;
-                    span_grid_cols = 0;
-                }
-                cur_fg = fg;
-                cur_bg = bg;
-                cur_flags = flags;
+            Color::Indexed(i) => i.hash(&mut hasher),
+        }
+        std::mem::discriminant(&cell.bg).hash(&mut hasher);
+        match &cell.bg {
+            Color::Named(c) => (*c as u8).hash(&mut hasher),
+            Color::Spec(rgb) => {
+                rgb.r.hash(&mut hasher);
+                rgb.g.hash(&mut hasher);
+                rgb.b.hash(&mut hasher);
             }
-            text.push(cell.c);
+            Color::Indexed(i) => i.hash(&mut hasher),
+        }
+        cell.flags.bits().hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// Build a TermLine for a single grid row.
+fn build_line<T: TermEventListener>(term: &Term<T>, row_idx: usize, offset: i32) -> TermLine {
+    let grid = term.grid();
+    let num_cols = grid.columns();
+    let row = &grid[Line(row_idx as i32 - offset)];
+    let mut spans = Vec::new();
+    let mut text = String::new();
+    let mut cur_fg: TermColor = TermColor::Default;
+    let mut cur_bg: TermColor = TermColor::Default;
+    let mut cur_flags: u16 = 0;
+    let mut span_col_start: u16 = 0;
+    let mut span_grid_cols: u16 = 0;
+
+    for col_idx in 0..num_cols {
+        let cell = &row[Column(col_idx)];
+
+        if cell.flags.contains(CellFlags::WIDE_CHAR_SPACER) {
             span_grid_cols += 1;
+            continue;
         }
-        if !text.is_empty() {
-            spans.push(TermSpan {
-                text,
-                fg: cur_fg,
-                bg: cur_bg,
-                flags: cur_flags,
-                col: span_col_start,
-                grid_cols: span_grid_cols,
-            });
-        }
-        lines.push(TermLine { spans });
-    }
 
-    let cursor_point = grid.cursor.point;
-    let scrolled_back = offset > 0;
+        let fg = color_to_term_color(&cell.fg);
+        let bg = color_to_term_color(&cell.bg);
+        let flags = cell_flags_to_u16(cell.flags);
 
-    // Read character under cursor directly from the grid.
-    let cursor_char = {
-        let cursor_row = &grid[cursor_point.line];
-        let cell = &cursor_row[cursor_point.column];
-        cell.c.to_string()
-    };
-
-    // Convert alacritty selection to viewport-relative coordinates.
-    let selection = term
-        .selection
-        .as_ref()
-        .and_then(|sel| sel.to_range(term))
-        .map(|range| {
-            // Selection range points are in grid coordinates (Line is relative
-            // to viewport top when display_offset == 0).  Adjust for scroll.
-            let start_row = (range.start.line.0 + offset) as u16;
-            let end_row = (range.end.line.0 + offset) as u16;
-            TermSelectionRange {
-                start_col: range.start.column.0 as u16,
-                start_row,
-                end_col: range.end.column.0 as u16,
-                end_row,
-                is_block: range.is_block,
+        if fg != cur_fg || bg != cur_bg || flags != cur_flags {
+            if !text.is_empty() {
+                spans.push(TermSpan {
+                    text: std::mem::take(&mut text),
+                    fg: cur_fg,
+                    bg: cur_bg,
+                    flags: cur_flags,
+                    col: span_col_start,
+                    grid_cols: span_grid_cols,
+                });
+                span_col_start = col_idx as u16;
+                span_grid_cols = 0;
             }
-        });
-
-    TermViewportEvent {
-        lines,
-        cursor: TermCursor {
-            col: cursor_point.column.0 as u16,
-            row: cursor_point.line.0 as u16,
-            shape: CursorShape::Block,
-            visible: !scrolled_back,
-            ch: cursor_char,
-        },
-        cols: num_cols as u16,
-        rows: num_lines as u16,
-        title: None,
-        selection,
+            cur_fg = fg;
+            cur_bg = bg;
+            cur_flags = flags;
+        }
+        text.push(cell.c);
+        span_grid_cols += 1;
     }
+    if !text.is_empty() {
+        spans.push(TermSpan {
+            text,
+            fg: cur_fg,
+            bg: cur_bg,
+            flags: cur_flags,
+            col: span_col_start,
+            grid_cols: span_grid_cols,
+        });
+    }
+
+    TermLine { spans }
 }
 
 fn color_to_term_color(color: &Color) -> TermColor {
@@ -1131,6 +1198,7 @@ fn on_term_resize(
         let dims = PtyDimensions { cols, rows };
         state.term.resize(dims);
         state.dirty = true;
+        state.full_sync_needed = true;
     }
 }
 
@@ -1275,6 +1343,8 @@ fn on_restart_pty(
     state.processor = Processor::new();
     state.dirty = true;
     state.selection_cursor = None;
+    state.line_hashes.clear();
+    state.full_sync_needed = true;
 
     // Replace PtyHandle entirely
     *pty = PtyHandle {
