@@ -5,7 +5,7 @@
 
 ## Linear
 
-When taking a Linear issue (e.g. "take VMX-XX"), immediately move it to **In Progress** before doing anything else — before creating a worktree, before reading code, before submitting a PR.
+When taking a Linear issue (e.g. "take VMX-XX"), immediately move it to **In Progress** before doing anything else — before creating a worktree, before reading code, before drafting a PR.
 
 ## Worktrees
 
