@@ -43,6 +43,8 @@ impl Plugin for WindowPlugin {
                 crate::persistence::load_session_on_startup,
                 spawn_default_session,
                 crate::persistence::rebuild_session_views,
+                crate::persistence::ensure_layout_state_entities,
+                crate::persistence::apply_persisted_layout_state,
                 fit_window_to_screen,
             )
                 .chain()
@@ -208,9 +210,11 @@ fn setup(
                 HostWindow(pw),
                 Browser,
                 WebviewTransparent,
+                Visibility::Hidden,
                 Node {
-                    height: Val::Px(HEADER_HEIGHT_PX),
+                    height: Val::Px(0.0),
                     flex_shrink: 0.0,
+                    display: Display::None,
                     ..default()
                 },
                 HeaderBundle {

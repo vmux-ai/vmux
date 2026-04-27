@@ -14,6 +14,12 @@ When working on a Linear issue, always use a git worktree for isolation:
 
 Worktree directory: `.worktrees/` (already in `.gitignore`).
 
+## Documentation
+
+- Save design specs to `docs/specs/YYYY-MM-DD-<topic>-design.md` (not `docs/superpowers/specs/`).
+- Save implementation plans to `docs/plans/YYYY-MM-DD-<feature-name>.md` (not `docs/superpowers/plans/`).
+- Delete the plan file once the plan is fully implemented.
+
 ## Before Pushing
 
 Always run lint and test before pushing to catch CI failures locally:

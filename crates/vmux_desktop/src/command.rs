@@ -46,6 +46,7 @@ pub enum AppCommand {
     Browser(BrowserCommand),
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TabCommand {
     #[default]
@@ -78,18 +79,19 @@ pub enum TabCommand {
     #[menu(
         id = "tab_reopen",
         label = "Reopen Closed Tab",
-        accel = "super+shift+t"
+        accel = "super+shift+t",
+        hidden
     )]
     Reopen,
-    #[menu(id = "tab_duplicate", label = "Duplicate Tab\t<leader> d")]
+    #[menu(id = "tab_duplicate", label = "Duplicate Tab\t<leader> d", hidden)]
     #[shortcut(chord = "Ctrl+g, d")]
     Duplicate,
-    #[menu(id = "tab_pin", label = "Pin Tab")]
-    Pin,
-    #[menu(id = "tab_mute", label = "Mute Tab\t<leader> m")]
-    #[shortcut(chord = "Ctrl+g, m")]
-    Mute,
-    #[menu(id = "tab_move_to_pane", label = "Move Tab to Pane\t<leader> !")]
+
+    #[menu(
+        id = "tab_move_to_pane",
+        label = "Move Tab to Pane\t<leader> !",
+        hidden
+    )]
     #[shortcut(chord = "Ctrl+g, !")]
     MoveToPane,
     #[menu(id = "tab_swap_prev", label = "Move Tab Left\t<leader> <")]
@@ -100,28 +102,19 @@ pub enum TabCommand {
     SwapNext,
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TerminalCommand {
     #[default]
     #[menu(id = "terminal_new", label = "New Terminal", accel = "ctrl+`")]
     #[shortcut(direct = "Ctrl+`")]
     New,
-    #[menu(id = "terminal_close", label = "Close Terminal")]
-    Close,
-    #[menu(id = "terminal_next", label = "Next Terminal")]
-    Next,
-    #[menu(id = "terminal_prev", label = "Previous Terminal")]
-    Previous,
-    #[menu(id = "terminal_clear", label = "Clear Terminal")]
+
+    #[menu(id = "terminal_clear", label = "Clear Terminal", hidden)]
     Clear,
-    #[menu(id = "terminal_reset", label = "Reset Terminal")]
-    Reset,
-    #[menu(id = "terminal_split_v", label = "Split Terminal Vertically")]
-    SplitV,
-    #[menu(id = "terminal_split_h", label = "Split Terminal Horizontally")]
-    SplitH,
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BrowserCommand {
     #[default]
@@ -137,7 +130,7 @@ pub enum BrowserCommand {
         accel = "super+shift+r"
     )]
     HardReload,
-    #[menu(id = "browser_stop", label = "Stop Loading", accel = "super+.")]
+    #[menu(id = "browser_stop", label = "Stop Loading", accel = "super+.", hidden)]
     Stop,
     #[menu(
         id = "browser_focus_address_bar",
@@ -160,7 +153,7 @@ pub enum BrowserCommand {
     #[menu(id = "browser_open_commands", label = "Commands")]
     #[shortcut(direct = ">")]
     OpenCommands,
-    #[menu(id = "browser_find", label = "Find", accel = "super+f")]
+    #[menu(id = "browser_find", label = "Find", accel = "super+f", hidden)]
     Find,
     #[menu(id = "browser_zoom_in", label = "Zoom In", accel = "super+=")]
     ZoomIn,
@@ -177,13 +170,15 @@ pub enum BrowserCommand {
     #[menu(
         id = "browser_view_source",
         label = "View Source",
-        accel = "super+alt+u"
+        accel = "super+alt+u",
+        hidden
     )]
     ViewSource,
-    #[menu(id = "browser_print", label = "Print", accel = "super+p")]
+    #[menu(id = "browser_print", label = "Print", accel = "super+p", hidden)]
     Print,
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaneCommand {
     #[default]
@@ -193,13 +188,13 @@ pub enum PaneCommand {
     #[menu(id = "split_h", label = "Split Horizontally\t<leader> \"")]
     #[shortcut(chord = "Ctrl+g, \"")]
     SplitH,
-    #[menu(id = "toggle_pane", label = "Next Pane\t<leader> o")]
+    #[menu(id = "toggle_pane", label = "Next Pane\t<leader> o", hidden)]
     #[shortcut(chord = "Ctrl+g, o")]
     Toggle,
     #[menu(id = "close_pane", label = "Close Pane\t<leader> x")]
     #[shortcut(chord = "Ctrl+g, x")]
     Close,
-    #[menu(id = "zoom_pane", label = "Zoom Pane\t<leader> z")]
+    #[menu(id = "zoom_pane", label = "Zoom Pane\t<leader> z", hidden)]
     #[shortcut(chord = "Ctrl+g, z")]
     Zoom,
     #[menu(id = "select_pane_left", label = "Select Left Pane\t<leader> h")]
@@ -220,10 +215,18 @@ pub enum PaneCommand {
     #[menu(id = "swap_pane_next", label = "Swap Pane Next\t<leader> }")]
     #[shortcut(chord = "Ctrl+g, }")]
     SwapNext,
-    #[menu(id = "rotate_forward", label = "Rotate Forward\t<leader> ctrl+o")]
+    #[menu(
+        id = "rotate_forward",
+        label = "Rotate Forward\t<leader> ctrl+o",
+        hidden
+    )]
     #[shortcut(chord = "Ctrl+g, Ctrl+o")]
     RotateForward,
-    #[menu(id = "rotate_backward", label = "Rotate Backward\t<leader> alt+o")]
+    #[menu(
+        id = "rotate_backward",
+        label = "Rotate Backward\t<leader> alt+o",
+        hidden
+    )]
     #[shortcut(chord = "Ctrl+g, Alt+o")]
     RotateBackward,
     #[menu(id = "equalize_pane_size", label = "Equalize Pane Size\t<leader> =")]
@@ -246,30 +249,32 @@ pub enum PaneCommand {
     ResizeDown,
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpaceCommand {
     #[default]
-    #[menu(id = "new_space", label = "New Space\t<leader> c")]
+    #[menu(id = "new_space", label = "New Space\t<leader> c", hidden)]
     #[shortcut(chord = "Ctrl+g, c")]
     New,
-    #[menu(id = "close_space", label = "Close Space\t<leader> &")]
+    #[menu(id = "close_space", label = "Close Space\t<leader> &", hidden)]
     #[shortcut(chord = "Ctrl+g, &")]
     Close,
-    #[menu(id = "next_space", label = "Next Space\t<leader> n")]
+    #[menu(id = "next_space", label = "Next Space\t<leader> n", hidden)]
     #[shortcut(chord = "Ctrl+g, n")]
     Next,
-    #[menu(id = "prev_space", label = "Previous Space\t<leader> p")]
+    #[menu(id = "prev_space", label = "Previous Space\t<leader> p", hidden)]
     #[shortcut(chord = "Ctrl+g, p")]
     Previous,
-    #[menu(id = "rename_space", label = "Rename Space\t<leader> ,")]
+    #[menu(id = "rename_space", label = "Rename Space\t<leader> ,", hidden)]
     #[shortcut(chord = "Ctrl+g, Comma")]
     Rename,
-    #[menu(id = "swap_space_prev", label = "Move Space Left")]
+    #[menu(id = "swap_space_prev", label = "Move Space Left", hidden)]
     SwapPrev,
-    #[menu(id = "swap_space_next", label = "Move Space Right")]
+    #[menu(id = "swap_space_next", label = "Move Space Right", hidden)]
     SwapNext,
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SideSheetCommand {
     #[default]
@@ -282,13 +287,15 @@ pub enum SideSheetCommand {
     Toggle,
     #[menu(
         id = "toggle_side_sheet_right",
-        label = "Toggle Right Sheet\t<leader> r"
+        label = "Toggle Right Sheet\t<leader> r",
+        hidden
     )]
     #[shortcut(chord = "Ctrl+g, r")]
     ToggleRight,
     #[menu(
         id = "toggle_side_sheet_bottom",
-        label = "Toggle Bottom Sheet\t<leader> b"
+        label = "Toggle Bottom Sheet\t<leader> b",
+        hidden
     )]
     #[shortcut(chord = "Ctrl+g, b")]
     ToggleBottom,
@@ -309,21 +316,28 @@ pub enum HeaderCommand {
     Toggle,
 }
 
+#[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WindowCommand {
     #[default]
-    #[menu(id = "new_window", label = "New Window", accel = "super+n")]
+    #[menu(id = "new_window", label = "New Window", accel = "super+n", hidden)]
     NewWindow,
-    #[menu(id = "close_window", label = "Close Window", accel = "super+shift+w")]
+    #[menu(
+        id = "close_window",
+        label = "Close Window",
+        accel = "super+shift+w",
+        hidden
+    )]
     CloseWindow,
-    #[menu(id = "minimize_window", label = "Minimize", accel = "super+m")]
+    #[menu(id = "minimize_window", label = "Minimize", accel = "super+m", hidden)]
     Minimize,
     #[menu(
         id = "toggle_fullscreen",
         label = "Toggle Fullscreen",
-        accel = "ctrl+super+f"
+        accel = "ctrl+super+f",
+        hidden
     )]
     ToggleFullscreen,
-    #[menu(id = "open_settings", label = "Settings", accel = "super+,")]
+    #[menu(id = "open_settings", label = "Settings", accel = "super+,", hidden)]
     Settings,
 }

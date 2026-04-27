@@ -1,3 +1,4 @@
+use super::{Open, SideSheetState};
 use crate::{
     command::{AppCommand, ReadAppCommands, SideSheetCommand},
     layout::window::Main,
@@ -10,8 +11,7 @@ pub(crate) struct SideSheetLayoutPlugin;
 
 impl Plugin for SideSheetLayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(SideSheetOpen(false))
-            .insert_resource(SideSheetWidth(0.0)) // set from settings on first sync
+        app.insert_resource(SideSheetWidth(0.0)) // set from settings on first sync
             .add_systems(Update, handle_side_sheet_toggle.in_set(ReadAppCommands))
             .add_systems(Update, side_sheet_drag_resize)
             .add_systems(
@@ -34,9 +34,6 @@ pub(crate) enum SideSheetPosition {
     Bottom,
 }
 
-#[derive(Resource)]
-pub(crate) struct SideSheetOpen(pub bool);
-
 /// Current width of the left side sheet (mutable during drag).
 #[derive(Resource)]
 struct SideSheetWidth(f32);
@@ -54,12 +51,29 @@ const EDGE_HIT_ZONE: f32 = 6.0;
 
 fn handle_side_sheet_toggle(
     mut reader: MessageReader<AppCommand>,
-    mut open: ResMut<SideSheetOpen>,
+    side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>), With<SideSheet>>,
+    state_q: Query<(Entity, Has<Open>), With<SideSheetState>>,
+    mut commands: Commands,
 ) {
     for cmd in reader.read() {
         match cmd {
             AppCommand::SideSheet(SideSheetCommand::Toggle) => {
-                open.0 = !open.0;
+                for (entity, pos, is_open) in &side_sheet_q {
+                    if *pos == SideSheetPosition::Left {
+                        if is_open {
+                            commands.entity(entity).remove::<Open>();
+                        } else {
+                            commands.entity(entity).insert(Open);
+                        }
+                    }
+                }
+                for (entity, is_open) in &state_q {
+                    if is_open {
+                        commands.entity(entity).remove::<Open>();
+                    } else {
+                        commands.entity(entity).insert(Open);
+                    }
+                }
             }
             AppCommand::SideSheet(SideSheetCommand::ToggleRight) => {}
             AppCommand::SideSheet(SideSheetCommand::ToggleBottom) => {}
@@ -71,9 +85,16 @@ fn handle_side_sheet_toggle(
 fn side_sheet_drag_resize(
     windows: Query<&Window, With<PrimaryWindow>>,
 
-    open: Res<SideSheetOpen>,
     mut width_res: ResMut<SideSheetWidth>,
-    sheet_q: Query<(&SideSheetPosition, &ComputedNode, &UiGlobalTransform), With<SideSheet>>,
+    sheet_q: Query<
+        (
+            &SideSheetPosition,
+            Has<Open>,
+            &ComputedNode,
+            &UiGlobalTransform,
+        ),
+        With<SideSheet>,
+    >,
     active_drags: Query<(Entity, &SideSheetDrag)>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut side_sheet_q: Query<(&SideSheetPosition, &mut Node), With<SideSheet>>,
@@ -82,7 +103,10 @@ fn side_sheet_drag_resize(
     settings: Res<AppSettings>,
     mut commands: Commands,
 ) {
-    if !open.0 {
+    let is_open = sheet_q
+        .iter()
+        .any(|(pos, open, _, _)| *pos == SideSheetPosition::Left && open);
+    if !is_open {
         return;
     }
 
@@ -120,7 +144,7 @@ fn side_sheet_drag_resize(
     }
 
     // Hover detection on right edge of left side sheet
-    for (pos, cn, gt) in &sheet_q {
+    for (pos, _, cn, gt) in &sheet_q {
         if *pos != SideSheetPosition::Left {
             continue;
         }
@@ -145,16 +169,35 @@ fn side_sheet_drag_resize(
 }
 
 fn sync_side_sheet_visibility(
-    open: Res<SideSheetOpen>,
     settings: Res<AppSettings>,
     mut width_res: ResMut<SideSheetWidth>,
-    mut side_sheet_q: Query<(&SideSheetPosition, &mut Visibility, &mut Node), With<SideSheet>>,
+    mut side_sheet_q: Query<
+        (Entity, &SideSheetPosition, &mut Visibility, &mut Node),
+        With<SideSheet>,
+    >,
     mut header_q: Query<&mut Node, (With<Header>, Without<SideSheet>, Without<Main>)>,
     mut main_q: Query<&mut Node, (With<Main>, Without<SideSheet>, Without<Header>)>,
+    added: Query<Entity, (With<SideSheet>, Added<Open>)>,
+    mut removed: RemovedComponents<Open>,
 ) {
-    if !open.is_changed() {
-        return;
+    // Determine if the left side sheet opened or closed
+    let mut left_open: Option<bool> = None;
+    for entity in &added {
+        if let Ok((_, pos, _, _)) = side_sheet_q.get(entity)
+            && *pos == SideSheetPosition::Left
+        {
+            left_open = Some(true);
+        }
     }
+    for entity in removed.read() {
+        if let Ok((_, pos, _, _)) = side_sheet_q.get(entity)
+            && *pos == SideSheetPosition::Left
+        {
+            left_open = Some(false);
+        }
+    }
+
+    let Some(is_open) = left_open else { return };
 
     // Initialize width from settings if not yet set
     if width_res.0 <= 0.0 {
@@ -163,11 +206,11 @@ fn sync_side_sheet_visibility(
 
     let width = width_res.0;
     let sheet_total = width + settings.layout.pane.gap;
-    for (pos, mut vis, mut node) in &mut side_sheet_q {
+    for (_, pos, mut vis, mut node) in &mut side_sheet_q {
         if *pos != SideSheetPosition::Left {
             continue;
         }
-        if open.0 {
+        if is_open {
             *vis = Visibility::Inherited;
             node.display = Display::Flex;
             node.width = Val::Px(width);
@@ -177,14 +220,14 @@ fn sync_side_sheet_visibility(
         }
     }
     for mut node in &mut header_q {
-        node.margin.left = if open.0 {
+        node.margin.left = if is_open {
             Val::Px(sheet_total)
         } else {
             Val::Px(0.0)
         };
     }
     for mut node in &mut main_q {
-        node.margin.left = if open.0 {
+        node.margin.left = if is_open {
             Val::Px(sheet_total)
         } else {
             Val::Px(0.0)
@@ -195,11 +238,34 @@ fn sync_side_sheet_visibility(
 /// Show/hide macOS traffic-light buttons to match the side-sheet state.
 #[cfg(target_os = "macos")]
 fn sync_window_buttons_visibility(
-    open: Res<SideSheetOpen>,
+    side_sheet_q: Query<(&SideSheetPosition, Has<Open>), With<SideSheet>>,
+    added: Query<Entity, (With<SideSheet>, Added<Open>)>,
+    mut removed: RemovedComponents<Open>,
     winit_windows: Option<NonSend<WinitWindows>>,
     window_q: Query<Entity, With<PrimaryWindow>>,
 ) {
-    if !open.is_changed() {
+    // Only react to left side sheet changes
+    let mut changed = false;
+    let mut is_open = false;
+    for entity in &added {
+        if let Ok((pos, _)) = side_sheet_q.get(entity)
+            && *pos == SideSheetPosition::Left
+        {
+            changed = true;
+            is_open = true;
+        }
+    }
+    if !changed {
+        for entity in removed.read() {
+            if let Ok((pos, _)) = side_sheet_q.get(entity)
+                && *pos == SideSheetPosition::Left
+            {
+                changed = true;
+            }
+        }
+    }
+
+    if !changed {
         return;
     }
     let Some(winit_windows) = winit_windows else {
@@ -228,7 +294,7 @@ fn sync_window_buttons_visibility(
         if ns_window.is_null() {
             return;
         }
-        let hidden: libc::c_int = if open.0 { 0 } else { 1 };
+        let hidden: libc::c_int = if is_open { 0 } else { 1 };
         // NSWindowButton values: Close=0, Miniaturize=1, Zoom=2
         for button_type in 0u64..=2 {
             let button = objc_msgSend(ns_window, sel("standardWindowButton:"), button_type);

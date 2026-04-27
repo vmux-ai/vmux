@@ -16,6 +16,7 @@ use bevy::prelude::*;
 use focus_ring::FocusRingPlugin;
 use glass::GlassMaterialPlugin;
 use header::HeaderLayoutPlugin;
+use moonshine_save::prelude::*;
 use pane::PanePlugin;
 use side_sheet::SideSheetLayoutPlugin;
 use space::SpacePlugin;
@@ -24,10 +25,31 @@ use vmux_webview_app::JsEmitUiReadyPlugin;
 use window::WindowPlugin;
 pub(crate) use window::fit_window_to_screen;
 
+/// Marker component indicating a panel (header, side-sheet) is open.
+/// Added/removed at runtime; persisted on state entities.
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+pub(crate) struct Open;
+
+/// Persisted entity that mirrors header open state.
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+#[require(Save)]
+pub(crate) struct HeaderState;
+
+/// Persisted entity that mirrors side-sheet open state.
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+#[require(Save)]
+pub(crate) struct SideSheetState;
+
 pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
+        app.register_type::<Open>()
+            .register_type::<HeaderState>()
+            .register_type::<SideSheetState>();
         app.add_plugins((
             JsEmitUiReadyPlugin,
             WindowPlugin,

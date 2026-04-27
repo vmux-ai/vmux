@@ -1,4 +1,4 @@
-.PHONY: run-mac run-mac-local run-doctor build-mac-debug build build-local-mac build-release-mac package-local-mac package-release-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps run-website build-website lint fmt clippy test
+.PHONY: run-mac run-mac-local run-doctor build-mac-debug build build-local-mac build-release-mac package-local-mac package-release-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps run-website build-website lint lint-fix fmt clippy test
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 RUSTUP_BIN := $(or $(shell command -v rustup 2>/dev/null),$(HOME)/.cargo/bin/rustup)
@@ -56,6 +56,14 @@ install-debug-render-process:
 PKGS = $(shell "$(CARGO_BIN)" metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | .name')
 
 lint: fmt clippy
+
+lint-fix:
+	@for pkg in $(PKGS); do \
+		"$(CARGO_BIN)" fmt -p "$$pkg" || exit 1; \
+	done
+	@for pkg in $(PKGS); do \
+		env -u CEF_PATH "$(CARGO_BIN)" clippy -p "$$pkg" --all-targets --fix --allow-dirty --allow-staged -- -D warnings || exit 1; \
+	done
 
 fmt:
 	@for pkg in $(PKGS); do \
