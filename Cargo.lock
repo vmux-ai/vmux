@@ -8908,7 +8908,6 @@ dependencies = [
 name = "vmux_desktop"
 version = "0.1.0"
 dependencies = [
- "alacritty_terminal",
  "bevy",
  "bevy_cef",
  "bevy_cef_core",
@@ -8921,7 +8920,6 @@ dependencies = [
  "muda",
  "notify 6.1.1",
  "parking_lot",
- "portable-pty",
  "raw-window-handle",
  "rfd",
  "ron 0.8.1",
@@ -8930,6 +8928,7 @@ dependencies = [
  "serde_json",
  "vmux_command_bar",
  "vmux_core",
+ "vmux_daemon",
  "vmux_header",
  "vmux_history",
  "vmux_macro",
