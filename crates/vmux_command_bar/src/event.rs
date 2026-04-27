@@ -48,4 +48,7 @@ pub struct PathEntry {
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct PathCompleteResponse {
     pub completions: Vec<PathEntry>,
+    /// Whether the exact queried path is an existing directory.
+    #[serde(default)]
+    pub query_is_dir: bool,
 }

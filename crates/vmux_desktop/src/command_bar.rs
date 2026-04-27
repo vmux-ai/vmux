@@ -739,7 +739,21 @@ fn on_path_complete_request(
     }
 
     let completions = complete_path(query);
-    let payload = PathCompleteResponse { completions };
+    let query_is_dir = {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        let resolved = if let Some(stripped) = query.strip_prefix("~/") {
+            std::path::PathBuf::from(&home).join(stripped)
+        } else if query.starts_with('/') {
+            std::path::PathBuf::from(query)
+        } else {
+            std::path::PathBuf::from(&home).join(query)
+        };
+        resolved.is_dir()
+    };
+    let payload = PathCompleteResponse {
+        completions,
+        query_is_dir,
+    };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     commands.trigger(HostEmitEvent::new(
         modal_e,

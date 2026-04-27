@@ -165,6 +165,7 @@ pub fn App() -> Element {
     let mut nav_mode = use_signal(|| false);
 
     let mut path_completions = use_signal(Vec::<PathEntry>::new);
+    let mut path_query_is_dir = use_signal(|| false);
 
     let _listener =
         use_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
@@ -179,12 +180,14 @@ pub fn App() -> Element {
     let _path_listener =
         use_event_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
             path_completions.set(data.completions);
+            path_query_is_dir.set(data.query_is_dir);
         });
 
     use_effect(move || {
         let q = query();
         if !looks_like_path(q.trim()) {
             path_completions.set(Vec::new());
+            path_query_is_dir.set(false);
             return;
         }
         let _ = try_cef_emit_serde(&PathCompleteRequest {
@@ -212,6 +215,7 @@ pub fn App() -> Element {
     let results = {
         let mut r = filter_results(&q, &tabs, &commands, is_new_tab);
         let completions = path_completions();
+        let is_dir = path_query_is_dir();
         if !completions.is_empty() {
             let path_items: Vec<ResultItem> = completions
                 .iter()
@@ -227,17 +231,23 @@ pub fn App() -> Element {
                 .cloned();
             r.retain(|item| !matches!(item, ResultItem::Terminal { path } if !path.is_empty()));
             let mut combined = Vec::new();
-            if let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
-                && !path_items
-                    .iter()
-                    .any(|item| matches!(item, ResultItem::Terminal { path } if path == tp))
-            {
-                combined.push(entry.clone());
+            if is_dir {
+                if let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
+                    && !path_items
+                        .iter()
+                        .any(|item| matches!(item, ResultItem::Terminal { path } if path == tp))
+                {
+                    combined.push(entry.clone());
+                }
             }
             combined.extend(path_items);
             combined.extend(r);
             combined
         } else {
+            // No completions — hide typed path item if the path doesn't exist
+            if !is_dir {
+                r.retain(|item| !matches!(item, ResultItem::Terminal { path } if !path.is_empty()));
+            }
             r
         }
     };
