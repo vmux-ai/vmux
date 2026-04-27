@@ -50,6 +50,7 @@ impl Plugin for TabPlugin {
                     .in_set(ComputeFocusSet)
                     .after(ReadAppCommands),
             )
+            .add_systems(Update, open_command_bar_if_no_tabs.run_if(run_once))
             .add_systems(PostUpdate, sync_tab_picking);
     }
 }
@@ -576,4 +577,23 @@ fn activate_space_for(world: &mut World, entity: Entity) {
             return;
         }
     }
+
+fn open_command_bar_if_no_tabs(
+    tab_q: Query<(), With<Tab>>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    mut new_tab_ctx: ResMut<NewTabContext>,
+    mut commands: Commands,
+) {
+    if !tab_q.is_empty() {
+        return;
+    }
+    let Some(pane) = leaf_panes.iter().next() else {
+        return;
+    };
+    let tab = commands
+        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+        .id();
+    new_tab_ctx.tab = Some(tab);
+    new_tab_ctx.previous_tab = None;
+    new_tab_ctx.needs_open = true;
 }
