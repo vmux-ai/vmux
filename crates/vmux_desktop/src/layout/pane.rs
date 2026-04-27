@@ -501,6 +501,7 @@ fn on_pane_select(
     pane_pos_q: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     mut pending_warp: ResMut<PendingCursorWarp>,
+    mut new_tab_ctx: ResMut<NewTabContext>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -511,6 +512,13 @@ fn on_pane_select(
             AppCommand::Pane(PaneCommand::SelectDown) => Vec2::new(0.0, 1.0),
             _ => continue,
         };
+
+        // Despawn empty tab from Cmd+T command bar when navigating panes
+        if let Some(e) = new_tab_ctx.tab.take() {
+            commands.entity(e).despawn();
+            new_tab_ctx.previous_tab = None;
+        }
+
         let active_space = active_among(spaces.iter());
         let Some(space) = active_space else {
             continue;

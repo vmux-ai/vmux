@@ -1,6 +1,8 @@
 use crate::{
     browser::Browser,
-    command::{AppCommand, BrowserCommand, ReadAppCommands, TabCommand, TerminalCommand},
+    command::{
+        AppCommand, BrowserCommand, PaneCommand, ReadAppCommands, TabCommand, TerminalCommand,
+    },
     layout::{
         pane::{Pane, PaneSplit},
         side_sheet::SideSheet,
@@ -37,6 +39,9 @@ pub(crate) struct NewTabContext {
     pub previous_tab: Option<Entity>,
 
     pub needs_open: bool,
+    /// Set by handle_tab_commands when SelectIndex dismisses the empty
+    /// tab; a PostUpdate system reads this to close the modal.
+    pub dismiss_modal: bool,
 }
 
 pub(crate) struct CommandBarInputPlugin;
@@ -49,6 +54,12 @@ impl Plugin for CommandBarInputPlugin {
             .add_observer(on_command_bar_action)
             .add_observer(on_path_complete_request)
             .add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands))
+            .add_systems(
+                Update,
+                deferred_dismiss_modal
+                    .after(ReadAppCommands)
+                    .before(crate::layout::tab::ComputeFocusSet),
+            )
             .add_systems(PostUpdate, reveal_command_bar.after(UiSystems::Layout));
     }
 }
@@ -104,6 +115,10 @@ fn handle_open_command_bar(
     let mut should_open = false;
     let mut should_toggle = false;
     let mut should_dismiss = false;
+    // Navigation commands (tab/pane switch) only close the modal; the empty
+    // tab is cleaned up by handle_tab_commands / on_pane_select to avoid
+    // deferred-command conflicts.
+    let mut should_dismiss_nav = false;
     let mut url_override: Option<String> = None;
 
     for cmd in reader.read() {
@@ -125,6 +140,19 @@ fn handle_open_command_bar(
             }
             AppCommand::Tab(TabCommand::New) | AppCommand::Tab(TabCommand::Close) => {
                 should_dismiss = true;
+            }
+            // Dismiss command bar when navigating tabs or panes.
+            // SelectIndex / SelectLast are NOT included here; they are
+            // handled by handle_tab_commands which only dismisses when
+            // the target index actually exists.
+            AppCommand::Tab(TabCommand::Next | TabCommand::Previous)
+            | AppCommand::Pane(
+                PaneCommand::SelectLeft
+                | PaneCommand::SelectRight
+                | PaneCommand::SelectUp
+                | PaneCommand::SelectDown,
+            ) => {
+                should_dismiss_nav = true;
             }
             _ => {}
         }
@@ -181,6 +209,29 @@ fn handle_open_command_bar(
                     }
                 }
             }
+            new_tab_ctx.needs_open = false;
+            return;
+        }
+    }
+
+    // Navigation dismiss: close modal only, leave empty tab for
+    // handle_tab_commands / on_pane_select to clean up.
+    if should_dismiss_nav {
+        let is_open = modal_q
+            .single()
+            .map(|(_, n, _)| n.display != Display::None)
+            .unwrap_or(false);
+        if is_open {
+            let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut() else {
+                return;
+            };
+            modal_node.display = Display::None;
+            *modal_vis = Visibility::Hidden;
+            commands
+                .entity(modal_e)
+                .remove::<CefKeyboardTarget>()
+                .remove::<CefPointerTarget>()
+                .remove::<PendingCommandBarReveal>();
             new_tab_ctx.needs_open = false;
             return;
         }
@@ -629,6 +680,31 @@ fn on_command_bar_action(
                 }
             }
         }
+    }
+}
+
+/// Closes the command bar modal when `NewTabContext::dismiss_modal` is set.
+/// Runs after `ReadAppCommands` so that `handle_tab_commands` can validate
+/// the target index before requesting a dismiss.
+fn deferred_dismiss_modal(
+    mut new_tab_ctx: ResMut<NewTabContext>,
+    mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
+    mut commands: Commands,
+) {
+    if !new_tab_ctx.dismiss_modal {
+        return;
+    }
+    new_tab_ctx.dismiss_modal = false;
+    if let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut()
+        && modal_node.display != Display::None
+    {
+        modal_node.display = Display::None;
+        *modal_vis = Visibility::Hidden;
+        commands
+            .entity(modal_e)
+            .remove::<CefKeyboardTarget>()
+            .remove::<CefPointerTarget>()
+            .remove::<PendingCommandBarReveal>();
     }
 }
 

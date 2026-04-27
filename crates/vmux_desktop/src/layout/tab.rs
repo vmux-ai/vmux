@@ -167,6 +167,7 @@ fn handle_tab_commands(
     tab_q: Query<Entity, With<Tab>>,
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
+
     settings: Res<AppSettings>,
     mut new_tab_ctx: ResMut<NewTabContext>,
     mut commands: Commands,
@@ -315,6 +316,14 @@ fn handle_tab_commands(
                 commands.entity(next).insert(LastActivatedAt::now());
             }
             TabCommand::Next | TabCommand::Previous => {
+                // If an empty tab is pending (Cmd+T command bar), despawn it
+                // and exclude from navigation targets.
+                let empty_tab = new_tab_ctx.tab.take();
+                let prev_tab = new_tab_ctx.previous_tab.take();
+                if let Some(e) = empty_tab {
+                    commands.entity(e).despawn();
+                }
+
                 let Some(space) = active_among(spaces.iter()) else {
                     continue;
                 };
@@ -325,7 +334,7 @@ fn handle_tab_commands(
                 for &pane_e in &space_panes {
                     if let Ok(children) = pane_children.get(pane_e) {
                         for child in children.iter() {
-                            if tab_q.contains(child) {
+                            if tab_q.contains(child) && Some(child) != empty_tab {
                                 flat.push((pane_e, child));
                             }
                         }
@@ -334,7 +343,15 @@ fn handle_tab_commands(
                 if flat.len() < 2 {
                     continue;
                 }
-                let Some(current) = flat.iter().position(|&(_, t)| Some(t) == active_tab) else {
+                // When coming from an empty tab, use previous_tab as current
+                // position; otherwise use active_tab.
+                let effective_current = if empty_tab.is_some() {
+                    prev_tab.or(active_tab)
+                } else {
+                    active_tab
+                };
+                let Some(current) = flat.iter().position(|&(_, t)| Some(t) == effective_current)
+                else {
                     continue;
                 };
                 let delta: i32 = if tab_cmd == TabCommand::Next { 1 } else { -1 };
@@ -356,13 +373,18 @@ fn handle_tab_commands(
             | TabCommand::SelectIndex7
             | TabCommand::SelectIndex8
             | TabCommand::SelectLast => {
+                let empty_tab = new_tab_ctx.tab;
+
                 let Some(pane) = active_pane else {
                     continue;
                 };
                 let Ok(children) = pane_children.get(pane) else {
                     continue;
                 };
-                let tabs: Vec<Entity> = children.iter().filter(|&e| tab_q.contains(e)).collect();
+                let tabs: Vec<Entity> = children
+                    .iter()
+                    .filter(|&e| tab_q.contains(e) && Some(e) != empty_tab)
+                    .collect();
                 if tabs.is_empty() {
                     continue;
                 }
@@ -379,8 +401,17 @@ fn handle_tab_commands(
                     _ => continue,
                 };
                 if target_idx >= tabs.len() {
+                    // Target doesn't exist — ignore (keep command bar open)
                     continue;
                 }
+
+                // Target is valid — despawn empty tab and request modal dismiss
+                if let Some(e) = new_tab_ctx.tab.take() {
+                    commands.entity(e).despawn();
+                    new_tab_ctx.previous_tab = None;
+                    new_tab_ctx.dismiss_modal = true;
+                }
+
                 commands
                     .entity(tabs[target_idx])
                     .insert(LastActivatedAt::now());
