@@ -53,34 +53,31 @@ pub(crate) struct TerminalInputPlugin;
 
 impl Plugin for TerminalInputPlugin {
     fn build(&self, app: &mut App) {
-        // Connect to daemon at startup
+        // Connect to daemon, auto-starting it if needed.
+        // The daemon runs as `<current_exe> daemon` (same binary, subcommand).
+        if DaemonHandle::connect().is_none() {
+            if let Ok(exe) = std::env::current_exe() {
+                info!("Starting daemon: {} daemon", exe.display());
+                let _ = std::process::Command::new(&exe)
+                    .arg("daemon")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn();
+                // Wait for daemon socket to appear
+                let sock = vmux_daemon::socket_path();
+                for _ in 0..20 {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    if sock.exists() {
+                        break;
+                    }
+                }
+            }
+        }
         if let Some(handle) = DaemonHandle::connect() {
             app.insert_resource(DaemonClient(handle));
         } else {
-            // Spawn daemon process automatically
-            let daemon_bin = std::env::current_exe()
-                .ok()
-                .and_then(|p| {
-                    let dir = p.parent()?;
-                    let candidate = dir.join("vmux-daemon");
-                    candidate.exists().then_some(candidate)
-                });
-            if let Some(bin) = daemon_bin {
-                let _ = std::process::Command::new(&bin)
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn();
-                // Wait briefly for daemon to start
-                std::thread::sleep(std::time::Duration::from_millis(200));
-                if let Some(handle) = DaemonHandle::connect() {
-                    app.insert_resource(DaemonClient(handle));
-                } else {
-                    warn!("Failed to connect to vmux daemon after spawn");
-                }
-            } else {
-                warn!("vmux-daemon binary not found; terminal sessions will not persist");
-            }
+            warn!("Failed to connect to vmux daemon");
         }
 
         app.init_resource::<MouseSelectionState>()
