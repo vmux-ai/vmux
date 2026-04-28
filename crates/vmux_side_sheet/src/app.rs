@@ -136,6 +136,11 @@ fn TabRow(tab: TabNode, pane_id: u64) -> Element {
                         onerror: move |_| icon_error.set(true),
                     }
                 }
+            } else if tab.title == "New Tab" && tab.url.is_empty() {
+                Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                    line { x1: "12", y1: "5", x2: "12", y2: "19" }
+                    line { x1: "5", y1: "12", x2: "19", y2: "12" }
+                }
             } else {
                 Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                     path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }

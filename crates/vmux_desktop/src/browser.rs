@@ -586,7 +586,7 @@ fn push_tabs_host_emit(
     {
         rows.retain(|r| !r.is_active);
         rows.push(TabRow {
-            title: "+ New Tab".to_string(),
+            title: "New Tab".to_string(),
             url: String::new(),
             favicon_url: String::new(),
             is_active: true,
@@ -660,7 +660,7 @@ fn push_pane_tree_emit(
                             let is_new_tab = new_tab_ctx.tab == Some(child)
                                 && (meta.url.is_empty() || meta.url == "about:blank");
                             tabs.push(TabNode {
-                                title: if is_new_tab { "+ New Tab".to_string() } else { meta.title.clone() },
+                                title: if is_new_tab { "New Tab".to_string() } else { meta.title.clone() },
                                 url: if is_new_tab { String::new() } else { meta.url.clone() },
                                 favicon_url: if is_new_tab { String::new() } else { meta.favicon_url.clone() },
                                 is_active: tab_is_active,
