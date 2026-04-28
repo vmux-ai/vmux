@@ -1,10 +1,7 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,9 +12,36 @@ env:
 jobs:
   lint:
     name: Lint
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
+            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
+            /usr/local/share/chromium /usr/local/share/edge
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libssl-dev \
+            libasound2-dev \
+            libudev-dev \
+            libx11-dev \
+            libxi-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libgtk-3-dev \
+            libxdo-dev \
+            libvulkan-dev
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -33,8 +57,8 @@ jobs:
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
             target
-          key: ${{ runner.os }}-lint-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-lint-
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
 
       - name: Check formatting
         run: |
@@ -46,11 +70,19 @@ jobs:
 
       - name: Install CEF framework
         run: |
-          cargo install export-cef-dir@145.6.1+145.0.28 --force
+          command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@145.6.1+145.0.28
           export-cef-dir --force "$HOME/.local/share"
 
       - name: Install dioxus-cli
-        run: cargo install dioxus-cli --locked --version 0.7.4
+        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
+
+      - name: Install tailwindcss
+        run: |
+          if ! command -v tailwindcss >/dev/null 2>&1; then
+            curl -sLO https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.19/tailwindcss-linux-x64
+            chmod +x tailwindcss-linux-x64
+            sudo mv tailwindcss-linux-x64 /usr/local/bin/tailwindcss
+          fi
 
       - name: Clippy
         run: |
@@ -61,9 +93,36 @@ jobs:
 
   test:
     name: Test
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
+            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
+            /usr/local/share/chromium /usr/local/share/edge
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libssl-dev \
+            libasound2-dev \
+            libudev-dev \
+            libx11-dev \
+            libxi-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libgtk-3-dev \
+            libxdo-dev \
+            libvulkan-dev
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -78,22 +137,46 @@ jobs:
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
             target
-          key: ${{ runner.os }}-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-test-
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
 
       - name: Install CEF framework
         run: |
-          cargo install export-cef-dir@145.6.1+145.0.28 --force
+          command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@145.6.1+145.0.28
           export-cef-dir --force "$HOME/.local/share"
 
       - name: Install dioxus-cli
-        run: cargo install dioxus-cli --locked --version 0.7.4
+        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
+
+      - name: Install tailwindcss
+        run: |
+          if ! command -v tailwindcss >/dev/null 2>&1; then
+            curl -sLO https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.19/tailwindcss-linux-x64
+            chmod +x tailwindcss-linux-x64
+            sudo mv tailwindcss-linux-x64 /usr/local/bin/tailwindcss
+          fi
 
       - name: Run tests
         run: env -u CEF_PATH cargo test --workspace --exclude bevy_cef_core
 
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      website: ${{ steps.filter.outputs.website }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            website:
+              - 'website/**'
+
   website:
     name: Website Build
+    needs: changes
+    if: needs.changes.outputs.website == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -115,7 +198,7 @@ jobs:
           restore-keys: website-ci-
 
       - name: Install dioxus-cli
-        run: cargo install dioxus-cli --locked --version 0.7.4
+        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
       - name: Build website
         working-directory: website
@@ -142,22 +225,30 @@ jobs:
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
             target
-          key: ${{ runner.os }}-build-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-build-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-build-
 
       - name: Install CEF framework
         run: |
-          cargo install export-cef-dir@145.6.1+145.0.28 --force
+          command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@145.6.1+145.0.28
           export-cef-dir --force "$HOME/.local/share"
 
       - name: Install dioxus-cli
-        run: cargo install dioxus-cli --locked --version 0.7.4
+        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
       - name: Install bevy_cef_bundle_app
-        run: cargo install bevy_cef_bundle_app --locked
+        run: command -v bevy_cef_bundle_app >/dev/null 2>&1 || cargo install bevy_cef_bundle_app --locked
 
       - name: Install cargo-packager
-        run: cargo install cargo-packager --locked
+        run: command -v cargo-packager >/dev/null 2>&1 || cargo install cargo-packager --locked
+
+      - name: Install tailwindcss
+        run: |
+          if ! command -v tailwindcss >/dev/null 2>&1; then
+            curl -sLO https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.19/tailwindcss-macos-arm64
+            chmod +x tailwindcss-macos-arm64
+            sudo mv tailwindcss-macos-arm64 /usr/local/bin/tailwindcss
+          fi
 
       - name: Strip signing config for CI
         run: |

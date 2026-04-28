@@ -26,6 +26,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::RenderTextureMessage;
+#[cfg(target_os = "macos")]
 use std::path::PathBuf;
 use vmux_header::{
     Header, NavigationState, PageMetadata,

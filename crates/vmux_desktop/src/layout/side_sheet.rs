@@ -4,10 +4,9 @@ use crate::{
     layout::window::Main,
     settings::AppSettings,
 };
-use bevy::{
-    ecs::system::NonSendMarker, prelude::*, ui::UiSystems, window::PrimaryWindow,
-    winit::WINIT_WINDOWS,
-};
+#[cfg(target_os = "macos")]
+use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
+use bevy::{prelude::*, ui::UiSystems, window::PrimaryWindow};
 use vmux_header::Header;
 
 pub(crate) struct SideSheetLayoutPlugin;

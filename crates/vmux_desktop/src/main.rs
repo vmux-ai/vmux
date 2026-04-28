@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+#[cfg(not(target_os = "macos"))]
+use bevy_cef::prelude::early_exit_if_subprocess;
 use vmux_desktop::VmuxPlugin;
 
 fn main() {
