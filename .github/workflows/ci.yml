@@ -15,7 +15,7 @@ env:
 jobs:
   lint:
     name: Lint
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -61,7 +61,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
