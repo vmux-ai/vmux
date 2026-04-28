@@ -6,10 +6,11 @@ pub mod session;
 
 use std::path::PathBuf;
 
-/// Directory for daemon runtime files (socket, pid).
+/// Directory for daemon runtime files (socket, pid, log).
 pub fn daemon_dir() -> PathBuf {
     let home = std::env::var_os("HOME").expect("HOME not set");
-    PathBuf::from(home).join(".vmux")
+    PathBuf::from(home)
+        .join("Library/Application Support/ai.vmux.desktop/services")
 }
 
 /// Path to the Unix domain socket.

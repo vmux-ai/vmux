@@ -49,35 +49,29 @@ pub(crate) struct RestartPty {
     pub entity: Entity,
 }
 
+/// Tracks daemon connection retry state.
+#[derive(Resource)]
+struct DaemonConnectRetry {
+    /// Countdown: stop retrying after this many ticks.
+    remaining_attempts: u32,
+    timer: Timer,
+}
+
 pub(crate) struct TerminalInputPlugin;
 
 impl Plugin for TerminalInputPlugin {
     fn build(&self, app: &mut App) {
-        // Connect to daemon, auto-starting it if needed.
-        // The daemon runs as `<current_exe> daemon` (same binary, subcommand).
-        if DaemonHandle::connect().is_none() {
-            if let Ok(exe) = std::env::current_exe() {
-                info!("Starting daemon: {} daemon", exe.display());
-                let _ = std::process::Command::new(&exe)
-                    .arg("daemon")
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::piped())
-                    .spawn();
-                // Wait for daemon socket to appear
-                let sock = vmux_daemon::socket_path();
-                for _ in 0..20 {
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                    if sock.exists() {
-                        break;
-                    }
-                }
-            }
-        }
+        // Try to connect to an already-running daemon first.
         if let Some(handle) = DaemonHandle::connect() {
+            eprintln!("vmux: connected to existing daemon");
             app.insert_resource(DaemonClient(handle));
         } else {
-            warn!("Failed to connect to vmux daemon");
+            // Daemon not running — auto-start it and schedule connection retries.
+            ensure_daemon_started();
+            app.insert_resource(DaemonConnectRetry {
+                remaining_attempts: 60, // ~3 seconds with 50ms timer
+                timer: Timer::from_seconds(0.05, TimerMode::Repeating),
+            });
         }
 
         app.init_resource::<MouseSelectionState>()
@@ -94,6 +88,7 @@ impl Plugin for TerminalInputPlugin {
             .add_systems(
                 Update,
                 (
+                    try_connect_daemon.run_if(resource_exists::<DaemonConnectRetry>),
                     poll_daemon_messages.in_set(WriteAppCommands),
                     sync_terminal_theme,
                 )
@@ -249,8 +244,99 @@ struct PendingDaemonCreate {
 #[derive(Component)]
 struct PendingDaemonAttach;
 
+/// Marker: CreateSession was sent, waiting for SessionCreated response.
+#[derive(Component)]
+struct AwaitingSessionCreated;
+
 fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+}
+
+/// Spawn the daemon subprocess if not already running.
+fn ensure_daemon_started() {
+    if DaemonHandle::daemon_running() {
+        eprintln!("vmux: daemon already running");
+        return;
+    }
+    let exe = match std::env::current_exe() {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("vmux: failed to get current exe: {e}");
+            return;
+        }
+    };
+    eprintln!("vmux: starting daemon: {} daemon", exe.display());
+
+    // Redirect daemon stderr to a log file instead of piping.
+    // Piped stderr with nobody reading causes SIGPIPE on macOS,
+    // which can kill the daemon process.
+    let log_dir = vmux_daemon::daemon_dir();
+    let _ = std::fs::create_dir_all(&log_dir);
+    let stderr_cfg = match std::fs::File::create(log_dir.join("daemon.log")) {
+        Ok(f) => std::process::Stdio::from(f),
+        Err(_) => std::process::Stdio::null(),
+    };
+
+    match std::process::Command::new(&exe)
+        .arg("daemon")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(stderr_cfg)
+        .spawn()
+    {
+        Ok(_child) => {
+            eprintln!("vmux: daemon subprocess spawned");
+        }
+        Err(e) => {
+            eprintln!("vmux: failed to spawn daemon: {e}");
+        }
+    }
+}
+
+/// Bevy system: retry connecting to daemon until it succeeds or we give up.
+fn try_connect_daemon(
+    mut retry: ResMut<DaemonConnectRetry>,
+    time: Res<Time>,
+    mut commands: Commands,
+) {
+    retry.timer.tick(time.delta());
+    if !retry.timer.just_finished() {
+        return;
+    }
+
+    retry.remaining_attempts = retry.remaining_attempts.saturating_sub(1);
+
+    // Check if socket is ready
+    let sock = vmux_daemon::socket_path();
+    if !sock.exists() {
+        if retry.remaining_attempts == 0 {
+            eprintln!("vmux: daemon socket never appeared — giving up");
+            commands.remove_resource::<DaemonConnectRetry>();
+        }
+        return;
+    }
+
+    // Try to connect
+    match DaemonHandle::connect() {
+        Some(handle) => {
+            eprintln!("vmux: connected to daemon after retry");
+            commands.insert_resource(DaemonClient(handle));
+            commands.remove_resource::<DaemonConnectRetry>();
+        }
+        None => {
+            if retry.remaining_attempts == 0 {
+                eprintln!("vmux: failed to connect to daemon after all retries");
+                // Check daemon log for clues
+                let log_path = vmux_daemon::daemon_dir().join("daemon.log");
+                if let Ok(log) = std::fs::read_to_string(&log_path) {
+                    if !log.is_empty() {
+                        eprintln!("vmux: daemon log:\n{log}");
+                    }
+                }
+                commands.remove_resource::<DaemonConnectRetry>();
+            }
+        }
+    }
 }
 
 /// Send CreateSession / AttachSession for newly spawned terminals.
@@ -262,6 +348,10 @@ fn poll_daemon_messages(
     pending_attach: Query<
         (Entity, &DaemonSessionHandle),
         (With<Terminal>, With<PendingDaemonAttach>),
+    >,
+    awaiting_create: Query<
+        (Entity, &DaemonSessionHandle, &ChildOf),
+        (With<Terminal>, With<AwaitingSessionCreated>),
     >,
     terminals: Query<
         (Entity, &DaemonSessionHandle, &ChildOf),
@@ -285,7 +375,10 @@ fn poll_daemon_messages(
             cols: 80,
             rows: 24,
         });
-        commands.entity(entity).remove::<PendingDaemonCreate>();
+        commands
+            .entity(entity)
+            .remove::<PendingDaemonCreate>()
+            .insert(AwaitingSessionCreated);
     }
 
     // Handle pending attaches
@@ -303,16 +396,15 @@ fn poll_daemon_messages(
     for msg in daemon.0.drain() {
         match msg {
             DaemonMessage::SessionCreated { session_id } => {
-                // Update the placeholder session_id on the first terminal
-                // that doesn't yet have a real daemon session.
-                // CreateSession responses arrive in order.
-                for (entity, _, _) in &terminals {
+                // Match the first terminal awaiting a SessionCreated response.
+                for (entity, _, _) in &awaiting_create {
                     // Attach to receive viewport patches
                     daemon.0.send(ClientMessage::AttachSession { session_id });
                     // Update handle with real daemon session ID
                     commands
                         .entity(entity)
-                        .insert(DaemonSessionHandle { session_id });
+                        .insert(DaemonSessionHandle { session_id })
+                        .remove::<AwaitingSessionCreated>();
                     // Update PageMetadata URL so session.ron saves the real ID
                     if let Ok(mut meta) = meta_q.get_mut(entity) {
                         meta.url =
@@ -826,6 +918,7 @@ fn on_restart_pty(
     };
 
     // Kill old session
+
     daemon.0.send(ClientMessage::KillSession {
         session_id: handle.session_id,
     });

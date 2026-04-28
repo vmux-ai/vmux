@@ -7,9 +7,10 @@ use crate::{
         pane::{Pane, PaneSplit},
         side_sheet::SideSheet,
         space::Space,
-        tab::{Tab, TabCommandSet, active_among, collect_leaf_panes, focused_tab},
+        tab::{Tab, active_among, collect_leaf_panes, focused_tab},
         window::Modal,
     },
+    sessions_monitor::SessionsMonitor,
     settings::AppSettings,
     terminal::Terminal,
 };
@@ -21,19 +22,23 @@ use vmux_command_bar::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
 };
+use vmux_daemon::protocol::SessionId;
 use vmux_header::{Header, PageMetadata};
 use vmux_history::LastActivatedAt;
+use vmux_sessions::event::SESSIONS_WEBVIEW_URL;
 use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
+
+/// Try to extract a session UUID from `vmux://terminal/session/{uuid}`.
+fn parse_session_id_from_url(url: &str) -> Option<SessionId> {
+    let suffix = url.strip_prefix(TERMINAL_WEBVIEW_URL)?;
+    let uuid_str = suffix.strip_prefix("session/")?;
+    uuid_str.parse::<SessionId>().ok()
+}
 
 /// Deferred visibility for the command bar modal. Counts frames after Display::Flex
 /// so CEF can resize the webview before the modal becomes visible.
 #[derive(Component)]
 struct PendingCommandBarReveal(u8);
-
-/// Inserted during the first app launch (no session file) so that the command
-/// bar opens automatically once the modal webview is ready.
-#[derive(Resource)]
-pub(crate) struct PendingFirstLaunchOpen;
 
 /// Tracks an empty tab spawned by Cmd+T that is waiting for the user
 /// to choose content via the command bar.
@@ -58,15 +63,7 @@ impl Plugin for CommandBarInputPlugin {
             .add_plugins(JsEmitEventPlugin::<PathCompleteRequest>::default())
             .add_observer(on_command_bar_action)
             .add_observer(on_path_complete_request)
-            .add_systems(
-                Update,
-                (
-                    handle_open_command_bar
-                        .in_set(ReadAppCommands)
-                        .after(TabCommandSet),
-                    first_launch_open_command_bar.before(ReadAppCommands),
-                ),
-            )
+            .add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands))
             .add_systems(
                 Update,
                 deferred_dismiss_modal
@@ -97,31 +94,6 @@ pub fn match_command(id: &str) -> Option<AppCommand> {
 /// Returns true when the command bar modal is currently visible.
 pub fn is_command_bar_open(modal_q: &Query<&Node, With<Modal>>) -> bool {
     modal_q.iter().any(|n| n.display != Display::None)
-}
-
-/// Despawn any pre-spawned Browser children of a tab (e.g. the transparent
-/// about:blank browser + glass created by Cmd+T) before attaching real content.
-fn despawn_tab_browsers(
-    tab: Entity,
-    all_children: &Query<&Children>,
-    content_browsers: &Query<
-        Entity,
-        (
-            With<Browser>,
-            Without<Header>,
-            Without<SideSheet>,
-            Without<Modal>,
-        ),
-    >,
-    commands: &mut Commands,
-) {
-    if let Ok(children) = all_children.get(tab) {
-        for child in children.iter() {
-            if content_browsers.contains(child) {
-                commands.entity(child).despawn();
-            }
-        }
-    }
 }
 
 fn handle_open_command_bar(
@@ -288,6 +260,8 @@ fn handle_open_command_bar(
         if !is_open {
             should_open = true;
         }
+        // If already open, do nothing — the shortcut should not close the bar.
+        // Users can dismiss with Escape or click-outside.
     }
 
     if !should_open {
@@ -468,8 +442,6 @@ fn on_command_bar_action(
                     expanded.parent().unwrap_or(&expanded)
                 };
                 if let Some(tab_e) = empty_tab {
-                    // Despawn pre-spawned transparent browser + glass
-                    despawn_tab_browsers(tab_e, &all_children, &content_browsers, &mut commands);
                     commands.entity(tab_e).insert(PageMetadata {
                         url: TERMINAL_WEBVIEW_URL.to_string(),
                         title: format!("Terminal ({})", dir.display()),
@@ -501,22 +473,39 @@ fn on_command_bar_action(
                 };
 
                 if let Some(tab_e) = empty_tab {
-                    // Despawn pre-spawned transparent browser + glass
-                    despawn_tab_browsers(tab_e, &all_children, &content_browsers, &mut commands);
                     // New tab mode: attach content to the empty tab
                     if url.starts_with("vmux://terminal") {
+                        let term_e = if let Some(sid) = parse_session_id_from_url(&url) {
+                            commands
+                                .spawn((
+                                    Terminal::reattach(&mut meshes, &mut webview_mt, sid),
+                                    ChildOf(tab_e),
+                                ))
+                                .id()
+                        } else {
+                            commands.entity(tab_e).insert(PageMetadata {
+                                url: TERMINAL_WEBVIEW_URL.to_string(),
+                                title: "Terminal (Session: -)".to_string(),
+                                ..default()
+                            });
+                            commands
+                                .spawn((
+                                    Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                                    ChildOf(tab_e),
+                                ))
+                                .id()
+                        };
+                        commands.entity(term_e).insert(CefKeyboardTarget);
+                    } else if url.starts_with(SESSIONS_WEBVIEW_URL.trim_end_matches('/')) {
                         commands.entity(tab_e).insert(PageMetadata {
-                            url: TERMINAL_WEBVIEW_URL.to_string(),
-                            title: "Terminal (Session: -)".to_string(),
+                            url: SESSIONS_WEBVIEW_URL.to_string(),
+                            title: "Sessions".to_string(),
                             ..default()
                         });
-                        let term_e = commands
-                            .spawn((
-                                Terminal::new(&mut meshes, &mut webview_mt, &settings),
-                                ChildOf(tab_e),
-                            ))
-                            .id();
-                        commands.entity(term_e).insert(CefKeyboardTarget);
+                        commands.spawn((
+                            SessionsMonitor::new(&mut meshes, &mut webview_mt),
+                            ChildOf(tab_e),
+                        ));
                     } else {
                         let browser_e = commands
                             .spawn((
@@ -531,8 +520,33 @@ fn on_command_bar_action(
                     custom_keyboard_restore = true;
                 } else {
                     // Normal mode: navigate or spawn terminal in current tab
-                    if url.starts_with("vmux://terminal") {
+                    if let Some(sid) = parse_session_id_from_url(&url) {
+                        // Reattach to existing daemon session in a new tab
+                        let (_, active_pane_opt, _) = focused_tab(
+                            &spaces, &all_children, &leaf_panes,
+                            &pane_ts, &pane_children, &tab_ts,
+                        );
+                        if let Some(pane_e) = active_pane_opt {
+                            let tab_e = commands
+                                .spawn((
+                                    crate::layout::tab::tab_bundle(),
+                                    LastActivatedAt::now(),
+                                    ChildOf(pane_e),
+                                ))
+                                .id();
+                            let term_e = commands
+                                .spawn((
+                                    Terminal::reattach(&mut meshes, &mut webview_mt, sid),
+                                    ChildOf(tab_e),
+                                ))
+                                .id();
+                            commands.entity(term_e).insert(CefKeyboardTarget);
+                        }
+                    } else if url.starts_with("vmux://terminal") {
                         writer.write(AppCommand::Terminal(TerminalCommand::New));
+                    } else if url.starts_with(SESSIONS_WEBVIEW_URL.trim_end_matches('/')) {
+                        use crate::command::SessionCommand;
+                        writer.write(AppCommand::Session(SessionCommand::Open));
                     } else {
                         let (_, _, active_tab) = focused_tab(
                             &spaces,
@@ -559,6 +573,42 @@ fn on_command_bar_action(
             }
         }
         "terminal" => {
+            // Check if value is a vmux://terminal/session/{id} URL — reattach
+            if let Some(sid) = parse_session_id_from_url(&evt.value) {
+                if let Some(tab_e) = empty_tab {
+                    let term_e = commands
+                        .spawn((
+                            Terminal::reattach(&mut meshes, &mut webview_mt, sid),
+                            ChildOf(tab_e),
+                        ))
+                        .id();
+                    commands.entity(term_e).insert(CefKeyboardTarget);
+                    new_tab_ctx.tab = None;
+                    new_tab_ctx.previous_tab = None;
+                    custom_keyboard_restore = true;
+                } else {
+                    let (_, active_pane_opt, _) = focused_tab(
+                        &spaces, &all_children, &leaf_panes,
+                        &pane_ts, &pane_children, &tab_ts,
+                    );
+                    if let Some(pane_e) = active_pane_opt {
+                        let tab_e = commands
+                            .spawn((
+                                crate::layout::tab::tab_bundle(),
+                                LastActivatedAt::now(),
+                                ChildOf(pane_e),
+                            ))
+                            .id();
+                        let term_e = commands
+                            .spawn((
+                                Terminal::reattach(&mut meshes, &mut webview_mt, sid),
+                                ChildOf(tab_e),
+                            ))
+                            .id();
+                        commands.entity(term_e).insert(CefKeyboardTarget);
+                    }
+                }
+            } else {
             let cwd = if evt.value.is_empty() || evt.value.contains("://") {
                 None
             } else {
@@ -576,8 +626,6 @@ fn on_command_bar_action(
                 Some(expanded)
             };
             if let Some(tab_e) = empty_tab {
-                // Despawn pre-spawned transparent browser + glass
-                despawn_tab_browsers(tab_e, &all_children, &content_browsers, &mut commands);
                 commands.entity(tab_e).insert(PageMetadata {
                     url: TERMINAL_WEBVIEW_URL.to_string(),
                     title: "Terminal (Session: -)".to_string(),
@@ -636,6 +684,7 @@ fn on_command_bar_action(
                     writer.write(AppCommand::Terminal(TerminalCommand::New));
                 }
             }
+            } // end reattach else
         }
         "command" => {
             if let Some(cmd) = match_command(&evt.value) {
@@ -748,29 +797,6 @@ fn deferred_dismiss_modal(
             .remove::<CefPointerTarget>()
             .remove::<PendingCommandBarReveal>();
     }
-}
-
-/// Opens the command bar on first launch, waiting until the modal webview is
-/// ready so the open event is actually received by the WASM app.
-fn first_launch_open_command_bar(
-    pending: Option<Res<PendingFirstLaunchOpen>>,
-    modal_q: Query<Entity, With<Modal>>,
-    browsers: NonSend<Browsers>,
-    mut new_tab_ctx: ResMut<NewTabContext>,
-    mut commands: Commands,
-) {
-    if pending.is_none() {
-        return;
-    }
-    let Ok(modal_e) = modal_q.single() else {
-        return;
-    };
-    if !browsers.has_browser(modal_e) || !browsers.host_emit_ready(&modal_e) {
-        return;
-    }
-    // Modal webview is ready — trigger command bar open on the next frame.
-    new_tab_ctx.needs_open = true;
-    commands.remove_resource::<PendingFirstLaunchOpen>();
 }
 
 /// Waits 2 frames after `Display::Flex` before revealing the command bar so that

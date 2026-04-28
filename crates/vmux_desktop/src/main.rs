@@ -72,7 +72,7 @@ fn run_daemon() {
 
     rt.block_on(async {
         let dir = daemon_dir();
-        std::fs::create_dir_all(&dir).expect("failed to create ~/.vmux");
+        std::fs::create_dir_all(&dir).expect("failed to create daemon dir");
 
         let pid = std::process::id();
         std::fs::write(pid_path(), pid.to_string()).expect("failed to write PID file");

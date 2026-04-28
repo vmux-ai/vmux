@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_sessions::event::*;
-use vmux_ui::hooks::{use_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
 
 #[component]
 pub fn App() -> Element {
@@ -11,6 +11,7 @@ pub fn App() -> Element {
         connected: false,
         sessions: Vec::new(),
     });
+    let mut search = use_signal(String::new);
 
     let _listener =
         use_event_listener::<SessionsListEvent, _>(SESSIONS_LIST_EVENT, move |event| {
@@ -18,13 +19,52 @@ pub fn App() -> Element {
         });
 
     let data = state.read();
+    let query = search.read().to_lowercase();
+    let filtered: Vec<&SessionEntry> = data
+        .sessions
+        .iter()
+        .filter(|s| {
+            if query.is_empty() {
+                return true;
+            }
+            s.id.to_lowercase().contains(&query)
+                || s.shell.to_lowercase().contains(&query)
+                || s.cwd.to_lowercase().contains(&query)
+                || s.pid.to_string().contains(&query)
+        })
+        .collect();
+
+    let has_sessions = !data.sessions.is_empty();
+    let session_count = data.sessions.len();
 
     rsx! {
         div { class: "flex h-full flex-col bg-background p-4 overflow-auto",
             // Header
-            div { class: "mb-4 flex items-center gap-3",
-                h1 { class: "text-lg font-semibold text-foreground", "Daemon Sessions" }
-                StatusBadge { connected: data.connected }
+            div { class: "mb-3 flex items-center justify-between",
+                div { class: "flex items-center gap-3",
+                    h1 { class: "text-lg font-semibold text-foreground", "Daemon Sessions" }
+                    StatusBadge { connected: data.connected }
+                    if has_sessions {
+                        {
+                            let label = if session_count == 1 {
+                                format!("{session_count} session")
+                            } else {
+                                format!("{session_count} sessions")
+                            };
+                            rsx! { span { class: "text-xs text-muted-foreground", "{label}" } }
+                        }
+                    }
+                }
+                if has_sessions {
+                    button {
+                        class: "rounded bg-red-500/10 px-2.5 py-1 text-xs text-red-400 hover:bg-red-500/20 transition-colors",
+                        onclick: move |e: Event<MouseData>| {
+                            e.stop_propagation();
+                            let _ = try_cef_emit_serde(&SessionKillAllEvent { kill_all: true });
+                        },
+                        "Kill All"
+                    }
+                }
             }
 
             if !data.connected {
@@ -37,14 +77,31 @@ pub fn App() -> Element {
                         }
                     }
                 }
-            } else if data.sessions.is_empty() {
+            } else if !has_sessions {
                 div { class: "flex flex-1 items-center justify-center",
                     p { class: "text-sm text-muted-foreground", "No active sessions" }
                 }
             } else {
-                div { class: "flex flex-col gap-3",
-                    for session in data.sessions.iter() {
-                        SessionCard { session: session.clone() }
+                // Search filter
+                div { class: "mb-3",
+                    input {
+                        class: "w-full rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-foreground/30",
+                        r#type: "text",
+                        placeholder: "Filter sessions...",
+                        value: "{search}",
+                        oninput: move |e: Event<FormData>| search.set(e.value()),
+                    }
+                }
+
+                if filtered.is_empty() {
+                    div { class: "flex flex-1 items-center justify-center",
+                        p { class: "text-sm text-muted-foreground", "No matching sessions" }
+                    }
+                } else {
+                    div { class: "flex flex-col gap-3",
+                        for session in filtered.iter() {
+                            SessionCard { key: "{session.id}", session: (*session).clone() }
+                        }
                     }
                 }
             }
@@ -76,14 +133,42 @@ fn SessionCard(session: SessionEntry) -> Element {
     } else {
         &session.id
     };
+    let shell_name = session
+        .shell
+        .rsplit('/')
+        .next()
+        .unwrap_or(&session.shell)
+        .to_string();
+
+    let nav_id = session.id.clone();
+    let kill_id = session.id.clone();
+
+    let onclick = move |_| {
+        let _ = try_cef_emit_serde(&SessionNavigateEvent {
+            session_id: nav_id.clone(),
+        });
+    };
+
+    let onkill = move |e: Event<MouseData>| {
+        e.stop_propagation();
+        let _ = try_cef_emit_serde(&SessionKillEvent {
+            session_id: kill_id.clone(),
+        });
+    };
 
     rsx! {
-        div { class: "rounded-lg border border-border bg-card p-3",
-            // Session header
+        div {
+            class: "rounded-lg border border-border bg-card p-3 cursor-pointer hover:border-foreground/30 transition-colors",
+            onclick,
+
+            // Row 1: ID + badges + uptime + kill
             div { class: "mb-2 flex items-center justify-between",
                 div { class: "flex items-center gap-2",
                     code { class: "rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground",
                         "{id_short}"
+                    }
+                    span { class: "rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground",
+                        "{shell_name}"
                     }
                     if session.attached {
                         span { class: "rounded-full bg-blue-500/20 px-2 py-0.5 text-xs text-blue-400",
@@ -91,17 +176,24 @@ fn SessionCard(session: SessionEntry) -> Element {
                         }
                     }
                 }
-                span { class: "text-xs text-muted-foreground", "{uptime}" }
+                div { class: "flex items-center gap-2",
+                    span { class: "text-xs text-muted-foreground", "{uptime}" }
+                    button {
+                        class: "rounded px-1.5 py-0.5 text-xs text-red-400 hover:bg-red-500/20 transition-colors",
+                        onclick: onkill,
+                        "Kill"
+                    }
+                }
             }
 
-            // Session metadata
-            div { class: "mb-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs",
-                MetaRow { label: "Shell", value: session.shell.clone() }
+            // Row 2: metadata grid
+            div { class: "grid grid-cols-2 gap-x-4 gap-y-1 text-xs",
                 MetaRow { label: "PID", value: session.pid.to_string() }
                 MetaRow { label: "Size", value: format!("{}x{}", session.cols, session.rows) }
                 if !session.cwd.is_empty() {
                     MetaRow { label: "CWD", value: session.cwd.clone() }
                 }
+                MetaRow { label: "Shell", value: session.shell.clone() }
             }
 
             // Terminal preview
@@ -119,8 +211,8 @@ fn SessionCard(session: SessionEntry) -> Element {
 #[component]
 fn MetaRow(label: String, value: String) -> Element {
     rsx! {
-        div { class: "flex gap-1",
-            span { class: "text-muted-foreground", "{label}:" }
+        div { class: "flex gap-1 min-w-0",
+            span { class: "shrink-0 text-muted-foreground", "{label}:" }
             span { class: "truncate text-foreground", "{value}" }
         }
     }

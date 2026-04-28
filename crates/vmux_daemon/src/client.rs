@@ -54,16 +54,32 @@ impl DaemonHandle {
         }
         // Check if the PID file references a live process
         let pid_file = crate::pid_path();
-        if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-            if let Ok(pid) = pid_str.trim().parse::<i32>() {
-                // kill(pid, 0) checks if process exists without sending a signal
-                if unsafe { libc::kill(pid, 0) } != 0 {
-                    // Process is dead — clean up stale files
-                    let _ = std::fs::remove_file(&sock);
-                    let _ = std::fs::remove_file(&pid_file);
-                    return false;
-                }
+        let pid_str = match std::fs::read_to_string(&pid_file) {
+            Ok(s) => s,
+            Err(_) => {
+                // Socket exists but no PID file — stale state, clean up
+                eprintln!("vmux-daemon: socket exists but no PID file, cleaning up");
+                let _ = std::fs::remove_file(&sock);
+                return false;
             }
+        };
+        let pid: i32 = match pid_str.trim().parse() {
+            Ok(p) => p,
+            Err(_) => {
+                // Invalid PID file content — clean up
+                eprintln!("vmux-daemon: invalid PID file content: {:?}", pid_str.trim());
+                let _ = std::fs::remove_file(&sock);
+                let _ = std::fs::remove_file(&pid_file);
+                return false;
+            }
+        };
+        // kill(pid, 0) checks if process exists without sending a signal
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            // Process is dead — clean up stale files
+            eprintln!("vmux-daemon: stale daemon (pid {pid}) — cleaning up");
+            let _ = std::fs::remove_file(&sock);
+            let _ = std::fs::remove_file(&pid_file);
+            return false;
         }
         true
     }

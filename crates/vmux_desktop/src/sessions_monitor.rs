@@ -1,12 +1,18 @@
-use bevy::{picking::Pickable, prelude::*, render::alpha::AlphaMode};
+use bevy::{ecs::relationship::Relationship, picking::Pickable, prelude::*, render::alpha::AlphaMode};
 use bevy_cef::prelude::*;
-use vmux_daemon::protocol::ClientMessage;
+use vmux_daemon::protocol::{ClientMessage, SessionId};
+use vmux_history::LastActivatedAt;
 use vmux_sessions::event::*;
 use vmux_webview_app::UiReady;
 
 use crate::{
     browser::Browser,
-    layout::window::WEBVIEW_MESH_DEPTH_BIAS,
+    layout::{
+        pane::{Pane, PaneSplit},
+        space::Space,
+        tab::{Tab, focused_tab, tab_bundle},
+        window::WEBVIEW_MESH_DEPTH_BIAS,
+    },
     terminal::{DaemonClient, DaemonSessionHandle, Terminal},
 };
 
@@ -84,7 +90,13 @@ impl Plugin for SessionsMonitorPlugin {
                 1.0,
                 TimerMode::Repeating,
             )))
-            .add_systems(Update, (request_session_list, broadcast_to_monitors).chain());
+            .add_plugins(JsEmitEventPlugin::<SessionNavigateEvent>::default())
+            .add_plugins(JsEmitEventPlugin::<SessionKillEvent>::default())
+            .add_plugins(JsEmitEventPlugin::<SessionKillAllEvent>::default())
+            .add_systems(Update, (request_session_list, broadcast_to_monitors).chain())
+            .add_observer(on_session_navigate)
+            .add_observer(on_session_kill)
+            .add_observer(on_session_kill_all);
     }
 }
 
@@ -152,5 +164,81 @@ fn broadcast_to_monitors(
         if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
             commands.trigger(HostEmitEvent::new(entity, SESSIONS_LIST_EVENT, &event));
         }
+    }
+}
+
+/// Navigate to the terminal tab for the clicked session, or open a new one.
+fn on_session_navigate(
+    trigger: On<Receive<SessionNavigateEvent>>,
+    terminals: Query<(Entity, &DaemonSessionHandle, &ChildOf), With<Terminal>>,
+    tab_parent: Query<&ChildOf, With<Tab>>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_children: Query<&Children, With<Pane>>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut commands: Commands,
+) {
+    let sid = &trigger.event().payload.session_id;
+
+    // If a tab already has this session attached, activate it
+    for (_, handle, content_child_of) in &terminals {
+        if handle.session_id.to_string() == *sid {
+            let tab = content_child_of.get();
+            commands.entity(tab).insert(LastActivatedAt::now());
+            if let Ok(tab_child_of) = tab_parent.get(tab) {
+                commands.entity(tab_child_of.get()).insert(LastActivatedAt::now());
+            }
+            return;
+        }
+    }
+
+    // No existing tab — open a new one with reattach
+    let Ok(session_id) = sid.parse::<SessionId>() else {
+        warn!("Invalid session ID from navigate event: {sid}");
+        return;
+    };
+    let (_, active_pane, _) = focused_tab(
+        &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts,
+    );
+    let Some(pane) = active_pane else { return };
+
+    let tab = commands
+        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+        .id();
+    commands.spawn((
+        Terminal::reattach(&mut meshes, &mut webview_mt, session_id),
+        ChildOf(tab),
+    ));
+}
+
+/// Kill a single daemon session.
+fn on_session_kill(
+    trigger: On<Receive<SessionKillEvent>>,
+    daemon: Option<Res<DaemonClient>>,
+) {
+    let Some(daemon) = daemon else { return };
+    let sid = &trigger.event().payload.session_id;
+
+    if let Ok(session_id) = sid.parse::<SessionId>() {
+        daemon.0.send(ClientMessage::KillSession { session_id });
+    }
+}
+
+/// Kill all daemon sessions.
+fn on_session_kill_all(
+    _trigger: On<Receive<SessionKillAllEvent>>,
+    daemon: Option<Res<DaemonClient>>,
+    session_list: Res<DaemonSessionList>,
+) {
+    let Some(daemon) = daemon else { return };
+
+    for info in &session_list.sessions {
+        daemon.0.send(ClientMessage::KillSession {
+            session_id: info.id,
+        });
     }
 }

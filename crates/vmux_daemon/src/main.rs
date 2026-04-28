@@ -3,7 +3,7 @@ use vmux_daemon::{daemon_dir, pid_path, socket_path};
 #[tokio::main]
 async fn main() {
     let dir = daemon_dir();
-    std::fs::create_dir_all(&dir).expect("failed to create ~/.vmux");
+    std::fs::create_dir_all(&dir).expect("failed to create daemon dir");
 
     // Write PID file
     let pid = std::process::id();
