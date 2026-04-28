@@ -51,7 +51,10 @@ impl Plugin for VmuxPlugin {
             transparent: true,
             composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
             decorations: true,
-            titlebar_shown: false,
+            titlebar_shown: true,
+            titlebar_transparent: true,
+            titlebar_show_title: false,
+            titlebar_show_buttons: false,
             movable_by_window_background: false,
             fullsize_content_view: true,
             ..default()

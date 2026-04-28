@@ -4,7 +4,10 @@ use crate::{
     layout::window::Main,
     settings::AppSettings,
 };
-use bevy::{prelude::*, ui::UiSystems, window::PrimaryWindow, winit::WinitWindows};
+use bevy::{
+    ecs::system::NonSendMarker, prelude::*, ui::UiSystems, window::PrimaryWindow,
+    winit::WINIT_WINDOWS,
+};
 use vmux_header::Header;
 
 pub(crate) struct SideSheetLayoutPlugin;
@@ -236,73 +239,88 @@ fn sync_side_sheet_visibility(
 }
 
 /// Show/hide macOS traffic-light buttons to match the side-sheet state.
+///
+/// Uses `Local<Option<bool>>` to track the last-applied state instead of
+/// change-detection (`Added` / `RemovedComponents`) so we never miss a
+/// toggle – e.g. when the side-sheet is restored from persistence during
+/// startup.
 #[cfg(target_os = "macos")]
 fn sync_window_buttons_visibility(
     side_sheet_q: Query<(&SideSheetPosition, Has<Open>), With<SideSheet>>,
-    added: Query<Entity, (With<SideSheet>, Added<Open>)>,
-    mut removed: RemovedComponents<Open>,
-    winit_windows: Option<NonSend<WinitWindows>>,
     window_q: Query<Entity, With<PrimaryWindow>>,
+    mut last_open: Local<Option<bool>>,
+    _non_send: NonSendMarker,
 ) {
-    // Only react to left side sheet changes
-    let mut changed = false;
-    let mut is_open = false;
-    for entity in &added {
-        if let Ok((pos, _)) = side_sheet_q.get(entity)
-            && *pos == SideSheetPosition::Left
-        {
-            changed = true;
-            is_open = true;
-        }
-    }
-    if !changed {
-        for entity in removed.read() {
-            if let Ok((pos, _)) = side_sheet_q.get(entity)
-                && *pos == SideSheetPosition::Left
-            {
-                changed = true;
-            }
-        }
+    let is_open = side_sheet_q
+        .iter()
+        .any(|(pos, open)| *pos == SideSheetPosition::Left && open);
+
+    if *last_open == Some(is_open) {
+        return;
     }
 
-    if !changed {
-        return;
-    }
-    let Some(winit_windows) = winit_windows else {
-        return;
-    };
+    *last_open = Some(is_open);
+
     let Ok(entity) = window_q.single() else {
-        return;
-    };
-    let Some(winit_win) = winit_windows.get_window(entity) else {
-        return;
-    };
-
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    let Ok(handle) = winit_win.window_handle() else {
-        return;
-    };
-    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+        warn!("sync_window_buttons: no PrimaryWindow entity");
         return;
     };
 
-    // ns_view -> [view window] -> standardWindowButton: for each button type
-    let ns_view = appkit.ns_view.as_ptr();
-    unsafe {
-        use objc_ffi::{objc_msgSend, sel};
-        let ns_window = objc_msgSend(ns_view, sel("window"));
-        if ns_window.is_null() {
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
+        let Some(winit_win) = winit_windows.get_window(entity) else {
+            // Window not yet created – reset so we retry next frame.
+            warn!("sync_window_buttons: winit window not found, will retry");
+            *last_open = None;
             return;
-        }
-        let hidden: libc::c_int = if is_open { 0 } else { 1 };
-        // NSWindowButton values: Close=0, Miniaturize=1, Zoom=2
-        for button_type in 0u64..=2 {
-            let button = objc_msgSend(ns_window, sel("standardWindowButton:"), button_type);
-            if !button.is_null() {
-                objc_msgSend(button, sel("setHidden:"), hidden);
+        };
+
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let Ok(handle) = winit_win.window_handle() else {
+            warn!("sync_window_buttons: no window handle");
+            return;
+        };
+        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+            warn!("sync_window_buttons: not AppKit handle");
+            return;
+        };
+
+        let ns_view = appkit.ns_view.as_ptr();
+        unsafe {
+            use objc_ffi::sel;
+
+            // On ARM64 Apple, variadic arguments are passed on the stack,
+            // but objc_msgSend reads them from registers.  We must cast
+            // objc_msgSend to a properly-typed non-variadic function pointer
+            // for each call signature.
+            type MsgSendNoArgs =
+                unsafe extern "C" fn(*mut libc::c_void, *const libc::c_void) -> *mut libc::c_void;
+            type MsgSendU64 = unsafe extern "C" fn(
+                *mut libc::c_void,
+                *const libc::c_void,
+                u64,
+            ) -> *mut libc::c_void;
+            type MsgSendBool =
+                unsafe extern "C" fn(*mut libc::c_void, *const libc::c_void, libc::c_schar);
+
+            let send_no_args: MsgSendNoArgs =
+                std::mem::transmute(objc_ffi::objc_msgSend as *const ());
+            let send_u64: MsgSendU64 = std::mem::transmute(objc_ffi::objc_msgSend as *const ());
+            let send_bool: MsgSendBool = std::mem::transmute(objc_ffi::objc_msgSend as *const ());
+
+            let ns_window = send_no_args(ns_view, sel("window"));
+            if ns_window.is_null() {
+                return;
+            }
+            let hidden: libc::c_schar = if is_open { 0 } else { 1 };
+            // NSWindowButton values: Close=0, Miniaturize=1, Zoom=2
+            for button_type in 0u64..=2 {
+                let button = send_u64(ns_window, sel("standardWindowButton:"), button_type);
+                if !button.is_null() {
+                    send_bool(button, sel("setHidden:"), hidden);
+                }
             }
         }
-    }
+    });
 }
 
 #[cfg(not(target_os = "macos"))]
