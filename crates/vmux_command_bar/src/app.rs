@@ -12,6 +12,7 @@ use wasm_bindgen::prelude::*;
 
 #[derive(Clone, PartialEq)]
 enum ResultItem {
+    NewTab,
     Terminal {
         path: String,
     },
@@ -31,25 +32,50 @@ enum ResultItem {
     },
 }
 
+fn looks_like_path(s: &str) -> bool {
+    s.starts_with('/')
+        || s.starts_with("~/")
+        || s.starts_with("./")
+        || s.starts_with("../")
+        || s.contains('/')
+            && !s.contains(' ')
+            && !s.starts_with("http://")
+            && !s.starts_with("https://")
+}
+>>>>>>> 019f345 (feat(command-bar): toggle cmd+t, keep active tab visible, first-launch open, + New Tab button)
+=======
 use vmux_command_bar::event::{looks_like_path, looks_like_url};
+=======
+fn looks_like_path(s: &str) -> bool {
+    s.starts_with('/')
+        || s.starts_with("~/")
+        || s.starts_with("./")
+        || s.starts_with("../")
+        || s.contains('/')
+            && !s.contains(' ')
+            && !s.starts_with("http://")
+            && !s.starts_with("https://")
+}
+>>>>>>> 019f345 (feat(command-bar): toggle cmd+t, keep active tab visible, first-launch open, + New Tab button)
 
 fn filter_results(
     query: &str,
     tabs: &[CommandBarTab],
     commands: &[CommandBarCommandEntry],
     new_tab: bool,
-    current_url: &str,
 ) -> Vec<ResultItem> {
-    let current_is_terminal = current_url.starts_with("vmux://terminal");
-    let show_terminal = new_tab || !current_is_terminal;
     let q = query.trim();
     if q.is_empty() {
         let mut items: Vec<ResultItem> = Vec::new();
         items.push(ResultItem::Navigate { url: String::new() });
-        if show_terminal {
+        if new_tab {
             items.push(ResultItem::Terminal {
                 path: String::new(),
             });
+        }
+        // Show "+ New Tab" above the tab list when browsing existing tabs
+        if !new_tab && !tabs.is_empty() {
+            items.push(ResultItem::NewTab);
         }
         items.extend(tabs.iter().map(|t| ResultItem::Tab {
             title: t.title.clone(),
@@ -79,7 +105,7 @@ fn filter_results(
         });
     }
 
-    if !starts_with_cmd && !is_path && show_terminal && "terminal".contains(&search_lower) {
+    if !starts_with_cmd && !is_path && new_tab && "terminal".contains(&search_lower) {
         items.push(ResultItem::Terminal {
             path: String::new(),
         });
@@ -141,11 +167,10 @@ fn filter_results(
     items
 }
 
-fn emit_action(action: &str, value: &str, new_tab: bool) {
+fn emit_action(action: &str, value: &str) {
     let _ = try_cef_emit_serde(&CommandBarActionEvent {
         action: action.to_string(),
         value: value.to_string(),
-        new_tab,
     });
 }
 
@@ -160,7 +185,6 @@ pub fn App() -> Element {
     let mut nav_mode = use_signal(|| false);
 
     let mut path_completions = use_signal(Vec::<PathEntry>::new);
-    let mut path_query_is_dir = use_signal(|| false);
 
     let _listener =
         use_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
@@ -175,14 +199,12 @@ pub fn App() -> Element {
     let _path_listener =
         use_event_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
             path_completions.set(data.completions);
-            path_query_is_dir.set(data.query_is_dir);
         });
 
     use_effect(move || {
         let q = query();
         if !looks_like_path(q.trim()) {
             path_completions.set(Vec::new());
-            path_query_is_dir.set(false);
             return;
         }
         let _ = try_cef_emit_serde(&PathCompleteRequest {
@@ -200,7 +222,7 @@ pub fn App() -> Element {
     });
 
     let CommandBarOpenEvent {
-        url: current_url,
+        url: _,
         tabs,
         commands,
         new_tab: _,
@@ -208,9 +230,8 @@ pub fn App() -> Element {
     let q = query();
     let is_new_tab = new_tab();
     let results = {
-        let mut r = filter_results(&q, &tabs, &commands, is_new_tab, &current_url);
+        let mut r = filter_results(&q, &tabs, &commands, is_new_tab);
         let completions = path_completions();
-        let is_dir = path_query_is_dir();
         if !completions.is_empty() {
             let path_items: Vec<ResultItem> = completions
                 .iter()
@@ -226,8 +247,7 @@ pub fn App() -> Element {
                 .cloned();
             r.retain(|item| !matches!(item, ResultItem::Terminal { path } if !path.is_empty()));
             let mut combined = Vec::new();
-            if is_dir
-                && let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
+            if let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
                 && !path_items
                     .iter()
                     .any(|item| matches!(item, ResultItem::Terminal { path } if path == tp))
@@ -238,10 +258,6 @@ pub fn App() -> Element {
             combined.extend(r);
             combined
         } else {
-            // No completions — hide typed path item if the path doesn't exist
-            if !is_dir {
-                r.retain(|item| !matches!(item, ResultItem::Terminal { path } if !path.is_empty()));
-            }
             r
         }
     };
@@ -250,6 +266,7 @@ pub fn App() -> Element {
     let nav = nav_mode();
     let display_text = if nav {
         match &active_item {
+            Some(ResultItem::NewTab) => String::new(),
             Some(ResultItem::Command { name, .. }) => format!("> {name}"),
             Some(ResultItem::Navigate { url }) => url.clone(),
             Some(ResultItem::Tab { url, .. }) => url.clone(),
@@ -291,22 +308,24 @@ pub fn App() -> Element {
 
     let mut execute = move |item: &ResultItem| {
         is_open.set(false);
-        let nt = new_tab();
         match item {
+            ResultItem::NewTab => {
+                emit_action("command", "tab_new");
+            }
             ResultItem::Terminal { path } => {
-                emit_action("terminal", path, nt);
+                emit_action("terminal", path);
             }
             ResultItem::Tab {
                 pane_id, tab_index, ..
             } => {
-                emit_action("switch_tab", &format!("{pane_id}:{tab_index}"), nt);
+                emit_action("switch_tab", &format!("{pane_id}:{tab_index}"));
             }
             ResultItem::Command { id, .. } => {
-                emit_action("command", id, nt);
+                emit_action("command", id);
             }
             ResultItem::Navigate { url } => {
                 if !url.is_empty() {
-                    emit_action("navigate", url, nt);
+                    emit_action("navigate", url);
                 }
             }
         }
@@ -318,8 +337,8 @@ pub fn App() -> Element {
 
     rsx! {
         div {
-            class: "flex h-full w-full items-start justify-center pt-[15%]",
-            onclick: move |_| { is_open.set(false); emit_action("dismiss", "", new_tab()); },
+            class: "flex h-full w-full items-start justify-center pt-[15%] bg-white/5 backdrop-blur-md backdrop-saturate-150",
+            onclick: move |_| { is_open.set(false); emit_action("dismiss", ""); },
             div {
                 class: "relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-white/10 shadow-2xl backdrop-blur-2xl backdrop-saturate-150",
                 onclick: move |e| { e.stop_propagation(); },
@@ -331,6 +350,7 @@ pub fn App() -> Element {
                             let icon_class = "h-4 w-4 shrink-0 text-muted-foreground";
                             let (is_command, is_path, is_url) = if nav {
                                 match &active_item {
+                                    Some(ResultItem::NewTab) => (false, false, false),
                                     Some(ResultItem::Command { .. }) => (true, false, false),
                                     Some(ResultItem::Terminal { path }) if path.is_empty() => (true, false, false),
                                     Some(ResultItem::Terminal { .. }) => (false, true, false),
@@ -433,12 +453,12 @@ pub fn App() -> Element {
                                         || (ctrl && e.code() == Code::KeyC)
                                     {
                                         is_open.set(false);
-                                        emit_action("dismiss", "", new_tab());
+                                        emit_action("dismiss", "");
                                     } else if e.key() == Key::Enter {
                                         if let Some(item) = results.get(sel) {
                                             execute(item);
                                         } else if !q.is_empty() {
-                                            emit_action("navigate", &q, new_tab());
+                                            emit_action("navigate", &q);
                                         }
                                     }
                                 },
@@ -462,15 +482,21 @@ pub fn App() -> Element {
                                     move |_| { execute(&item); }
                                 },
                                 match item {
+                                    ResultItem::NewTab => rsx! {
+                                        div { class: "flex items-center gap-2",
+                                            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                                                path { d: "M12 5v14" }
+                                                path { d: "M5 12h14" }
+                                            }
+                                            span { class: "text-base text-foreground", "New Tab" }
+                                        }
+                                        span { class: "ml-2 shrink-0 rounded bg-muted px-1.5 py-0.5 text-sm text-muted-foreground", "\u{2318}T" }
+                                    },
                                     ResultItem::Terminal { path } => rsx! {
                                         div { class: "flex items-center gap-2",
                                             span { class: "shrink-0 text-base text-muted-foreground", ">_" }
                                             if path.is_empty() {
-                                                if is_new_tab {
-                                                    span { class: "text-base text-foreground", "Open Terminal" }
-                                                } else {
-                                                    span { class: "text-base text-foreground", "Open Terminal in New Tab" }
-                                                }
+                                                span { class: "text-base text-foreground", "Terminal" }
                                             } else {
                                                 span { class: "text-base text-foreground", "Open in Terminal" }
                                                 span { class: "ml-1 text-sm text-muted-foreground", "{path}" }

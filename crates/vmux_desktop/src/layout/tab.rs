@@ -1,4 +1,5 @@
 use crate::{
+    browser::Browser,
     command::{AppCommand, ReadAppCommands, TabCommand, TerminalCommand},
     command_bar::NewTabContext,
     layout::pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_tab_in_pane},
@@ -36,13 +37,18 @@ pub(crate) struct PendingTabClose;
 #[derive(Component)]
 pub(crate) struct CloseConfirmed;
 
+/// System set for `handle_tab_commands`. The command bar's open/dismiss
+/// handler must run `.after(TabCommandSet)` to avoid a race when toggling.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct TabCommandSet;
+
 pub(crate) struct TabPlugin;
 
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
             .init_resource::<FocusedTab>()
-            .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
+            .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands).in_set(TabCommandSet))
             .add_systems(Update, process_pending_tab_closes)
             .add_systems(
                 Update,
@@ -190,10 +196,9 @@ fn handle_tab_commands(
     )>,
 ) {
     for cmd in reader.read() {
-        let (tab_cmd, terminal_mode) = match *cmd {
-            AppCommand::Tab(t) => (t, None),
-            AppCommand::Terminal(TerminalCommand::New) => (TabCommand::New, Some(false)),
-            AppCommand::Terminal(TerminalCommand::NewTab) => (TabCommand::New, Some(true)),
+        let (tab_cmd, is_terminal) = match *cmd {
+            AppCommand::Tab(t) => (t, false),
+            AppCommand::Terminal(TerminalCommand::New) => (TabCommand::New, true),
             _ => continue,
         };
 
@@ -211,45 +216,43 @@ fn handle_tab_commands(
                 let Some(pane) = active_pane else {
                     continue;
                 };
-                match terminal_mode {
-                    Some(new_tab) => {
-                        let tab = match (new_tab, active_tab) {
-                            (false, Some(existing)) => {
-                                if let Ok(children) = all_children.get(existing) {
-                                    for child in children.iter() {
-                                        if !tab_q.contains(child) {
-                                            commands.entity(child).despawn();
-                                        }
-                                    }
-                                }
-                                existing
-                            }
-                            _ => commands
-                                .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                                .id(),
-                        };
-                        commands.entity(tab).insert(vmux_header::PageMetadata {
-                            url: TERMINAL_WEBVIEW_URL.to_string(),
-                            title: "Terminal (Session: -)".to_string(),
-                            ..default()
-                        });
-                        commands.spawn((
-                            Terminal::new(&mut meshes, &mut webview_mt, &settings),
-                            ChildOf(tab),
-                        ));
+                if is_terminal {
+                    let tab = commands
+                        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                        .id();
+                    commands.entity(tab).insert(vmux_header::PageMetadata {
+                        url: TERMINAL_WEBVIEW_URL.to_string(),
+                        title: "Terminal (Session: -)".to_string(),
+                        ..default()
+                    });
+                    commands.spawn((
+                        Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                        ChildOf(tab),
+                    ));
+                } else {
+                    // Toggle: if an empty tab is already pending (command bar
+                    // open from a prior Cmd+T), skip creating another tab and
+                    // let handle_open_command_bar dismiss the modal.
+                    if new_tab_ctx.tab.is_some() {
+                        continue;
                     }
-                    None => {
-                        if new_tab_ctx.tab.is_some() {
-                            new_tab_ctx.needs_open = true;
-                            continue;
-                        }
-                        let tab = commands
-                            .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                            .id();
-                        new_tab_ctx.tab = Some(tab);
-                        new_tab_ctx.previous_tab = active_tab;
-                        new_tab_ctx.needs_open = true;
-                    }
+                    let tab = commands
+                        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                        .id();
+
+                    // Spawn a transparent CEF browser immediately so the
+                    // rendering pipeline is warm when the user picks content.
+                    // The glass backdrop is handled by CSS in the command bar
+                    // overlay (see vmux_command_bar app.rs).
+                    commands.spawn((
+                        Browser::new(&mut meshes, &mut webview_mt, "about:blank"),
+                        WebviewTransparent,
+                        ChildOf(tab),
+                    ));
+
+                    new_tab_ctx.tab = Some(tab);
+                    new_tab_ctx.previous_tab = active_tab;
+                    new_tab_ctx.needs_open = true;
                 }
             }
             TabCommand::Close => {

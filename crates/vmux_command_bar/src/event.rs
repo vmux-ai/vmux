@@ -28,7 +28,6 @@ pub struct CommandBarCommandEntry {
 pub struct CommandBarActionEvent {
     pub action: String,
     pub value: String,
-    pub new_tab: bool,
 }
 
 pub const PATH_COMPLETE_REQUEST: &str = "path-complete-request";
@@ -49,9 +48,6 @@ pub struct PathEntry {
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct PathCompleteResponse {
     pub completions: Vec<PathEntry>,
-    /// Whether the exact queried path is an existing directory.
-    #[serde(default)]
-    pub query_is_dir: bool,
 }
 
 pub fn looks_like_url(s: &str) -> bool {
@@ -182,19 +178,12 @@ mod tests {
     }
 
     #[test]
-    fn action_event_new_tab_field() {
+    fn action_event_fields() {
         let evt = CommandBarActionEvent {
             action: "navigate".to_string(),
             value: "google.com".to_string(),
-            new_tab: false,
         };
-        assert!(!evt.new_tab);
-
-        let evt_new = CommandBarActionEvent {
-            action: "navigate".to_string(),
-            value: "google.com".to_string(),
-            new_tab: true,
-        };
-        assert!(evt_new.new_tab);
+        assert_eq!(evt.action, "navigate");
+        assert_eq!(evt.value, "google.com");
     }
 }

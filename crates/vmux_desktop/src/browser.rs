@@ -231,6 +231,7 @@ fn sync_children_to_ui(
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    new_tab_ctx: Res<crate::command_bar::NewTabContext>,
     glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<VmuxWindow>>,
 ) {
     let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
@@ -271,8 +272,16 @@ fn sync_children_to_ui(
             true
         };
 
-        let is_inactive_tab =
-            parent != glass_entity && status.is_none() && side_sheet.is_none() && !is_active_tab;
+        // Keep rendering the previous tab behind while a new empty tab
+        // (without CEF content) is pending in the command bar flow.
+        let is_previous_tab = new_tab_ctx.tab.is_some()
+            && new_tab_ctx.previous_tab == Some(parent);
+
+        let is_inactive_tab = parent != glass_entity
+            && status.is_none()
+            && side_sheet.is_none()
+            && !is_active_tab
+            && !is_previous_tab;
 
         let sx = size_px.x / glass_size_px.x;
         let sy = size_px.y / glass_size_px.y;
@@ -400,6 +409,7 @@ fn sync_osr_webview_focus(
     browsers: NonSend<Browsers>,
     webviews: Query<Entity, With<WebviewSource>>,
     focus: Res<crate::layout::tab::FocusedTab>,
+    new_tab_ctx: Res<crate::command_bar::NewTabContext>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children_q: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
@@ -453,7 +463,12 @@ fn sync_osr_webview_focus(
             browsers.set_osr_not_hidden(&e);
             continue;
         }
-        if active_tab_in_pane(pane, &pane_children_q, &tab_ts) == Some(parent) {
+        let is_active = active_tab_in_pane(pane, &pane_children_q, &tab_ts) == Some(parent);
+        // Keep previous tab's webview visible while an empty new tab is
+        // pending (user is picking content in the command bar).
+        let is_prev = new_tab_ctx.tab.is_some()
+            && new_tab_ctx.previous_tab == Some(parent);
+        if is_active || is_prev {
             browsers.set_osr_not_hidden(&e);
         } else {
             browsers.set_osr_hidden(&e);
@@ -564,11 +579,12 @@ fn push_tabs_host_emit(
             });
         }
     }
-    // If the active tab is an empty new-tab, add a placeholder row
+    // If the active tab is a new-tab (pending content selection),
+    // replace any pre-spawned browser row with a "New tab" placeholder.
     if let Some(empty_tab) = new_tab_ctx.tab
         && active_tab_opt == Some(empty_tab)
-        && !rows.iter().any(|r| r.is_active)
     {
+        rows.retain(|r| !r.is_active);
         rows.push(TabRow {
             title: "New tab".to_string(),
             url: String::new(),
