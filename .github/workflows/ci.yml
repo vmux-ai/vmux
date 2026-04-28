@@ -52,8 +52,8 @@ jobs:
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
             target
-          key: ${{ runner.os }}-lint-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-lint-
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
 
       - name: Check formatting
         run: |
@@ -65,11 +65,11 @@ jobs:
 
       - name: Install CEF framework
         run: |
-          cargo install export-cef-dir@145.6.1+145.0.28 --force
+          command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@145.6.1+145.0.28
           export-cef-dir --force "$HOME/.local/share"
 
       - name: Install dioxus-cli
-        run: cargo install dioxus-cli --locked --version 0.7.4
+        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
       - name: Clippy
         run: |
@@ -116,22 +116,38 @@ jobs:
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
             target
-          key: ${{ runner.os }}-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-test-
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
 
       - name: Install CEF framework
         run: |
-          cargo install export-cef-dir@145.6.1+145.0.28 --force
+          command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@145.6.1+145.0.28
           export-cef-dir --force "$HOME/.local/share"
 
       - name: Install dioxus-cli
-        run: cargo install dioxus-cli --locked --version 0.7.4
+        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
       - name: Run tests
         run: env -u CEF_PATH cargo test --workspace --exclude bevy_cef_core
 
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      website: ${{ steps.filter.outputs.website }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            website:
+              - 'website/**'
+
   website:
     name: Website Build
+    needs: changes
+    if: needs.changes.outputs.website == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -180,22 +196,22 @@ jobs:
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
             target
-          key: ${{ runner.os }}-build-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-build-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-build-
 
       - name: Install CEF framework
         run: |
-          cargo install export-cef-dir@145.6.1+145.0.28 --force
+          command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@145.6.1+145.0.28
           export-cef-dir --force "$HOME/.local/share"
 
       - name: Install dioxus-cli
-        run: cargo install dioxus-cli --locked --version 0.7.4
+        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
       - name: Install bevy_cef_bundle_app
-        run: cargo install bevy_cef_bundle_app --locked
+        run: command -v bevy_cef_bundle_app >/dev/null 2>&1 || cargo install bevy_cef_bundle_app --locked
 
       - name: Install cargo-packager
-        run: cargo install cargo-packager --locked
+        run: command -v cargo-packager >/dev/null 2>&1 || cargo install cargo-packager --locked
 
       - name: Strip signing config for CI
         run: |
