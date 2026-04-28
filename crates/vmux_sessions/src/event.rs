@@ -42,12 +42,16 @@ pub struct PreviewLine {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionNavigateEvent {
     pub session_id: String,
+    /// Discriminator so serde doesn't confuse with SessionKillEvent.
+    pub navigate: bool,
 }
 
 /// Emitted to kill a single daemon session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionKillEvent {
     pub session_id: String,
+    /// Discriminator so serde doesn't confuse with SessionNavigateEvent.
+    pub kill: bool,
 }
 
 /// Emitted to kill all daemon sessions.

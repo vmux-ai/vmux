@@ -146,6 +146,7 @@ fn SessionCard(session: SessionEntry) -> Element {
     let onclick = move |_| {
         let _ = try_cef_emit_serde(&SessionNavigateEvent {
             session_id: nav_id.clone(),
+            navigate: true,
         });
     };
 
@@ -153,6 +154,7 @@ fn SessionCard(session: SessionEntry) -> Element {
         e.stop_propagation();
         let _ = try_cef_emit_serde(&SessionKillEvent {
             session_id: kill_id.clone(),
+            kill: true,
         });
     };
 

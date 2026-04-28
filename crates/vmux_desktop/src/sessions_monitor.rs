@@ -215,24 +215,41 @@ fn on_session_navigate(
     ));
 }
 
-/// Kill a single daemon session.
+/// Kill a single daemon session and close the associated terminal tab if any.
 fn on_session_kill(
     trigger: On<Receive<SessionKillEvent>>,
     daemon: Option<Res<DaemonClient>>,
+    terminals: Query<(Entity, &DaemonSessionHandle, &ChildOf), With<Terminal>>,
+    tab_parent: Query<&ChildOf, With<Tab>>,
+    mut commands: Commands,
 ) {
     let Some(daemon) = daemon else { return };
     let sid = &trigger.event().payload.session_id;
 
     if let Ok(session_id) = sid.parse::<SessionId>() {
         daemon.0.send(ClientMessage::KillSession { session_id });
+
+        // Close the terminal tab that owns this session
+        for (_, handle, content_child_of) in &terminals {
+            if handle.session_id == session_id {
+                let tab = content_child_of.get();
+                // Only despawn if it's actually a tab
+                if tab_parent.get(tab).is_ok() || commands.get_entity(tab).is_ok() {
+                    commands.entity(tab).despawn();
+                }
+                break;
+            }
+        }
     }
 }
 
-/// Kill all daemon sessions.
+/// Kill all daemon sessions and close their terminal tabs.
 fn on_session_kill_all(
     _trigger: On<Receive<SessionKillAllEvent>>,
     daemon: Option<Res<DaemonClient>>,
     session_list: Res<DaemonSessionList>,
+    terminals: Query<(Entity, &DaemonSessionHandle, &ChildOf), With<Terminal>>,
+    mut commands: Commands,
 ) {
     let Some(daemon) = daemon else { return };
 
@@ -240,5 +257,14 @@ fn on_session_kill_all(
         daemon.0.send(ClientMessage::KillSession {
             session_id: info.id,
         });
+
+        // Close the terminal tab
+        for (_, handle, content_child_of) in &terminals {
+            if handle.session_id == info.id {
+                let tab = content_child_of.get();
+                commands.entity(tab).despawn();
+                break;
+            }
+        }
     }
 }
