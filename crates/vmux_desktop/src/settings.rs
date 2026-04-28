@@ -161,6 +161,12 @@ pub struct TerminalSettings {
     pub themes: Vec<TerminalTheme>,
     #[serde(default)]
     pub custom_themes: Vec<crate::themes::TerminalColorScheme>,
+    #[serde(default = "default_true")]
+    pub confirm_close: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_theme_name() -> String {

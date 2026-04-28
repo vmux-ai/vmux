@@ -58,6 +58,7 @@ impl Plugin for VmuxPlugin {
         };
         let window_plugin = WindowPlugin {
             primary_window: Some(primary_window),
+            close_when_requested: false,
             ..default()
         };
 

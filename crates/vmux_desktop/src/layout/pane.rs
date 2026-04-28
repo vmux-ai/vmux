@@ -4,12 +4,14 @@ use crate::{
     layout::space::Space,
     layout::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     layout::tab::{
-        Tab, active_among, active_pane_in_space, active_tab_in_pane, focused_tab, tab_bundle,
+        CloseConfirmed, Tab, active_among, active_pane_in_space, active_tab_in_pane, focused_tab,
+        tab_bundle,
     },
     settings::AppSettings,
+    terminal::{self, PtyExited, Terminal},
 };
 use bevy::{
-    ecs::relationship::Relationship,
+    ecs::{message::Messages, relationship::Relationship},
     input::mouse::AccumulatedMouseMotion,
     prelude::*,
     ui::{FlexDirection, UiGlobalTransform},
@@ -19,6 +21,10 @@ use bevy_cef::prelude::CefKeyboardTarget;
 use moonshine_save::prelude::*;
 use std::time::Instant;
 use vmux_history::LastActivatedAt;
+
+/// Marker: pane is waiting for close confirmation dialog.
+#[derive(Component)]
+pub(crate) struct PendingPaneClose;
 
 pub(crate) struct PanePlugin;
 
@@ -45,6 +51,7 @@ impl Plugin for PanePlugin {
             .add_systems(Update, poll_cursor_pane_focus)
             .add_systems(Update, click_pane_in_player_mode)
             .add_systems(Update, pane_gap_drag_resize)
+            .add_systems(Update, process_pending_pane_closes)
             .add_systems(PostUpdate, warp_cursor_to_active_pane);
     }
 }
@@ -193,6 +200,9 @@ fn handle_pane_commands(
         Query<&mut PaneSize>,
         Query<&ComputedNode>,
         ResMut<PendingCursorWarp>,
+        Query<'static, 'static, (), (With<Terminal>, Without<PtyExited>)>,
+        Query<'static, 'static, (), With<CloseConfirmed>>,
+        Query<'static, 'static, (), With<PendingPaneClose>>,
     )>,
 ) {
     for cmd in reader.read() {
@@ -262,6 +272,25 @@ fn handle_pane_commands(
                 resize_q.p3().target = Some(pane2);
             }
             PaneCommand::Close => {
+                // Confirm close if any tab in this pane has a live terminal
+                let needs_confirm = terminal::should_confirm_close(&settings)
+                    && terminal::pane_has_live_terminal(
+                        active,
+                        &pane_children,
+                        &all_children,
+                        &resize_q.p4(),
+                    );
+                if needs_confirm {
+                    if resize_q.p5().contains(active) {
+                        commands.entity(active).remove::<CloseConfirmed>();
+                    } else {
+                        if !resize_q.p6().contains(active) {
+                            commands.entity(active).insert(PendingPaneClose);
+                        }
+                        continue;
+                    }
+                }
+
                 let Ok(pane_co) = child_of_q.get(active) else {
                     continue;
                 };
@@ -924,4 +953,52 @@ fn collect_space_leaf_panes(
         }
     }
     result
+}
+
+/// Exclusive system: processes pending pane close confirmations by showing
+/// native dialogs on the main thread.
+fn process_pending_pane_closes(world: &mut World) {
+    let pending: Vec<Entity> = world
+        .query_filtered::<Entity, (With<PendingPaneClose>, With<Pane>)>()
+        .iter(world)
+        .collect();
+
+    if pending.is_empty() {
+        return;
+    }
+
+    for pane in pending {
+        let confirmed = terminal::show_close_dialog();
+
+        if let Ok(mut entity_mut) = world.get_entity_mut(pane) {
+            entity_mut.remove::<PendingPaneClose>();
+        }
+
+        if confirmed {
+            if let Ok(mut entity_mut) = world.get_entity_mut(pane) {
+                entity_mut.insert((CloseConfirmed, LastActivatedAt::now()));
+            }
+            // Walk up to activate the parent Space
+            let mut current = pane;
+            for _ in 0..10 {
+                if world
+                    .get_entity(current)
+                    .is_ok_and(|e| e.contains::<Space>())
+                {
+                    if let Ok(mut entity_mut) = world.get_entity_mut(current) {
+                        entity_mut.insert(LastActivatedAt::now());
+                    }
+                    break;
+                }
+                if let Some(co) = world.get::<ChildOf>(current) {
+                    current = co.get();
+                } else {
+                    break;
+                }
+            }
+            world
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Pane(PaneCommand::Close));
+        }
+    }
 }

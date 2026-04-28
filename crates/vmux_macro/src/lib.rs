@@ -183,10 +183,17 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     other => format!("Vmux ({})", other),
                 };
                 let mut app_native_submenu = ::muda::Submenu::new(&app_name, true);
+                let quit_label = format!("Quit {}", &app_name);
+                let quit_item = ::muda::MenuItem::with_id(
+                    "app_quit",
+                    &quit_label,
+                    true,
+                    ::core::option::Option::Some("super+q".parse().unwrap()),
+                );
                 app_native_submenu.append_items(&[
                     &::muda::PredefinedMenuItem::about(None, None),
                     &::muda::PredefinedMenuItem::separator(),
-                    &::muda::PredefinedMenuItem::quit(None),
+                    &quit_item,
                 ])?;
                 let mut submenus: ::std::vec::Vec<::std::boxed::Box<dyn ::muda::IsMenuItem>> = ::std::vec::Vec::new();
                 submenus.push(::std::boxed::Box::new(app_native_submenu));

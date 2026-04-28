@@ -5,9 +5,9 @@ use crate::{
     layout::space::Space,
     layout::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     settings::AppSettings,
-    terminal::Terminal,
+    terminal::{self, PtyExited, Terminal},
 };
-use bevy::{ecs::relationship::Relationship, prelude::*};
+use bevy::{ecs::message::Messages, ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_history::LastActivatedAt;
@@ -28,6 +28,14 @@ pub(crate) struct FocusedTab {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ComputeFocusSet;
 
+/// Marker: tab is waiting for close confirmation dialog.
+#[derive(Component)]
+pub(crate) struct PendingTabClose;
+
+/// Marker: close was confirmed, skip dialog next time.
+#[derive(Component)]
+pub(crate) struct CloseConfirmed;
+
 pub(crate) struct TabPlugin;
 
 impl Plugin for TabPlugin {
@@ -35,6 +43,7 @@ impl Plugin for TabPlugin {
         app.register_type::<Tab>()
             .init_resource::<FocusedTab>()
             .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
+            .add_systems(Update, process_pending_tab_closes)
             .add_systems(
                 Update,
                 compute_focused_tab
@@ -173,7 +182,12 @@ fn handle_tab_commands(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    mut pending_warp: ResMut<PendingCursorWarp>,
+    mut extra: ParamSet<(
+        ResMut<'static, PendingCursorWarp>,
+        Query<'static, 'static, (), (With<Terminal>, Without<PtyExited>)>,
+        Query<'static, 'static, (), With<CloseConfirmed>>,
+        Query<'static, 'static, (), With<PendingTabClose>>,
+    )>,
 ) {
     for cmd in reader.read() {
         let (tab_cmd, terminal_mode) = match *cmd {
@@ -245,6 +259,21 @@ fn handle_tab_commands(
                 let Some(active) = active_tab else {
                     continue;
                 };
+
+                // Confirm close if terminal is still running
+                if terminal::should_confirm_close(&settings)
+                    && terminal::has_live_terminal(active, &all_children, &extra.p1())
+                {
+                    if extra.p2().contains(active) {
+                        commands.entity(active).remove::<CloseConfirmed>();
+                    } else {
+                        if !extra.p3().contains(active) {
+                            commands.entity(active).insert(PendingTabClose);
+                        }
+                        continue;
+                    }
+                }
+
                 let Ok(children) = pane_children.get(pane) else {
                     continue;
                 };
@@ -376,7 +405,7 @@ fn handle_tab_commands(
                 commands.entity(target_tab).insert(LastActivatedAt::now());
                 if active_pane != Some(target_pane) {
                     commands.entity(target_pane).insert(LastActivatedAt::now());
-                    pending_warp.target = Some(target_pane);
+                    extra.p0().target = Some(target_pane);
                 }
             }
             TabCommand::SelectIndex1
@@ -481,6 +510,62 @@ fn sync_tab_picking(
                     }
                 }
             }
+        }
+    }
+}
+
+/// Exclusive system: processes pending tab close confirmations by showing
+/// native dialogs on the main thread.
+fn process_pending_tab_closes(world: &mut World) {
+    let pending: Vec<(Entity, Entity)> = world
+        .query_filtered::<(Entity, &ChildOf), (With<PendingTabClose>, With<Tab>)>()
+        .iter(world)
+        .map(|(tab, co)| (tab, co.get()))
+        .collect();
+
+    if pending.is_empty() {
+        return;
+    }
+
+    for (tab, pane) in pending {
+        let confirmed = terminal::show_close_dialog();
+
+        if let Ok(mut entity_mut) = world.get_entity_mut(tab) {
+            entity_mut.remove::<PendingTabClose>();
+        }
+
+        if confirmed {
+            if let Ok(mut entity_mut) = world.get_entity_mut(tab) {
+                entity_mut.insert((CloseConfirmed, LastActivatedAt::now()));
+            }
+            if let Ok(mut entity_mut) = world.get_entity_mut(pane) {
+                entity_mut.insert(LastActivatedAt::now());
+            }
+            activate_space_for(world, pane);
+            world
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Tab(TabCommand::Close));
+        }
+    }
+}
+
+/// Walk up the entity hierarchy from `entity` to find and activate its Space.
+fn activate_space_for(world: &mut World, entity: Entity) {
+    let mut current = entity;
+    for _ in 0..10 {
+        if world
+            .get_entity(current)
+            .is_ok_and(|e| e.contains::<Space>())
+        {
+            if let Ok(mut entity_mut) = world.get_entity_mut(current) {
+                entity_mut.insert(LastActivatedAt::now());
+            }
+            return;
+        }
+        if let Some(co) = world.get::<ChildOf>(current) {
+            current = co.get();
+        } else {
+            return;
         }
     }
 }

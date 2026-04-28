@@ -58,6 +58,7 @@
     ),
     terminal: Some((
         default_theme: "default",
+        confirm_close: true,
         themes: [
             (
                 name: "default",

@@ -48,6 +48,7 @@ regex = "1"
 
 alacritty_terminal = "0.26"
 portable-pty = "0.9"
+rfd = "0.15"
 vte = "0.15"
 
 [profile.release.package.vmux_history]
