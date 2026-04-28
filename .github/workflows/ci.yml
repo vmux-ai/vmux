@@ -21,7 +21,9 @@ jobs:
 
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
+            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
+            /usr/local/share/chromium /usr/local/share/edge
           sudo docker image prune --all --force || true
           df -h /
 
@@ -77,6 +79,14 @@ jobs:
       - name: Install dioxus-cli
         run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
+      - name: Install tailwindcss
+        run: |
+          if ! command -v tailwindcss >/dev/null 2>&1; then
+            curl -sLO https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.19/tailwindcss-linux-x64
+            chmod +x tailwindcss-linux-x64
+            sudo mv tailwindcss-linux-x64 /usr/local/bin/tailwindcss
+          fi
+
       - name: Clippy
         run: |
           PKGS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | .name')
@@ -92,7 +102,9 @@ jobs:
 
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
+            /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup \
+            /usr/local/share/chromium /usr/local/share/edge
           sudo docker image prune --all --force || true
           df -h /
 
@@ -138,6 +150,14 @@ jobs:
 
       - name: Install dioxus-cli
         run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
+
+      - name: Install tailwindcss
+        run: |
+          if ! command -v tailwindcss >/dev/null 2>&1; then
+            curl -sLO https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.19/tailwindcss-linux-x64
+            chmod +x tailwindcss-linux-x64
+            sudo mv tailwindcss-linux-x64 /usr/local/bin/tailwindcss
+          fi
 
       - name: Run tests
         run: env -u CEF_PATH cargo test --workspace --exclude bevy_cef_core
