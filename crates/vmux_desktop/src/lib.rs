@@ -98,13 +98,13 @@ impl Plugin for VmuxPlugin {
             SideSheetPlugin,
             CommandBarPlugin,
             TerminalPlugin,
+            SessionsPlugin,
             CommandBarInputPlugin,
             BrowserPlugin,
         ))
         .add_plugins((
             TerminalInputPlugin,
             SessionsMonitorPlugin,
-            SessionsPlugin,
             PersistencePlugin,
             ProfilePlugin,
             LayoutPlugin,
