@@ -16,7 +16,7 @@ use bevy::{
     render::alpha::AlphaMode,
     ui::{FlexDirection, UiTargetCamera},
     window::PrimaryWindow,
-    winit::WinitWindows,
+    winit::WINIT_WINDOWS,
 };
 use bevy_cef::prelude::*;
 use vmux_command_bar::COMMAND_BAR_WEBVIEW_URL;
@@ -66,28 +66,26 @@ struct ScreenMaximized;
 
 /// Size the window to fill the current monitor (runs once at startup).
 fn maximize_window_to_screen(
-    winit_windows: Option<NonSend<WinitWindows>>,
     mut window_q: Query<(Entity, &mut Window), With<PrimaryWindow>>,
     mut commands: Commands,
 ) {
-    let Some(winit_windows) = winit_windows else {
-        return;
-    };
     let Ok((entity, mut window)) = window_q.single_mut() else {
         return;
     };
-    let Some(winit_win) = winit_windows.get_window(entity) else {
-        return;
-    };
-    let Some(monitor) = winit_win.current_monitor() else {
-        return;
-    };
-    let size = monitor.size();
-    let scale = monitor.scale_factor() as f32;
-    let logical_w = size.width as f32 / scale;
-    let logical_h = size.height as f32 / scale;
-    window.resolution.set(logical_w, logical_h);
-    commands.insert_resource(ScreenMaximized);
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
+        let Some(winit_win) = winit_windows.get_window(entity) else {
+            return;
+        };
+        let Some(monitor) = winit_win.current_monitor() else {
+            return;
+        };
+        let size = monitor.size();
+        let scale = monitor.scale_factor() as f32;
+        let logical_w = size.width as f32 / scale;
+        let logical_h = size.height as f32 / scale;
+        window.resolution.set(logical_w, logical_h);
+        commands.insert_resource(ScreenMaximized);
+    });
 }
 
 #[derive(Bundle)]

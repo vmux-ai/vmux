@@ -36,7 +36,7 @@ pub fn App() -> Element {
     let PaneTreeEvent { panes } = tree_state();
 
     rsx! {
-        div { class: "flex h-full flex-col overflow-y-auto px-2 py-3 text-foreground",
+        div { class: "flex h-full flex-col overflow-y-auto px-2 pb-3 pt-10 text-foreground",
             if (listener.is_loading)() {
                 div { class: "flex items-center px-2 py-1",
                     span { class: "text-ui text-muted-foreground", "Connecting…" }
