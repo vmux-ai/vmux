@@ -1,14 +1,14 @@
 use crate::{
-    browser::Browser,
-    command::{AppCommand, ReadAppCommands, TabCommand, TerminalCommand},
+    command::{AppCommand, ReadAppCommands, SessionCommand, TabCommand, TerminalCommand},
     command_bar::NewTabContext,
     layout::pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_tab_in_pane},
     layout::space::Space,
     layout::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
+    sessions_monitor::SessionsMonitor,
     settings::AppSettings,
-    terminal::{self, PtyExited, Terminal},
+    terminal::Terminal,
 };
-use bevy::{ecs::message::Messages, ecs::relationship::Relationship, prelude::*};
+use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_history::LastActivatedAt;
@@ -29,27 +29,13 @@ pub(crate) struct FocusedTab {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ComputeFocusSet;
 
-/// Marker: tab is waiting for close confirmation dialog.
-#[derive(Component)]
-pub(crate) struct PendingTabClose;
-
-/// Marker: close was confirmed, skip dialog next time.
-#[derive(Component)]
-pub(crate) struct CloseConfirmed;
-
-/// System set for `handle_tab_commands`. The command bar's open/dismiss
-/// handler must run `.after(TabCommandSet)` to avoid a race when toggling.
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct TabCommandSet;
-
 pub(crate) struct TabPlugin;
 
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
             .init_resource::<FocusedTab>()
-            .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands).in_set(TabCommandSet))
-            .add_systems(Update, process_pending_tab_closes)
+            .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
             .add_systems(
                 Update,
                 compute_focused_tab
@@ -188,17 +174,13 @@ fn handle_tab_commands(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    mut extra: ParamSet<(
-        ResMut<'static, PendingCursorWarp>,
-        Query<'static, 'static, (), (With<Terminal>, Without<PtyExited>)>,
-        Query<'static, 'static, (), With<CloseConfirmed>>,
-        Query<'static, 'static, (), With<PendingTabClose>>,
-    )>,
+    mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
-        let (tab_cmd, is_terminal) = match *cmd {
-            AppCommand::Tab(t) => (t, false),
-            AppCommand::Terminal(TerminalCommand::New) => (TabCommand::New, true),
+        let (tab_cmd, is_terminal, is_sessions) = match *cmd {
+            AppCommand::Tab(t) => (t, false, false),
+            AppCommand::Terminal(TerminalCommand::New) => (TabCommand::New, true, false),
+            AppCommand::Session(SessionCommand::Open) => (TabCommand::New, false, true),
             _ => continue,
         };
 
@@ -229,27 +211,28 @@ fn handle_tab_commands(
                         Terminal::new(&mut meshes, &mut webview_mt, &settings),
                         ChildOf(tab),
                     ));
+                } else if is_sessions {
+                    let tab = commands
+                        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                        .id();
+                    commands.entity(tab).insert(vmux_header::PageMetadata {
+                        url: vmux_sessions::event::SESSIONS_WEBVIEW_URL.to_string(),
+                        title: "Sessions".to_string(),
+                        ..default()
+                    });
+                    commands.spawn((
+                        SessionsMonitor::new(&mut meshes, &mut webview_mt),
+                        ChildOf(tab),
+                    ));
                 } else {
-                    // Toggle: if an empty tab is already pending (command bar
-                    // open from a prior Cmd+T), skip creating another tab and
-                    // let handle_open_command_bar dismiss the modal.
+                    // If there's already an empty tab pending, reuse it
                     if new_tab_ctx.tab.is_some() {
+                        new_tab_ctx.needs_open = true;
                         continue;
                     }
                     let tab = commands
                         .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
-
-                    // Spawn a transparent CEF browser immediately so the
-                    // rendering pipeline is warm when the user picks content.
-                    // The glass backdrop is handled by CSS in the command bar
-                    // overlay (see vmux_command_bar app.rs).
-                    commands.spawn((
-                        Browser::new(&mut meshes, &mut webview_mt, "about:blank"),
-                        WebviewTransparent,
-                        ChildOf(tab),
-                    ));
-
                     new_tab_ctx.tab = Some(tab);
                     new_tab_ctx.previous_tab = active_tab;
                     new_tab_ctx.needs_open = true;
@@ -262,21 +245,6 @@ fn handle_tab_commands(
                 let Some(active) = active_tab else {
                     continue;
                 };
-
-                // Confirm close if terminal is still running
-                if terminal::should_confirm_close(&settings)
-                    && terminal::has_live_terminal(active, &all_children, &extra.p1())
-                {
-                    if extra.p2().contains(active) {
-                        commands.entity(active).remove::<CloseConfirmed>();
-                    } else {
-                        if !extra.p3().contains(active) {
-                            commands.entity(active).insert(PendingTabClose);
-                        }
-                        continue;
-                    }
-                }
-
                 let Ok(children) = pane_children.get(pane) else {
                     continue;
                 };
@@ -290,14 +258,6 @@ fn handle_tab_commands(
 
                     if !split_dir_q.contains(parent) {
                         commands.entity(active).despawn();
-                        // Last tab in the root pane — show command bar so the
-                        // user can navigate somewhere.
-                        let tab = commands
-                            .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                            .id();
-                        new_tab_ctx.tab = Some(tab);
-                        new_tab_ctx.previous_tab = None;
-                        new_tab_ctx.needs_open = true;
                         continue;
                     }
 
@@ -310,12 +270,6 @@ fn handle_tab_commands(
                         e != pane && (leaf_panes.contains(e) || split_dir_q.contains(e))
                     });
                     let Some(sibling) = sibling else {
-                        let tab = commands
-                            .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                            .id();
-                        new_tab_ctx.tab = Some(tab);
-                        new_tab_ctx.previous_tab = None;
-                        new_tab_ctx.needs_open = true;
                         continue;
                     };
 
@@ -422,7 +376,7 @@ fn handle_tab_commands(
                 commands.entity(target_tab).insert(LastActivatedAt::now());
                 if active_pane != Some(target_pane) {
                     commands.entity(target_pane).insert(LastActivatedAt::now());
-                    extra.p0().target = Some(target_pane);
+                    pending_warp.target = Some(target_pane);
                 }
             }
             TabCommand::SelectIndex1
@@ -529,81 +483,4 @@ fn sync_tab_picking(
             }
         }
     }
-}
-
-/// Exclusive system: processes pending tab close confirmations by showing
-/// native dialogs on the main thread.
-fn process_pending_tab_closes(world: &mut World) {
-    let pending: Vec<(Entity, Entity)> = world
-        .query_filtered::<(Entity, &ChildOf), (With<PendingTabClose>, With<Tab>)>()
-        .iter(world)
-        .map(|(tab, co)| (tab, co.get()))
-        .collect();
-
-    if pending.is_empty() {
-        return;
-    }
-
-    for (tab, pane) in pending {
-        let confirmed = terminal::show_close_dialog();
-
-        if let Ok(mut entity_mut) = world.get_entity_mut(tab) {
-            entity_mut.remove::<PendingTabClose>();
-        }
-
-        if confirmed {
-            if let Ok(mut entity_mut) = world.get_entity_mut(tab) {
-                entity_mut.insert((CloseConfirmed, LastActivatedAt::now()));
-            }
-            if let Ok(mut entity_mut) = world.get_entity_mut(pane) {
-                entity_mut.insert(LastActivatedAt::now());
-            }
-            activate_space_for(world, pane);
-            world
-                .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Tab(TabCommand::Close));
-        }
-    }
-}
-
-/// Walk up the entity hierarchy from `entity` to find and activate its Space.
-fn activate_space_for(world: &mut World, entity: Entity) {
-    let mut current = entity;
-    for _ in 0..10 {
-        if world
-            .get_entity(current)
-            .is_ok_and(|e| e.contains::<Space>())
-        {
-            if let Ok(mut entity_mut) = world.get_entity_mut(current) {
-                entity_mut.insert(LastActivatedAt::now());
-            }
-            return;
-        }
-        if let Some(co) = world.get::<ChildOf>(current) {
-            current = co.get();
-        } else {
-            return;
-        }
-    }
-
-}
-
-pub(crate) fn open_command_bar_if_no_tabs(
-    tab_q: Query<(), With<Tab>>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    mut new_tab_ctx: ResMut<NewTabContext>,
-    mut commands: Commands,
-) {
-    if !tab_q.is_empty() {
-        return;
-    }
-    let Some(pane) = leaf_panes.iter().next() else {
-        return;
-    };
-    let tab = commands
-        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-        .id();
-    new_tab_ctx.tab = Some(tab);
-    new_tab_ctx.previous_tab = None;
-    new_tab_ctx.needs_open = true;
 }

@@ -44,6 +44,9 @@ pub enum AppCommand {
 
     #[menu(label = "Browser")]
     Browser(BrowserCommand),
+
+    #[menu(label = "Session")]
+    Session(SessionCommand),
 }
 
 #[allow(dead_code)]
@@ -183,6 +186,14 @@ pub enum BrowserCommand {
     ViewSource,
     #[menu(id = "browser_print", label = "Print", accel = "super+p", hidden)]
     Print,
+}
+
+#[allow(dead_code)]
+#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SessionCommand {
+    #[default]
+    #[menu(id = "session_open", label = "Open Session Monitor")]
+    Open,
 }
 
 #[allow(dead_code)]
