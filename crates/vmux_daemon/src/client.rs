@@ -46,9 +46,18 @@ pub struct DaemonHandle {
 }
 
 impl DaemonHandle {
-    /// Spawn a background connection to the daemon.
-    /// Returns `None` if the daemon is not running.
+    /// Check if the daemon socket exists (quick pre-check).
+    pub fn daemon_running() -> bool {
+        socket_path().exists()
+    }
+
+    /// Connect to the daemon synchronously.
+    /// Returns `None` if the daemon is not running or connection fails.
     pub fn connect() -> Option<Self> {
+        if !Self::daemon_running() {
+            return None;
+        }
+
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -56,40 +65,62 @@ impl DaemonHandle {
             .ok()?;
         let rt = Arc::new(rt);
 
+        // Verify connection synchronously before returning
+        let conn = {
+            let rt2 = Arc::clone(&rt);
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::Builder::new()
+                .name("daemon-connect".into())
+                .spawn(move || {
+                    let result = rt2.block_on(async { DaemonConnection::connect().await });
+                    let _ = tx.send(result);
+                })
+                .ok()?;
+            // Wait up to 2s for connection
+            match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+                Ok(Ok(c)) => Arc::new(c),
+                Ok(Err(e)) => {
+                    eprintln!("daemon connect failed: {e}");
+                    return None;
+                }
+                Err(_) => {
+                    eprintln!("daemon connect timed out");
+                    return None;
+                }
+            }
+        };
+
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<ClientMessage>();
         let (msg_tx, msg_rx) = std::sync::mpsc::channel::<DaemonMessage>();
 
+        // Reader task: daemon -> msg_tx
+        let conn_r = Arc::clone(&conn);
         let rt2 = Arc::clone(&rt);
         std::thread::Builder::new()
-            .name("daemon-client".into())
+            .name("daemon-reader".into())
             .spawn(move || {
                 rt2.block_on(async move {
-                    let conn = match DaemonConnection::connect().await {
-                        Ok(c) => Arc::new(c),
-                        Err(e) => {
-                            eprintln!("daemon connect failed: {e}");
-                            return;
-                        }
-                    };
-
-                    // Reader task: daemon -> msg_tx
-                    let conn_r = Arc::clone(&conn);
-                    let msg_tx2 = msg_tx.clone();
-                    tokio::spawn(async move {
-                        loop {
-                            match conn_r.recv().await {
-                                Ok(Some(msg)) => {
-                                    if msg_tx2.send(msg).is_err() {
-                                        break;
-                                    }
+                    loop {
+                        match conn_r.recv().await {
+                            Ok(Some(msg)) => {
+                                if msg_tx.send(msg).is_err() {
+                                    break;
                                 }
-                                Ok(None) => break,
-                                Err(_) => break,
                             }
+                            Ok(None) => break,
+                            Err(_) => break,
                         }
-                    });
+                    }
+                });
+            })
+            .ok()?;
 
-                    // Writer task: cmd_rx -> daemon
+        // Writer task: cmd_rx -> daemon
+        let rt3 = Arc::clone(&rt);
+        std::thread::Builder::new()
+            .name("daemon-writer".into())
+            .spawn(move || {
+                rt3.block_on(async move {
                     loop {
                         let msg = match cmd_rx.recv() {
                             Ok(m) => m,
