@@ -352,8 +352,8 @@ impl Process {
         let cur = (mouse_capture, copy_mode);
         if self.last_terminal_mode != Some(cur) {
             self.last_terminal_mode = Some(cur);
-            let _ = self.patch_tx.send(DaemonMessage::TerminalMode {
-                session_id: self.id,
+            let _ = self.patch_tx.send(ServiceMessage::TerminalMode {
+                process_id: self.id,
                 mouse_capture,
                 copy_mode,
             });

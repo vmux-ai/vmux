@@ -73,25 +73,25 @@ pub enum ClientMessage {
         process_id: ProcessId,
     },
     SetSelection {
-        session_id: SessionId,
+        process_id: ProcessId,
         range: Option<TermSelectionRange>,
     },
     ExtendSelectionTo {
-        session_id: SessionId,
+        process_id: ProcessId,
         col: u16,
         row: u16,
     },
     SelectWordAt {
-        session_id: SessionId,
+        process_id: ProcessId,
         col: u16,
         row: u16,
     },
     SelectLineAt {
-        session_id: SessionId,
+        process_id: ProcessId,
         row: u16,
     },
     GetSelectionText {
-        session_id: SessionId,
+        process_id: ProcessId,
     },
     Shutdown,
 }
@@ -133,11 +133,11 @@ pub enum ServiceMessage {
         message: String,
     },
     SelectionText {
-        session_id: SessionId,
+        process_id: ProcessId,
         text: String,
     },
     TerminalMode {
-        session_id: SessionId,
+        process_id: ProcessId,
         mouse_capture: bool,
         copy_mode: bool,
     },

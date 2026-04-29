@@ -108,6 +108,19 @@ pub(crate) struct ServiceProcessHandle {
 #[derive(Resource)]
 pub(crate) struct ServiceClient(pub ServiceHandle);
 
+/// Per-process terminal mode flags, last broadcast by the service.
+#[derive(Resource, Default)]
+pub(crate) struct TerminalModeMap {
+    pub modes: std::collections::HashMap<ProcessId, TerminalModeFlags>,
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+#[allow(dead_code)] // fields read by Task 5 (mouse) and Task 9 (copy mode keymap)
+pub(crate) struct TerminalModeFlags {
+    pub mouse_capture: bool,
+    pub copy_mode: bool,
+}
+
 /// Triggered to restart the terminal process for a terminal entity.
 #[derive(Event)]
 pub(crate) struct RestartPty {
@@ -140,6 +153,7 @@ impl Plugin for TerminalInputPlugin {
         }
 
         app.init_resource::<MouseSelectionState>()
+            .init_resource::<TerminalModeMap>()
             .add_plugins(JsEmitEventPlugin::<TermResizeEvent>::default())
             .add_plugins(JsEmitEventPlugin::<TermMouseEvent>::default())
             .add_systems(
@@ -424,6 +438,7 @@ fn poll_service_messages(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
     mut writer: MessageWriter<AppCommand>,
+    mut mode_map: ResMut<TerminalModeMap>,
 ) {
     let Some(service) = service else { return };
 
@@ -556,7 +571,20 @@ fn poll_service_messages(
             ServiceMessage::Error { message } => {
                 warn!("Service error: {message}");
             }
-            _ => {} // ProcessOutput handled elsewhere if needed
+            ServiceMessage::TerminalMode {
+                process_id,
+                mouse_capture,
+                copy_mode,
+            } => {
+                mode_map.modes.insert(
+                    process_id,
+                    TerminalModeFlags {
+                        mouse_capture,
+                        copy_mode,
+                    },
+                );
+            }
+            _ => {} // ProcessOutput / SelectionText handled elsewhere if needed
         }
     }
 }
