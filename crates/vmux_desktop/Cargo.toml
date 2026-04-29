@@ -38,12 +38,14 @@ vmux_side_sheet = { path = "../vmux_side_sheet" }
 vmux_command_bar = { path = "../vmux_command_bar" }
 vmux_macro = { path = "../vmux_macro" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
+tokio = { workspace = true }
+uuid = { workspace = true }
+vmux_daemon = { path = "../vmux_daemon" }
+vmux_sessions = { path = "../vmux_sessions" }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_webview_app = { path = "../vmux_webview_app" }
 
-alacritty_terminal = { workspace = true }
-portable-pty = { workspace = true }
-rfd = { workspace = true }
+
 notify = { workspace = true }
 semver = "1"
 cargo-packager-updater = "0.2"

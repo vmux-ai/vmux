@@ -26,6 +26,9 @@ tokio = { version = "1", features = [
     "sync",
     "macros",
     "net",
+    "io-util",
+    "signal",
+    "time",
 ] }
 axum = { version = "0.7", default-features = false, features = [
     "http1",
@@ -50,6 +53,9 @@ alacritty_terminal = "0.26"
 portable-pty = "0.9"
 rfd = "0.15"
 vte = "0.15"
+rkyv = { version = "0.8", features = ["alloc"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+tray-icon = "0.19"
 
 [profile.release.package.vmux_history]
 opt-level = "z"
@@ -70,6 +76,10 @@ opt-level = "z"
 codegen-units = 1
 
 [profile.release.package.vmux_terminal]
+opt-level = "z"
+codegen-units = 1
+
+[profile.release.package.vmux_sessions]
 opt-level = "z"
 codegen-units = 1
 

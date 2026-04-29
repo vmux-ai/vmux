@@ -1,17 +1,8 @@
 use crate::{
     browser::Browser,
     command::{AppCommand, TabCommand, WriteAppCommands},
-    layout::pane::Pane,
     layout::window::WEBVIEW_MESH_DEPTH_BIAS,
     settings::AppSettings,
-};
-use alacritty_terminal::{
-    event::{Event as TermEvent, EventListener as TermEventListener},
-    grid::{Dimensions, Scroll},
-    index::{Column, Line, Point, Side},
-    selection::{Selection, SelectionType},
-    term::{Config as TermConfig, Term, TermMode, cell::Flags as CellFlags},
-    vte::ansi::{Color, NamedColor, Processor},
 };
 use bevy::{
     ecs::relationship::Relationship,
@@ -25,10 +16,9 @@ use bevy::{
     render::alpha::AlphaMode,
 };
 use bevy_cef::prelude::*;
-use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
-use std::{
-    io::{Read, Write},
-    sync::{Arc, Mutex, mpsc},
+use vmux_daemon::{
+    client::DaemonHandle,
+    protocol::{ClientMessage, DaemonMessage, SessionId},
 };
 use vmux_header::PageMetadata;
 use vmux_history::LastActivatedAt;
@@ -39,126 +29,51 @@ use vmux_webview_app::UiReady;
 #[derive(Component)]
 pub(crate) struct Terminal;
 
-/// Marker: PTY child process has exited; tab close is pending.
+/// Marker: daemon session has exited; tab close is pending.
 #[derive(Component)]
-pub(crate) struct PtyExited;
+struct SessionExited;
 
-/// Check if confirmation is needed based on settings.
-pub(crate) fn should_confirm_close(settings: &AppSettings) -> bool {
-    settings.terminal.as_ref().is_none_or(|t| t.confirm_close)
-}
-
-/// Check if a tab entity has any child terminal that is still running.
-pub(crate) fn has_live_terminal(
-    tab: Entity,
-    children_q: &Query<&Children>,
-    terminal_q: &Query<(), (With<Terminal>, Without<PtyExited>)>,
-) -> bool {
-    if let Ok(children) = children_q.get(tab) {
-        children.iter().any(|child| terminal_q.contains(child))
-    } else {
-        false
-    }
-}
-
-/// Check if a pane has any tab with a live terminal.
-pub(crate) fn pane_has_live_terminal(
-    pane: Entity,
-    pane_children_q: &Query<&Children, With<Pane>>,
-    all_children_q: &Query<&Children>,
-    terminal_q: &Query<(), (With<Terminal>, Without<PtyExited>)>,
-) -> bool {
-    if let Ok(tabs) = pane_children_q.get(pane) {
-        tabs.iter()
-            .any(|tab| has_live_terminal(tab, all_children_q, terminal_q))
-    } else {
-        false
-    }
-}
-
-/// Show confirmation dialog for closing a terminal tab/pane.
-/// Returns `true` if user confirms the close.
-pub(crate) fn show_close_dialog() -> bool {
-    use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
-    let result = MessageDialog::new()
-        .set_level(MessageLevel::Warning)
-        .set_title("Close Terminal?")
-        .set_description("A process is still running in this terminal. Close anyway?")
-        .set_buttons(MessageButtons::OkCancel)
-        .show();
-    matches!(result, MessageDialogResult::Ok)
-}
-
-/// Show confirmation dialog for quitting with N running terminals.
-/// Returns `true` if user confirms the quit.
-pub(crate) fn confirm_quit_dialog(count: usize) -> bool {
-    use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
-    let msg = if count == 1 {
-        "A terminal is still running. Quit anyway?".to_string()
-    } else {
-        format!("{count} terminals are still running. Quit anyway?")
-    };
-    let result = MessageDialog::new()
-        .set_level(MessageLevel::Warning)
-        .set_title("Quit Vmux?")
-        .set_description(&msg)
-        .set_buttons(MessageButtons::OkCancel)
-        .show();
-    matches!(result, MessageDialogResult::Ok)
-}
-
-/// Holds the alacritty_terminal state for a terminal instance.
+/// Associates a terminal entity with a daemon session.
 #[derive(Component)]
-pub(crate) struct TerminalState {
-    term: Term<VmuxEventProxy>,
-    processor: Processor,
-    dirty: bool,
-    /// Moving end of keyboard-driven selection (distinct from anchor).
-    /// Tracked separately because `Selection::to_range()` normalizes order,
-    /// making it impossible to know which end the user is extending.
-    selection_cursor: Option<Point>,
-    /// Per-row hash of the last synced viewport. Used to detect which lines
-    /// changed and need to be re-sent to the webview.
-    line_hashes: Vec<u64>,
-    /// True when the entire viewport must be re-sent (resize, first frame).
-    full_sync_needed: bool,
+pub(crate) struct DaemonSessionHandle {
+    pub session_id: SessionId,
 }
 
-/// Receives PTY output from a background reader thread.
-#[derive(Component)]
-pub(crate) struct PtyHandle {
-    rx: Mutex<mpsc::Receiver<Vec<u8>>>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
-    child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
-}
+/// Bevy resource wrapping the daemon connection.
+#[derive(Resource)]
+pub(crate) struct DaemonClient(pub DaemonHandle);
 
-/// Triggered to restart the PTY process for a terminal entity.
+/// Triggered to restart the terminal session for a terminal entity.
 #[derive(Event)]
 pub(crate) struct RestartPty {
     pub entity: Entity,
 }
 
-/// Event proxy that forwards PtyWrite responses back to the PTY.
-#[derive(Clone)]
-pub(crate) struct VmuxEventProxy {
-    pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
-}
-
-impl TermEventListener for VmuxEventProxy {
-    fn send_event(&self, event: TermEvent) {
-        if let TermEvent::PtyWrite(text) = event
-            && let Ok(mut writer) = self.pty_writer.lock()
-        {
-            let _ = writer.write_all(text.as_bytes());
-        }
-    }
+/// Tracks daemon connection retry state.
+#[derive(Resource)]
+struct DaemonConnectRetry {
+    /// Countdown: stop retrying after this many ticks.
+    remaining_attempts: u32,
+    timer: Timer,
 }
 
 pub(crate) struct TerminalInputPlugin;
 
 impl Plugin for TerminalInputPlugin {
     fn build(&self, app: &mut App) {
+        // Try to connect to an already-running daemon first.
+        if let Some(handle) = DaemonHandle::connect() {
+            eprintln!("vmux: connected to existing daemon");
+            app.insert_resource(DaemonClient(handle));
+        } else {
+            // Daemon not running — auto-start it and schedule connection retries.
+            ensure_daemon_started();
+            app.insert_resource(DaemonConnectRetry {
+                remaining_attempts: 60, // ~3 seconds with 50ms timer
+                timer: Timer::from_seconds(0.05, TimerMode::Repeating),
+            });
+        }
+
         app.init_resource::<MouseSelectionState>()
             .add_plugins(JsEmitEventPlugin::<TermResizeEvent>::default())
             .add_plugins(JsEmitEventPlugin::<TermMouseEvent>::default())
@@ -173,8 +88,8 @@ impl Plugin for TerminalInputPlugin {
             .add_systems(
                 Update,
                 (
-                    poll_pty_output.in_set(WriteAppCommands),
-                    sync_terminal_viewport,
+                    try_connect_daemon.run_if(resource_exists::<DaemonConnectRetry>),
+                    poll_daemon_messages.in_set(WriteAppCommands),
                     sync_terminal_theme,
                 )
                     .chain(),
@@ -201,103 +116,86 @@ impl Terminal {
         settings: &AppSettings,
         cwd: Option<&std::path::Path>,
     ) -> impl Bundle {
-        let cols = 80u16;
-        let rows = 24u16;
-
         let shell = settings
             .terminal
             .as_ref()
             .map(|t| t.resolve_theme(&t.default_theme).shell)
             .unwrap_or_else(default_shell);
 
-        // Create PTY
-        let pty_system = NativePtySystem::default();
-        let pair = pty_system
-            .openpty(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .expect("failed to open PTY");
-
-        let mut cmd = CommandBuilder::new(&shell);
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
-        cmd.env("LANG", "en_US.UTF-8");
-        cmd.env("LC_CTYPE", "UTF-8");
-        let initial_cwd = cwd
+        let cwd_str = cwd
             .filter(|d| !d.to_string_lossy().contains("://"))
-            .map(|d| d.to_path_buf());
-        if let Some(ref dir) = initial_cwd {
-            cmd.cwd(dir);
-        }
+            .map(|d| d.to_string_lossy().to_string())
+            .unwrap_or_default();
 
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .expect("failed to spawn shell");
-        let pid = child.process_id().unwrap_or(0);
-        let reader = pair
-            .master
-            .try_clone_reader()
-            .expect("failed to clone PTY reader");
-        let writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(
-            pair.master
-                .take_writer()
-                .expect("failed to take PTY writer"),
-        ));
-        drop(pair.slave);
-
-        // If a cwd was requested, also send a `cd` command to the shell.
-        // Some shells (e.g. nushell) ignore the PTY's initial cwd.
-        if let Some(ref dir) = initial_cwd {
-            let cd_cmd = format!("cd {}\n", dir.display());
-            if let Ok(mut w) = writer.lock() {
-                let _ = w.write_all(cd_cmd.as_bytes());
-                let _ = w.flush();
-            }
-        }
-
-        // Spawn background reader thread
-        let (tx, rx) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("pty-reader".into())
-            .spawn(move || {
-                pty_reader_thread(reader, tx);
-            })
-            .expect("failed to spawn PTY reader thread");
-
-        // Create alacritty terminal with event proxy that can write back to PTY
-        let event_proxy = VmuxEventProxy {
-            pty_writer: Arc::clone(&writer),
-        };
-        let term_config = TermConfig::default();
-        let dims = PtyDimensions { cols, rows };
-        let term = Term::new(term_config, &dims, event_proxy);
-        let processor = Processor::new();
+        // SessionId is set to a placeholder here; the actual session is created
+        // in a startup system that sends CreateSession to the daemon once the
+        // DaemonClient resource is available.
+        let session_id = SessionId::new();
 
         (
             (
                 Self,
                 Browser,
-                TerminalState {
-                    term,
-                    processor,
-                    dirty: true,
-                    selection_cursor: None,
-                    line_hashes: Vec::new(),
-                    full_sync_needed: true,
-                },
-                PtyHandle {
-                    rx: Mutex::new(rx),
-                    writer,
-                    master: Mutex::new(pair.master),
-                    child: Mutex::new(child),
+                DaemonSessionHandle { session_id },
+                PendingDaemonCreate {
+                    shell,
+                    cwd: cwd_str,
                 },
                 PageMetadata {
-                    title: format!("Terminal (Session: {})", pid),
-                    url: format!("{}session/{}", TERMINAL_WEBVIEW_URL, pid),
+                    title: format!("Terminal ({})", &session_id.to_string()[..8]),
+                    url: format!("{}session/{}", TERMINAL_WEBVIEW_URL, session_id),
+                    favicon_url: String::new(),
+                },
+                WebviewSource::new(TERMINAL_WEBVIEW_URL),
+                ResolvedWebviewUri(TERMINAL_WEBVIEW_URL.to_string()),
+                Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
+                    Vec3::Z,
+                    Vec2::splat(0.5),
+                ))),
+            ),
+            (
+                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
+                    base: StandardMaterial {
+                        unlit: true,
+                        alpha_mode: AlphaMode::Blend,
+                        depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
+                        ..default()
+                    },
+                    ..default()
+                })),
+                WebviewSize(Vec2::new(1280.0, 720.0)),
+                Transform::default(),
+                GlobalTransform::default(),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    ..default()
+                },
+                Visibility::Inherited,
+                Pickable::default(),
+            ),
+        )
+    }
+
+    /// Create a terminal bundle that reattaches to an existing daemon session.
+    #[allow(dead_code)] // Used by persistence.rs for session reconnect
+    pub(crate) fn reattach(
+        meshes: &mut ResMut<Assets<Mesh>>,
+        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+        session_id: SessionId,
+    ) -> impl Bundle {
+        (
+            (
+                Self,
+                Browser,
+                DaemonSessionHandle { session_id },
+                PendingDaemonAttach,
+                PageMetadata {
+                    title: format!("Terminal ({})", &session_id.to_string()[..8]),
+                    url: format!("{}session/{}", TERMINAL_WEBVIEW_URL, session_id),
                     favicon_url: String::new(),
                 },
                 WebviewSource::new(TERMINAL_WEBVIEW_URL),
@@ -335,344 +233,278 @@ impl Terminal {
     }
 }
 
+/// Temporary component: terminal needs a CreateSession sent to daemon.
+#[derive(Component)]
+struct PendingDaemonCreate {
+    shell: String,
+    cwd: String,
+}
+
+/// Temporary component: terminal needs an AttachSession sent to daemon.
+#[derive(Component)]
+struct PendingDaemonAttach;
+
+/// Marker: CreateSession was sent, waiting for SessionCreated response.
+#[derive(Component)]
+struct AwaitingSessionCreated;
+
 fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
 }
 
-/// Background thread that reads from PTY and sends chunks via channel.
-fn pty_reader_thread(mut reader: Box<dyn Read + Send>, tx: mpsc::Sender<Vec<u8>>) {
-    let mut buf = [0u8; 4096];
-    loop {
-        match reader.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                if tx.send(buf[..n].to_vec()).is_err() {
-                    break;
-                }
-            }
-            Err(_) => break,
+/// Spawn the daemon subprocess if not already running.
+fn ensure_daemon_started() {
+    if DaemonHandle::daemon_running() {
+        eprintln!("vmux: daemon already running");
+        return;
+    }
+    let exe = match std::env::current_exe() {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("vmux: failed to get current exe: {e}");
+            return;
+        }
+    };
+    eprintln!("vmux: starting daemon: {} daemon", exe.display());
+
+    // Redirect daemon stderr to a log file instead of piping.
+    // Piped stderr with nobody reading causes SIGPIPE on macOS,
+    // which can kill the daemon process.
+    let log_dir = vmux_daemon::daemon_dir();
+    let _ = std::fs::create_dir_all(&log_dir);
+    let stderr_cfg = match std::fs::File::create(log_dir.join("daemon.log")) {
+        Ok(f) => std::process::Stdio::from(f),
+        Err(_) => std::process::Stdio::null(),
+    };
+
+    match std::process::Command::new(&exe)
+        .arg("daemon")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(stderr_cfg)
+        .spawn()
+    {
+        Ok(_child) => {
+            eprintln!("vmux: daemon subprocess spawned");
+        }
+        Err(e) => {
+            eprintln!("vmux: failed to spawn daemon: {e}");
         }
     }
 }
 
-/// Helper to implement alacritty_terminal's Dimensions trait.
-struct PtyDimensions {
-    cols: u16,
-    rows: u16,
+/// Bevy system: retry connecting to daemon until it succeeds or we give up.
+fn try_connect_daemon(
+    mut retry: ResMut<DaemonConnectRetry>,
+    time: Res<Time>,
+    mut commands: Commands,
+) {
+    retry.timer.tick(time.delta());
+    if !retry.timer.just_finished() {
+        return;
+    }
+
+    retry.remaining_attempts = retry.remaining_attempts.saturating_sub(1);
+
+    // Check if socket is ready
+    let sock = vmux_daemon::socket_path();
+    if !sock.exists() {
+        if retry.remaining_attempts == 0 {
+            eprintln!("vmux: daemon socket never appeared — giving up");
+            commands.remove_resource::<DaemonConnectRetry>();
+        }
+        return;
+    }
+
+    // Try to connect
+    match DaemonHandle::connect() {
+        Some(handle) => {
+            eprintln!("vmux: connected to daemon after retry");
+            commands.insert_resource(DaemonClient(handle));
+            commands.remove_resource::<DaemonConnectRetry>();
+        }
+        None => {
+            if retry.remaining_attempts == 0 {
+                eprintln!("vmux: failed to connect to daemon after all retries");
+                // Check daemon log for clues
+                let log_path = vmux_daemon::daemon_dir().join("daemon.log");
+                if let Ok(log) = std::fs::read_to_string(&log_path) {
+                    if !log.is_empty() {
+                        eprintln!("vmux: daemon log:\n{log}");
+                    }
+                }
+                commands.remove_resource::<DaemonConnectRetry>();
+            }
+        }
+    }
 }
 
-impl Dimensions for PtyDimensions {
-    fn total_lines(&self) -> usize {
-        self.rows as usize
-    }
-    fn screen_lines(&self) -> usize {
-        self.rows as usize
-    }
-    fn columns(&self) -> usize {
-        self.cols as usize
-    }
-}
-
-/// Drain PTY output from background thread, feed to alacritty_terminal.
-fn poll_pty_output(
-    mut q: Query<
-        (Entity, &mut TerminalState, &PtyHandle, &ChildOf),
-        (With<Terminal>, Without<PtyExited>),
+/// Send CreateSession / AttachSession for newly spawned terminals.
+fn poll_daemon_messages(
+    pending_create: Query<
+        (Entity, &DaemonSessionHandle, &PendingDaemonCreate),
+        With<Terminal>,
     >,
+    pending_attach: Query<
+        (Entity, &DaemonSessionHandle),
+        (With<Terminal>, With<PendingDaemonAttach>),
+    >,
+    awaiting_create: Query<
+        (Entity, &DaemonSessionHandle, &ChildOf),
+        (With<Terminal>, With<AwaitingSessionCreated>),
+    >,
+    terminals: Query<
+        (Entity, &DaemonSessionHandle, &ChildOf),
+        (With<Terminal>, Without<SessionExited>),
+    >,
+    mut meta_q: Query<&mut PageMetadata>,
+    daemon: Option<Res<DaemonClient>>,
+    browsers: NonSend<Browsers>,
     mut commands: Commands,
     mut writer: MessageWriter<AppCommand>,
 ) {
-    for (entity, mut state, pty, child_of) in &mut q {
-        let rx = pty.rx.lock().unwrap();
-        let mut got_data = false;
-        while let Ok(data) = rx.try_recv() {
-            let TerminalState {
-                ref mut term,
-                ref mut processor,
-                ..
-            } = *state;
-            processor.advance(term, &data);
-            got_data = true;
-        }
-        if got_data {
-            state.dirty = true;
-        }
+    let Some(daemon) = daemon else { return };
 
-        // Check if the shell process has exited.
-        if let Ok(mut child) = pty.child.lock()
-            && let Ok(Some(_status)) = child.try_wait()
-        {
-            commands.entity(entity).insert(PtyExited);
-            // Activate the parent tab so TabCommand::Close targets it.
-            let tab = child_of.get();
-            commands.entity(tab).insert(LastActivatedAt::now());
-            writer.write(AppCommand::Tab(TabCommand::Close));
-        }
-    }
-}
-
-/// Serialize visible viewport diff and send to webview via rkyv + base64.
-fn sync_terminal_viewport(
-    mut q: Query<(Entity, &mut TerminalState), With<Terminal>>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (entity, mut state) in &mut q {
-        if !state.dirty {
-            continue;
-        }
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
-            continue;
-        }
-        state.dirty = false;
-
-        // Extract grid dimensions (immutable borrow of state.term).
-        let num_lines;
-        let num_cols;
-        let offset;
-        let cursor_point;
-        let scrolled_back;
-        let cursor_char;
-        {
-            let grid = state.term.grid();
-            num_lines = grid.screen_lines();
-            num_cols = grid.columns();
-            offset = grid.display_offset() as i32;
-            cursor_point = grid.cursor.point;
-            scrolled_back = offset > 0;
-            let cursor_row = &grid[cursor_point.line];
-            let cell = &cursor_row[cursor_point.column];
-            cursor_char = cell.c.to_string();
-        }
-
-        let full = state.full_sync_needed || state.line_hashes.len() != num_lines;
-
-        // Resize hash cache if needed.
-        if state.line_hashes.len() != num_lines {
-            state.line_hashes.resize(num_lines, 0);
-        }
-
-        let mut changed_lines = Vec::new();
-
-        for row_idx in 0..num_lines {
-            let hash = hash_grid_row(&state.term, row_idx, offset);
-            if full || hash != state.line_hashes[row_idx] {
-                state.line_hashes[row_idx] = hash;
-                changed_lines.push((row_idx as u16, build_line(&state.term, row_idx, offset)));
-            }
-        }
-
-        state.full_sync_needed = false;
-
-        // Convert alacritty selection to viewport-relative coordinates.
-        let selection = state
-            .term
-            .selection
-            .as_ref()
-            .and_then(|sel| sel.to_range(&state.term))
-            .map(|range| {
-                let start_row = (range.start.line.0 + offset) as u16;
-                let end_row = (range.end.line.0 + offset) as u16;
-                TermSelectionRange {
-                    start_col: range.start.column.0 as u16,
-                    start_row,
-                    end_col: range.end.column.0 as u16,
-                    end_row,
-                    is_block: range.is_block,
-                }
-            });
-
-        let patch = TermViewportPatch {
-            changed_lines,
-            cursor: TermCursor {
-                col: cursor_point.column.0 as u16,
-                row: cursor_point.line.0 as u16,
-                shape: CursorShape::Block,
-                visible: !scrolled_back,
-                ch: cursor_char,
-            },
-            cols: num_cols as u16,
-            rows: num_lines as u16,
-            selection,
-            full,
-        };
-
-        commands.trigger(HostEmitEvent::new(entity, TERM_VIEWPORT_EVENT, &patch));
-    }
-}
-
-/// Compute a fast hash of a single grid row's visible content.
-fn hash_grid_row<T: TermEventListener>(term: &Term<T>, row_idx: usize, offset: i32) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    let grid = term.grid();
-    let num_cols = grid.columns();
-    let row = &grid[Line(row_idx as i32 - offset)];
-    for col_idx in 0..num_cols {
-        let cell = &row[Column(col_idx)];
-        cell.c.hash(&mut hasher);
-        std::mem::discriminant(&cell.fg).hash(&mut hasher);
-        match &cell.fg {
-            Color::Named(c) => (*c as u8).hash(&mut hasher),
-            Color::Spec(rgb) => {
-                rgb.r.hash(&mut hasher);
-                rgb.g.hash(&mut hasher);
-                rgb.b.hash(&mut hasher);
-            }
-            Color::Indexed(i) => i.hash(&mut hasher),
-        }
-        std::mem::discriminant(&cell.bg).hash(&mut hasher);
-        match &cell.bg {
-            Color::Named(c) => (*c as u8).hash(&mut hasher),
-            Color::Spec(rgb) => {
-                rgb.r.hash(&mut hasher);
-                rgb.g.hash(&mut hasher);
-                rgb.b.hash(&mut hasher);
-            }
-            Color::Indexed(i) => i.hash(&mut hasher),
-        }
-        cell.flags.bits().hash(&mut hasher);
-    }
-    hasher.finish()
-}
-
-/// Build a TermLine for a single grid row.
-fn build_line<T: TermEventListener>(term: &Term<T>, row_idx: usize, offset: i32) -> TermLine {
-    let grid = term.grid();
-    let num_cols = grid.columns();
-    let row = &grid[Line(row_idx as i32 - offset)];
-    let mut spans = Vec::new();
-    let mut text = String::new();
-    let mut cur_fg: TermColor = TermColor::Default;
-    let mut cur_bg: TermColor = TermColor::Default;
-    let mut cur_flags: u16 = 0;
-    let mut span_col_start: u16 = 0;
-    let mut span_grid_cols: u16 = 0;
-
-    for col_idx in 0..num_cols {
-        let cell = &row[Column(col_idx)];
-
-        if cell.flags.contains(CellFlags::WIDE_CHAR_SPACER) {
-            span_grid_cols += 1;
-            continue;
-        }
-
-        let fg = color_to_term_color(&cell.fg);
-        let bg = color_to_term_color(&cell.bg);
-        let flags = cell_flags_to_u16(cell.flags);
-
-        if fg != cur_fg || bg != cur_bg || flags != cur_flags {
-            if !text.is_empty() {
-                spans.push(TermSpan {
-                    text: std::mem::take(&mut text),
-                    fg: cur_fg,
-                    bg: cur_bg,
-                    flags: cur_flags,
-                    col: span_col_start,
-                    grid_cols: span_grid_cols,
-                });
-                span_col_start = col_idx as u16;
-                span_grid_cols = 0;
-            }
-            cur_fg = fg;
-            cur_bg = bg;
-            cur_flags = flags;
-        }
-        text.push(cell.c);
-        span_grid_cols += 1;
-    }
-    if !text.is_empty() {
-        spans.push(TermSpan {
-            text,
-            fg: cur_fg,
-            bg: cur_bg,
-            flags: cur_flags,
-            col: span_col_start,
-            grid_cols: span_grid_cols,
+    // Handle pending creates — send CreateSession, wait for SessionCreated
+    // response which will carry the real session ID.
+    for (entity, _handle, pending) in &pending_create {
+        daemon.0.send(ClientMessage::CreateSession {
+            shell: pending.shell.clone(),
+            cwd: pending.cwd.clone(),
+            env: Vec::new(),
+            cols: 80,
+            rows: 24,
         });
+        commands
+            .entity(entity)
+            .remove::<PendingDaemonCreate>()
+            .insert(AwaitingSessionCreated);
     }
 
-    TermLine { spans }
-}
+    // Handle pending attaches
+    for (entity, handle) in &pending_attach {
+        daemon.0.send(ClientMessage::AttachSession {
+            session_id: handle.session_id,
+        });
+        daemon.0.send(ClientMessage::RequestSnapshot {
+            session_id: handle.session_id,
+        });
+        commands.entity(entity).remove::<PendingDaemonAttach>();
+    }
 
-fn color_to_term_color(color: &Color) -> TermColor {
-    match color {
-        Color::Named(named) => match named {
-            NamedColor::Foreground | NamedColor::DimForeground | NamedColor::BrightForeground => {
-                TermColor::Default
+    // Drain daemon messages and dispatch
+    for msg in daemon.0.drain() {
+        match msg {
+            DaemonMessage::SessionCreated { session_id } => {
+                // Match the first terminal awaiting a SessionCreated response.
+                for (entity, _, _) in &awaiting_create {
+                    // Attach to receive viewport patches
+                    daemon.0.send(ClientMessage::AttachSession { session_id });
+                    // Update handle with real daemon session ID
+                    commands
+                        .entity(entity)
+                        .insert(DaemonSessionHandle { session_id })
+                        .remove::<AwaitingSessionCreated>();
+                    // Update PageMetadata URL so session.ron saves the real ID
+                    if let Ok(mut meta) = meta_q.get_mut(entity) {
+                        meta.url =
+                            format!("{}session/{}", TERMINAL_WEBVIEW_URL, session_id);
+                        meta.title = format!(
+                            "Terminal ({})",
+                            &session_id.to_string()[..8]
+                        );
+                    }
+                    break;
+                }
             }
-            NamedColor::Background => TermColor::Default,
-            NamedColor::Cursor => TermColor::Default,
-            other => TermColor::Indexed(named_to_ansi_index(other)),
-        },
-        Color::Indexed(idx) if *idx < 16 => TermColor::Indexed(*idx),
-        Color::Indexed(idx) => {
-            let [r, g, b] = ansi_256_to_rgb(*idx);
-            TermColor::Rgb(r, g, b)
+            DaemonMessage::ViewportPatch {
+                session_id,
+                changed_lines,
+                cursor,
+                cols,
+                rows,
+                selection,
+                full,
+            } => {
+                for (entity, handle, _) in &terminals {
+                    if handle.session_id == session_id {
+                        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                            continue;
+                        }
+                        let patch = TermViewportPatch {
+                            changed_lines,
+                            cursor,
+                            cols,
+                            rows,
+                            selection,
+                            full,
+                        };
+                        commands.trigger(HostEmitEvent::new(
+                            entity,
+                            TERM_VIEWPORT_EVENT,
+                            &patch,
+                        ));
+                        break;
+                    }
+                }
+            }
+            DaemonMessage::Snapshot {
+                session_id,
+                lines,
+                cursor,
+                cols,
+                rows,
+            } => {
+                for (entity, handle, _) in &terminals {
+                    if handle.session_id == session_id {
+                        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                            continue;
+                        }
+                        let patch = TermViewportPatch {
+                            changed_lines: lines
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, l)| (i as u16, l))
+                                .collect(),
+                            cursor,
+                            cols,
+                            rows,
+                            selection: None,
+                            full: true,
+                        };
+                        commands.trigger(HostEmitEvent::new(
+                            entity,
+                            TERM_VIEWPORT_EVENT,
+                            &patch,
+                        ));
+                        break;
+                    }
+                }
+            }
+            DaemonMessage::SessionExited {
+                session_id,
+                exit_code: _,
+            } => {
+                for (entity, handle, child_of) in &terminals {
+                    if handle.session_id == session_id {
+                        commands.entity(entity).insert(SessionExited);
+                        let tab = child_of.get();
+                        commands.entity(tab).insert(LastActivatedAt::now());
+                        writer.write(AppCommand::Tab(TabCommand::Close));
+                        break;
+                    }
+                }
+            }
+            DaemonMessage::SessionList { sessions } => {
+                commands.insert_resource(crate::sessions_monitor::DaemonSessionList {
+                    sessions,
+                });
+            }
+            DaemonMessage::Error { message } => {
+                warn!("Daemon error: {message}");
+            }
+            _ => {} // SessionOutput handled elsewhere if needed
         }
-        Color::Spec(rgb) => TermColor::Rgb(rgb.r, rgb.g, rgb.b),
-    }
-}
-
-fn named_to_ansi_index(named: &NamedColor) -> u8 {
-    match named {
-        NamedColor::Black | NamedColor::DimBlack => 0,
-        NamedColor::Red | NamedColor::DimRed => 1,
-        NamedColor::Green | NamedColor::DimGreen => 2,
-        NamedColor::Yellow | NamedColor::DimYellow => 3,
-        NamedColor::Blue | NamedColor::DimBlue => 4,
-        NamedColor::Magenta | NamedColor::DimMagenta => 5,
-        NamedColor::Cyan | NamedColor::DimCyan => 6,
-        NamedColor::White | NamedColor::DimWhite => 7,
-        NamedColor::BrightBlack => 8,
-        NamedColor::BrightRed => 9,
-        NamedColor::BrightGreen => 10,
-        NamedColor::BrightYellow => 11,
-        NamedColor::BrightBlue => 12,
-        NamedColor::BrightMagenta => 13,
-        NamedColor::BrightCyan => 14,
-        NamedColor::BrightWhite => 15,
-        _ => 7, // fallback to white
-    }
-}
-
-fn cell_flags_to_u16(flags: CellFlags) -> u16 {
-    let mut f = 0u16;
-    if flags.contains(CellFlags::BOLD) {
-        f |= FLAG_BOLD;
-    }
-    if flags.contains(CellFlags::ITALIC) {
-        f |= FLAG_ITALIC;
-    }
-    if flags.contains(CellFlags::UNDERLINE) {
-        f |= FLAG_UNDERLINE;
-    }
-    if flags.contains(CellFlags::STRIKEOUT) {
-        f |= FLAG_STRIKETHROUGH;
-    }
-    if flags.contains(CellFlags::DIM) {
-        f |= FLAG_DIM;
-    }
-    if flags.contains(CellFlags::INVERSE) {
-        f |= FLAG_INVERSE;
-    }
-    f
-}
-
-/// Convert ANSI 256-color index (16-255) to RGB.
-fn ansi_256_to_rgb(idx: u8) -> [u8; 3] {
-    if idx < 16 {
-        return [0, 0, 0];
-    }
-    if idx < 232 {
-        let i = idx - 16;
-        let r = (i / 36) * 51;
-        let g = ((i % 36) / 6) * 51;
-        let b = (i % 6) * 51;
-        [r, g, b]
-    } else {
-        let v = 8 + (idx - 232) * 10;
-        [v, v, v]
     }
 }
 
@@ -708,36 +540,22 @@ fn is_non_character_key(key: KeyCode) -> bool {
     )
 }
 
-/// Check if a key code is a selection-extending key (used with Shift).
-fn is_selection_key(key: KeyCode) -> bool {
-    matches!(
-        key,
-        KeyCode::ArrowLeft
-            | KeyCode::ArrowRight
-            | KeyCode::ArrowUp
-            | KeyCode::ArrowDown
-            | KeyCode::Home
-            | KeyCode::End
-            | KeyCode::PageUp
-            | KeyCode::PageDown
-    )
-}
-
 /// Handle keyboard input directly from Bevy, bypassing CEF round-trip.
 fn handle_terminal_keyboard(
     mut er: MessageReader<KeyboardInput>,
-    mut q: Query<(&PtyHandle, &mut TerminalState), (With<Terminal>, With<CefKeyboardTarget>)>,
+    q: Query<&DaemonSessionHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
     input: Res<ButtonInput<KeyCode>>,
     chord_state: Res<crate::shortcut::ChordState>,
+    daemon: Option<Res<DaemonClient>>,
 ) {
     if q.is_empty() {
         return;
     }
-    // Suppress keyboard input while a chord prefix is pending so the second
-    // key of a chord (e.g. the `` ` `` in Ctrl+G → `` ` ``) doesn't leak
-    // into the terminal.
+    let Some(daemon) = daemon else {
+        for _ in er.read() {}
+        return;
+    };
     if chord_state.pending_prefix.is_some() {
-        // Drain events so MessageReader cursor advances
         for _ in er.read() {}
         return;
     }
@@ -751,228 +569,77 @@ fn handle_terminal_keyboard(
         if event.state != ButtonState::Pressed {
             continue;
         }
-        // Deduplicate non-character keys — macOS/bevy_winit can deliver two
-        // Pressed messages for a single physical press, either in the same
-        // frame or across consecutive frames.
         if !event.repeat && is_non_character_key(event.key_code) {
-            // Same-frame dedup
             if seen_keys.contains(&event.key_code) {
                 continue;
             }
             seen_keys.push(event.key_code);
-            // Cross-frame dedup: skip if the key was already held from a
-            // previous frame (not a fresh press).
             if !input.just_pressed(event.key_code) {
                 continue;
             }
         }
 
-        // Handle Cmd/Super key combinations (clipboard shortcuts).
-        // Don't forward these to the PTY — they're OS-level commands.
         if super_key {
             match event.key_code {
                 KeyCode::KeyV => {
-                    // Paste: read system clipboard and write to PTY.
-                    // Use pbpaste to avoid objc2/NSPasteboard conflicts with CEF.
+                    // Paste via pbpaste
                     if let Ok(output) = std::process::Command::new("pbpaste").output()
                         && output.status.success()
                     {
                         let text = String::from_utf8_lossy(&output.stdout);
                         if !text.is_empty() {
-                            for (pty, state) in &q {
-                                if let Ok(mut writer) = pty.writer.lock() {
-                                    let bp = state.term.mode().contains(TermMode::BRACKETED_PASTE);
-                                    if bp {
-                                        let _ = writer.write_all(b"\x1b[200~");
-                                    }
-                                    let _ = writer.write_all(text.as_bytes());
-                                    if bp {
-                                        let _ = writer.write_all(b"\x1b[201~");
-                                    }
-                                }
+                            // Wrap in bracketed paste sequences
+                            let mut data = Vec::new();
+                            data.extend_from_slice(b"\x1b[200~");
+                            data.extend_from_slice(text.as_bytes());
+                            data.extend_from_slice(b"\x1b[201~");
+                            for handle in &q {
+                                daemon.0.send(ClientMessage::SessionInput {
+                                    session_id: handle.session_id,
+                                    data: data.clone(),
+                                });
                             }
                         }
                     }
                     continue;
                 }
                 KeyCode::KeyC => {
-                    // Copy: selected text if selection exists, else full visible grid.
-                    for (_pty, mut state) in &mut q {
-                        let text = if state.term.selection.is_some() {
-                            let s = state.term.selection_to_string().unwrap_or_default();
-                            // Clear selection after copy
-                            state.term.selection = None;
-                            state.selection_cursor = None;
-                            state.dirty = true;
-                            s
-                        } else {
-                            visible_text(&state.term)
-                        };
-                        if !text.is_empty() {
-                            pbcopy(&text);
-                        }
-                    }
+                    // Copy: in daemon mode we can't access selection, so skip
+                    // TODO: implement copy via daemon snapshot
                     continue;
                 }
-                _ => {
-                    // Skip all other Cmd+key combos — don't send to PTY
-                    continue;
-                }
+                _ => continue,
             }
         }
 
-        // Shift+Arrow/Home/End/PgUp/PgDn: keyboard text selection.
-        // Don't send these to the PTY — they drive the selection overlay.
-        if shift && is_selection_key(event.key_code) {
-            for (_pty, mut state) in &mut q {
-                let num_cols = state.term.grid().columns();
-                let num_lines = state.term.grid().screen_lines();
-
-                // Use tracked selection_cursor, or fall back to terminal cursor.
-                let cur = state
-                    .selection_cursor
-                    .unwrap_or_else(|| state.term.grid().cursor.point);
-
-                let new_point = match event.key_code {
-                    KeyCode::ArrowLeft => {
-                        if cur.column.0 > 0 {
-                            Point::new(cur.line, cur.column - 1)
-                        } else if cur.line.0 > 0 {
-                            Point::new(cur.line - 1, Column(num_cols - 1))
-                        } else {
-                            cur
-                        }
-                    }
-                    KeyCode::ArrowRight => {
-                        if cur.column.0 + 1 < num_cols {
-                            Point::new(cur.line, cur.column + 1)
-                        } else if (cur.line.0 as usize) + 1 < num_lines {
-                            Point::new(cur.line + 1, Column(0))
-                        } else {
-                            cur
-                        }
-                    }
-                    KeyCode::ArrowUp => {
-                        if cur.line.0 > 0 {
-                            Point::new(cur.line - 1, cur.column)
-                        } else {
-                            cur
-                        }
-                    }
-                    KeyCode::ArrowDown => {
-                        if (cur.line.0 as usize) + 1 < num_lines {
-                            Point::new(cur.line + 1, cur.column)
-                        } else {
-                            cur
-                        }
-                    }
-                    KeyCode::Home => Point::new(cur.line, Column(0)),
-                    KeyCode::End => Point::new(cur.line, Column(num_cols - 1)),
-                    KeyCode::PageUp => {
-                        let target_line = (cur.line.0 - num_lines as i32).max(0);
-                        Point::new(Line(target_line), cur.column)
-                    }
-                    KeyCode::PageDown => {
-                        let target_line = (cur.line.0 + num_lines as i32).min(num_lines as i32 - 1);
-                        Point::new(Line(target_line), cur.column)
-                    }
-                    _ => cur,
-                };
-
-                if state.term.selection.is_none() {
-                    // Start new selection from cursor position.
-                    let cursor_point = state.term.grid().cursor.point;
-                    let sel_type = if alt {
-                        SelectionType::Block
-                    } else {
-                        SelectionType::Simple
-                    };
-                    state.term.selection = Some(Selection::new(sel_type, cursor_point, Side::Left));
-                }
-                if let Some(ref mut sel) = state.term.selection {
-                    sel.update(new_point, Side::Left);
-                    sel.include_all();
-                }
-                state.selection_cursor = Some(new_point);
-                state.dirty = true;
-            }
+        // Skip selection keys (Shift+Arrow etc) — daemon doesn't support local selection
+        if shift
+            && matches!(
+                event.key_code,
+                KeyCode::ArrowLeft
+                    | KeyCode::ArrowRight
+                    | KeyCode::ArrowUp
+                    | KeyCode::ArrowDown
+                    | KeyCode::Home
+                    | KeyCode::End
+                    | KeyCode::PageUp
+                    | KeyCode::PageDown
+            )
+        {
             continue;
-        }
-
-        // Any non-modifier key press clears the selection.
-        if !matches!(
-            event.key_code,
-            KeyCode::ShiftLeft
-                | KeyCode::ShiftRight
-                | KeyCode::ControlLeft
-                | KeyCode::ControlRight
-                | KeyCode::AltLeft
-                | KeyCode::AltRight
-                | KeyCode::SuperLeft
-                | KeyCode::SuperRight
-        ) {
-            for (_pty, mut state) in &mut q {
-                if state.term.selection.is_some() {
-                    state.term.selection = None;
-                    state.selection_cursor = None;
-                    state.dirty = true;
-                }
-            }
         }
 
         let bytes = logical_key_to_bytes(&event.logical_key, ctrl, alt);
         if bytes.is_empty() {
             continue;
         }
-        for (pty, _state) in &q {
-            if let Ok(mut writer) = pty.writer.lock() {
-                let _ = writer.write_all(&bytes);
-            }
+        for handle in &q {
+            daemon.0.send(ClientMessage::SessionInput {
+                session_id: handle.session_id,
+                data: bytes.clone(),
+            });
         }
     }
-}
-
-/// Write text to system clipboard via pbcopy (avoids objc2/CEF conflicts).
-fn pbcopy(text: &str) {
-    if let Ok(mut child) = std::process::Command::new("pbcopy")
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-    {
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(text.as_bytes());
-        }
-        let _ = child.wait();
-    }
-}
-
-/// Extract visible text from the terminal grid, trimming trailing whitespace per line.
-fn visible_text<T: TermEventListener>(term: &Term<T>) -> String {
-    let grid = term.grid();
-    let num_cols = grid.columns();
-    let num_lines = grid.screen_lines();
-    let offset = grid.display_offset() as i32;
-    let mut result = String::new();
-
-    for row_idx in 0..num_lines {
-        let row = &grid[Line(row_idx as i32 - offset)];
-        let mut line = String::with_capacity(num_cols);
-        for col_idx in 0..num_cols {
-            let cell = &row[Column(col_idx)];
-            if cell.flags.contains(CellFlags::WIDE_CHAR_SPACER) {
-                continue;
-            }
-            line.push(cell.c);
-        }
-        let trimmed = line.trim_end();
-        result.push_str(trimmed);
-        if row_idx < num_lines - 1 {
-            result.push('\n');
-        }
-    }
-
-    // Trim trailing empty lines
-    result.truncate(result.trim_end_matches('\n').len());
-    result
 }
 
 fn logical_key_to_bytes(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
@@ -1033,15 +700,19 @@ fn logical_key_to_bytes(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
     }
 }
 
-/// Handle mouse wheel scrolling — forwards to PTY when mouse mode is active,
-/// otherwise scrolls the scrollback buffer.
+/// Handle mouse wheel scrolling — sends scroll input to daemon.
 fn handle_terminal_scroll(
     mut er: MessageReader<MouseWheel>,
-    mut q: Query<(&mut TerminalState, &PtyHandle), (With<Terminal>, With<CefKeyboardTarget>)>,
+    q: Query<&DaemonSessionHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
+    daemon: Option<Res<DaemonClient>>,
 ) {
     if q.is_empty() {
         return;
     }
+    let Some(daemon) = daemon else {
+        for _ in er.read() {}
+        return;
+    };
     for event in er.read() {
         let lines = match event.unit {
             MouseScrollUnit::Line => -event.y as i32,
@@ -1050,28 +721,22 @@ fn handle_terminal_scroll(
         if lines == 0 {
             continue;
         }
-        for (mut state, pty) in &mut q {
-            let mode = *state.term.mode();
-            if mode.intersects(TermMode::MOUSE_MODE) && mode.contains(TermMode::SGR_MOUSE) {
-                // Forward scroll as SGR mouse button 64 (up) / 65 (down) to the PTY
-                let button: u8 = if lines < 0 { 64 } else { 65 };
-                let count = lines.unsigned_abs();
-                let seq = sgr_mouse_sequence(button, 0, 0, 0, true);
-                if let Ok(mut w) = pty.writer.lock() {
-                    for _ in 0..count {
-                        let _ = w.write_all(&seq);
-                    }
-                }
-            } else {
-                state.term.scroll_display(Scroll::Delta(lines));
+        // Send scroll as mouse button 64/65 SGR sequences
+        let button: u8 = if lines < 0 { 64 } else { 65 };
+        let count = lines.unsigned_abs();
+        let seq = sgr_mouse_sequence(button, 0, 0, 0, true);
+        for handle in &q {
+            for _ in 0..count {
+                daemon.0.send(ClientMessage::SessionInput {
+                    session_id: handle.session_id,
+                    data: seq.clone(),
+                });
             }
-            state.dirty = true;
         }
     }
 }
 
 /// Encode a mouse event as an SGR escape sequence.
-/// button: SGR button value (0=left, 1=mid, 2=right, 32+=drag, 35=motion, 64/65=scroll)
 fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool) -> Vec<u8> {
     let mut cb = button as u32;
     if modifiers & MOD_SHIFT != 0 {
@@ -1084,129 +749,50 @@ fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bo
         cb += 16;
     }
     let suffix = if pressed { 'M' } else { 'm' };
-    // SGR coordinates are 1-based
     format!("\x1b[<{};{};{}{}", cb, col + 1, row + 1, suffix).into_bytes()
 }
 
-/// Tracks mouse state for selection (double/triple click detection).
+/// Tracks mouse state for selection (reserved for future local selection).
 #[derive(Resource, Default)]
-struct MouseSelectionState {
-    /// Timestamp of last mousedown for multi-click detection.
-    last_click_time: Option<std::time::Instant>,
-    /// Number of consecutive clicks at roughly the same position.
-    click_count: u8,
-    /// Position of last click for multi-click detection.
-    last_click_pos: Option<(u16, u16)>,
-    /// Whether a drag selection is in progress.
-    dragging: bool,
-}
+struct MouseSelectionState;
 
-/// Handle mouse events from the terminal webview.
+/// Handle mouse events from the terminal webview — forward to daemon as input.
 fn on_term_mouse(
     trigger: On<Receive<TermMouseEvent>>,
-    mut state_q: Query<&mut TerminalState, With<Terminal>>,
-    pty_q: Query<&PtyHandle, With<Terminal>>,
-    mut mouse_sel: ResMut<MouseSelectionState>,
+    q: Query<&DaemonSessionHandle, With<Terminal>>,
+    daemon: Option<Res<DaemonClient>>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
+    let Some(daemon) = daemon else { return };
+    let Ok(handle) = q.get(entity) else { return };
 
-    let Ok(mut state) = state_q.get_mut(entity) else {
-        return;
-    };
-
-    let mode = *state.term.mode();
-
-    // When mouse reporting is disabled, handle text selection locally.
-    if !mode.intersects(TermMode::MOUSE_MODE) {
-        // Only handle left button (button == 0)
-        if event.button == 0 || (event.moving && mouse_sel.dragging) {
-            let point = Point::new(Line(event.row as i32), Column(event.col as usize));
-
-            if event.pressed && !event.moving {
-                // Mouse down — detect click count for single/double/triple
-                let now = std::time::Instant::now();
-                let same_pos = mouse_sel
-                    .last_click_pos
-                    .is_some_and(|(c, r)| c == event.col && r == event.row);
-                let fast_enough = mouse_sel
-                    .last_click_time
-                    .is_some_and(|t| now.duration_since(t).as_millis() < 500);
-
-                if same_pos && fast_enough {
-                    mouse_sel.click_count = (mouse_sel.click_count + 1).min(3);
-                } else {
-                    mouse_sel.click_count = 1;
-                }
-                mouse_sel.last_click_time = Some(now);
-                mouse_sel.last_click_pos = Some((event.col, event.row));
-                mouse_sel.dragging = true;
-
-                let sel_type = match mouse_sel.click_count {
-                    2 => SelectionType::Semantic,
-                    3 => SelectionType::Lines,
-                    _ => SelectionType::Simple,
-                };
-
-                let mut sel = Selection::new(sel_type, point, Side::Left);
-                if sel_type != SelectionType::Simple {
-                    // For semantic/lines, expand both sides immediately
-                    sel.update(point, Side::Right);
-                    sel.include_all();
-                }
-                state.term.selection = Some(sel);
-                state.dirty = true;
-            } else if event.moving && mouse_sel.dragging {
-                // Mouse drag — extend selection
-                if let Some(ref mut sel) = state.term.selection {
-                    sel.update(point, Side::Right);
-                    state.dirty = true;
-                }
-            } else if !event.pressed && !event.moving {
-                // Mouse up — finalize drag
-                mouse_sel.dragging = false;
-            }
-        }
-        return;
-    }
-
-    // Only support SGR encoding (used by all modern terminal apps)
-    if !mode.contains(TermMode::SGR_MOUSE) {
-        return;
-    }
-
-    // Filter motion events based on terminal mode
-    if event.moving {
-        let is_drag = event.button < 3;
-        if is_drag && !mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION) {
-            return;
-        }
-        if !is_drag && !mode.contains(TermMode::MOUSE_MOTION) {
-            return;
-        }
-    }
-
-    // Encode SGR button: add 32 for motion/drag events
+    // Forward all mouse events as SGR sequences to daemon
     let button = if event.moving {
         event.button + 32
     } else {
         event.button
     };
-
     let seq = sgr_mouse_sequence(button, event.col, event.row, event.modifiers, event.pressed);
-
-    if let Ok(pty) = pty_q.get(entity)
-        && let Ok(mut w) = pty.writer.lock()
-    {
-        let _ = w.write_all(&seq);
-    }
+    daemon.0.send(ClientMessage::SessionInput {
+        session_id: handle.session_id,
+        data: seq,
+    });
 }
 
 /// Mark dirty when webview becomes ready so initial viewport is sent.
-fn on_term_ready(trigger: On<Add, UiReady>, mut q: Query<&mut TerminalState, With<Terminal>>) {
+fn on_term_ready(
+    trigger: On<Add, UiReady>,
+    q: Query<&DaemonSessionHandle, With<Terminal>>,
+    daemon: Option<Res<DaemonClient>>,
+) {
     let entity = trigger.event_target();
-    if let Ok(mut state) = q.get_mut(entity) {
-        state.dirty = true;
+    let Some(daemon) = daemon else { return };
+    if let Ok(handle) = q.get(entity) {
+        // Request a full snapshot when webview is ready
+        daemon.0.send(ClientMessage::RequestSnapshot {
+            session_id: handle.session_id,
+        });
     }
 }
 
@@ -1214,13 +800,17 @@ fn on_term_ready(trigger: On<Add, UiReady>, mut q: Query<&mut TerminalState, Wit
 fn on_term_resize(
     trigger: On<Receive<TermResizeEvent>>,
     webview_q: Query<&WebviewSize, With<Terminal>>,
-    mut state_q: Query<&mut TerminalState, With<Terminal>>,
-    pty_q: Query<&PtyHandle, With<Terminal>>,
+    handle_q: Query<&DaemonSessionHandle, With<Terminal>>,
+    daemon: Option<Res<DaemonClient>>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
+    let Some(daemon) = daemon else { return };
 
     let Ok(webview_size) = webview_q.get(entity) else {
+        return;
+    };
+    let Ok(handle) = handle_q.get(entity) else {
         return;
     };
 
@@ -1228,8 +818,6 @@ fn on_term_resize(
         return;
     }
 
-    // Use viewport dimensions from JS when available (accounts for CEF zoom),
-    // otherwise fall back to WebviewSize (DIP).
     let vw = if event.viewport_width > 0.0 {
         event.viewport_width
     } else {
@@ -1244,24 +832,11 @@ fn on_term_resize(
     let cols = (vw / event.char_width).floor().max(1.0) as u16;
     let rows = (vh / event.char_height).floor().max(1.0) as u16;
 
-    // Resize PTY
-    if let Ok(pty) = pty_q.get(entity) {
-        let master = pty.master.lock().unwrap();
-        let _ = master.resize(PtySize {
-            rows,
-            cols,
-            pixel_width: webview_size.0.x as u16,
-            pixel_height: webview_size.0.y as u16,
-        });
-    }
-
-    // Resize alacritty terminal grid
-    if let Ok(mut state) = state_q.get_mut(entity) {
-        let dims = PtyDimensions { cols, rows };
-        state.term.resize(dims);
-        state.dirty = true;
-        state.full_sync_needed = true;
-    }
+    daemon.0.send(ClientMessage::ResizeSession {
+        session_id: handle.session_id,
+        cols,
+        rows,
+    });
 }
 
 fn sync_terminal_theme(
@@ -1281,7 +856,6 @@ fn sync_terminal_theme(
     let colors =
         crate::themes::resolve_theme(&theme.color_scheme, &terminal_settings.custom_themes);
 
-    // Simple hash to detect theme changes
     let hash = {
         let mut h: u64 = 0;
         for b in &colors.foreground {
@@ -1321,9 +895,6 @@ fn sync_terminal_theme(
     let targets: Vec<Entity> = if theme_changed {
         q.iter().collect()
     } else {
-        // Include both newly spawned terminals and terminals whose
-        // browser just became ready (fixes race where the browser
-        // wasn't ready on the first sync attempt).
         new_terminals.iter().chain(newly_ready.iter()).collect()
     };
 
@@ -1336,16 +907,21 @@ fn sync_terminal_theme(
 
 fn on_restart_pty(
     trigger: On<RestartPty>,
-    mut q: Query<(&mut TerminalState, &mut PtyHandle, &mut PageMetadata)>,
+    mut q: Query<(&mut DaemonSessionHandle, &mut PageMetadata)>,
+    daemon: Option<Res<DaemonClient>>,
     settings: Res<AppSettings>,
 ) {
     let entity = trigger.event().entity;
-    let Ok((mut state, mut pty, mut meta)) = q.get_mut(entity) else {
+    let Some(daemon) = daemon else { return };
+    let Ok((mut handle, mut meta)) = q.get_mut(entity) else {
         return;
     };
 
-    // Kill old PTY
-    let _ = pty.child.lock().unwrap().kill();
+    // Kill old session
+
+    daemon.0.send(ClientMessage::KillSession {
+        session_id: handle.session_id,
+    });
 
     let shell = settings
         .terminal
@@ -1353,72 +929,20 @@ fn on_restart_pty(
         .map(|t| t.resolve_theme(&t.default_theme).shell)
         .unwrap_or_else(default_shell);
 
-    // Spawn new PTY
-    let pty_system = NativePtySystem::default();
-    let pair = pty_system
-        .openpty(PtySize {
-            rows: 24,
-            cols: 80,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .expect("failed to open PTY");
+    // Create new session
+    let new_id = SessionId::new();
+    daemon.0.send(ClientMessage::CreateSession {
+        shell,
+        cwd: String::new(),
+        env: Vec::new(),
+        cols: 80,
+        rows: 24,
+    });
+    daemon.0.send(ClientMessage::AttachSession {
+        session_id: new_id,
+    });
 
-    let mut cmd = CommandBuilder::new(&shell);
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env("LANG", "en_US.UTF-8");
-    cmd.env("LC_CTYPE", "UTF-8");
-
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .expect("failed to spawn shell");
-    let pid = child.process_id().unwrap_or(0);
-    let reader = pair
-        .master
-        .try_clone_reader()
-        .expect("failed to clone PTY reader");
-    let new_writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(
-        pair.master
-            .take_writer()
-            .expect("failed to take PTY writer"),
-    ));
-    drop(pair.slave);
-
-    // Spawn new reader thread
-    let (tx, rx) = mpsc::channel();
-    std::thread::Builder::new()
-        .name("pty-reader".into())
-        .spawn(move || {
-            pty_reader_thread(reader, tx);
-        })
-        .expect("failed to spawn PTY reader thread");
-
-    // Reset terminal state
-    let event_proxy = VmuxEventProxy {
-        pty_writer: Arc::clone(&new_writer),
-    };
-    let term_config = TermConfig::default();
-    let dims = PtyDimensions { cols: 80, rows: 24 };
-    let new_term = Term::new(term_config, &dims, event_proxy);
-
-    state.term = new_term;
-    state.processor = Processor::new();
-    state.dirty = true;
-    state.selection_cursor = None;
-    state.line_hashes.clear();
-    state.full_sync_needed = true;
-
-    // Replace PtyHandle entirely
-    *pty = PtyHandle {
-        rx: Mutex::new(rx),
-        writer: new_writer,
-        master: Mutex::new(pair.master),
-        child: Mutex::new(child),
-    };
-
-    // Update metadata
-    meta.url = format!("{}session/{}", TERMINAL_WEBVIEW_URL, pid);
-    meta.title = format!("Terminal (Session: {})", pid);
+    handle.session_id = new_id;
+    meta.url = format!("{}session/{}", TERMINAL_WEBVIEW_URL, new_id);
+    meta.title = format!("Terminal ({})", &new_id.to_string()[..8]);
 }

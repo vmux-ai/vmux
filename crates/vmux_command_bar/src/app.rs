@@ -12,7 +12,6 @@ use wasm_bindgen::prelude::*;
 
 #[derive(Clone, PartialEq)]
 enum ResultItem {
-    NewTab,
     Terminal {
         path: String,
     },
@@ -39,24 +38,8 @@ fn looks_like_path(s: &str) -> bool {
         || s.starts_with("../")
         || s.contains('/')
             && !s.contains(' ')
-            && !s.starts_with("http://")
-            && !s.starts_with("https://")
+            && !s.contains("://")
 }
->>>>>>> 019f345 (feat(command-bar): toggle cmd+t, keep active tab visible, first-launch open, + New Tab button)
-=======
-use vmux_command_bar::event::{looks_like_path, looks_like_url};
-=======
-fn looks_like_path(s: &str) -> bool {
-    s.starts_with('/')
-        || s.starts_with("~/")
-        || s.starts_with("./")
-        || s.starts_with("../")
-        || s.contains('/')
-            && !s.contains(' ')
-            && !s.starts_with("http://")
-            && !s.starts_with("https://")
-}
->>>>>>> 019f345 (feat(command-bar): toggle cmd+t, keep active tab visible, first-launch open, + New Tab button)
 
 fn filter_results(
     query: &str,
@@ -72,10 +55,6 @@ fn filter_results(
             items.push(ResultItem::Terminal {
                 path: String::new(),
             });
-        }
-        // Show "+ New Tab" above the tab list when browsing existing tabs
-        if !new_tab && !tabs.is_empty() {
-            items.push(ResultItem::NewTab);
         }
         items.extend(tabs.iter().map(|t| ResultItem::Tab {
             title: t.title.clone(),
@@ -266,7 +245,6 @@ pub fn App() -> Element {
     let nav = nav_mode();
     let display_text = if nav {
         match &active_item {
-            Some(ResultItem::NewTab) => String::new(),
             Some(ResultItem::Command { name, .. }) => format!("> {name}"),
             Some(ResultItem::Navigate { url }) => url.clone(),
             Some(ResultItem::Tab { url, .. }) => url.clone(),
@@ -309,9 +287,6 @@ pub fn App() -> Element {
     let mut execute = move |item: &ResultItem| {
         is_open.set(false);
         match item {
-            ResultItem::NewTab => {
-                emit_action("command", "tab_new");
-            }
             ResultItem::Terminal { path } => {
                 emit_action("terminal", path);
             }
@@ -337,7 +312,7 @@ pub fn App() -> Element {
 
     rsx! {
         div {
-            class: "flex h-full w-full items-start justify-center pt-[15%] bg-white/5 backdrop-blur-md backdrop-saturate-150",
+            class: "flex h-full w-full items-start justify-center pt-[15%]",
             onclick: move |_| { is_open.set(false); emit_action("dismiss", ""); },
             div {
                 class: "relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-white/10 shadow-2xl backdrop-blur-2xl backdrop-saturate-150",
@@ -350,13 +325,12 @@ pub fn App() -> Element {
                             let icon_class = "h-4 w-4 shrink-0 text-muted-foreground";
                             let (is_command, is_path, is_url) = if nav {
                                 match &active_item {
-                                    Some(ResultItem::NewTab) => (false, false, false),
                                     Some(ResultItem::Command { .. }) => (true, false, false),
                                     Some(ResultItem::Terminal { path }) if path.is_empty() => (true, false, false),
                                     Some(ResultItem::Terminal { .. }) => (false, true, false),
                                     Some(ResultItem::Tab { .. }) => (false, false, true),
                                     Some(ResultItem::Navigate { url }) => {
-                                        let is_u = looks_like_url(url);
+                                        let is_u = url.contains("://") || (url.contains('.') && !url.contains(' '));
                                         (false, false, is_u)
                                     }
                                     None => (false, false, false),
@@ -364,8 +338,8 @@ pub fn App() -> Element {
                             } else {
                                 let trimmed = q.trim();
                                 let cmd = trimmed.starts_with('>');
-                                let url = !cmd && looks_like_url(trimmed);
-                                let pth = !cmd && !url && (trimmed.starts_with('/') || trimmed.starts_with('~'));
+                                let pth = !cmd && (trimmed.starts_with('/') || trimmed.starts_with('~'));
+                                let url = !cmd && !pth && (trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')));
                                 (cmd, pth, url)
                             };
                             if is_command {
@@ -482,16 +456,6 @@ pub fn App() -> Element {
                                     move |_| { execute(&item); }
                                 },
                                 match item {
-                                    ResultItem::NewTab => rsx! {
-                                        div { class: "flex items-center gap-2",
-                                            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                                                path { d: "M12 5v14" }
-                                                path { d: "M5 12h14" }
-                                            }
-                                            span { class: "text-base text-foreground", "New Tab" }
-                                        }
-                                        span { class: "ml-2 shrink-0 rounded bg-muted px-1.5 py-0.5 text-sm text-muted-foreground", "\u{2318}T" }
-                                    },
                                     ResultItem::Terminal { path } => rsx! {
                                         div { class: "flex items-center gap-2",
                                             span { class: "shrink-0 text-base text-muted-foreground", ">_" }
@@ -553,7 +517,7 @@ fn focus_and_install_ctrl_bindings() {
     let input: web_sys::HtmlInputElement = el.unchecked_into();
     input.focus().ok();
     let len = input.value().len() as u32;
-    let _ = input.set_selection_range(len, len);
+    let _ = input.set_selection_range(0, len);
 
     // Guard against double-binding.
     if js_sys::Reflect::get(&input, &JsValue::from_str("_ctrlBound"))

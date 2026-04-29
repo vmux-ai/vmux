@@ -1,6 +1,6 @@
 [package]
-name = "vmux_terminal"
-description = "Bevy + CEF + Dioxus terminal webview"
+name = "vmux_sessions"
+description = "Daemon session monitor webview app"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -11,7 +11,7 @@ default = []
 web = []
 
 [[bin]]
-name = "vmux_terminal_app"
+name = "vmux_sessions_app"
 path = "src/main.rs"
 required-features = ["web"]
 
@@ -23,7 +23,6 @@ vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
 
 [dependencies]
 serde = { workspace = true }
-rkyv = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true }
@@ -32,12 +31,6 @@ vmux_webview_app = { path = "../vmux_webview_app" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
-js-sys = "0.3"
-unicode-width = "0.2"
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = { workspace = true }
-web-sys = { version = "0.3", features = [
-    "Window", "Document", "Element", "HtmlElement", "Node",
-    "DomRect", "CssStyleDeclaration",
-    "ResizeObserver", "ResizeObserverEntry",
-] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement"] }

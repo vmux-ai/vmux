@@ -20,7 +20,9 @@ use crate::{
     settings::AppSettings,
     terminal::Terminal,
 };
+use vmux_daemon::protocol::SessionId;
 use vmux_header::PageMetadata;
+use vmux_sessions::event::SESSIONS_WEBVIEW_URL;
 use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
 
 pub(crate) struct PersistencePlugin;
@@ -272,12 +274,37 @@ pub(crate) fn rebuild_session_views(
         if !has_browser {
             if meta
                 .url
-                .starts_with(TERMINAL_WEBVIEW_URL.trim_end_matches('/'))
+                .starts_with(SESSIONS_WEBVIEW_URL.trim_end_matches('/'))
             {
                 commands.spawn((
-                    Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                    crate::sessions_monitor::SessionsMonitor::new(
+                        &mut meshes,
+                        &mut webview_mt,
+                    ),
                     ChildOf(entity),
                 ));
+            } else if meta
+                .url
+                .starts_with(TERMINAL_WEBVIEW_URL.trim_end_matches('/'))
+            {
+                // Try to extract session UUID from URL for reattach
+                let session_id = meta.url
+                    .strip_prefix(TERMINAL_WEBVIEW_URL)
+                    .and_then(|rest| rest.strip_prefix("session/"))
+                    .and_then(|uuid_str| uuid_str.parse::<uuid::Uuid>().ok())
+                    .map(SessionId::from_uuid);
+
+                if let Some(sid) = session_id {
+                    commands.spawn((
+                        Terminal::reattach(&mut meshes, &mut webview_mt, sid),
+                        ChildOf(entity),
+                    ));
+                } else {
+                    commands.spawn((
+                        Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                        ChildOf(entity),
+                    ));
+                }
             } else {
                 commands.spawn((
                     Browser::new(&mut meshes, &mut webview_mt, &meta.url),

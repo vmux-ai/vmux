@@ -15,8 +15,10 @@ mod profile;
 mod scene;
 mod settings;
 pub(crate) mod shortcut;
+mod sessions_monitor;
 mod terminal;
 mod themes;
+mod tray;
 mod unit;
 pub mod updater;
 
@@ -29,10 +31,11 @@ use std::time::Duration;
 use {
     browser::BrowserPlugin, command::CommandPlugin, command_bar::CommandBarInputPlugin,
     layout::LayoutPlugin, os_menu::OsMenuPlugin, persistence::PersistencePlugin,
-    profile::ProfilePlugin, scene::ScenePlugin, settings::SettingsPlugin, shortcut::ShortcutPlugin,
-    terminal::TerminalInputPlugin, vmux_command_bar::CommandBarPlugin, vmux_header::HeaderPlugin,
-    vmux_side_sheet::SideSheetPlugin, vmux_terminal::TerminalPlugin,
-    vmux_webview_app::WebviewAppRegistryPlugin,
+    profile::ProfilePlugin, scene::ScenePlugin, sessions_monitor::SessionsMonitorPlugin,
+    settings::SettingsPlugin, shortcut::ShortcutPlugin, terminal::TerminalInputPlugin,
+    vmux_command_bar::CommandBarPlugin, vmux_header::HeaderPlugin,
+    vmux_sessions::SessionsPlugin, vmux_side_sheet::SideSheetPlugin,
+    vmux_terminal::TerminalPlugin, vmux_webview_app::WebviewAppRegistryPlugin,
 };
 
 pub struct VmuxPlugin;
@@ -95,11 +98,13 @@ impl Plugin for VmuxPlugin {
             SideSheetPlugin,
             CommandBarPlugin,
             TerminalPlugin,
+            SessionsPlugin,
             CommandBarInputPlugin,
             BrowserPlugin,
         ))
         .add_plugins((
             TerminalInputPlugin,
+            SessionsMonitorPlugin,
             PersistencePlugin,
             ProfilePlugin,
             LayoutPlugin,
