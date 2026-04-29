@@ -51,10 +51,7 @@ trap restore EXIT
 sed -i '' "s/^product-name = .*/product-name = \"$PRODUCT_NAME\"/" "$CARGO_TOML"
 sed -i '' "s/^identifier = .*/identifier = \"$BUNDLE_ID\"/" "$CARGO_TOML"
 
-# Local builds only need .app (DMG fails with special chars in product name)
-if [[ "$PROFILE" == "local" ]]; then
-    sed -i '' 's/^formats = .*/formats = ["app"]/' "$CARGO_TOML"
-fi
+
 
 # Patch Info.plist
 sed -i '' "s|<string>ai\.vmux\.desktop</string>|<string>$BUNDLE_ID</string>|" "$INFO_PLIST"

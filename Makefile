@@ -1,4 +1,4 @@
-.PHONY: run-mac run-mac-local run-doctor build-mac-debug build build-local-mac build-release-mac package-local-mac package-release-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps run-website build-website lint lint-fix fmt clippy test
+.PHONY: run-mac run-mac-local run-doctor build-mac-debug build build-mac-local build-mac-release package-local-mac package-release-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps run-website build-website lint lint-fix fmt clippy test
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 RUSTUP_BIN := $(or $(shell command -v rustup 2>/dev/null),$(HOME)/.cargo/bin/rustup)
@@ -33,10 +33,12 @@ package-local-mac:
 package-release-mac:
 	./scripts/package.sh release
 
-build-local-mac: package-local-mac
-	@echo "Done. App bundle is already codesigned by cargo-packager + inject-cef."
+build-mac-local: package-local-mac
+	@HASH=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown); \
+	APP_BUNDLE="target/release/Vmux ($$HASH).app" ./scripts/sign-and-notarize.sh
 
-build-release-mac: package-release-mac
+build-mac-release: package-release-mac
+	./scripts/sign-and-notarize.sh
 	@echo "Signing..."
 	./scripts/sign-and-notarize.sh
 
