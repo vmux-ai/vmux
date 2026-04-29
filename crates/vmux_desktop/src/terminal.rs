@@ -833,32 +833,130 @@ fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bo
     format!("\x1b[<{};{};{}{}", cb, col + 1, row + 1, suffix).into_bytes()
 }
 
-/// Tracks mouse state for selection (reserved for future local selection).
+/// Tracks the most recent mouse-down per session for click-count detection
+/// (300ms / ~1 cell window) and an active drag anchor.
 #[derive(Resource, Default)]
-struct MouseSelectionState;
+struct MouseSelectionState {
+    per_process: std::collections::HashMap<ProcessId, MouseSessionState>,
+}
 
-/// Handle mouse events from the terminal webview — forward to service as input.
+#[derive(Default, Clone, Debug)]
+struct MouseSessionState {
+    last_click: Option<MouseClickRecord>,
+    drag_active: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MouseClickRecord {
+    when: std::time::Instant,
+    col: u16,
+    row: u16,
+    count: u8,
+}
+
+/// Handle mouse events from the terminal webview.
+///
+/// Selection mode (left-button + (no app mouse-capture OR shift held)) is
+/// intercepted and translated into selection commands sent to the service.
+/// Anything else is forwarded as SGR mouse-report bytes to the PTY.
 fn on_term_mouse(
     trigger: On<Receive<TermMouseEvent>>,
     q: Query<&ServiceProcessHandle, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
+    mode_map: Res<TerminalModeMap>,
+    mut state: ResMut<MouseSelectionState>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
     let Some(service) = service else { return };
     let Ok(handle) = q.get(entity) else { return };
+    let process_id = handle.process_id;
 
-    // Forward all mouse events as SGR sequences to service
-    let button = if event.moving {
-        event.button + 32
-    } else {
-        event.button
-    };
-    let seq = sgr_mouse_sequence(button, event.col, event.row, event.modifiers, event.pressed);
-    service.0.send(ClientMessage::ProcessInput {
-        process_id: handle.process_id,
-        data: seq,
-    });
+    let mouse_capture = mode_map
+        .modes
+        .get(&process_id)
+        .map(|m| m.mouse_capture)
+        .unwrap_or(false);
+    let shift = event.modifiers & MOD_SHIFT != 0;
+    let is_left = event.button == 0;
+    let select_mode = is_left && (!mouse_capture || shift);
+
+    if !select_mode {
+        let button = if event.moving {
+            event.button + 32
+        } else {
+            event.button
+        };
+        let seq = sgr_mouse_sequence(button, event.col, event.row, event.modifiers, event.pressed);
+        service.0.send(ClientMessage::ProcessInput {
+            process_id,
+            data: seq,
+        });
+        return;
+    }
+
+    let entry = state.per_process.entry(process_id).or_default();
+
+    if event.pressed && !event.moving {
+        // Mouse-down: detect click count.
+        let now = std::time::Instant::now();
+        let count = match entry.last_click {
+            Some(prev)
+                if now.duration_since(prev.when).as_millis() <= 300
+                    && (prev.col as i32 - event.col as i32).abs() <= 1
+                    && (prev.row as i32 - event.row as i32).abs() <= 1 =>
+            {
+                (prev.count + 1).min(3)
+            }
+            _ => 1,
+        };
+        entry.last_click = Some(MouseClickRecord {
+            when: now,
+            col: event.col,
+            row: event.row,
+            count,
+        });
+        entry.drag_active = count == 1;
+
+        match count {
+            1 if shift => {
+                service.0.send(ClientMessage::ExtendSelectionTo {
+                    process_id,
+                    col: event.col,
+                    row: event.row,
+                });
+            }
+            1 => {
+                service.0.send(ClientMessage::SetSelection {
+                    process_id,
+                    range: Some(TermSelectionRange {
+                        start_col: event.col,
+                        start_row: event.row,
+                        end_col: event.col,
+                        end_row: event.row,
+                        is_block: false,
+                    }),
+                });
+            }
+            2 => service.0.send(ClientMessage::SelectWordAt {
+                process_id,
+                col: event.col,
+                row: event.row,
+            }),
+            _ => service.0.send(ClientMessage::SelectLineAt {
+                process_id,
+                row: event.row,
+            }),
+        }
+    } else if event.moving && entry.drag_active {
+        service.0.send(ClientMessage::ExtendSelectionTo {
+            process_id,
+            col: event.col,
+            row: event.row,
+        });
+    } else if !event.pressed {
+        entry.drag_active = false;
+    }
 }
 
 /// Mark dirty when webview becomes ready so initial viewport is sent.
