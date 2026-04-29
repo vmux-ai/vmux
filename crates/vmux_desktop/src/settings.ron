@@ -29,7 +29,7 @@
         ),
     ),
     shortcuts: (
-        leader: (key: "g", ctrl: true),
+        leader: (key: "b", ctrl: true),
         chord_timeout_ms: 1000,
         bindings: [
             (command: "tab_next", binding: Direct((key: "Tab", ctrl: true))),
