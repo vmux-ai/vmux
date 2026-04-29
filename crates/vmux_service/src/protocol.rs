@@ -136,6 +136,11 @@ pub enum ServiceMessage {
         session_id: SessionId,
         text: String,
     },
+    TerminalMode {
+        session_id: SessionId,
+        mouse_capture: bool,
+        copy_mode: bool,
+    },
 }
 
 /// Metadata about a process, returned in ProcessList.

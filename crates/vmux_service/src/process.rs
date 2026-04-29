@@ -76,6 +76,8 @@ pub struct Process {
     selection: Option<TermSelectionRange>,
     /// Stable hash of the last broadcast selection, so toggles re-trigger sync.
     last_selection_signature: u64,
+    /// Last broadcast (mouse_capture, copy_mode) flags.
+    last_terminal_mode: Option<(bool, bool)>,
 }
 
 impl Process {
@@ -181,6 +183,7 @@ impl Process {
             last_cursor: None,
             selection: None,
             last_selection_signature: 0,
+            last_terminal_mode: None,
         })
     }
 
@@ -340,6 +343,23 @@ impl Process {
         }
     }
 
+    /// Broadcast TerminalMode whenever mouse-capture or copy-mode changes.
+    fn maybe_broadcast_mode(&mut self) {
+        use alacritty_terminal::term::TermMode;
+        let mouse_capture = self.term.mode().intersects(TermMode::MOUSE_MODE);
+        // copy_mode field added in Task 7; stub as false for now.
+        let copy_mode = false;
+        let cur = (mouse_capture, copy_mode);
+        if self.last_terminal_mode != Some(cur) {
+            self.last_terminal_mode = Some(cur);
+            let _ = self.patch_tx.send(DaemonMessage::TerminalMode {
+                session_id: self.id,
+                mouse_capture,
+                copy_mode,
+            });
+        }
+    }
+
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.cols = cols;
         self.rows = rows;
@@ -365,6 +385,7 @@ impl Process {
         if got_data {
             self.sync_viewport();
         }
+        self.maybe_broadcast_mode();
         if let Ok(Some(status)) = self.child.try_wait() {
             let code = status.exit_code() as i32;
             let _ = self.patch_tx.send(ServiceMessage::ProcessExited {
