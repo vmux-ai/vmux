@@ -317,9 +317,8 @@ fn spawn_default_session(
     profile_q: Query<(), With<Profile>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     settings: Res<AppSettings>,
+    mut new_tab_ctx: ResMut<crate::command_bar::NewTabContext>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     // If profiles already exist (loaded from session.ron) or a session
     // file is present (entities may still be arriving from the load
@@ -330,7 +329,6 @@ fn spawn_default_session(
 
     let Ok(main) = main_q.single() else { return };
     let pw = *primary_window;
-    let startup_url = settings.browser.startup_url.as_str();
 
     // Spawn a Profile so that on next launch, this function is skipped
     // when session.ron is loaded (the guard checks profile_q.is_empty()).
@@ -374,6 +372,8 @@ fn spawn_default_session(
         ))
         .id();
 
+    // Create an empty tab (no browser content) and open the command bar
+    // so the user is immediately prompted instead of seeing an empty pane.
     let tab = commands
         .spawn((
             tab_bundle(),
@@ -382,11 +382,8 @@ fn spawn_default_session(
             ChildOf(leaf),
         ))
         .id();
-
-    commands.spawn((
-        Browser::new(&mut meshes, &mut webview_mt, startup_url),
-        ChildOf(tab),
-    ));
+    new_tab_ctx.tab = Some(tab);
+    commands.insert_resource(crate::command_bar::PendingFirstLaunchOpen);
 }
 
 fn spawn_glass_child(
@@ -447,7 +444,8 @@ fn spawn_glass_panes(
             spawn_glass_child(&mut commands, plane.clone(), &mut materials, r, entity);
         }
     }
-    // Modal and panes use CSS-based glass, not 3D meshes.
+    // Modal glass is handled per-tab (glass mesh spawned as child of
+    // the new tab's transparent browser in handle_tab_commands).
 }
 
 /// Keeps each Glass's GlassCorners clip in sync with its parent panel's computed size.
