@@ -13,9 +13,9 @@ mod os_menu;
 mod persistence;
 mod profile;
 mod scene;
+mod sessions_monitor;
 mod settings;
 pub(crate) mod shortcut;
-mod sessions_monitor;
 mod terminal;
 mod themes;
 mod tray;
@@ -33,9 +33,9 @@ use {
     layout::LayoutPlugin, os_menu::OsMenuPlugin, persistence::PersistencePlugin,
     profile::ProfilePlugin, scene::ScenePlugin, sessions_monitor::SessionsMonitorPlugin,
     settings::SettingsPlugin, shortcut::ShortcutPlugin, terminal::TerminalInputPlugin,
-    vmux_command_bar::CommandBarPlugin, vmux_header::HeaderPlugin,
-    vmux_sessions::SessionsPlugin, vmux_side_sheet::SideSheetPlugin,
-    vmux_terminal::TerminalPlugin, vmux_webview_app::WebviewAppRegistryPlugin,
+    vmux_command_bar::CommandBarPlugin, vmux_header::HeaderPlugin, vmux_sessions::SessionsPlugin,
+    vmux_side_sheet::SideSheetPlugin, vmux_terminal::TerminalPlugin,
+    vmux_webview_app::WebviewAppRegistryPlugin,
 };
 
 pub struct VmuxPlugin;

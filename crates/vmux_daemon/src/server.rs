@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::BufReader;
 use tokio::net::UnixListener;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 
 // rkyv is used directly in the attach forwarder (can't use write_message! macro
 // inside a spawned task that doesn't return Result).
@@ -98,11 +98,10 @@ async fn handle_client(
                         loop {
                             match rx.recv().await {
                                 Ok(msg) => {
-                                    let bytes =
-                                        match rkyv::to_bytes::<rkyv::rancor::Error>(&msg) {
-                                            Ok(b) => b,
-                                            Err(_) => break,
-                                        };
+                                    let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&msg) {
+                                        Ok(b) => b,
+                                        Err(_) => break,
+                                    };
                                     let mut w = w.lock().await;
                                     if crate::framing::write_raw_frame(&mut *w, &bytes)
                                         .await
@@ -152,11 +151,7 @@ async fn handle_client(
 
             ClientMessage::ListSessions => {
                 let mgr = manager.lock().await;
-                let sessions = mgr
-                    .sessions
-                    .values()
-                    .map(|s| s.info())
-                    .collect::<Vec<_>>();
+                let sessions = mgr.sessions.values().map(|s| s.info()).collect::<Vec<_>>();
                 let resp = DaemonMessage::SessionList { sessions };
                 let mut w = writer.lock().await;
                 write_message!(&mut *w, &resp)?;

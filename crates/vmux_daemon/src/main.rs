@@ -13,8 +13,7 @@ async fn main() {
     let sock = socket_path();
     let _ = std::fs::remove_file(&sock);
 
-    let listener =
-        tokio::net::UnixListener::bind(&sock).expect("failed to bind Unix socket");
+    let listener = tokio::net::UnixListener::bind(&sock).expect("failed to bind Unix socket");
 
     eprintln!("vmux-daemon: listening on {}", sock.display());
 

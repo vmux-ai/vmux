@@ -24,11 +24,10 @@ struct DaemonEventProxy {
 
 impl TermEventListener for DaemonEventProxy {
     fn send_event(&self, event: TermEvent) {
-        if let TermEvent::PtyWrite(text) = event {
-            if let Ok(mut writer) = self.pty_writer.lock() {
+        if let TermEvent::PtyWrite(text) = event
+            && let Ok(mut writer) = self.pty_writer.lock() {
                 let _ = writer.write_all(text.as_bytes());
             }
-        }
     }
 }
 
@@ -117,13 +116,12 @@ impl Session {
         ));
         drop(pair.slave);
 
-        if !cwd.is_empty() && cwd_path.exists() {
-            if let Ok(mut w) = writer.lock() {
+        if !cwd.is_empty() && cwd_path.exists()
+            && let Ok(mut w) = writer.lock() {
                 let cd_cmd = format!("cd {}\n", cwd);
                 let _ = w.write_all(cd_cmd.as_bytes());
                 let _ = w.flush();
             }
-        }
 
         let (pty_tx, pty_rx) = mpsc::unbounded_channel();
         std::thread::Builder::new()
@@ -320,6 +318,12 @@ pub struct SessionManager {
     pub sessions: HashMap<SessionId, Session>,
 }
 
+impl Default for SessionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SessionManager {
     pub fn new() -> Self {
         Self {
@@ -358,7 +362,7 @@ impl SessionManager {
     }
 
     pub fn shutdown(&mut self) {
-        for (_, session) in &mut self.sessions {
+        for session in self.sessions.values_mut() {
             session.kill();
         }
         self.sessions.clear();
@@ -497,12 +501,24 @@ fn named_to_ansi_index(named: &NamedColor) -> u8 {
 
 fn cell_flags_to_u16(flags: CellFlags) -> u16 {
     let mut f = 0u16;
-    if flags.contains(CellFlags::BOLD) { f |= FLAG_BOLD; }
-    if flags.contains(CellFlags::ITALIC) { f |= FLAG_ITALIC; }
-    if flags.contains(CellFlags::UNDERLINE) { f |= FLAG_UNDERLINE; }
-    if flags.contains(CellFlags::STRIKEOUT) { f |= FLAG_STRIKETHROUGH; }
-    if flags.contains(CellFlags::DIM) { f |= FLAG_DIM; }
-    if flags.contains(CellFlags::INVERSE) { f |= FLAG_INVERSE; }
+    if flags.contains(CellFlags::BOLD) {
+        f |= FLAG_BOLD;
+    }
+    if flags.contains(CellFlags::ITALIC) {
+        f |= FLAG_ITALIC;
+    }
+    if flags.contains(CellFlags::UNDERLINE) {
+        f |= FLAG_UNDERLINE;
+    }
+    if flags.contains(CellFlags::STRIKEOUT) {
+        f |= FLAG_STRIKETHROUGH;
+    }
+    if flags.contains(CellFlags::DIM) {
+        f |= FLAG_DIM;
+    }
+    if flags.contains(CellFlags::INVERSE) {
+        f |= FLAG_INVERSE;
+    }
     f
 }
 

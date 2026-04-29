@@ -36,9 +36,7 @@ fn looks_like_path(s: &str) -> bool {
         || s.starts_with("~/")
         || s.starts_with("./")
         || s.starts_with("../")
-        || s.contains('/')
-            && !s.contains(' ')
-            && !s.contains("://")
+        || s.contains('/') && !s.contains(' ') && !s.contains("://")
 }
 
 fn filter_results(

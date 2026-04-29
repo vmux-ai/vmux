@@ -2,8 +2,16 @@ use vmux_terminal::event::{TermCursor, TermLine, TermSelectionRange};
 
 /// Unique identifier for a daemon-managed terminal session.
 /// Stored as raw bytes for rkyv compatibility.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct SessionId(pub [u8; 16]);
+
+impl Default for SessionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl SessionId {
     pub fn new() -> Self {
@@ -42,25 +50,41 @@ pub enum ClientMessage {
         cols: u16,
         rows: u16,
     },
-    AttachSession { session_id: SessionId },
-    DetachSession { session_id: SessionId },
-    SessionInput { session_id: SessionId, data: Vec<u8> },
+    AttachSession {
+        session_id: SessionId,
+    },
+    DetachSession {
+        session_id: SessionId,
+    },
+    SessionInput {
+        session_id: SessionId,
+        data: Vec<u8>,
+    },
     ResizeSession {
         session_id: SessionId,
         cols: u16,
         rows: u16,
     },
     ListSessions,
-    KillSession { session_id: SessionId },
-    RequestSnapshot { session_id: SessionId },
+    KillSession {
+        session_id: SessionId,
+    },
+    RequestSnapshot {
+        session_id: SessionId,
+    },
     Shutdown,
 }
 
 /// Messages sent from the daemon to the GUI client.
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum DaemonMessage {
-    SessionCreated { session_id: SessionId },
-    SessionOutput { session_id: SessionId, data: Vec<u8> },
+    SessionCreated {
+        session_id: SessionId,
+    },
+    SessionOutput {
+        session_id: SessionId,
+        data: Vec<u8>,
+    },
     ViewportPatch {
         session_id: SessionId,
         changed_lines: Vec<(u16, TermLine)>,
@@ -74,7 +98,9 @@ pub enum DaemonMessage {
         session_id: SessionId,
         exit_code: Option<i32>,
     },
-    SessionList { sessions: Vec<SessionInfo> },
+    SessionList {
+        sessions: Vec<SessionInfo>,
+    },
     Snapshot {
         session_id: SessionId,
         lines: Vec<TermLine>,
@@ -82,7 +108,9 @@ pub enum DaemonMessage {
         cols: u16,
         rows: u16,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 /// Metadata about a session, returned in SessionList.

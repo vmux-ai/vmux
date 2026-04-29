@@ -1,4 +1,6 @@
-use bevy::{ecs::relationship::Relationship, picking::Pickable, prelude::*, render::alpha::AlphaMode};
+use bevy::{
+    ecs::relationship::Relationship, picking::Pickable, prelude::*, render::alpha::AlphaMode,
+};
 use bevy_cef::prelude::*;
 use vmux_daemon::protocol::{ClientMessage, SessionId};
 use vmux_history::LastActivatedAt;
@@ -93,7 +95,10 @@ impl Plugin for SessionsMonitorPlugin {
             .add_plugins(JsEmitEventPlugin::<SessionNavigateEvent>::default())
             .add_plugins(JsEmitEventPlugin::<SessionKillEvent>::default())
             .add_plugins(JsEmitEventPlugin::<SessionKillAllEvent>::default())
-            .add_systems(Update, (request_session_list, broadcast_to_monitors).chain())
+            .add_systems(
+                Update,
+                (request_session_list, broadcast_to_monitors).chain(),
+            )
             .add_observer(on_session_navigate)
             .add_observer(on_session_kill)
             .add_observer(on_session_kill_all);
@@ -111,11 +116,10 @@ fn request_session_list(
         return;
     }
     timer.0.tick(time.delta());
-    if timer.0.just_finished() {
-        if let Some(daemon) = daemon {
+    if timer.0.just_finished()
+        && let Some(daemon) = daemon {
             daemon.0.send(ClientMessage::ListSessions);
         }
-    }
 }
 
 /// Broadcast the cached session list to all sessions monitor webviews.
@@ -190,7 +194,9 @@ fn on_session_navigate(
             let tab = content_child_of.get();
             commands.entity(tab).insert(LastActivatedAt::now());
             if let Ok(tab_child_of) = tab_parent.get(tab) {
-                commands.entity(tab_child_of.get()).insert(LastActivatedAt::now());
+                commands
+                    .entity(tab_child_of.get())
+                    .insert(LastActivatedAt::now());
             }
             return;
         }
@@ -202,7 +208,12 @@ fn on_session_navigate(
         return;
     };
     let (_, active_pane, _) = focused_tab(
-        &spaces, &all_children, &leaf_panes, &pane_ts, &pane_children, &tab_ts,
+        &spaces,
+        &all_children,
+        &leaf_panes,
+        &pane_ts,
+        &pane_children,
+        &tab_ts,
     );
     let Some(pane) = active_pane else { return };
 

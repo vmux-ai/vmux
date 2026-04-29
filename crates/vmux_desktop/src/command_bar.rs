@@ -41,6 +41,10 @@ fn parse_session_id_from_url(url: &str) -> Option<SessionId> {
 struct PendingCommandBarReveal(u8);
 
 /// Tracks an empty tab spawned by Cmd+T that is waiting for the user
+/// Marker: first launch pending, command bar opens when modal webview is ready.
+#[derive(Resource)]
+pub(crate) struct PendingFirstLaunchOpen;
+
 /// to choose content via the command bar.
 #[derive(Resource, Default)]
 pub(crate) struct NewTabContext {
@@ -99,6 +103,7 @@ pub fn is_command_bar_open(modal_q: &Query<&Node, With<Modal>>) -> bool {
 fn handle_open_command_bar(
     mut reader: MessageReader<AppCommand>,
     mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
+    mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
     browsers: NonSend<Browsers>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
@@ -286,6 +291,9 @@ fn handle_open_command_bar(
         .entity(modal_e)
         .insert(CefKeyboardTarget)
         .insert(CefPointerTarget);
+
+    // Command bar is a CEF webview — allow keyboard forwarding
+    suppress.0 = false;
 
     // Gather current URL (empty for new tab mode)
     let current_url = if let Some(override_url) = url_override {
@@ -523,8 +531,12 @@ fn on_command_bar_action(
                     if let Some(sid) = parse_session_id_from_url(&url) {
                         // Reattach to existing daemon session in a new tab
                         let (_, active_pane_opt, _) = focused_tab(
-                            &spaces, &all_children, &leaf_panes,
-                            &pane_ts, &pane_children, &tab_ts,
+                            &spaces,
+                            &all_children,
+                            &leaf_panes,
+                            &pane_ts,
+                            &pane_children,
+                            &tab_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
                             let tab_e = commands
@@ -588,8 +600,12 @@ fn on_command_bar_action(
                     custom_keyboard_restore = true;
                 } else {
                     let (_, active_pane_opt, _) = focused_tab(
-                        &spaces, &all_children, &leaf_panes,
-                        &pane_ts, &pane_children, &tab_ts,
+                        &spaces,
+                        &all_children,
+                        &leaf_panes,
+                        &pane_ts,
+                        &pane_children,
+                        &tab_ts,
                     );
                     if let Some(pane_e) = active_pane_opt {
                         let tab_e = commands
@@ -609,60 +625,23 @@ fn on_command_bar_action(
                     }
                 }
             } else {
-            let cwd = if evt.value.is_empty() || evt.value.contains("://") {
-                None
-            } else {
-                let expanded = if evt.value.starts_with("~/") {
-                    std::env::var("HOME")
-                        .map(|h| std::path::PathBuf::from(h).join(&evt.value[2..]))
-                        .unwrap_or_else(|_| std::path::PathBuf::from(&evt.value))
-                } else if evt.value.starts_with('/') {
-                    std::path::PathBuf::from(&evt.value)
+                let cwd = if evt.value.is_empty() || evt.value.contains("://") {
+                    None
                 } else {
-                    std::env::var("HOME")
-                        .map(|h| std::path::PathBuf::from(h).join(&evt.value))
-                        .unwrap_or_else(|_| std::path::PathBuf::from(&evt.value))
+                    let expanded = if evt.value.starts_with("~/") {
+                        std::env::var("HOME")
+                            .map(|h| std::path::PathBuf::from(h).join(&evt.value[2..]))
+                            .unwrap_or_else(|_| std::path::PathBuf::from(&evt.value))
+                    } else if evt.value.starts_with('/') {
+                        std::path::PathBuf::from(&evt.value)
+                    } else {
+                        std::env::var("HOME")
+                            .map(|h| std::path::PathBuf::from(h).join(&evt.value))
+                            .unwrap_or_else(|_| std::path::PathBuf::from(&evt.value))
+                    };
+                    Some(expanded)
                 };
-                Some(expanded)
-            };
-            if let Some(tab_e) = empty_tab {
-                commands.entity(tab_e).insert(PageMetadata {
-                    url: TERMINAL_WEBVIEW_URL.to_string(),
-                    title: "Terminal (Session: -)".to_string(),
-                    ..default()
-                });
-                let term_e = commands
-                    .spawn((
-                        Terminal::new_with_cwd(
-                            &mut meshes,
-                            &mut webview_mt,
-                            &settings,
-                            cwd.as_deref(),
-                        ),
-                        ChildOf(tab_e),
-                    ))
-                    .id();
-                commands.entity(term_e).insert(CefKeyboardTarget);
-                new_tab_ctx.tab = None;
-                new_tab_ctx.previous_tab = None;
-                custom_keyboard_restore = true;
-            } else {
-                let (_, active_pane_opt, _) = focused_tab(
-                    &spaces,
-                    &all_children,
-                    &leaf_panes,
-                    &pane_ts,
-                    &pane_children,
-                    &tab_ts,
-                );
-                if let Some(pane_e) = active_pane_opt {
-                    let tab_e = commands
-                        .spawn((
-                            crate::layout::tab::tab_bundle(),
-                            LastActivatedAt::now(),
-                            ChildOf(pane_e),
-                        ))
-                        .id();
+                if let Some(tab_e) = empty_tab {
                     commands.entity(tab_e).insert(PageMetadata {
                         url: TERMINAL_WEBVIEW_URL.to_string(),
                         title: "Terminal (Session: -)".to_string(),
@@ -680,10 +659,47 @@ fn on_command_bar_action(
                         ))
                         .id();
                     commands.entity(term_e).insert(CefKeyboardTarget);
+                    new_tab_ctx.tab = None;
+                    new_tab_ctx.previous_tab = None;
+                    custom_keyboard_restore = true;
                 } else {
-                    writer.write(AppCommand::Terminal(TerminalCommand::New));
+                    let (_, active_pane_opt, _) = focused_tab(
+                        &spaces,
+                        &all_children,
+                        &leaf_panes,
+                        &pane_ts,
+                        &pane_children,
+                        &tab_ts,
+                    );
+                    if let Some(pane_e) = active_pane_opt {
+                        let tab_e = commands
+                            .spawn((
+                                crate::layout::tab::tab_bundle(),
+                                LastActivatedAt::now(),
+                                ChildOf(pane_e),
+                            ))
+                            .id();
+                        commands.entity(tab_e).insert(PageMetadata {
+                            url: TERMINAL_WEBVIEW_URL.to_string(),
+                            title: "Terminal (Session: -)".to_string(),
+                            ..default()
+                        });
+                        let term_e = commands
+                            .spawn((
+                                Terminal::new_with_cwd(
+                                    &mut meshes,
+                                    &mut webview_mt,
+                                    &settings,
+                                    cwd.as_deref(),
+                                ),
+                                ChildOf(tab_e),
+                            ))
+                            .id();
+                        commands.entity(term_e).insert(CefKeyboardTarget);
+                    } else {
+                        writer.write(AppCommand::Terminal(TerminalCommand::New));
+                    }
                 }
-            }
             } // end reattach else
         }
         "command" => {

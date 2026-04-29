@@ -31,7 +31,72 @@ pub(crate) struct Terminal;
 
 /// Marker: daemon session has exited; tab close is pending.
 #[derive(Component)]
-struct SessionExited;
+pub(crate) struct SessionExited;
+
+/// Alias for backwards compatibility with close-confirmation code.
+pub(crate) type PtyExited = SessionExited;
+
+/// Check if confirmation is needed based on settings.
+pub(crate) fn should_confirm_close(settings: &AppSettings) -> bool {
+    settings.terminal.as_ref().is_none_or(|t| t.confirm_close)
+}
+
+/// Check if a tab entity has any child terminal that is still running.
+pub(crate) fn has_live_terminal(
+    tab: Entity,
+    children_q: &Query<&Children>,
+    terminal_q: &Query<(), (With<Terminal>, Without<SessionExited>)>,
+) -> bool {
+    if let Ok(children) = children_q.get(tab) {
+        children.iter().any(|child| terminal_q.contains(child))
+    } else {
+        false
+    }
+}
+
+/// Check if a pane has any tab with a live terminal.
+pub(crate) fn pane_has_live_terminal(
+    pane: Entity,
+    pane_children_q: &Query<&Children, With<crate::layout::pane::Pane>>,
+    all_children_q: &Query<&Children>,
+    terminal_q: &Query<(), (With<Terminal>, Without<SessionExited>)>,
+) -> bool {
+    if let Ok(tabs) = pane_children_q.get(pane) {
+        tabs.iter()
+            .any(|tab| has_live_terminal(tab, all_children_q, terminal_q))
+    } else {
+        false
+    }
+}
+
+/// Show confirmation dialog for closing a terminal tab/pane.
+pub(crate) fn show_close_dialog() -> bool {
+    use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Warning)
+        .set_title("Close Terminal?")
+        .set_description("A process is still running in this terminal. Close anyway?")
+        .set_buttons(MessageButtons::OkCancel)
+        .show();
+    matches!(result, MessageDialogResult::Ok)
+}
+
+/// Show confirmation dialog for quitting with N running terminals.
+pub(crate) fn confirm_quit_dialog(count: usize) -> bool {
+    use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+    let msg = if count == 1 {
+        "A terminal is still running. Quit anyway?".to_string()
+    } else {
+        format!("{count} terminals are still running. Quit anyway?")
+    };
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Warning)
+        .set_title("Quit Vmux?")
+        .set_description(&msg)
+        .set_buttons(MessageButtons::OkCancel)
+        .show();
+    matches!(result, MessageDialogResult::Ok)
+}
 
 /// Associates a terminal entity with a daemon session.
 #[derive(Component)]
@@ -328,11 +393,10 @@ fn try_connect_daemon(
                 eprintln!("vmux: failed to connect to daemon after all retries");
                 // Check daemon log for clues
                 let log_path = vmux_daemon::daemon_dir().join("daemon.log");
-                if let Ok(log) = std::fs::read_to_string(&log_path) {
-                    if !log.is_empty() {
+                if let Ok(log) = std::fs::read_to_string(&log_path)
+                    && !log.is_empty() {
                         eprintln!("vmux: daemon log:\n{log}");
                     }
-                }
                 commands.remove_resource::<DaemonConnectRetry>();
             }
         }
@@ -341,10 +405,7 @@ fn try_connect_daemon(
 
 /// Send CreateSession / AttachSession for newly spawned terminals.
 fn poll_daemon_messages(
-    pending_create: Query<
-        (Entity, &DaemonSessionHandle, &PendingDaemonCreate),
-        With<Terminal>,
-    >,
+    pending_create: Query<(Entity, &DaemonSessionHandle, &PendingDaemonCreate), With<Terminal>>,
     pending_attach: Query<
         (Entity, &DaemonSessionHandle),
         (With<Terminal>, With<PendingDaemonAttach>),
@@ -393,11 +454,16 @@ fn poll_daemon_messages(
     }
 
     // Drain daemon messages and dispatch
+    let mut matched_entities = Vec::new();
     for msg in daemon.0.drain() {
         match msg {
             DaemonMessage::SessionCreated { session_id } => {
-                // Match the first terminal awaiting a SessionCreated response.
-                for (entity, _, _) in &awaiting_create {
+                // Match the first unmatched terminal awaiting a SessionCreated response.
+                if let Some((entity, _, _)) = (&awaiting_create)
+                    .into_iter()
+                    .find(|(e, _, _)| !matched_entities.contains(e))
+                {
+                    matched_entities.push(entity);
                     // Attach to receive viewport patches
                     daemon.0.send(ClientMessage::AttachSession { session_id });
                     // Update handle with real daemon session ID
@@ -407,14 +473,9 @@ fn poll_daemon_messages(
                         .remove::<AwaitingSessionCreated>();
                     // Update PageMetadata URL so session.ron saves the real ID
                     if let Ok(mut meta) = meta_q.get_mut(entity) {
-                        meta.url =
-                            format!("{}session/{}", TERMINAL_WEBVIEW_URL, session_id);
-                        meta.title = format!(
-                            "Terminal ({})",
-                            &session_id.to_string()[..8]
-                        );
+                        meta.url = format!("{}session/{}", TERMINAL_WEBVIEW_URL, session_id);
+                        meta.title = format!("Terminal ({})", &session_id.to_string()[..8]);
                     }
-                    break;
                 }
             }
             DaemonMessage::ViewportPatch {
@@ -439,11 +500,7 @@ fn poll_daemon_messages(
                             selection,
                             full,
                         };
-                        commands.trigger(HostEmitEvent::new(
-                            entity,
-                            TERM_VIEWPORT_EVENT,
-                            &patch,
-                        ));
+                        commands.trigger(HostEmitEvent::new(entity, TERM_VIEWPORT_EVENT, &patch));
                         break;
                     }
                 }
@@ -472,11 +529,7 @@ fn poll_daemon_messages(
                             selection: None,
                             full: true,
                         };
-                        commands.trigger(HostEmitEvent::new(
-                            entity,
-                            TERM_VIEWPORT_EVENT,
-                            &patch,
-                        ));
+                        commands.trigger(HostEmitEvent::new(entity, TERM_VIEWPORT_EVENT, &patch));
                         break;
                     }
                 }
@@ -496,9 +549,7 @@ fn poll_daemon_messages(
                 }
             }
             DaemonMessage::SessionList { sessions } => {
-                commands.insert_resource(crate::sessions_monitor::DaemonSessionList {
-                    sessions,
-                });
+                commands.insert_resource(crate::sessions_monitor::DaemonSessionList { sessions });
             }
             DaemonMessage::Error { message } => {
                 warn!("Daemon error: {message}");
@@ -938,9 +989,9 @@ fn on_restart_pty(
         cols: 80,
         rows: 24,
     });
-    daemon.0.send(ClientMessage::AttachSession {
-        session_id: new_id,
-    });
+    daemon
+        .0
+        .send(ClientMessage::AttachSession { session_id: new_id });
 
     handle.session_id = new_id;
     meta.url = format!("{}session/{}", TERMINAL_WEBVIEW_URL, new_id);

@@ -67,7 +67,10 @@ impl DaemonHandle {
             Ok(p) => p,
             Err(_) => {
                 // Invalid PID file content — clean up
-                eprintln!("vmux-daemon: invalid PID file content: {:?}", pid_str.trim());
+                eprintln!(
+                    "vmux-daemon: invalid PID file content: {:?}",
+                    pid_str.trim()
+                );
                 let _ = std::fs::remove_file(&sock);
                 let _ = std::fs::remove_file(&pid_file);
                 return false;
@@ -154,11 +157,7 @@ impl DaemonHandle {
             .name("daemon-writer".into())
             .spawn(move || {
                 rt3.block_on(async move {
-                    loop {
-                        let msg = match cmd_rx.recv() {
-                            Ok(m) => m,
-                            Err(_) => break,
-                        };
+                    while let Ok(msg) = cmd_rx.recv() {
                         if conn.send(&msg).await.is_err() {
                             break;
                         }

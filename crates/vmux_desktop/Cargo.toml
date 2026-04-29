@@ -45,7 +45,7 @@ vmux_sessions = { path = "../vmux_sessions" }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_webview_app = { path = "../vmux_webview_app" }
 
-
+rfd = { workspace = true }
 notify = { workspace = true }
 semver = "1"
 cargo-packager-updater = "0.2"

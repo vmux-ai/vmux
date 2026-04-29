@@ -29,13 +29,30 @@ pub(crate) struct FocusedTab {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ComputeFocusSet;
 
+/// Marker: tab is waiting for close confirmation dialog.
+#[derive(Component)]
+pub(crate) struct PendingTabClose;
+
+/// Marker: close was confirmed, skip dialog next time.
+#[derive(Component)]
+pub(crate) struct CloseConfirmed;
+
+/// System set for `handle_tab_commands`.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct TabCommandSet;
+
 pub(crate) struct TabPlugin;
 
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
             .init_resource::<FocusedTab>()
-            .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
+            .add_systems(
+                Update,
+                handle_tab_commands
+                    .in_set(ReadAppCommands)
+                    .in_set(TabCommandSet),
+            )
             .add_systems(
                 Update,
                 compute_focused_tab
@@ -483,4 +500,24 @@ fn sync_tab_picking(
             }
         }
     }
+}
+
+pub(crate) fn open_command_bar_if_no_tabs(
+    tab_q: Query<(), With<Tab>>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    mut new_tab_ctx: ResMut<NewTabContext>,
+    mut commands: Commands,
+) {
+    if !tab_q.is_empty() {
+        return;
+    }
+    let Some(pane) = leaf_panes.iter().next() else {
+        return;
+    };
+    let tab = commands
+        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+        .id();
+    new_tab_ctx.tab = Some(tab);
+    new_tab_ctx.previous_tab = None;
+    new_tab_ctx.needs_open = true;
 }

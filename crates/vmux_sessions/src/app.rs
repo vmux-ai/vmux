@@ -13,10 +13,9 @@ pub fn App() -> Element {
     });
     let mut search = use_signal(String::new);
 
-    let _listener =
-        use_event_listener::<SessionsListEvent, _>(SESSIONS_LIST_EVENT, move |event| {
-            state.set(event);
-        });
+    let _listener = use_event_listener::<SessionsListEvent, _>(SESSIONS_LIST_EVENT, move |event| {
+        state.set(event);
+    });
 
     let data = state.read();
     let query = search.read().to_lowercase();
