@@ -93,7 +93,32 @@ pub enum ClientMessage {
     GetSelectionText {
         process_id: ProcessId,
     },
+    EnterCopyMode {
+        process_id: ProcessId,
+    },
+    ExitCopyMode {
+        process_id: ProcessId,
+    },
+    CopyModeKey {
+        process_id: ProcessId,
+        key: CopyModeKey,
+    },
     Shutdown,
+}
+
+#[derive(Debug, Clone, Copy, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum CopyModeKey {
+    Left,
+    Right,
+    Up,
+    Down,
+    LineStart,
+    LineEnd,
+    PageUp,
+    PageDown,
+    StartSelection,
+    Copy,
+    Exit,
 }
 
 /// Messages sent from the service to the GUI client.

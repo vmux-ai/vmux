@@ -78,6 +78,13 @@ pub struct Process {
     last_selection_signature: u64,
     /// Last broadcast (mouse_capture, copy_mode) flags.
     last_terminal_mode: Option<(bool, bool)>,
+    /// Active copy-mode state (cursor + optional anchor). None when not in copy mode.
+    copy_mode: Option<CopyModeState>,
+}
+
+struct CopyModeState {
+    cursor: (u16, u16),
+    anchor: Option<(u16, u16)>,
 }
 
 impl Process {
@@ -184,6 +191,7 @@ impl Process {
             selection: None,
             last_selection_signature: 0,
             last_terminal_mode: None,
+            copy_mode: None,
         })
     }
 
@@ -347,8 +355,7 @@ impl Process {
     fn maybe_broadcast_mode(&mut self) {
         use alacritty_terminal::term::TermMode;
         let mouse_capture = self.term.mode().intersects(TermMode::MOUSE_MODE);
-        // copy_mode field added in Task 7; stub as false for now.
-        let copy_mode = false;
+        let copy_mode = self.copy_mode.is_some();
         let cur = (mouse_capture, copy_mode);
         if self.last_terminal_mode != Some(cur) {
             self.last_terminal_mode = Some(cur);
@@ -358,6 +365,76 @@ impl Process {
                 copy_mode,
             });
         }
+    }
+
+    pub fn is_copy_mode(&self) -> bool {
+        self.copy_mode.is_some()
+    }
+
+    pub fn enter_copy_mode(&mut self) {
+        let grid = self.term.grid();
+        let cursor = (
+            grid.cursor.point.column.0 as u16,
+            grid.cursor.point.line.0 as u16,
+        );
+        self.copy_mode = Some(CopyModeState {
+            cursor,
+            anchor: None,
+        });
+        self.selection = None;
+        self.maybe_broadcast_mode();
+        self.sync_viewport();
+    }
+
+    pub fn exit_copy_mode(&mut self) {
+        self.copy_mode = None;
+        self.selection = None;
+        self.maybe_broadcast_mode();
+        self.sync_viewport();
+    }
+
+    /// Returns Some(text) if the key triggered a Copy action.
+    pub fn copy_mode_key(&mut self, key: crate::protocol::CopyModeKey) -> Option<String> {
+        use crate::protocol::CopyModeKey as K;
+        let cm = self.copy_mode.as_mut()?;
+        let cols = self.cols;
+        let rows = self.rows;
+        let (cur_col, cur_row) = cm.cursor;
+        let (new_col, new_row) = match key {
+            K::Left => (cur_col.saturating_sub(1), cur_row),
+            K::Right => ((cur_col + 1).min(cols.saturating_sub(1)), cur_row),
+            K::Up => (cur_col, cur_row.saturating_sub(1)),
+            K::Down => (cur_col, (cur_row + 1).min(rows.saturating_sub(1))),
+            K::LineStart => (0, cur_row),
+            K::LineEnd => (cols.saturating_sub(1), cur_row),
+            K::PageUp => (cur_col, cur_row.saturating_sub(rows / 2)),
+            K::PageDown => (cur_col, (cur_row + rows / 2).min(rows.saturating_sub(1))),
+            K::StartSelection => {
+                cm.anchor = Some((cur_col, cur_row));
+                (cur_col, cur_row)
+            }
+            K::Exit => {
+                self.exit_copy_mode();
+                return None;
+            }
+            K::Copy => {
+                let text = self.selection_text();
+                self.exit_copy_mode();
+                return text;
+            }
+        };
+        cm.cursor = (new_col, new_row);
+        if let Some((ac, ar)) = cm.anchor {
+            self.selection = Some(TermSelectionRange {
+                start_col: ac,
+                start_row: ar,
+                end_col: new_col,
+                end_row: new_row,
+                is_block: false,
+            });
+        }
+        self.sync_viewport();
+        None
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {

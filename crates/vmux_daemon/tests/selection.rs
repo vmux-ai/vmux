@@ -1,3 +1,4 @@
+use vmux_daemon::protocol::CopyModeKey;
 use vmux_daemon::session::Session;
 use vmux_terminal::event::TermSelectionRange;
 
@@ -72,4 +73,26 @@ fn select_word_walks_word_chars() {
         }
     }
     panic!("did not find foo_bar word selection");
+}
+
+#[test]
+fn copy_mode_movement_creates_selection() {
+    let mut s = new_session();
+    s.enter_copy_mode();
+    assert!(s.is_copy_mode());
+    s.copy_mode_key(CopyModeKey::StartSelection);
+    s.copy_mode_key(CopyModeKey::Right);
+    s.copy_mode_key(CopyModeKey::Right);
+    assert!(s.selection_text().is_some());
+    let copied = s.copy_mode_key(CopyModeKey::Copy);
+    assert!(copied.is_some());
+    assert!(!s.is_copy_mode());
+}
+
+#[test]
+fn copy_mode_exit_clears_state() {
+    let mut s = new_session();
+    s.enter_copy_mode();
+    s.copy_mode_key(CopyModeKey::Exit);
+    assert!(!s.is_copy_mode());
 }

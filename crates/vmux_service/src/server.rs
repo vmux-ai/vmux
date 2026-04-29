@@ -133,7 +133,9 @@ async fn handle_client(
 
             ClientMessage::ProcessInput { process_id, data } => {
                 let mgr = manager.lock().await;
-                if let Some(process) = mgr.processes.get(&process_id) {
+                if let Some(process) = mgr.processes.get(&process_id)
+                    && !process.is_copy_mode()
+                {
                     process.write_input(&data);
                 }
             }
@@ -226,6 +228,31 @@ async fn handle_client(
                 let resp = ServiceMessage::SelectionText { process_id, text };
                 let mut w = writer.lock().await;
                 write_message!(&mut *w, &resp)?;
+            }
+
+            ClientMessage::EnterCopyMode { process_id } => {
+                let mut mgr = manager.lock().await;
+                if let Some(process) = mgr.processes.get_mut(&process_id) {
+                    process.enter_copy_mode();
+                }
+            }
+
+            ClientMessage::ExitCopyMode { process_id } => {
+                let mut mgr = manager.lock().await;
+                if let Some(process) = mgr.processes.get_mut(&process_id) {
+                    process.exit_copy_mode();
+                }
+            }
+
+            ClientMessage::CopyModeKey { process_id, key } => {
+                let mut mgr = manager.lock().await;
+                if let Some(process) = mgr.processes.get_mut(&process_id)
+                    && let Some(text) = process.copy_mode_key(key)
+                {
+                    let resp = ServiceMessage::SelectionText { process_id, text };
+                    let mut w = writer.lock().await;
+                    write_message!(&mut *w, &resp)?;
+                }
             }
 
             ClientMessage::Shutdown => {
