@@ -562,10 +562,9 @@ fn poll_service_messages(
                 process_id,
                 exit_code: _,
             } => {
-                // Drop per-session caches so they don't leak across the
-                // app lifetime as sessions churn.
-                mode_map.modes.remove(&session_id);
-                mouse_state.per_session.remove(&session_id);
+                // Drop per-process caches so they don't leak across the app lifetime.
+                mode_map.modes.remove(&process_id);
+                mouse_state.per_process.remove(&process_id);
                 for (entity, handle, child_of) in &terminals {
                     if handle.process_id == process_id {
                         commands.entity(entity).insert(ProcessExited);
@@ -695,36 +694,9 @@ fn handle_terminal_keyboard(
         }
 
         if copy_mode_active {
-<<<<<<< HEAD
-            use vmux_service::protocol::CopyModeKey as K;
-            let k = match (&event.logical_key, ctrl) {
-                (Key::Character(s), false) if s.as_str() == "h" => Some(K::Left),
-                (Key::Character(s), false) if s.as_str() == "j" => Some(K::Down),
-                (Key::Character(s), false) if s.as_str() == "k" => Some(K::Up),
-                (Key::Character(s), false) if s.as_str() == "l" => Some(K::Right),
-                (Key::Character(s), false) if s.as_str() == "0" => Some(K::LineStart),
-                (Key::Character(s), false) if s.as_str() == "$" => Some(K::LineEnd),
-                (Key::Character(s), true) if s.as_str() == "u" => Some(K::PageUp),
-                (Key::Character(s), true) if s.as_str() == "d" => Some(K::PageDown),
-                (Key::Character(s), false) if s.as_str() == "v" => Some(K::StartSelection),
-                (Key::Character(s), false) if s.as_str() == "y" => Some(K::Copy),
-                (Key::Enter, _) => Some(K::Copy),
-                (Key::Character(s), false) if s.as_str() == "q" => Some(K::Exit),
-                (Key::Escape, _) => Some(K::Exit),
-                (Key::ArrowLeft, _) => Some(K::Left),
-                (Key::ArrowRight, _) => Some(K::Right),
-                (Key::ArrowUp, _) => Some(K::Up),
-                (Key::ArrowDown, _) => Some(K::Down),
-                _ => None,
-            };
-            if let Some(k) = k {
+            if let Some(k) = map_copy_mode_key(&event.logical_key, ctrl) {
                 service.0.send(ClientMessage::CopyModeKey {
                     process_id: active_process_id,
-=======
-            if let Some(k) = map_copy_mode_key(&event.logical_key, ctrl) {
-                daemon.0.send(ClientMessage::CopyModeKey {
-                    session_id: active_session_id,
->>>>>>> 4684260 (refactor(desktop): const multi-click constants + extract map_copy_mode_key + 4th-click wraps)
                     key: k,
                 });
             }
@@ -793,8 +765,8 @@ fn handle_terminal_keyboard(
 /// Translate a Bevy logical key + ctrl modifier into the corresponding
 /// tmux-style copy-mode action. Returns None if the key has no copy-mode
 /// binding (caller should swallow it regardless).
-fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_daemon::protocol::CopyModeKey> {
-    use vmux_daemon::protocol::CopyModeKey as K;
+fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_service::protocol::CopyModeKey> {
+    use vmux_service::protocol::CopyModeKey as K;
     match (key, ctrl) {
         (Key::ArrowLeft, _) => Some(K::Left),
         (Key::ArrowRight, _) => Some(K::Right),

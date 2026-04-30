@@ -1,4 +1,4 @@
-use crate::process::ProcessManager;
+use crate::process::{Process, ProcessManager};
 use crate::protocol::{ClientMessage, ProcessId, ServiceMessage};
 use crate::{read_message, write_message};
 use std::collections::HashMap;
@@ -6,6 +6,20 @@ use std::sync::Arc;
 use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tokio::sync::{Mutex, broadcast};
+
+/// Acquire the manager lock and run `f` against the process if it exists.
+/// Returns Some(result) when the process was found, None otherwise.
+async fn with_process_mut<F, R>(
+    manager: &Arc<Mutex<ProcessManager>>,
+    id: ProcessId,
+    f: F,
+) -> Option<R>
+where
+    F: FnOnce(&mut Process) -> R,
+{
+    let mut mgr = manager.lock().await;
+    mgr.processes.get_mut(&id).map(f)
+}
 
 // rkyv is used directly in the attach forwarder (can't use write_message! macro
 // inside a spawned task that doesn't return Result).
@@ -183,10 +197,10 @@ async fn handle_client(
             }
 
             ClientMessage::SetSelection { process_id, range } => {
-                let mut mgr = manager.lock().await;
-                if let Some(process) = mgr.processes.get_mut(&process_id) {
-                    process.set_selection(range);
-                }
+                with_process_mut(&manager, process_id, |process| {
+                    process.set_selection(range)
+                })
+                .await;
             }
 
             ClientMessage::ExtendSelectionTo {
@@ -194,10 +208,10 @@ async fn handle_client(
                 col,
                 row,
             } => {
-                let mut mgr = manager.lock().await;
-                if let Some(process) = mgr.processes.get_mut(&process_id) {
-                    process.extend_selection_to(col, row);
-                }
+                with_process_mut(&manager, process_id, |process| {
+                    process.extend_selection_to(col, row)
+                })
+                .await;
             }
 
             ClientMessage::SelectWordAt {
@@ -205,25 +219,23 @@ async fn handle_client(
                 col,
                 row,
             } => {
-                let mut mgr = manager.lock().await;
-                if let Some(process) = mgr.processes.get_mut(&process_id) {
-                    process.select_word_at(col, row);
-                }
+                with_process_mut(&manager, process_id, |process| {
+                    process.select_word_at(col, row)
+                })
+                .await;
             }
 
             ClientMessage::SelectLineAt { process_id, row } => {
-                let mut mgr = manager.lock().await;
-                if let Some(process) = mgr.processes.get_mut(&process_id) {
-                    process.select_line_at(row);
-                }
+                with_process_mut(&manager, process_id, |process| {
+                    process.select_line_at(row)
+                })
+                .await;
             }
 
             ClientMessage::GetSelectionText { process_id } => {
-                let mgr = manager.lock().await;
-                let text = mgr
-                    .processes
-                    .get(&process_id)
-                    .and_then(|process| process.selection_text())
+                let text = with_process_mut(&manager, process_id, |process| process.selection_text())
+                    .await
+                    .flatten()
                     .unwrap_or_default();
                 let resp = ServiceMessage::SelectionText { process_id, text };
                 let mut w = writer.lock().await;
@@ -231,23 +243,20 @@ async fn handle_client(
             }
 
             ClientMessage::EnterCopyMode { process_id } => {
-                let mut mgr = manager.lock().await;
-                if let Some(process) = mgr.processes.get_mut(&process_id) {
-                    process.enter_copy_mode();
-                }
+                with_process_mut(&manager, process_id, |process| {
+                    process.enter_copy_mode()
+                })
+                .await;
             }
 
             ClientMessage::ExitCopyMode { process_id } => {
-                let mut mgr = manager.lock().await;
-                if let Some(process) = mgr.processes.get_mut(&process_id) {
-                    process.exit_copy_mode();
-                }
+                with_process_mut(&manager, process_id, |process| process.exit_copy_mode()).await;
             }
 
             ClientMessage::CopyModeKey { process_id, key } => {
-                let mut mgr = manager.lock().await;
-                if let Some(process) = mgr.processes.get_mut(&process_id)
-                    && let Some(text) = process.copy_mode_key(key)
+                if let Some(Some(text)) =
+                    with_process_mut(&manager, process_id, |process| process.copy_mode_key(key))
+                        .await
                 {
                     let resp = ServiceMessage::SelectionText { process_id, text };
                     let mut w = writer.lock().await;
