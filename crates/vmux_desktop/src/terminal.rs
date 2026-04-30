@@ -25,6 +25,13 @@ use vmux_service::{
 use vmux_terminal::event::*;
 use vmux_webview_app::UiReady;
 
+/// Maximum interval between consecutive mouse-down events that count as a
+/// multi-click (double, triple).
+const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
+/// Maximum cell distance between consecutive mouse-down points that still
+/// counts as a multi-click (jitter tolerance).
+const MULTI_CLICK_CELL_TOLERANCE: i32 = 1;
+
 /// Marker component for terminal content entities (analogous to Browser).
 #[derive(Component)]
 pub(crate) struct Terminal;
@@ -688,6 +695,7 @@ fn handle_terminal_keyboard(
         }
 
         if copy_mode_active {
+<<<<<<< HEAD
             use vmux_service::protocol::CopyModeKey as K;
             let k = match (&event.logical_key, ctrl) {
                 (Key::Character(s), false) if s.as_str() == "h" => Some(K::Left),
@@ -712,6 +720,11 @@ fn handle_terminal_keyboard(
             if let Some(k) = k {
                 service.0.send(ClientMessage::CopyModeKey {
                     process_id: active_process_id,
+=======
+            if let Some(k) = map_copy_mode_key(&event.logical_key, ctrl) {
+                daemon.0.send(ClientMessage::CopyModeKey {
+                    session_id: active_session_id,
+>>>>>>> 4684260 (refactor(desktop): const multi-click constants + extract map_copy_mode_key + 4th-click wraps)
                     key: k,
                 });
             }
@@ -774,6 +787,36 @@ fn handle_terminal_keyboard(
             process_id: active_process_id,
             data: bytes,
         });
+    }
+}
+
+/// Translate a Bevy logical key + ctrl modifier into the corresponding
+/// tmux-style copy-mode action. Returns None if the key has no copy-mode
+/// binding (caller should swallow it regardless).
+fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_daemon::protocol::CopyModeKey> {
+    use vmux_daemon::protocol::CopyModeKey as K;
+    match (key, ctrl) {
+        (Key::ArrowLeft, _) => Some(K::Left),
+        (Key::ArrowRight, _) => Some(K::Right),
+        (Key::ArrowUp, _) => Some(K::Up),
+        (Key::ArrowDown, _) => Some(K::Down),
+        (Key::Enter, _) => Some(K::Copy),
+        (Key::Escape, _) => Some(K::Exit),
+        (Key::Character(s), c) => match (s.as_str(), c) {
+            ("h", false) => Some(K::Left),
+            ("j", false) => Some(K::Down),
+            ("k", false) => Some(K::Up),
+            ("l", false) => Some(K::Right),
+            ("0", false) => Some(K::LineStart),
+            ("$", false) => Some(K::LineEnd),
+            ("u", true) => Some(K::PageUp),
+            ("d", true) => Some(K::PageDown),
+            ("v", false) => Some(K::StartSelection),
+            ("y", false) => Some(K::Copy),
+            ("q", false) => Some(K::Exit),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -959,11 +1002,12 @@ fn on_term_mouse(
         let now = std::time::Instant::now();
         let count = match entry.last_click {
             Some(prev)
-                if now.duration_since(prev.when).as_millis() <= 300
-                    && (prev.col as i32 - event.col as i32).abs() <= 1
-                    && (prev.row as i32 - event.row as i32).abs() <= 1 =>
+                if now.duration_since(prev.when) <= MULTI_CLICK_WINDOW
+                    && (prev.col as i32 - event.col as i32).abs() <= MULTI_CLICK_CELL_TOLERANCE
+                    && (prev.row as i32 - event.row as i32).abs() <= MULTI_CLICK_CELL_TOLERANCE =>
             {
-                (prev.count + 1).min(3)
+                // Wrap back to 1 on the 4th click (browser behavior).
+                if prev.count >= 3 { 1 } else { prev.count + 1 }
             }
             _ => 1,
         };
