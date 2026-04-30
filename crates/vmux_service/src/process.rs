@@ -404,9 +404,15 @@ impl Process {
 
     pub fn enter_copy_mode(&mut self) {
         let grid = self.term.grid();
+        // Place the copy-mode cursor at the real PTY cursor, but clamped to
+        // the visible viewport. If the user has scrolled back, the PTY
+        // cursor sits off-screen; clamp to the bottom-most visible row so
+        // the first arrow keystroke moves a visible cursor.
+        let max_col = self.cols.saturating_sub(1);
+        let max_row = self.rows.saturating_sub(1);
         let cursor = (
-            grid.cursor.point.column.0 as u16,
-            grid.cursor.point.line.0 as u16,
+            (grid.cursor.point.column.0 as u16).min(max_col),
+            (grid.cursor.point.line.0 as u16).min(max_row),
         );
         self.copy_mode = Some(CopyModeState {
             cursor,
