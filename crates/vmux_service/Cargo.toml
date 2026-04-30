@@ -1,16 +1,16 @@
 [package]
-name = "vmux_daemon"
+name = "vmux_service"
 version.workspace = true
 edition.workspace = true
-description = "Background daemon for persistent terminal sessions"
+description = "Background service hosting persistent terminal processes"
 publish = false
 
 [[bin]]
-name = "vmux-daemon"
+name = "vmux-service"
 path = "src/main.rs"
 
 [lib]
-name = "vmux_daemon"
+name = "vmux_service"
 path = "src/lib.rs"
 
 [dependencies]

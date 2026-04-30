@@ -207,7 +207,7 @@ fn sync_keyboard_target(
                 commands.entity(browser_e).insert(CefKeyboardTarget);
             }
             // Suppress CEF keyboard forwarding when a terminal is focused —
-            // terminals receive input via the daemon, not CEF key events.
+            // terminals receive input via the service, not CEF key events.
             suppress.0 = terminal_q.contains(browser_e);
         } else if has_kb {
             commands.entity(browser_e).remove::<CefKeyboardTarget>();

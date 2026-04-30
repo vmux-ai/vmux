@@ -1,4 +1,4 @@
-use crate::protocol::{DaemonMessage, SessionId, SessionInfo};
+use crate::protocol::{ProcessId, ProcessInfo, ServiceMessage};
 use alacritty_terminal::{
     event::{Event as TermEvent, EventListener as TermEventListener},
     grid::Dimensions,
@@ -18,11 +18,11 @@ use tokio::sync::{broadcast, mpsc};
 use vmux_terminal::event::*;
 
 #[derive(Clone)]
-struct DaemonEventProxy {
+struct ServiceEventProxy {
     pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
 }
 
-impl TermEventListener for DaemonEventProxy {
+impl TermEventListener for ServiceEventProxy {
     fn send_event(&self, event: TermEvent) {
         if let TermEvent::PtyWrite(text) = event
             && let Ok(mut writer) = self.pty_writer.lock()
@@ -49,23 +49,23 @@ impl Dimensions for PtyDimensions {
     }
 }
 
-/// A single terminal session managed by the daemon.
-pub struct Session {
-    pub id: SessionId,
+/// A single terminal process managed by the service.
+pub struct Process {
+    pub id: ProcessId,
     pub shell: String,
     pub cwd: String,
     pub cols: u16,
     pub rows: u16,
     pub pid: u32,
     pub created_at: Instant,
-    term: Term<DaemonEventProxy>,
+    term: Term<ServiceEventProxy>,
     processor: Processor,
     pty_writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Box<dyn portable_pty::MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     pty_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     /// Broadcasts viewport patches to all attached GUI clients.
-    patch_tx: broadcast::Sender<DaemonMessage>,
+    patch_tx: broadcast::Sender<ServiceMessage>,
     line_hashes: Vec<u64>,
     /// Last broadcast cursor position (col, row). Used to broadcast a patch
     /// when only the cursor moves (e.g. typing space over already-blank
@@ -74,7 +74,7 @@ pub struct Session {
     last_cursor: Option<(u16, u16)>,
 }
 
-impl Session {
+impl Process {
     pub fn new(
         shell: String,
         cwd: String,
@@ -82,7 +82,7 @@ impl Session {
         cols: u16,
         rows: u16,
     ) -> Result<Self, String> {
-        let id = SessionId::new();
+        let id = ProcessId::new();
         let pty_system = NativePtySystem::default();
         let pair = pty_system
             .openpty(PtySize {
@@ -151,7 +151,7 @@ impl Session {
             })
             .map_err(|e| format!("failed to spawn PTY reader: {e}"))?;
 
-        let event_proxy = DaemonEventProxy {
+        let event_proxy = ServiceEventProxy {
             pty_writer: Arc::clone(&writer),
         };
         let dims = PtyDimensions { cols, rows };
@@ -178,7 +178,7 @@ impl Session {
         })
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<DaemonMessage> {
+    pub fn subscribe(&self) -> broadcast::Receiver<ServiceMessage> {
         self.patch_tx.subscribe()
     }
 
@@ -215,8 +215,8 @@ impl Session {
         }
         if let Ok(Some(status)) = self.child.try_wait() {
             let code = status.exit_code() as i32;
-            let _ = self.patch_tx.send(DaemonMessage::SessionExited {
-                session_id: self.id,
+            let _ = self.patch_tx.send(ServiceMessage::ProcessExited {
+                process_id: self.id,
                 exit_code: Some(code),
             });
             return true;
@@ -261,8 +261,8 @@ impl Session {
             cell.c.to_string()
         };
 
-        let patch = DaemonMessage::ViewportPatch {
-            session_id: self.id,
+        let patch = ServiceMessage::ViewportPatch {
+            process_id: self.id,
             changed_lines,
             cursor: TermCursor {
                 col: cursor_point.column.0 as u16,
@@ -279,7 +279,7 @@ impl Session {
         let _ = self.patch_tx.send(patch);
     }
 
-    pub fn snapshot(&self) -> DaemonMessage {
+    pub fn snapshot(&self) -> ServiceMessage {
         let grid = self.term.grid();
         let num_lines = grid.screen_lines();
         let offset = grid.display_offset() as i32;
@@ -297,8 +297,8 @@ impl Session {
             cell.c.to_string()
         };
 
-        DaemonMessage::Snapshot {
-            session_id: self.id,
+        ServiceMessage::Snapshot {
+            process_id: self.id,
             lines,
             cursor: TermCursor {
                 col: cursor_point.column.0 as u16,
@@ -312,8 +312,8 @@ impl Session {
         }
     }
 
-    pub fn info(&self) -> SessionInfo {
-        SessionInfo {
+    pub fn info(&self) -> ProcessInfo {
+        ProcessInfo {
             id: self.id,
             shell: self.shell.clone(),
             cwd: self.cwd.clone(),
@@ -329,58 +329,58 @@ impl Session {
     }
 }
 
-pub struct SessionManager {
-    pub sessions: HashMap<SessionId, Session>,
+pub struct ProcessManager {
+    pub processes: HashMap<ProcessId, Process>,
 }
 
-impl Default for SessionManager {
+impl Default for ProcessManager {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SessionManager {
+impl ProcessManager {
     pub fn new() -> Self {
         Self {
-            sessions: HashMap::new(),
+            processes: HashMap::new(),
         }
     }
 
-    pub fn create_session(
+    pub fn create_process(
         &mut self,
         shell: String,
         cwd: String,
         env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
-    ) -> Result<SessionId, String> {
-        let session = Session::new(shell, cwd, env, cols, rows)?;
-        let id = session.id;
-        self.sessions.insert(id, session);
+    ) -> Result<ProcessId, String> {
+        let process = Process::new(shell, cwd, env, cols, rows)?;
+        let id = process.id;
+        self.processes.insert(id, process);
         Ok(id)
     }
 
-    pub fn poll_all(&mut self) -> Vec<SessionId> {
+    pub fn poll_all(&mut self) -> Vec<ProcessId> {
         let mut exited = Vec::new();
-        for (id, session) in &mut self.sessions {
-            if session.poll() {
+        for (id, process) in &mut self.processes {
+            if process.poll() {
                 exited.push(*id);
             }
         }
         exited
     }
 
-    pub fn remove_session(&mut self, id: &SessionId) {
-        if let Some(mut session) = self.sessions.remove(id) {
-            session.kill();
+    pub fn remove_process(&mut self, id: &ProcessId) {
+        if let Some(mut process) = self.processes.remove(id) {
+            process.kill();
         }
     }
 
     pub fn shutdown(&mut self) {
-        for session in self.sessions.values_mut() {
-            session.kill();
+        for process in self.processes.values_mut() {
+            process.kill();
         }
-        self.sessions.clear();
+        self.processes.clear();
     }
 }
 

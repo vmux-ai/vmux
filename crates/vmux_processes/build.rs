@@ -4,12 +4,12 @@ use vmux_webview_app::build::{CefEmbeddedWebviewFinalize, WebviewAppBuilder};
 
 fn main() {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    WebviewAppBuilder::new(manifest_dir, "vmux_sessions", "vmux_sessions_app")
+    WebviewAppBuilder::new(manifest_dir, "vmux_processes", "vmux_processes_app")
         .track_manifest_rel_paths(&["tailwind.config.js", "../vmux_ui/assets/theme.css"])
-        .dx_extra_args(&["--bin", "vmux_sessions_app", "--features", "web"])
+        .dx_extra_args(&["--bin", "vmux_processes_app", "--features", "web"])
         .cef_finalize(CefEmbeddedWebviewFinalize {
             strip_uncompiled_tailwind_css: true,
         })
-        .tailwind_postprocess_after_dx(&["index-dxs", "sessions-dxs"])
-        .run("vmux_sessions");
+        .tailwind_postprocess_after_dx(&["index-dxs", "processes-dxs"])
+        .run("vmux_processes");
 }

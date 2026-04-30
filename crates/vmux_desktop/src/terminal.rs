@@ -16,12 +16,12 @@ use bevy::{
     render::alpha::AlphaMode,
 };
 use bevy_cef::prelude::*;
-use vmux_daemon::{
-    client::DaemonHandle,
-    protocol::{ClientMessage, DaemonMessage, SessionId},
-};
 use vmux_header::PageMetadata;
 use vmux_history::LastActivatedAt;
+use vmux_service::{
+    client::ServiceHandle,
+    protocol::{ClientMessage, ProcessId, ServiceMessage},
+};
 use vmux_terminal::event::*;
 use vmux_webview_app::UiReady;
 
@@ -29,12 +29,12 @@ use vmux_webview_app::UiReady;
 #[derive(Component)]
 pub(crate) struct Terminal;
 
-/// Marker: daemon session has exited; tab close is pending.
+/// Marker: service-managed process has exited; tab close is pending.
 #[derive(Component)]
-pub(crate) struct SessionExited;
+pub(crate) struct ProcessExited;
 
 /// Alias for backwards compatibility with close-confirmation code.
-pub(crate) type PtyExited = SessionExited;
+pub(crate) type PtyExited = ProcessExited;
 
 /// Check if confirmation is needed based on settings.
 pub(crate) fn should_confirm_close(settings: &AppSettings) -> bool {
@@ -45,7 +45,7 @@ pub(crate) fn should_confirm_close(settings: &AppSettings) -> bool {
 pub(crate) fn has_live_terminal(
     tab: Entity,
     children_q: &Query<&Children>,
-    terminal_q: &Query<(), (With<Terminal>, Without<SessionExited>)>,
+    terminal_q: &Query<(), (With<Terminal>, Without<ProcessExited>)>,
 ) -> bool {
     if let Ok(children) = children_q.get(tab) {
         children.iter().any(|child| terminal_q.contains(child))
@@ -59,7 +59,7 @@ pub(crate) fn pane_has_live_terminal(
     pane: Entity,
     pane_children_q: &Query<&Children, With<crate::layout::pane::Pane>>,
     all_children_q: &Query<&Children>,
-    terminal_q: &Query<(), (With<Terminal>, Without<SessionExited>)>,
+    terminal_q: &Query<(), (With<Terminal>, Without<ProcessExited>)>,
 ) -> bool {
     if let Ok(tabs) = pane_children_q.get(pane) {
         tabs.iter()
@@ -98,25 +98,25 @@ pub(crate) fn confirm_quit_dialog(count: usize) -> bool {
     matches!(result, MessageDialogResult::Ok)
 }
 
-/// Associates a terminal entity with a daemon session.
+/// Associates a terminal entity with a service-managed process.
 #[derive(Component)]
-pub(crate) struct DaemonSessionHandle {
-    pub session_id: SessionId,
+pub(crate) struct ServiceProcessHandle {
+    pub process_id: ProcessId,
 }
 
-/// Bevy resource wrapping the daemon connection.
+/// Bevy resource wrapping the service connection.
 #[derive(Resource)]
-pub(crate) struct DaemonClient(pub DaemonHandle);
+pub(crate) struct ServiceClient(pub ServiceHandle);
 
-/// Triggered to restart the terminal session for a terminal entity.
+/// Triggered to restart the terminal process for a terminal entity.
 #[derive(Event)]
 pub(crate) struct RestartPty {
     pub entity: Entity,
 }
 
-/// Tracks daemon connection retry state.
+/// Tracks service connection retry state.
 #[derive(Resource)]
-struct DaemonConnectRetry {
+struct ServiceConnectRetry {
     /// Countdown: stop retrying after this many ticks.
     remaining_attempts: u32,
     timer: Timer,
@@ -126,14 +126,14 @@ pub(crate) struct TerminalInputPlugin;
 
 impl Plugin for TerminalInputPlugin {
     fn build(&self, app: &mut App) {
-        // Try to connect to an already-running daemon first.
-        if let Some(handle) = DaemonHandle::connect() {
-            eprintln!("vmux: connected to existing daemon");
-            app.insert_resource(DaemonClient(handle));
+        // Try to connect to an already-running service first.
+        if let Some(handle) = ServiceHandle::connect() {
+            eprintln!("vmux: connected to existing service");
+            app.insert_resource(ServiceClient(handle));
         } else {
-            // Daemon not running — auto-start it and schedule connection retries.
-            ensure_daemon_started();
-            app.insert_resource(DaemonConnectRetry {
+            // Service not running — auto-start it and schedule connection retries.
+            ensure_service_started();
+            app.insert_resource(ServiceConnectRetry {
                 remaining_attempts: 60, // ~3 seconds with 50ms timer
                 timer: Timer::from_seconds(0.05, TimerMode::Repeating),
             });
@@ -153,8 +153,8 @@ impl Plugin for TerminalInputPlugin {
             .add_systems(
                 Update,
                 (
-                    try_connect_daemon.run_if(resource_exists::<DaemonConnectRetry>),
-                    poll_daemon_messages.in_set(WriteAppCommands),
+                    try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
+                    poll_service_messages.in_set(WriteAppCommands),
                     sync_terminal_theme,
                 )
                     .chain(),
@@ -192,23 +192,23 @@ impl Terminal {
             .map(|d| d.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        // SessionId is set to a placeholder here; the actual session is created
-        // in a startup system that sends CreateSession to the daemon once the
-        // DaemonClient resource is available.
-        let session_id = SessionId::new();
+        // ProcessId is set to a placeholder here; the actual process is created
+        // in a startup system that sends CreateProcess to the service once the
+        // ServiceClient resource is available.
+        let process_id = ProcessId::new();
 
         (
             (
                 Self,
                 Browser,
-                DaemonSessionHandle { session_id },
-                PendingDaemonCreate {
+                ServiceProcessHandle { process_id },
+                PendingServiceCreate {
                     shell,
                     cwd: cwd_str,
                 },
                 PageMetadata {
-                    title: format!("Terminal ({})", &session_id.to_string()[..8]),
-                    url: format!("{}session/{}", TERMINAL_WEBVIEW_URL, session_id),
+                    title: format!("Terminal ({})", &process_id.to_string()[..8]),
+                    url: format!("{}{}", TERMINAL_WEBVIEW_URL, process_id),
                     favicon_url: String::new(),
                 },
                 WebviewSource::new(TERMINAL_WEBVIEW_URL),
@@ -245,22 +245,22 @@ impl Terminal {
         )
     }
 
-    /// Create a terminal bundle that reattaches to an existing daemon session.
-    #[allow(dead_code)] // Used by persistence.rs for session reconnect
+    /// Create a terminal bundle that reattaches to an existing service-managed process.
+    #[allow(dead_code)] // Used by persistence.rs for process reconnect
     pub(crate) fn reattach(
         meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-        session_id: SessionId,
+        process_id: ProcessId,
     ) -> impl Bundle {
         (
             (
                 Self,
                 Browser,
-                DaemonSessionHandle { session_id },
-                PendingDaemonAttach,
+                ServiceProcessHandle { process_id },
+                PendingServiceAttach,
                 PageMetadata {
-                    title: format!("Terminal ({})", &session_id.to_string()[..8]),
-                    url: format!("{}session/{}", TERMINAL_WEBVIEW_URL, session_id),
+                    title: format!("Terminal ({})", &process_id.to_string()[..8]),
+                    url: format!("{}{}", TERMINAL_WEBVIEW_URL, process_id),
                     favicon_url: String::new(),
                 },
                 WebviewSource::new(TERMINAL_WEBVIEW_URL),
@@ -298,29 +298,29 @@ impl Terminal {
     }
 }
 
-/// Temporary component: terminal needs a CreateSession sent to daemon.
+/// Temporary component: terminal needs a CreateProcess sent to service.
 #[derive(Component)]
-struct PendingDaemonCreate {
+struct PendingServiceCreate {
     shell: String,
     cwd: String,
 }
 
-/// Temporary component: terminal needs an AttachSession sent to daemon.
+/// Temporary component: terminal needs an AttachProcess sent to service.
 #[derive(Component)]
-struct PendingDaemonAttach;
+struct PendingServiceAttach;
 
-/// Marker: CreateSession was sent, waiting for SessionCreated response.
+/// Marker: CreateProcess was sent, waiting for ProcessCreated response.
 #[derive(Component)]
-struct AwaitingSessionCreated;
+struct AwaitingProcessCreated;
 
 fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
 }
 
-/// Spawn the daemon subprocess if not already running.
-fn ensure_daemon_started() {
-    if DaemonHandle::daemon_running() {
-        eprintln!("vmux: daemon already running");
+/// Spawn the service subprocess if not already running.
+fn ensure_service_started() {
+    if ServiceHandle::service_running() {
+        eprintln!("vmux: service already running");
         return;
     }
     let exe = match std::env::current_exe() {
@@ -330,37 +330,37 @@ fn ensure_daemon_started() {
             return;
         }
     };
-    eprintln!("vmux: starting daemon: {} daemon", exe.display());
+    eprintln!("vmux: starting service: {} service", exe.display());
 
-    // Redirect daemon stderr to a log file instead of piping.
+    // Redirect service stderr to a log file instead of piping.
     // Piped stderr with nobody reading causes SIGPIPE on macOS,
-    // which can kill the daemon process.
-    let log_dir = vmux_daemon::daemon_dir();
+    // which can kill the service process.
+    let log_dir = vmux_service::service_dir();
     let _ = std::fs::create_dir_all(&log_dir);
-    let stderr_cfg = match std::fs::File::create(log_dir.join("daemon.log")) {
+    let stderr_cfg = match std::fs::File::create(log_dir.join("service.log")) {
         Ok(f) => std::process::Stdio::from(f),
         Err(_) => std::process::Stdio::null(),
     };
 
     match std::process::Command::new(&exe)
-        .arg("daemon")
+        .arg("service")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(stderr_cfg)
         .spawn()
     {
         Ok(_child) => {
-            eprintln!("vmux: daemon subprocess spawned");
+            eprintln!("vmux: service subprocess spawned");
         }
         Err(e) => {
-            eprintln!("vmux: failed to spawn daemon: {e}");
+            eprintln!("vmux: failed to spawn service: {e}");
         }
     }
 }
 
-/// Bevy system: retry connecting to daemon until it succeeds or we give up.
-fn try_connect_daemon(
-    mut retry: ResMut<DaemonConnectRetry>,
+/// Bevy system: retry connecting to service until it succeeds or we give up.
+fn try_connect_service(
+    mut retry: ResMut<ServiceConnectRetry>,
     time: Res<Time>,
     mut commands: Commands,
 ) {
@@ -372,65 +372,65 @@ fn try_connect_daemon(
     retry.remaining_attempts = retry.remaining_attempts.saturating_sub(1);
 
     // Check if socket is ready
-    let sock = vmux_daemon::socket_path();
+    let sock = vmux_service::socket_path();
     if !sock.exists() {
         if retry.remaining_attempts == 0 {
-            eprintln!("vmux: daemon socket never appeared — giving up");
-            commands.remove_resource::<DaemonConnectRetry>();
+            eprintln!("vmux: service socket never appeared — giving up");
+            commands.remove_resource::<ServiceConnectRetry>();
         }
         return;
     }
 
     // Try to connect
-    match DaemonHandle::connect() {
+    match ServiceHandle::connect() {
         Some(handle) => {
-            eprintln!("vmux: connected to daemon after retry");
-            commands.insert_resource(DaemonClient(handle));
-            commands.remove_resource::<DaemonConnectRetry>();
+            eprintln!("vmux: connected to service after retry");
+            commands.insert_resource(ServiceClient(handle));
+            commands.remove_resource::<ServiceConnectRetry>();
         }
         None => {
             if retry.remaining_attempts == 0 {
-                eprintln!("vmux: failed to connect to daemon after all retries");
-                // Check daemon log for clues
-                let log_path = vmux_daemon::daemon_dir().join("daemon.log");
+                eprintln!("vmux: failed to connect to service after all retries");
+                // Check service log for clues
+                let log_path = vmux_service::service_dir().join("service.log");
                 if let Ok(log) = std::fs::read_to_string(&log_path)
                     && !log.is_empty()
                 {
-                    eprintln!("vmux: daemon log:\n{log}");
+                    eprintln!("vmux: service log:\n{log}");
                 }
-                commands.remove_resource::<DaemonConnectRetry>();
+                commands.remove_resource::<ServiceConnectRetry>();
             }
         }
     }
 }
 
-/// Send CreateSession / AttachSession for newly spawned terminals.
-fn poll_daemon_messages(
-    pending_create: Query<(Entity, &DaemonSessionHandle, &PendingDaemonCreate), With<Terminal>>,
+/// Send CreateProcess / AttachProcess for newly spawned terminals.
+fn poll_service_messages(
+    pending_create: Query<(Entity, &ServiceProcessHandle, &PendingServiceCreate), With<Terminal>>,
     pending_attach: Query<
-        (Entity, &DaemonSessionHandle),
-        (With<Terminal>, With<PendingDaemonAttach>),
+        (Entity, &ServiceProcessHandle),
+        (With<Terminal>, With<PendingServiceAttach>),
     >,
     awaiting_create: Query<
-        (Entity, &DaemonSessionHandle, &ChildOf),
-        (With<Terminal>, With<AwaitingSessionCreated>),
+        (Entity, &ServiceProcessHandle, &ChildOf),
+        (With<Terminal>, With<AwaitingProcessCreated>),
     >,
     terminals: Query<
-        (Entity, &DaemonSessionHandle, &ChildOf),
-        (With<Terminal>, Without<SessionExited>),
+        (Entity, &ServiceProcessHandle, &ChildOf),
+        (With<Terminal>, Without<ProcessExited>),
     >,
     mut meta_q: Query<&mut PageMetadata>,
-    daemon: Option<Res<DaemonClient>>,
+    service: Option<Res<ServiceClient>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
     mut writer: MessageWriter<AppCommand>,
 ) {
-    let Some(daemon) = daemon else { return };
+    let Some(service) = service else { return };
 
-    // Handle pending creates — send CreateSession, wait for SessionCreated
-    // response which will carry the real session ID.
+    // Handle pending creates — send CreateProcess, wait for ProcessCreated
+    // response which will carry the real process ID.
     for (entity, _handle, pending) in &pending_create {
-        daemon.0.send(ClientMessage::CreateSession {
+        service.0.send(ClientMessage::CreateProcess {
             shell: pending.shell.clone(),
             cwd: pending.cwd.clone(),
             env: Vec::new(),
@@ -439,48 +439,48 @@ fn poll_daemon_messages(
         });
         commands
             .entity(entity)
-            .remove::<PendingDaemonCreate>()
-            .insert(AwaitingSessionCreated);
+            .remove::<PendingServiceCreate>()
+            .insert(AwaitingProcessCreated);
     }
 
     // Handle pending attaches
     for (entity, handle) in &pending_attach {
-        daemon.0.send(ClientMessage::AttachSession {
-            session_id: handle.session_id,
+        service.0.send(ClientMessage::AttachProcess {
+            process_id: handle.process_id,
         });
-        daemon.0.send(ClientMessage::RequestSnapshot {
-            session_id: handle.session_id,
+        service.0.send(ClientMessage::RequestSnapshot {
+            process_id: handle.process_id,
         });
-        commands.entity(entity).remove::<PendingDaemonAttach>();
+        commands.entity(entity).remove::<PendingServiceAttach>();
     }
 
-    // Drain daemon messages and dispatch
+    // Drain service messages and dispatch
     let mut matched_entities = Vec::new();
-    for msg in daemon.0.drain() {
+    for msg in service.0.drain() {
         match msg {
-            DaemonMessage::SessionCreated { session_id } => {
-                // Match the first unmatched terminal awaiting a SessionCreated response.
+            ServiceMessage::ProcessCreated { process_id } => {
+                // Match the first unmatched terminal awaiting a ProcessCreated response.
                 if let Some((entity, _, _)) = (&awaiting_create)
                     .into_iter()
                     .find(|(e, _, _)| !matched_entities.contains(e))
                 {
                     matched_entities.push(entity);
                     // Attach to receive viewport patches
-                    daemon.0.send(ClientMessage::AttachSession { session_id });
-                    // Update handle with real daemon session ID
+                    service.0.send(ClientMessage::AttachProcess { process_id });
+                    // Update handle with real service-managed process ID
                     commands
                         .entity(entity)
-                        .insert(DaemonSessionHandle { session_id })
-                        .remove::<AwaitingSessionCreated>();
-                    // Update PageMetadata URL so session.ron saves the real ID
+                        .insert(ServiceProcessHandle { process_id })
+                        .remove::<AwaitingProcessCreated>();
+                    // Update PageMetadata URL so persistence saves the real ID
                     if let Ok(mut meta) = meta_q.get_mut(entity) {
-                        meta.url = format!("{}session/{}", TERMINAL_WEBVIEW_URL, session_id);
-                        meta.title = format!("Terminal ({})", &session_id.to_string()[..8]);
+                        meta.url = format!("{}{}", TERMINAL_WEBVIEW_URL, process_id);
+                        meta.title = format!("Terminal ({})", &process_id.to_string()[..8]);
                     }
                 }
             }
-            DaemonMessage::ViewportPatch {
-                session_id,
+            ServiceMessage::ViewportPatch {
+                process_id,
                 changed_lines,
                 cursor,
                 cols,
@@ -489,7 +489,7 @@ fn poll_daemon_messages(
                 full,
             } => {
                 for (entity, handle, _) in &terminals {
-                    if handle.session_id == session_id {
+                    if handle.process_id == process_id {
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
                         }
@@ -506,15 +506,15 @@ fn poll_daemon_messages(
                     }
                 }
             }
-            DaemonMessage::Snapshot {
-                session_id,
+            ServiceMessage::Snapshot {
+                process_id,
                 lines,
                 cursor,
                 cols,
                 rows,
             } => {
                 for (entity, handle, _) in &terminals {
-                    if handle.session_id == session_id {
+                    if handle.process_id == process_id {
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
                         }
@@ -535,13 +535,13 @@ fn poll_daemon_messages(
                     }
                 }
             }
-            DaemonMessage::SessionExited {
-                session_id,
+            ServiceMessage::ProcessExited {
+                process_id,
                 exit_code: _,
             } => {
                 for (entity, handle, child_of) in &terminals {
-                    if handle.session_id == session_id {
-                        commands.entity(entity).insert(SessionExited);
+                    if handle.process_id == process_id {
+                        commands.entity(entity).insert(ProcessExited);
                         let tab = child_of.get();
                         commands.entity(tab).insert(LastActivatedAt::now());
                         writer.write(AppCommand::Tab(TabCommand::Close));
@@ -549,13 +549,14 @@ fn poll_daemon_messages(
                     }
                 }
             }
-            DaemonMessage::SessionList { sessions } => {
-                commands.insert_resource(crate::sessions_monitor::DaemonSessionList { sessions });
+            ServiceMessage::ProcessList { processes } => {
+                commands
+                    .insert_resource(crate::processes_monitor::ServiceProcessList { processes });
             }
-            DaemonMessage::Error { message } => {
-                warn!("Daemon error: {message}");
+            ServiceMessage::Error { message } => {
+                warn!("Service error: {message}");
             }
-            _ => {} // SessionOutput handled elsewhere if needed
+            _ => {} // ProcessOutput handled elsewhere if needed
         }
     }
 }
@@ -595,15 +596,15 @@ fn is_non_character_key(key: KeyCode) -> bool {
 /// Handle keyboard input directly from Bevy, bypassing CEF round-trip.
 fn handle_terminal_keyboard(
     mut er: MessageReader<KeyboardInput>,
-    q: Query<&DaemonSessionHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
+    q: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
     input: Res<ButtonInput<KeyCode>>,
     chord_state: Res<crate::shortcut::ChordState>,
-    daemon: Option<Res<DaemonClient>>,
+    service: Option<Res<ServiceClient>>,
 ) {
     if q.is_empty() {
         return;
     }
-    let Some(daemon) = daemon else {
+    let Some(service) = service else {
         for _ in er.read() {}
         return;
     };
@@ -646,8 +647,8 @@ fn handle_terminal_keyboard(
                             data.extend_from_slice(text.as_bytes());
                             data.extend_from_slice(b"\x1b[201~");
                             for handle in &q {
-                                daemon.0.send(ClientMessage::SessionInput {
-                                    session_id: handle.session_id,
+                                service.0.send(ClientMessage::ProcessInput {
+                                    process_id: handle.process_id,
                                     data: data.clone(),
                                 });
                             }
@@ -656,15 +657,15 @@ fn handle_terminal_keyboard(
                     continue;
                 }
                 KeyCode::KeyC => {
-                    // Copy: in daemon mode we can't access selection, so skip
-                    // TODO: implement copy via daemon snapshot
+                    // Copy: in service mode we can't access selection, so skip
+                    // TODO: implement copy via service snapshot
                     continue;
                 }
                 _ => continue,
             }
         }
 
-        // Skip selection keys (Shift+Arrow etc) — daemon doesn't support local selection
+        // Skip selection keys (Shift+Arrow etc) — service doesn't support local selection
         if shift
             && matches!(
                 event.key_code,
@@ -686,8 +687,8 @@ fn handle_terminal_keyboard(
             continue;
         }
         for handle in &q {
-            daemon.0.send(ClientMessage::SessionInput {
-                session_id: handle.session_id,
+            service.0.send(ClientMessage::ProcessInput {
+                process_id: handle.process_id,
                 data: bytes.clone(),
             });
         }
@@ -752,16 +753,16 @@ fn logical_key_to_bytes(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
     }
 }
 
-/// Handle mouse wheel scrolling — sends scroll input to daemon.
+/// Handle mouse wheel scrolling — sends scroll input to service.
 fn handle_terminal_scroll(
     mut er: MessageReader<MouseWheel>,
-    q: Query<&DaemonSessionHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
-    daemon: Option<Res<DaemonClient>>,
+    q: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
+    service: Option<Res<ServiceClient>>,
 ) {
     if q.is_empty() {
         return;
     }
-    let Some(daemon) = daemon else {
+    let Some(service) = service else {
         for _ in er.read() {}
         return;
     };
@@ -779,8 +780,8 @@ fn handle_terminal_scroll(
         let seq = sgr_mouse_sequence(button, 0, 0, 0, true);
         for handle in &q {
             for _ in 0..count {
-                daemon.0.send(ClientMessage::SessionInput {
-                    session_id: handle.session_id,
+                service.0.send(ClientMessage::ProcessInput {
+                    process_id: handle.process_id,
                     data: seq.clone(),
                 });
             }
@@ -808,26 +809,26 @@ fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bo
 #[derive(Resource, Default)]
 struct MouseSelectionState;
 
-/// Handle mouse events from the terminal webview — forward to daemon as input.
+/// Handle mouse events from the terminal webview — forward to service as input.
 fn on_term_mouse(
     trigger: On<Receive<TermMouseEvent>>,
-    q: Query<&DaemonSessionHandle, With<Terminal>>,
-    daemon: Option<Res<DaemonClient>>,
+    q: Query<&ServiceProcessHandle, With<Terminal>>,
+    service: Option<Res<ServiceClient>>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
-    let Some(daemon) = daemon else { return };
+    let Some(service) = service else { return };
     let Ok(handle) = q.get(entity) else { return };
 
-    // Forward all mouse events as SGR sequences to daemon
+    // Forward all mouse events as SGR sequences to service
     let button = if event.moving {
         event.button + 32
     } else {
         event.button
     };
     let seq = sgr_mouse_sequence(button, event.col, event.row, event.modifiers, event.pressed);
-    daemon.0.send(ClientMessage::SessionInput {
-        session_id: handle.session_id,
+    service.0.send(ClientMessage::ProcessInput {
+        process_id: handle.process_id,
         data: seq,
     });
 }
@@ -835,15 +836,15 @@ fn on_term_mouse(
 /// Mark dirty when webview becomes ready so initial viewport is sent.
 fn on_term_ready(
     trigger: On<Add, UiReady>,
-    q: Query<&DaemonSessionHandle, With<Terminal>>,
-    daemon: Option<Res<DaemonClient>>,
+    q: Query<&ServiceProcessHandle, With<Terminal>>,
+    service: Option<Res<ServiceClient>>,
 ) {
     let entity = trigger.event_target();
-    let Some(daemon) = daemon else { return };
+    let Some(service) = service else { return };
     if let Ok(handle) = q.get(entity) {
         // Request a full snapshot when webview is ready
-        daemon.0.send(ClientMessage::RequestSnapshot {
-            session_id: handle.session_id,
+        service.0.send(ClientMessage::RequestSnapshot {
+            process_id: handle.process_id,
         });
     }
 }
@@ -852,12 +853,12 @@ fn on_term_ready(
 fn on_term_resize(
     trigger: On<Receive<TermResizeEvent>>,
     webview_q: Query<&WebviewSize, With<Terminal>>,
-    handle_q: Query<&DaemonSessionHandle, With<Terminal>>,
-    daemon: Option<Res<DaemonClient>>,
+    handle_q: Query<&ServiceProcessHandle, With<Terminal>>,
+    service: Option<Res<ServiceClient>>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
-    let Some(daemon) = daemon else { return };
+    let Some(service) = service else { return };
 
     let Ok(webview_size) = webview_q.get(entity) else {
         return;
@@ -884,8 +885,8 @@ fn on_term_resize(
     let cols = (vw / event.char_width).floor().max(1.0) as u16;
     let rows = (vh / event.char_height).floor().max(1.0) as u16;
 
-    daemon.0.send(ClientMessage::ResizeSession {
-        session_id: handle.session_id,
+    service.0.send(ClientMessage::ResizeProcess {
+        process_id: handle.process_id,
         cols,
         rows,
     });
@@ -959,20 +960,20 @@ fn sync_terminal_theme(
 
 fn on_restart_pty(
     trigger: On<RestartPty>,
-    mut q: Query<(&mut DaemonSessionHandle, &mut PageMetadata)>,
-    daemon: Option<Res<DaemonClient>>,
+    mut q: Query<(&mut ServiceProcessHandle, &mut PageMetadata)>,
+    service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
 ) {
     let entity = trigger.event().entity;
-    let Some(daemon) = daemon else { return };
+    let Some(service) = service else { return };
     let Ok((mut handle, mut meta)) = q.get_mut(entity) else {
         return;
     };
 
-    // Kill old session
+    // Kill old process
 
-    daemon.0.send(ClientMessage::KillSession {
-        session_id: handle.session_id,
+    service.0.send(ClientMessage::KillProcess {
+        process_id: handle.process_id,
     });
 
     let shell = settings
@@ -981,20 +982,20 @@ fn on_restart_pty(
         .map(|t| t.resolve_theme(&t.default_theme).shell)
         .unwrap_or_else(default_shell);
 
-    // Create new session
-    let new_id = SessionId::new();
-    daemon.0.send(ClientMessage::CreateSession {
+    // Create new process
+    let new_id = ProcessId::new();
+    service.0.send(ClientMessage::CreateProcess {
         shell,
         cwd: String::new(),
         env: Vec::new(),
         cols: 80,
         rows: 24,
     });
-    daemon
+    service
         .0
-        .send(ClientMessage::AttachSession { session_id: new_id });
+        .send(ClientMessage::AttachProcess { process_id: new_id });
 
-    handle.session_id = new_id;
-    meta.url = format!("{}session/{}", TERMINAL_WEBVIEW_URL, new_id);
+    handle.process_id = new_id;
+    meta.url = format!("{}{}", TERMINAL_WEBVIEW_URL, new_id);
     meta.title = format!("Terminal ({})", &new_id.to_string()[..8]);
 }

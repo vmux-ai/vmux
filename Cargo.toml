@@ -79,7 +79,7 @@ codegen-units = 1
 opt-level = "z"
 codegen-units = 1
 
-[profile.release.package.vmux_sessions]
+[profile.release.package.vmux_processes]
 opt-level = "z"
 codegen-units = 1
 

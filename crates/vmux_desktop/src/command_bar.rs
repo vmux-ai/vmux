@@ -10,7 +10,7 @@ use crate::{
         tab::{Tab, active_among, collect_leaf_panes, focused_tab},
         window::Modal,
     },
-    sessions_monitor::SessionsMonitor,
+    processes_monitor::ProcessesMonitor,
     settings::AppSettings,
     terminal::Terminal,
 };
@@ -22,17 +22,16 @@ use vmux_command_bar::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
 };
-use vmux_daemon::protocol::SessionId;
 use vmux_header::{Header, PageMetadata};
 use vmux_history::LastActivatedAt;
-use vmux_sessions::event::SESSIONS_WEBVIEW_URL;
+use vmux_processes::event::PROCESSES_WEBVIEW_URL;
+use vmux_service::protocol::ProcessId;
 use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
 
-/// Try to extract a session UUID from `vmux://terminal/session/{uuid}`.
-fn parse_session_id_from_url(url: &str) -> Option<SessionId> {
+/// Try to extract a process UUID from `vmux://terminal/{uuid}`.
+fn parse_process_id_from_url(url: &str) -> Option<ProcessId> {
     let suffix = url.strip_prefix(TERMINAL_WEBVIEW_URL)?;
-    let uuid_str = suffix.strip_prefix("session/")?;
-    uuid_str.parse::<SessionId>().ok()
+    suffix.parse::<ProcessId>().ok()
 }
 
 /// Deferred visibility for the command bar modal. Counts frames after Display::Flex
@@ -483,17 +482,17 @@ fn on_command_bar_action(
                 if let Some(tab_e) = empty_tab {
                     // New tab mode: attach content to the empty tab
                     if url.starts_with("vmux://terminal") {
-                        let term_e = if let Some(sid) = parse_session_id_from_url(&url) {
+                        let term_e = if let Some(pid) = parse_process_id_from_url(&url) {
                             commands
                                 .spawn((
-                                    Terminal::reattach(&mut meshes, &mut webview_mt, sid),
+                                    Terminal::reattach(&mut meshes, &mut webview_mt, pid),
                                     ChildOf(tab_e),
                                 ))
                                 .id()
                         } else {
                             commands.entity(tab_e).insert(PageMetadata {
                                 url: TERMINAL_WEBVIEW_URL.to_string(),
-                                title: "Terminal (Session: -)".to_string(),
+                                title: "Terminal".to_string(),
                                 ..default()
                             });
                             commands
@@ -504,14 +503,14 @@ fn on_command_bar_action(
                                 .id()
                         };
                         commands.entity(term_e).insert(CefKeyboardTarget);
-                    } else if url.starts_with(SESSIONS_WEBVIEW_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
                         commands.entity(tab_e).insert(PageMetadata {
-                            url: SESSIONS_WEBVIEW_URL.to_string(),
-                            title: "Sessions".to_string(),
+                            url: PROCESSES_WEBVIEW_URL.to_string(),
+                            title: "Background Services".to_string(),
                             ..default()
                         });
                         commands.spawn((
-                            SessionsMonitor::new(&mut meshes, &mut webview_mt),
+                            ProcessesMonitor::new(&mut meshes, &mut webview_mt),
                             ChildOf(tab_e),
                         ));
                     } else {
@@ -528,8 +527,8 @@ fn on_command_bar_action(
                     custom_keyboard_restore = true;
                 } else {
                     // Normal mode: navigate or spawn terminal in current tab
-                    if let Some(sid) = parse_session_id_from_url(&url) {
-                        // Reattach to existing daemon session in a new tab
+                    if let Some(pid) = parse_process_id_from_url(&url) {
+                        // Reattach to existing service-managed process in a new tab
                         let (_, active_pane_opt, _) = focused_tab(
                             &spaces,
                             &all_children,
@@ -548,7 +547,7 @@ fn on_command_bar_action(
                                 .id();
                             let term_e = commands
                                 .spawn((
-                                    Terminal::reattach(&mut meshes, &mut webview_mt, sid),
+                                    Terminal::reattach(&mut meshes, &mut webview_mt, pid),
                                     ChildOf(tab_e),
                                 ))
                                 .id();
@@ -556,9 +555,9 @@ fn on_command_bar_action(
                         }
                     } else if url.starts_with("vmux://terminal") {
                         writer.write(AppCommand::Terminal(TerminalCommand::New));
-                    } else if url.starts_with(SESSIONS_WEBVIEW_URL.trim_end_matches('/')) {
-                        use crate::command::SessionCommand;
-                        writer.write(AppCommand::Session(SessionCommand::Open));
+                    } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
+                        use crate::command::ServiceCommand;
+                        writer.write(AppCommand::Service(ServiceCommand::Open));
                     } else {
                         let (_, _, active_tab) = focused_tab(
                             &spaces,
@@ -585,12 +584,12 @@ fn on_command_bar_action(
             }
         }
         "terminal" => {
-            // Check if value is a vmux://terminal/session/{id} URL — reattach
-            if let Some(sid) = parse_session_id_from_url(&evt.value) {
+            // Check if value is a vmux://terminal/{id} URL — reattach
+            if let Some(pid) = parse_process_id_from_url(&evt.value) {
                 if let Some(tab_e) = empty_tab {
                     let term_e = commands
                         .spawn((
-                            Terminal::reattach(&mut meshes, &mut webview_mt, sid),
+                            Terminal::reattach(&mut meshes, &mut webview_mt, pid),
                             ChildOf(tab_e),
                         ))
                         .id();
@@ -617,7 +616,7 @@ fn on_command_bar_action(
                             .id();
                         let term_e = commands
                             .spawn((
-                                Terminal::reattach(&mut meshes, &mut webview_mt, sid),
+                                Terminal::reattach(&mut meshes, &mut webview_mt, pid),
                                 ChildOf(tab_e),
                             ))
                             .id();
@@ -644,7 +643,7 @@ fn on_command_bar_action(
                 if let Some(tab_e) = empty_tab {
                     commands.entity(tab_e).insert(PageMetadata {
                         url: TERMINAL_WEBVIEW_URL.to_string(),
-                        title: "Terminal (Session: -)".to_string(),
+                        title: "Terminal".to_string(),
                         ..default()
                     });
                     let term_e = commands
@@ -681,7 +680,7 @@ fn on_command_bar_action(
                             .id();
                         commands.entity(tab_e).insert(PageMetadata {
                             url: TERMINAL_WEBVIEW_URL.to_string(),
-                            title: "Terminal (Session: -)".to_string(),
+                            title: "Terminal".to_string(),
                             ..default()
                         });
                         let term_e = commands

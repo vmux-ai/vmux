@@ -1,0 +1,6 @@
+[application]
+name = "vmux_processes"
+default_platform = "web"
+
+[web.app]
+title = "Background Services"

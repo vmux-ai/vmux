@@ -1,65 +1,69 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_sessions::event::*;
+use vmux_processes::event::*;
 use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
 
 #[component]
 pub fn App() -> Element {
     use_theme();
-    let mut state = use_signal(|| SessionsListEvent {
+    let mut state = use_signal(|| ProcessesListEvent {
         connected: false,
-        sessions: Vec::new(),
+        processes: Vec::new(),
     });
     let mut search = use_signal(String::new);
 
-    let _listener = use_event_listener::<SessionsListEvent, _>(SESSIONS_LIST_EVENT, move |event| {
-        state.set(event);
-    });
+    let _listener =
+        use_event_listener::<ProcessesListEvent, _>(PROCESSES_LIST_EVENT, move |event| {
+            state.set(event);
+        });
 
     let data = state.read();
     let query = search.read().to_lowercase();
-    let filtered: Vec<&SessionEntry> = data
-        .sessions
+    let filtered: Vec<&ProcessEntry> = data
+        .processes
         .iter()
-        .filter(|s| {
+        .filter(|p| {
             if query.is_empty() {
                 return true;
             }
-            s.id.to_lowercase().contains(&query)
-                || s.shell.to_lowercase().contains(&query)
-                || s.cwd.to_lowercase().contains(&query)
-                || s.pid.to_string().contains(&query)
+            p.id.to_lowercase().contains(&query)
+                || p.shell.to_lowercase().contains(&query)
+                || p.cwd.to_lowercase().contains(&query)
+                || p.pid.to_string().contains(&query)
         })
         .collect();
 
-    let has_sessions = !data.sessions.is_empty();
-    let session_count = data.sessions.len();
+    let has_processes = !data.processes.is_empty();
+    let process_count = data.processes.len();
 
     rsx! {
         div { class: "flex h-full flex-col bg-background p-4 overflow-auto",
             // Header
             div { class: "mb-3 flex items-center justify-between",
                 div { class: "flex items-center gap-3",
-                    h1 { class: "text-lg font-semibold text-foreground", "Daemon Sessions" }
+                    div { class: "flex items-center gap-2 text-foreground",
+                        ServiceIcon {}
+                        h1 { class: "text-lg font-semibold", "Background Services" }
+                    }
                     StatusBadge { connected: data.connected }
-                    if has_sessions {
+                    if has_processes {
                         {
-                            let label = if session_count == 1 {
-                                format!("{session_count} session")
+                            let label = if process_count == 1 {
+                                format!("{process_count} process")
                             } else {
-                                format!("{session_count} sessions")
+                                format!("{process_count} processes")
                             };
                             rsx! { span { class: "text-xs text-muted-foreground", "{label}" } }
                         }
                     }
                 }
-                if has_sessions {
+                if has_processes {
                     button {
                         class: "rounded bg-red-500/10 px-2.5 py-1 text-xs text-red-400 hover:bg-red-500/20 transition-colors",
                         onclick: move |e: Event<MouseData>| {
                             e.stop_propagation();
-                            let _ = try_cef_emit_serde(&SessionKillAllEvent { kill_all: true });
+                            let _ = try_cef_emit_serde(&ProcessKillAllEvent { kill_all: true });
                         },
                         "Kill All"
                     }
@@ -69,16 +73,16 @@ pub fn App() -> Element {
             if !data.connected {
                 div { class: "flex flex-1 items-center justify-center",
                     div { class: "text-center text-muted-foreground",
-                        p { class: "text-sm", "Daemon is not running" }
+                        p { class: "text-sm", "Service is not running" }
                         p { class: "mt-1 text-xs opacity-60",
                             "Start with: "
-                            code { class: "rounded bg-muted px-1.5 py-0.5 font-mono text-xs", "Vmux daemon" }
+                            code { class: "rounded bg-muted px-1.5 py-0.5 font-mono text-xs", "Vmux service" }
                         }
                     }
                 }
-            } else if !has_sessions {
+            } else if !has_processes {
                 div { class: "flex flex-1 items-center justify-center",
-                    p { class: "text-sm text-muted-foreground", "No active sessions" }
+                    p { class: "text-sm text-muted-foreground", "No active processes" }
                 }
             } else {
                 // Search filter
@@ -86,7 +90,7 @@ pub fn App() -> Element {
                     input {
                         class: "w-full rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-foreground/30",
                         r#type: "text",
-                        placeholder: "Filter sessions...",
+                        placeholder: "Filter processes...",
                         value: "{search}",
                         oninput: move |e: Event<FormData>| search.set(e.value()),
                     }
@@ -94,16 +98,38 @@ pub fn App() -> Element {
 
                 if filtered.is_empty() {
                     div { class: "flex flex-1 items-center justify-center",
-                        p { class: "text-sm text-muted-foreground", "No matching sessions" }
+                        p { class: "text-sm text-muted-foreground", "No matching processes" }
                     }
                 } else {
                     div { class: "flex flex-col gap-3",
-                        for session in filtered.iter() {
-                            SessionCard { key: "{session.id}", session: (*session).clone() }
+                        for process in filtered.iter() {
+                            ProcessCard { key: "{process.id}", process: (*process).clone() }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+fn ServiceIcon() -> Element {
+    // lucide `server` icon — https://lucide.dev/icons/server
+    rsx! {
+        svg {
+            width: "20",
+            height: "20",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2",
+            stroke_linecap: "round",
+            stroke_linejoin: "round",
+            "aria-hidden": "true",
+            rect { width: "20", height: "8", x: "2", y: "2", rx: "2" }
+            rect { width: "20", height: "8", x: "2", y: "14", rx: "2" }
+            line { x1: "6", x2: "6.01", y1: "6", y2: "6" }
+            line { x1: "6", x2: "6.01", y1: "18", y2: "18" }
         }
     }
 }
@@ -125,34 +151,34 @@ fn StatusBadge(connected: bool) -> Element {
 }
 
 #[component]
-fn SessionCard(session: SessionEntry) -> Element {
-    let uptime = format_uptime(session.uptime_secs);
-    let id_short = if session.id.len() > 8 {
-        &session.id[..8]
+fn ProcessCard(process: ProcessEntry) -> Element {
+    let uptime = format_uptime(process.uptime_secs);
+    let id_short = if process.id.len() > 8 {
+        &process.id[..8]
     } else {
-        &session.id
+        &process.id
     };
-    let shell_name = session
+    let shell_name = process
         .shell
         .rsplit('/')
         .next()
-        .unwrap_or(&session.shell)
+        .unwrap_or(&process.shell)
         .to_string();
 
-    let nav_id = session.id.clone();
-    let kill_id = session.id.clone();
+    let nav_id = process.id.clone();
+    let kill_id = process.id.clone();
 
     let onclick = move |_| {
-        let _ = try_cef_emit_serde(&SessionNavigateEvent {
-            session_id: nav_id.clone(),
+        let _ = try_cef_emit_serde(&ProcessNavigateEvent {
+            process_id: nav_id.clone(),
             navigate: true,
         });
     };
 
     let onkill = move |e: Event<MouseData>| {
         e.stop_propagation();
-        let _ = try_cef_emit_serde(&SessionKillEvent {
-            session_id: kill_id.clone(),
+        let _ = try_cef_emit_serde(&ProcessKillEvent {
+            process_id: kill_id.clone(),
             kill: true,
         });
     };
@@ -171,7 +197,7 @@ fn SessionCard(session: SessionEntry) -> Element {
                     span { class: "rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground",
                         "{shell_name}"
                     }
-                    if session.attached {
+                    if process.attached {
                         span { class: "rounded-full bg-blue-500/20 px-2 py-0.5 text-xs text-blue-400",
                             "attached"
                         }
@@ -189,18 +215,18 @@ fn SessionCard(session: SessionEntry) -> Element {
 
             // Row 2: metadata grid
             div { class: "grid grid-cols-2 gap-x-4 gap-y-1 text-xs",
-                MetaRow { label: "PID", value: session.pid.to_string() }
-                MetaRow { label: "Size", value: format!("{}x{}", session.cols, session.rows) }
-                if !session.cwd.is_empty() {
-                    MetaRow { label: "CWD", value: session.cwd.clone() }
+                MetaRow { label: "PID", value: process.pid.to_string() }
+                MetaRow { label: "Size", value: format!("{}x{}", process.cols, process.rows) }
+                if !process.cwd.is_empty() {
+                    MetaRow { label: "CWD", value: process.cwd.clone() }
                 }
-                MetaRow { label: "Shell", value: session.shell.clone() }
+                MetaRow { label: "Shell", value: process.shell.clone() }
             }
 
             // Terminal preview
-            if !session.preview_lines.is_empty() {
+            if !process.preview_lines.is_empty() {
                 div { class: "mt-2 rounded bg-muted/50 p-2 font-mono text-xs leading-tight text-muted-foreground",
-                    for line in session.preview_lines.iter() {
+                    for line in process.preview_lines.iter() {
                         div { class: "truncate whitespace-pre", "{line.text}" }
                     }
                 }

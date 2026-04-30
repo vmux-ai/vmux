@@ -34,7 +34,7 @@ impl Profile {
 //
 // Layout under `~/Library/Application Support/Vmux/`:
 //   settings.ron                   shared across profiles
-//   services/                      shared (daemon socket, pid, log)
+//   services/                      shared (service socket, pid, log)
 //   profiles/<name>/
 //     session.ron                  per-profile tab/pane layout
 //     Cookies, Local State, ...    per-profile CEF state

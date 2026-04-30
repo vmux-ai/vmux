@@ -1,5 +1,5 @@
-use crate::protocol::{ClientMessage, DaemonMessage, SessionId};
-use crate::session::SessionManager;
+use crate::process::ProcessManager;
+use crate::protocol::{ClientMessage, ProcessId, ServiceMessage};
 use crate::{read_message, write_message};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,9 +12,9 @@ use tokio::sync::{Mutex, broadcast};
 
 /// Run the IPC server loop, accepting connections and dispatching messages.
 pub async fn run_server(listener: UnixListener) {
-    let manager = Arc::new(Mutex::new(SessionManager::new()));
+    let manager = Arc::new(Mutex::new(ProcessManager::new()));
 
-    // Poll sessions at ~60Hz in background
+    // Poll processes at ~60Hz in background
     let poll_mgr = Arc::clone(&manager);
     tokio::spawn(async move {
         loop {
@@ -22,7 +22,7 @@ pub async fn run_server(listener: UnixListener) {
                 let mut mgr = poll_mgr.lock().await;
                 let exited = mgr.poll_all();
                 for id in exited {
-                    mgr.remove_session(&id);
+                    mgr.remove_process(&id);
                 }
             }
             tokio::time::sleep(std::time::Duration::from_millis(16)).await;
@@ -48,14 +48,14 @@ pub async fn run_server(listener: UnixListener) {
 
 async fn handle_client(
     stream: tokio::net::UnixStream,
-    manager: Arc<Mutex<SessionManager>>,
+    manager: Arc<Mutex<ProcessManager>>,
 ) -> std::io::Result<()> {
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let writer = Arc::new(tokio::sync::Mutex::new(writer));
 
-    // Track which sessions this client is attached to, so we can forward patches.
-    let attached: Arc<tokio::sync::Mutex<HashMap<SessionId, tokio::task::JoinHandle<()>>>> =
+    // Track which processes this client is attached to, so we can forward patches.
+    let attached: Arc<tokio::sync::Mutex<HashMap<ProcessId, tokio::task::JoinHandle<()>>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     loop {
@@ -65,7 +65,7 @@ async fn handle_client(
         };
 
         match msg {
-            ClientMessage::CreateSession {
+            ClientMessage::CreateProcess {
                 shell,
                 cwd,
                 env,
@@ -73,15 +73,15 @@ async fn handle_client(
                 rows,
             } => {
                 let mut mgr = manager.lock().await;
-                match mgr.create_session(shell, cwd, env, cols, rows) {
+                match mgr.create_process(shell, cwd, env, cols, rows) {
                     Ok(id) => {
-                        let resp = DaemonMessage::SessionCreated { session_id: id };
+                        let resp = ServiceMessage::ProcessCreated { process_id: id };
                         let w = writer.clone();
                         let mut w = w.lock().await;
                         write_message!(&mut *w, &resp)?;
                     }
                     Err(e) => {
-                        let resp = DaemonMessage::Error { message: e };
+                        let resp = ServiceMessage::Error { message: e };
                         let w = writer.clone();
                         let mut w = w.lock().await;
                         write_message!(&mut *w, &resp)?;
@@ -89,10 +89,10 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::AttachSession { session_id } => {
+            ClientMessage::AttachProcess { process_id } => {
                 let mgr = manager.lock().await;
-                if let Some(session) = mgr.sessions.get(&session_id) {
-                    let mut rx = session.subscribe();
+                if let Some(process) = mgr.processes.get(&process_id) {
+                    let mut rx = process.subscribe();
                     let w = writer.clone();
                     let handle = tokio::spawn(async move {
                         loop {
@@ -115,65 +115,65 @@ async fn handle_client(
                             }
                         }
                     });
-                    attached.lock().await.insert(session_id, handle);
+                    attached.lock().await.insert(process_id, handle);
                 } else {
-                    let resp = DaemonMessage::Error {
-                        message: format!("session not found: {session_id}"),
+                    let resp = ServiceMessage::Error {
+                        message: format!("process not found: {process_id}"),
                     };
                     let mut w = writer.lock().await;
                     write_message!(&mut *w, &resp)?;
                 }
             }
 
-            ClientMessage::DetachSession { session_id } => {
-                if let Some(handle) = attached.lock().await.remove(&session_id) {
+            ClientMessage::DetachProcess { process_id } => {
+                if let Some(handle) = attached.lock().await.remove(&process_id) {
                     handle.abort();
                 }
             }
 
-            ClientMessage::SessionInput { session_id, data } => {
+            ClientMessage::ProcessInput { process_id, data } => {
                 let mgr = manager.lock().await;
-                if let Some(session) = mgr.sessions.get(&session_id) {
-                    session.write_input(&data);
+                if let Some(process) = mgr.processes.get(&process_id) {
+                    process.write_input(&data);
                 }
             }
 
-            ClientMessage::ResizeSession {
-                session_id,
+            ClientMessage::ResizeProcess {
+                process_id,
                 cols,
                 rows,
             } => {
                 let mut mgr = manager.lock().await;
-                if let Some(session) = mgr.sessions.get_mut(&session_id) {
-                    session.resize(cols, rows);
+                if let Some(process) = mgr.processes.get_mut(&process_id) {
+                    process.resize(cols, rows);
                 }
             }
 
-            ClientMessage::ListSessions => {
+            ClientMessage::ListProcesses => {
                 let mgr = manager.lock().await;
-                let sessions = mgr.sessions.values().map(|s| s.info()).collect::<Vec<_>>();
-                let resp = DaemonMessage::SessionList { sessions };
+                let processes = mgr.processes.values().map(|p| p.info()).collect::<Vec<_>>();
+                let resp = ServiceMessage::ProcessList { processes };
                 let mut w = writer.lock().await;
                 write_message!(&mut *w, &resp)?;
             }
 
-            ClientMessage::KillSession { session_id } => {
+            ClientMessage::KillProcess { process_id } => {
                 let mut mgr = manager.lock().await;
-                mgr.remove_session(&session_id);
-                if let Some(handle) = attached.lock().await.remove(&session_id) {
+                mgr.remove_process(&process_id);
+                if let Some(handle) = attached.lock().await.remove(&process_id) {
                     handle.abort();
                 }
             }
 
-            ClientMessage::RequestSnapshot { session_id } => {
+            ClientMessage::RequestSnapshot { process_id } => {
                 let mgr = manager.lock().await;
-                if let Some(session) = mgr.sessions.get(&session_id) {
-                    let snap = session.snapshot();
+                if let Some(process) = mgr.processes.get(&process_id) {
+                    let snap = process.snapshot();
                     let mut w = writer.lock().await;
                     write_message!(&mut *w, &snap)?;
                 } else {
-                    let resp = DaemonMessage::Error {
-                        message: format!("session not found: {session_id}"),
+                    let resp = ServiceMessage::Error {
+                        message: format!("process not found: {process_id}"),
                     };
                     let mut w = writer.lock().await;
                     write_message!(&mut *w, &resp)?;
@@ -183,8 +183,8 @@ async fn handle_client(
             ClientMessage::Shutdown => {
                 let mut mgr = manager.lock().await;
                 mgr.shutdown();
-                let resp = DaemonMessage::SessionList {
-                    sessions: Vec::new(),
+                let resp = ServiceMessage::ProcessList {
+                    processes: Vec::new(),
                 };
                 let mut w = writer.lock().await;
                 write_message!(&mut *w, &resp)?;

@@ -1,19 +1,19 @@
 use vmux_terminal::event::{TermCursor, TermLine, TermSelectionRange};
 
-/// Unique identifier for a daemon-managed terminal session.
+/// Unique identifier for a service-managed terminal process.
 /// Stored as raw bytes for rkyv compatibility.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
-pub struct SessionId(pub [u8; 16]);
+pub struct ProcessId(pub [u8; 16]);
 
-impl Default for SessionId {
+impl Default for ProcessId {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SessionId {
+impl ProcessId {
     pub fn new() -> Self {
         Self(*uuid::Uuid::new_v4().as_bytes())
     }
@@ -27,66 +27,66 @@ impl SessionId {
     }
 }
 
-impl std::fmt::Display for SessionId {
+impl std::fmt::Display for ProcessId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.to_uuid())
     }
 }
 
-impl std::str::FromStr for SessionId {
+impl std::str::FromStr for ProcessId {
     type Err = uuid::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self::from_uuid(s.parse()?))
     }
 }
 
-/// Messages sent from the GUI client to the daemon.
+/// Messages sent from the GUI client to the service.
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ClientMessage {
-    CreateSession {
+    CreateProcess {
         shell: String,
         cwd: String,
         env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
     },
-    AttachSession {
-        session_id: SessionId,
+    AttachProcess {
+        process_id: ProcessId,
     },
-    DetachSession {
-        session_id: SessionId,
+    DetachProcess {
+        process_id: ProcessId,
     },
-    SessionInput {
-        session_id: SessionId,
+    ProcessInput {
+        process_id: ProcessId,
         data: Vec<u8>,
     },
-    ResizeSession {
-        session_id: SessionId,
+    ResizeProcess {
+        process_id: ProcessId,
         cols: u16,
         rows: u16,
     },
-    ListSessions,
-    KillSession {
-        session_id: SessionId,
+    ListProcesses,
+    KillProcess {
+        process_id: ProcessId,
     },
     RequestSnapshot {
-        session_id: SessionId,
+        process_id: ProcessId,
     },
     Shutdown,
 }
 
-/// Messages sent from the daemon to the GUI client.
+/// Messages sent from the service to the GUI client.
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub enum DaemonMessage {
-    SessionCreated {
-        session_id: SessionId,
+pub enum ServiceMessage {
+    ProcessCreated {
+        process_id: ProcessId,
     },
-    SessionOutput {
-        session_id: SessionId,
+    ProcessOutput {
+        process_id: ProcessId,
         data: Vec<u8>,
     },
     ViewportPatch {
-        session_id: SessionId,
+        process_id: ProcessId,
         changed_lines: Vec<(u16, TermLine)>,
         cursor: TermCursor,
         cols: u16,
@@ -94,15 +94,15 @@ pub enum DaemonMessage {
         selection: Option<TermSelectionRange>,
         full: bool,
     },
-    SessionExited {
-        session_id: SessionId,
+    ProcessExited {
+        process_id: ProcessId,
         exit_code: Option<i32>,
     },
-    SessionList {
-        sessions: Vec<SessionInfo>,
+    ProcessList {
+        processes: Vec<ProcessInfo>,
     },
     Snapshot {
-        session_id: SessionId,
+        process_id: ProcessId,
         lines: Vec<TermLine>,
         cursor: TermCursor,
         cols: u16,
@@ -113,10 +113,10 @@ pub enum DaemonMessage {
     },
 }
 
-/// Metadata about a session, returned in SessionList.
+/// Metadata about a process, returned in ProcessList.
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct SessionInfo {
-    pub id: SessionId,
+pub struct ProcessInfo {
+    pub id: ProcessId,
     pub shell: String,
     pub cwd: String,
     pub cols: u16,

@@ -4,9 +4,9 @@ use bevy_cef::prelude::early_exit_if_subprocess;
 use vmux_desktop::VmuxPlugin;
 
 fn main() {
-    // Check for `daemon` subcommand before any GUI/Bevy initialization.
-    if std::env::args().nth(1).as_deref() == Some("daemon") {
-        run_daemon();
+    // Check for `service` subcommand before any GUI/Bevy initialization.
+    if std::env::args().nth(1).as_deref() == Some("service") {
+        run_service();
         return;
     }
 
@@ -67,10 +67,10 @@ extern "C" fn sigint_handler(_: libc::c_int) {
     }
 }
 
-/// Run the vmux daemon (persistent terminal session manager).
-/// Invoked via `vmux daemon` or `Vmux daemon`.
-fn run_daemon() {
-    use vmux_daemon::{daemon_dir, pid_path, socket_path};
+/// Run the vmux service (persistent terminal process manager).
+/// Invoked via `vmux service` or `Vmux service`.
+fn run_service() {
+    use vmux_service::{pid_path, service_dir, socket_path};
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -78,8 +78,8 @@ fn run_daemon() {
         .expect("failed to create tokio runtime");
 
     rt.block_on(async {
-        let dir = daemon_dir();
-        std::fs::create_dir_all(&dir).expect("failed to create daemon dir");
+        let dir = service_dir();
+        std::fs::create_dir_all(&dir).expect("failed to create service dir");
 
         let pid = std::process::id();
         std::fs::write(pid_path(), pid.to_string()).expect("failed to write PID file");
@@ -89,7 +89,7 @@ fn run_daemon() {
 
         let listener = tokio::net::UnixListener::bind(&sock).expect("failed to bind Unix socket");
 
-        eprintln!("vmux-daemon: listening on {}", sock.display());
+        eprintln!("vmux-service: listening on {}", sock.display());
 
         let sock_cleanup = sock.clone();
         tokio::spawn(async move {
@@ -99,6 +99,6 @@ fn run_daemon() {
             std::process::exit(0);
         });
 
-        vmux_daemon::server::run_server(listener).await;
+        vmux_service::server::run_server(listener).await;
     });
 }

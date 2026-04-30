@@ -1,6 +1,0 @@
-[application]
-name = "vmux_sessions"
-default_platform = "web"
-
-[web.app]
-title = "vmux sessions"

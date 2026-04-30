@@ -1,18 +1,18 @@
 //! System tray integration for macOS.
 //!
-//! Tray icon for the daemon when the GUI is closed.
+//! Tray icon for the service when the GUI is closed.
 //!
-//! When the GUI window closes but daemon sessions are still alive,
-//! a tray icon is shown to indicate the daemon is running.
+//! When the GUI window closes but service-managed processes are still alive,
+//! a tray icon is shown to indicate the service is running.
 //!
 //! NOTE: Full tray-icon integration is deferred to a follow-up.
 //! tray-icon requires a running event loop and careful coordination
-//! with Bevy/winit's event loop on macOS. For now, the daemon runs
+//! with Bevy/winit's event loop on macOS. For now, the service runs
 //! headlessly and the user can relaunch the GUI to reconnect.
 //!
 //! Planned features:
-//! - Tray icon appears when GUI closes with active sessions
-//! - Menu: "Show Vmux", "Sessions (N active)", "Quit Daemon"
+//! - Tray icon appears when GUI closes with active processes
+//! - Menu: "Show Vmux", "Processes (N active)", "Quit Service"
 //! - Click to relaunch GUI and reattach
 
 #[allow(dead_code)] // Will be registered in VmuxPlugin once implemented

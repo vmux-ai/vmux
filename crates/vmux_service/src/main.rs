@@ -1,9 +1,9 @@
-use vmux_daemon::{daemon_dir, pid_path, socket_path};
+use vmux_service::{pid_path, service_dir, socket_path};
 
 #[tokio::main]
 async fn main() {
-    let dir = daemon_dir();
-    std::fs::create_dir_all(&dir).expect("failed to create daemon dir");
+    let dir = service_dir();
+    std::fs::create_dir_all(&dir).expect("failed to create service dir");
 
     // Write PID file
     let pid = std::process::id();
@@ -15,7 +15,7 @@ async fn main() {
 
     let listener = tokio::net::UnixListener::bind(&sock).expect("failed to bind Unix socket");
 
-    eprintln!("vmux-daemon: listening on {}", sock.display());
+    eprintln!("vmux-service: listening on {}", sock.display());
 
     // Clean up on shutdown
     let sock_cleanup = sock.clone();
@@ -26,5 +26,5 @@ async fn main() {
         std::process::exit(0);
     });
 
-    vmux_daemon::server::run_server(listener).await;
+    vmux_service::server::run_server(listener).await;
 }

@@ -2,9 +2,9 @@ use bevy::{
     ecs::relationship::Relationship, picking::Pickable, prelude::*, render::alpha::AlphaMode,
 };
 use bevy_cef::prelude::*;
-use vmux_daemon::protocol::{ClientMessage, SessionId};
 use vmux_history::LastActivatedAt;
-use vmux_sessions::event::*;
+use vmux_processes::event::*;
+use vmux_service::protocol::{ClientMessage, ProcessId};
 use vmux_webview_app::UiReady;
 
 use crate::{
@@ -15,15 +15,15 @@ use crate::{
         tab::{Tab, focused_tab, tab_bundle},
         window::WEBVIEW_MESH_DEPTH_BIAS,
     },
-    terminal::{DaemonClient, DaemonSessionHandle, Terminal},
+    terminal::{ServiceClient, ServiceProcessHandle, Terminal},
 };
 
-/// Marker for the sessions monitor webview entity.
+/// Marker for the processes monitor webview entity.
 #[derive(Component)]
-pub(crate) struct SessionsMonitor;
+pub(crate) struct ProcessesMonitor;
 
-impl SessionsMonitor {
-    /// Create a sessions monitor webview bundle.
+impl ProcessesMonitor {
+    /// Create a processes monitor webview bundle.
     pub(crate) fn new(
         meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -32,11 +32,11 @@ impl SessionsMonitor {
             (
                 Self,
                 Browser,
-                WebviewSource::new(SESSIONS_WEBVIEW_URL),
-                ResolvedWebviewUri(SESSIONS_WEBVIEW_URL.to_string()),
+                WebviewSource::new(PROCESSES_WEBVIEW_URL),
+                ResolvedWebviewUri(PROCESSES_WEBVIEW_URL.to_string()),
                 vmux_header::PageMetadata {
-                    title: "Sessions".to_string(),
-                    url: SESSIONS_WEBVIEW_URL.to_string(),
+                    title: "Background Services".to_string(),
+                    url: PROCESSES_WEBVIEW_URL.to_string(),
                     favicon_url: String::new(),
                 },
                 Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
@@ -72,82 +72,82 @@ impl SessionsMonitor {
     }
 }
 
-/// Cached session list from the daemon, updated via ListSessions responses.
-/// Written by terminal.rs's poll_daemon_messages, read by this module.
+/// Cached process list from the service, updated via ListProcesses responses.
+/// Written by terminal.rs's poll_service_messages, read by this module.
 #[derive(Resource, Default)]
-pub(crate) struct DaemonSessionList {
-    pub sessions: Vec<vmux_daemon::protocol::SessionInfo>,
+pub(crate) struct ServiceProcessList {
+    pub processes: Vec<vmux_service::protocol::ProcessInfo>,
 }
 
-/// Timer for periodic session list polling.
+/// Timer for periodic process list polling.
 #[derive(Resource)]
-struct SessionsPollTimer(Timer);
+struct ProcessesPollTimer(Timer);
 
-pub(crate) struct SessionsMonitorPlugin;
+pub(crate) struct ProcessesMonitorPlugin;
 
-impl Plugin for SessionsMonitorPlugin {
+impl Plugin for ProcessesMonitorPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<DaemonSessionList>()
-            .insert_resource(SessionsPollTimer(Timer::from_seconds(
+        app.init_resource::<ServiceProcessList>()
+            .insert_resource(ProcessesPollTimer(Timer::from_seconds(
                 1.0,
                 TimerMode::Repeating,
             )))
-            .add_plugins(JsEmitEventPlugin::<SessionNavigateEvent>::default())
-            .add_plugins(JsEmitEventPlugin::<SessionKillEvent>::default())
-            .add_plugins(JsEmitEventPlugin::<SessionKillAllEvent>::default())
+            .add_plugins(JsEmitEventPlugin::<ProcessNavigateEvent>::default())
+            .add_plugins(JsEmitEventPlugin::<ProcessKillEvent>::default())
+            .add_plugins(JsEmitEventPlugin::<ProcessKillAllEvent>::default())
             .add_systems(
                 Update,
-                (request_session_list, broadcast_to_monitors).chain(),
+                (request_process_list, broadcast_to_monitors).chain(),
             )
-            .add_observer(on_session_navigate)
-            .add_observer(on_session_kill)
-            .add_observer(on_session_kill_all);
+            .add_observer(on_process_navigate)
+            .add_observer(on_process_kill)
+            .add_observer(on_process_kill_all);
     }
 }
 
-/// Periodically send ListSessions to the daemon.
-fn request_session_list(
+/// Periodically send ListProcesses to the service.
+fn request_process_list(
     time: Res<Time>,
-    mut timer: ResMut<SessionsPollTimer>,
-    daemon: Option<Res<DaemonClient>>,
-    monitors: Query<(), With<SessionsMonitor>>,
+    mut timer: ResMut<ProcessesPollTimer>,
+    service: Option<Res<ServiceClient>>,
+    monitors: Query<(), With<ProcessesMonitor>>,
 ) {
     if monitors.is_empty() {
         return;
     }
     timer.0.tick(time.delta());
     if timer.0.just_finished()
-        && let Some(daemon) = daemon
+        && let Some(service) = service
     {
-        daemon.0.send(ClientMessage::ListSessions);
+        service.0.send(ClientMessage::ListProcesses);
     }
 }
 
-/// Broadcast the cached session list to all sessions monitor webviews.
+/// Broadcast the cached process list to all process monitor webviews.
 fn broadcast_to_monitors(
-    session_list: Res<DaemonSessionList>,
-    daemon: Option<Res<DaemonClient>>,
-    monitors: Query<Entity, (With<SessionsMonitor>, With<UiReady>)>,
+    process_list: Res<ServiceProcessList>,
+    service: Option<Res<ServiceClient>>,
+    monitors: Query<Entity, (With<ProcessesMonitor>, With<UiReady>)>,
     browsers: NonSend<Browsers>,
-    terminal_handles: Query<&DaemonSessionHandle, With<Terminal>>,
+    terminal_handles: Query<&ServiceProcessHandle, With<Terminal>>,
     mut commands: Commands,
 ) {
-    if monitors.is_empty() || !session_list.is_changed() {
+    if monitors.is_empty() || !process_list.is_changed() {
         return;
     }
 
-    let connected = daemon.is_some();
+    let connected = service.is_some();
 
     // Build attached set from local terminal handles
     let attached_ids: std::collections::HashSet<String> = terminal_handles
         .iter()
-        .map(|h| h.session_id.to_string())
+        .map(|h| h.process_id.to_string())
         .collect();
 
-    let sessions: Vec<SessionEntry> = session_list
-        .sessions
+    let processes: Vec<ProcessEntry> = process_list
+        .processes
         .iter()
-        .map(|info| SessionEntry {
+        .map(|info| ProcessEntry {
             id: info.id.to_string(),
             shell: info.shell.clone(),
             cwd: info.cwd.clone(),
@@ -160,22 +160,22 @@ fn broadcast_to_monitors(
         })
         .collect();
 
-    let event = SessionsListEvent {
+    let event = ProcessesListEvent {
         connected,
-        sessions,
+        processes,
     };
 
     for entity in &monitors {
         if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
-            commands.trigger(HostEmitEvent::new(entity, SESSIONS_LIST_EVENT, &event));
+            commands.trigger(HostEmitEvent::new(entity, PROCESSES_LIST_EVENT, &event));
         }
     }
 }
 
-/// Navigate to the terminal tab for the clicked session, or open a new one.
-fn on_session_navigate(
-    trigger: On<Receive<SessionNavigateEvent>>,
-    terminals: Query<(Entity, &DaemonSessionHandle, &ChildOf), With<Terminal>>,
+/// Navigate to the terminal tab for the clicked process, or open a new one.
+fn on_process_navigate(
+    trigger: On<Receive<ProcessNavigateEvent>>,
+    terminals: Query<(Entity, &ServiceProcessHandle, &ChildOf), With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Tab>>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
@@ -187,11 +187,11 @@ fn on_session_navigate(
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut commands: Commands,
 ) {
-    let sid = &trigger.event().payload.session_id;
+    let pid = &trigger.event().payload.process_id;
 
-    // If a tab already has this session attached, activate it
+    // If a tab already has this process attached, activate it
     for (_, handle, content_child_of) in &terminals {
-        if handle.session_id.to_string() == *sid {
+        if handle.process_id.to_string() == *pid {
             let tab = content_child_of.get();
             commands.entity(tab).insert(LastActivatedAt::now());
             if let Ok(tab_child_of) = tab_parent.get(tab) {
@@ -204,8 +204,8 @@ fn on_session_navigate(
     }
 
     // No existing tab — open a new one with reattach
-    let Ok(session_id) = sid.parse::<SessionId>() else {
-        warn!("Invalid session ID from navigate event: {sid}");
+    let Ok(process_id) = pid.parse::<ProcessId>() else {
+        warn!("Invalid process ID from navigate event: {pid}");
         return;
     };
     let (_, active_pane, _) = focused_tab(
@@ -222,28 +222,28 @@ fn on_session_navigate(
         .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
     commands.spawn((
-        Terminal::reattach(&mut meshes, &mut webview_mt, session_id),
+        Terminal::reattach(&mut meshes, &mut webview_mt, process_id),
         ChildOf(tab),
     ));
 }
 
-/// Kill a single daemon session and close the associated terminal tab if any.
-fn on_session_kill(
-    trigger: On<Receive<SessionKillEvent>>,
-    daemon: Option<Res<DaemonClient>>,
-    terminals: Query<(Entity, &DaemonSessionHandle, &ChildOf), With<Terminal>>,
+/// Kill a single service-managed process and close the associated terminal tab if any.
+fn on_process_kill(
+    trigger: On<Receive<ProcessKillEvent>>,
+    service: Option<Res<ServiceClient>>,
+    terminals: Query<(Entity, &ServiceProcessHandle, &ChildOf), With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Tab>>,
     mut commands: Commands,
 ) {
-    let Some(daemon) = daemon else { return };
-    let sid = &trigger.event().payload.session_id;
+    let Some(service) = service else { return };
+    let pid = &trigger.event().payload.process_id;
 
-    if let Ok(session_id) = sid.parse::<SessionId>() {
-        daemon.0.send(ClientMessage::KillSession { session_id });
+    if let Ok(process_id) = pid.parse::<ProcessId>() {
+        service.0.send(ClientMessage::KillProcess { process_id });
 
-        // Close the terminal tab that owns this session
+        // Close the terminal tab that owns this process
         for (_, handle, content_child_of) in &terminals {
-            if handle.session_id == session_id {
+            if handle.process_id == process_id {
                 let tab = content_child_of.get();
                 // Only despawn if it's actually a tab
                 if tab_parent.get(tab).is_ok() || commands.get_entity(tab).is_ok() {
@@ -255,24 +255,24 @@ fn on_session_kill(
     }
 }
 
-/// Kill all daemon sessions and close their terminal tabs.
-fn on_session_kill_all(
-    _trigger: On<Receive<SessionKillAllEvent>>,
-    daemon: Option<Res<DaemonClient>>,
-    session_list: Res<DaemonSessionList>,
-    terminals: Query<(Entity, &DaemonSessionHandle, &ChildOf), With<Terminal>>,
+/// Kill all service-managed processes and close their terminal tabs.
+fn on_process_kill_all(
+    _trigger: On<Receive<ProcessKillAllEvent>>,
+    service: Option<Res<ServiceClient>>,
+    process_list: Res<ServiceProcessList>,
+    terminals: Query<(Entity, &ServiceProcessHandle, &ChildOf), With<Terminal>>,
     mut commands: Commands,
 ) {
-    let Some(daemon) = daemon else { return };
+    let Some(service) = service else { return };
 
-    for info in &session_list.sessions {
-        daemon.0.send(ClientMessage::KillSession {
-            session_id: info.id,
+    for info in &process_list.processes {
+        service.0.send(ClientMessage::KillProcess {
+            process_id: info.id,
         });
 
         // Close the terminal tab
         for (_, handle, content_child_of) in &terminals {
-            if handle.session_id == info.id {
+            if handle.process_id == info.id {
                 let tab = content_child_of.get();
                 commands.entity(tab).despawn();
                 break;

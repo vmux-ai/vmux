@@ -413,7 +413,7 @@ struct SettingsWatcher {
 }
 
 /// Returns the Vmux data directory (~/Library/Application Support/Vmux on macOS).
-/// Matches the paths used by persistence, browser profiles, and the daemon.
+/// Matches the paths used by persistence, browser profiles, and the service.
 fn data_dir() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "macos")]
     {

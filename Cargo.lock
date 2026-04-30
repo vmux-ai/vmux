@@ -8891,21 +8891,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vmux_daemon"
-version = "0.1.0"
-dependencies = [
- "alacritty_terminal",
- "libc",
- "portable-pty",
- "rkyv",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
- "vmux_terminal",
-]
-
-[[package]]
 name = "vmux_desktop"
 version = "0.1.0"
 dependencies = [
@@ -8931,11 +8916,11 @@ dependencies = [
  "uuid",
  "vmux_command_bar",
  "vmux_core",
- "vmux_daemon",
  "vmux_header",
  "vmux_history",
  "vmux_macro",
- "vmux_sessions",
+ "vmux_processes",
+ "vmux_service",
  "vmux_side_sheet",
  "vmux_terminal",
  "vmux_ui",
@@ -8990,7 +8975,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vmux_sessions"
+name = "vmux_processes"
 version = "0.1.0"
 dependencies = [
  "bevy",
@@ -9001,6 +8986,21 @@ dependencies = [
  "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "vmux_service"
+version = "0.1.0"
+dependencies = [
+ "alacritty_terminal",
+ "libc",
+ "portable-pty",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+ "vmux_terminal",
 ]
 
 [[package]]

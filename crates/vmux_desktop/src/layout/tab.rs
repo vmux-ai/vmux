@@ -1,10 +1,10 @@
 use crate::{
-    command::{AppCommand, ReadAppCommands, SessionCommand, TabCommand, TerminalCommand},
+    command::{AppCommand, ReadAppCommands, ServiceCommand, TabCommand, TerminalCommand},
     command_bar::NewTabContext,
     layout::pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_tab_in_pane},
     layout::space::Space,
     layout::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
-    sessions_monitor::SessionsMonitor,
+    processes_monitor::ProcessesMonitor,
     settings::AppSettings,
     terminal::Terminal,
 };
@@ -194,10 +194,10 @@ fn handle_tab_commands(
     mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
-        let (tab_cmd, is_terminal, is_sessions) = match *cmd {
+        let (tab_cmd, is_terminal, is_processes) = match *cmd {
             AppCommand::Tab(t) => (t, false, false),
             AppCommand::Terminal(TerminalCommand::New) => (TabCommand::New, true, false),
-            AppCommand::Session(SessionCommand::Open) => (TabCommand::New, false, true),
+            AppCommand::Service(ServiceCommand::Open) => (TabCommand::New, false, true),
             _ => continue,
         };
 
@@ -221,24 +221,24 @@ fn handle_tab_commands(
                         .id();
                     commands.entity(tab).insert(vmux_header::PageMetadata {
                         url: TERMINAL_WEBVIEW_URL.to_string(),
-                        title: "Terminal (Session: -)".to_string(),
+                        title: "Terminal".to_string(),
                         ..default()
                     });
                     commands.spawn((
                         Terminal::new(&mut meshes, &mut webview_mt, &settings),
                         ChildOf(tab),
                     ));
-                } else if is_sessions {
+                } else if is_processes {
                     let tab = commands
                         .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
                     commands.entity(tab).insert(vmux_header::PageMetadata {
-                        url: vmux_sessions::event::SESSIONS_WEBVIEW_URL.to_string(),
-                        title: "Sessions".to_string(),
+                        url: vmux_processes::event::PROCESSES_WEBVIEW_URL.to_string(),
+                        title: "Background Services".to_string(),
                         ..default()
                     });
                     commands.spawn((
-                        SessionsMonitor::new(&mut meshes, &mut webview_mt),
+                        ProcessesMonitor::new(&mut meshes, &mut webview_mt),
                         ChildOf(tab),
                     ));
                 } else {

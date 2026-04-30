@@ -1,6 +1,6 @@
 [package]
-name = "vmux_sessions"
-description = "Daemon session monitor webview app"
+name = "vmux_processes"
+description = "Service process monitor webview app"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -11,7 +11,7 @@ default = []
 web = []
 
 [[bin]]
-name = "vmux_sessions_app"
+name = "vmux_processes_app"
 path = "src/main.rs"
 required-features = ["web"]
 

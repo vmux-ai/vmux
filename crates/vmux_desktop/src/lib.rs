@@ -13,9 +13,9 @@ pub mod keychain;
 mod layout;
 mod os_menu;
 mod persistence;
+mod processes_monitor;
 pub mod profile;
 mod scene;
-mod sessions_monitor;
 mod settings;
 pub(crate) mod shortcut;
 mod terminal;
@@ -33,9 +33,9 @@ use std::time::Duration;
 use {
     browser::BrowserPlugin, command::CommandPlugin, command_bar::CommandBarInputPlugin,
     layout::LayoutPlugin, os_menu::OsMenuPlugin, persistence::PersistencePlugin,
-    profile::ProfilePlugin, scene::ScenePlugin, sessions_monitor::SessionsMonitorPlugin,
+    processes_monitor::ProcessesMonitorPlugin, profile::ProfilePlugin, scene::ScenePlugin,
     settings::SettingsPlugin, shortcut::ShortcutPlugin, terminal::TerminalInputPlugin,
-    vmux_command_bar::CommandBarPlugin, vmux_header::HeaderPlugin, vmux_sessions::SessionsPlugin,
+    vmux_command_bar::CommandBarPlugin, vmux_header::HeaderPlugin, vmux_processes::ProcessesPlugin,
     vmux_side_sheet::SideSheetPlugin, vmux_terminal::TerminalPlugin,
     vmux_webview_app::WebviewAppRegistryPlugin,
 };
@@ -100,13 +100,13 @@ impl Plugin for VmuxPlugin {
             SideSheetPlugin,
             CommandBarPlugin,
             TerminalPlugin,
-            SessionsPlugin,
+            ProcessesPlugin,
             CommandBarInputPlugin,
             BrowserPlugin,
         ))
         .add_plugins((
             TerminalInputPlugin,
-            SessionsMonitorPlugin,
+            ProcessesMonitorPlugin,
             PersistencePlugin,
             ProfilePlugin,
             LayoutPlugin,
