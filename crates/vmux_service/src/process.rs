@@ -205,15 +205,18 @@ impl Process {
         }
     }
 
-    /// Replace the selection. None clears it.
+    /// Replace the selection. None clears it. Range is clamped to the
+    /// current viewport dimensions to defend against stale or buggy clients.
     pub fn set_selection(&mut self, range: Option<TermSelectionRange>) {
-        self.selection = range;
+        self.selection = range.map(|r| self.clamp_range(r));
         self.sync_viewport();
     }
 
     /// Extend the current selection's end point to (col, row). If no
-    /// selection exists, anchor at (col, row).
+    /// selection exists, anchor at (col, row). Coordinates are clamped to
+    /// the current viewport.
     pub fn extend_selection_to(&mut self, col: u16, row: u16) {
+        let (col, row) = self.clamp_point(col, row);
         let range = match self.selection.take() {
             Some(mut r) => {
                 r.end_col = col;
@@ -230,6 +233,23 @@ impl Process {
         };
         self.selection = Some(range);
         self.sync_viewport();
+    }
+
+    fn clamp_point(&self, col: u16, row: u16) -> (u16, u16) {
+        (
+            col.min(self.cols.saturating_sub(1)),
+            row.min(self.rows.saturating_sub(1)),
+        )
+    }
+
+    fn clamp_range(&self, mut r: TermSelectionRange) -> TermSelectionRange {
+        let max_col = self.cols.saturating_sub(1);
+        let max_row = self.rows.saturating_sub(1);
+        r.start_col = r.start_col.min(max_col);
+        r.end_col = r.end_col.min(max_col);
+        r.start_row = r.start_row.min(max_row);
+        r.end_row = r.end_row.min(max_row);
+        r
     }
 
     /// Select the word at (col, row). A "word" is a maximal run of
@@ -315,13 +335,24 @@ impl Process {
         };
 
         let max_col = num_cols.saturating_sub(1);
+        // Block selections require per-axis min/max independently of row order.
+        let (block_lo, block_hi) = if sel.is_block {
+            (
+                sel.start_col.min(sel.end_col) as usize,
+                sel.start_col.max(sel.end_col) as usize,
+            )
+        } else {
+            (0, 0)
+        };
         let mut lines: Vec<String> = Vec::new();
         for row_idx in sr..=er {
             if (row_idx as usize) >= num_lines {
                 break;
             }
             let line = &grid[Line(row_idx as i32 - offset)];
-            let (lo, hi) = if sel.is_block || sr == er {
+            let (lo, hi) = if sel.is_block {
+                (block_lo, block_hi)
+            } else if sr == er {
                 (sc as usize, ec as usize)
             } else if row_idx == sr {
                 (sc as usize, max_col)
@@ -449,6 +480,20 @@ impl Process {
         let dims = PtyDimensions { cols, rows };
         self.term.resize(dims);
         self.line_hashes.clear();
+        // Clamp copy-mode cursor + anchor to the new bounds.
+        if let Some(cm) = self.copy_mode.as_mut() {
+            let max_col = cols.saturating_sub(1);
+            let max_row = rows.saturating_sub(1);
+            cm.cursor.0 = cm.cursor.0.min(max_col);
+            cm.cursor.1 = cm.cursor.1.min(max_row);
+            if let Some((ac, ar)) = cm.anchor.as_mut() {
+                *ac = (*ac).min(max_col);
+                *ar = (*ar).min(max_row);
+            }
+        }
+        if let Some(r) = self.selection.take() {
+            self.selection = Some(self.clamp_range(r));
+        }
     }
 
     /// Drain PTY output, process through VTE, broadcast viewport patches.
