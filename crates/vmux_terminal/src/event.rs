@@ -59,7 +59,16 @@ pub struct TermViewportEvent {
 
 /// Range of selected cells in viewport coordinates (0-based row/col).
 #[derive(
-    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 pub struct TermSelectionRange {
     pub start_col: u16,
