@@ -589,7 +589,7 @@ fn poll_service_messages(
                 text,
             } => {
                 if !text.is_empty() {
-                    write_to_pasteboard(&text);
+                    crate::clipboard::write(text.clone());
                 }
             }
             _ => {} // ProcessOutput handled elsewhere if needed
@@ -714,23 +714,20 @@ fn handle_terminal_keyboard(
         if super_key {
             match event.key_code {
                 KeyCode::KeyV => {
-                    // Paste via pbpaste
-                    if let Ok(output) = std::process::Command::new("pbpaste").output()
-                        && output.status.success()
+                    // Paste via OS clipboard.
+                    if let Some(text) = crate::clipboard::read_blocking()
+                        && !text.is_empty()
                     {
-                        let text = String::from_utf8_lossy(&output.stdout);
-                        if !text.is_empty() {
-                            // Wrap in bracketed paste sequences
-                            let mut data = Vec::new();
-                            data.extend_from_slice(b"\x1b[200~");
-                            data.extend_from_slice(text.as_bytes());
-                            data.extend_from_slice(b"\x1b[201~");
-                            for handle in &q {
-                                service.0.send(ClientMessage::ProcessInput {
-                                    process_id: handle.process_id,
-                                    data: data.clone(),
-                                });
-                            }
+                        // Wrap in bracketed paste sequences
+                        let mut data = Vec::new();
+                        data.extend_from_slice(b"\x1b[200~");
+                        data.extend_from_slice(text.as_bytes());
+                        data.extend_from_slice(b"\x1b[201~");
+                        for handle in &q {
+                            service.0.send(ClientMessage::ProcessInput {
+                                process_id: handle.process_id,
+                                data: data.clone(),
+                            });
                         }
                     }
                     continue;
@@ -1212,20 +1209,5 @@ fn handle_terminal_copy_mode_command(
                 });
             }
         }
-    }
-}
-
-/// Write text to the macOS pasteboard via `pbcopy`.
-fn write_to_pasteboard(text: &str) {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-    match Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
-        Ok(mut child) => {
-            if let Some(stdin) = child.stdin.as_mut() {
-                let _ = stdin.write_all(text.as_bytes());
-            }
-            let _ = child.wait();
-        }
-        Err(e) => warn!("pbcopy failed: {e}"),
     }
 }

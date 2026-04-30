@@ -6,6 +6,7 @@
 )]
 
 mod browser;
+mod clipboard;
 mod command;
 mod command_bar;
 #[cfg(target_os = "macos")]
