@@ -916,6 +916,11 @@ struct MouseSessionState {
     /// Last (col, row) sent via ExtendSelectionTo during the active drag.
     /// Used to dedupe redundant move events at the same cell.
     last_extend_cell: Option<(u16, u16)>,
+    /// Anchor cell from the most recent left-click that has not yet
+    /// produced a real selection. We defer materializing the selection
+    /// until the user actually drags so a single click doesn't draw a
+    /// 1-character selection box.
+    pending_anchor: Option<(u16, u16)>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -994,6 +999,8 @@ fn on_term_mouse(
 
         match count {
             1 if shift => {
+                // Shift+click extends the existing selection.
+                entry.pending_anchor = None;
                 service.0.send(ClientMessage::ExtendSelectionTo {
                     process_id,
                     col: event.col,
@@ -1001,40 +1008,59 @@ fn on_term_mouse(
                 });
             }
             1 => {
+                // Plain left-click: clear any prior selection and remember
+                // the anchor cell. We materialize the selection only on
+                // the first drag move to avoid drawing a 1-char box.
+                entry.pending_anchor = Some((event.col, event.row));
+                service.0.send(ClientMessage::SetSelection {
+                    process_id,
+                    range: None,
+                });
+            }
+            2 => {
+                entry.pending_anchor = None;
+                service.0.send(ClientMessage::SelectWordAt {
+                    process_id,
+                    col: event.col,
+                    row: event.row,
+                });
+            }
+            _ => {
+                entry.pending_anchor = None;
+                service.0.send(ClientMessage::SelectLineAt {
+                    process_id,
+                    row: event.row,
+                });
+            }
+        }
+    } else if event.moving && entry.drag_active {
+        // Dedupe: only act when the cursor crosses into a new cell.
+        if entry.last_extend_cell != Some((event.col, event.row)) {
+            entry.last_extend_cell = Some((event.col, event.row));
+            if let Some((ac, ar)) = entry.pending_anchor.take() {
+                // First drag movement: now materialize the selection.
                 service.0.send(ClientMessage::SetSelection {
                     process_id,
                     range: Some(TermSelectionRange {
-                        start_col: event.col,
-                        start_row: event.row,
+                        start_col: ac,
+                        start_row: ar,
                         end_col: event.col,
                         end_row: event.row,
                         is_block: false,
                     }),
                 });
+            } else {
+                service.0.send(ClientMessage::ExtendSelectionTo {
+                    process_id,
+                    col: event.col,
+                    row: event.row,
+                });
             }
-            2 => service.0.send(ClientMessage::SelectWordAt {
-                process_id,
-                col: event.col,
-                row: event.row,
-            }),
-            _ => service.0.send(ClientMessage::SelectLineAt {
-                process_id,
-                row: event.row,
-            }),
-        }
-    } else if event.moving && entry.drag_active {
-        // Dedupe: only send when the cursor crosses into a new cell.
-        if entry.last_extend_cell != Some((event.col, event.row)) {
-            entry.last_extend_cell = Some((event.col, event.row));
-            service.0.send(ClientMessage::ExtendSelectionTo {
-                process_id,
-                col: event.col,
-                row: event.row,
-            });
         }
     } else if !event.pressed {
         entry.drag_active = false;
         entry.last_extend_cell = None;
+        entry.pending_anchor = None;
     }
 }
 
