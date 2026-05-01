@@ -72,7 +72,121 @@ pub enum ClientMessage {
     RequestSnapshot {
         process_id: ProcessId,
     },
+    SetSelection {
+        process_id: ProcessId,
+        range: Option<TermSelectionRange>,
+    },
+    ExtendSelectionTo {
+        process_id: ProcessId,
+        col: u16,
+        row: u16,
+    },
+    SelectWordAt {
+        process_id: ProcessId,
+        col: u16,
+        row: u16,
+    },
+    SelectLineAt {
+        process_id: ProcessId,
+        row: u16,
+    },
+    GetSelectionText {
+        process_id: ProcessId,
+    },
+    EnterCopyMode {
+        process_id: ProcessId,
+    },
+    ExitCopyMode {
+        process_id: ProcessId,
+    },
+    CopyModeKey {
+        process_id: ProcessId,
+        key: CopyModeKey,
+    },
     Shutdown,
+}
+
+/// Vim-style visual/copy-mode action sent by the GUI to the service.
+///
+/// All movement keys (Left/Right/Up/Down/LineStart/LineEnd/PageUp/PageDown)
+/// reposition the copy-mode cursor. If visual selection is active, movement
+/// also extends the selection to the new cursor position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum CopyModeKey {
+    /// Move cursor one cell left (clamped to col 0).
+    Left,
+    /// Move cursor one cell right (clamped to last column).
+    Right,
+    /// Move cursor one row up (clamped to row 0).
+    Up,
+    /// Move cursor one row down (clamped to last row).
+    Down,
+    /// Jump cursor to column 0 of the current row.
+    LineStart,
+    /// Jump cursor to the last column of the current row.
+    LineEnd,
+    /// Jump cursor to the last non-blank cell of the current row (`g_`).
+    LastNonBlank,
+    /// Jump cursor to the first non-blank cell of the current row (`^`).
+    FirstNonBlank,
+    /// Move to the next vi word start (`w`).
+    WordForward,
+    /// Move to the next whitespace-delimited WORD start (`W`).
+    BigWordForward,
+    /// Move to the previous vi word start (`b`).
+    WordBackward,
+    /// Move to the previous whitespace-delimited WORD start (`B`).
+    BigWordBackward,
+    /// Move to the next vi word end (`e`).
+    WordEndForward,
+    /// Move to the next whitespace-delimited WORD end (`E`).
+    BigWordEndForward,
+    /// Move to the previous vi word end (`ge`).
+    WordEndBackward,
+    /// Move to the previous whitespace-delimited WORD end (`gE`).
+    BigWordEndBackward,
+    /// Move to the first visible row (`gg`).
+    Top,
+    /// Move to the last visible row (`G`).
+    Bottom,
+    /// Move to the top visible row (`H`).
+    ScreenTop,
+    /// Move to the middle visible row (`M`).
+    ScreenMiddle,
+    /// Move to the bottom visible row (`L`).
+    ScreenBottom,
+    /// Move to the previous paragraph/blank-line boundary (`{`).
+    PrevParagraph,
+    /// Move to the next paragraph/blank-line boundary (`}`).
+    NextParagraph,
+    /// Find a character forward on the current line (`f{char}`).
+    FindForward(char),
+    /// Find a character backward on the current line (`F{char}`).
+    FindBackward(char),
+    /// Move until before a character forward on the current line (`t{char}`).
+    TillForward(char),
+    /// Move until after a character backward on the current line (`T{char}`).
+    TillBackward(char),
+    /// Repeat the last find/till motion (`;`).
+    RepeatFind,
+    /// Repeat the last find/till motion in reverse (`,`).
+    RepeatFindReverse,
+    /// Swap visual anchor and cursor (`o`).
+    SwapSelectionEnds,
+    /// Move cursor up by half a screen.
+    PageUp,
+    /// Move cursor down by half a screen.
+    PageDown,
+    /// Re-anchor the selection at the current cursor position. Subsequent
+    /// movement keys extend the selection from this anchor.
+    StartSelection,
+    /// Select full lines from the current cursor row. Subsequent movement
+    /// extends the linewise selection by row.
+    StartLineSelection,
+    /// Return the current selection text and exit copy mode.
+    Copy,
+    /// Discard any selection and exit copy mode.
+    Exit,
 }
 
 /// Messages sent from the service to the GUI client.
@@ -92,6 +206,7 @@ pub enum ServiceMessage {
         cols: u16,
         rows: u16,
         selection: Option<TermSelectionRange>,
+        copy_mode: bool,
         full: bool,
     },
     ProcessExited {
@@ -110,6 +225,15 @@ pub enum ServiceMessage {
     },
     Error {
         message: String,
+    },
+    SelectionText {
+        process_id: ProcessId,
+        text: String,
+    },
+    TerminalMode {
+        process_id: ProcessId,
+        mouse_capture: bool,
+        copy_mode: bool,
     },
 }
 

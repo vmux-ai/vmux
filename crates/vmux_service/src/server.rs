@@ -11,6 +11,20 @@ use tokio::time::MissedTickBehavior;
 const MAX_WAKE_EVENTS_PER_TICK: usize = 1024;
 type InputWriters = Arc<Mutex<HashMap<ProcessId, PtyInputWriter>>>;
 
+/// Acquire the manager lock and run `f` against the process if it exists.
+/// Returns Some(result) when the process was found, None otherwise.
+async fn with_process_mut<F, R>(
+    manager: &Arc<Mutex<ProcessManager>>,
+    id: ProcessId,
+    f: F,
+) -> Option<R>
+where
+    F: FnOnce(&mut Process) -> R,
+{
+    let mut mgr = manager.lock().await;
+    mgr.processes.get_mut(&id).map(f)
+}
+
 // rkyv is used directly in the attach forwarder (can't use write_message! macro
 // inside a spawned task that doesn't return Result).
 
@@ -172,7 +186,17 @@ async fn handle_client(
             }
 
             ClientMessage::ProcessInput { process_id, data } => {
-                let writer = input_writers.lock().await.get(&process_id).cloned();
+                let can_write = {
+                    let mgr = manager.lock().await;
+                    mgr.processes
+                        .get(&process_id)
+                        .is_some_and(|process| !process.is_copy_mode())
+                };
+                let writer = if can_write {
+                    input_writers.lock().await.get(&process_id).cloned()
+                } else {
+                    None
+                };
                 if let Some(writer) = writer {
                     Process::write_input_to_writer(&writer, &data);
                 }
@@ -216,6 +240,67 @@ async fn handle_client(
                     let resp = ServiceMessage::Error {
                         message: format!("process not found: {process_id}"),
                     };
+                    let mut w = writer.lock().await;
+                    write_message!(&mut *w, &resp)?;
+                }
+            }
+
+            ClientMessage::SetSelection { process_id, range } => {
+                with_process_mut(&manager, process_id, |process| process.set_selection(range))
+                    .await;
+            }
+
+            ClientMessage::ExtendSelectionTo {
+                process_id,
+                col,
+                row,
+            } => {
+                with_process_mut(&manager, process_id, |process| {
+                    process.extend_selection_to(col, row)
+                })
+                .await;
+            }
+
+            ClientMessage::SelectWordAt {
+                process_id,
+                col,
+                row,
+            } => {
+                with_process_mut(&manager, process_id, |process| {
+                    process.select_word_at(col, row)
+                })
+                .await;
+            }
+
+            ClientMessage::SelectLineAt { process_id, row } => {
+                with_process_mut(&manager, process_id, |process| process.select_line_at(row)).await;
+            }
+
+            ClientMessage::GetSelectionText { process_id } => {
+                let text =
+                    with_process_mut(&manager, process_id, |process| process.selection_text())
+                        .await
+                        .flatten()
+                        .unwrap_or_default();
+                let resp = ServiceMessage::SelectionText { process_id, text };
+                let mut w = writer.lock().await;
+                write_message!(&mut *w, &resp)?;
+            }
+
+            ClientMessage::EnterCopyMode { process_id } => {
+                with_process_mut(&manager, process_id, |process| process.enter_copy_mode()).await;
+            }
+
+            ClientMessage::ExitCopyMode { process_id } => {
+                with_process_mut(&manager, process_id, |process| process.exit_copy_mode()).await;
+            }
+
+            ClientMessage::CopyModeKey { process_id, key } => {
+                if let Some(Some(text)) =
+                    with_process_mut(&manager, process_id, |process| process.copy_mode_key(key))
+                        .await
+                {
+                    let resp = ServiceMessage::SelectionText { process_id, text };
                     let mut w = writer.lock().await;
                     write_message!(&mut *w, &resp)?;
                 }

@@ -42,6 +42,7 @@ pub fn App() -> Element {
     let mut cols = use_signal(|| 0u16);
     let mut cursor = use_signal(|| None::<TermCursor>);
     let mut selection = use_signal(|| None::<TermSelectionRange>);
+    let mut copy_mode = use_signal(|| false);
     let mut theme = use_signal(|| None::<TermThemeEvent>);
 
     let _listener = use_event_listener::<TermViewportPatch, _>(TERM_VIEWPORT_EVENT, move |patch| {
@@ -98,6 +99,9 @@ pub fn App() -> Element {
         }
         if *selection.peek() != patch.selection {
             selection.set(patch.selection);
+        }
+        if *copy_mode.peek() != patch.copy_mode {
+            copy_mode.set(patch.copy_mode);
         }
     });
 
@@ -196,6 +200,21 @@ pub fn App() -> Element {
             oncontextmenu: move |e: Event<MouseData>| {
                 e.prevent_default();
             },
+
+            if copy_mode() {
+                if let Some(cursor) = cursor() {
+                    {
+                        let row = cursor.row.saturating_add(1);
+                        let rows = rows().len().max(1);
+                        rsx! {
+                            div {
+                                class: "absolute right-2 top-1 z-10 rounded bg-term-fg px-1 text-xs text-term-bg",
+                                "[{row}/{rows}]"
+                            }
+                        }
+                    }
+                }
+            }
 
             div {
                 style: "padding:{padding}px;",
@@ -589,6 +608,9 @@ fn span_char_offset_for_col(span: &TermSpan, col: u16) -> usize {
 
 /// Compute the selected column range for a given row, if any.
 /// Returns Some((start_col, end_col_exclusive)) or None.
+///
+/// Normalizes the selection so it works regardless of drag direction
+/// (start may be after end in either axis).
 fn row_selection_cols(
     selection: &Option<TermSelectionRange>,
     row_idx: usize,
@@ -596,23 +618,39 @@ fn row_selection_cols(
 ) -> Option<(usize, usize)> {
     let sel = selection.as_ref()?;
     let row = row_idx as u16;
-    if row < sel.start_row || row > sel.end_row {
+    let lo_row = sel.start_row.min(sel.end_row);
+    let hi_row = sel.start_row.max(sel.end_row);
+    if row < lo_row || row > hi_row {
         return None;
     }
-    if sel.is_block {
-        // Block selection: same column range on every selected row
-        Some((sel.start_col as usize, sel.end_col as usize + 1))
-    } else if sel.start_row == sel.end_row {
-        // Single line selection
-        Some((sel.start_col as usize, sel.end_col as usize + 1))
-    } else if row == sel.start_row {
-        // First line of multi-line selection
-        Some((sel.start_col as usize, total_cols as usize))
-    } else if row == sel.end_row {
-        // Last line of multi-line selection
-        Some((0, sel.end_col as usize + 1))
+    // Normalize cols: for block selections per-axis; for linear selections
+    // by row-major (start_row, start_col) order so start always comes first.
+    let (sr, sc, er, ec) = if sel.is_block {
+        (
+            lo_row,
+            sel.start_col.min(sel.end_col),
+            hi_row,
+            sel.start_col.max(sel.end_col),
+        )
+    } else if (sel.start_row, sel.start_col) <= (sel.end_row, sel.end_col) {
+        (sel.start_row, sel.start_col, sel.end_row, sel.end_col)
     } else {
-        // Middle line -- fully selected
-        Some((0, total_cols as usize))
+        (sel.end_row, sel.end_col, sel.start_row, sel.start_col)
+    };
+
+    let (start, end_exclusive) = if sel.is_block || sr == er {
+        (sc as usize, ec as usize + 1)
+    } else if row == sr {
+        (sc as usize, total_cols as usize)
+    } else if row == er {
+        (0, ec as usize + 1)
+    } else {
+        (0, total_cols as usize)
+    };
+
+    if end_exclusive <= start {
+        None
+    } else {
+        Some((start, end_exclusive))
     }
 }

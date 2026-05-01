@@ -55,6 +55,7 @@
             (command: "swap_pane_next", binding: Leader((key: "}"))),
             (command: "rotate_forward", binding: Leader((key: "o", ctrl: true))),
             (command: "rotate_backward", binding: Leader((key: "o", alt: true))),
+            (command: "terminal_copy_mode", binding: Leader((key: "["))),
         ],
     ),
     terminal: Some((

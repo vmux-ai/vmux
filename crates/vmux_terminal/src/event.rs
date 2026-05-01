@@ -54,6 +54,8 @@ pub struct TermViewportEvent {
     pub rows: u16,
     pub title: Option<String>,
     #[serde(default)]
+    pub copy_mode: bool,
+    #[serde(default)]
     pub selection: Option<TermSelectionRange>,
 }
 
@@ -61,10 +63,11 @@ pub struct TermViewportEvent {
 #[derive(
     Debug,
     Clone,
-    Serialize,
-    Deserialize,
+    Copy,
     PartialEq,
     Eq,
+    Serialize,
+    Deserialize,
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
@@ -186,6 +189,8 @@ pub struct TermViewportPatch {
     pub cols: u16,
     pub rows: u16,
     pub selection: Option<TermSelectionRange>,
+    #[serde(default)]
+    pub copy_mode: bool,
     /// When true, changed_lines contains every row (full viewport rebuild).
     pub full: bool,
 }
@@ -265,6 +270,7 @@ mod tests {
             cols,
             rows,
             selection: None,
+            copy_mode: false,
             full,
         }
     }

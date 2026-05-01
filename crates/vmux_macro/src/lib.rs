@@ -59,16 +59,27 @@ fn impl_os_sub_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
             ));
         };
         let props = MenuProps::from_attrs(&variant.attrs)?;
-        if props.hidden {
-            continue;
-        }
-        let (Some(id), Some(label)) = (&props.id, &props.label) else {
+        let Some(id) = &props.id else {
             return Err(syn::Error::new_spanned(
                 variant,
-                "each variant needs #[menu(id = \"...\", label = \"...\")]",
+                "each variant needs #[menu(id = \"...\")]",
             ));
         };
         let id_lit = id.as_str();
+        let variant_ident = &variant.ident;
+        from_menu_arms.push(quote! {
+            #id_lit => ::core::option::Option::Some(#ident::#variant_ident),
+        });
+
+        if props.hidden {
+            continue;
+        }
+        let Some(label) = &props.label else {
+            return Err(syn::Error::new_spanned(
+                variant,
+                "visible variants need #[menu(label = \"...\")]",
+            ));
+        };
         let label = label.as_str();
         let item_ident = format_ident!("os_menu_item_{}", idx);
         let accel_tokens = if let Some(ref accel) = props.accel {
@@ -81,11 +92,6 @@ fn impl_os_sub_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
             let #item_ident = ::muda::MenuItem::with_id(#id_lit, #label, true, #accel_tokens);
         });
         item_refs.push(quote! { &#item_ident });
-
-        let variant_ident = &variant.ident;
-        from_menu_arms.push(quote! {
-            #id_lit => ::core::option::Option::Some(#ident::#variant_ident),
-        });
     }
 
     let has_visible = !items.is_empty();
@@ -293,10 +299,6 @@ fn impl_leaf_shortcuts(
     for variant in &data.variants {
         let bind_props = BindProps::from_attrs(&variant.attrs)?;
         let menu_props = MenuProps::from_attrs(&variant.attrs)?;
-
-        if menu_props.hidden {
-            continue;
-        }
 
         let binding_str = match (&bind_props.direct, &bind_props.chord) {
             (Some(_), Some(_)) => {

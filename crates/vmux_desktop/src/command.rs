@@ -125,6 +125,9 @@ pub enum TerminalCommand {
     Previous,
     #[menu(id = "terminal_clear", label = "Clear Terminal")]
     Clear,
+    #[menu(id = "terminal_copy_mode", label = "Visual Mode\t<leader> [", hidden)]
+    #[shortcut(chord = "Ctrl+g, [")]
+    CopyMode,
 }
 
 #[allow(dead_code)]
@@ -368,4 +371,41 @@ pub enum WindowCommand {
     ToggleFullscreen,
     #[menu(id = "open_settings", label = "Settings", accel = "super+,", hidden)]
     Settings,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shortcut::{KeyCombo, Modifiers, Shortcut};
+    use bevy::input::keyboard::KeyCode;
+
+    #[test]
+    fn hidden_commands_can_have_default_shortcuts() {
+        assert_eq!(
+            AppCommand::from_menu_id("terminal_copy_mode"),
+            Some(AppCommand::Terminal(TerminalCommand::CopyMode))
+        );
+
+        let copy_mode = AppCommand::default_shortcuts()
+            .into_iter()
+            .find(|(_, id)| id == "terminal_copy_mode")
+            .map(|(shortcut, _)| shortcut);
+
+        assert_eq!(
+            copy_mode,
+            Some(Shortcut::Chord(
+                KeyCombo {
+                    key: KeyCode::KeyG,
+                    modifiers: Modifiers {
+                        ctrl: true,
+                        ..Default::default()
+                    },
+                },
+                KeyCombo {
+                    key: KeyCode::BracketLeft,
+                    modifiers: Modifiers::default(),
+                },
+            ))
+        );
+    }
 }

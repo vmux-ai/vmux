@@ -25,6 +25,13 @@ use vmux_service::{
 use vmux_terminal::event::*;
 use vmux_webview_app::UiReady;
 
+/// Maximum interval between consecutive mouse-down events that count as a
+/// multi-click (double, triple).
+const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
+/// Maximum cell distance between consecutive mouse-down points that still
+/// counts as a multi-click (jitter tolerance).
+const MULTI_CLICK_CELL_TOLERANCE: i32 = 1;
+
 /// Marker component for terminal content entities (analogous to Browser).
 #[derive(Component)]
 pub(crate) struct Terminal;
@@ -111,6 +118,69 @@ pub(crate) struct ServiceClient(pub ServiceHandle);
 #[derive(Resource, Clone)]
 struct ServiceWakeCallback(Option<ServiceWake>);
 
+/// Per-process terminal mode flags, last broadcast by the service.
+#[derive(Resource, Default)]
+pub(crate) struct TerminalModeMap {
+    pub modes: std::collections::HashMap<ProcessId, TerminalModeFlags>,
+}
+
+/// Optimistic copy-mode state owned by the desktop. The service confirms
+/// asynchronously via `TerminalMode`, but keyboard routing must switch on
+/// immediately after the shortcut or first mouse drag.
+#[derive(Resource, Default)]
+struct LocalCopyModeState {
+    active: std::collections::HashSet<ProcessId>,
+    input_states: std::collections::HashMap<ProcessId, CopyModeInputState>,
+}
+
+#[derive(Default)]
+struct CopyModeInputState {
+    pending_key: Option<CopyModePendingKey>,
+    count: Option<u16>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CopyModePendingKey {
+    G,
+    FindForward,
+    FindBackward,
+    TillForward,
+    TillBackward,
+}
+
+#[derive(Clone, Copy)]
+struct CopyModeKeyInput<'a> {
+    key: &'a Key,
+    key_code: KeyCode,
+    ctrl: bool,
+    shift: bool,
+}
+
+#[cfg(test)]
+impl<'a> CopyModeKeyInput<'a> {
+    fn new(key: &'a Key, key_code: KeyCode) -> Self {
+        Self {
+            key,
+            key_code,
+            ctrl: false,
+            shift: false,
+        }
+    }
+
+    fn shift(key: &'a Key, key_code: KeyCode) -> Self {
+        Self {
+            shift: true,
+            ..Self::new(key, key_code)
+        }
+    }
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+pub(crate) struct TerminalModeFlags {
+    pub mouse_capture: bool,
+    pub copy_mode: bool,
+}
+
 /// Triggered to restart the terminal process for a terminal entity.
 #[derive(Event)]
 pub(crate) struct RestartPty {
@@ -145,6 +215,8 @@ impl Plugin for TerminalInputPlugin {
         app.insert_resource(ServiceWakeCallback(service_wake));
 
         app.init_resource::<MouseSelectionState>()
+            .init_resource::<TerminalModeMap>()
+            .init_resource::<LocalCopyModeState>()
             .add_plugins(JsEmitEventPlugin::<TermResizeEvent>::default())
             .add_plugins(JsEmitEventPlugin::<TermMouseEvent>::default())
             .add_systems(
@@ -160,6 +232,7 @@ impl Plugin for TerminalInputPlugin {
                 (
                     try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
                     poll_service_messages.in_set(WriteAppCommands),
+                    handle_terminal_copy_mode_command.in_set(crate::command::ReadAppCommands),
                     sync_terminal_theme,
                 )
                     .chain(),
@@ -441,6 +514,9 @@ fn poll_service_messages(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
     mut writer: MessageWriter<AppCommand>,
+    mut mode_map: ResMut<TerminalModeMap>,
+    mut local_copy_mode: ResMut<LocalCopyModeState>,
+    mut mouse_state: ResMut<MouseSelectionState>,
 ) {
     let Some(service) = service else { return };
 
@@ -503,6 +579,7 @@ fn poll_service_messages(
                 cols,
                 rows,
                 selection,
+                copy_mode,
                 full,
             } => {
                 for (entity, handle, _) in &terminals {
@@ -516,6 +593,7 @@ fn poll_service_messages(
                             cols,
                             rows,
                             selection,
+                            copy_mode,
                             full,
                         };
                         commands.trigger(HostEmitEvent::new(entity, TERM_VIEWPORT_EVENT, &patch));
@@ -545,6 +623,7 @@ fn poll_service_messages(
                             cols,
                             rows,
                             selection: None,
+                            copy_mode: false,
                             full: true,
                         };
                         commands.trigger(HostEmitEvent::new(entity, TERM_VIEWPORT_EVENT, &patch));
@@ -556,6 +635,10 @@ fn poll_service_messages(
                 process_id,
                 exit_code: _,
             } => {
+                // Drop per-process caches so they don't leak across the app lifetime.
+                mode_map.modes.remove(&process_id);
+                set_local_copy_mode(&mut local_copy_mode, process_id, false);
+                mouse_state.per_process.remove(&process_id);
                 for (entity, handle, child_of) in &terminals {
                     if handle.process_id == process_id {
                         commands.entity(entity).insert(ProcessExited);
@@ -572,6 +655,28 @@ fn poll_service_messages(
             }
             ServiceMessage::Error { message } => {
                 warn!("Service error: {message}");
+            }
+            ServiceMessage::TerminalMode {
+                process_id,
+                mouse_capture,
+                copy_mode,
+            } => {
+                mode_map.modes.insert(
+                    process_id,
+                    TerminalModeFlags {
+                        mouse_capture,
+                        copy_mode,
+                    },
+                );
+                set_local_copy_mode(&mut local_copy_mode, process_id, copy_mode);
+            }
+            ServiceMessage::SelectionText {
+                process_id: _,
+                text,
+            } => {
+                if !text.is_empty() {
+                    crate::clipboard::write(text.clone());
+                }
             }
             _ => {} // ProcessOutput handled elsewhere if needed
         }
@@ -611,6 +716,12 @@ fn is_non_character_key(key: KeyCode) -> bool {
 }
 
 /// Handle keyboard input directly from Bevy, bypassing CEF round-trip.
+///
+/// Only routes input to the single focused terminal (CefKeyboardTarget is
+/// expected to mark exactly one entity). If multiple terminals are
+/// keyboard-targeted simultaneously, only the first is used and the rest
+/// are ignored — copy-mode and Cmd+C decisions are per-terminal so we
+/// must not broadcast them.
 fn handle_terminal_keyboard(
     mut er: MessageReader<KeyboardInput>,
     targeted_terminals: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
@@ -621,6 +732,8 @@ fn handle_terminal_keyboard(
     input: Res<ButtonInput<KeyCode>>,
     chord_state: Res<crate::shortcut::ChordState>,
     service: Option<Res<ServiceClient>>,
+    mode_map: Res<TerminalModeMap>,
+    mut local_copy_mode: ResMut<LocalCopyModeState>,
 ) {
     let target_processes = resolve_terminal_input_targets(
         targeted_terminals.iter().map(|handle| handle.process_id),
@@ -635,7 +748,8 @@ fn handle_terminal_keyboard(
     if target_processes.is_empty() {
         for _ in er.read() {}
         return;
-    }
+    };
+    let active_process_id = target_processes.first().copied();
     let Some(service) = service else {
         for _ in er.read() {}
         return;
@@ -648,6 +762,10 @@ fn handle_terminal_keyboard(
     let alt = input.pressed(KeyCode::AltLeft) || input.pressed(KeyCode::AltRight);
     let shift = input.pressed(KeyCode::ShiftLeft) || input.pressed(KeyCode::ShiftRight);
     let super_key = input.pressed(KeyCode::SuperLeft) || input.pressed(KeyCode::SuperRight);
+
+    let copy_mode_active = active_process_id
+        .map(|process_id| is_copy_mode_active(&mode_map, &local_copy_mode, process_id))
+        .unwrap_or(false);
 
     let mut seen_keys: Vec<KeyCode> = Vec::new();
     for event in er.read() {
@@ -664,33 +782,61 @@ fn handle_terminal_keyboard(
             }
         }
 
+        if copy_mode_active {
+            let Some(active_process_id) = active_process_id else {
+                continue;
+            };
+            let mapped = map_copy_mode_keys_with_state(
+                &mut local_copy_mode,
+                active_process_id,
+                CopyModeKeyInput {
+                    key: &event.logical_key,
+                    key_code: event.key_code,
+                    ctrl,
+                    shift,
+                },
+            );
+            for k in mapped {
+                if copy_mode_key_exits(k) {
+                    set_local_copy_mode(&mut local_copy_mode, active_process_id, false);
+                }
+                service.0.send(ClientMessage::CopyModeKey {
+                    process_id: active_process_id,
+                    key: k,
+                });
+            }
+            // While in copy mode, swallow ALL keys — never forward to PTY.
+            continue;
+        }
+
         if super_key {
             match event.key_code {
                 KeyCode::KeyV => {
-                    // Paste via pbpaste
-                    if let Ok(output) = std::process::Command::new("pbpaste").output()
-                        && output.status.success()
+                    // Paste via OS clipboard.
+                    if let Some(text) = crate::clipboard::read_blocking()
+                        && !text.is_empty()
                     {
-                        let text = String::from_utf8_lossy(&output.stdout);
-                        if !text.is_empty() {
-                            // Wrap in bracketed paste sequences
-                            let mut data = Vec::new();
-                            data.extend_from_slice(b"\x1b[200~");
-                            data.extend_from_slice(text.as_bytes());
-                            data.extend_from_slice(b"\x1b[201~");
-                            for process_id in &target_processes {
-                                service.0.send(ClientMessage::ProcessInput {
-                                    process_id: *process_id,
-                                    data: data.clone(),
-                                });
-                            }
+                        // Wrap in bracketed paste sequences
+                        let mut data = Vec::new();
+                        data.extend_from_slice(b"\x1b[200~");
+                        data.extend_from_slice(text.as_bytes());
+                        data.extend_from_slice(b"\x1b[201~");
+                        for process_id in &target_processes {
+                            service.0.send(ClientMessage::ProcessInput {
+                                process_id: *process_id,
+                                data: data.clone(),
+                            });
                         }
                     }
                     continue;
                 }
                 KeyCode::KeyC => {
-                    // Copy: in service mode we can't access selection, so skip
-                    // TODO: implement copy via service snapshot
+                    // Round-trip selection through the service, then copy to pasteboard.
+                    if let Some(process_id) = active_process_id {
+                        service
+                            .0
+                            .send(ClientMessage::GetSelectionText { process_id });
+                    }
                     continue;
                 }
                 _ => continue,
@@ -724,6 +870,219 @@ fn handle_terminal_keyboard(
                 data: bytes.clone(),
             });
         }
+    }
+}
+
+/// Translate a Bevy logical key + ctrl modifier into the corresponding
+/// Vim-style copy-mode action. Returns None if the key has no copy-mode
+/// binding (caller should swallow it regardless).
+#[cfg(test)]
+fn map_copy_mode_key(key: &Key, ctrl: bool) -> Option<vmux_service::protocol::CopyModeKey> {
+    map_copy_mode_key_from_input(CopyModeKeyInput {
+        key,
+        key_code: KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
+        ctrl,
+        shift: false,
+    })
+}
+
+fn map_copy_mode_key_from_input(
+    input: CopyModeKeyInput<'_>,
+) -> Option<vmux_service::protocol::CopyModeKey> {
+    use vmux_service::protocol::CopyModeKey as K;
+    match (input.key, input.ctrl) {
+        (Key::ArrowLeft, _) => Some(K::Left),
+        (Key::ArrowRight, _) => Some(K::Right),
+        (Key::ArrowUp, _) => Some(K::Up),
+        (Key::ArrowDown, _) => Some(K::Down),
+        (Key::Enter, _) => Some(K::Copy),
+        (Key::Escape, _) => Some(K::Exit),
+        (Key::Home, _) => Some(K::LineStart),
+        (Key::End, _) => Some(K::LineEnd),
+        (Key::PageUp, _) => Some(K::PageUp),
+        (Key::PageDown, _) => Some(K::PageDown),
+        _ if input.ctrl && key_char_eq(input, 'u') => Some(K::PageUp),
+        _ if input.ctrl && key_char_eq(input, 'd') => Some(K::PageDown),
+        _ if input.ctrl && key_char_eq(input, 'e') => Some(K::Down),
+        _ if input.ctrl && key_char_eq(input, 'y') => Some(K::Up),
+        _ if input.ctrl && key_char_eq(input, 'b') => Some(K::PageUp),
+        _ if input.ctrl && key_char_eq(input, 'f') => Some(K::PageDown),
+        _ if input.ctrl && key_char_eq(input, 'c') => Some(K::Exit),
+        _ if key_char_eq(input, 'h') => Some(K::Left),
+        _ if key_char_eq(input, 'j') => Some(K::Down),
+        _ if key_char_eq(input, 'k') => Some(K::Up),
+        _ if key_char_eq(input, 'l') => Some(K::Right),
+        _ if key_char_eq(input, '0') => Some(K::LineStart),
+        _ if key_char_eq(input, '$') => Some(K::LineEnd),
+        _ if key_char_eq(input, '^') => Some(K::FirstNonBlank),
+        _ if key_char_eq(input, 'w') => Some(K::WordForward),
+        _ if key_char_eq(input, 'W') => Some(K::BigWordForward),
+        _ if key_char_eq(input, 'b') => Some(K::WordBackward),
+        _ if key_char_eq(input, 'B') => Some(K::BigWordBackward),
+        _ if key_char_eq(input, 'e') => Some(K::WordEndForward),
+        _ if key_char_eq(input, 'E') => Some(K::BigWordEndForward),
+        _ if key_char_eq(input, 'G') => Some(K::Bottom),
+        _ if key_char_eq(input, 'H') => Some(K::ScreenTop),
+        _ if key_char_eq(input, 'M') => Some(K::ScreenMiddle),
+        _ if key_char_eq(input, 'L') => Some(K::ScreenBottom),
+        _ if key_char_eq(input, '{') => Some(K::PrevParagraph),
+        _ if key_char_eq(input, '}') => Some(K::NextParagraph),
+        _ if key_char_eq(input, ';') => Some(K::RepeatFind),
+        _ if key_char_eq(input, ',') => Some(K::RepeatFindReverse),
+        _ if key_char_eq(input, 'o') => Some(K::SwapSelectionEnds),
+        _ if key_char_eq(input, 'v') => Some(K::StartSelection),
+        _ if key_char_eq(input, 'V') => Some(K::StartLineSelection),
+        _ if key_char_eq(input, 'y') => Some(K::Copy),
+        _ if key_char_eq(input, 'q') => Some(K::Exit),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+fn map_copy_mode_key_with_state(
+    local_copy_mode: &mut LocalCopyModeState,
+    process_id: ProcessId,
+    key: &Key,
+    ctrl: bool,
+) -> Option<vmux_service::protocol::CopyModeKey> {
+    map_copy_mode_keys_with_state(
+        local_copy_mode,
+        process_id,
+        CopyModeKeyInput {
+            key,
+            key_code: KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
+            ctrl,
+            shift: false,
+        },
+    )
+    .into_iter()
+    .next()
+}
+
+fn map_copy_mode_keys_with_state(
+    local_copy_mode: &mut LocalCopyModeState,
+    process_id: ProcessId,
+    input: CopyModeKeyInput<'_>,
+) -> Vec<vmux_service::protocol::CopyModeKey> {
+    use vmux_service::protocol::CopyModeKey as K;
+
+    let state = local_copy_mode.input_states.entry(process_id).or_default();
+    if let Some(pending) = state.pending_key.take() {
+        let key = match pending {
+            CopyModePendingKey::G if !input.ctrl && key_char_eq(input, '_') => {
+                Some(K::LastNonBlank)
+            }
+            CopyModePendingKey::G if !input.ctrl && key_char_eq(input, 'g') => Some(K::Top),
+            CopyModePendingKey::G if !input.ctrl && key_char_eq(input, 'e') => {
+                Some(K::WordEndBackward)
+            }
+            CopyModePendingKey::G if !input.ctrl && key_char_eq(input, 'E') => {
+                Some(K::BigWordEndBackward)
+            }
+            CopyModePendingKey::FindForward => input_char(input).map(K::FindForward),
+            CopyModePendingKey::FindBackward => input_char(input).map(K::FindBackward),
+            CopyModePendingKey::TillForward => input_char(input).map(K::TillForward),
+            CopyModePendingKey::TillBackward => input_char(input).map(K::TillBackward),
+            _ => None,
+        };
+        if let Some(key) = key {
+            return repeat_copy_mode_key(state, key);
+        }
+    }
+
+    if let Some(digit) = input_digit(input)
+        && (!matches!(digit, 0) || state.count.is_some())
+        && !input.ctrl
+    {
+        let current = state.count.unwrap_or(0);
+        state.count = Some(current.saturating_mul(10).saturating_add(digit).min(999));
+        return Vec::new();
+    }
+
+    if !input.ctrl && key_char_eq(input, 'g') {
+        state.pending_key = Some(CopyModePendingKey::G);
+        return Vec::new();
+    }
+
+    if !input.ctrl && key_char_eq(input, 'f') {
+        state.pending_key = Some(CopyModePendingKey::FindForward);
+        return Vec::new();
+    }
+
+    if !input.ctrl && key_char_eq(input, 'F') {
+        state.pending_key = Some(CopyModePendingKey::FindBackward);
+        return Vec::new();
+    }
+
+    if !input.ctrl && key_char_eq(input, 't') {
+        state.pending_key = Some(CopyModePendingKey::TillForward);
+        return Vec::new();
+    }
+
+    if !input.ctrl && key_char_eq(input, 'T') {
+        state.pending_key = Some(CopyModePendingKey::TillBackward);
+        return Vec::new();
+    }
+
+    map_copy_mode_key_from_input(input)
+        .map(|key| repeat_copy_mode_key(state, key))
+        .unwrap_or_default()
+}
+
+fn repeat_copy_mode_key(
+    state: &mut CopyModeInputState,
+    key: vmux_service::protocol::CopyModeKey,
+) -> Vec<vmux_service::protocol::CopyModeKey> {
+    let repeat = if copy_mode_key_uses_count(key) {
+        state.count.take().unwrap_or(1)
+    } else {
+        state.count = None;
+        1
+    };
+    vec![key; repeat as usize]
+}
+
+fn copy_mode_key_uses_count(key: vmux_service::protocol::CopyModeKey) -> bool {
+    use vmux_service::protocol::CopyModeKey as K;
+    !matches!(
+        key,
+        K::StartSelection | K::StartLineSelection | K::Copy | K::Exit
+    )
+}
+
+fn input_char(input: CopyModeKeyInput<'_>) -> Option<char> {
+    match input.key {
+        Key::Character(s) => s.chars().next(),
+        _ => None,
+    }
+}
+
+fn input_digit(input: CopyModeKeyInput<'_>) -> Option<u16> {
+    let c = input_char(input)?;
+    c.to_digit(10).map(|d| d as u16)
+}
+
+fn key_char_eq(input: CopyModeKeyInput<'_>, expected: char) -> bool {
+    if input_char(input) == Some(expected) {
+        return true;
+    }
+    match expected {
+        '_' => input.shift && input.key_code == KeyCode::Minus,
+        '$' => input.shift && input.key_code == KeyCode::Digit4,
+        '^' => input.shift && input.key_code == KeyCode::Digit6,
+        '{' => input.shift && input.key_code == KeyCode::BracketLeft,
+        '}' => input.shift && input.key_code == KeyCode::BracketRight,
+        'W' => input.shift && input.key_code == KeyCode::KeyW,
+        'B' => input.shift && input.key_code == KeyCode::KeyB,
+        'E' => input.shift && input.key_code == KeyCode::KeyE,
+        'G' => input.shift && input.key_code == KeyCode::KeyG,
+        'H' => input.shift && input.key_code == KeyCode::KeyH,
+        'M' => input.shift && input.key_code == KeyCode::KeyM,
+        'L' => input.shift && input.key_code == KeyCode::KeyL,
+        'F' => input.shift && input.key_code == KeyCode::KeyF,
+        'T' => input.shift && input.key_code == KeyCode::KeyT,
+        'V' => input.shift && input.key_code == KeyCode::KeyV,
+        _ => false,
     }
 }
 
@@ -875,32 +1234,223 @@ fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bo
     format!("\x1b[<{};{};{}{}", cb, col + 1, row + 1, suffix).into_bytes()
 }
 
-/// Tracks mouse state for selection (reserved for future local selection).
+/// Tracks the most recent mouse-down per process for click-count detection
+/// (300ms / ~1 cell window) and an active drag anchor.
 #[derive(Resource, Default)]
-struct MouseSelectionState;
+struct MouseSelectionState {
+    per_process: std::collections::HashMap<ProcessId, MouseSessionState>,
+}
 
-/// Handle mouse events from the terminal webview — forward to service as input.
+#[derive(Default, Clone, Debug)]
+struct MouseSessionState {
+    last_click: Option<MouseClickRecord>,
+    drag_active: bool,
+    drag_visual_active: bool,
+    /// Last (col, row) sent via ExtendSelectionTo during the active drag.
+    /// Used to dedupe redundant move events at the same cell.
+    last_extend_cell: Option<(u16, u16)>,
+    /// Anchor cell from the most recent left-click that has not yet
+    /// produced a real selection. We defer materializing the selection
+    /// until the user actually drags so a single click doesn't draw a
+    /// 1-character selection box.
+    pending_anchor: Option<(u16, u16)>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MouseClickRecord {
+    when: std::time::Instant,
+    col: u16,
+    row: u16,
+    count: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum MouseTerminalAction {
+    ForwardInput(Vec<u8>),
+    EnterCopyMode,
+    ExitCopyMode,
+    SetSelection(Option<TermSelectionRange>),
+    ExtendSelectionTo { col: u16, row: u16 },
+    SelectWordAt { col: u16, row: u16 },
+    SelectLineAt { row: u16 },
+}
+
+fn mouse_terminal_actions(
+    entry: &mut MouseSessionState,
+    event: &TermMouseEvent,
+    mouse_capture: bool,
+    now: std::time::Instant,
+) -> Vec<MouseTerminalAction> {
+    let shift = event.modifiers & MOD_SHIFT != 0;
+    let is_left = event.button == 0;
+    let select_mode = is_left && (!mouse_capture || shift);
+
+    if !select_mode {
+        let button = if event.moving {
+            event.button + 32
+        } else {
+            event.button
+        };
+        return vec![MouseTerminalAction::ForwardInput(sgr_mouse_sequence(
+            button,
+            event.col,
+            event.row,
+            event.modifiers,
+            event.pressed,
+        ))];
+    }
+
+    if event.pressed && !event.moving {
+        let count = match entry.last_click {
+            Some(prev)
+                if now.duration_since(prev.when) <= MULTI_CLICK_WINDOW
+                    && (prev.col as i32 - event.col as i32).abs() <= MULTI_CLICK_CELL_TOLERANCE
+                    && (prev.row as i32 - event.row as i32).abs() <= MULTI_CLICK_CELL_TOLERANCE =>
+            {
+                if prev.count >= 3 {
+                    1
+                } else {
+                    prev.count + 1
+                }
+            }
+            _ => 1,
+        };
+        entry.last_click = Some(MouseClickRecord {
+            when: now,
+            col: event.col,
+            row: event.row,
+            count,
+        });
+        entry.drag_active = count == 1;
+        entry.drag_visual_active = false;
+        entry.last_extend_cell = Some((event.col, event.row));
+
+        match count {
+            1 if shift => {
+                entry.pending_anchor = None;
+                vec![MouseTerminalAction::ExtendSelectionTo {
+                    col: event.col,
+                    row: event.row,
+                }]
+            }
+            1 => {
+                entry.pending_anchor = Some((event.col, event.row));
+                vec![MouseTerminalAction::SetSelection(None)]
+            }
+            2 => {
+                entry.pending_anchor = None;
+                vec![MouseTerminalAction::SelectWordAt {
+                    col: event.col,
+                    row: event.row,
+                }]
+            }
+            _ => {
+                entry.pending_anchor = None;
+                vec![MouseTerminalAction::SelectLineAt { row: event.row }]
+            }
+        }
+    } else if event.moving && entry.drag_active {
+        if entry.last_extend_cell == Some((event.col, event.row)) {
+            return Vec::new();
+        }
+        entry.last_extend_cell = Some((event.col, event.row));
+        if let Some((ac, ar)) = entry.pending_anchor.take() {
+            entry.drag_visual_active = true;
+            vec![
+                MouseTerminalAction::EnterCopyMode,
+                MouseTerminalAction::SetSelection(Some(TermSelectionRange {
+                    start_col: ac,
+                    start_row: ar,
+                    end_col: event.col,
+                    end_row: event.row,
+                    is_block: false,
+                })),
+            ]
+        } else {
+            vec![MouseTerminalAction::ExtendSelectionTo {
+                col: event.col,
+                row: event.row,
+            }]
+        }
+    } else if !event.pressed {
+        let actions = if entry.drag_visual_active {
+            vec![MouseTerminalAction::ExitCopyMode]
+        } else {
+            Vec::new()
+        };
+        entry.drag_active = false;
+        entry.drag_visual_active = false;
+        entry.last_extend_cell = None;
+        entry.pending_anchor = None;
+        actions
+    } else {
+        Vec::new()
+    }
+}
+
+fn send_mouse_action(service: &ServiceHandle, process_id: ProcessId, action: MouseTerminalAction) {
+    match action {
+        MouseTerminalAction::ForwardInput(data) => {
+            service.send(ClientMessage::ProcessInput { process_id, data });
+        }
+        MouseTerminalAction::EnterCopyMode => {
+            service.send(ClientMessage::EnterCopyMode { process_id });
+        }
+        MouseTerminalAction::ExitCopyMode => {
+            service.send(ClientMessage::ExitCopyMode { process_id });
+        }
+        MouseTerminalAction::SetSelection(range) => {
+            service.send(ClientMessage::SetSelection { process_id, range });
+        }
+        MouseTerminalAction::ExtendSelectionTo { col, row } => {
+            service.send(ClientMessage::ExtendSelectionTo {
+                process_id,
+                col,
+                row,
+            });
+        }
+        MouseTerminalAction::SelectWordAt { col, row } => {
+            service.send(ClientMessage::SelectWordAt {
+                process_id,
+                col,
+                row,
+            });
+        }
+        MouseTerminalAction::SelectLineAt { row } => {
+            service.send(ClientMessage::SelectLineAt { process_id, row });
+        }
+    }
+}
+
+/// Handle mouse events from the terminal webview.
+///
+/// Selection mode (left-button + (no app mouse-capture OR shift held)) is
+/// intercepted and translated into selection commands sent to the service.
+/// Anything else is forwarded as SGR mouse-report bytes to the PTY.
 fn on_term_mouse(
     trigger: On<Receive<TermMouseEvent>>,
     q: Query<&ServiceProcessHandle, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
+    mode_map: Res<TerminalModeMap>,
+    mut state: ResMut<MouseSelectionState>,
+    mut local_copy_mode: ResMut<LocalCopyModeState>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
     let Some(service) = service else { return };
     let Ok(handle) = q.get(entity) else { return };
+    let process_id = handle.process_id;
 
-    // Forward all mouse events as SGR sequences to service
-    let button = if event.moving {
-        event.button + 32
-    } else {
-        event.button
-    };
-    let seq = sgr_mouse_sequence(button, event.col, event.row, event.modifiers, event.pressed);
-    service.0.send(ClientMessage::ProcessInput {
-        process_id: handle.process_id,
-        data: seq,
-    });
+    let mouse_capture = mode_map
+        .modes
+        .get(&process_id)
+        .map(|m| m.mouse_capture)
+        .unwrap_or(false);
+    let entry = state.per_process.entry(process_id).or_default();
+    for action in mouse_terminal_actions(entry, event, mouse_capture, std::time::Instant::now()) {
+        update_local_copy_mode_for_mouse_action(&mut local_copy_mode, process_id, &action);
+        send_mouse_action(&service.0, process_id, action);
+    }
 }
 
 /// Mark dirty when webview becomes ready so initial viewport is sent.
@@ -1070,6 +1620,91 @@ fn on_restart_pty(
     meta.title = format!("Terminal ({})", &new_id.to_string()[..8]);
 }
 
+/// Consume `AppCommand::Terminal::CopyMode` and ask the service to enter
+/// visual/copy mode for the currently focused terminal process.
+fn handle_terminal_copy_mode_command(
+    mut er: MessageReader<AppCommand>,
+    targeted_terminals: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
+    keyboard_targets: Query<(), With<CefKeyboardTarget>>,
+    terminals: Query<(&ServiceProcessHandle, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    focus: Res<crate::layout::tab::FocusedTab>,
+    mode: Res<crate::scene::InteractionMode>,
+    service: Option<Res<ServiceClient>>,
+    mut local_copy_mode: ResMut<LocalCopyModeState>,
+) {
+    let Some(service) = service else {
+        for _ in er.read() {}
+        return;
+    };
+    let target_processes = resolve_terminal_input_targets(
+        targeted_terminals.iter().map(|handle| handle.process_id),
+        !keyboard_targets.is_empty(),
+        focus.tab,
+        terminals
+            .iter()
+            .map(|(handle, child_of)| (child_of.get(), handle.process_id)),
+        *mode,
+    );
+    let active_process_id = target_processes.first().copied();
+    for cmd in er.read() {
+        if matches!(
+            cmd,
+            AppCommand::Terminal(crate::command::TerminalCommand::CopyMode)
+        ) && let Some(process_id) = active_process_id
+        {
+            set_local_copy_mode(&mut local_copy_mode, process_id, true);
+            service.0.send(ClientMessage::EnterCopyMode { process_id });
+        }
+    }
+}
+
+fn is_copy_mode_active(
+    mode_map: &TerminalModeMap,
+    local_copy_mode: &LocalCopyModeState,
+    process_id: ProcessId,
+) -> bool {
+    mode_map
+        .modes
+        .get(&process_id)
+        .map(|m| m.copy_mode)
+        .unwrap_or(false)
+        || local_copy_mode.active.contains(&process_id)
+}
+
+fn set_local_copy_mode(
+    local_copy_mode: &mut LocalCopyModeState,
+    process_id: ProcessId,
+    active: bool,
+) {
+    if active {
+        local_copy_mode.active.insert(process_id);
+    } else {
+        local_copy_mode.active.remove(&process_id);
+        local_copy_mode.input_states.remove(&process_id);
+    }
+}
+
+fn copy_mode_key_exits(key: vmux_service::protocol::CopyModeKey) -> bool {
+    use vmux_service::protocol::CopyModeKey as K;
+    matches!(key, K::Copy | K::Exit)
+}
+
+fn update_local_copy_mode_for_mouse_action(
+    local_copy_mode: &mut LocalCopyModeState,
+    process_id: ProcessId,
+    action: &MouseTerminalAction,
+) {
+    match action {
+        MouseTerminalAction::EnterCopyMode => {
+            set_local_copy_mode(local_copy_mode, process_id, true)
+        }
+        MouseTerminalAction::ExitCopyMode => {
+            set_local_copy_mode(local_copy_mode, process_id, false)
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1107,5 +1742,307 @@ mod tests {
         );
 
         assert!(targets.is_empty());
+    }
+
+    fn mouse_event(button: u8, col: u16, row: u16, pressed: bool, moving: bool) -> TermMouseEvent {
+        TermMouseEvent {
+            button,
+            col,
+            row,
+            modifiers: 0,
+            pressed,
+            moving,
+        }
+    }
+
+    #[test]
+    fn drag_enters_visual_mode_on_first_motion_and_exits_on_release() {
+        let mut state = MouseSessionState::default();
+        let now = std::time::Instant::now();
+
+        let down = mouse_event(0, 2, 3, true, false);
+        assert_eq!(
+            mouse_terminal_actions(&mut state, &down, false, now),
+            vec![MouseTerminalAction::SetSelection(None)]
+        );
+
+        let drag = mouse_event(0, 5, 3, true, true);
+        assert_eq!(
+            mouse_terminal_actions(
+                &mut state,
+                &drag,
+                false,
+                now + std::time::Duration::from_millis(10),
+            ),
+            vec![
+                MouseTerminalAction::EnterCopyMode,
+                MouseTerminalAction::SetSelection(Some(TermSelectionRange {
+                    start_col: 2,
+                    start_row: 3,
+                    end_col: 5,
+                    end_row: 3,
+                    is_block: false,
+                })),
+            ]
+        );
+
+        let release = mouse_event(0, 5, 3, false, false);
+        assert_eq!(
+            mouse_terminal_actions(
+                &mut state,
+                &release,
+                false,
+                now + std::time::Duration::from_millis(20),
+            ),
+            vec![MouseTerminalAction::ExitCopyMode]
+        );
+    }
+
+    #[test]
+    fn single_click_never_enters_visual_mode() {
+        let mut state = MouseSessionState::default();
+        let now = std::time::Instant::now();
+
+        let down = mouse_event(0, 2, 3, true, false);
+        assert_eq!(
+            mouse_terminal_actions(&mut state, &down, false, now),
+            vec![MouseTerminalAction::SetSelection(None)]
+        );
+
+        let release = mouse_event(0, 2, 3, false, false);
+        assert_eq!(
+            mouse_terminal_actions(
+                &mut state,
+                &release,
+                false,
+                now + std::time::Duration::from_millis(20),
+            ),
+            Vec::<MouseTerminalAction>::new()
+        );
+    }
+
+    #[test]
+    fn captured_mouse_without_shift_still_forwards_drag_motion() {
+        let mut state = MouseSessionState::default();
+        let event = mouse_event(0, 4, 5, true, true);
+
+        assert_eq!(
+            mouse_terminal_actions(&mut state, &event, true, std::time::Instant::now()),
+            vec![MouseTerminalAction::ForwardInput(sgr_mouse_sequence(
+                32, 4, 5, 0, true,
+            ))]
+        );
+    }
+
+    #[test]
+    fn vim_visual_keys_map_to_copy_mode_actions() {
+        use vmux_service::protocol::CopyModeKey as K;
+
+        assert_eq!(
+            map_copy_mode_key(&Key::Character("v".into()), false),
+            Some(K::StartSelection)
+        );
+        assert_eq!(
+            map_copy_mode_key(&Key::Character("V".into()), false),
+            Some(K::StartLineSelection)
+        );
+        assert_eq!(
+            map_copy_mode_key(&Key::Character("e".into()), true),
+            Some(K::Down)
+        );
+        assert_eq!(
+            map_copy_mode_key(&Key::Character("y".into()), true),
+            Some(K::Up)
+        );
+        assert_eq!(
+            map_copy_mode_key(&Key::Character("y".into()), false),
+            Some(K::Copy)
+        );
+        assert_eq!(
+            map_copy_mode_key(&Key::Character("c".into()), true),
+            Some(K::Exit)
+        );
+    }
+
+    #[test]
+    fn vim_g_ends_visual_selection_at_last_non_blank() {
+        use vmux_service::protocol::CopyModeKey as K;
+
+        let process_id = ProcessId::new();
+        let mut local_copy_mode = LocalCopyModeState::default();
+
+        assert_eq!(
+            map_copy_mode_key_with_state(
+                &mut local_copy_mode,
+                process_id,
+                &Key::Character("g".into()),
+                false
+            ),
+            None
+        );
+        assert_eq!(
+            map_copy_mode_key_with_state(
+                &mut local_copy_mode,
+                process_id,
+                &Key::Character("_".into()),
+                false
+            ),
+            Some(K::LastNonBlank)
+        );
+    }
+
+    #[test]
+    fn vim_visual_motion_keys_map_to_copy_mode_actions() {
+        use vmux_service::protocol::CopyModeKey as K;
+
+        let process_id = ProcessId::new();
+        let mut local_copy_mode = LocalCopyModeState::default();
+
+        assert_eq!(
+            map_copy_mode_keys_with_state(
+                &mut local_copy_mode,
+                process_id,
+                CopyModeKeyInput::new(&Key::Character("w".into()), KeyCode::KeyW)
+            ),
+            vec![K::WordForward]
+        );
+        assert_eq!(
+            map_copy_mode_keys_with_state(
+                &mut local_copy_mode,
+                process_id,
+                CopyModeKeyInput::shift(&Key::Character("W".into()), KeyCode::KeyW)
+            ),
+            vec![K::BigWordForward]
+        );
+        assert_eq!(
+            map_copy_mode_keys_with_state(
+                &mut local_copy_mode,
+                process_id,
+                CopyModeKeyInput::new(&Key::Character("b".into()), KeyCode::KeyB)
+            ),
+            vec![K::WordBackward]
+        );
+        assert_eq!(
+            map_copy_mode_keys_with_state(
+                &mut local_copy_mode,
+                process_id,
+                CopyModeKeyInput::new(&Key::Character("e".into()), KeyCode::KeyE)
+            ),
+            vec![K::WordEndForward]
+        );
+
+        assert_eq!(
+            map_copy_mode_keys_with_state(
+                &mut local_copy_mode,
+                process_id,
+                CopyModeKeyInput::new(&Key::Character("g".into()), KeyCode::KeyG)
+            ),
+            Vec::<K>::new()
+        );
+        assert_eq!(
+            map_copy_mode_keys_with_state(
+                &mut local_copy_mode,
+                process_id,
+                CopyModeKeyInput::new(&Key::Character("e".into()), KeyCode::KeyE)
+            ),
+            vec![K::WordEndBackward]
+        );
+
+        assert_eq!(
+            map_copy_mode_keys_with_state(
+                &mut local_copy_mode,
+                process_id,
+                CopyModeKeyInput::new(&Key::Character("3".into()), KeyCode::Digit3)
+            ),
+            Vec::<K>::new()
+        );
+        assert_eq!(
+            map_copy_mode_keys_with_state(
+                &mut local_copy_mode,
+                process_id,
+                CopyModeKeyInput::new(&Key::Character("w".into()), KeyCode::KeyW)
+            ),
+            vec![K::WordForward, K::WordForward, K::WordForward]
+        );
+    }
+
+    #[test]
+    fn shifted_minus_resolves_g_() {
+        use vmux_service::protocol::CopyModeKey as K;
+
+        let process_id = ProcessId::new();
+        let mut local_copy_mode = LocalCopyModeState::default();
+
+        assert_eq!(
+            map_copy_mode_keys_with_state(
+                &mut local_copy_mode,
+                process_id,
+                CopyModeKeyInput::new(&Key::Character("g".into()), KeyCode::KeyG)
+            ),
+            Vec::<K>::new()
+        );
+        assert_eq!(
+            map_copy_mode_keys_with_state(
+                &mut local_copy_mode,
+                process_id,
+                CopyModeKeyInput::shift(&Key::Character("-".into()), KeyCode::Minus)
+            ),
+            vec![K::LastNonBlank]
+        );
+    }
+
+    #[test]
+    fn local_copy_mode_is_active_before_service_broadcast() {
+        let process_id = ProcessId::new();
+        let mode_map = TerminalModeMap::default();
+        let mut local_copy_mode = LocalCopyModeState::default();
+
+        assert!(!is_copy_mode_active(
+            &mode_map,
+            &local_copy_mode,
+            process_id
+        ));
+
+        set_local_copy_mode(&mut local_copy_mode, process_id, true);
+
+        assert!(is_copy_mode_active(&mode_map, &local_copy_mode, process_id));
+    }
+
+    #[test]
+    fn service_copy_mode_broadcast_reconciles_local_latch() {
+        let process_id = ProcessId::new();
+        let mut mode_map = TerminalModeMap::default();
+        let mut local_copy_mode = LocalCopyModeState::default();
+
+        set_local_copy_mode(&mut local_copy_mode, process_id, true);
+        mode_map.modes.insert(
+            process_id,
+            TerminalModeFlags {
+                mouse_capture: false,
+                copy_mode: false,
+            },
+        );
+        set_local_copy_mode(&mut local_copy_mode, process_id, false);
+
+        assert!(!is_copy_mode_active(
+            &mode_map,
+            &local_copy_mode,
+            process_id
+        ));
+    }
+
+    #[test]
+    fn exiting_copy_mode_clears_local_latch() {
+        use vmux_service::protocol::CopyModeKey as K;
+
+        let process_id = ProcessId::new();
+        let mut local_copy_mode = LocalCopyModeState::default();
+        set_local_copy_mode(&mut local_copy_mode, process_id, true);
+
+        if copy_mode_key_exits(K::Exit) {
+            set_local_copy_mode(&mut local_copy_mode, process_id, false);
+        }
+
+        assert!(!local_copy_mode.active.contains(&process_id));
     }
 }
