@@ -15,6 +15,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
+use vmux_header::PageMetadata;
 use vmux_history::LastActivatedAt;
 use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
 
@@ -517,8 +518,13 @@ fn sync_tab_picking(
 }
 
 pub(crate) fn open_command_bar_if_no_tabs(
-    tab_q: Query<(), With<Tab>>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_children: Query<&Children, With<Pane>>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_meta: Query<&PageMetadata, With<Tab>>,
     closing_primary: Query<(), (With<PrimaryWindow>, With<ClosingWindow>)>,
     mut new_tab_ctx: ResMut<NewTabContext>,
     mut commands: Commands,
@@ -526,10 +532,23 @@ pub(crate) fn open_command_bar_if_no_tabs(
     if !closing_primary.is_empty() {
         return;
     }
-    if !tab_q.is_empty() {
+    let (_, active_pane, active_tab) = focused_tab(
+        &spaces,
+        &all_children,
+        &leaf_panes,
+        &pane_ts,
+        &pane_children,
+        &tab_ts,
+    );
+    if let Some(tab) = active_tab {
+        if tab_needs_command_bar(tab_meta.get(tab).ok()) && new_tab_ctx.tab.is_none() {
+            new_tab_ctx.tab = Some(tab);
+            new_tab_ctx.previous_tab = None;
+            new_tab_ctx.needs_open = true;
+        }
         return;
     }
-    let Some(pane) = leaf_panes.iter().next() else {
+    let Some(pane) = active_pane.or_else(|| leaf_panes.iter().next()) else {
         return;
     };
     let tab = commands
@@ -538,6 +557,10 @@ pub(crate) fn open_command_bar_if_no_tabs(
     new_tab_ctx.tab = Some(tab);
     new_tab_ctx.previous_tab = None;
     new_tab_ctx.needs_open = true;
+}
+
+fn tab_needs_command_bar(meta: Option<&PageMetadata>) -> bool {
+    meta.is_none_or(|meta| meta.url.trim().is_empty())
 }
 
 #[cfg(test)]
@@ -608,5 +631,72 @@ mod tests {
         app.update();
 
         assert!(app.world().entity(window).contains::<ClosingWindow>());
+    }
+
+    #[test]
+    fn empty_active_pane_opens_command_bar_even_when_other_spaces_have_tabs() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<NewTabContext>();
+        app.add_systems(Update, open_command_bar_if_no_tabs);
+
+        let old_space = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt(1)))
+            .id();
+        let old_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(old_space)))
+            .id();
+        app.world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(old_pane)));
+
+        let active_space = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt(2)))
+            .id();
+        let active_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(active_space)))
+            .id();
+
+        app.update();
+
+        let ctx = app.world().resource::<NewTabContext>();
+        let Some(new_tab) = ctx.tab else {
+            panic!("expected empty active pane to get pending tab");
+        };
+        assert!(ctx.needs_open);
+        assert_eq!(
+            app.world().get::<ChildOf>(new_tab).map(Relationship::get),
+            Some(active_pane)
+        );
+    }
+
+    #[test]
+    fn active_empty_tab_opens_command_bar() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<NewTabContext>();
+        app.add_systems(Update, open_command_bar_if_no_tabs);
+
+        let space = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt(1)))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(space)))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(pane)))
+            .id();
+
+        app.update();
+
+        let ctx = app.world().resource::<NewTabContext>();
+        assert_eq!(ctx.tab, Some(tab));
+        assert!(ctx.needs_open);
     }
 }

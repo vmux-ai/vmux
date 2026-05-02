@@ -18,6 +18,7 @@ use bevy::{
     ecs::message::MessageReader, ecs::relationship::Relationship, prelude::*, ui::UiSystems,
 };
 use bevy_cef::prelude::*;
+use bevy_cef_core::prelude::webview_debug_log;
 use vmux_command_bar::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
@@ -27,6 +28,7 @@ use vmux_history::LastActivatedAt;
 use vmux_processes::event::PROCESSES_WEBVIEW_URL;
 use vmux_service::protocol::ProcessId;
 use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
+use vmux_webview_app::UiReady;
 
 /// Try to extract a process UUID from `vmux://terminal/{uuid}`.
 fn parse_process_id_from_url(url: &str) -> Option<ProcessId> {
@@ -38,11 +40,6 @@ fn parse_process_id_from_url(url: &str) -> Option<ProcessId> {
 /// so CEF can resize the webview before the modal becomes visible.
 #[derive(Component)]
 struct PendingCommandBarReveal(u8);
-
-/// Tracks an empty tab spawned by Cmd+T that is waiting for the user
-/// Marker: first launch pending, command bar opens when modal webview is ready.
-#[derive(Resource)]
-pub(crate) struct PendingFirstLaunchOpen;
 
 /// to choose content via the command bar.
 #[derive(Resource, Default)]
@@ -104,9 +101,42 @@ pub fn is_command_bar_open(modal_q: &Query<&Node, With<Modal>>) -> bool {
     modal_q.iter().any(|n| n.display != Display::None)
 }
 
+fn command_bar_open_delivery_ready(
+    has_browser: bool,
+    host_emit_ready: bool,
+    _ui_ready: bool,
+) -> bool {
+    has_browser && host_emit_ready
+}
+
+fn command_bar_reveal_ready(has_browser: bool, _host_emit_ready: bool, _ui_ready: bool) -> bool {
+    has_browser
+}
+
+fn should_start_command_bar_reveal(
+    has_browser: bool,
+    host_emit_ready: bool,
+    ui_ready: bool,
+    pending_reveal: bool,
+    visibility: Visibility,
+) -> bool {
+    command_bar_reveal_ready(has_browser, host_emit_ready, ui_ready)
+        && !pending_reveal
+        && visibility == Visibility::Hidden
+}
+
 fn handle_open_command_bar(
     mut reader: MessageReader<AppCommand>,
-    mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
+    mut modal_q: Query<
+        (
+            Entity,
+            &mut Node,
+            &mut Visibility,
+            Has<UiReady>,
+            Has<PendingCommandBarReveal>,
+        ),
+        With<Modal>,
+    >,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
     browsers: NonSend<Browsers>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
@@ -181,10 +211,10 @@ fn handle_open_command_bar(
     if should_dismiss {
         let is_open = modal_q
             .single()
-            .map(|(_, n, _)| n.display != Display::None)
+            .map(|(_, n, _, _, _)| n.display != Display::None)
             .unwrap_or(false);
         if is_open {
-            let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut() else {
+            let Ok((modal_e, mut modal_node, mut modal_vis, _, _)) = modal_q.single_mut() else {
                 return;
             };
             modal_node.display = Display::None;
@@ -238,10 +268,10 @@ fn handle_open_command_bar(
     if should_dismiss_nav {
         let is_open = modal_q
             .single()
-            .map(|(_, n, _)| n.display != Display::None)
+            .map(|(_, n, _, _, _)| n.display != Display::None)
             .unwrap_or(false);
         if is_open {
-            let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut() else {
+            let Ok((modal_e, mut modal_node, mut modal_vis, _, _)) = modal_q.single_mut() else {
                 return;
             };
             modal_node.display = Display::None;
@@ -264,7 +294,7 @@ fn handle_open_command_bar(
     if should_toggle {
         let is_open = modal_q
             .single()
-            .map(|(_, n, _)| n.display != Display::None)
+            .map(|(_, n, _, _, _)| n.display != Display::None)
             .unwrap_or(false);
         if !is_open {
             should_open = true;
@@ -277,19 +307,25 @@ fn handle_open_command_bar(
         return;
     }
 
-    let Ok((modal_e, mut modal_node, _)) = modal_q.single_mut() else {
+    let Ok((modal_e, mut modal_node, mut modal_vis, modal_ready, modal_pending_reveal)) =
+        modal_q.single_mut()
+    else {
         return;
     };
 
     let is_new_tab = new_tab_ctx.tab.is_some();
+    let was_open = modal_node.display != Display::None;
 
-    // Open command bar — keep hidden until CEF resizes (see reveal_command_bar)
-    modal_node.display = Display::Flex;
-    commands.entity(modal_e).insert(PendingCommandBarReveal(0));
+    if !was_open {
+        // Open command bar — keep hidden until CEF resizes (see reveal_command_bar)
+        modal_node.display = Display::Flex;
+        *modal_vis = Visibility::Hidden;
+    }
 
-    // Remove keyboard target from all content browsers
-    for browser_e in &content_browsers {
-        commands.entity(browser_e).remove::<CefKeyboardTarget>();
+    if !was_open {
+        for browser_e in &content_browsers {
+            commands.entity(browser_e).remove::<CefKeyboardTarget>();
+        }
     }
     commands
         .entity(modal_e)
@@ -377,20 +413,47 @@ fn handle_open_command_bar(
         })
         .collect();
 
-    // Send open event to command bar webview
-    if browsers.has_browser(modal_e) && browsers.host_emit_ready(&modal_e) {
-        let payload = CommandBarOpenEvent {
-            url: current_url,
-            tabs: bar_tabs,
-            commands: bar_commands,
-            new_tab: is_new_tab,
-        };
-        let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-        commands.trigger(HostEmitEvent::new(
-            modal_e,
-            COMMAND_BAR_OPEN_EVENT,
-            &ron_body,
-        ));
+    let has_browser = browsers.has_browser(modal_e);
+    let host_emit_ready = browsers.host_emit_ready(&modal_e);
+    webview_debug_log(format!(
+        "command_bar open entity={modal_e:?} was_open={was_open} has_browser={has_browser} host_emit_ready={host_emit_ready} ui_ready={modal_ready} pending_reveal={modal_pending_reveal} visibility={:?} new_tab={is_new_tab}",
+        *modal_vis
+    ));
+    if should_start_command_bar_reveal(
+        has_browser,
+        host_emit_ready,
+        modal_ready,
+        modal_pending_reveal,
+        *modal_vis,
+    ) {
+        commands.entity(modal_e).insert(PendingCommandBarReveal(0));
+    }
+
+    if !command_bar_open_delivery_ready(has_browser, host_emit_ready, modal_ready) {
+        new_tab_ctx.needs_open = true;
+        return;
+    }
+
+    let payload = CommandBarOpenEvent {
+        url: current_url,
+        tabs: bar_tabs,
+        commands: bar_commands,
+        new_tab: is_new_tab,
+    };
+    let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
+    commands.trigger(HostEmitEvent::new(
+        modal_e,
+        COMMAND_BAR_OPEN_EVENT,
+        &ron_body,
+    ));
+    webview_debug_log(format!(
+        "command_bar emit open entity={modal_e:?} payload_len={} tabs={} commands={}",
+        ron_body.len(),
+        payload.tabs.len(),
+        payload.commands.len()
+    ));
+    if !modal_ready {
+        new_tab_ctx.needs_open = true;
     }
 }
 
@@ -829,6 +892,7 @@ fn reveal_command_bar(
         if pending.0 >= 2 {
             *vis = Visibility::Inherited;
             commands.entity(entity).remove::<PendingCommandBarReveal>();
+            webview_debug_log(format!("command_bar reveal entity={entity:?}"));
         } else {
             pending.0 += 1;
         }
@@ -923,4 +987,60 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
 
     results.truncate(20);
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_bar_open_can_emit_before_ui_listener() {
+        assert!(command_bar_open_delivery_ready(true, true, false));
+    }
+
+    #[test]
+    fn command_bar_reveal_does_not_wait_for_ui_listener() {
+        assert!(command_bar_reveal_ready(true, true, false));
+        assert!(command_bar_reveal_ready(true, true, true));
+    }
+
+    #[test]
+    fn command_bar_open_requires_browser_main_frame() {
+        assert!(!command_bar_open_delivery_ready(false, true, true));
+        assert!(!command_bar_open_delivery_ready(true, false, true));
+        assert!(command_bar_open_delivery_ready(true, true, true));
+    }
+
+    #[test]
+    fn command_bar_retry_can_start_reveal_before_ui_listener() {
+        assert!(should_start_command_bar_reveal(
+            true,
+            true,
+            false,
+            false,
+            Visibility::Hidden
+        ));
+    }
+
+    #[test]
+    fn command_bar_reveal_starts_once_browser_exists_even_before_main_frame() {
+        assert!(should_start_command_bar_reveal(
+            true,
+            false,
+            false,
+            false,
+            Visibility::Hidden
+        ));
+    }
+
+    #[test]
+    fn command_bar_retry_does_not_restart_pending_reveal() {
+        assert!(!should_start_command_bar_reveal(
+            true,
+            true,
+            false,
+            true,
+            Visibility::Hidden
+        ));
+    }
 }

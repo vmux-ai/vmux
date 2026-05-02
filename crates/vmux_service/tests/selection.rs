@@ -2,9 +2,36 @@ use vmux_service::process::Process;
 use vmux_service::protocol::{CopyModeKey, ServiceMessage};
 use vmux_terminal::event::TermSelectionRange;
 
-fn new_process() -> Process {
+static PTY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+struct TestProcess {
+    _guard: std::sync::MutexGuard<'static, ()>,
+    process: Process,
+}
+
+impl std::ops::Deref for TestProcess {
+    type Target = Process;
+
+    fn deref(&self) -> &Self::Target {
+        &self.process
+    }
+}
+
+impl std::ops::DerefMut for TestProcess {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.process
+    }
+}
+
+fn new_process() -> TestProcess {
+    let guard = PTY_TEST_LOCK.lock().expect("pty test lock");
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-    Process::new(shell, String::new(), Vec::new(), 80, 24).expect("spawn process")
+    let process = Process::new(shell, String::new(), Vec::new(), 80, 24).expect("spawn process");
+
+    TestProcess {
+        _guard: guard,
+        process,
+    }
 }
 
 /// Write input to the PTY and let the reader thread + VTE catch up.

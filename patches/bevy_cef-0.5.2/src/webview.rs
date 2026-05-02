@@ -211,6 +211,12 @@ fn create_webview(
                     #[allow(deprecated)]
                     w.raw_window_handle().ok()
                 });
+            webview_debug_log(format!(
+                "create_webview entity={entity:?} uri={} size={:?} scale={device_scale_factor} transparent={transparent} host_window={}",
+                uri.0,
+                size.0,
+                host_window.is_some()
+            ));
             browsers.create_browser(
                 entity,
                 &uri.0,

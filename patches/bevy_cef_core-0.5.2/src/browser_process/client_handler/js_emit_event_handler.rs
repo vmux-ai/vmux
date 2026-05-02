@@ -33,6 +33,11 @@ impl ProcessMessageHandler for JsEmitEventHandler {
                 webview: self.webview, // Placeholder, should be set correctly
                 payload: args.string(0).into_string(),
             };
+            crate::util::webview_debug_log(format!(
+                "browser js_emit entity={:?} payload_len={}",
+                event.webview,
+                event.payload.len()
+            ));
             let _ = self.sender.send_blocking(event);
         }
     }

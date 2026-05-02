@@ -64,6 +64,7 @@ pub fn render_standard_materials(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     webviews: Query<&MeshMaterial3d<WebviewExtendStandardMaterial>>,
+    mut logged: Local<bevy::platform::collections::HashSet<Entity>>,
 ) {
     for texture in er.read() {
         if let Ok(handle) = webviews.get(texture.webview)
@@ -80,6 +81,15 @@ pub fn render_standard_materials(
             }
         {
             update_webview_image(texture.clone(), image);
+            if logged.insert(texture.webview) {
+                webview_debug_log(format!(
+                    "texture applied entity={:?} size={}x{} bytes={}",
+                    texture.webview,
+                    texture.width,
+                    texture.height,
+                    texture.buffer.len()
+                ));
+            }
         } else {
             bevy::log::warn!(
                 "[tex-apply] FAILED to apply texture for {:?} {}x{}",
@@ -87,6 +97,13 @@ pub fn render_standard_materials(
                 texture.width,
                 texture.height
             );
+            webview_debug_log(format!(
+                "texture apply failed entity={:?} size={}x{} bytes={}",
+                texture.webview,
+                texture.width,
+                texture.height,
+                texture.buffer.len()
+            ));
         }
     }
 }

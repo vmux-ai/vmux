@@ -20,7 +20,7 @@ use std::os::raw::c_int;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use crate::util::{CefEmbeddedPageConfig, resolved_cef_embedded_page_config};
+use crate::util::{CefEmbeddedPageConfig, resolved_cef_embedded_page_config, webview_debug_log};
 
 /// Map navigated custom-scheme URLs to a Bevy [`AssetServer`] load path.
 ///
@@ -55,6 +55,20 @@ fn split_custom_scheme_host_and_tail(path_part: &str) -> Option<(&str, &str)> {
     }
 }
 
+fn normalize_url_path_tail(path: &str) -> String {
+    let mut parts = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            _ => parts.push(part),
+        }
+    }
+    parts.join("/")
+}
+
 pub(crate) fn asset_load_path_from_request_url_with(
     url: &str,
     cfg: &CefEmbeddedPageConfig,
@@ -77,6 +91,7 @@ pub(crate) fn asset_load_path_from_request_url_with(
         if tail.starts_with(EMBEDDED_SCHEME) {
             return tail.to_string();
         }
+        let tail = normalize_url_path_tail(tail);
         if let Some(entry) = cfg.hosts.entry_for_host(host) {
             if tail.is_empty() {
                 format!("{EMBEDDED_SCHEME}{}", entry.default_document)
@@ -94,7 +109,8 @@ pub(crate) fn asset_load_path_from_request_url_with(
                 }
             }
         } else {
-            let full = path_part.trim_start_matches('/').trim_end_matches('/');
+            let full =
+                normalize_url_path_tail(path_part.trim_start_matches('/').trim_end_matches('/'));
             if full.is_empty() {
                 String::new()
             } else {
@@ -282,6 +298,8 @@ impl ImplResourceHandler for LocalResourceHandlerBuilder {
             *handle_request = 0;
         }
         let url = request.url().into_string();
+        let uri = asset_load_path_from_request_url(&url);
+        webview_debug_log(format!("scheme open url={url} uri={uri} range={range:?}"));
         let requester = self.requester.clone();
         let headers_responser = self.headers.clone();
         let data_responser = self.data.clone();
@@ -290,11 +308,17 @@ impl ImplResourceHandler for LocalResourceHandlerBuilder {
                 let (tx, rx) = async_channel::bounded(1);
                 let _ = requester
                     .send(CefRequest {
-                        uri: asset_load_path_from_request_url(&url),
+                        uri: uri.clone(),
                         responser: Responser(tx),
                     })
                     .await;
                 let response = rx.recv().await.unwrap_or_default();
+                webview_debug_log(format!(
+                    "scheme response uri={uri} status={} mime={} len={}",
+                    response.status_code,
+                    response.mime_type,
+                    response.data.len()
+                ));
                 headers_responser.lock().unwrap().prepare(&response, &range);
                 data_responser
                     .lock()
@@ -416,6 +440,19 @@ mod custom_scheme_url_tests {
         assert_eq!(
             asset_load_path_from_request_url_with(&format!("{p}history/other/page.html"), &cfg),
             "embedded://history/other/page.html"
+        );
+    }
+
+    #[test]
+    fn registered_host_subpath_normalizes_dot_segments() {
+        let cfg = history_config();
+        let p = cfg.scheme_prefix();
+        assert_eq!(
+            asset_load_path_from_request_url_with(
+                &format!("{p}history/./wasm/history_app_bg.wasm"),
+                &cfg
+            ),
+            "embedded://history/wasm/history_app_bg.wasm"
         );
     }
 

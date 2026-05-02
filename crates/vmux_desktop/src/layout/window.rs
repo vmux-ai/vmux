@@ -31,7 +31,7 @@ pub(crate) const WEBVIEW_Z_FOCUS_RING: f32 = 0.02;
 pub(crate) const WEBVIEW_Z_HEADER: f32 = 0.022;
 pub(crate) const WEBVIEW_Z_SIDE_SHEET: f32 = 0.022;
 pub(crate) const WEBVIEW_Z_MODAL: f32 = 0.06;
-pub(crate) const WEBVIEW_MESH_DEPTH_BIAS: f32 = -4.0;
+pub(crate) const WEBVIEW_MESH_DEPTH_BIAS: f32 = 0.0;
 
 const _: () = {
     assert!(WEBVIEW_Z_MAIN <= 0.025);
@@ -39,6 +39,7 @@ const _: () = {
     assert!(WEBVIEW_Z_HEADER <= 0.03);
     assert!(WEBVIEW_Z_SIDE_SHEET <= 0.03);
     assert!(WEBVIEW_Z_MODAL <= 0.08);
+    assert!(WEBVIEW_MESH_DEPTH_BIAS >= 0.0);
 };
 
 pub(crate) struct WindowPlugin;
@@ -488,7 +489,7 @@ fn spawn_default_session(
         ))
         .id();
     new_tab_ctx.tab = Some(tab);
-    commands.insert_resource(crate::command_bar::PendingFirstLaunchOpen);
+    new_tab_ctx.needs_open = true;
 }
 
 fn spawn_glass_child(
@@ -690,6 +691,43 @@ pub(crate) fn fit_window_to_screen(
 mod tests {
     use super::*;
 
+    static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct HomeEnvGuard {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        old_home: Option<std::ffi::OsString>,
+    }
+
+    impl HomeEnvGuard {
+        fn use_temp_home(name: &str) -> Self {
+            let guard = HOME_ENV_LOCK.lock().expect("home env lock");
+            let old_home = std::env::var_os("HOME");
+            let home =
+                std::env::temp_dir().join(format!("vmux-test-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&home);
+            std::fs::create_dir_all(&home).expect("create temp home");
+            unsafe {
+                std::env::set_var("HOME", &home);
+            }
+            Self {
+                _guard: guard,
+                old_home,
+            }
+        }
+    }
+
+    impl Drop for HomeEnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(home) = &self.old_home {
+                    std::env::set_var("HOME", home);
+                } else {
+                    std::env::remove_var("HOME");
+                }
+            }
+        }
+    }
+
     #[test]
     fn window_glass_uses_dark_finder_style_background() {
         assert_eq!(
@@ -701,5 +739,46 @@ mod tests {
     #[test]
     fn chrome_glass_has_no_fill_color() {
         assert_eq!(chrome_glass_base_color(), Color::srgba(1.0, 1.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn default_session_requests_command_bar_open() {
+        let _home = HomeEnvGuard::use_temp_home("default-session");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<crate::command_bar::NewTabContext>();
+        app.insert_resource(AppSettings {
+            browser: crate::settings::BrowserSettings {
+                startup_url: "about:blank".to_string(),
+            },
+            layout: crate::settings::LayoutSettings {
+                window: crate::settings::WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: crate::settings::PaneSettings {
+                    gap: 0.0,
+                    radius: 0.0,
+                },
+                side_sheet: crate::settings::SideSheetSettings::default(),
+                focus_ring: crate::settings::FocusRingSettings::default(),
+            },
+            shortcuts: crate::settings::ShortcutSettings::default(),
+            terminal: None,
+            auto_update: false,
+        });
+        app.add_systems(Update, spawn_default_session);
+
+        app.world_mut().spawn(PrimaryWindow);
+        app.world_mut().spawn(Main);
+
+        app.update();
+
+        let ctx = app.world().resource::<crate::command_bar::NewTabContext>();
+        assert!(ctx.tab.is_some());
+        assert!(ctx.needs_open);
     }
 }

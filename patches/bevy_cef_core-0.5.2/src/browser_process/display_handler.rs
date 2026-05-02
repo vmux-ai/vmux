@@ -147,7 +147,12 @@ impl ImplDisplayHandler for DisplayHandlerBuilder {
             source.map(|s| s.to_string()).unwrap_or_default(),
             message.map(|m| m.to_string()).unwrap_or_default()
         );
-        match level.into_raw() {
+        let raw_level = level.into_raw();
+        crate::util::webview_debug_log(format!(
+            "console entity={:?} level={raw_level:?} {message}",
+            self.webview
+        ));
+        match raw_level {
             cef_log_severity_t::LOGSEVERITY_ERROR => {
                 error!("{message}");
             }

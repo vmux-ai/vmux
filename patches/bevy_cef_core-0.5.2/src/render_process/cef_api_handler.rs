@@ -140,6 +140,7 @@ impl CefApiHandler {
             && let Some(arg) = v8_value_to_json(arg)
             && let Ok(arg) = serde_json::to_string(&arg)
         {
+            crate::util::webview_debug_log(format!("render cef.emit payload_len={}", arg.len()));
             arguments_list.set_string(0, Some(&arg.as_str().into()));
             frame.send_process_message(
                 ProcessId::from(cef_process_id_t::PID_BROWSER),
@@ -160,6 +161,7 @@ impl CefApiHandler {
                 .lock()
                 .unwrap()
                 .insert(id.string_value().into_string(), callback.clone());
+            crate::util::webview_debug_log("render cef.listen registered");
         }
         1
     }

@@ -4,7 +4,7 @@ use bevy::prelude::{
     SystemSet,
 };
 use bevy_cef::prelude::{JsEmitEventPlugin, Receive};
-use bevy_cef_core::prelude::{CefEmbeddedHost, CefEmbeddedHosts};
+use bevy_cef_core::prelude::{CefEmbeddedHost, CefEmbeddedHosts, webview_debug_log};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -99,6 +99,7 @@ impl Plugin for JsEmitUiReadyPlugin {
 }
 
 fn mark_webview_ui_ready_on_js_emit(trigger: On<Receive<UiReady>>, mut commands: Commands) {
+    webview_debug_log(format!("UiReady entity={:?}", trigger.event().webview));
     commands
         .entity(trigger.event().webview)
         .insert(trigger.event().payload);
@@ -172,6 +173,11 @@ fn embed_dir_recursive(
                 embedded_path = prefix.join(&embedded_path);
             }
             let bytes = std::fs::read(&p)?;
+            webview_debug_log(format!(
+                "embed asset source={} embedded={}",
+                p.display(),
+                embedded_path.display()
+            ));
             reg.insert_asset(p, embedded_path.as_path(), bytes);
         }
     }

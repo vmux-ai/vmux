@@ -1,6 +1,7 @@
 use crate::{
     command::{AppCommand, BrowserCommand, ReadAppCommands},
     layout::{
+        PendingWebviewReveal,
         pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_tab_in_pane},
         side_sheet::SideSheet,
         space::Space,
@@ -25,7 +26,7 @@ use bevy::{
     window::{ClosingWindow, PrimaryWindow, WindowResized},
 };
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::RenderTextureMessage;
+use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
 use vmux_footer::Footer;
 #[cfg(target_os = "macos")]
 use vmux_header::{
@@ -47,6 +48,7 @@ impl Plugin for BrowserPlugin {
             .world()
             .resource::<WebviewAppRegistry>()
             .embedded_hosts();
+        webview_debug_log(format!("BrowserPlugin embedded_hosts={embedded_hosts:?}"));
         app.configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
             .add_plugins(CefPlugin {
                 root_cache_path: cef_root_cache_path(),
@@ -104,6 +106,7 @@ fn on_webview_ready_send_theme(
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
+    webview_debug_log(format!("on_webview_ready_send_theme entity={entity:?}"));
     if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
         let payload = ThemeEvent {
             radius: settings.layout.pane.radius,
@@ -389,6 +392,10 @@ fn sync_cef_webview_resize_after_ui(
             continue;
         }
         browsers.resize(&entity, size.0, device_scale_factor);
+        webview_debug_log(format!(
+            "resize entity={entity:?} size={:?} scale={device_scale_factor} force={force}",
+            size.0
+        ));
         if let Some(entry) = last_entries.iter_mut().find(|(k, _, _)| *k == key) {
             entry.1 = size.0;
             entry.2 = device_scale_factor;
@@ -434,7 +441,15 @@ fn sync_webview_pane_corner_clip(
 
 fn sync_osr_webview_focus(
     browsers: NonSend<Browsers>,
-    webviews: Query<(Entity, Option<&Visibility>, Option<&ComputedNode>), With<WebviewSource>>,
+    webviews: Query<
+        (
+            Entity,
+            Option<&Visibility>,
+            Option<&ComputedNode>,
+            Has<PendingWebviewReveal>,
+        ),
+        With<WebviewSource>,
+    >,
     primary_window: Single<&Window, With<PrimaryWindow>>,
     focus: Res<crate::layout::tab::FocusedTab>,
     new_tab_ctx: Res<crate::command_bar::NewTabContext>,
@@ -449,12 +464,12 @@ fn sync_osr_webview_focus(
     mut last_ready_set: Local<Vec<Entity>>,
 ) {
     ready.clear();
-    for (entity, visibility, computed) in webviews.iter() {
+    for (entity, visibility, computed, pending_reveal) in webviews.iter() {
         if !browsers.has_browser(entity) {
             continue;
         }
         let size = computed.map(|node| node.size).unwrap_or(Vec2::ONE);
-        if webview_layout_is_renderable(size, visibility) {
+        if webview_osr_should_run(size, visibility, pending_reveal) {
             ready.push(entity);
         } else {
             browsers.set_osr_hidden(&entity);
@@ -478,6 +493,7 @@ fn sync_osr_webview_focus(
 
     if !window_focused {
         if last_active.is_some() || *last_ready_set != *ready {
+            webview_debug_log(format!("osr focus window_unfocused ready={ready:?}"));
             browsers.sync_osr_focus_to_active_pane(None, &[]);
             *last_active = None;
             last_ready_set.clone_from(&ready);
@@ -486,6 +502,10 @@ fn sync_osr_webview_focus(
     } else {
         auxiliary.clear();
         auxiliary.extend(ready.iter().copied().filter(|&e| e != active));
+        webview_debug_log(format!(
+            "osr focus active={active:?} auxiliary={:?} ready={ready:?}",
+            auxiliary.as_slice()
+        ));
         browsers.sync_osr_focus_to_active_pane(Some(active), auxiliary.as_slice());
         *last_active = Some(active);
         last_ready_set.clone_from(&ready);
@@ -527,16 +547,21 @@ fn webview_layout_is_renderable(size_px: Vec2, visibility: Option<&Visibility>) 
     !matches!(visibility, Some(Visibility::Hidden)) && size_px.x > 0.0 && size_px.y > 0.0
 }
 
+fn webview_osr_should_run(
+    size_px: Vec2,
+    visibility: Option<&Visibility>,
+    pending_reveal: bool,
+) -> bool {
+    pending_reveal || webview_layout_is_renderable(size_px, visibility)
+}
+
 fn should_show_osr_webview(
-    window_focused: bool,
+    _window_focused: bool,
     parent_is_tab: bool,
     pane_is_leaf: bool,
     tab_is_active: bool,
     tab_is_previous_new_tab: bool,
 ) -> bool {
-    if !window_focused {
-        return false;
-    }
     if !parent_is_tab || !pane_is_leaf {
         return true;
     }
@@ -1129,10 +1154,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn osr_webview_is_hidden_when_window_is_unfocused() {
+    fn osr_webview_stays_visible_when_window_is_unfocused() {
         assert!(!should_show_osr_webview(true, true, true, false, false));
         assert!(should_show_osr_webview(true, true, true, true, false));
-        assert!(!should_show_osr_webview(false, true, true, true, false));
+        assert!(should_show_osr_webview(false, true, true, true, false));
     }
 
     #[test]
@@ -1140,8 +1165,8 @@ mod tests {
         assert!(should_show_osr_webview(true, false, true, false, false));
         assert!(should_show_osr_webview(true, true, false, false, false));
         assert!(should_show_osr_webview(true, true, true, false, true));
-        assert!(!should_show_osr_webview(false, false, true, false, false));
-        assert!(!should_show_osr_webview(false, true, false, false, false));
+        assert!(should_show_osr_webview(false, false, true, false, false));
+        assert!(should_show_osr_webview(false, true, false, false, false));
     }
 
     #[test]
@@ -1161,6 +1186,15 @@ mod tests {
         assert!(webview_layout_is_renderable(
             Vec2::new(100.0, 20.0),
             Some(&Visibility::Inherited)
+        ));
+    }
+
+    #[test]
+    fn pending_reveal_webviews_keep_cef_running() {
+        assert!(webview_osr_should_run(
+            Vec2::ZERO,
+            Some(&Visibility::Hidden),
+            true
         ));
     }
 }

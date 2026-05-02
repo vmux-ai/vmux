@@ -13,6 +13,12 @@ fn main() {
     #[cfg(not(target_os = "macos"))]
     early_exit_if_subprocess();
 
+    bevy_cef_core::prelude::reset_webview_debug_log();
+    bevy_cef_core::prelude::webview_debug_log(format!(
+        "vmux start exe={:?}",
+        std::env::current_exe().ok()
+    ));
+
     // Fix up the macOS keychain ACL on the Chromium safe-storage item so
     // future signed builds (manual install, brew upgrade, auto-update)
     // inherit access without prompting the user. No-op on non-macOS, and

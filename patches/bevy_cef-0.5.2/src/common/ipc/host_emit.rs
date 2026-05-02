@@ -34,5 +34,11 @@ impl Plugin for HostEmitPlugin {
 }
 
 fn host_emit(trigger: On<HostEmitEvent>, browsers: NonSend<Browsers>) {
+    webview_debug_log(format!(
+        "host_emit entity={:?} id={} payload_len={}",
+        trigger.webview,
+        trigger.id,
+        trigger.payload.len()
+    ));
     browsers.emit_event_raw_json(&trigger.webview, trigger.id.clone(), &trigger.payload);
 }

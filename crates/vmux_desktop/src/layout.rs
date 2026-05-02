@@ -25,6 +25,7 @@ use side_sheet::SideSheetLayoutPlugin;
 use space::SpacePlugin;
 use tab::TabPlugin;
 use vmux_webview_app::JsEmitUiReadyPlugin;
+pub(crate) use webview_reveal::PendingWebviewReveal;
 use webview_reveal::WebviewRevealPlugin;
 use window::WindowPlugin;
 pub(crate) use window::fit_window_to_screen;

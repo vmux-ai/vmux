@@ -34,8 +34,11 @@ use cef_dll_sys::cef_scheme_options_t::{
     CEF_SCHEME_OPTION_SECURE, CEF_SCHEME_OPTION_STANDARD,
 };
 use std::env::home_dir;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const EXTENSIONS_SWITCH: &str = "bevy-cef-extensions";
 
@@ -117,6 +120,45 @@ pub fn resolved_cef_embedded_page_config() -> Arc<CefEmbeddedPageConfig> {
         .get()
         .cloned()
         .unwrap_or_else(|| Arc::new(CefEmbeddedPageConfig::default()))
+}
+
+pub fn webview_debug_log_enabled() -> bool {
+    std::env::var_os("VMUX_WEBVIEW_DEBUG").is_some()
+}
+
+fn webview_debug_log_path() -> PathBuf {
+    std::env::var_os("VMUX_WEBVIEW_DEBUG_LOG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp/vmux_webview_debug.log"))
+}
+
+pub fn reset_webview_debug_log() {
+    if !webview_debug_log_enabled() {
+        return;
+    }
+    let _ = std::fs::remove_file(webview_debug_log_path());
+}
+
+pub fn webview_debug_log(message: impl AsRef<str>) {
+    if !webview_debug_log_enabled() {
+        return;
+    }
+    let ts_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(webview_debug_log_path())
+    {
+        let _ = writeln!(
+            file,
+            "{ts_ms} pid={} {}",
+            std::process::id(),
+            message.as_ref()
+        );
+    }
 }
 
 pub fn cef_scheme_flags() -> u32 {
@@ -213,6 +255,54 @@ pub fn v8_value_to_json(v8: &cef::V8Value) -> Option<serde_json::Value> {
         Some(serde_json::Value::Object(object))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvGuard {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        old_log: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn clear_debug_log_path() -> Self {
+            let guard = ENV_LOCK.lock().expect("env lock");
+            let old_log = std::env::var_os("VMUX_WEBVIEW_DEBUG_LOG");
+            unsafe {
+                std::env::remove_var("VMUX_WEBVIEW_DEBUG_LOG");
+            }
+            Self {
+                _guard: guard,
+                old_log,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(old_log) = &self.old_log {
+                    std::env::set_var("VMUX_WEBVIEW_DEBUG_LOG", old_log);
+                } else {
+                    std::env::remove_var("VMUX_WEBVIEW_DEBUG_LOG");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn default_webview_debug_log_path_is_stable_tmp_path() {
+        let _env = EnvGuard::clear_debug_log_path();
+
+        assert_eq!(
+            webview_debug_log_path(),
+            PathBuf::from("/tmp/vmux_webview_debug.log")
+        );
     }
 }
 

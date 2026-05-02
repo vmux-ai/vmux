@@ -44,18 +44,20 @@ ensure_dev_prereqs() {
 		echo '  export-cef-dir --force "$HOME/.local/share"' >&2
 		exit 1
 	fi
-	if [[ ! -f "$DEBUG_RENDER" ]]; then
-		echo "error: macOS debug render helper not found:" >&2
+}
+
+install_debug_render_process() {
+	make -C "$ROOT" install-debug-render-process
+	if [[ ! -x "$DEBUG_RENDER" ]]; then
+		echo "error: macOS debug render helper not installed:" >&2
 		echo "  $DEBUG_RENDER" >&2
-		echo >&2
-		echo "Install from vmux-patched bevy_cef_core (one-time):" >&2
-		echo "  make install-debug-render-process" >&2
 		exit 1
 	fi
 }
 
 cmd_dev() {
 	ensure_dev_prereqs
+	install_debug_render_process
 	cd "$ROOT"
 	echo "==> cargo run -p vmux_desktop --features debug"
 	cargo run -p vmux_desktop --features debug

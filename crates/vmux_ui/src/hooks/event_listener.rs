@@ -124,6 +124,22 @@ pub fn try_emit_ui_ready() -> Result<(), EventListenerError> {
     try_cef_emit(&JsValue::from(js_sys::Object::new()))
 }
 
+const LISTENER_RETRY_MS: i32 = 16;
+
+fn schedule_listener_retry(mut retry_tick: Signal<u32>, current: u32) {
+    let Some(win) = window() else {
+        return;
+    };
+    let closure = Closure::once(move || {
+        retry_tick.set(current.wrapping_add(1));
+    });
+    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+        closure.as_ref().unchecked_ref(),
+        LISTENER_RETRY_MS,
+    );
+    closure.forget();
+}
+
 pub struct BevyState {
     pub is_loading: Signal<bool>,
     pub error: Signal<Option<String>>,
@@ -137,8 +153,14 @@ where
     let on_event = Rc::new(RefCell::new(on_event));
     let mut is_loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+    let mut is_listening = use_signal(|| false);
+    let retry_tick = use_signal(|| 0u32);
 
-    use_hook(move || {
+    use_effect(move || {
+        let current_retry = retry_tick();
+        if is_listening() {
+            return;
+        }
         let on_event = Rc::clone(&on_event);
         let Some(rt) = Runtime::try_current() else {
             is_loading.set(false);
@@ -155,15 +177,18 @@ where
             });
         }) {
             Ok(()) => {
+                is_listening.set(true);
                 is_loading.set(false);
+                error.set(None);
                 match try_emit_ui_ready() {
                     Ok(()) => {}
                     Err(e) => error.set(Some(format!("cef.emit failed: {e}"))),
                 }
             }
             Err(e) => {
-                is_loading.set(false);
+                is_loading.set(true);
                 error.set(Some(format!("cef.listen failed: {e}")));
+                schedule_listener_retry(retry_tick, current_retry);
             }
         }
     });

@@ -102,6 +102,7 @@ fn coming_request(
     store: Res<InlineHtmlStore>,
 ) {
     while let Ok(request) = requester_receiver.0.try_recv() {
+        webview_debug_log(format!("asset request uri={}", request.uri));
         if let Some(id) = extract_inline_id(&request.uri) {
             let response = match store.by_id.get(id) {
                 Some(data) => CefResponse {
@@ -115,6 +116,12 @@ fn coming_request(
                     data: b"Not Found".to_vec(),
                 },
             };
+            webview_debug_log(format!(
+                "asset inline response uri={} status={} len={}",
+                request.uri,
+                response.status_code,
+                response.data.len()
+            ));
             let _ = request.responser.0.send_blocking(response);
         } else {
             commands.spawn((
@@ -142,6 +149,13 @@ fn responser(
 ) {
     for (entity, handle, responser) in handles.iter() {
         if let Some(response) = responses.get(&handle.0) {
+            webview_debug_log(format!(
+                "asset response path={:?} status={} mime={} len={}",
+                handle.0.path(),
+                response.status_code,
+                response.mime_type,
+                response.data.len()
+            ));
             let _ = responser.0.send_blocking(response.clone());
             commands.entity(entity).despawn();
             handle_stores.insert(handle.0.clone());
@@ -150,6 +164,7 @@ fn responser(
             bevy::asset::LoadState::Failed(_)
         ) {
             error!("cef://localhost/ asset load failed: {:?}", handle.0.path());
+            webview_debug_log(format!("asset load failed path={:?}", handle.0.path()));
             let _ = responser.0.send_blocking(CefResponse {
                 mime_type: "text/plain".to_string(),
                 status_code: 404,

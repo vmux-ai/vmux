@@ -97,6 +97,10 @@ impl Browsers {
         disk_profile_root: Option<&str>,
         background_color: Option<u32>,
     ) {
+        webview_debug_log(format!(
+            "Browsers::create_browser entity={webview:?} uri={_uri} size={webview_size:?} scale={device_scale_factor} disk_profile={} bg={background_color:?}",
+            disk_profile_root.is_some_and(|s| !s.trim().is_empty())
+        ));
         let size = Rc::new(Cell::new(webview_size));
         let device_scale = Rc::new(Cell::new(device_scale_factor));
         // Build the client before borrowing `shared_disk_context` mutably (same `self`).
@@ -135,6 +139,9 @@ impl Browsers {
                 Some(&HOST_CEF.into()),
                 Some(&mut cef_factory),
             );
+            webview_debug_log(format!(
+                "register_scheme_handler_factory cef://localhost ok={ok_cef}"
+            ));
             assert_eq!(
                 ok_cef, 1,
                 "cef_register_scheme_handler_factory(cef) failed with code {ok_cef}"
@@ -145,6 +152,10 @@ impl Browsers {
                 None,
                 Some(&mut embedded_factory),
             );
+            webview_debug_log(format!(
+                "register_scheme_handler_factory {}://* ok={ok_embedded}",
+                emb_scheme
+            ));
             assert_eq!(
                 ok_embedded, 1,
                 "cef_register_scheme_handler_factory(embedded page scheme) failed with code {ok_embedded}"
@@ -210,6 +221,9 @@ impl Browsers {
             device_scale,
         };
         self.browsers.insert(webview, webview_browser);
+        webview_debug_log(format!(
+            "Browsers::create_browser inserted entity={webview:?}"
+        ));
     }
 
     /// Returns `true` if [`Self::create_browser`] has already succeeded for this webview entity.

@@ -14,7 +14,7 @@ CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 run-mac: build-mac-debug
 	exec env -u CEF_PATH ./target/debug/Vmux
 
-build-mac-debug: ensure-run-mac-deps
+build-mac-debug: ensure-run-mac-deps install-debug-render-process
 	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop --features debug
 
 build: ensure-run-mac-deps
