@@ -6,6 +6,10 @@ pub fn result_item_class(is_selected: bool) -> &'static str {
     }
 }
 
+pub fn command_bar_shell_class() -> &'static str {
+    "relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-white/10 shadow-2xl"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -18,5 +22,19 @@ mod tests {
         assert!(class.contains("text-sidebar-primary-foreground"));
         assert!(class.contains("w-full"));
         assert!(!class.contains("bg-white/10"));
+    }
+
+    #[test]
+    fn command_bar_shell_does_not_apply_backdrop_filter() {
+        let class = command_bar_shell_class();
+
+        assert!(!class.contains("backdrop-"));
+    }
+
+    #[test]
+    fn command_bar_document_keeps_backdrop_transparent() {
+        let css = include_str!("../assets/index.css");
+
+        assert!(!css.contains("background-color: var(--chrome-surface)"));
     }
 }

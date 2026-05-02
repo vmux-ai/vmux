@@ -5,7 +5,7 @@ use vmux_command_bar::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
 };
-use vmux_command_bar::style::result_item_class;
+use vmux_command_bar::style::{command_bar_shell_class, result_item_class};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
 use wasm_bindgen::JsCast;
@@ -314,7 +314,7 @@ pub fn App() -> Element {
             class: "flex h-full w-full items-start justify-center pt-[15%]",
             onclick: move |_| { is_open.set(false); emit_action("dismiss", ""); },
             div {
-                class: "relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-white/10 shadow-2xl backdrop-blur-2xl backdrop-saturate-150",
+                class: command_bar_shell_class(),
                 onclick: move |e| { e.stop_propagation(); },
                 // Inner glow overlay
                 div { class: "pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-white/20 to-transparent" }

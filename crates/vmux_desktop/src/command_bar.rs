@@ -805,15 +805,27 @@ fn on_command_bar_action(
         _ => {
             // "dismiss" and unknown actions
             if let Some(tab_e) = empty_tab {
-                commands.entity(tab_e).despawn();
+                let closed_space = close_space_if_only_pending_tab(
+                    tab_e,
+                    &spaces,
+                    &child_of_q,
+                    &all_children,
+                    &tab_q,
+                    &mut commands,
+                );
+                if !closed_space {
+                    commands.entity(tab_e).despawn();
+                }
                 new_tab_ctx.tab = None;
-                // Restore keyboard to previous tab's browser
-                if let Some(prev) = previous_tab
-                    && let Ok(children) = all_children.get(prev)
-                {
-                    for child in children.iter() {
-                        if content_browsers.contains(child) {
-                            commands.entity(child).insert(CefKeyboardTarget);
+                if !closed_space {
+                    // Restore keyboard to previous tab's browser
+                    if let Some(prev) = previous_tab
+                        && let Ok(children) = all_children.get(prev)
+                    {
+                        for child in children.iter() {
+                            if content_browsers.contains(child) {
+                                commands.entity(child).insert(CefKeyboardTarget);
+                            }
                         }
                     }
                 }
@@ -855,6 +867,85 @@ fn on_command_bar_action(
             }
         }
     }
+}
+
+fn close_space_if_only_pending_tab(
+    tab: Entity,
+    spaces: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    child_of_q: &Query<&ChildOf>,
+    all_children: &Query<&Children>,
+    tab_q: &Query<Entity, With<Tab>>,
+    commands: &mut Commands,
+) -> bool {
+    let Some(space) = ancestor_space(tab, spaces, child_of_q) else {
+        return false;
+    };
+    if entity_tree_contains_tab_other_than(space, tab, all_children, tab_q) {
+        return false;
+    }
+    let siblings = sibling_spaces(space, spaces, child_of_q, all_children);
+    if siblings.len() <= 1 {
+        return false;
+    }
+    if let Some(next) = pick_space_after_close(space, &siblings) {
+        commands.entity(next).insert(LastActivatedAt::now());
+    }
+    commands.entity(space).despawn();
+    true
+}
+
+fn ancestor_space(
+    entity: Entity,
+    spaces: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    child_of_q: &Query<&ChildOf>,
+) -> Option<Entity> {
+    let mut current = entity;
+    while let Ok(parent) = child_of_q.get(current).map(Relationship::get) {
+        if spaces.get(parent).is_ok() {
+            return Some(parent);
+        }
+        current = parent;
+    }
+    None
+}
+
+fn entity_tree_contains_tab_other_than(
+    entity: Entity,
+    ignored_tab: Entity,
+    all_children: &Query<&Children>,
+    tab_q: &Query<Entity, With<Tab>>,
+) -> bool {
+    (tab_q.contains(entity) && entity != ignored_tab)
+        || all_children.get(entity).is_ok_and(|children| {
+            children.iter().any(|child| {
+                entity_tree_contains_tab_other_than(child, ignored_tab, all_children, tab_q)
+            })
+        })
+}
+
+fn sibling_spaces(
+    space: Entity,
+    spaces: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    child_of_q: &Query<&ChildOf>,
+    all_children: &Query<&Children>,
+) -> Vec<Entity> {
+    let Ok(parent) = child_of_q.get(space).map(Relationship::get) else {
+        return vec![space];
+    };
+    let Ok(children) = all_children.get(parent) else {
+        return vec![space];
+    };
+    children.iter().filter(|e| spaces.get(*e).is_ok()).collect()
+}
+
+fn pick_space_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
+    if siblings.len() <= 1 {
+        return None;
+    }
+    let idx = siblings.iter().position(|e| *e == active)?;
+    let next_idx = if idx + 1 < siblings.len() { idx + 1 } else { 0 };
+    let target = siblings[next_idx];
+    if target == active { None } else { Some(target) }
 }
 
 /// Closes the command bar modal when `NewTabContext::dismiss_modal` is set.
@@ -992,6 +1083,39 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        command::CommandPlugin,
+        settings::{
+            AppSettings, BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings,
+            ShortcutSettings, SideSheetSettings, WindowSettings,
+        },
+    };
+
+    fn test_settings() -> AppSettings {
+        AppSettings {
+            browser: BrowserSettings {
+                startup_url: "about:blank".to_string(),
+            },
+            layout: LayoutSettings {
+                window: WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: PaneSettings {
+                    gap: 0.0,
+                    radius: 0.0,
+                },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            },
+            shortcuts: ShortcutSettings::default(),
+            terminal: None,
+            auto_update: false,
+        }
+    }
 
     #[test]
     fn command_bar_open_can_emit_before_ui_listener() {
@@ -1042,5 +1166,71 @@ mod tests {
             true,
             Visibility::Hidden
         ));
+    }
+
+    #[test]
+    fn dismissing_only_pending_tab_in_new_space_closes_space() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.add_observer(on_command_bar_action);
+        app.init_resource::<NewTabContext>();
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let modal = app
+            .world_mut()
+            .spawn((
+                Modal,
+                Node {
+                    display: Display::Flex,
+                    ..default()
+                },
+                Visibility::Inherited,
+            ))
+            .id();
+        let root = app.world_mut().spawn_empty().id();
+        let old_space = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt(1), ChildOf(root)))
+            .id();
+        let old_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(old_space)))
+            .id();
+        let old_tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(old_pane)))
+            .id();
+        let new_space = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt(2), ChildOf(root)))
+            .id();
+        let new_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(new_space)))
+            .id();
+        let pending_tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(new_pane)))
+            .id();
+        app.world_mut().resource_mut::<NewTabContext>().tab = Some(pending_tab);
+
+        app.world_mut()
+            .entity_mut(modal)
+            .trigger(|webview| Receive {
+                webview,
+                payload: CommandBarActionEvent {
+                    action: "dismiss".to_string(),
+                    value: String::new(),
+                },
+            });
+        app.update();
+
+        assert!(app.world().get_entity(new_space).is_err());
+        assert!(app.world().get_entity(old_space).is_ok());
+        assert!(app.world().get_entity(old_tab).is_ok());
+        assert_eq!(app.world().resource::<NewTabContext>().tab, None);
     }
 }

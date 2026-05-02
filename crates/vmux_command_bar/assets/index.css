@@ -10,7 +10,7 @@
   }
 
   html.dark body {
-    background-color: var(--chrome-surface);
+    background-color: transparent;
     color: var(--foreground);
     font-family: "Inter", system-ui, -apple-system, sans-serif;
   }

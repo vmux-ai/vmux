@@ -15,7 +15,6 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_header::PageMetadata;
 use vmux_history::LastActivatedAt;
 use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
 
@@ -196,10 +195,7 @@ fn handle_tab_commands(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    mut tab_extra: ParamSet<(
-        Query<'static, 'static, Entity, With<PrimaryWindow>>,
-        ResMut<'static, PendingCursorWarp>,
-    )>,
+    mut pending_cursor_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
         let (tab_cmd, is_terminal, is_processes) = match *cmd {
@@ -209,7 +205,7 @@ fn handle_tab_commands(
             _ => continue,
         };
 
-        let (_, active_pane, active_tab) = focused_tab(
+        let (active_space, active_pane, active_tab) = focused_tab(
             &spaces,
             &all_children,
             &leaf_panes,
@@ -276,10 +272,33 @@ fn handle_tab_commands(
                 let tabs_in_pane: Vec<Entity> =
                     children.iter().filter(|&e| tab_q.contains(e)).collect();
                 if tabs_in_pane.len() <= 1 {
-                    if leaf_panes.iter().count() <= 1 {
-                        if let Ok(primary_window) = tab_extra.p0().single() {
-                            commands.entity(primary_window).insert(ClosingWindow);
+                    if let Some(space) = active_space
+                        && close_space_if_only_closing_tab(
+                            space,
+                            active,
+                            &spaces,
+                            &child_of_q,
+                            &all_children,
+                            &tab_q,
+                            &mut commands,
+                        )
+                    {
+                        if new_tab_ctx.tab == Some(active) {
+                            new_tab_ctx.tab = None;
                         }
+                        new_tab_ctx.previous_tab = None;
+                        new_tab_ctx.needs_open = false;
+                        continue;
+                    }
+
+                    if leaf_panes.iter().count() <= 1 {
+                        commands.entity(active).despawn();
+                        let tab = commands
+                            .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                            .id();
+                        new_tab_ctx.tab = Some(tab);
+                        new_tab_ctx.previous_tab = None;
+                        new_tab_ctx.needs_open = true;
                         continue;
                     }
 
@@ -408,7 +427,7 @@ fn handle_tab_commands(
                 commands.entity(target_tab).insert(LastActivatedAt::now());
                 if active_pane != Some(target_pane) {
                     commands.entity(target_pane).insert(LastActivatedAt::now());
-                    tab_extra.p1().target = Some(target_pane);
+                    pending_cursor_warp.target = Some(target_pane);
                 }
             }
             TabCommand::SelectIndex1
@@ -492,6 +511,68 @@ fn handle_tab_commands(
     }
 }
 
+fn close_space_if_only_closing_tab(
+    space: Entity,
+    closing_tab: Entity,
+    spaces: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    child_of_q: &Query<&ChildOf>,
+    all_children: &Query<&Children>,
+    tab_q: &Query<Entity, With<Tab>>,
+    commands: &mut Commands,
+) -> bool {
+    if entity_tree_contains_tab_other_than(space, closing_tab, all_children, tab_q) {
+        return false;
+    }
+    let siblings = sibling_spaces(space, spaces, child_of_q, all_children);
+    if siblings.len() <= 1 {
+        return false;
+    }
+    if let Some(next) = pick_space_after_close(space, &siblings) {
+        commands.entity(next).insert(LastActivatedAt::now());
+    }
+    commands.entity(space).despawn();
+    true
+}
+
+fn entity_tree_contains_tab_other_than(
+    entity: Entity,
+    ignored_tab: Entity,
+    all_children: &Query<&Children>,
+    tab_q: &Query<Entity, With<Tab>>,
+) -> bool {
+    (tab_q.contains(entity) && entity != ignored_tab)
+        || all_children.get(entity).is_ok_and(|children| {
+            children.iter().any(|child| {
+                entity_tree_contains_tab_other_than(child, ignored_tab, all_children, tab_q)
+            })
+        })
+}
+
+fn sibling_spaces(
+    space: Entity,
+    spaces: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    child_of_q: &Query<&ChildOf>,
+    all_children: &Query<&Children>,
+) -> Vec<Entity> {
+    let Ok(parent) = child_of_q.get(space).map(Relationship::get) else {
+        return vec![space];
+    };
+    let Ok(children) = all_children.get(parent) else {
+        return vec![space];
+    };
+    children.iter().filter(|e| spaces.get(*e).is_ok()).collect()
+}
+
+fn pick_space_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
+    if siblings.len() <= 1 {
+        return None;
+    }
+    let idx = siblings.iter().position(|e| *e == active)?;
+    let next_idx = if idx + 1 < siblings.len() { idx + 1 } else { 0 };
+    let target = siblings[next_idx];
+    if target == active { None } else { Some(target) }
+}
+
 fn sync_tab_picking(
     pane_children: Query<&Children, With<Pane>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -524,7 +605,7 @@ pub(crate) fn open_command_bar_if_no_tabs(
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
-    tab_meta: Query<&PageMetadata, With<Tab>>,
+    tab_q: Query<Entity, With<Tab>>,
     closing_primary: Query<(), (With<PrimaryWindow>, With<ClosingWindow>)>,
     mut new_tab_ctx: ResMut<NewTabContext>,
     mut commands: Commands,
@@ -532,7 +613,7 @@ pub(crate) fn open_command_bar_if_no_tabs(
     if !closing_primary.is_empty() {
         return;
     }
-    let (_, active_pane, active_tab) = focused_tab(
+    let (active_space, active_pane, _) = focused_tab(
         &spaces,
         &all_children,
         &leaf_panes,
@@ -540,12 +621,7 @@ pub(crate) fn open_command_bar_if_no_tabs(
         &pane_children,
         &tab_ts,
     );
-    if let Some(tab) = active_tab {
-        if tab_needs_command_bar(tab_meta.get(tab).ok()) && new_tab_ctx.tab.is_none() {
-            new_tab_ctx.tab = Some(tab);
-            new_tab_ctx.previous_tab = None;
-            new_tab_ctx.needs_open = true;
-        }
+    if active_space.is_some_and(|space| entity_tree_contains_tab(space, &all_children, &tab_q)) {
         return;
     }
     let Some(pane) = active_pane.or_else(|| leaf_panes.iter().next()) else {
@@ -559,8 +635,17 @@ pub(crate) fn open_command_bar_if_no_tabs(
     new_tab_ctx.needs_open = true;
 }
 
-fn tab_needs_command_bar(meta: Option<&PageMetadata>) -> bool {
-    meta.is_none_or(|meta| meta.url.trim().is_empty())
+fn entity_tree_contains_tab(
+    entity: Entity,
+    all_children: &Query<&Children>,
+    tab_q: &Query<Entity, With<Tab>>,
+) -> bool {
+    tab_q.contains(entity)
+        || all_children.get(entity).is_ok_and(|children| {
+            children
+                .iter()
+                .any(|child| entity_tree_contains_tab(child, all_children, tab_q))
+        })
 }
 
 #[cfg(test)]
@@ -602,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn closing_last_tab_marks_window_closing() {
+    fn closing_last_tab_opens_command_bar_with_replacement_tab() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
@@ -622,15 +707,87 @@ mod tests {
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(space)))
             .id();
-        app.world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(pane)));
+        let original_tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(pane)))
+            .id();
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
             .write(AppCommand::Tab(TabCommand::Close));
 
         app.update();
 
-        assert!(app.world().entity(window).contains::<ClosingWindow>());
+        assert!(!app.world().entity(window).contains::<ClosingWindow>());
+        assert!(app.world().get_entity(original_tab).is_err());
+
+        let ctx = app.world().resource::<NewTabContext>();
+        let Some(replacement_tab) = ctx.tab else {
+            panic!("expected replacement tab to open command bar");
+        };
+        assert!(ctx.needs_open);
+        assert_eq!(ctx.previous_tab, None);
+        assert_eq!(
+            app.world()
+                .get::<ChildOf>(replacement_tab)
+                .map(Relationship::get),
+            Some(pane)
+        );
+    }
+
+    #[test]
+    fn closing_last_tab_in_space_closes_space_when_another_space_exists() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.init_resource::<NewTabContext>();
+        app.init_resource::<PendingCursorWarp>();
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_systems(Update, handle_tab_commands.in_set(WriteAppCommands));
+
+        let root = app.world_mut().spawn_empty().id();
+        let remaining_space = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt(1), ChildOf(root)))
+            .id();
+        let remaining_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(remaining_space)))
+            .id();
+        app.world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(remaining_pane)));
+
+        let closing_space = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt(2), ChildOf(root)))
+            .id();
+        let closing_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(closing_space)))
+            .id();
+        app.world_mut()
+            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(closing_pane)));
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Tab(TabCommand::Close));
+
+        app.update();
+
+        assert!(app.world().get_entity(closing_space).is_err());
+        assert!(app.world().get_entity(remaining_space).is_ok());
+        assert!(
+            app.world()
+                .get::<LastActivatedAt>(remaining_space)
+                .unwrap()
+                .0
+                > 1
+        );
+
+        let ctx = app.world().resource::<NewTabContext>();
+        assert_eq!(ctx.tab, None);
+        assert!(!ctx.needs_open);
     }
 
     #[test]
@@ -674,7 +831,34 @@ mod tests {
     }
 
     #[test]
-    fn active_empty_tab_opens_command_bar() {
+    fn empty_active_pane_does_not_open_command_bar_when_space_has_tabs() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<NewTabContext>();
+        app.add_systems(Update, open_command_bar_if_no_tabs);
+
+        let space = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt(1)))
+            .id();
+        let pane_with_tab = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(space)))
+            .id();
+        app.world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(pane_with_tab)));
+        app.world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(space)));
+
+        app.update();
+
+        let ctx = app.world().resource::<NewTabContext>();
+        assert_eq!(ctx.tab, None);
+        assert!(!ctx.needs_open);
+    }
+
+    #[test]
+    fn active_empty_tab_does_not_reopen_command_bar() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<NewTabContext>();
@@ -696,7 +880,7 @@ mod tests {
         app.update();
 
         let ctx = app.world().resource::<NewTabContext>();
-        assert_eq!(ctx.tab, Some(tab));
-        assert!(ctx.needs_open);
+        assert_ne!(ctx.tab, Some(tab));
+        assert!(!ctx.needs_open);
     }
 }
