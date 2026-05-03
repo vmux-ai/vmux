@@ -419,6 +419,45 @@ fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
 }
 
+struct MissingTerminalRestart {
+    entity: Entity,
+    command: ClientMessage,
+}
+
+fn terminal_shell(settings: &AppSettings) -> String {
+    settings
+        .terminal
+        .as_ref()
+        .map(|t| t.resolve_theme(&t.default_theme).shell)
+        .unwrap_or_else(default_shell)
+}
+
+fn missing_terminal_restart(
+    process_id: ProcessId,
+    terminals: impl IntoIterator<Item = (Entity, ProcessId)>,
+    settings: &AppSettings,
+) -> Option<MissingTerminalRestart> {
+    terminals
+        .into_iter()
+        .find(|(_, terminal_process_id)| *terminal_process_id == process_id)
+        .map(|(entity, _)| MissingTerminalRestart {
+            entity,
+            command: ClientMessage::CreateProcess {
+                shell: terminal_shell(settings),
+                cwd: String::new(),
+                env: Vec::new(),
+                cols: 80,
+                rows: 24,
+            },
+        })
+}
+
+fn missing_process_id(message: &str) -> Option<ProcessId> {
+    message
+        .strip_prefix("process not found: ")
+        .and_then(|id| id.parse().ok())
+}
+
 /// Spawn the service subprocess if not already running.
 fn ensure_service_started() {
     if ServiceHandle::service_running() {
@@ -520,7 +559,11 @@ fn poll_service_messages(
     >,
     terminals: Query<
         (Entity, &ServiceProcessHandle, &ChildOf),
-        (With<Terminal>, Without<ProcessExited>),
+        (
+            With<Terminal>,
+            Without<ProcessExited>,
+            Without<AwaitingProcessCreated>,
+        ),
     >,
     mut meta_q: Query<&mut PageMetadata>,
     service: Option<Res<ServiceClient>>,
@@ -530,6 +573,7 @@ fn poll_service_messages(
     mut mode_map: ResMut<TerminalModeMap>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
     mut mouse_state: ResMut<MouseSelectionState>,
+    settings: Res<AppSettings>,
 ) {
     let Some(service) = service else { return };
 
@@ -562,6 +606,7 @@ fn poll_service_messages(
 
     // Drain service messages and dispatch
     let mut matched_entities = Vec::new();
+    let mut restarted_missing_processes = Vec::new();
     for msg in service.0.drain() {
         match msg {
             ServiceMessage::ProcessCreated { process_id } => {
@@ -670,6 +715,22 @@ fn poll_service_messages(
                     .insert_resource(crate::processes_monitor::ServiceProcessList { processes });
             }
             ServiceMessage::Error { message } => {
+                if let Some(process_id) = missing_process_id(&message)
+                    && !restarted_missing_processes.contains(&process_id)
+                {
+                    let terminals = terminals
+                        .iter()
+                        .map(|(entity, handle, _)| (entity, handle.process_id));
+                    if let Some(restart) =
+                        missing_terminal_restart(process_id, terminals, &settings)
+                    {
+                        restarted_missing_processes.push(process_id);
+                        service.0.send(restart.command);
+                        commands
+                            .entity(restart.entity)
+                            .insert(AwaitingProcessCreated);
+                    }
+                }
                 warn!("Service error: {message}");
             }
             ServiceMessage::TerminalMode {
@@ -1724,10 +1785,75 @@ fn update_local_copy_mode_for_mouse_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::{
+        BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings, ShortcutSettings,
+        SideSheetSettings, WindowSettings,
+    };
     use bevy::ecs::schedule::Schedules;
 
     fn process_id(byte: u8) -> ProcessId {
         ProcessId([byte; 16])
+    }
+
+    fn test_settings() -> AppSettings {
+        AppSettings {
+            browser: BrowserSettings {
+                startup_url: "about:blank".to_string(),
+            },
+            layout: LayoutSettings {
+                window: WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: PaneSettings {
+                    gap: 0.0,
+                    radius: 0.0,
+                },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            },
+            shortcuts: ShortcutSettings::default(),
+            terminal: None,
+            auto_update: false,
+        }
+    }
+
+    #[test]
+    fn missing_service_process_restarts_matching_terminal() {
+        let missing = process_id(7);
+        let target = Entity::from_bits(1);
+        let restart = missing_terminal_restart(
+            missing,
+            [(Entity::from_bits(2), process_id(8)), (target, missing)],
+            &test_settings(),
+        )
+        .unwrap();
+
+        assert_eq!(restart.entity, target);
+        assert!(matches!(
+            restart.command,
+            ClientMessage::CreateProcess {
+                shell,
+                cwd,
+                env,
+                cols: 80,
+                rows: 24
+            } if shell == default_shell() && cwd.is_empty() && env.is_empty()
+        ));
+    }
+
+    #[test]
+    fn process_not_found_message_parses_process_id() {
+        let missing = process_id(9);
+
+        assert_eq!(
+            missing_process_id(&format!("process not found: {missing}")),
+            Some(missing)
+        );
+        assert_eq!(missing_process_id("permission denied"), None);
     }
 
     #[test]

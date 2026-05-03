@@ -139,5 +139,47 @@ pub fn layout_chrome_bundle(
         Transform::default(),
         GlobalTransform::default(),
         Visibility::Inherited,
+        Pickable {
+            should_block_lower: false,
+            is_hoverable: true,
+        },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spawn_test_chrome(
+        mut commands: Commands,
+        mut meshes: ResMut<Assets<Mesh>>,
+        mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    ) {
+        let host = commands.spawn_empty().id();
+        commands.spawn(layout_chrome_bundle(host, &mut meshes, &mut webview_mt));
+    }
+
+    #[test]
+    fn layout_chrome_does_not_block_pointer_events_below_it() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_systems(Startup, spawn_test_chrome);
+        app.update();
+
+        let pickable = app
+            .world_mut()
+            .query_filtered::<&Pickable, With<LayoutChrome>>()
+            .single(app.world())
+            .expect("layout chrome pickable");
+
+        assert_eq!(
+            pickable,
+            &Pickable {
+                should_block_lower: false,
+                is_hoverable: true,
+            }
+        );
+    }
 }

@@ -17,12 +17,14 @@ use crate::{
         window::Main,
     },
     profile::Profile,
+    sessions::{ActiveSession, SessionsView},
     settings::AppSettings,
     terminal::Terminal,
 };
 use vmux_core::PageMetadata;
 use vmux_layout::event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
 use vmux_service::protocol::ProcessId;
+use vmux_sessions::event::SESSIONS_WEBVIEW_URL;
 
 pub(crate) struct PersistencePlugin;
 
@@ -49,8 +51,31 @@ impl Plugin for PersistencePlugin {
                 .chain()
                 .in_set(LayoutStartupSet::Post),
         )
+        .add_observer(mark_session_views_need_rebuild)
+        .add_systems(
+            Update,
+            (
+                rebuild_session_views,
+                ensure_layout_state_entities,
+                apply_persisted_layout_state,
+                clear_session_views_need_rebuild,
+            )
+                .chain()
+                .run_if(resource_exists::<SessionViewsNeedRebuild>),
+        )
         .add_systems(Update, (mark_dirty_on_change, auto_save_system).chain());
     }
+}
+
+#[derive(Resource)]
+struct SessionViewsNeedRebuild;
+
+fn mark_session_views_need_rebuild(_trigger: On<Loaded>, mut commands: Commands) {
+    commands.insert_resource(SessionViewsNeedRebuild);
+}
+
+fn clear_session_views_need_rebuild(mut commands: Commands) {
+    commands.remove_resource::<SessionViewsNeedRebuild>();
 }
 
 #[derive(Resource)]
@@ -60,8 +85,8 @@ struct AutoSave {
     dirty: bool,
 }
 
-pub(crate) fn session_path() -> PathBuf {
-    crate::profile::session_path()
+pub(crate) fn session_path(active: &ActiveSession) -> PathBuf {
+    active.layout_path()
 }
 
 fn mark_dirty_on_change(
@@ -102,24 +127,28 @@ fn mark_dirty_on_change(
     }
 }
 
-fn auto_save_system(time: Res<Time>, mut auto_save: ResMut<AutoSave>, mut commands: Commands) {
+fn auto_save_system(
+    time: Res<Time>,
+    mut auto_save: ResMut<AutoSave>,
+    active: Res<ActiveSession>,
+    mut commands: Commands,
+) {
     auto_save.periodic.tick(time.delta());
 
     if auto_save.dirty {
         auto_save.debounce.tick(time.delta());
         if auto_save.debounce.is_finished() {
-            do_save(&mut commands);
+            save_session_to_path(&mut commands, session_path(&active));
             auto_save.dirty = false;
         }
     }
 
     if auto_save.periodic.just_finished() {
-        do_save(&mut commands);
+        save_session_to_path(&mut commands, session_path(&active));
     }
 }
 
-fn do_save(commands: &mut Commands) {
-    let path = session_path();
+pub(crate) fn save_session_to_path(commands: &mut Commands, path: PathBuf) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -148,8 +177,8 @@ fn do_save(commands: &mut Commands) {
 }
 
 /// Check if a session file exists and trigger load on startup.
-pub(crate) fn load_session_on_startup(mut commands: Commands) {
-    let path = session_path();
+pub(crate) fn load_session_on_startup(active: Res<ActiveSession>, mut commands: Commands) {
+    let path = session_path(&active);
     let exists = path.exists();
     commands.insert_resource(SessionFilePresent(exists));
     if exists {
@@ -310,10 +339,20 @@ pub(crate) fn rebuild_session_views(
                     ));
                 }
             } else {
-                commands.spawn((
-                    Browser::new(&mut meshes, &mut webview_mt, &meta.url),
-                    ChildOf(entity),
-                ));
+                if meta
+                    .url
+                    .starts_with(SESSIONS_WEBVIEW_URL.trim_end_matches('/'))
+                {
+                    commands.spawn((
+                        SessionsView::new(&mut meshes, &mut webview_mt),
+                        ChildOf(entity),
+                    ));
+                } else {
+                    commands.spawn((
+                        Browser::new(&mut meshes, &mut webview_mt, &meta.url),
+                        ChildOf(entity),
+                    ));
+                }
             }
         }
     }
@@ -398,5 +437,172 @@ pub(crate) fn apply_persisted_layout_state(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::{
+        AppSettings, BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings,
+        ShortcutSettings, SideSheetSettings, WindowSettings,
+    };
+    use bevy::ecs::entity::EntityHashMap;
+
+    static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct HomeEnvGuard {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        old_home: Option<std::ffi::OsString>,
+    }
+
+    impl HomeEnvGuard {
+        fn use_temp_home(name: &str) -> Self {
+            let guard = HOME_ENV_LOCK.lock().expect("home env lock");
+            let old_home = std::env::var_os("HOME");
+            let home =
+                std::env::temp_dir().join(format!("vmux-test-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&home);
+            std::fs::create_dir_all(&home).expect("create temp home");
+            unsafe {
+                std::env::set_var("HOME", &home);
+            }
+            Self {
+                _guard: guard,
+                old_home,
+            }
+        }
+    }
+
+    impl Drop for HomeEnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(home) = &self.old_home {
+                    std::env::set_var("HOME", home);
+                } else {
+                    std::env::remove_var("HOME");
+                }
+            }
+        }
+    }
+
+    fn test_settings() -> AppSettings {
+        AppSettings {
+            browser: BrowserSettings {
+                startup_url: "about:blank".to_string(),
+            },
+            layout: LayoutSettings {
+                window: WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: PaneSettings {
+                    gap: 0.0,
+                    radius: 0.0,
+                },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            },
+            shortcuts: ShortcutSettings::default(),
+            terminal: None,
+            auto_update: false,
+        }
+    }
+
+    #[test]
+    fn persisted_terminal_tab_reattaches_saved_process() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_systems(Update, rebuild_session_views);
+
+        let main = app.world_mut().spawn(Main).id();
+        app.world_mut().spawn(PrimaryWindow);
+        let space = app
+            .world_mut()
+            .spawn((Space::default(), ChildOf(main)))
+            .id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
+        let saved_url = format!(
+            "{}{}",
+            TERMINAL_WEBVIEW_URL,
+            uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap()
+        );
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                PageMetadata {
+                    title: "Terminal".to_string(),
+                    url: saved_url.clone(),
+                    favicon_url: String::new(),
+                },
+                ChildOf(pane),
+            ))
+            .id();
+
+        app.update();
+
+        let children = app.world().get::<Children>(tab).unwrap();
+        let terminal = children
+            .iter()
+            .find(|entity| app.world().entity(*entity).contains::<Terminal>())
+            .unwrap();
+        let meta = app.world().get::<PageMetadata>(terminal).unwrap();
+
+        assert_eq!(meta.url, saved_url);
+    }
+
+    #[test]
+    fn runtime_loaded_session_rebuilds_browser_views() {
+        let _home = HomeEnvGuard::use_temp_home("runtime-loaded-session-rebuilds-browser-views");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(test_settings());
+        app.insert_resource(ActiveSession {
+            record: vmux_sessions::model::default_session_record(),
+        });
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_plugins(PersistencePlugin);
+
+        let main = app.world_mut().spawn(Main).id();
+        app.world_mut().spawn(PrimaryWindow);
+        app.update();
+
+        let space = app
+            .world_mut()
+            .spawn((Space::default(), ChildOf(main)))
+            .id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                PageMetadata {
+                    title: "Example".to_string(),
+                    url: "https://example.com".to_string(),
+                    favicon_url: String::new(),
+                },
+                ChildOf(pane),
+            ))
+            .id();
+
+        app.world_mut().trigger(Loaded {
+            entity_map: EntityHashMap::default(),
+        });
+        app.update();
+
+        let children = app.world().get::<Children>(tab).unwrap();
+        assert!(
+            children
+                .iter()
+                .any(|entity| app.world().entity(entity).contains::<Browser>())
+        );
     }
 }

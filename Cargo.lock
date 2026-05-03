@@ -8921,6 +8921,7 @@ dependencies = [
  "vmux_macro",
  "vmux_processes",
  "vmux_service",
+ "vmux_sessions",
  "vmux_terminal",
  "vmux_ui",
  "vmux_webview_app",
@@ -9010,6 +9011,18 @@ dependencies = [
  "tokio",
  "uuid",
  "vmux_terminal",
+]
+
+[[package]]
+name = "vmux_sessions"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+ "serde",
+ "vmux_ui",
+ "vmux_webview_app",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

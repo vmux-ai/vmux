@@ -6,7 +6,7 @@ use crate::{
     window::{VmuxWindow, WEBVIEW_Z_FOCUS_RING},
 };
 use bevy::{
-    asset::*, pbr::MaterialPlugin, prelude::*, render::alpha::AlphaMode,
+    asset::*, pbr::MaterialPlugin, picking::Pickable, prelude::*, render::alpha::AlphaMode,
     render::render_resource::AsBindGroup, shader::ShaderRef, ui::UiGlobalTransform,
     window::PrimaryWindow,
 };
@@ -79,6 +79,7 @@ fn spawn_focus_ring(
         Visibility::Hidden,
         InheritedVisibility::VISIBLE,
         ViewVisibility::default(),
+        Pickable::IGNORE,
     ));
 }
 
@@ -229,5 +230,52 @@ fn build_focus_ring_material(
         gradient_params,
         border_accent,
         alpha_mode: AlphaMode::Blend,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::{
+        asset::Assets,
+        picking::Pickable,
+        prelude::{App, MinimalPlugins, Startup, With},
+    };
+
+    fn test_layout_settings() -> LayoutSettings {
+        LayoutSettings {
+            window: crate::settings::WindowSettings {
+                padding: 0.0,
+                padding_top: None,
+                padding_right: None,
+                padding_bottom: None,
+                padding_left: None,
+            },
+            pane: crate::settings::PaneSettings {
+                gap: 0.0,
+                radius: 0.0,
+            },
+            side_sheet: crate::settings::SideSheetSettings::default(),
+            focus_ring: crate::settings::FocusRingSettings::default(),
+        }
+    }
+
+    #[test]
+    fn focus_ring_does_not_capture_pointer_events() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(test_layout_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<FocusRingMaterial>>();
+        app.add_systems(Startup, spawn_focus_ring);
+        app.update();
+
+        let pickable = app
+            .world_mut()
+            .query_filtered::<&Pickable, With<FocusRing>>()
+            .single(app.world())
+            .expect("focus ring pickable");
+
+        assert_eq!(pickable, &Pickable::IGNORE);
     }
 }

@@ -16,6 +16,7 @@ use crate::{
 };
 use bevy::{
     ecs::relationship::Relationship,
+    picking::Pickable,
     prelude::*,
     render::alpha::AlphaMode,
     ui::{FlexDirection, UiTargetCamera},
@@ -362,6 +363,7 @@ fn setup(
         Transform::default(),
         GlobalTransform::default(),
         Visibility::Hidden,
+        Pickable::IGNORE,
         ChildOf(root),
     ));
 
@@ -389,12 +391,23 @@ fn spawn_default_session(
     }
 
     let Ok(main) = main_q.single() else { return };
-    let pw = *primary_window;
+    spawn_default_session_layout(
+        main,
+        *primary_window,
+        &settings,
+        &mut new_tab_ctx,
+        &mut commands,
+    );
+}
 
-    // Spawn a Profile so that on next launch, this function is skipped
-    // when session.ron is loaded (the guard checks profile_q.is_empty()).
+pub fn spawn_default_session_layout(
+    main: Entity,
+    pw: Entity,
+    settings: &LayoutSettings,
+    new_tab_ctx: &mut crate::NewTabContext,
+    commands: &mut Commands,
+) {
     commands.spawn(Profile::default_profile());
-
     let space = commands
         .spawn((
             space_bundle(),
@@ -445,6 +458,7 @@ fn spawn_default_session(
         ))
         .id();
     new_tab_ctx.tab = Some(tab);
+    new_tab_ctx.previous_tab = None;
     new_tab_ctx.needs_open = true;
 }
 

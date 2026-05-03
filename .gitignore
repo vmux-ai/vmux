@@ -3,25 +3,17 @@
 *.app
 *.bak
 .claude/
+**/dist/
 
 # Tailwind output (run `npm run build:css` in crates/vmux_header)
 crates/vmux_header/assets/status.css
-# Dioxus web bundle (run `dx build --platform web` in crates/vmux_header)
-crates/vmux_header/dist/
 # Cargo artifacts when building inside the crate (e.g. `dx build`, `cargo build -p vmux_header`)
 crates/vmux_header/target/
 
 # Tailwind output (run `npm run build:css` in crates/vmux_ui)
 crates/vmux_ui/assets/ui_library.css
-# Wasm bundle + wasm-bindgen (run native debug build / `build.rs` in crates/vmux_ui)
-crates/vmux_ui/dist/
 crates/vmux_ui/target/
 
-# Dioxus web bundle (`dx build` / `build.rs`)
-crates/vmux_history/dist/
-crates/vmux_side_sheet/dist/
-crates/vmux_command_bar/dist/
-crates/vmux_terminal/dist/
 .superpowers/
 .worktrees/
 .env
@@ -29,4 +21,3 @@ build/
 
 # Website
 website/target/
-website/dist/

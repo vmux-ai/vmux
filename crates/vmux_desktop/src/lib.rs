@@ -17,6 +17,7 @@ mod persistence;
 mod processes_monitor;
 pub mod profile;
 mod scene;
+mod sessions;
 mod settings;
 pub(crate) mod shortcut;
 mod terminal;
@@ -38,6 +39,7 @@ use {
     os_menu::OsMenuPlugin,
     persistence::PersistencePlugin,
     processes_monitor::ProcessesMonitorPlugin,
+    sessions::SessionsPlugin,
     settings::SettingsPlugin,
     shortcut::ShortcutPlugin,
     terminal::TerminalInputPlugin,
@@ -114,8 +116,9 @@ impl Plugin for VmuxPlugin {
             TerminalPlugin,
             ProcessesPlugin,
             CommandBarInputPlugin,
-            BrowserPlugin,
         ))
+        .add_plugins(SessionsPlugin)
+        .add_plugins(BrowserPlugin)
         .add_plugins((
             TerminalInputPlugin,
             ProcessesMonitorPlugin,

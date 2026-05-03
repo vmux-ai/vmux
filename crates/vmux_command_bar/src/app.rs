@@ -2,8 +2,12 @@
 
 use dioxus::prelude::*;
 use vmux_command_bar::event::{
-    COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
-    CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
+    COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarOpenEvent, CommandBarReadyEvent,
+    CommandBarRenderedEvent, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
+    PathEntry,
+};
+use vmux_command_bar::results::{
+    CommandBarResultItem as ResultItem, SESSIONS_PAGE_URL, filter_results,
 };
 use vmux_command_bar::style::{command_bar_shell_class, result_item_class};
 use vmux_ui::components::icon::Icon;
@@ -11,138 +15,12 @@ use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-#[derive(Clone, PartialEq)]
-enum ResultItem {
-    Terminal {
-        path: String,
-    },
-    Tab {
-        title: String,
-        url: String,
-        pane_id: u64,
-        tab_index: usize,
-    },
-    Command {
-        id: String,
-        name: String,
-        shortcut: String,
-    },
-    Navigate {
-        url: String,
-    },
-}
-
 fn looks_like_path(s: &str) -> bool {
     s.starts_with('/')
         || s.starts_with("~/")
         || s.starts_with("./")
         || s.starts_with("../")
         || s.contains('/') && !s.contains(' ') && !s.contains("://")
-}
-
-fn filter_results(
-    query: &str,
-    tabs: &[CommandBarTab],
-    commands: &[CommandBarCommandEntry],
-    new_tab: bool,
-) -> Vec<ResultItem> {
-    let q = query.trim();
-    if q.is_empty() {
-        let mut items: Vec<ResultItem> = Vec::new();
-        items.push(ResultItem::Navigate { url: String::new() });
-        if new_tab {
-            items.push(ResultItem::Terminal {
-                path: String::new(),
-            });
-        }
-        items.extend(tabs.iter().map(|t| ResultItem::Tab {
-            title: t.title.clone(),
-            url: t.url.clone(),
-            pane_id: t.pane_id,
-            tab_index: t.tab_index,
-        }));
-        items.extend(commands.iter().map(|c| ResultItem::Command {
-            id: c.id.clone(),
-            name: c.name.clone(),
-            shortcut: c.shortcut.clone(),
-        }));
-        return items;
-    }
-
-    let starts_with_cmd = q.starts_with('>');
-    let search = if starts_with_cmd { q[1..].trim() } else { q };
-    let search_lower = search.to_lowercase();
-
-    let mut items = Vec::new();
-
-    let is_path = looks_like_path(search);
-
-    if !starts_with_cmd && is_path {
-        items.push(ResultItem::Terminal {
-            path: search.to_string(),
-        });
-    }
-
-    if !starts_with_cmd && !is_path && new_tab && "terminal".contains(&search_lower) {
-        items.push(ResultItem::Terminal {
-            path: String::new(),
-        });
-    }
-
-    // Commands always shown when > prefix
-    if starts_with_cmd {
-        for c in commands {
-            if search.is_empty()
-                || c.name.to_lowercase().contains(&search_lower)
-                || c.id.contains(&search_lower)
-            {
-                items.push(ResultItem::Command {
-                    id: c.id.clone(),
-                    name: c.name.clone(),
-                    shortcut: c.shortcut.clone(),
-                });
-            }
-        }
-    }
-
-    // Tabs (always for non-command mode; as fallback when > has text)
-    if !starts_with_cmd || !search.is_empty() {
-        for t in tabs {
-            if search.is_empty()
-                || t.title.to_lowercase().contains(&search_lower)
-                || t.url.to_lowercase().contains(&search_lower)
-            {
-                items.push(ResultItem::Tab {
-                    title: t.title.clone(),
-                    url: t.url.clone(),
-                    pane_id: t.pane_id,
-                    tab_index: t.tab_index,
-                });
-            }
-        }
-    }
-
-    // Commands (non-command mode)
-    if !starts_with_cmd {
-        for c in commands {
-            if c.name.to_lowercase().contains(&search_lower) || c.id.contains(&search_lower) {
-                items.push(ResultItem::Command {
-                    id: c.id.clone(),
-                    name: c.name.clone(),
-                    shortcut: c.shortcut.clone(),
-                });
-            }
-        }
-    }
-
-    // Navigate/search as fallback
-    if !search.is_empty() {
-        items.push(ResultItem::Navigate {
-            url: search.to_string(),
-        });
-    }
-
-    items
 }
 
 fn emit_action(action: &str, value: &str) {
@@ -161,11 +39,16 @@ pub fn App() -> Element {
     let mut new_tab = use_signal(|| false);
     let mut is_open = use_signal(|| false);
     let mut nav_mode = use_signal(|| false);
+    let mut current_open_id = use_signal(|| 0u64);
+    let mut last_rendered_open_id = use_signal(|| 0u64);
+    let mut ready_sent = use_signal(|| false);
 
     let mut path_completions = use_signal(Vec::<PathEntry>::new);
 
-    let _listener =
+    let open_listener =
         use_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
+            path_completions.set(Vec::new());
+            current_open_id.set(data.open_id);
             query.set(data.url.clone());
             selected.set(0);
             nav_mode.set(false);
@@ -173,6 +56,24 @@ pub fn App() -> Element {
             state.set(data);
             is_open.set(true);
         });
+
+    use_effect(move || {
+        if !(open_listener.is_loading)() && !ready_sent() {
+            if try_cef_emit_serde(&CommandBarReadyEvent).is_ok() {
+                ready_sent.set(true);
+            }
+        }
+    });
+
+    use_effect(move || {
+        let open = is_open();
+        let open_id = current_open_id();
+        if open && open_id != 0 && last_rendered_open_id() != open_id {
+            if try_cef_emit_serde(&CommandBarRenderedEvent { open_id }).is_ok() {
+                last_rendered_open_id.set(open_id);
+            }
+        }
+    });
 
     let _path_listener =
         use_event_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
@@ -201,15 +102,22 @@ pub fn App() -> Element {
 
     let CommandBarOpenEvent {
         url: _,
+        session_name,
+        sessions,
         tabs,
         commands,
         new_tab: _,
+        ..
     } = state();
     let q = query();
     let is_new_tab = new_tab();
     let results = {
-        let mut r = filter_results(&q, &tabs, &commands, is_new_tab);
-        let completions = path_completions();
+        let mut r = filter_results(&q, &tabs, &commands, &sessions, is_new_tab);
+        let completions = if looks_like_path(q.trim()) {
+            path_completions()
+        } else {
+            Vec::new()
+        };
         if !completions.is_empty() {
             let path_items: Vec<ResultItem> = completions
                 .iter()
@@ -247,6 +155,7 @@ pub fn App() -> Element {
             Some(ResultItem::Command { name, .. }) => format!("> {name}"),
             Some(ResultItem::Navigate { url }) => url.clone(),
             Some(ResultItem::Tab { url, .. }) => url.clone(),
+            Some(ResultItem::Session { name, .. }) => name.clone(),
             Some(ResultItem::Terminal { path }) if path.is_empty() => "Terminal".to_string(),
             Some(ResultItem::Terminal { path }) => path.clone(),
             None => q.clone(),
@@ -257,7 +166,11 @@ pub fn App() -> Element {
 
     let ghost_text = {
         let q_trimmed = q.trim();
-        let completions = path_completions();
+        let completions = if looks_like_path(q_trimmed) {
+            path_completions()
+        } else {
+            Vec::new()
+        };
         if let Some(first) = completions.first() {
             let full = &first.full_path;
             if full.to_lowercase().starts_with(&q_trimmed.to_lowercase()) {
@@ -297,6 +210,9 @@ pub fn App() -> Element {
             ResultItem::Command { id, .. } => {
                 emit_action("command", id);
             }
+            ResultItem::Session { id, .. } => {
+                emit_action("session", id);
+            }
             ResultItem::Navigate { url } => {
                 if !url.is_empty() {
                     emit_action("navigate", url);
@@ -320,6 +236,13 @@ pub fn App() -> Element {
                 div { class: "pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-white/20 to-transparent" }
                 div { class: "p-2",
                     div { class: "flex items-center gap-2 rounded-lg bg-white/5 px-3",
+                        if !session_name.is_empty() {
+                            span {
+                                title: "{session_name}",
+                                class: "max-w-36 shrink-0 truncate rounded-md bg-glass-hover px-2 py-1 text-ui-xs font-medium text-muted-foreground",
+                                "{session_name}"
+                            }
+                        }
                         {
                             let icon_class = "h-4 w-4 shrink-0 text-muted-foreground";
                             let (is_command, is_path, is_url) = if nav {
@@ -328,6 +251,7 @@ pub fn App() -> Element {
                                     Some(ResultItem::Terminal { path }) if path.is_empty() => (true, false, false),
                                     Some(ResultItem::Terminal { .. }) => (false, true, false),
                                     Some(ResultItem::Tab { .. }) => (false, false, true),
+                                    Some(ResultItem::Session { .. }) => (false, false, false),
                                     Some(ResultItem::Navigate { url }) => {
                                         let is_u = url.contains("://") || (url.contains('.') && !url.contains(' '));
                                         (false, false, is_u)
@@ -469,6 +393,18 @@ pub fn App() -> Element {
                                         }
                                         span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "Tab" }
                                     },
+                                    ResultItem::Session { name, profile, is_active, tab_count, .. } => rsx! {
+                                        div { class: "flex min-w-0 flex-col",
+                                            div { class: "flex min-w-0 items-center gap-2",
+                                                span { class: "truncate text-base text-foreground", "{name}" }
+                                                if *is_active {
+                                                    span { class: "rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300", "active" }
+                                                }
+                                            }
+                                            span { class: "truncate text-sm text-muted-foreground", "{profile}" }
+                                        }
+                                        span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "{tab_count} tabs" }
+                                    },
                                     ResultItem::Command { name, shortcut, .. } => rsx! {
                                         div { class: "flex items-center gap-2",
                                             span { class: "shrink-0 text-base text-muted-foreground", ">_" }
@@ -482,13 +418,20 @@ pub fn App() -> Element {
                                                 circle { cx: "11", cy: "11", r: "8" }
                                                 path { d: "m21 21-4.3-4.3" }
                                             }
-                                            if url.is_empty() {
+                                            if url == SESSIONS_PAGE_URL {
+                                                div { class: "flex min-w-0 flex-col",
+                                                    span { class: "truncate text-base text-foreground", "Sessions Page" }
+                                                    span { class: "truncate text-sm text-muted-foreground", "{url}" }
+                                                }
+                                            } else if url.is_empty() {
                                                 span { class: "text-base text-foreground", "Search" }
                                             } else {
                                                 span { class: "min-w-0 break-all text-base text-foreground", "Search \"{url}\"" }
                                             }
                                         }
-                                        if !url.is_empty() {
+                                        if url == SESSIONS_PAGE_URL {
+                                            span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "New tab" }
+                                        } else if !url.is_empty() {
                                             span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "\u{21b5}" }
                                         }
                                     },

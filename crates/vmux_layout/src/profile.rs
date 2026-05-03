@@ -52,7 +52,7 @@ pub fn active_profile_name() -> &'static str {
 }
 
 /// Root data directory shared across all profiles.
-fn shared_data_dir() -> PathBuf {
+pub fn shared_data_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         let home = std::env::var_os("HOME").expect("HOME not set");

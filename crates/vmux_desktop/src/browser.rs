@@ -1,5 +1,6 @@
 use crate::{
     command::{AppCommand, BrowserCommand, ReadAppCommands},
+    command_bar::PendingCommandBarReveal,
     layout::{
         PendingWebviewReveal,
         pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_tab_in_pane},
@@ -190,6 +191,8 @@ fn sync_children_to_ui(
             Option<&Modal>,
             Option<&Visibility>,
             Option<&HistorySwipeVisualOffset>,
+            Has<PendingWebviewReveal>,
+            Has<PendingCommandBarReveal>,
         ),
         With<Browser>,
     >,
@@ -216,6 +219,8 @@ fn sync_children_to_ui(
         modal,
         visibility,
         history_swipe_visual,
+        pending_webview_reveal,
+        pending_command_bar_reveal,
     ) in browser_q.iter_mut()
     {
         let parent = child_of.get();
@@ -230,7 +235,11 @@ fn sync_children_to_ui(
         }
 
         let size_px = computed.size;
-        if !webview_layout_is_renderable(size_px, visibility) {
+        if !webview_layout_is_renderable(
+            size_px,
+            visibility,
+            pending_webview_reveal || pending_command_bar_reveal,
+        ) {
             tf.scale = Vec3::splat(1.0e-6);
             if webview_size.0 != Vec2::ONE {
                 webview_size.0 = Vec2::ONE;
@@ -404,6 +413,7 @@ fn sync_osr_webview_focus(
             Option<&Visibility>,
             Option<&ComputedNode>,
             Has<PendingWebviewReveal>,
+            Has<PendingCommandBarReveal>,
         ),
         With<WebviewSource>,
     >,
@@ -421,12 +431,18 @@ fn sync_osr_webview_focus(
     mut last_ready_set: Local<Vec<Entity>>,
 ) {
     ready.clear();
-    for (entity, visibility, computed, pending_reveal) in webviews.iter() {
+    for (entity, visibility, computed, pending_reveal, pending_command_bar_reveal) in
+        webviews.iter()
+    {
         if !browsers.has_browser(entity) {
             continue;
         }
         let size = computed.map(|node| node.size).unwrap_or(Vec2::ONE);
-        if webview_osr_should_run(size, visibility, pending_reveal) {
+        if webview_osr_should_run(
+            size,
+            visibility,
+            pending_reveal || pending_command_bar_reveal,
+        ) {
             ready.push(entity);
         } else {
             browsers.set_osr_hidden(&entity);
@@ -500,8 +516,14 @@ fn sync_osr_webview_focus(
     }
 }
 
-fn webview_layout_is_renderable(size_px: Vec2, visibility: Option<&Visibility>) -> bool {
-    !matches!(visibility, Some(Visibility::Hidden)) && size_px.x > 0.0 && size_px.y > 0.0
+fn webview_layout_is_renderable(
+    size_px: Vec2,
+    visibility: Option<&Visibility>,
+    pending_reveal: bool,
+) -> bool {
+    (pending_reveal || !matches!(visibility, Some(Visibility::Hidden)))
+        && size_px.x > 0.0
+        && size_px.y > 0.0
 }
 
 fn webview_osr_should_run(
@@ -509,7 +531,7 @@ fn webview_osr_should_run(
     visibility: Option<&Visibility>,
     pending_reveal: bool,
 ) -> bool {
-    pending_reveal || webview_layout_is_renderable(size_px, visibility)
+    pending_reveal || webview_layout_is_renderable(size_px, visibility, false)
 }
 
 fn should_show_osr_webview(
@@ -1180,19 +1202,32 @@ mod tests {
     fn hidden_or_collapsed_webviews_do_not_render() {
         assert!(!webview_layout_is_renderable(
             Vec2::ZERO,
-            Some(&Visibility::Inherited)
+            Some(&Visibility::Inherited),
+            false
         ));
         assert!(!webview_layout_is_renderable(
             Vec2::new(100.0, 0.0),
-            Some(&Visibility::Inherited)
+            Some(&Visibility::Inherited),
+            false
         ));
         assert!(!webview_layout_is_renderable(
             Vec2::new(100.0, 20.0),
-            Some(&Visibility::Hidden)
+            Some(&Visibility::Hidden),
+            false
         ));
         assert!(webview_layout_is_renderable(
             Vec2::new(100.0, 20.0),
-            Some(&Visibility::Inherited)
+            Some(&Visibility::Inherited),
+            false
+        ));
+    }
+
+    #[test]
+    fn hidden_pending_reveal_webviews_resize_before_reveal() {
+        assert!(webview_layout_is_renderable(
+            Vec2::new(100.0, 20.0),
+            Some(&Visibility::Hidden),
+            true
         ));
     }
 

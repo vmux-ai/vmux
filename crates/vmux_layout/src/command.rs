@@ -54,6 +54,9 @@ pub enum AppCommand {
 
     #[menu(label = "Service")]
     Service(ServiceCommand),
+
+    #[menu(label = "Session")]
+    Session(SessionCommand),
 }
 
 #[allow(dead_code)]
@@ -203,6 +206,14 @@ pub enum BrowserCommand {
 pub enum ServiceCommand {
     #[default]
     #[menu(id = "service_open", label = "Open Service Monitor")]
+    Open,
+}
+
+#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SessionCommand {
+    #[default]
+    #[menu(id = "session_open", label = "Sessions\t<leader> s")]
+    #[shortcut(chord = "Ctrl+g, s")]
     Open,
 }
 

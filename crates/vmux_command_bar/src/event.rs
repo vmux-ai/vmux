@@ -2,10 +2,25 @@ pub const COMMAND_BAR_OPEN_EVENT: &str = "command-bar-open";
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct CommandBarOpenEvent {
+    #[serde(default)]
+    pub open_id: u64,
     pub url: String,
+    #[serde(default)]
+    pub session_name: String,
+    #[serde(default)]
+    pub sessions: Vec<CommandBarSession>,
     pub tabs: Vec<CommandBarTab>,
     pub commands: Vec<CommandBarCommandEntry>,
     pub new_tab: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CommandBarSession {
+    pub id: String,
+    pub name: String,
+    pub profile: String,
+    pub is_active: bool,
+    pub tab_count: usize,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -28,6 +43,14 @@ pub struct CommandBarCommandEntry {
 pub struct CommandBarActionEvent {
     pub action: String,
     pub value: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct CommandBarReadyEvent;
+
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct CommandBarRenderedEvent {
+    pub open_id: u64,
 }
 
 pub const PATH_COMPLETE_REQUEST: &str = "path-complete-request";
@@ -185,5 +208,42 @@ mod tests {
         };
         assert_eq!(evt.action, "navigate");
         assert_eq!(evt.value, "google.com");
+    }
+
+    #[test]
+    fn command_bar_open_event_carries_session_name() {
+        let event = CommandBarOpenEvent {
+            session_name: "Work".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(event.session_name, "Work");
+    }
+
+    #[test]
+    fn command_bar_open_event_carries_open_id() {
+        let event = CommandBarOpenEvent {
+            open_id: 7,
+            ..Default::default()
+        };
+
+        assert_eq!(event.open_id, 7);
+    }
+
+    #[test]
+    fn command_bar_open_event_carries_sessions() {
+        let event = CommandBarOpenEvent {
+            sessions: vec![CommandBarSession {
+                id: "work".to_string(),
+                name: "Work".to_string(),
+                profile: "default".to_string(),
+                is_active: true,
+                tab_count: 2,
+            }],
+            ..Default::default()
+        };
+
+        assert_eq!(event.sessions[0].id, "work");
+        assert!(event.sessions[0].is_active);
     }
 }

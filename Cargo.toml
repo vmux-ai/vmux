@@ -79,6 +79,10 @@ codegen-units = 1
 opt-level = "z"
 codegen-units = 1
 
+[profile.release.package.vmux_sessions]
+opt-level = "z"
+codegen-units = 1
+
 [patch.crates-io]
 bevy_cef = { path = "patches/bevy_cef-0.5.2" }
 bevy_cef_core = { path = "patches/bevy_cef_core-0.5.2" }

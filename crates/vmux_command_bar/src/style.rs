@@ -7,7 +7,7 @@ pub fn result_item_class(is_selected: bool) -> &'static str {
 }
 
 pub fn command_bar_shell_class() -> &'static str {
-    "relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-white/20 bg-white/10 shadow-2xl"
+    "relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
 }
 
 #[cfg(test)]
@@ -36,5 +36,13 @@ mod tests {
         let css = include_str!("../assets/index.css");
 
         assert!(!css.contains("background-color: var(--chrome-surface)"));
+    }
+
+    #[test]
+    fn command_bar_shell_uses_solid_background() {
+        let class = command_bar_shell_class();
+
+        assert!(class.contains("bg-background"));
+        assert!(!class.contains("bg-white/10"));
     }
 }
