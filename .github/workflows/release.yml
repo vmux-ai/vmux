@@ -77,6 +77,12 @@ jobs:
       - name: Run tests
         run: make test
 
+      - name: Free build artifacts before packaging
+        run: |
+          df -h
+          rm -rf target
+          df -h
+
       - name: Create and push tag
         if: ${{ inputs.version }}
         run: |
@@ -86,8 +92,10 @@ jobs:
       - name: Install cargo-packager (patched for macOS Tahoe)
         run: cargo install --path patches/cargo-packager-0.11.8
 
-      - name: Package app and DMG
-        run: env -u CEF_PATH cargo packager --release
+      - name: Package app
+        run: |
+          env -u CEF_PATH cargo packager --release --formats app
+          CARGO_PACKAGER_FORMAT=dmg ./scripts/inject-cef.sh
 
       - name: Import signing certificate
         env:
