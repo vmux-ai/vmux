@@ -58,7 +58,10 @@ pub fn App() -> Element {
         });
 
     use_effect(move || {
-        if !(open_listener.is_loading)() && !ready_sent() && try_cef_emit_serde(&CommandBarReadyEvent).is_ok() {
+        if !(open_listener.is_loading)()
+            && !ready_sent()
+            && try_cef_emit_serde(&CommandBarReadyEvent).is_ok()
+        {
             ready_sent.set(true);
         }
     });
