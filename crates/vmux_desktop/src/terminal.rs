@@ -750,10 +750,8 @@ fn poll_service_messages(
             ServiceMessage::SelectionText {
                 process_id: _,
                 text,
-            } => {
-                if !text.is_empty() {
-                    crate::clipboard::write(text.clone());
-                }
+            } if !text.is_empty() => {
+                crate::clipboard::write(text.clone());
             }
             _ => {} // ProcessOutput handled elsewhere if needed
         }
