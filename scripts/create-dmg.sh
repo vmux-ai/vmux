@@ -11,6 +11,11 @@ if [ ! -d "$APP_BUNDLE" ]; then
     exit 1
 fi
 
+CODESIGN_KEYCHAIN_ARGS=()
+if [ -n "${CODESIGN_KEYCHAIN:-}" ]; then
+    CODESIGN_KEYCHAIN_ARGS=(--keychain "$CODESIGN_KEYCHAIN")
+fi
+
 rm -f "$ROOT"/target/release/Vmux_*.dmg
 hdiutil create -volname "Vmux" \
     -srcfolder "$APP_BUNDLE" \
@@ -18,7 +23,7 @@ hdiutil create -volname "Vmux" \
     "$DMG_PATH"
 
 if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
-    codesign --force --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG_PATH"
+    codesign --force "${CODESIGN_KEYCHAIN_ARGS[@]}" --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG_PATH"
 fi
 
 echo "Done: $DMG_PATH"

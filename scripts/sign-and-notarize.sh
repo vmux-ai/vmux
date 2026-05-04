@@ -28,6 +28,11 @@ if [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
     exit 1
 fi
 
+CODESIGN_KEYCHAIN_ARGS=()
+if [ -n "${CODESIGN_KEYCHAIN:-}" ]; then
+    CODESIGN_KEYCHAIN_ARGS=(--keychain "$CODESIGN_KEYCHAIN")
+fi
+
 echo "==> Signing $APP_BUNDLE"
 
 # Sign the CEF framework and helper binaries first (inside-out signing)
@@ -37,6 +42,7 @@ find "$APP_BUNDLE/Contents/Frameworks" -type f \( -name "*.dylib" -o -perm +111 
     file "$binary" | grep -q "Mach-O" || continue
     echo "  Signing: ${binary#$APP_BUNDLE/}"
     codesign --force --verify --verbose \
+        "${CODESIGN_KEYCHAIN_ARGS[@]}" \
         --sign "$APPLE_SIGNING_IDENTITY" \
         --options runtime \
         "$binary"
@@ -46,6 +52,7 @@ done
 if [ -d "$APP_BUNDLE/Contents/Frameworks/Chromium Embedded Framework.framework" ]; then
     echo "  Signing: Chromium Embedded Framework.framework"
     codesign --force --verify --verbose \
+        "${CODESIGN_KEYCHAIN_ARGS[@]}" \
         --sign "$APPLE_SIGNING_IDENTITY" \
         --options runtime \
         "$APP_BUNDLE/Contents/Frameworks/Chromium Embedded Framework.framework"
@@ -55,6 +62,7 @@ fi
 find "$APP_BUNDLE/Contents/Frameworks" -name "*.app" -type d | while read -r helper; do
     echo "  Signing: ${helper#$APP_BUNDLE/}"
     codesign --force --verify --verbose \
+        "${CODESIGN_KEYCHAIN_ARGS[@]}" \
         --sign "$APPLE_SIGNING_IDENTITY" \
         --options runtime \
         --entitlements "$ENTITLEMENTS" \
@@ -64,6 +72,7 @@ done
 # Sign the main app bundle
 echo "  Signing: Vmux.app"
 codesign --force --verify --verbose \
+    "${CODESIGN_KEYCHAIN_ARGS[@]}" \
     --sign "$APPLE_SIGNING_IDENTITY" \
     --options runtime \
     --entitlements "$ENTITLEMENTS" \

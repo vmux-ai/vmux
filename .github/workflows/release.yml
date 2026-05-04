@@ -101,10 +101,11 @@ jobs:
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           CERT_FILE=$(mktemp /tmp/cert.XXXXXX.p12)
           echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_FILE"
-          KEYCHAIN="build.keychain-db"
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
           KEYCHAIN_PASSWORD=$(uuidgen)
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
@@ -112,6 +113,12 @@ jobs:
           security import "$CERT_FILE" -P "$APPLE_CERTIFICATE_PASSWORD" -A -f pkcs12 -k "$KEYCHAIN"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          echo "CODESIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+          if ! security find-identity -v -p codesigning "$KEYCHAIN" | grep -Fq "\"$APPLE_SIGNING_IDENTITY\""; then
+            echo "Error: APPLE_SIGNING_IDENTITY does not match an imported codesigning identity." >&2
+            exit 1
+          fi
           rm -f "$CERT_FILE"
 
       - name: Sign and notarize
