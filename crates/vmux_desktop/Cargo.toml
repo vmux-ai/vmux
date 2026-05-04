@@ -70,5 +70,4 @@ application-folder-position = { x = 480, y = 180 }
 
 [package.metadata.packager.macos]
 minimum-system-version = "13.0"
-signing-identity = "Developer ID Application: Junichi Sugiura (4BG7FRMF2G)"
 entitlements = "../../packaging/macos/Vmux.entitlements"

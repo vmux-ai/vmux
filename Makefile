@@ -39,8 +39,7 @@ build-mac-local: package-local-mac
 
 build-mac-release: package-release-mac
 	./scripts/sign-and-notarize.sh
-	@echo "Signing..."
-	./scripts/sign-and-notarize.sh
+	./scripts/create-dmg.sh
 
 # One-time CEF download (macOS paths; pin matches bevy_cef 0.5.x)
 setup-cef:
