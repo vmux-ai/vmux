@@ -58,20 +58,20 @@ pub fn App() -> Element {
         });
 
     use_effect(move || {
-        if !(open_listener.is_loading)() && !ready_sent() {
-            if try_cef_emit_serde(&CommandBarReadyEvent).is_ok() {
-                ready_sent.set(true);
-            }
+        if !(open_listener.is_loading)() && !ready_sent() && try_cef_emit_serde(&CommandBarReadyEvent).is_ok() {
+            ready_sent.set(true);
         }
     });
 
     use_effect(move || {
         let open = is_open();
         let open_id = current_open_id();
-        if open && open_id != 0 && last_rendered_open_id() != open_id {
-            if try_cef_emit_serde(&CommandBarRenderedEvent { open_id }).is_ok() {
-                last_rendered_open_id.set(open_id);
-            }
+        if open
+            && open_id != 0
+            && last_rendered_open_id() != open_id
+            && try_cef_emit_serde(&CommandBarRenderedEvent { open_id }).is_ok()
+        {
+            last_rendered_open_id.set(open_id);
         }
     });
 

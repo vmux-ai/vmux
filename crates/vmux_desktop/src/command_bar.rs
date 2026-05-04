@@ -74,7 +74,8 @@ impl Plugin for CommandBarInputPlugin {
                 Update,
                 handle_open_command_bar
                     .in_set(ReadAppCommands)
-                    .after(crate::layout::space::SpaceCommandSet),
+                    .after(crate::layout::space::SpaceCommandSet)
+                    .after(crate::layout::tab::TabCommandSet),
             )
             .add_systems(
                 Update,
@@ -111,18 +112,18 @@ pub fn is_command_bar_open(modal_q: &Query<&Node, With<Modal>>) -> bool {
 fn command_bar_open_delivery_ready(
     has_browser: bool,
     host_emit_ready: bool,
-    command_bar_ready: bool,
+    _command_bar_ready: bool,
 ) -> bool {
-    has_browser && host_emit_ready && command_bar_ready
+    has_browser && host_emit_ready
 }
 
 fn command_bar_reveal_ready(
     has_browser: bool,
-    host_emit_ready: bool,
-    command_bar_ready: bool,
-    rendered_open: bool,
+    _host_emit_ready: bool,
+    _command_bar_ready: bool,
+    _rendered_open: bool,
 ) -> bool {
-    has_browser && host_emit_ready && command_bar_ready && rendered_open
+    has_browser
 }
 
 fn should_start_command_bar_reveal(
@@ -479,6 +480,10 @@ fn handle_open_command_bar(
     ));
 
     if !command_bar_open_delivery_ready(has_browser, host_emit_ready, command_bar_ready) {
+        commands.entity(modal_e).insert(PendingCommandBarReveal {
+            frames: 0,
+            open_id: 0,
+        });
         new_tab_ctx.needs_open = true;
         return;
     }
@@ -1148,9 +1153,8 @@ fn reveal_command_bar(
         With<Modal>,
     >,
 ) {
-    for (entity, mut vis, mut pending, rendered) in &mut query {
-        let rendered = rendered.is_some_and(|rendered| rendered.0 == pending.open_id);
-        if !rendered {
+    for (entity, mut vis, mut pending, _rendered) in &mut query {
+        if pending.open_id == 0 {
             continue;
         }
         if pending.frames >= 2 {
@@ -1263,6 +1267,7 @@ mod tests {
             ShortcutSettings, SideSheetSettings, WindowSettings,
         },
     };
+    use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
 
     fn test_settings() -> AppSettings {
         AppSettings {
@@ -1291,22 +1296,27 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_open_waits_for_command_bar_listener() {
-        assert!(!command_bar_open_delivery_ready(true, true, false));
+    fn command_bar_open_does_not_block_on_command_bar_listener() {
+        assert!(command_bar_open_delivery_ready(true, true, false));
         assert!(command_bar_open_delivery_ready(true, true, true));
     }
 
     #[test]
-    fn command_bar_reveal_waits_for_main_frame_and_ui_listener() {
-        assert!(!command_bar_reveal_ready(true, false, true, true));
-        assert!(!command_bar_reveal_ready(true, true, false, true));
+    fn command_bar_reveal_does_not_block_on_host_or_ui_listener() {
+        assert!(command_bar_reveal_ready(true, false, true, true));
+        assert!(command_bar_reveal_ready(true, true, false, true));
         assert!(command_bar_reveal_ready(true, true, true, true));
     }
 
     #[test]
-    fn command_bar_reveal_waits_for_rendered_open_payload() {
-        assert!(!command_bar_reveal_ready(true, true, true, false));
+    fn command_bar_reveal_does_not_block_on_rendered_open_payload() {
+        assert!(command_bar_reveal_ready(true, true, true, false));
         assert!(command_bar_reveal_ready(true, true, true, true));
+    }
+
+    #[test]
+    fn command_bar_reveal_requires_browser() {
+        assert!(!command_bar_reveal_ready(false, true, true, true));
     }
 
     #[test]
@@ -1317,8 +1327,8 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_reveal_does_not_start_before_ui_listener() {
-        assert!(!should_start_command_bar_reveal(
+    fn command_bar_reveal_starts_before_ui_listener() {
+        assert!(should_start_command_bar_reveal(
             true,
             true,
             false,
@@ -1331,7 +1341,7 @@ mod tests {
     #[test]
     fn command_bar_reveal_does_not_start_before_main_frame() {
         assert!(!should_start_command_bar_reveal(
-            true,
+            false,
             false,
             true,
             true,
@@ -1397,6 +1407,74 @@ mod tests {
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, Some(SESSIONS_WEBVIEW_URL.to_string()));
+    }
+
+    #[test]
+    fn command_bar_open_runs_after_tab_commands() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.add_plugins(vmux_layout::tab::TabPlugin);
+        app.add_plugins(CommandBarInputPlugin);
+
+        let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
+        let mut update = schedules.remove(Update).unwrap();
+        update.initialize(app.world_mut()).unwrap();
+        let graph = update.graph();
+        let tab_command_set = graph
+            .system_sets
+            .get_key(vmux_layout::tab::TabCommandSet.intern())
+            .unwrap();
+        let read_command_systems = graph.systems_in_set(ReadAppCommands.intern()).unwrap();
+        let tab_command_systems = graph
+            .systems_in_set(vmux_layout::tab::TabCommandSet.intern())
+            .unwrap();
+        let command_bar_open_system = read_command_systems
+            .iter()
+            .copied()
+            .find(|system| !tab_command_systems.contains(system))
+            .unwrap();
+
+        assert!(graph.dependency().graph().contains_edge(
+            NodeId::Set(tab_command_set),
+            NodeId::System(command_bar_open_system)
+        ));
+    }
+
+    #[test]
+    fn command_bar_open_bootstraps_hidden_modal_before_js_ready() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.init_resource::<NewTabContext>();
+        app.init_resource::<ActiveSession>();
+        app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
+        app.insert_non_send_resource(Browsers::default());
+        app.add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands));
+
+        let modal = app
+            .world_mut()
+            .spawn((
+                Modal,
+                Node {
+                    display: Display::None,
+                    ..default()
+                },
+                Visibility::Hidden,
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::FocusAddressBar));
+
+        app.update();
+
+        let node = app.world().get::<Node>(modal).unwrap();
+        let reveal = app.world().get::<PendingCommandBarReveal>(modal).unwrap();
+
+        assert_eq!(node.display, Display::Flex);
+        assert_eq!(reveal.open_id, 0);
+        assert!(app.world().resource::<NewTabContext>().needs_open);
     }
 
     #[test]
