@@ -1,6 +1,5 @@
 use crate::{
     CloseRequiresConfirmation, NewTabContext,
-    command::{AppCommand, PaneCommand, ReadAppCommands},
     settings::{ConfirmCloseSettings, LayoutSettings},
     space::Space,
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
@@ -19,6 +18,7 @@ use bevy::{
 use bevy_cef::prelude::CefKeyboardTarget;
 use moonshine_save::prelude::*;
 use std::time::Instant;
+use vmux_command::{AppCommand, PaneCommand, ReadAppCommands};
 use vmux_history::LastActivatedAt;
 
 /// Marker: pane is waiting for close confirmation dialog.
@@ -1089,13 +1089,13 @@ fn process_pending_pane_closes(world: &mut World) {
 mod tests {
     use super::*;
     use crate::{
-        command::{CommandPlugin, WriteAppCommands},
         settings::ConfirmCloseSettings,
         settings::{
             FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
         },
     };
     use bevy::window::ClosingWindow;
+    use vmux_command::{CommandPlugin, WriteAppCommands};
 
     fn test_settings() -> LayoutSettings {
         LayoutSettings {

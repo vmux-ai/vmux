@@ -24,7 +24,7 @@ use crate::{
 use vmux_core::PageMetadata;
 use vmux_layout::event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
 use vmux_service::protocol::ProcessId;
-use vmux_sessions::event::SESSIONS_WEBVIEW_URL;
+use vmux_session::event::SESSIONS_WEBVIEW_URL;
 
 pub(crate) struct PersistencePlugin;
 
@@ -565,7 +565,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.insert_resource(test_settings());
         app.insert_resource(ActiveSession {
-            record: vmux_sessions::model::default_session_record(),
+            record: vmux_session::model::default_session_record(),
         });
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();

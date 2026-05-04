@@ -1,7 +1,7 @@
 use super::Open;
-use crate::command::{AppCommand, BrowserCommand, FooterCommand, ReadAppCommands};
 use crate::event::FOOTER_HEIGHT_PX;
 use bevy::prelude::*;
+use vmux_command::{AppCommand, BrowserCommand, FooterCommand, ReadAppCommands};
 
 #[derive(Component)]
 pub struct Footer;
@@ -71,7 +71,7 @@ fn sync_footer_visibility(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::CommandPlugin;
+    use vmux_command::CommandPlugin;
 
     #[test]
     fn browser_find_closes_open_footer_on_first_command() {

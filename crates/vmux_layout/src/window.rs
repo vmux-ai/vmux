@@ -2,7 +2,6 @@ use crate::event::COMMAND_BAR_WEBVIEW_URL;
 use crate::{
     Footer, Header, LayoutStartupSet, SessionFilePresent,
     chrome::{Browser, layout_chrome_bundle},
-    command::{AppCommand, ReadAppCommands, WindowCommand},
     event::FOOTER_HEIGHT_PX,
     glass::{GlassCorners, GlassMaterial},
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
@@ -24,6 +23,7 @@ use bevy::{
     winit::WINIT_WINDOWS,
 };
 use bevy_cef::prelude::*;
+use vmux_command::{AppCommand, ReadAppCommands, WindowCommand};
 use vmux_history::{CreatedAt, LastActivatedAt};
 use vmux_webview_app::WebviewAppEmbedSet;
 

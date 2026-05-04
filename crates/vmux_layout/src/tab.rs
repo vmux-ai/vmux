@@ -1,7 +1,6 @@
 use crate::event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
 use crate::{
     LayoutSpawnRequest, NewTabContext,
-    command::{AppCommand, ReadAppCommands, ServiceCommand, TabCommand, TerminalCommand},
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_tab_in_pane},
     space::Space,
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
@@ -12,6 +11,7 @@ use bevy::{
     window::{ClosingWindow, PrimaryWindow},
 };
 use moonshine_save::prelude::*;
+use vmux_command::{AppCommand, ReadAppCommands, ServiceCommand, TabCommand, TerminalCommand};
 use vmux_history::LastActivatedAt;
 
 /// Cached result of `focused_tab()`, computed once per frame in `Update`
@@ -640,14 +640,12 @@ fn entity_tree_contains_tab(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        command::{CommandPlugin, WriteAppCommands},
-        settings::{
-            FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
-        },
+    use crate::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use bevy::window::ClosingWindow;
     use bevy_cef::prelude::WebviewExtendStandardMaterial;
+    use vmux_command::{CommandPlugin, WriteAppCommands};
 
     fn test_settings() -> LayoutSettings {
         LayoutSettings {

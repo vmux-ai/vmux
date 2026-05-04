@@ -3,7 +3,7 @@ use crate::settings::{AppSettings, load_settings};
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use std::time::Instant;
-pub(crate) use vmux_layout::shortcut::{KeyCombo, Modifiers, Shortcut, resolve_key};
+pub(crate) use vmux_command::shortcut::{KeyCombo, Modifiers, Shortcut, resolve_key};
 
 pub struct ShortcutPlugin;
 

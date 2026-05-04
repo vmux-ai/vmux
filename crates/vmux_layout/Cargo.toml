@@ -25,7 +25,6 @@ vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
 [dependencies]
 serde = { workspace = true }
 vmux_core = { path = "../vmux_core" }
-vmux_macro = { path = "../vmux_macro" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true, features = [
@@ -41,10 +40,10 @@ bevy_render = "0.18"
 bevy_winit = { workspace = true }
 libc = "0.2"
 moonshine-save = { workspace = true }
-muda = "0.17"
 raw-window-handle = "0.6"
 rfd = { workspace = true }
 ron = { workspace = true }
+vmux_command = { path = "../vmux_command" }
 vmux_history = { path = "../vmux_history" }
 vmux_webview_app = { path = "../vmux_webview_app" }
 

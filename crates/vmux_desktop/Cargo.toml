@@ -34,14 +34,14 @@ serde_json = { workspace = true }
 vmux_core = { path = "../vmux_core" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
-vmux_command_bar = { path = "../vmux_command_bar" }
+vmux_command = { path = "../vmux_command" }
 vmux_macro = { path = "../vmux_macro" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 tokio = { workspace = true }
 uuid = { workspace = true }
 vmux_service = { path = "../vmux_service" }
-vmux_processes = { path = "../vmux_processes" }
-vmux_sessions = { path = "../vmux_sessions" }
+vmux_process = { path = "../vmux_process" }
+vmux_session = { path = "../vmux_session" }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_webview_app = { path = "../vmux_webview_app" }
 

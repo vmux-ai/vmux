@@ -9,8 +9,6 @@ pub mod event;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod chrome;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod command;
-#[cfg(not(target_arch = "wasm32"))]
 mod focus_ring;
 #[cfg(not(target_arch = "wasm32"))]
 mod footer;
@@ -24,8 +22,6 @@ pub mod profile;
 pub mod scene;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod settings;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod shortcut;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tab;
 #[cfg(not(target_arch = "wasm32"))]

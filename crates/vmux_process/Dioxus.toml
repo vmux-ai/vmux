@@ -1,5 +1,5 @@
 [application]
-name = "vmux_processes"
+name = "vmux_process"
 default_platform = "web"
 
 [web.app]

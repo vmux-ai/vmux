@@ -1,1 +1,1 @@
-pub(crate) use vmux_layout::command::*;
+pub(crate) use vmux_command::*;

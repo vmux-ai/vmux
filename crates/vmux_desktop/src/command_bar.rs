@@ -22,7 +22,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::webview_debug_log;
-use vmux_command_bar::event::{
+use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSession, CommandBarTab,
     PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
@@ -35,7 +35,7 @@ use vmux_layout::{
     event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL},
 };
 use vmux_service::protocol::ProcessId;
-use vmux_sessions::event::{SESSIONS_WEBVIEW_URL, SessionCommandEvent};
+use vmux_session::event::{SESSIONS_WEBVIEW_URL, SessionCommandEvent};
 
 /// Try to extract a process UUID from `vmux://terminal/{uuid}`.
 fn parse_process_id_from_url(url: &str) -> Option<ProcessId> {

@@ -43,9 +43,8 @@ use {
     settings::SettingsPlugin,
     shortcut::ShortcutPlugin,
     terminal::TerminalInputPlugin,
-    vmux_command_bar::CommandBarPlugin,
     vmux_layout::{LayoutChromePlugin, profile::ProfilePlugin, scene::ScenePlugin},
-    vmux_processes::ProcessesPlugin,
+    vmux_process::ProcessesPlugin,
     vmux_terminal::TerminalPlugin,
     vmux_webview_app::WebviewAppRegistryPlugin,
 };
@@ -112,7 +111,6 @@ impl Plugin for VmuxPlugin {
             OsMenuPlugin,
             WebviewAppRegistryPlugin,
             LayoutChromePlugin,
-            CommandBarPlugin,
             TerminalPlugin,
             ProcessesPlugin,
             CommandBarInputPlugin,

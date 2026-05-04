@@ -4,7 +4,7 @@ use bevy::{
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
-use vmux_processes::event::*;
+use vmux_process::event::*;
 use vmux_service::protocol::{ClientMessage, ProcessId};
 use vmux_webview_app::UiReady;
 

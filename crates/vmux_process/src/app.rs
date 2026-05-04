@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_processes::event::*;
+use vmux_process::event::*;
 use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
 
 #[component]

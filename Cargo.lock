@@ -8864,15 +8864,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vmux_command_bar"
+name = "vmux_command"
 version = "0.0.2"
 dependencies = [
  "bevy",
- "bevy_cef",
  "bevy_ecs",
  "dioxus",
  "js-sys",
+ "muda",
  "serde",
+ "vmux_macro",
  "vmux_ui",
  "vmux_webview_app",
  "wasm-bindgen",
@@ -8914,14 +8915,14 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
- "vmux_command_bar",
+ "vmux_command",
  "vmux_core",
  "vmux_history",
  "vmux_layout",
  "vmux_macro",
- "vmux_processes",
+ "vmux_process",
  "vmux_service",
- "vmux_sessions",
+ "vmux_session",
  "vmux_terminal",
  "vmux_ui",
  "vmux_webview_app",
@@ -8962,14 +8963,13 @@ dependencies = [
  "dioxus",
  "libc",
  "moonshine-save",
- "muda",
  "raw-window-handle",
  "rfd",
  "ron 0.8.1",
  "serde",
+ "vmux_command",
  "vmux_core",
  "vmux_history",
- "vmux_macro",
  "vmux_ui",
  "vmux_webview_app",
  "wasm-bindgen",
@@ -8985,7 +8985,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vmux_processes"
+name = "vmux_process"
 version = "0.0.2"
 dependencies = [
  "bevy",
@@ -9014,7 +9014,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vmux_sessions"
+name = "vmux_session"
 version = "0.0.2"
 dependencies = [
  "dioxus",

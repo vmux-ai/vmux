@@ -1,10 +1,10 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_sessions::event::{
+use vmux_session::event::{
     SESSIONS_LIST_EVENT, SessionCommandEvent, SessionRow, SessionsListEvent,
 };
-use vmux_sessions::model::DEFAULT_SESSION_ID;
+use vmux_session::model::DEFAULT_SESSION_ID;
 use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 

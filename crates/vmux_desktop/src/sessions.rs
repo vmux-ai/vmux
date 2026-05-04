@@ -4,7 +4,7 @@ use bevy::{picking::Pickable, prelude::*, render::alpha::AlphaMode, window::Prim
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::TriggerLoad;
 use vmux_core::PageMetadata;
-use vmux_sessions::{
+use vmux_session::{
     event::{
         SESSIONS_LIST_EVENT, SESSIONS_WEBVIEW_URL, SessionCommandEvent, SessionRow,
         SessionsListEvent,
@@ -35,7 +35,7 @@ impl Default for ActiveSession {
         let record = registry
             .sessions
             .iter()
-            .find(|session| session.id == vmux_sessions::model::DEFAULT_SESSION_ID)
+            .find(|session| session.id == vmux_session::model::DEFAULT_SESSION_ID)
             .cloned()
             .or_else(|| registry.sessions.first().cloned())
             .unwrap_or_else(default_session_record);
@@ -123,7 +123,7 @@ impl Plugin for SessionsPlugin {
 
 fn register_sessions_webview_app(registry: &mut WebviewAppRegistry) {
     registry.register(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_sessions"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_session"),
         &WebviewAppConfig::with_custom_host("sessions"),
     );
 }
@@ -139,7 +139,7 @@ fn read_session_registry_from(root: &Path) -> SessionRegistry {
     if !registry
         .sessions
         .iter()
-        .any(|session| session.id == vmux_sessions::model::DEFAULT_SESSION_ID)
+        .any(|session| session.id == vmux_session::model::DEFAULT_SESSION_ID)
     {
         registry.sessions.insert(0, default_session_record());
     }
@@ -375,7 +375,7 @@ fn on_session_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_sessions::model::DEFAULT_PROFILE_ID;
+    use vmux_session::model::DEFAULT_PROFILE_ID;
     use vmux_webview_app::WebviewAppRegistry;
 
     #[test]

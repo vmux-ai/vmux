@@ -1,5 +1,5 @@
 [application]
-name = "vmux_sessions"
+name = "vmux_session"
 default_platform = "web"
 
 [web.app]

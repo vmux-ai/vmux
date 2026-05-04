@@ -4,7 +4,6 @@ use crate::{
 };
 use crate::{
     NewTabContext,
-    command::{AppCommand, ReadAppCommands, SpaceCommand},
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
     settings::LayoutSettings,
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
@@ -18,6 +17,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
+use vmux_command::{AppCommand, ReadAppCommands, SpaceCommand};
 use vmux_history::{CreatedAt, LastActivatedAt};
 use vmux_webview_app::UiReady;
 

@@ -1,7 +1,5 @@
 use crate::{
-    LayoutStartupSet,
-    command::{AppCommand, ReadAppCommands, SceneCommand},
-    fit_window_to_screen,
+    LayoutStartupSet, fit_window_to_screen,
     settings::LayoutSettings,
     unit::{PIXELS_PER_METER, WindowExt},
 };
@@ -16,6 +14,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_cef::prelude::CefKeyboardTarget;
+use vmux_command::{AppCommand, ReadAppCommands, SceneCommand};
 
 pub const FOV_Y: f32 = std::f32::consts::FRAC_PI_4;
 

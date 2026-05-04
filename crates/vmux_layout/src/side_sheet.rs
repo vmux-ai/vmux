@@ -1,11 +1,9 @@
 use super::{Open, SideSheetState};
-use crate::{
-    command::{AppCommand, ReadAppCommands, SideSheetCommand},
-    settings::LayoutSettings,
-};
+use crate::settings::LayoutSettings;
 #[cfg(target_os = "macos")]
 use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
 use bevy::{prelude::*, ui::UiSystems, window::PrimaryWindow};
+use vmux_command::{AppCommand, ReadAppCommands, SideSheetCommand};
 
 pub(crate) struct SideSheetLayoutPlugin;
 

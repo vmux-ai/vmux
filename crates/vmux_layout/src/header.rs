@@ -1,7 +1,7 @@
 use super::{HeaderState, Open};
-use crate::command::{AppCommand, HeaderCommand, ReadAppCommands};
 use crate::event::HEADER_HEIGHT_PX;
 use bevy::prelude::*;
+use vmux_command::{AppCommand, HeaderCommand, ReadAppCommands};
 
 #[derive(Component)]
 pub struct Header;

@@ -1,5 +1,5 @@
 [application]
-name = "vmux_command_bar"
+name = "vmux_command"
 default_platform = "web"
 
 [web.app]
