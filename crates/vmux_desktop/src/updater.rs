@@ -7,10 +7,18 @@ use crate::settings::AppSettings;
 const DEFAULT_ENDPOINT: &str =
     "https://github.com/vmux-ai/vmux/releases/latest/download/update-manifest.json";
 
-// TODO: Replace with real minisign public key once generated via
-//   `cargo packager signer generate -w vmux-update.key`
-// The corresponding private key goes into the VMUX_UPDATE_PRIVATE_KEY GitHub secret.
-const DEFAULT_PUBKEY: &str = "PLACEHOLDER_PUBKEY";
+fn default_pubkey() -> String {
+    default_pubkey_from_env(
+        std::env::var("VMUX_UPDATE_PUBLIC_KEY").ok(),
+        option_env!("VMUX_UPDATE_PUBLIC_KEY"),
+    )
+}
+
+fn default_pubkey_from_env(runtime: Option<String>, build_time: Option<&'static str>) -> String {
+    runtime
+        .or_else(|| build_time.map(ToString::to_string))
+        .unwrap_or_default()
+}
 
 /// Auto-updater for Vmux. Checks a remote endpoint for new versions,
 /// downloads the signed `.app` bundle, and replaces the current one in-place.
@@ -55,7 +63,7 @@ impl Default for VmuxUpdaterBuilder {
     fn default() -> Self {
         Self {
             endpoint: DEFAULT_ENDPOINT.to_string(),
-            pubkey: DEFAULT_PUBKEY.to_string(),
+            pubkey: default_pubkey(),
             initial_delay: Duration::from_secs(5),
             poll_interval: Duration::from_secs(3600),
         }
@@ -243,5 +251,31 @@ fn run_update_check(endpoint: &str, pubkey: &str) -> UpdateResult {
     match update.download_and_install() {
         Ok(()) => UpdateResult::Installed { version },
         Err(e) => UpdateResult::Failed(format!("install failed: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_pubkey_uses_runtime_env_first() {
+        let pubkey = default_pubkey_from_env(Some("runtime".to_string()), Some("build"));
+
+        assert_eq!(pubkey, "runtime");
+    }
+
+    #[test]
+    fn default_pubkey_falls_back_to_build_env() {
+        let pubkey = default_pubkey_from_env(None, Some("build"));
+
+        assert_eq!(pubkey, "build");
+    }
+
+    #[test]
+    fn default_pubkey_is_empty_when_env_is_missing() {
+        let pubkey = default_pubkey_from_env(None, None);
+
+        assert_eq!(pubkey, "");
     }
 }

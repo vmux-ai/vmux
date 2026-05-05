@@ -1,4 +1,5 @@
 /target
+patches/**/target/
 .DS_Store
 *.app
 *.bak
