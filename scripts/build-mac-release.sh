@@ -16,8 +16,18 @@ fi
 
 CERT_FILE=""
 KEYCHAIN=""
+ORIGINAL_KEYCHAINS=()
+
+while IFS= read -r keychain; do
+    keychain="${keychain#\"}"
+    keychain="${keychain%\"}"
+    ORIGINAL_KEYCHAINS+=("$keychain")
+done < <(security list-keychains -d user)
 
 cleanup() {
+    if [[ "${#ORIGINAL_KEYCHAINS[@]}" -gt 0 ]]; then
+        security list-keychains -d user -s "${ORIGINAL_KEYCHAINS[@]}" >/dev/null 2>&1 || true
+    fi
     if [[ -n "$KEYCHAIN" ]]; then
         security delete-keychain "$KEYCHAIN" >/dev/null 2>&1 || true
     fi
@@ -45,6 +55,7 @@ if [[ -n "${APPLE_CERTIFICATE:-}" || -n "${APPLE_CERTIFICATE_PASSWORD:-}" ]]; th
         exit 1
     fi
     security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+    security list-keychains -d user -s "$KEYCHAIN" "${ORIGINAL_KEYCHAINS[@]}"
     security find-identity -v -p codesigning "$KEYCHAIN"
     if ! security find-identity -v -p codesigning "$KEYCHAIN" | grep -Fq "\"$APPLE_SIGNING_IDENTITY\""; then
         echo "Error: APPLE_SIGNING_IDENTITY does not match an imported codesigning identity." >&2
