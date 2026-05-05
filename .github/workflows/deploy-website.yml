@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "website/**"
+      - "scripts/install.sh"
+      - ".github/workflows/deploy-website.yml"
   workflow_dispatch:
 
 permissions:
@@ -50,6 +52,9 @@ jobs:
 
       - name: Copy CNAME to dist
         run: cp website/CNAME website/target/dx/vmux_website/release/web/public/CNAME
+
+      - name: Copy install script to dist
+        run: install -m 0644 scripts/install.sh website/target/dx/vmux_website/release/web/public/install
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
