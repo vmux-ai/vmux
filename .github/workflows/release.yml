@@ -199,7 +199,7 @@ jobs:
 
           sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Casks/vmux.rb
           sed -i '' "s/sha256 \".*\"/sha256 \"${DMG_SHA}\"/" Casks/vmux.rb
-          sed -i '' "s|/v[^/]*/.*\.dmg|/v${VERSION}/${DMG_NAME}|" Casks/vmux.rb
+          sed -i '' "s|^  url \".*\"|  url \"https://github.com/vmux-ai/vmux/releases/download/v${VERSION}/${DMG_NAME}\"|" Casks/vmux.rb
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
