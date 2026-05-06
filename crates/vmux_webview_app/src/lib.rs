@@ -44,6 +44,13 @@ struct WebviewAppEntry {
     index_file_path: String,
 }
 
+impl WebviewAppEntry {
+    fn bundle_root(&self, resources_dir: Option<&Path>) -> PathBuf {
+        packaged_webview_app_root(resources_dir, &self.host)
+            .unwrap_or_else(|| self.manifest_dir.join(&self.bundle_dir))
+    }
+}
+
 #[derive(Clone, Debug, Resource, Default)]
 pub struct WebviewAppRegistry {
     entries: Vec<WebviewAppEntry>,
@@ -113,12 +120,40 @@ fn embedded_default_document(host: &str, index_file_path: &str) -> String {
     format!("{h}/{index_file_path}")
 }
 
+fn macos_resources_dir_from_exe(exe: &Path) -> Option<PathBuf> {
+    let macos_dir = exe.parent()?;
+    if macos_dir.file_name()? != "MacOS" {
+        return None;
+    }
+    let contents_dir = macos_dir.parent()?;
+    if contents_dir.file_name()? != "Contents" {
+        return None;
+    }
+    Some(contents_dir.join("Resources"))
+}
+
+fn current_app_resources_dir() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| macos_resources_dir_from_exe(&exe))
+}
+
+fn packaged_webview_app_root(resources_dir: Option<&Path>, host: &str) -> Option<PathBuf> {
+    let h = host.trim().trim_matches('/');
+    if h.is_empty() {
+        return None;
+    }
+    let root = resources_dir?.join("webview-apps").join(h);
+    root.is_dir().then_some(root)
+}
+
 fn embed_webview_app_static_assets(
     registry: Res<WebviewAppRegistry>,
     mut reg: ResMut<EmbeddedAssetRegistry>,
 ) {
+    let resources_dir = current_app_resources_dir();
     for entry in &registry.entries {
-        let bundle_root = entry.manifest_dir.join(&entry.bundle_dir);
+        let bundle_root = entry.bundle_root(resources_dir.as_deref());
         if !bundle_root.is_dir() {
             bevy::log::warn!("WebviewAppPlugin: skip {:?}: not a directory", bundle_root);
             continue;
@@ -182,4 +217,48 @@ fn embed_dir_recursive(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packaged_webview_app_root_uses_resources_webview_host_dir() {
+        let root =
+            std::env::temp_dir().join(format!("vmux-webview-app-test-{}", std::process::id()));
+        let host_dir = root.join("webview-apps").join("terminal");
+        std::fs::create_dir_all(&host_dir).unwrap();
+
+        let found = packaged_webview_app_root(Some(&root), "terminal");
+
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(found, Some(host_dir));
+    }
+
+    #[test]
+    fn packaged_webview_app_root_ignores_missing_host_dir() {
+        let root = std::env::temp_dir().join(format!(
+            "vmux-webview-app-missing-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let found = packaged_webview_app_root(Some(&root), "terminal");
+
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(found, None);
+    }
+
+    #[test]
+    fn macos_resources_dir_resolves_from_bundle_executable() {
+        let exe = Path::new("/Applications/Vmux.app/Contents/MacOS/Vmux");
+
+        let resources = macos_resources_dir_from_exe(exe);
+
+        assert_eq!(
+            resources,
+            Some(PathBuf::from("/Applications/Vmux.app/Contents/Resources"))
+        );
+    }
 }

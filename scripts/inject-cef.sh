@@ -24,6 +24,8 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
     exit 0
 fi
 
+APP_BUNDLE="$APP_BUNDLE" "$ROOT/scripts/copy-webview-assets.sh"
+
 if [[ -d "$APP_BUNDLE/Contents/Frameworks/Chromium Embedded Framework.framework" ]]; then
     echo "inject-cef: CEF already injected, skipping"
     exit 0
