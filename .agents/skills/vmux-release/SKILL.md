@@ -15,9 +15,18 @@ description: Use when releasing a new vmux version, cutting a vmux release, vali
 
 ## Steps
 
-1. **Determine next version.** Use semver. Patch bump for fixes, minor for features, major for breaking. Check `git log v$LAST..HEAD` for changes since last release.
+1. **Categorize the upgrade.** Choose exactly one SemVer category before bumping:
+   - **Patch:** bug fixes, CI/release fixes, docs, dependency updates, no user-facing behavior change.
+   - **Minor:** new user-facing features, compatible behavior changes, new settings or commands.
+   - **Major:** breaking changes, incompatible config/data/API changes, removed behavior, required manual migration.
+   Check `git log v$LAST..HEAD` for changes since last release and map every notable change into one category. Use the highest category present.
 
-2. **Create release worktree and bump version.**
+2. **Determine next version.** Apply the category to the current version:
+   - Patch: `X.Y.Z` -> `X.Y.(Z+1)`
+   - Minor: `X.Y.Z` -> `X.(Y+1).0`
+   - Major: `X.Y.Z` -> `(X+1).0.0`
+
+3. **Create release worktree and bump version.**
    ```bash
    git worktree list
    git worktree add .worktrees/vmux-release-vX.Y.Z -b release/vX.Y.Z main
@@ -30,44 +39,44 @@ description: Use when releasing a new vmux version, cutting a vmux release, vali
    git push -u origin release/vX.Y.Z
    ```
 
-3. **Open PR.**
+4. **Open PR.**
    ```bash
    gh pr create --title "chore(release): vX.Y.Z" --body "Release vX.Y.Z"
    ```
 
-4. **Wait for CI green.** Lint + test always run; build-mac runs only if packaging-touching paths changed.
+5. **Wait for CI green.** Lint + test always run; build-mac runs only if packaging-touching paths changed.
 
-5. **Squash-merge PR to main.**
+6. **Squash-merge PR to main.**
    ```bash
    gh pr merge --squash --delete-branch
    ```
 
-6. **Watch release pipeline.**
+7. **Watch release pipeline.**
    ```bash
    gh run watch $(gh run list --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId')
    ```
    Expected: ~50 min for the macOS sign + notarize + DMG build.
 
-7. **Verify GH release.**
+8. **Verify GH release.**
    ```bash
    gh release view vX.Y.Z
    ```
    Assets present: `Vmux_X.Y.Z_aarch64.dmg`, `vmux-vX.Y.Z-aarch64-apple-darwin.tar.gz`, `Vmux-vX.Y.Z-aarch64-apple-darwin.app.tar.gz`, `Vmux-vX.Y.Z-aarch64-apple-darwin.app.tar.gz.sig`.
 
-8. **Verify auto-commit on main.**
+9. **Verify auto-commit on main.**
    ```bash
    git pull --rebase origin main
    git log -1 --stat
    ```
    Expect a commit `chore(release): update cask and update manifest to X.Y.Z` touching `Casks/vmux.rb` and `website/public/updates.json`.
 
-9. **Verify website redeploy.** Wait ~5 min for `deploy-website.yml`, then:
+10. **Verify website redeploy.** Wait ~5 min for `deploy-website.yml`, then:
    ```bash
    curl -fsSL https://vmux.ai/updates.json | jq .version
    ```
    Should print `"vX.Y.Z"`.
 
-10. **Smoke test.** On a clean macOS machine or VM:
+11. **Smoke test.** On a clean macOS machine or VM:
     ```bash
     brew tap vmux-ai/vmux https://github.com/vmux-ai/vmux
     brew install --cask vmux
@@ -77,7 +86,7 @@ description: Use when releasing a new vmux version, cutting a vmux release, vali
     ```
     Confirm app launches and `About` shows the new version.
 
-11. **(Optional) Test auto-update.** Install previous version, launch, wait for poll interval (default 1h). App should download + replace itself with the new version on next launch.
+12. **(Optional) Test auto-update.** Install previous version, launch, wait for poll interval (default 1h). App should download + replace itself with the new version on next launch.
 
 ## If something goes wrong
 
