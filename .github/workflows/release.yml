@@ -2,39 +2,95 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-main
   cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release-macos:
-    runs-on: macos-latest
+  detect-version:
+    name: Detect Version Bump
+    runs-on: ubuntu-latest
+    env:
+      BEFORE_SHA: ${{ github.event.before }}
+    outputs:
+      should_release: ${{ steps.detect.outputs.should_release }}
+      version: ${{ steps.detect.outputs.version }}
+      tag: ${{ steps.detect.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Extract version
+      - name: Detect version bump
+        id: detect
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "Building version: $VERSION"
-
-      - name: Verify Cargo.toml version matches
-        run: |
-          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-          if [ "$CARGO_VERSION" != "$VERSION" ]; then
-            echo "Error: Cargo.toml version ($CARGO_VERSION) does not match ($VERSION)" >&2
+          VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$'
+          if ! printf '%s\n' "$VERSION" | grep -Eq "$SEMVER_RE"; then
+            echo "::error::Invalid Cargo.toml version: $VERSION"
             exit 1
           fi
+          PREV_REF="HEAD^"
+          if [ -n "${BEFORE_SHA:-}" ] && ! printf '%s\n' "$BEFORE_SHA" | grep -Eq '^0+$' && git cat-file -e "${BEFORE_SHA}:Cargo.toml" 2>/dev/null; then
+            PREV_REF="$BEFORE_SHA"
+          fi
+          PREV_VERSION=$(git show "${PREV_REF}:Cargo.toml" 2>/dev/null | grep -m1 '^version' | sed 's/.*"\(.*\)".*/\1/' || true)
+          if [ "$PREV_VERSION" = "$VERSION" ]; then
+            echo "Cargo.toml version unchanged ($VERSION); skipping release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TAG="v$VERSION"
+          RELEASE_SHA=$(git rev-parse HEAD)
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            TAG_SHA=$(git rev-parse "$TAG^{commit}")
+            if [ "$TAG_SHA" != "$RELEASE_SHA" ]; then
+              echo "::error::Tag already exists locally at $TAG_SHA, expected $RELEASE_SHA: $TAG"
+              exit 1
+            fi
+            echo "Tag already exists locally at release commit; resuming: $TAG"
+          fi
+          remote_tag_sha=$(git ls-remote --tags origin "refs/tags/$TAG^{}" | awk '{print $1}')
+          if [ -z "$remote_tag_sha" ]; then
+            remote_tag_sha=$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')
+          fi
+          if [ -n "$remote_tag_sha" ]; then
+            if [ "$remote_tag_sha" != "$RELEASE_SHA" ]; then
+              echo "::error::Tag already exists on origin at $remote_tag_sha, expected $RELEASE_SHA: $TAG"
+              exit 1
+            fi
+            echo "Tag already exists on origin at release commit; resuming: $TAG"
+          fi
+          echo "Detected version bump: $PREV_VERSION -> $VERSION"
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  release-macos:
+    name: Release macOS
+    needs: detect-version
+    if: needs.detect-version.outputs.should_release == 'true'
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.detect-version.outputs.version }}
+      TAG: ${{ needs.detect-version.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Validate release secrets
         env:
@@ -96,18 +152,6 @@ jobs:
           cargo install bevy_cef_render_process
           cargo install bevy_cef_bundle_app
 
-      - name: Run lint
-        run: make lint
-
-      - name: Run tests
-        run: make test
-
-      - name: Free build artifacts before packaging
-        run: |
-          df -h
-          rm -rf target
-          df -h
-
       - name: Install cargo-packager (patched for macOS Tahoe)
         run: cargo install --path patches/cargo-packager-0.11.8
 
@@ -141,7 +185,6 @@ jobs:
           cargo packager signer sign "${TARBALL}" \
             --private-key "${VMUX_UPDATE_PRIVATE_KEY}" \
             --password "${VMUX_UPDATE_PRIVATE_KEY_PASSWORD}"
-          # Produces ${TARBALL}.sig
 
       - name: Generate update manifest
         run: |
@@ -149,7 +192,8 @@ jobs:
           SIG=$(cat "${TARBALL}.sig")
           URL="https://github.com/vmux-ai/vmux/releases/download/v${VERSION}/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
           DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          cat > target/release/update-manifest.json <<EOF
+          mkdir -p website/public
+          cat > website/public/updates.json <<EOF
           {
             "version": "v${VERSION}",
             "pub_date": "${DATE}",
@@ -163,23 +207,10 @@ jobs:
           }
           EOF
 
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          DMG_PATH=$(ls target/release/Vmux_*.dmg)
-          gh release create "v${VERSION}" \
-            --title "Vmux v${VERSION}" \
-            --generate-notes \
-            "$DMG_PATH" \
-            "target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz" \
-            "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz" \
-            "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz.sig" \
-            "target/release/update-manifest.json"
+      - name: Capture release SHA
+        run: echo "RELEASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Update Homebrew cask
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           DMG_PATH=$(ls target/release/Vmux_*.dmg)
           DMG_NAME=$(basename "$DMG_PATH")
@@ -189,8 +220,66 @@ jobs:
           sed -i '' "s/sha256 \".*\"/sha256 \"${DMG_SHA}\"/" Casks/vmux.rb
           sed -i '' "s|^  url \".*\"|  url \"https://github.com/vmux-ai/vmux/releases/download/v${VERSION}/${DMG_NAME}\"|" Casks/vmux.rb
 
+      - name: Commit cask + manifest to main
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/vmux.rb
-          git diff --cached --quiet || git commit -m "chore: update Homebrew cask to ${VERSION}"
-          git push
+          git add Casks/vmux.rb website/public/updates.json
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore(release): update cask and update manifest to ${VERSION}"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Create and push tag
+        run: |
+          remote_tag_sha=$(git ls-remote --tags origin "refs/tags/$TAG^{}" | awk '{print $1}')
+          if [ -z "$remote_tag_sha" ]; then
+            remote_tag_sha=$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')
+          fi
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            TAG_SHA=$(git rev-parse "$TAG^{commit}")
+            if [ "$TAG_SHA" != "$RELEASE_SHA" ]; then
+              echo "::error::Tag $TAG points at $TAG_SHA, expected $RELEASE_SHA"
+              exit 1
+            fi
+            echo "Tag $TAG already points at $RELEASE_SHA"
+          elif [ -z "$remote_tag_sha" ]; then
+            git tag -a "$TAG" "$RELEASE_SHA" -m "Vmux $TAG"
+          fi
+          if [ -n "$remote_tag_sha" ]; then
+            if [ "$remote_tag_sha" != "$RELEASE_SHA" ]; then
+              echo "::error::Tag $TAG on origin points at $remote_tag_sha, expected $RELEASE_SHA"
+              exit 1
+            fi
+            echo "Tag $TAG already exists on origin at $RELEASE_SHA"
+          else
+            git push origin "$TAG"
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DMG_PATH=$(ls target/release/Vmux_*.dmg)
+          ASSETS=(
+            "$DMG_PATH"
+            "target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz"
+            "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
+            "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz.sig"
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$TAG" \
+              --title "Vmux $TAG" \
+              --generate-notes \
+              "${ASSETS[@]}"
+          fi
+
+      - name: Dispatch website deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-website.yml --ref main
