@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'Casks/**'
+      - 'website/public/updates.json'
   workflow_dispatch:
 
 permissions:
@@ -168,6 +171,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       website: ${{ steps.filter.outputs.website }}
+      packaging: ${{ steps.filter.outputs.packaging }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -176,6 +180,15 @@ jobs:
           filters: |
             website:
               - 'website/**'
+            packaging:
+              - 'scripts/**'
+              - 'patches/**'
+              - 'packaging/**'
+              - 'Cargo.toml'
+              - 'crates/vmux_desktop/Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/release.yml'
+              - '.github/workflows/ci.yml'
 
   website:
     name: Website Build
@@ -210,9 +223,9 @@ jobs:
 
   build-mac:
     name: Build macOS App
+    needs: changes
+    if: needs.changes.outputs.packaging == 'true'
     runs-on: macos-latest
-    env:
-      HAS_SIGNING_CERT: ${{ secrets.APPLE_CERTIFICATE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -240,11 +253,13 @@ jobs:
       - name: Install dioxus-cli
         run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
-      - name: Install bevy_cef_bundle_app
-        run: command -v bevy_cef_bundle_app >/dev/null 2>&1 || cargo install bevy_cef_bundle_app --locked
+      - name: Install bevy_cef tools
+        run: |
+          command -v bevy_cef_render_process >/dev/null 2>&1 || cargo install bevy_cef_render_process
+          command -v bevy_cef_bundle_app >/dev/null 2>&1 || cargo install bevy_cef_bundle_app
 
-      - name: Install cargo-packager
-        run: command -v cargo-packager >/dev/null 2>&1 || cargo install cargo-packager --locked
+      - name: Install cargo-packager (patched for macOS Tahoe)
+        run: cargo install --path patches/cargo-packager-0.11.8
 
       - name: Install tailwindcss
         run: |
@@ -254,52 +269,20 @@ jobs:
             sudo mv tailwindcss-macos-arm64 /usr/local/bin/tailwindcss
           fi
 
-      - name: Strip signing config for CI
-        run: |
-          sed -i '' '/signing-identity/d' crates/vmux_desktop/Cargo.toml
-
-      - name: Package
-        run: env -u CEF_PATH cargo packager --release
-
-      - name: Import signing certificate
-        if: env.HAS_SIGNING_CERT == 'true'
+      - name: Build, sign, notarize, and package DMG
         env:
-          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          CERT_FILE=$(mktemp /tmp/cert.XXXXXX.p12)
-          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$CERT_FILE"
-          KEYCHAIN="build.keychain-db"
-          KEYCHAIN_PASSWORD=$(uuidgen)
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security import "$CERT_FILE" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-          rm -f "$CERT_FILE"
-
-      - name: Sign and notarize
-        if: env.HAS_SIGNING_CERT == 'true'
-        env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: ./scripts/sign-and-notarize.sh
-
-      - name: Re-create .dmg from signed .app
-        if: env.HAS_SIGNING_CERT == 'true'
-        run: |
-          rm -f target/release/*.dmg
-          hdiutil create -volname "Vmux" \
-            -srcfolder target/release/Vmux.app \
-            -ov -format UDZO \
-            target/release/Vmux.dmg
+          VMUX_UPDATE_PUBLIC_KEY: ${{ secrets.VMUX_UPDATE_PUBLIC_KEY }}
+        run: ./scripts/build-mac-release.sh
 
       - name: Upload .dmg
         uses: actions/upload-artifact@v4
         with:
           name: Vmux-${{ github.sha }}.dmg
-          path: target/release/*.dmg
+          path: target/release/Vmux_*.dmg
           retention-days: 7
