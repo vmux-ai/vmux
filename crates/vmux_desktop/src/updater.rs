@@ -4,8 +4,7 @@ use std::time::Duration;
 
 use crate::settings::AppSettings;
 
-const DEFAULT_ENDPOINT: &str =
-    "https://github.com/vmux-ai/vmux/releases/latest/download/update-manifest.json";
+const DEFAULT_ENDPOINT: &str = "https://vmux.ai/updates.json";
 
 fn default_pubkey() -> String {
     default_pubkey_from_env(
@@ -257,6 +256,11 @@ fn run_update_check(endpoint: &str, pubkey: &str) -> UpdateResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_endpoint_is_vmux_ai_updates_json() {
+        assert_eq!(DEFAULT_ENDPOINT, "https://vmux.ai/updates.json");
+    }
 
     #[test]
     fn default_pubkey_uses_runtime_env_first() {
