@@ -29,10 +29,10 @@ rm -rf "$WEBVIEW_ROOT"
 mkdir -p "$WEBVIEW_ROOT"
 
 copy_webview_app "layout" "vmux_layout"
-copy_webview_app "command-bar" "vmux_command_bar"
+copy_webview_app "command-bar" "vmux_command"
 copy_webview_app "terminal" "vmux_terminal"
-copy_webview_app "services" "vmux_processes"
+copy_webview_app "services" "vmux_process"
 copy_webview_app "history" "vmux_history"
-copy_webview_app "sessions" "vmux_sessions"
+copy_webview_app "sessions" "vmux_session"
 
 echo "copy-webview-assets: copied webview assets to $WEBVIEW_ROOT"
