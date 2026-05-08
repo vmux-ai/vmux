@@ -507,11 +507,7 @@ mod tests {
             .spawn(crate::layout::tab::tab_bundle())
             .insert(ChildOf(pane))
             .id();
-        let terminal = app
-            .world_mut()
-            .spawn(Terminal)
-            .insert(ChildOf(tab))
-            .id();
+        let terminal = app.world_mut().spawn(Terminal).insert(ChildOf(tab)).id();
 
         app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
         app.world_mut().resource_mut::<FocusedTab>().tab = Some(tab);
