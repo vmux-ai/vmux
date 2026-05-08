@@ -74,7 +74,7 @@ pub enum AppCommand {
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TabCommand {
     #[default]
-    #[menu(id = "tab_new", label = "New Tab", accel = "super+t", agent)]
+    #[menu(id = "tab_new", label = "New Tab", accel = "super+t")]
     New,
     #[menu(id = "tab_close", label = "Close Tab", accel = "super+w")]
     Close,
@@ -175,18 +175,16 @@ pub enum BrowserCommand {
     #[menu(
         id = "browser_open_command_bar",
         label = "Command Bar",
-        accel = "super+k",
-        agent
+        accel = "super+k"
     )]
     OpenCommandBar,
     #[menu(
         id = "browser_open_path_bar",
         label = "Path Navigator",
-        accel = "super+/",
-        agent
+        accel = "super+/"
     )]
     OpenPathBar,
-    #[menu(id = "browser_open_commands", label = "Commands", agent)]
+    #[menu(id = "browser_open_commands", label = "Commands")]
     #[shortcut(direct = ">")]
     OpenCommands,
     #[menu(id = "browser_find", label = "Find", accel = "super+f", hidden)]
@@ -438,11 +436,34 @@ mod tests {
     }
 
     #[test]
-    fn agent_command_lookup_exposes_only_allowlisted_commands() {
+    fn agent_lookup_resolves_every_command_id() {
+        let entries = AppCommand::agent_entries();
+        assert!(!entries.is_empty(), "agent_entries should not be empty");
+
+        for (id, _description) in &entries {
+            assert!(
+                AppCommand::from_agent_id(id).is_some(),
+                "from_agent_id failed to resolve {id}"
+            );
+        }
+
+        assert_eq!(
+            AppCommand::from_agent_id("tab_close"),
+            Some(AppCommand::Tab(TabCommand::Close))
+        );
+        assert_eq!(
+            AppCommand::from_agent_id("split_v"),
+            Some(AppCommand::Pane(PaneCommand::SplitV))
+        );
         assert_eq!(
             AppCommand::from_agent_id("browser_open_command_bar"),
             Some(AppCommand::Browser(BrowserCommand::OpenCommandBar))
         );
-        assert_eq!(AppCommand::from_agent_id("tab_close"), None);
+
+        let split_v = entries
+            .iter()
+            .find(|(id, _)| *id == "split_v")
+            .expect("split_v in agent_entries");
+        assert_eq!(split_v.1, "Split Vertically");
     }
 }

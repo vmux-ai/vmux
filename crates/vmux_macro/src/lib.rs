@@ -221,7 +221,6 @@ struct MenuProps {
     label: Option<String>,
     accel: Option<String>,
     hidden: bool,
-    agent: bool,
 }
 
 impl MenuProps {
@@ -230,7 +229,6 @@ impl MenuProps {
         let mut label = None;
         let mut accel = None;
         let mut hidden = false;
-        let mut agent = false;
         for attr in attrs {
             if !attr.path().is_ident("menu") {
                 continue;
@@ -247,8 +245,6 @@ impl MenuProps {
                     accel = Some(v.value());
                 } else if meta.path.is_ident("hidden") {
                     hidden = true;
-                } else if meta.path.is_ident("agent") {
-                    agent = true;
                 }
                 Ok(())
             })?;
@@ -258,7 +254,6 @@ impl MenuProps {
             label,
             accel,
             hidden,
-            agent,
         })
     }
 }
@@ -570,34 +565,44 @@ fn impl_command_bar_leaf(
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut entries = Vec::new();
+    let mut agent_entries = Vec::new();
     let mut agent_arms = Vec::new();
 
     for variant in &data.variants {
         let props = MenuProps::from_attrs(&variant.attrs)?;
         let variant_ident = &variant.ident;
-        if props.agent
-            && let Some(id) = &props.id
-        {
-            let id_lit = id.as_str();
-            agent_arms.push(quote! {
-                #id_lit => ::core::option::Option::Some(#ident::#variant_ident),
-            });
-        }
+
+        let Some(id) = &props.id else {
+            continue;
+        };
+        let id_lit = id.as_str();
+
+        let description = props
+            .label
+            .as_deref()
+            .map(|l| l.split('\t').next().unwrap_or(l).trim())
+            .unwrap_or("");
+
+        agent_entries.push(quote! {
+            (#id_lit, #description)
+        });
+        agent_arms.push(quote! {
+            #id_lit => ::core::option::Option::Some(#ident::#variant_ident),
+        });
+
         if props.hidden {
             continue;
         }
-        let (Some(id), Some(label)) = (&props.id, &props.label) else {
+        let Some(label) = &props.label else {
             continue;
         };
 
-        // Split label on \t: name is before, tab-hint is after
         let (name, tab_hint) = if let Some(pos) = label.find('\t') {
             (&label[..pos], Some(label[pos + 1..].to_string()))
         } else {
             (label.as_str(), None)
         };
 
-        // Build display shortcut: prefer accel, fall back to tab hint
         let shortcut = if let Some(ref accel) = props.accel {
             accel_to_display(accel)
         } else if let Some(ref hint) = tab_hint {
@@ -607,7 +612,7 @@ fn impl_command_bar_leaf(
         };
 
         entries.push(quote! {
-            (#id, #name, #shortcut)
+            (#id_lit, #name, #shortcut)
         });
     }
 
@@ -615,6 +620,10 @@ fn impl_command_bar_leaf(
         impl #ident {
             pub fn command_bar_entries() -> ::std::vec::Vec<(&'static str, &'static str, &'static str)> {
                 ::std::vec![#(#entries),*]
+            }
+
+            pub fn agent_entries() -> ::std::vec::Vec<(&'static str, &'static str)> {
+                ::std::vec![#(#agent_entries),*]
             }
 
             pub fn from_agent_id(id: &str) -> ::core::option::Option<Self> {
@@ -632,6 +641,7 @@ fn impl_command_bar_root(
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut extend_calls = Vec::new();
+    let mut agent_extend_calls = Vec::new();
     let mut agent_clauses = Vec::new();
 
     for variant in &data.variants {
@@ -651,6 +661,9 @@ fn impl_command_bar_root(
         let variant_ident = &variant.ident;
         extend_calls.push(quote! {
             entries.extend(<#inner_ty>::command_bar_entries());
+        });
+        agent_extend_calls.push(quote! {
+            entries.extend(<#inner_ty>::agent_entries());
         });
         agent_clauses.push(quote! {
             <#inner_ty>::from_agent_id(id).map(#ident::#variant_ident)
@@ -672,6 +685,12 @@ fn impl_command_bar_root(
             pub fn command_bar_entries() -> ::std::vec::Vec<(&'static str, &'static str, &'static str)> {
                 let mut entries = ::std::vec::Vec::new();
                 #(#extend_calls)*
+                entries
+            }
+
+            pub fn agent_entries() -> ::std::vec::Vec<(&'static str, &'static str)> {
+                let mut entries = ::std::vec::Vec::new();
+                #(#agent_extend_calls)*
                 entries
             }
 
