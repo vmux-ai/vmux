@@ -13,4 +13,5 @@ path = "src/lib.rs"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+vmux_command = { path = "../vmux_command" }
 vmux_service = { path = "../vmux_service" }

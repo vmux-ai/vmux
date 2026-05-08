@@ -9040,6 +9040,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "vmux_command",
  "vmux_service",
 ]
 

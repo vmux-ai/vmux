@@ -1,5 +1,6 @@
 use serde::Serialize;
 use serde_json::{Value, json};
+use vmux_command::command::AppCommand;
 use vmux_service::protocol::{AgentCommand, AgentShellMode};
 
 #[derive(Clone, Debug, Serialize)]
@@ -11,61 +12,65 @@ pub struct ToolDefinition {
 }
 
 pub fn tool_definitions() -> Vec<ToolDefinition> {
-    vec![
-        ToolDefinition {
-            name: "open_command_bar".to_string(),
-            description: "Open the Vmux command bar.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "mode": {
-                        "type": "string",
-                        "enum": ["default", "commands", "path"]
-                    }
-                }
-            }),
-        },
-        ToolDefinition {
-            name: "new_tab".to_string(),
-            description: "Create a new Vmux tab and open the command bar.".to_string(),
+    let mut tools: Vec<ToolDefinition> = AppCommand::agent_entries()
+        .into_iter()
+        .map(|(id, description)| ToolDefinition {
+            name: id.to_string(),
+            description: description.to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {}
             }),
-        },
-        ToolDefinition {
-            name: "new_terminal_tab".to_string(),
-            description: "Create a visible Vmux terminal tab.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "cwd": {
-                        "type": "string"
-                    }
+        })
+        .collect();
+
+    tools.push(ToolDefinition {
+        name: "open_command_bar".to_string(),
+        description: "Open the Vmux command bar.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["default", "commands", "path"]
                 }
-            }),
-        },
-        ToolDefinition {
-            name: "run_shell".to_string(),
-            description: "Run a shell command in a visible Vmux terminal.".to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string"
-                    },
-                    "cwd": {
-                        "type": "string"
-                    },
-                    "mode": {
-                        "type": "string",
-                        "enum": ["new_tab", "active"]
-                    }
+            }
+        }),
+    });
+    tools.push(ToolDefinition {
+        name: "new_terminal_tab".to_string(),
+        description: "Create a visible Vmux terminal tab.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "cwd": {
+                    "type": "string"
+                }
+            }
+        }),
+    });
+    tools.push(ToolDefinition {
+        name: "run_shell".to_string(),
+        description: "Run a shell command in a visible Vmux terminal.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string"
                 },
-                "required": ["command"]
-            }),
-        },
-    ]
+                "cwd": {
+                    "type": "string"
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["new_tab", "active"]
+                }
+            },
+            "required": ["command"]
+        }),
+    });
+
+    tools
 }
 
 pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<AgentCommand, String> {
@@ -80,9 +85,6 @@ pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<Agen
             };
             Ok(AgentCommand::AppCommand { id: id.to_string() })
         }
-        "new_tab" => Ok(AgentCommand::AppCommand {
-            id: "tab_new".to_string(),
-        }),
         "new_terminal_tab" => Ok(AgentCommand::NewTerminalTab {
             cwd: optional_string(&arguments, "cwd")
                 .unwrap_or_default()
@@ -108,7 +110,15 @@ pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<Agen
                 mode,
             })
         }
-        other => Err(format!("unknown tool: {other}")),
+        other => {
+            if AppCommand::from_agent_id(other).is_some() {
+                Ok(AgentCommand::AppCommand {
+                    id: other.to_string(),
+                })
+            } else {
+                Err(format!("unknown tool: {other}"))
+            }
+        }
     }
 }
 
@@ -119,23 +129,57 @@ fn optional_string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_service::protocol::AgentCommand;
 
-    #[test]
-    fn list_tools_exposes_mvp_tools() {
-        let names: Vec<_> = tool_definitions()
+    fn tool_names() -> Vec<String> {
+        tool_definitions()
             .into_iter()
             .map(|tool| tool.name)
-            .collect();
+            .collect()
+    }
 
-        assert_eq!(
-            names,
-            vec![
-                "open_command_bar",
-                "new_tab",
-                "new_terminal_tab",
-                "run_shell"
-            ]
+    #[test]
+    fn list_tools_includes_auto_generated_and_handwritten() {
+        let names = tool_names();
+
+        for hand in ["open_command_bar", "new_terminal_tab", "run_shell"] {
+            assert!(
+                names.contains(&hand.to_string()),
+                "missing hand-written {hand}"
+            );
+        }
+        for auto in [
+            "tab_new",
+            "tab_close",
+            "split_v",
+            "terminal_clear",
+            "browser_reload",
+        ] {
+            assert!(
+                names.contains(&auto.to_string()),
+                "missing auto-generated {auto}"
+            );
+        }
+        assert!(
+            !names.contains(&"new_tab".to_string()),
+            "removed hand-written new_tab should not appear"
         );
+    }
+
+    #[test]
+    fn auto_generated_tool_dispatches_as_app_command() {
+        let command = agent_command_from_tool_call("split_v", serde_json::json!({})).unwrap();
+        assert_eq!(
+            command,
+            AgentCommand::AppCommand {
+                id: "split_v".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn unknown_tool_returns_error() {
+        assert!(agent_command_from_tool_call("nope_not_a_tool", serde_json::json!({})).is_err());
     }
 
     #[test]
