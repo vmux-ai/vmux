@@ -99,6 +99,22 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
         }),
     });
 
+    tools.push(ToolDefinition {
+        name: "select_tab".to_string(),
+        description: "Select a tab by index (1-8).".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "index": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 8
+                }
+            },
+            "required": ["index"]
+        }),
+    });
+
     tools
 }
 
@@ -156,6 +172,20 @@ pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<Agen
                 return Err("terminal_send.text is empty".to_string());
             }
             Ok(AgentCommand::TerminalSend { text })
+        }
+        "select_tab" => {
+            let index = arguments
+                .get("index")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| "select_tab.index is required (integer 1-8)".to_string())?;
+            if !(1..=8).contains(&index) {
+                return Err(format!(
+                    "select_tab.index must be between 1 and 8, got {index}"
+                ));
+            }
+            Ok(AgentCommand::AppCommand {
+                id: format!("tab_select_{index}"),
+            })
         }
         other => {
             if AppCommand::from_agent_id(other).is_some() {
@@ -284,5 +314,33 @@ mod tests {
     #[test]
     fn terminal_send_missing_text_returns_error() {
         assert!(agent_command_from_tool_call("terminal_send", serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn list_tools_includes_select_tab() {
+        let names = tool_names();
+        assert!(names.contains(&"select_tab".to_string()));
+    }
+
+    #[test]
+    fn select_tab_dispatches_to_tab_select_id() {
+        let command =
+            agent_command_from_tool_call("select_tab", serde_json::json!({"index": 3})).unwrap();
+        assert_eq!(
+            command,
+            AgentCommand::AppCommand {
+                id: "tab_select_3".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn select_tab_out_of_range_returns_error() {
+        assert!(
+            agent_command_from_tool_call("select_tab", serde_json::json!({"index": 0})).is_err()
+        );
+        assert!(
+            agent_command_from_tool_call("select_tab", serde_json::json!({"index": 9})).is_err()
+        );
     }
 }
