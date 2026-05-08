@@ -287,6 +287,15 @@ fn handle_agent_commands(
                     url: url.clone(),
                 });
             }
+            ServiceAgentCommand::TerminalSend { text } => {
+                let Some(terminal) = active_terminal_for_tab(focus.tab, &terminals) else {
+                    warn!("agent terminal_send has no active terminal");
+                    continue;
+                };
+                commands.entity(terminal).insert(PendingTerminalInput {
+                    data: text.as_bytes().to_vec(),
+                });
+            }
         }
     }
 }
@@ -479,5 +488,49 @@ mod tests {
             app.world().get::<PageMetadata>(tab).unwrap().url,
             TERMINAL_WEBVIEW_URL
         );
+    }
+
+    #[test]
+    fn terminal_send_writes_raw_text_to_active_terminal() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        let tab = app
+            .world_mut()
+            .spawn(crate::layout::tab::tab_bundle())
+            .insert(ChildOf(pane))
+            .id();
+        let terminal = app
+            .world_mut()
+            .spawn(Terminal)
+            .insert(ChildOf(tab))
+            .id();
+
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedTab>().tab = Some(tab);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                _request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::TerminalSend {
+                    text: "ls".to_string(),
+                },
+            });
+
+        app.update();
+
+        let pending = app
+            .world()
+            .get::<PendingTerminalInput>(terminal)
+            .expect("PendingTerminalInput inserted");
+        assert_eq!(pending.data, b"ls".to_vec());
     }
 }

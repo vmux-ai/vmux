@@ -84,6 +84,21 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
         }),
     });
 
+    tools.push(ToolDefinition {
+        name: "terminal_send".to_string(),
+        description: "Send raw text to the active terminal (no carriage return appended)."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string"
+                }
+            },
+            "required": ["text"]
+        }),
+    });
+
     tools
 }
 
@@ -132,6 +147,15 @@ pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<Agen
                 return Err("browser_navigate.url is empty".to_string());
             }
             Ok(AgentCommand::BrowserNavigate { url })
+        }
+        "terminal_send" => {
+            let text = optional_string(&arguments, "text")
+                .ok_or_else(|| "terminal_send.text is required".to_string())?
+                .to_string();
+            if text.is_empty() {
+                return Err("terminal_send.text is empty".to_string());
+            }
+            Ok(AgentCommand::TerminalSend { text })
         }
         other => {
             if AppCommand::from_agent_id(other).is_some() {
@@ -236,5 +260,29 @@ mod tests {
         assert!(
             agent_command_from_tool_call("run_shell", serde_json::json!({"command": ""})).is_err()
         );
+    }
+
+    #[test]
+    fn list_tools_includes_terminal_send() {
+        let names = tool_names();
+        assert!(names.contains(&"terminal_send".to_string()));
+    }
+
+    #[test]
+    fn terminal_send_dispatches_with_text() {
+        let command =
+            agent_command_from_tool_call("terminal_send", serde_json::json!({"text": "ls"}))
+                .unwrap();
+        assert_eq!(
+            command,
+            AgentCommand::TerminalSend {
+                text: "ls".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn terminal_send_missing_text_returns_error() {
+        assert!(agent_command_from_tool_call("terminal_send", serde_json::json!({})).is_err());
     }
 }

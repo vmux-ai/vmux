@@ -79,6 +79,9 @@ pub enum AgentCommand {
     BrowserNavigate {
         url: String,
     },
+    TerminalSend {
+        text: String,
+    },
 }
 
 pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str> {
@@ -89,6 +92,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::BrowserNavigate { url } if url.trim().is_empty() => {
             Err("browser_navigate.url is empty")
+        }
+        AgentCommand::TerminalSend { text } if text.is_empty() => {
+            Err("terminal_send.text is empty")
         }
         _ => Ok(()),
     }
@@ -345,6 +351,16 @@ mod tests {
                 mode: AgentShellMode::NewTab,
             }),
             Err("run_shell.command is empty")
+        );
+    }
+
+    #[test]
+    fn empty_terminal_send_text_is_invalid() {
+        assert_eq!(
+            validate_agent_command(&AgentCommand::TerminalSend {
+                text: String::new(),
+            }),
+            Err("terminal_send.text is empty")
         );
     }
 }
