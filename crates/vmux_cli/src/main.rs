@@ -8,7 +8,7 @@ use commands::{Cli, Command};
 async fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Some(Command::Mcp) => Ok(()),
+        Some(Command::Mcp) => commands::mcp::run().await,
         None => Ok(()),
     }
 }

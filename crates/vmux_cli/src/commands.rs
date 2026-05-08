@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 
+pub mod mcp;
+
 #[derive(Debug, Parser)]
 #[command(name = "vmux", version, about = "Vmux command-line interface")]
 pub struct Cli {
