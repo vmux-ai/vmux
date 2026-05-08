@@ -84,6 +84,69 @@ pub enum AgentCommand {
     },
 }
 
+pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AgentQuery {
+    GetState,
+    ListTabs,
+    ListSpaces,
+    ListTerminals,
+    GetFocused,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct TabInfo {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct TerminalInfo {
+    pub id: String,
+    pub cwd: String,
+    pub pid: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct PaneInfo {
+    pub id: String,
+    pub tabs: Vec<TabInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct SpaceInfo {
+    pub id: String,
+    pub name: String,
+    pub panes: Vec<PaneInfo>,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct FocusedInfo {
+    pub space: Option<String>,
+    pub pane: Option<String>,
+    pub tab: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct StateSnapshot {
+    pub spaces: Vec<SpaceInfo>,
+    pub focused: FocusedInfo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AgentQueryResult {
+    State(StateSnapshot),
+    Tabs(Vec<TabInfo>),
+    Spaces(Vec<SpaceInfo>),
+    Terminals(Vec<TerminalInfo>),
+    Focused(FocusedInfo),
+    Error(String),
+}
+
 pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str> {
     match command {
         AgentCommand::AppCommand { id } if id.trim().is_empty() => Err("app_command.id is empty"),
@@ -169,6 +232,14 @@ pub enum ClientMessage {
         command: AgentCommand,
     },
     Shutdown,
+    AgentQuery {
+        request_id: AgentRequestId,
+        query: AgentQuery,
+    },
+    AgentQueryResponse {
+        request_id: AgentRequestId,
+        result: AgentQueryResult,
+    },
 }
 
 /// Vim-style visual/copy-mode action sent by the GUI to the service.
@@ -307,6 +378,14 @@ pub enum ServiceMessage {
     AgentCommandAccepted {
         request_id: AgentRequestId,
     },
+    AgentQuery {
+        request_id: AgentRequestId,
+        query: AgentQuery,
+    },
+    AgentQueryResult {
+        request_id: AgentRequestId,
+        result: AgentQueryResult,
+    },
 }
 
 /// Metadata about a process, returned in ProcessList.
@@ -362,5 +441,64 @@ mod tests {
             }),
             Err("terminal_send.text is empty")
         );
+    }
+
+    #[test]
+    fn agent_query_roundtrips() {
+        let q = AgentQuery::ListTabs;
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
+        let decoded = rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded, q);
+    }
+
+    #[test]
+    fn agent_query_result_state_roundtrips() {
+        let snapshot = StateSnapshot {
+            spaces: vec![SpaceInfo {
+                id: "1v0".to_string(),
+                name: "Main".to_string(),
+                panes: vec![PaneInfo {
+                    id: "2v0".to_string(),
+                    tabs: vec![TabInfo {
+                        id: "3v0".to_string(),
+                        title: "Hello".to_string(),
+                        url: "https://example.com".to_string(),
+                        kind: "browser".to_string(),
+                    }],
+                }],
+                active: true,
+            }],
+            focused: FocusedInfo {
+                space: Some("1v0".to_string()),
+                pane: Some("2v0".to_string()),
+                tab: Some("3v0".to_string()),
+            },
+        };
+        let result = AgentQueryResult::State(snapshot.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&result).unwrap();
+        let decoded = rkyv::from_bytes::<AgentQueryResult, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded, result);
+    }
+
+    #[test]
+    fn agent_query_message_variants_roundtrip() {
+        let request_id = AgentRequestId::new();
+        let client_msg = ClientMessage::AgentQuery {
+            request_id,
+            query: AgentQuery::GetFocused,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client_msg).unwrap();
+        let _decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
+
+        let service_msg = ServiceMessage::AgentQueryResult {
+            request_id,
+            result: AgentQueryResult::Focused(FocusedInfo {
+                space: None,
+                pane: None,
+                tab: None,
+            }),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&service_msg).unwrap();
+        let _decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
     }
 }

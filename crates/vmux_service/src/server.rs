@@ -380,6 +380,7 @@ async fn handle_client(
                 // After responding, exit
                 std::process::exit(0);
             }
+            ClientMessage::AgentQuery { .. } | ClientMessage::AgentQueryResponse { .. } => {}
         }
     }
 
