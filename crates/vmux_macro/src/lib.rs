@@ -221,6 +221,7 @@ struct MenuProps {
     label: Option<String>,
     accel: Option<String>,
     hidden: bool,
+    agent: bool,
 }
 
 impl MenuProps {
@@ -229,6 +230,7 @@ impl MenuProps {
         let mut label = None;
         let mut accel = None;
         let mut hidden = false;
+        let mut agent = false;
         for attr in attrs {
             if !attr.path().is_ident("menu") {
                 continue;
@@ -245,6 +247,8 @@ impl MenuProps {
                     accel = Some(v.value());
                 } else if meta.path.is_ident("hidden") {
                     hidden = true;
+                } else if meta.path.is_ident("agent") {
+                    agent = true;
                 }
                 Ok(())
             })?;
@@ -254,6 +258,7 @@ impl MenuProps {
             label,
             accel,
             hidden,
+            agent,
         })
     }
 }
@@ -565,9 +570,19 @@ fn impl_command_bar_leaf(
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut entries = Vec::new();
+    let mut agent_arms = Vec::new();
 
     for variant in &data.variants {
         let props = MenuProps::from_attrs(&variant.attrs)?;
+        let variant_ident = &variant.ident;
+        if props.agent
+            && let Some(id) = &props.id
+        {
+            let id_lit = id.as_str();
+            agent_arms.push(quote! {
+                #id_lit => ::core::option::Option::Some(#ident::#variant_ident),
+            });
+        }
         if props.hidden {
             continue;
         }
@@ -601,6 +616,13 @@ fn impl_command_bar_leaf(
             pub fn command_bar_entries() -> ::std::vec::Vec<(&'static str, &'static str, &'static str)> {
                 ::std::vec![#(#entries),*]
             }
+
+            pub fn from_agent_id(id: &str) -> ::core::option::Option<Self> {
+                match id {
+                    #(#agent_arms)*
+                    _ => ::core::option::Option::None,
+                }
+            }
         }
     })
 }
@@ -610,6 +632,7 @@ fn impl_command_bar_root(
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut extend_calls = Vec::new();
+    let mut agent_clauses = Vec::new();
 
     for variant in &data.variants {
         let Fields::Unnamed(fields) = &variant.fields else {
@@ -625,10 +648,24 @@ fn impl_command_bar_root(
             ));
         };
         let inner_ty = &field.ty;
+        let variant_ident = &variant.ident;
         extend_calls.push(quote! {
             entries.extend(<#inner_ty>::command_bar_entries());
         });
+        agent_clauses.push(quote! {
+            <#inner_ty>::from_agent_id(id).map(#ident::#variant_ident)
+        });
     }
+
+    let from_agent_body = if agent_clauses.is_empty() {
+        quote! { ::core::option::Option::None }
+    } else {
+        let first = &agent_clauses[0];
+        let chained = agent_clauses[1..]
+            .iter()
+            .fold(quote! { #first }, |acc, c| quote! { #acc.or_else(|| #c) });
+        quote! { #chained }
+    };
 
     Ok(quote! {
         impl #ident {
@@ -636,6 +673,10 @@ fn impl_command_bar_root(
                 let mut entries = ::std::vec::Vec::new();
                 #(#extend_calls)*
                 entries
+            }
+
+            pub fn from_agent_id(id: &str) -> ::core::option::Option<Self> {
+                #from_agent_body
             }
         }
     })

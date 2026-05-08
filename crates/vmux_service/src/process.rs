@@ -206,15 +206,6 @@ impl Process {
         ));
         drop(pair.slave);
 
-        if !cwd.is_empty()
-            && cwd_path.exists()
-            && let Ok(mut w) = writer.lock()
-        {
-            let cd_cmd = format!("cd {}\n", cwd);
-            let _ = w.write_all(cd_cmd.as_bytes());
-            let _ = w.flush();
-        }
-
         let (pty_tx, pty_rx) = mpsc::unbounded_channel();
         let wake_process_id = id;
         std::thread::Builder::new()
@@ -1441,6 +1432,70 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+
+    #[test]
+    fn process_starts_in_requested_cwd_without_typing_cd() {
+        let temp = std::env::temp_dir().join(format!("vmux-process-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let cwd = temp.to_string_lossy().into_owned();
+        let (wake_tx, _) = mpsc::unbounded_channel();
+        let mut process = Process::new_with_wake(
+            "/bin/sh".to_string(),
+            cwd.clone(),
+            Vec::new(),
+            120,
+            24,
+            wake_tx,
+        )
+        .expect("process should spawn");
+
+        drain_process_output(&mut process, Duration::from_millis(300));
+        process.write_input(b"pwd\r");
+        let text = wait_for_snapshot_text(&mut process, &cwd);
+
+        process.kill();
+        let _ = std::fs::remove_dir_all(&temp);
+
+        assert!(text.contains(&cwd));
+        assert!(!text.contains(&format!("cd {cwd}")));
+    }
+
+    fn drain_process_output(process: &mut Process, duration: Duration) {
+        let deadline = Instant::now() + duration;
+        while Instant::now() < deadline {
+            process.poll();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn wait_for_snapshot_text(process: &mut Process, needle: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            process.poll();
+            let text = snapshot_text(process.snapshot());
+            if text.contains(needle) || Instant::now() >= deadline {
+                return text;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn snapshot_text(snapshot: ServiceMessage) -> String {
+        let ServiceMessage::Snapshot { lines, .. } = snapshot else {
+            unreachable!();
+        };
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.text.as_str())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     #[test]
     fn write_input_to_writer_does_not_need_process_lock() {
         #[derive(Clone)]

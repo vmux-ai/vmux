@@ -222,6 +222,8 @@ fn is_emacs_nav_key(key: KeyCode, input: &ButtonInput<KeyCode>) -> bool {
             | KeyCode::KeyB
             | KeyCode::KeyN
             | KeyCode::KeyP
+            | KeyCode::KeyJ
+            | KeyCode::KeyK
             | KeyCode::KeyD
             | KeyCode::KeyH
     )
@@ -284,6 +286,9 @@ fn ime_event(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use bevy::prelude::{ButtonInput, KeyCode};
+
     #[test]
     fn ime_events_route_to_keyboard_targets() {
         let implementation = include_str!("keyboard.rs")
@@ -295,5 +300,15 @@ mod tests {
         assert!(implementation.contains("set_ime_composition_for"));
         assert!(implementation.contains("set_ime_commit_text_for"));
         assert!(implementation.contains("ime_cancel_composition_for"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ctrl_j_k_are_deduped_as_macos_nav_keys() {
+        let mut input = ButtonInput::<KeyCode>::default();
+        input.press(KeyCode::ControlLeft);
+
+        assert!(super::is_emacs_nav_key(KeyCode::KeyJ, &input));
+        assert!(super::is_emacs_nav_key(KeyCode::KeyK, &input));
     }
 }

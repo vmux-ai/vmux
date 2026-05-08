@@ -4,7 +4,11 @@ use dioxus::prelude::*;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarOpenEvent, CommandBarReadyEvent,
     CommandBarRenderedEvent, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
-    PathEntry,
+    PathEntry, command_bar_open_should_ack, command_bar_open_should_reset_input,
+};
+use vmux_command::keyboard::{
+    CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code,
+    ignore_physical_rerouted_ctrl_keydown,
 };
 use vmux_command::results::{
     CommandBarResultItem as ResultItem, SESSIONS_PAGE_URL, filter_results,
@@ -47,14 +51,26 @@ pub fn App() -> Element {
 
     let open_listener =
         use_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
+            let open_id = data.open_id;
+            let should_reset_input =
+                command_bar_open_should_reset_input(current_open_id(), open_id);
+            if !should_reset_input {
+                if command_bar_open_should_ack(open_id) {
+                    let _ = try_cef_emit_serde(&CommandBarRenderedEvent { open_id });
+                }
+                return;
+            }
+            current_open_id.set(open_id);
             path_completions.set(Vec::new());
-            current_open_id.set(data.open_id);
             query.set(data.url.clone());
             selected.set(0);
             nav_mode.set(false);
             new_tab.set(data.new_tab);
             state.set(data);
             is_open.set(true);
+            if command_bar_open_should_ack(open_id) {
+                last_rendered_open_id.set(0);
+            }
         });
 
     use_effect(move || {
@@ -335,6 +351,16 @@ pub fn App() -> Element {
                                     }
 
                                     let ctrl = e.modifiers().contains(Modifiers::CONTROL);
+                                    let vmux_synthetic = is_vmux_synthetic_dioxus_keydown(&e);
+                                    if ctrl
+                                        && ignore_physical_rerouted_ctrl_keydown(
+                                            &e.code().to_string(),
+                                            vmux_synthetic,
+                                        )
+                                    {
+                                        e.prevent_default();
+                                        return;
+                                    }
                                     let go_down = (e.key() == Key::ArrowDown && !ctrl)
                                         || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
                                     let go_up = (e.key() == Key::ArrowUp && !ctrl)
@@ -474,30 +500,32 @@ fn focus_and_install_ctrl_bindings() {
         if !e.ctrl_key() {
             return;
         }
+        if is_vmux_synthetic_keydown(&e) {
+            return;
+        }
         let code = e.code();
-        let action = match code.as_str() {
-            "KeyA" => "home",
-            "KeyE" => "end",
-            "KeyF" => "fwd",
-            "KeyB" => "back",
-            "KeyD" => "del",
-            "KeyH" => "bksp",
-            "KeyW" => "delw",
-            "KeyU" => "delbeg",
-            "KeyC" | "KeyN" | "KeyJ" | "KeyP" | "KeyK" => {
+        let action = match ctrl_key_capture_for_code(&code) {
+            CtrlKeyCapture::Ignore => return,
+            CtrlKeyCapture::PassToDioxus => {
                 e.prevent_default();
                 return;
             }
-            _ => return,
+            CtrlKeyCapture::RerouteToDioxus => {
+                e.prevent_default();
+                e.stop_immediate_propagation();
+                dispatch_ctrl_keydown(&input2, &code);
+                return;
+            }
+            CtrlKeyCapture::Edit(action) => action,
         };
         e.prevent_default();
         e.stop_immediate_propagation();
 
         match action {
-            "home" => {
+            CtrlEditAction::Home => {
                 let _ = input2.set_selection_range(0, 0);
             }
-            "end" => {
+            CtrlEditAction::End => {
                 let ghost = input2.get_attribute("data-ghost").unwrap_or_default();
                 if !ghost.is_empty() {
                     let new_val = format!("{}{}", input2.value(), ghost);
@@ -510,12 +538,12 @@ fn focus_and_install_ctrl_bindings() {
                     let _ = input2.set_selection_range(len, len);
                 }
             }
-            "fwd" => {
+            CtrlEditAction::Forward => {
                 let p = (input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) + 1)
                     .min(input2.value().len() as u32);
                 let _ = input2.set_selection_range(p, p);
             }
-            "back" => {
+            CtrlEditAction::Back => {
                 let p = input2
                     .selection_start()
                     .unwrap_or(Some(0))
@@ -523,7 +551,7 @@ fn focus_and_install_ctrl_bindings() {
                     .saturating_sub(1);
                 let _ = input2.set_selection_range(p, p);
             }
-            "del" => {
+            CtrlEditAction::Delete => {
                 let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
                 let v = input2.value();
                 let new_val = format!("{}{}", &v[..s], &v[(s + 1).min(v.len())..]);
@@ -531,7 +559,7 @@ fn focus_and_install_ctrl_bindings() {
                 let _ = input2.set_selection_range(s as u32, s as u32);
                 dispatch_input_event(&input2);
             }
-            "bksp" => {
+            CtrlEditAction::Backspace => {
                 let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
                 if s > 0 {
                     let v = input2.value();
@@ -541,7 +569,7 @@ fn focus_and_install_ctrl_bindings() {
                     dispatch_input_event(&input2);
                 }
             }
-            "delw" => {
+            CtrlEditAction::DeleteWord => {
                 let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
                 let v = input2.value();
                 let bytes = v.as_bytes();
@@ -557,14 +585,13 @@ fn focus_and_install_ctrl_bindings() {
                 let _ = input2.set_selection_range(i as u32, i as u32);
                 dispatch_input_event(&input2);
             }
-            "delbeg" => {
+            CtrlEditAction::DeleteToBeginning => {
                 let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
                 let v = input2.value();
                 input2.set_value(&v[s..]);
                 let _ = input2.set_selection_range(0, 0);
                 dispatch_input_event(&input2);
             }
-            _ => {}
         }
     }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
 
@@ -577,6 +604,54 @@ fn focus_and_install_ctrl_bindings() {
         &opts,
     );
     closure.forget();
+}
+
+fn is_vmux_synthetic_dioxus_keydown(e: &KeyboardEvent) -> bool {
+    e.data()
+        .downcast::<web_sys::KeyboardEvent>()
+        .map(is_vmux_synthetic_keydown)
+        .unwrap_or(false)
+}
+
+fn is_vmux_synthetic_keydown(e: &web_sys::KeyboardEvent) -> bool {
+    js_sys::Reflect::get(e.as_ref(), &JsValue::from_str("_vmuxSyntheticKeydown"))
+        .map(|v| v.is_truthy())
+        .unwrap_or(false)
+}
+
+fn key_for_code(code: &str) -> &str {
+    match code {
+        "KeyA" => "a",
+        "KeyB" => "b",
+        "KeyC" => "c",
+        "KeyD" => "d",
+        "KeyE" => "e",
+        "KeyF" => "f",
+        "KeyH" => "h",
+        "KeyJ" => "j",
+        "KeyK" => "k",
+        "KeyN" => "n",
+        "KeyP" => "p",
+        "KeyU" => "u",
+        "KeyW" => "w",
+        _ => "",
+    }
+}
+
+fn dispatch_ctrl_keydown(el: &web_sys::HtmlInputElement, code: &str) {
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_bubbles(true);
+    init.set_ctrl_key(true);
+    init.set_code(code);
+    init.set_key(key_for_code(code));
+    if let Ok(evt) = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init) {
+        let _ = js_sys::Reflect::set(
+            evt.as_ref(),
+            &JsValue::from_str("_vmuxSyntheticKeydown"),
+            &JsValue::TRUE,
+        );
+        let _ = el.dispatch_event(&evt);
+    }
 }
 
 /// Dispatch a synthetic "input" event so Dioxus picks up value changes.

@@ -40,6 +40,54 @@ impl std::str::FromStr for ProcessId {
     }
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct AgentRequestId(pub [u8; 16]);
+
+impl Default for AgentRequestId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AgentRequestId {
+    pub fn new() -> Self {
+        Self(*uuid::Uuid::new_v4().as_bytes())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AgentShellMode {
+    NewTab,
+    Active,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AgentCommand {
+    AppCommand {
+        id: String,
+    },
+    NewTerminalTab {
+        cwd: String,
+    },
+    RunShell {
+        command: String,
+        cwd: String,
+        mode: AgentShellMode,
+    },
+}
+
+pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str> {
+    match command {
+        AgentCommand::AppCommand { id } if id.trim().is_empty() => Err("app_command.id is empty"),
+        AgentCommand::RunShell { command, .. } if command.trim().is_empty() => {
+            Err("run_shell.command is empty")
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Messages sent from the GUI client to the service.
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ClientMessage {
@@ -102,6 +150,11 @@ pub enum ClientMessage {
     CopyModeKey {
         process_id: ProcessId,
         key: CopyModeKey,
+    },
+    SubscribeAgentCommands,
+    AgentCommand {
+        request_id: AgentRequestId,
+        command: AgentCommand,
     },
     Shutdown,
 }
@@ -235,6 +288,13 @@ pub enum ServiceMessage {
         mouse_capture: bool,
         copy_mode: bool,
     },
+    AgentCommand {
+        request_id: AgentRequestId,
+        command: AgentCommand,
+    },
+    AgentCommandAccepted {
+        request_id: AgentRequestId,
+    },
 }
 
 /// Metadata about a process, returned in ProcessList.
@@ -247,4 +307,30 @@ pub struct ProcessInfo {
     pub rows: u16,
     pub pid: u32,
     pub created_at_secs: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_request_id_roundtrips() {
+        let request_id = AgentRequestId::new();
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&request_id).unwrap();
+        let decoded = rkyv::from_bytes::<AgentRequestId, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert_eq!(decoded, request_id);
+    }
+
+    #[test]
+    fn empty_agent_shell_command_is_invalid() {
+        assert_eq!(
+            validate_agent_command(&AgentCommand::RunShell {
+                command: String::new(),
+                cwd: String::new(),
+                mode: AgentShellMode::NewTab,
+            }),
+            Err("run_shell.command is empty")
+        );
+    }
 }

@@ -128,7 +128,7 @@ fn sync_keyboard_target(
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
-    modal_q: Query<&Node, With<Modal>>,
+    modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
     content_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     terminal_q: Query<(), With<crate::terminal::Terminal>>,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
@@ -414,6 +414,8 @@ fn sync_osr_webview_focus(
             Option<&ComputedNode>,
             Has<PendingWebviewReveal>,
             Has<PendingCommandBarReveal>,
+            Has<Modal>,
+            Has<CefKeyboardTarget>,
         ),
         With<WebviewSource>,
     >,
@@ -431,8 +433,16 @@ fn sync_osr_webview_focus(
     mut last_ready_set: Local<Vec<Entity>>,
 ) {
     ready.clear();
-    for (entity, visibility, computed, pending_reveal, pending_command_bar_reveal) in
-        webviews.iter()
+    let mut modal_keyboard_target = None;
+    for (
+        entity,
+        visibility,
+        computed,
+        pending_reveal,
+        pending_command_bar_reveal,
+        is_modal,
+        has_keyboard_target,
+    ) in webviews.iter()
     {
         if !browsers.has_browser(entity) {
             continue;
@@ -444,6 +454,9 @@ fn sync_osr_webview_focus(
             pending_reveal || pending_command_bar_reveal,
         ) {
             ready.push(entity);
+            if is_modal && has_keyboard_target {
+                modal_keyboard_target = Some(entity);
+            }
         } else {
             browsers.set_osr_hidden(&entity);
         }
@@ -455,14 +468,13 @@ fn sync_osr_webview_focus(
     let window_focused = primary_window.focused;
 
     let active_tab_opt = focus.tab;
-    let active = active_tab_opt
-        .and_then(|tab| {
-            ready
-                .iter()
-                .copied()
-                .find(|&b| child_of_q.get(b).ok().map(|co| co.get()) == Some(tab))
-        })
-        .unwrap_or(ready[0]);
+    let active_tab = active_tab_opt.and_then(|tab| {
+        ready
+            .iter()
+            .copied()
+            .find(|&b| child_of_q.get(b).ok().map(|co| co.get()) == Some(tab))
+    });
+    let active = choose_osr_active_webview(modal_keyboard_target, active_tab, ready[0]);
 
     if !window_focused {
         if last_active.is_some() || *last_ready_set != *ready {
@@ -532,6 +544,14 @@ fn webview_osr_should_run(
     pending_reveal: bool,
 ) -> bool {
     pending_reveal || webview_layout_is_renderable(size_px, visibility, false)
+}
+
+fn choose_osr_active_webview(
+    modal_keyboard_target: Option<Entity>,
+    active_tab: Option<Entity>,
+    fallback: Entity,
+) -> Entity {
+    modal_keyboard_target.or(active_tab).unwrap_or(fallback)
 }
 
 fn should_show_osr_webview(
@@ -613,7 +633,7 @@ fn flush_pending_osr_textures(
 fn push_layout_state_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    chrome: Option<Single<Entity, (With<LayoutChrome>, With<UiReady>)>>,
+    chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
     header_q: Query<Has<Open>, With<Header>>,
     footer_q: Query<Has<Open>, With<Footer>>,
     side_sheet_q: Query<(&SideSheetPosition, Has<Open>), With<SideSheet>>,
@@ -621,8 +641,9 @@ fn push_layout_state_emit(
     settings: Res<AppSettings>,
     mut last: Local<String>,
 ) {
-    let Some(chrome) = chrome else { return };
-    let chrome_e = *chrome;
+    let Ok((chrome_e, ui_ready)) = chrome_q.single() else {
+        return;
+    };
     if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
         return;
     }
@@ -640,7 +661,7 @@ fn push_layout_state_emit(
         titlebar_height: effective_titlebar_height(settings.layout.window.pad_top()),
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
-    if body == *last {
+    if !should_emit_cached_payload(&body, &last, ui_ready.is_changed()) {
         return;
     }
     commands.trigger(HostEmitEvent::new(chrome_e, LAYOUT_STATE_EVENT, &body));
@@ -663,23 +684,34 @@ fn should_emit_new_tab_placeholder(
         .any(|row| row.is_active && !row.url.is_empty() && row.url != "about:blank")
 }
 
+fn should_emit_cached_payload(body: &str, last: &str, ui_ready_changed: bool) -> bool {
+    ui_ready_changed || body != last
+}
+
 fn push_tabs_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    chrome: Option<Single<Entity, (With<LayoutChrome>, With<UiReady>)>>,
+    chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
     browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), With<Browser>>,
+    tab_q: Query<(), With<Tab>>,
     new_tab_ctx: Res<crate::command_bar::NewTabContext>,
     focus: Res<crate::layout::tab::FocusedTab>,
     child_of_q: Query<&ChildOf>,
     mut last: Local<String>,
 ) {
-    let Some(chrome) = chrome else { return };
-    let chrome_e = *chrome;
+    let Ok((chrome_e, ui_ready)) = chrome_q.single() else {
+        return;
+    };
     if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
         return;
     }
     let active_pane = focus.pane;
     let active_tab_opt = focus.tab;
+    if let Some(active_tab_entity) = active_tab_opt
+        && !tab_q.contains(active_tab_entity)
+    {
+        return;
+    }
     let mut rows: Vec<TabRow> = Vec::new();
     let mut can_go_back = false;
     let mut can_go_forward = false;
@@ -715,13 +747,16 @@ fn push_tabs_host_emit(
             is_active: true,
         });
     }
+    if active_tab_opt.is_some() && rows.is_empty() {
+        return;
+    }
     let payload = TabsHostEvent {
         tabs: rows,
         can_go_back,
         can_go_forward,
     };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    if ron_body.as_str() == last.as_str() {
+    if !should_emit_cached_payload(&ron_body, &last, ui_ready.is_changed()) {
         return;
     }
     warn!(
@@ -736,9 +771,10 @@ fn push_tabs_host_emit(
 fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    chrome: Option<Single<Entity, (With<LayoutChrome>, With<UiReady>)>>,
+    chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
     new_tab_ctx: Res<crate::command_bar::NewTabContext>,
     focus: Res<crate::layout::tab::FocusedTab>,
+    space_q: Query<(), With<Space>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
@@ -748,8 +784,9 @@ fn push_pane_tree_emit(
     browser_meta: Query<(&PageMetadata, Has<Loading>), With<Browser>>,
     mut last: Local<String>,
 ) {
-    let Some(chrome) = chrome else { return };
-    let chrome_e = *chrome;
+    let Ok((chrome_e, ui_ready)) = chrome_q.single() else {
+        return;
+    };
     if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
         return;
     }
@@ -759,6 +796,9 @@ fn push_pane_tree_emit(
     let Some(space) = focus.space else {
         return;
     };
+    if !space_q.contains(space) {
+        return;
+    }
     let mut space_leaf_panes = Vec::new();
     collect_leaf_panes(space, &all_children, &leaf_pane_q, &mut space_leaf_panes);
 
@@ -825,7 +865,7 @@ fn push_pane_tree_emit(
     }
     let payload = PaneTreeEvent { panes };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    if ron_body.as_str() == last.as_str() {
+    if !should_emit_cached_payload(&ron_body, &last, ui_ready.is_changed()) {
         return;
     }
     commands.trigger(HostEmitEvent::new(chrome_e, PANE_TREE_EVENT, &ron_body));
@@ -1241,6 +1281,17 @@ mod tests {
     }
 
     #[test]
+    fn command_bar_modal_wins_osr_focus_for_keyboard_input() {
+        let pane = Entity::from_bits(1);
+        let modal = Entity::from_bits(2);
+
+        assert_eq!(
+            choose_osr_active_webview(Some(modal), Some(pane), pane),
+            modal
+        );
+    }
+
+    #[test]
     fn active_browser_url_wins_over_stale_new_tab_placeholder() {
         let tab = Entity::from_bits(1);
         let rows = [TabRow {
@@ -1255,5 +1306,12 @@ mod tests {
             Some(tab),
             &rows
         ));
+    }
+
+    #[test]
+    fn host_payload_emits_again_when_ui_ready_changes() {
+        assert!(should_emit_cached_payload("tabs", "tabs", true));
+        assert!(should_emit_cached_payload("tabs-2", "tabs", false));
+        assert!(!should_emit_cached_payload("tabs", "tabs", false));
     }
 }

@@ -400,13 +400,19 @@ fn spawn_default_session(
     );
 }
 
+pub struct SpawnedSessionLayout {
+    pub space: Entity,
+    pub pane: Entity,
+    pub tab: Entity,
+}
+
 pub fn spawn_default_session_layout(
     main: Entity,
     pw: Entity,
     settings: &LayoutSettings,
     new_tab_ctx: &mut crate::NewTabContext,
     commands: &mut Commands,
-) {
+) -> SpawnedSessionLayout {
     commands.spawn(Profile::default_profile());
     let space = commands
         .spawn((
@@ -460,6 +466,11 @@ pub fn spawn_default_session_layout(
     new_tab_ctx.tab = Some(tab);
     new_tab_ctx.previous_tab = None;
     new_tab_ctx.needs_open = true;
+    SpawnedSessionLayout {
+        space,
+        pane: leaf,
+        tab,
+    }
 }
 
 fn spawn_glass_panes() {}

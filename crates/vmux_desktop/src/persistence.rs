@@ -449,8 +449,6 @@ mod tests {
     };
     use bevy::ecs::entity::EntityHashMap;
 
-    static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     struct HomeEnvGuard {
         _guard: std::sync::MutexGuard<'static, ()>,
         old_home: Option<std::ffi::OsString>,
@@ -458,7 +456,7 @@ mod tests {
 
     impl HomeEnvGuard {
         fn use_temp_home(name: &str) -> Self {
-            let guard = HOME_ENV_LOCK.lock().expect("home env lock");
+            let guard = crate::profile::HOME_ENV_LOCK.lock().expect("home env lock");
             let old_home = std::env::var_os("HOME");
             let home =
                 std::env::temp_dir().join(format!("vmux-test-{name}-{}", std::process::id()));

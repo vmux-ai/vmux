@@ -53,6 +53,14 @@ pub struct CommandBarRenderedEvent {
     pub open_id: u64,
 }
 
+pub fn command_bar_open_should_reset_input(current_open_id: u64, incoming_open_id: u64) -> bool {
+    incoming_open_id == 0 || current_open_id != incoming_open_id
+}
+
+pub fn command_bar_open_should_ack(open_id: u64) -> bool {
+    open_id != 0
+}
+
 pub const PATH_COMPLETE_REQUEST: &str = "path-complete-request";
 pub const PATH_COMPLETE_RESPONSE: &str = "path-complete-response";
 
@@ -228,6 +236,20 @@ mod tests {
         };
 
         assert_eq!(event.open_id, 7);
+    }
+
+    #[test]
+    fn command_bar_duplicate_open_id_does_not_reset_input() {
+        assert!(!command_bar_open_should_reset_input(7, 7));
+        assert!(command_bar_open_should_reset_input(7, 8));
+        assert!(command_bar_open_should_reset_input(0, 8));
+        assert!(command_bar_open_should_reset_input(0, 0));
+    }
+
+    #[test]
+    fn command_bar_retried_open_payload_still_gets_ack() {
+        assert!(command_bar_open_should_ack(7));
+        assert!(!command_bar_open_should_ack(0));
     }
 
     #[test]

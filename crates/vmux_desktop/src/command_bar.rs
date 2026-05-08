@@ -1,4 +1,5 @@
 use crate::{
+    agent::{AgentCommandEntry, AgentLaunchRequested, AgentProviders},
     browser::Browser,
     command::{
         AppCommand, BrowserCommand, PaneCommand, ReadAppCommands, SessionCommand, TabCommand,
@@ -9,7 +10,7 @@ use crate::{
         side_sheet::SideSheet,
         space::Space,
         tab::{Tab, active_among, collect_leaf_panes, focused_tab},
-        window::Modal,
+        window::{Main, Modal},
     },
     processes_monitor::ProcessesMonitor,
     sessions::{ActiveSession, SessionsView},
@@ -18,10 +19,10 @@ use crate::{
 };
 use bevy::{
     ecs::message::MessageReader, ecs::relationship::Relationship, picking::Pickable, prelude::*,
-    ui::UiSystems,
+    ui::UiSystems, window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::webview_debug_log;
+use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSession, CommandBarTab,
@@ -52,16 +53,25 @@ struct CommandBarReady;
 struct CommandBarRenderedOpen(u64);
 
 #[derive(Component)]
+struct CommandBarPaintedOpen(u64);
+
+#[derive(Component)]
 pub(crate) struct PendingCommandBarReveal {
     frames: u8,
     open_id: u64,
+    payload: Option<String>,
 }
+
+const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
+const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
 
 pub(crate) struct CommandBarInputPlugin;
 
 impl Plugin for CommandBarInputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NewTabContext>()
+            .init_resource::<AgentProviders>()
+            .init_resource::<Messages<AgentLaunchRequested>>()
             .add_plugins(JsEmitEventPlugin::<CommandBarActionEvent>::default())
             .add_plugins(JsEmitEventPlugin::<PathCompleteRequest>::default())
             .add_plugins(JsEmitEventPlugin::<CommandBarReadyEvent>::default())
@@ -72,10 +82,19 @@ impl Plugin for CommandBarInputPlugin {
             .add_observer(on_command_bar_rendered)
             .add_systems(
                 Update,
+                prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
+            )
+            .add_systems(
+                Update,
                 handle_open_command_bar
                     .in_set(ReadAppCommands)
+                    .after(prewarm_command_bar_modal)
                     .after(crate::layout::space::SpaceCommandSet)
                     .after(crate::layout::tab::TabCommandSet),
+            )
+            .add_systems(
+                Update,
+                retry_pending_command_bar_open.after(handle_open_command_bar),
             )
             .add_systems(
                 Update,
@@ -83,7 +102,12 @@ impl Plugin for CommandBarInputPlugin {
                     .after(ReadAppCommands)
                     .before(crate::layout::tab::ComputeFocusSet),
             )
-            .add_systems(PostUpdate, reveal_command_bar.after(UiSystems::Layout));
+            .add_systems(
+                PostUpdate,
+                (mark_command_bar_painted, reveal_command_bar)
+                    .chain()
+                    .after(UiSystems::Layout),
+            );
     }
 }
 
@@ -93,11 +117,17 @@ pub struct CommandBarEntry {
     pub shortcut: &'static str,
 }
 
-pub fn command_list() -> Vec<CommandBarEntry> {
-    AppCommand::command_bar_entries()
+pub fn command_list(agent_entries: Vec<AgentCommandEntry>) -> Vec<CommandBarEntry> {
+    let mut entries: Vec<CommandBarEntry> = AppCommand::command_bar_entries()
         .into_iter()
         .map(|(id, name, shortcut)| CommandBarEntry { id, name, shortcut })
-        .collect()
+        .collect();
+    entries.extend(agent_entries.into_iter().map(|entry| CommandBarEntry {
+        id: entry.id,
+        name: entry.name,
+        shortcut: entry.shortcut,
+    }));
+    entries
 }
 
 pub fn match_command(id: &str) -> Option<AppCommand> {
@@ -105,8 +135,55 @@ pub fn match_command(id: &str) -> Option<AppCommand> {
 }
 
 /// Returns true when the command bar modal is currently visible.
-pub fn is_command_bar_open(modal_q: &Query<&Node, With<Modal>>) -> bool {
-    modal_q.iter().any(|n| n.display != Display::None)
+pub fn is_command_bar_open(modal_q: &Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>) -> bool {
+    modal_q
+        .iter()
+        .any(|(n, has_keyboard_target)| command_bar_modal_is_open(n.display, has_keyboard_target))
+}
+
+fn command_bar_modal_is_open(display: Display, has_keyboard_target: bool) -> bool {
+    display != Display::None && has_keyboard_target
+}
+
+fn command_bar_modal_is_visible(
+    display: Display,
+    visibility: Visibility,
+    has_keyboard_target: bool,
+) -> bool {
+    display != Display::None && visibility != Visibility::Hidden && has_keyboard_target
+}
+
+fn prewarm_command_bar_modal(
+    mut commands: Commands,
+    mut modal_q: Query<
+        (
+            Entity,
+            &mut Node,
+            &mut Visibility,
+            Has<CefKeyboardTarget>,
+            Has<PendingCommandBarReveal>,
+        ),
+        With<Modal>,
+    >,
+) {
+    let Ok((modal_e, mut modal_node, mut modal_vis, has_keyboard_target, pending_reveal)) =
+        modal_q.single_mut()
+    else {
+        return;
+    };
+    if has_keyboard_target || pending_reveal {
+        return;
+    }
+    modal_node.display = Display::Flex;
+    *modal_vis = Visibility::Hidden;
+    commands
+        .entity(modal_e)
+        .insert(Pickable::IGNORE)
+        .insert(PendingCommandBarReveal {
+            frames: 0,
+            open_id: 0,
+            payload: None,
+        });
 }
 
 fn command_bar_open_delivery_ready(
@@ -121,9 +198,39 @@ fn command_bar_reveal_ready(
     has_browser: bool,
     _host_emit_ready: bool,
     _command_bar_ready: bool,
-    _rendered_open: bool,
+    rendered_open: bool,
 ) -> bool {
-    has_browser
+    has_browser && rendered_open
+}
+
+fn next_command_bar_reveal_frames(
+    frames: u8,
+    open_id: u64,
+    rendered_open_id: Option<u64>,
+    _painted_open_id: Option<u64>,
+) -> Option<u8> {
+    if open_id == 0 {
+        return Some(frames);
+    }
+    if rendered_open_id != Some(open_id) {
+        if frames >= COMMAND_BAR_REVEAL_FALLBACK_FRAMES {
+            return None;
+        }
+        return Some(frames + 1);
+    }
+    if frames >= COMMAND_BAR_REVEAL_FRAMES {
+        None
+    } else {
+        Some(frames + 1)
+    }
+}
+
+fn command_bar_reveal_start_frames(was_prewarmed: bool) -> u8 {
+    if was_prewarmed {
+        COMMAND_BAR_REVEAL_FRAMES
+    } else {
+        0
+    }
 }
 
 fn should_start_command_bar_reveal(
@@ -141,6 +248,18 @@ fn should_start_command_bar_reveal(
         rendered_open,
     ) && !pending_reveal
         && visibility == Visibility::Hidden
+}
+
+fn should_retry_command_bar_open_payload(
+    open_id: u64,
+    payload: Option<&str>,
+    rendered_open_id: Option<u64>,
+) -> bool {
+    open_id != 0 && payload.is_some() && rendered_open_id != Some(open_id)
+}
+
+fn should_requeue_command_bar_open_after_emit(_command_bar_ready: bool) -> bool {
+    false
 }
 
 fn on_command_bar_ready(trigger: On<Receive<CommandBarReadyEvent>>, mut commands: Commands) {
@@ -188,7 +307,7 @@ fn command_bar_open_request(
                 request.should_toggle = true;
                 request.url_override = Some(SESSIONS_WEBVIEW_URL.to_string());
             }
-            AppCommand::Tab(TabCommand::New) | AppCommand::Tab(TabCommand::Close) => {
+            AppCommand::Tab(TabCommand::Close) => {
                 request.should_dismiss = true;
             }
             AppCommand::Tab(TabCommand::Next | TabCommand::Previous)
@@ -213,9 +332,10 @@ fn handle_open_command_bar(
             Entity,
             &mut Node,
             &mut Visibility,
+            Has<CefKeyboardTarget>,
             Has<CommandBarReady>,
             Option<&CommandBarRenderedOpen>,
-            Has<PendingCommandBarReveal>,
+            Option<&PendingCommandBarReveal>,
         ),
         With<Modal>,
     >,
@@ -239,13 +359,21 @@ fn handle_open_command_bar(
             Without<Modal>,
         ),
     >,
-    mut session_params: ParamSet<(Res<ActiveSession>, ResMut<NewTabContext>)>,
+    mut session_params: ParamSet<(
+        Res<ActiveSession>,
+        Option<Res<AgentProviders>>,
+        ResMut<NewTabContext>,
+    )>,
     mut commands: Commands,
 ) {
     let active_tab_count = tab_q.iter().count();
     let active_session = session_params.p0().clone();
     let session_name = active_session.record.name.clone();
-    let mut new_tab_ctx = session_params.p1();
+    let agent_entries = session_params
+        .p1()
+        .map(|providers| providers.command_entries())
+        .unwrap_or_default();
+    let mut new_tab_ctx = session_params.p2();
 
     let request = command_bar_open_request(reader.read().copied());
     let mut should_open = false;
@@ -254,14 +382,16 @@ fn handle_open_command_bar(
     let should_dismiss_nav = request.should_dismiss_nav;
     let url_override = request.url_override;
 
-    // Dismiss command bar when Cmd+T or Cmd+W fires while open
     if should_dismiss {
         let is_open = modal_q
             .single()
-            .map(|(_, n, _, _, _, _)| n.display != Display::None)
+            .map(|(_, n, _, has_keyboard_target, _, _, _)| {
+                command_bar_modal_is_open(n.display, has_keyboard_target)
+            })
             .unwrap_or(false);
         if is_open {
-            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _)) = modal_q.single_mut() else {
+            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _, _)) = modal_q.single_mut()
+            else {
                 return;
             };
             modal_node.display = Display::None;
@@ -272,6 +402,7 @@ fn handle_open_command_bar(
                 .remove::<CefKeyboardTarget>()
                 .remove::<CefPointerTarget>()
                 .remove::<CommandBarRenderedOpen>()
+                .remove::<CommandBarPaintedOpen>()
                 .remove::<PendingCommandBarReveal>();
             // Discard empty tab created by a previous Cmd+T
             if let Some(tab_e) = new_tab_ctx.tab.take() {
@@ -317,10 +448,13 @@ fn handle_open_command_bar(
     if should_dismiss_nav {
         let is_open = modal_q
             .single()
-            .map(|(_, n, _, _, _, _)| n.display != Display::None)
+            .map(|(_, n, _, has_keyboard_target, _, _, _)| {
+                command_bar_modal_is_open(n.display, has_keyboard_target)
+            })
             .unwrap_or(false);
         if is_open {
-            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _)) = modal_q.single_mut() else {
+            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _, _)) = modal_q.single_mut()
+            else {
                 return;
             };
             modal_node.display = Display::None;
@@ -331,6 +465,7 @@ fn handle_open_command_bar(
                 .remove::<CefKeyboardTarget>()
                 .remove::<CefPointerTarget>()
                 .remove::<CommandBarRenderedOpen>()
+                .remove::<CommandBarPaintedOpen>()
                 .remove::<PendingCommandBarReveal>();
             new_tab_ctx.needs_open = false;
             return;
@@ -345,7 +480,9 @@ fn handle_open_command_bar(
     if should_toggle {
         let is_open = modal_q
             .single()
-            .map(|(_, n, _, _, _, _)| n.display != Display::None)
+            .map(|(_, n, visibility, has_keyboard_target, _, _, _)| {
+                command_bar_modal_is_visible(n.display, *visibility, has_keyboard_target)
+            })
             .unwrap_or(false);
         if !is_open {
             should_open = true;
@@ -362,6 +499,7 @@ fn handle_open_command_bar(
         modal_e,
         mut modal_node,
         mut modal_vis,
+        has_keyboard_target,
         command_bar_ready,
         rendered_open,
         modal_pending_reveal,
@@ -371,7 +509,7 @@ fn handle_open_command_bar(
     };
 
     let is_new_tab = new_tab_ctx.tab.is_some();
-    let was_open = modal_node.display != Display::None;
+    let was_open = command_bar_modal_is_open(modal_node.display, has_keyboard_target);
 
     if !was_open {
         // Open command bar — keep hidden until CEF resizes (see reveal_command_bar)
@@ -462,7 +600,7 @@ fn handle_open_command_bar(
     }
 
     // Build command list
-    let bar_commands: Vec<CommandBarCommandEntry> = command_list()
+    let bar_commands: Vec<CommandBarCommandEntry> = command_list(agent_entries)
         .into_iter()
         .map(|e| CommandBarCommandEntry {
             id: e.id.into(),
@@ -475,15 +613,20 @@ fn handle_open_command_bar(
     let host_emit_ready = browsers.host_emit_ready(&modal_e);
     let rendered_matches = rendered_open.is_some_and(|rendered| rendered.0 != 0);
     webview_debug_log(format!(
-        "command_bar open entity={modal_e:?} was_open={was_open} has_browser={has_browser} host_emit_ready={host_emit_ready} command_bar_ready={command_bar_ready} rendered={rendered_matches} pending_reveal={modal_pending_reveal} visibility={:?} new_tab={is_new_tab}",
+        "command_bar open entity={modal_e:?} was_open={was_open} has_browser={has_browser} host_emit_ready={host_emit_ready} command_bar_ready={command_bar_ready} rendered={rendered_matches} pending_reveal={} visibility={:?} new_tab={is_new_tab}",
+        modal_pending_reveal.is_some(),
         *modal_vis
     ));
 
     if !command_bar_open_delivery_ready(has_browser, host_emit_ready, command_bar_ready) {
-        commands.entity(modal_e).insert(PendingCommandBarReveal {
-            frames: 0,
-            open_id: 0,
-        });
+        commands
+            .entity(modal_e)
+            .remove::<CommandBarPaintedOpen>()
+            .insert(PendingCommandBarReveal {
+                frames: 0,
+                open_id: 0,
+                payload: None,
+            });
         new_tab_ctx.needs_open = true;
         return;
     }
@@ -500,6 +643,9 @@ fn handle_open_command_bar(
         .collect();
 
     let open_id = now_millis() as u64;
+    let reveal_start_frames = command_bar_reveal_start_frames(
+        modal_pending_reveal.is_some_and(|pending| pending.open_id == 0),
+    );
     let payload = command_bar_open_payload(
         open_id,
         session_name,
@@ -510,6 +656,7 @@ fn handle_open_command_bar(
         is_new_tab,
     );
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
+    let ron_body_len = ron_body.len();
     commands.trigger(HostEmitEvent::new(
         modal_e,
         COMMAND_BAR_OPEN_EVENT,
@@ -520,25 +667,35 @@ fn handle_open_command_bar(
         host_emit_ready,
         command_bar_ready,
         rendered_open.is_some_and(|rendered| rendered.0 == open_id),
-        modal_pending_reveal,
+        modal_pending_reveal.is_some(),
         *modal_vis,
     ) {
         commands
             .entity(modal_e)
-            .insert(PendingCommandBarReveal { frames: 0, open_id });
+            .remove::<CommandBarPaintedOpen>()
+            .insert(PendingCommandBarReveal {
+                frames: reveal_start_frames,
+                open_id,
+                payload: Some(ron_body.clone()),
+            });
     } else {
         commands
             .entity(modal_e)
             .remove::<CommandBarRenderedOpen>()
-            .insert(PendingCommandBarReveal { frames: 0, open_id });
+            .remove::<CommandBarPaintedOpen>()
+            .insert(PendingCommandBarReveal {
+                frames: reveal_start_frames,
+                open_id,
+                payload: Some(ron_body),
+            });
     }
     webview_debug_log(format!(
         "command_bar emit open entity={modal_e:?} payload_len={} tabs={} commands={}",
-        ron_body.len(),
+        ron_body_len,
         payload.tabs.len(),
         payload.commands.len()
     ));
-    if !command_bar_ready {
+    if should_requeue_command_bar_open_after_emit(command_bar_ready) {
         new_tab_ctx.needs_open = true;
     }
 }
@@ -563,6 +720,59 @@ fn command_bar_open_payload(
     }
 }
 
+fn attach_sessions_page_to_tab(
+    tab: Entity,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    commands.entity(tab).insert(PageMetadata {
+        url: SESSIONS_WEBVIEW_URL.to_string(),
+        title: "Sessions".to_string(),
+        ..default()
+    });
+    commands.spawn((SessionsView::new(meshes, webview_mt), ChildOf(tab)));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_sessions_page_layout_from_command_bar(
+    main: Option<Entity>,
+    primary_window: Option<Entity>,
+    settings: &AppSettings,
+    new_tab_ctx: &mut NewTabContext,
+    focus: Option<&mut crate::layout::tab::FocusedTab>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) -> bool {
+    let Some(main) = main else {
+        return false;
+    };
+    let Some(primary_window) = primary_window else {
+        return false;
+    };
+    let spawned = crate::layout::window::spawn_default_session_layout(
+        main,
+        primary_window,
+        &settings.layout,
+        new_tab_ctx,
+        commands,
+    );
+    if let Some(focus) = focus {
+        focus.space = Some(spawned.space);
+        focus.pane = Some(spawned.pane);
+        focus.tab = Some(spawned.tab);
+    }
+    let Some(tab) = new_tab_ctx.tab.take() else {
+        return false;
+    };
+    new_tab_ctx.previous_tab = None;
+    new_tab_ctx.needs_open = false;
+    new_tab_ctx.dismiss_modal = false;
+    attach_sessions_page_to_tab(tab, commands, meshes, webview_mt);
+    true
+}
+
 fn on_command_bar_action(
     trigger: On<Receive<CommandBarActionEvent>>,
     mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
@@ -572,7 +782,12 @@ fn on_command_bar_action(
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
-    tab_q: Query<Entity, With<Tab>>,
+    mut tab_params: ParamSet<(
+        Query<Entity, With<Tab>>,
+        Query<Entity, With<Main>>,
+        Query<Entity, With<PrimaryWindow>>,
+        Option<ResMut<crate::layout::tab::FocusedTab>>,
+    )>,
     child_of_q: Query<&ChildOf>,
     content_browsers: Query<
         Entity,
@@ -583,15 +798,19 @@ fn on_command_bar_action(
             Without<Modal>,
         ),
     >,
-    settings: Res<AppSettings>,
+    mut resource_params: ParamSet<(Res<AppSettings>, Option<Res<AgentProviders>>)>,
     mut new_tab_ctx: ResMut<NewTabContext>,
-    mut writer: MessageWriter<AppCommand>,
+    mut writer_params: ParamSet<(
+        MessageWriter<AppCommand>,
+        Option<MessageWriter<AgentLaunchRequested>>,
+    )>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
+    let settings = resource_params.p0().clone();
     let empty_tab = new_tab_ctx.tab;
     let previous_tab = new_tab_ctx.previous_tab;
     // Track whether we handle keyboard restore ourselves
@@ -689,15 +908,12 @@ fn on_command_bar_action(
                             ChildOf(tab_e),
                         ));
                     } else if url.starts_with(SESSIONS_WEBVIEW_URL.trim_end_matches('/')) {
-                        commands.entity(tab_e).insert(PageMetadata {
-                            url: SESSIONS_WEBVIEW_URL.to_string(),
-                            title: "Sessions".to_string(),
-                            ..default()
-                        });
-                        commands.spawn((
-                            SessionsView::new(&mut meshes, &mut webview_mt),
-                            ChildOf(tab_e),
-                        ));
+                        attach_sessions_page_to_tab(
+                            tab_e,
+                            &mut commands,
+                            &mut meshes,
+                            &mut webview_mt,
+                        );
                     } else {
                         let browser_e = commands
                             .spawn((
@@ -739,10 +955,14 @@ fn on_command_bar_action(
                             commands.entity(term_e).insert(CefKeyboardTarget);
                         }
                     } else if url.starts_with("vmux://terminal") {
-                        writer.write(AppCommand::Terminal(TerminalCommand::New));
+                        writer_params
+                            .p0()
+                            .write(AppCommand::Terminal(TerminalCommand::New));
                     } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
                         use crate::command::ServiceCommand;
-                        writer.write(AppCommand::Service(ServiceCommand::Open));
+                        writer_params
+                            .p0()
+                            .write(AppCommand::Service(ServiceCommand::Open));
                     } else if url.starts_with(SESSIONS_WEBVIEW_URL.trim_end_matches('/')) {
                         let (_, active_pane_opt, _) = focused_tab(
                             &spaces,
@@ -760,15 +980,29 @@ fn on_command_bar_action(
                                     ChildOf(pane_e),
                                 ))
                                 .id();
-                            commands.entity(tab_e).insert(PageMetadata {
-                                url: SESSIONS_WEBVIEW_URL.to_string(),
-                                title: "Sessions".to_string(),
-                                ..default()
-                            });
-                            commands.spawn((
-                                SessionsView::new(&mut meshes, &mut webview_mt),
-                                ChildOf(tab_e),
-                            ));
+                            attach_sessions_page_to_tab(
+                                tab_e,
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                            );
+                            custom_keyboard_restore = true;
+                        } else {
+                            let main = tab_params.p1().single().ok();
+                            let primary_window = tab_params.p2().single().ok();
+                            let mut focus = tab_params.p3();
+                            if spawn_sessions_page_layout_from_command_bar(
+                                main,
+                                primary_window,
+                                &settings,
+                                &mut new_tab_ctx,
+                                focus.as_deref_mut(),
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                            ) {
+                                custom_keyboard_restore = true;
+                            }
                         }
                     } else {
                         let (_, _, active_tab) = focused_tab(
@@ -908,14 +1142,28 @@ fn on_command_bar_action(
                             .id();
                         commands.entity(term_e).insert(CefKeyboardTarget);
                     } else {
-                        writer.write(AppCommand::Terminal(TerminalCommand::New));
+                        writer_params
+                            .p0()
+                            .write(AppCommand::Terminal(TerminalCommand::New));
                     }
                 }
             } // end reattach else
         }
         "command" => {
-            if let Some(cmd) = match_command(&evt.value) {
-                writer.write(cmd);
+            if resource_params
+                .p1()
+                .is_some_and(|providers| providers.contains(&evt.value))
+            {
+                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+                if let Some(mut agent_launches) = writer_params.p1() {
+                    agent_launches.write(AgentLaunchRequested {
+                        provider_id: evt.value.clone(),
+                        cwd,
+                    });
+                }
+                custom_keyboard_restore = true;
+            } else if let Some(cmd) = match_command(&evt.value) {
+                writer_params.p0().write(cmd);
             }
             // If in new-tab mode and a command was executed, clean up the empty tab
             if let Some(tab_e) = empty_tab {
@@ -956,6 +1204,7 @@ fn on_command_bar_action(
             {
                 commands.entity(target_pane).insert(LastActivatedAt::now());
                 if let Ok(children) = pane_children.get(target_pane) {
+                    let tab_q = tab_params.p0();
                     let tabs: Vec<Entity> =
                         children.iter().filter(|&e| tab_q.contains(e)).collect();
                     if let Some(&target_tab) = tabs.get(tab_index) {
@@ -967,6 +1216,7 @@ fn on_command_bar_action(
         _ => {
             // "dismiss" and unknown actions
             if let Some(tab_e) = empty_tab {
+                let tab_q = tab_params.p0();
                 let closed_space = close_space_if_only_pending_tab(
                     tab_e,
                     &spaces,
@@ -1007,6 +1257,7 @@ fn on_command_bar_action(
             .remove::<CefKeyboardTarget>()
             .remove::<CefPointerTarget>()
             .remove::<CommandBarRenderedOpen>()
+            .remove::<CommandBarPaintedOpen>()
             .remove::<PendingCommandBarReveal>();
     }
     if !custom_keyboard_restore {
@@ -1135,12 +1386,11 @@ fn deferred_dismiss_modal(
             .remove::<CefKeyboardTarget>()
             .remove::<CefPointerTarget>()
             .remove::<CommandBarRenderedOpen>()
+            .remove::<CommandBarPaintedOpen>()
             .remove::<PendingCommandBarReveal>();
     }
 }
 
-/// Waits 2 frames after `Display::Flex` before revealing the command bar so that
-/// Bevy UI layout + CEF resize can run while the webview is still invisible.
 fn reveal_command_bar(
     mut commands: Commands,
     mut query: Query<
@@ -1149,21 +1399,73 @@ fn reveal_command_bar(
             &mut Visibility,
             &mut PendingCommandBarReveal,
             Option<&CommandBarRenderedOpen>,
+            Option<&CommandBarPaintedOpen>,
         ),
         With<Modal>,
     >,
 ) {
-    for (entity, mut vis, mut pending, _rendered) in &mut query {
+    for (entity, mut vis, mut pending, rendered, painted) in &mut query {
+        let rendered_open_id = rendered.map(|rendered| rendered.0);
+        let painted_open_id = painted.map(|painted| painted.0);
+        match next_command_bar_reveal_frames(
+            pending.frames,
+            pending.open_id,
+            rendered_open_id,
+            painted_open_id,
+        ) {
+            Some(frames) => pending.frames = frames,
+            None => {
+                *vis = Visibility::Inherited;
+                commands.entity(entity).remove::<PendingCommandBarReveal>();
+                webview_debug_log(format!("command_bar reveal entity={entity:?}"));
+            }
+        }
+    }
+}
+
+fn retry_pending_command_bar_open(
+    mut commands: Commands,
+    browsers: NonSend<Browsers>,
+    query: Query<
+        (
+            Entity,
+            &PendingCommandBarReveal,
+            Option<&CommandBarRenderedOpen>,
+        ),
+        With<Modal>,
+    >,
+) {
+    for (entity, pending, rendered) in &query {
+        let rendered_open_id = rendered.map(|rendered| rendered.0);
+        let Some(payload) = pending.payload.as_deref() else {
+            continue;
+        };
+        if !should_retry_command_bar_open_payload(pending.open_id, Some(payload), rendered_open_id)
+        {
+            continue;
+        }
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(HostEmitEvent::new(entity, COMMAND_BAR_OPEN_EVENT, &payload));
+    }
+}
+
+fn mark_command_bar_painted(
+    mut commands: Commands,
+    mut textures: MessageReader<RenderTextureMessage>,
+    query: Query<&PendingCommandBarReveal, With<Modal>>,
+) {
+    for texture in textures.read() {
+        let Ok(pending) = query.get(texture.webview) else {
+            continue;
+        };
         if pending.open_id == 0 {
             continue;
         }
-        if pending.frames >= 2 {
-            *vis = Visibility::Inherited;
-            commands.entity(entity).remove::<PendingCommandBarReveal>();
-            webview_debug_log(format!("command_bar reveal entity={entity:?}"));
-        } else {
-            pending.frames += 1;
-        }
+        commands
+            .entity(texture.webview)
+            .insert(CommandBarPaintedOpen(pending.open_id));
     }
 }
 
@@ -1267,7 +1569,10 @@ mod tests {
             ShortcutSettings, SideSheetSettings, WindowSettings,
         },
     };
-    use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
+    use bevy::{
+        ecs::schedule::{NodeId, Schedules, SystemSet},
+        window::PrimaryWindow,
+    };
 
     fn test_settings() -> AppSettings {
         AppSettings {
@@ -1302,6 +1607,37 @@ mod tests {
     }
 
     #[test]
+    fn command_bar_open_payload_retries_until_rendered_ack() {
+        assert!(should_retry_command_bar_open_payload(
+            7,
+            Some("payload"),
+            None
+        ));
+        assert!(should_retry_command_bar_open_payload(
+            7,
+            Some("payload"),
+            Some(6)
+        ));
+        assert!(!should_retry_command_bar_open_payload(
+            7,
+            Some("payload"),
+            Some(7)
+        ));
+        assert!(!should_retry_command_bar_open_payload(
+            0,
+            Some("payload"),
+            None
+        ));
+        assert!(!should_retry_command_bar_open_payload(7, None, None));
+    }
+
+    #[test]
+    fn command_bar_open_emit_does_not_requeue_without_ready_event() {
+        assert!(!should_requeue_command_bar_open_after_emit(false));
+        assert!(!should_requeue_command_bar_open_after_emit(true));
+    }
+
+    #[test]
     fn command_bar_reveal_does_not_block_on_host_or_ui_listener() {
         assert!(command_bar_reveal_ready(true, false, true, true));
         assert!(command_bar_reveal_ready(true, true, false, true));
@@ -1309,14 +1645,106 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_reveal_does_not_block_on_rendered_open_payload() {
-        assert!(command_bar_reveal_ready(true, true, true, false));
+    fn command_bar_reveal_requires_rendered_open_payload() {
+        assert!(!command_bar_reveal_ready(true, true, true, false));
         assert!(command_bar_reveal_ready(true, true, true, true));
     }
 
     #[test]
     fn command_bar_reveal_requires_browser() {
         assert!(!command_bar_reveal_ready(false, true, true, true));
+    }
+
+    #[derive(Resource, Default)]
+    struct CapturedCommandBarOpen(bool);
+
+    fn capture_command_bar_open(
+        modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
+        mut captured: ResMut<CapturedCommandBarOpen>,
+    ) {
+        captured.0 = is_command_bar_open(&modal_q);
+    }
+
+    #[test]
+    fn hidden_prewarmed_modal_is_not_command_bar_open() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<CapturedCommandBarOpen>();
+        app.add_systems(Update, capture_command_bar_open);
+        app.world_mut().spawn((
+            Modal,
+            Node {
+                display: Display::Flex,
+                ..default()
+            },
+            Visibility::Hidden,
+        ));
+
+        app.update();
+
+        assert!(!app.world().resource::<CapturedCommandBarOpen>().0);
+    }
+
+    #[test]
+    fn command_bar_modal_prewarms_hidden_and_renderable() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_systems(Update, prewarm_command_bar_modal);
+        let modal = app
+            .world_mut()
+            .spawn((
+                Modal,
+                Node {
+                    display: Display::None,
+                    ..default()
+                },
+                Visibility::Hidden,
+            ))
+            .id();
+
+        app.update();
+
+        let node = app.world().get::<Node>(modal).unwrap();
+        let visibility = app.world().get::<Visibility>(modal).unwrap();
+        let reveal = app.world().get::<PendingCommandBarReveal>(modal).unwrap();
+
+        assert_eq!(node.display, Display::Flex);
+        assert_eq!(*visibility, Visibility::Hidden);
+        assert_eq!(reveal.open_id, 0);
+        assert!(app.world().get::<CefKeyboardTarget>(modal).is_none());
+        assert_eq!(
+            app.world().get::<bevy::picking::Pickable>(modal),
+            Some(&bevy::picking::Pickable::IGNORE)
+        );
+    }
+
+    #[test]
+    fn ready_command_bar_modal_still_prewarms_hidden_and_renderable() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_systems(Update, prewarm_command_bar_modal);
+        let modal = app
+            .world_mut()
+            .spawn((
+                Modal,
+                CommandBarReady,
+                Node {
+                    display: Display::None,
+                    ..default()
+                },
+                Visibility::Hidden,
+            ))
+            .id();
+
+        app.update();
+
+        let node = app.world().get::<Node>(modal).unwrap();
+        let visibility = app.world().get::<Visibility>(modal).unwrap();
+        let reveal = app.world().get::<PendingCommandBarReveal>(modal).unwrap();
+
+        assert_eq!(node.display, Display::Flex);
+        assert_eq!(*visibility, Visibility::Hidden);
+        assert_eq!(reveal.open_id, 0);
     }
 
     #[test]
@@ -1360,6 +1788,100 @@ mod tests {
             true,
             Visibility::Hidden
         ));
+    }
+
+    #[test]
+    fn command_bar_reveal_waits_for_matching_open_id() {
+        assert_eq!(next_command_bar_reveal_frames(1, 7, None, None), Some(2));
+        assert_eq!(
+            next_command_bar_reveal_frames(1, 7, Some(6), Some(7)),
+            Some(2)
+        );
+        assert_eq!(
+            next_command_bar_reveal_frames(0, 7, Some(7), Some(7)),
+            Some(1)
+        );
+        assert_eq!(next_command_bar_reveal_frames(2, 7, Some(7), Some(7)), None);
+    }
+
+    #[test]
+    fn command_bar_reveal_falls_back_when_rendered_event_is_missing() {
+        assert_eq!(next_command_bar_reveal_frames(0, 7, None, None), Some(1));
+        assert_eq!(next_command_bar_reveal_frames(10, 7, None, None), None);
+        assert_eq!(
+            next_command_bar_reveal_frames(10, 7, Some(6), Some(7)),
+            None
+        );
+    }
+
+    #[test]
+    fn command_bar_reveal_does_not_require_texture_after_rendered_event() {
+        assert_eq!(next_command_bar_reveal_frames(2, 7, Some(7), None), None);
+        assert_eq!(next_command_bar_reveal_frames(2, 7, Some(7), Some(7)), None);
+    }
+
+    #[test]
+    fn command_bar_paint_before_rendered_ack_still_allows_reveal() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<RenderTextureMessage>();
+        app.add_systems(
+            Update,
+            (mark_command_bar_painted, reveal_command_bar).chain(),
+        );
+
+        let modal = app
+            .world_mut()
+            .spawn((
+                Modal,
+                Visibility::Hidden,
+                PendingCommandBarReveal {
+                    frames: 2,
+                    open_id: 7,
+                    payload: Some("payload".to_string()),
+                },
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<RenderTextureMessage>>()
+            .write(RenderTextureMessage {
+                webview: modal,
+                ty: bevy_cef_core::prelude::RenderPaintElementType::View,
+                width: 1,
+                height: 1,
+                buffer: vec![0, 0, 0, 255],
+            });
+
+        app.update();
+        app.world_mut()
+            .entity_mut(modal)
+            .insert(CommandBarRenderedOpen(7));
+        app.update();
+
+        assert!(app.world().get::<CommandBarPaintedOpen>(modal).is_some());
+        assert!(app.world().get::<PendingCommandBarReveal>(modal).is_none());
+        assert_eq!(
+            app.world().get::<Visibility>(modal),
+            Some(&Visibility::Inherited)
+        );
+    }
+
+    #[test]
+    fn prewarmed_command_bar_starts_reveal_at_ready_frame() {
+        assert_eq!(
+            command_bar_reveal_start_frames(true),
+            COMMAND_BAR_REVEAL_FRAMES
+        );
+        assert_eq!(command_bar_reveal_start_frames(false), 0);
+        assert_eq!(
+            next_command_bar_reveal_frames(
+                command_bar_reveal_start_frames(true),
+                7,
+                Some(7),
+                Some(7)
+            ),
+            None
+        );
     }
 
     #[test]
@@ -1407,6 +1929,13 @@ mod tests {
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, Some(SESSIONS_WEBVIEW_URL.to_string()));
+    }
+
+    #[test]
+    fn tab_new_command_does_not_dismiss_command_bar() {
+        let request = command_bar_open_request([AppCommand::Tab(TabCommand::New)]);
+
+        assert!(!request.should_dismiss);
     }
 
     #[test]
@@ -1478,6 +2007,41 @@ mod tests {
     }
 
     #[test]
+    fn command_bar_open_retries_hidden_keyboard_targeted_modal() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.init_resource::<NewTabContext>();
+        app.init_resource::<ActiveSession>();
+        app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
+        app.insert_non_send_resource(Browsers::default());
+        app.add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands));
+
+        app.world_mut().spawn((
+            Modal,
+            Node {
+                display: Display::Flex,
+                ..default()
+            },
+            Visibility::Hidden,
+            CefKeyboardTarget,
+            CefPointerTarget,
+            PendingCommandBarReveal {
+                frames: 0,
+                open_id: 0,
+                payload: None,
+            },
+        ));
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Session(SessionCommand::Open));
+
+        app.update();
+
+        assert!(app.world().resource::<NewTabContext>().needs_open);
+    }
+
+    #[test]
     fn sessions_url_from_command_bar_opens_sessions_tab() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
@@ -1525,6 +2089,77 @@ mod tests {
         let sessions_count = sessions_query.iter(app.world()).count();
 
         assert_eq!(sessions_count, 1);
+    }
+
+    #[test]
+    fn sessions_url_without_active_pane_spawns_sessions_page_layout() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.add_observer(on_command_bar_action);
+        app.init_resource::<NewTabContext>();
+        app.insert_resource(crate::layout::tab::FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let modal = app
+            .world_mut()
+            .spawn((
+                Modal,
+                Node {
+                    display: Display::Flex,
+                    ..default()
+                },
+                Visibility::Inherited,
+            ))
+            .id();
+        app.world_mut().spawn(PrimaryWindow);
+        app.world_mut().spawn(crate::layout::window::Main);
+
+        app.world_mut()
+            .entity_mut(modal)
+            .trigger(|webview| Receive {
+                webview,
+                payload: CommandBarActionEvent {
+                    action: "navigate".to_string(),
+                    value: SESSIONS_WEBVIEW_URL.to_string(),
+                },
+            });
+        app.update();
+
+        let mut sessions_query = app.world_mut().query::<&SessionsView>();
+        assert_eq!(sessions_query.iter(app.world()).count(), 1);
+
+        let mut spaces = app.world_mut().query::<&Space>();
+        assert_eq!(spaces.iter(app.world()).count(), 1);
+
+        let tabs = {
+            let mut tab_q = app
+                .world_mut()
+                .query_filtered::<(Entity, &PageMetadata, &Children), With<Tab>>();
+            tab_q
+                .iter(app.world())
+                .map(|(entity, meta, children)| {
+                    let has_sessions_view = children
+                        .iter()
+                        .any(|child| app.world().get::<SessionsView>(child).is_some());
+                    (entity, meta.url.clone(), has_sessions_view)
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(tabs.len(), 1);
+        assert_eq!(tabs[0].1, SESSIONS_WEBVIEW_URL);
+        assert!(tabs[0].2);
+
+        let ctx = app.world().resource::<NewTabContext>();
+        assert!(!ctx.needs_open);
+        assert!(ctx.tab.is_none());
+
+        let focus = app.world().resource::<crate::layout::tab::FocusedTab>();
+        assert!(focus.space.is_some());
+        assert!(focus.pane.is_some());
+        assert!(focus.tab.is_some());
     }
 
     #[derive(Resource, Default)]

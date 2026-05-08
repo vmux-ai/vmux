@@ -74,7 +74,7 @@ pub enum AppCommand {
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TabCommand {
     #[default]
-    #[menu(id = "tab_new", label = "New Tab", accel = "super+t")]
+    #[menu(id = "tab_new", label = "New Tab", accel = "super+t", agent)]
     New,
     #[menu(id = "tab_close", label = "Close Tab", accel = "super+w")]
     Close,
@@ -175,16 +175,18 @@ pub enum BrowserCommand {
     #[menu(
         id = "browser_open_command_bar",
         label = "Command Bar",
-        accel = "super+k"
+        accel = "super+k",
+        agent
     )]
     OpenCommandBar,
     #[menu(
         id = "browser_open_path_bar",
         label = "Path Navigator",
-        accel = "super+/"
+        accel = "super+/",
+        agent
     )]
     OpenPathBar,
-    #[menu(id = "browser_open_commands", label = "Commands")]
+    #[menu(id = "browser_open_commands", label = "Commands", agent)]
     #[shortcut(direct = ">")]
     OpenCommands,
     #[menu(id = "browser_find", label = "Find", accel = "super+f", hidden)]
@@ -433,5 +435,14 @@ mod tests {
                 },
             ))
         );
+    }
+
+    #[test]
+    fn agent_command_lookup_exposes_only_allowlisted_commands() {
+        assert_eq!(
+            AppCommand::from_agent_id("browser_open_command_bar"),
+            Some(AppCommand::Browser(BrowserCommand::OpenCommandBar))
+        );
+        assert_eq!(AppCommand::from_agent_id("tab_close"), None);
     }
 }

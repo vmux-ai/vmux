@@ -4,6 +4,9 @@
 
 pub mod theme;
 
+#[cfg(any(target_arch = "wasm32", test))]
+mod listener_guard;
+
 #[cfg(target_arch = "wasm32")]
 pub mod hooks;
 

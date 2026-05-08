@@ -1,7 +1,6 @@
-use std::cell::RefCell;
 use std::fmt;
-use std::rc::Rc;
 
+use crate::listener_guard::GuardedListener;
 use dioxus::core::{Runtime, current_scope_id};
 use dioxus::prelude::*;
 use js_sys::Function;
@@ -150,7 +149,9 @@ where
     T: DeserializeOwned + 'static,
     F: FnMut(T) + 'static,
 {
-    let on_event = Rc::new(RefCell::new(on_event));
+    let listener = use_hook(|| GuardedListener::new(on_event));
+    let listener_guard = listener.guard();
+    use_drop(move || listener_guard.deactivate());
     let mut is_loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
     let mut is_listening = use_signal(|| false);
@@ -161,7 +162,7 @@ where
         if is_listening() {
             return;
         }
-        let on_event = Rc::clone(&on_event);
+        let listener = listener.clone();
         let Some(rt) = Runtime::try_current() else {
             is_loading.set(false);
             error.set(Some(
@@ -171,9 +172,9 @@ where
         };
         let scope = current_scope_id();
         match try_cef_listen::<T, _>(name, move |msg| {
-            let on_event = Rc::clone(&on_event);
+            let listener = listener.clone();
             rt.in_scope(scope, || {
-                on_event.borrow_mut()(msg);
+                listener.call(msg);
             });
         }) {
             Ok(()) => {

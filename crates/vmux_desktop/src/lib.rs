@@ -5,6 +5,7 @@
     clippy::new_ret_no_self
 )]
 
+mod agent;
 mod browser;
 mod clipboard;
 mod command;
@@ -24,6 +25,7 @@ mod terminal;
 mod themes;
 mod tray;
 pub mod updater;
+mod vibe;
 
 use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
@@ -32,6 +34,7 @@ use bevy::winit::WinitSettings;
 use std::time::Duration;
 
 use {
+    agent::AgentPlugin,
     browser::BrowserPlugin,
     command::CommandPlugin,
     command_bar::CommandBarInputPlugin,
@@ -43,6 +46,7 @@ use {
     settings::SettingsPlugin,
     shortcut::ShortcutPlugin,
     terminal::TerminalInputPlugin,
+    vibe::VibePlugin,
     vmux_layout::{LayoutChromePlugin, profile::ProfilePlugin, scene::ScenePlugin},
     vmux_process::ProcessesPlugin,
     vmux_terminal::TerminalPlugin,
@@ -119,6 +123,8 @@ impl Plugin for VmuxPlugin {
         .add_plugins(BrowserPlugin)
         .add_plugins((
             TerminalInputPlugin,
+            AgentPlugin,
+            VibePlugin,
             ProcessesMonitorPlugin,
             PersistencePlugin,
             ProfilePlugin,

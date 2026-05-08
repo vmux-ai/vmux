@@ -8985,6 +8985,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_mcp"
+version = "0.0.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tokio",
+ "vmux_service",
+]
+
+[[package]]
 name = "vmux_process"
 version = "0.0.2"
 dependencies = [

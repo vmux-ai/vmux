@@ -1,5 +1,5 @@
 use crate::process::{Process, ProcessManager, PtyInputWriter};
-use crate::protocol::{ClientMessage, ProcessId, ServiceMessage};
+use crate::protocol::{ClientMessage, ProcessId, ServiceMessage, validate_agent_command};
 use crate::{read_message, write_message};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,6 +33,7 @@ pub async fn run_server(listener: UnixListener) {
     let (wake_tx, mut wake_rx) = mpsc::unbounded_channel();
     let manager = Arc::new(Mutex::new(ProcessManager::new(wake_tx)));
     let input_writers = Arc::new(Mutex::new(HashMap::new()));
+    let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
 
     // Poll at ~60Hz for exits, and immediately when PTY output arrives.
     let poll_mgr = Arc::clone(&manager);
@@ -76,8 +77,9 @@ pub async fn run_server(listener: UnixListener) {
         };
         let mgr = Arc::clone(&manager);
         let input_writers = Arc::clone(&input_writers);
+        let agent_tx = agent_tx.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_client(stream, mgr, input_writers).await {
+            if let Err(e) = handle_client(stream, mgr, input_writers, agent_tx).await {
                 eprintln!("client error: {e}");
             }
         });
@@ -96,6 +98,7 @@ async fn handle_client(
     stream: tokio::net::UnixStream,
     manager: Arc<Mutex<ProcessManager>>,
     input_writers: InputWriters,
+    agent_tx: broadcast::Sender<ServiceMessage>,
 ) -> std::io::Result<()> {
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -104,6 +107,7 @@ async fn handle_client(
     // Track which processes this client is attached to, so we can forward patches.
     let attached: Arc<tokio::sync::Mutex<HashMap<ProcessId, tokio::task::JoinHandle<()>>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let mut agent_subscription: Option<tokio::task::JoinHandle<()>> = None;
 
     loop {
         let msg: Option<ClientMessage> = read_message!(&mut reader, ClientMessage)?;
@@ -306,6 +310,62 @@ async fn handle_client(
                 }
             }
 
+            ClientMessage::SubscribeAgentCommands => {
+                if let Some(handle) = agent_subscription.take() {
+                    handle.abort();
+                }
+                let mut rx = agent_tx.subscribe();
+                let w = writer.clone();
+                agent_subscription = Some(tokio::spawn(async move {
+                    loop {
+                        match rx.recv().await {
+                            Ok(msg) => {
+                                let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&msg) {
+                                    Ok(b) => b,
+                                    Err(_) => break,
+                                };
+                                let mut w = w.lock().await;
+                                if crate::framing::write_raw_frame(&mut *w, &bytes)
+                                    .await
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                }));
+            }
+
+            ClientMessage::AgentCommand {
+                request_id,
+                command,
+            } => {
+                let resp = if let Err(message) = validate_agent_command(&command) {
+                    ServiceMessage::Error {
+                        message: message.to_string(),
+                    }
+                } else if agent_tx.receiver_count() == 0 {
+                    ServiceMessage::Error {
+                        message: "no desktop subscribed to agent commands".to_string(),
+                    }
+                } else {
+                    match agent_tx.send(ServiceMessage::AgentCommand {
+                        request_id,
+                        command,
+                    }) {
+                        Ok(_) => ServiceMessage::AgentCommandAccepted { request_id },
+                        Err(_) => ServiceMessage::Error {
+                            message: "no desktop subscribed to agent commands".to_string(),
+                        },
+                    }
+                };
+                let mut w = writer.lock().await;
+                write_message!(&mut *w, &resp)?;
+            }
+
             ClientMessage::Shutdown => {
                 {
                     let mut mgr = manager.lock().await;
@@ -325,6 +385,9 @@ async fn handle_client(
 
     // Client disconnected — abort all patch forwarders
     for (_, handle) in attached.lock().await.drain() {
+        handle.abort();
+    }
+    if let Some(handle) = agent_subscription.take() {
         handle.abort();
     }
 

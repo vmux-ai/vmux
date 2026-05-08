@@ -346,15 +346,16 @@ fn sync_space_visibility(
 fn push_spaces_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    chrome: Option<Single<Entity, (With<LayoutChrome>, With<UiReady>)>>,
+    chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
     spaces: Query<(Entity, &Space, &LastActivatedAt)>,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
     space_q: Query<Entity, With<Space>>,
     mut last: Local<String>,
 ) {
-    let Some(chrome) = chrome else { return };
-    let chrome_e = *chrome;
+    let Ok((chrome_e, ui_ready)) = chrome_q.single() else {
+        return;
+    };
     if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
         return;
     }
@@ -384,7 +385,7 @@ fn push_spaces_host_emit(
 
     let payload = SpacesHostEvent { spaces: rows };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
-    if body == *last {
+    if !ui_ready.is_changed() && body == *last {
         return;
     }
     commands.trigger(HostEmitEvent::new(chrome_e, SPACES_EVENT, &body));

@@ -65,12 +65,18 @@ fn session_query(q: &str) -> Option<&str> {
     }
 }
 
+fn sessions_page_matches(search_lower: &str) -> bool {
+    search_lower.is_empty()
+        || "sessions".contains(search_lower)
+        || SESSIONS_PAGE_URL.contains(search_lower)
+}
+
 fn session_results(
     sessions: &[CommandBarSession],
     search_lower: &str,
 ) -> Vec<CommandBarResultItem> {
     let mut results = Vec::new();
-    if search_lower.is_empty() {
+    if sessions_page_matches(search_lower) {
         results.push(CommandBarResultItem::Navigate {
             url: SESSIONS_PAGE_URL.to_string(),
         });
@@ -84,6 +90,16 @@ fn session_results(
     results
 }
 
+fn command_results(
+    commands: &[CommandBarCommandEntry],
+) -> impl Iterator<Item = CommandBarResultItem> + '_ {
+    commands.iter().map(|c| CommandBarResultItem::Command {
+        id: c.id.clone(),
+        name: c.name.clone(),
+        shortcut: c.shortcut.clone(),
+    })
+}
+
 pub fn filter_results(
     query: &str,
     tabs: &[CommandBarTab],
@@ -94,7 +110,11 @@ pub fn filter_results(
     let q = query.trim();
     if let Some(search) = session_query(q) {
         let search_lower = search.trim().to_lowercase();
-        return session_results(sessions, &search_lower);
+        let mut items = session_results(sessions, &search_lower);
+        if search_lower.is_empty() {
+            items.extend(command_results(commands));
+        }
+        return items;
     }
 
     if q.is_empty() {
@@ -111,11 +131,7 @@ pub fn filter_results(
             pane_id: t.pane_id,
             tab_index: t.tab_index,
         }));
-        items.extend(commands.iter().map(|c| CommandBarResultItem::Command {
-            id: c.id.clone(),
-            name: c.name.clone(),
-            shortcut: c.shortcut.clone(),
-        }));
+        items.extend(command_results(commands));
         return items;
     }
 
@@ -247,6 +263,46 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn sessions_url_includes_normal_commands() {
+        let commands = vec![CommandBarCommandEntry {
+            id: "browser_open_command_bar".to_string(),
+            name: "Command Bar".to_string(),
+            shortcut: "super+k".to_string(),
+        }];
+
+        let results = filter_results("vmux://sessions/", &[], &commands, &[], false);
+
+        assert!(results.contains(&CommandBarResultItem::Navigate {
+            url: SESSIONS_PAGE_URL.to_string(),
+        }));
+        assert!(results.contains(&CommandBarResultItem::Command {
+            id: "browser_open_command_bar".to_string(),
+            name: "Command Bar".to_string(),
+            shortcut: "super+k".to_string(),
+        }));
+    }
+
+    #[test]
+    fn sessions_query_includes_sessions_page_and_command() {
+        let commands = vec![CommandBarCommandEntry {
+            id: "session_open".to_string(),
+            name: "Sessions".to_string(),
+            shortcut: "<leader> s".to_string(),
+        }];
+
+        let results = filter_results("sessions", &[], &commands, &[], false);
+
+        assert!(results.contains(&CommandBarResultItem::Navigate {
+            url: SESSIONS_PAGE_URL.to_string(),
+        }));
+        assert!(results.contains(&CommandBarResultItem::Command {
+            id: "session_open".to_string(),
+            name: "Sessions".to_string(),
+            shortcut: "<leader> s".to_string(),
+        }));
     }
 
     #[test]

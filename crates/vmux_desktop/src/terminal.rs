@@ -172,18 +172,20 @@ struct ServiceConnectRetry {
 
 pub(crate) struct TerminalInputPlugin;
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ServiceMessageSet;
+
 impl Plugin for TerminalInputPlugin {
     fn build(&self, app: &mut App) {
         let service_wake = service_wake_callback(app);
-        // Try to connect to an already-running service first.
         if let Some(handle) = ServiceHandle::connect_with_wake(service_wake.clone()) {
             eprintln!("vmux: connected to existing service");
+            handle.send(ClientMessage::SubscribeAgentCommands);
             app.insert_resource(ServiceClient(handle));
         } else {
-            // Service not running — auto-start it and schedule connection retries.
             ensure_service_started();
             app.insert_resource(ServiceConnectRetry {
-                remaining_attempts: 60, // ~3 seconds with 50ms timer
+                remaining_attempts: 60,
                 timer: Timer::from_seconds(0.05, TimerMode::Repeating),
             });
         }
@@ -219,7 +221,10 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
         Update,
         (
             try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
-            poll_service_messages.in_set(WriteAppCommands),
+            poll_service_messages
+                .in_set(WriteAppCommands)
+                .in_set(ServiceMessageSet),
+            flush_pending_terminal_input,
             handle_terminal_copy_mode_command.in_set(crate::command::ReadAppCommands),
             sync_terminal_theme,
         )
@@ -411,6 +416,11 @@ struct PendingServiceCreate {
 #[derive(Component)]
 struct PendingServiceAttach;
 
+#[derive(Component)]
+pub(crate) struct PendingTerminalInput {
+    pub data: Vec<u8>,
+}
+
 /// Marker: CreateProcess was sent, waiting for ProcessCreated response.
 #[derive(Component)]
 struct AwaitingProcessCreated;
@@ -527,6 +537,7 @@ fn try_connect_service(
     match ServiceHandle::connect_with_wake(wake.0.clone()) {
         Some(handle) => {
             eprintln!("vmux: connected to service after retry");
+            handle.send(ClientMessage::SubscribeAgentCommands);
             commands.insert_resource(ServiceClient(handle));
             commands.remove_resource::<ServiceConnectRetry>();
         }
@@ -570,6 +581,7 @@ fn poll_service_messages(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
     mut writer: MessageWriter<AppCommand>,
+    mut agent_writer: MessageWriter<crate::agent::AgentCommandRequest>,
     mut mode_map: ResMut<TerminalModeMap>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
     mut mouse_state: ResMut<MouseSelectionState>,
@@ -751,10 +763,42 @@ fn poll_service_messages(
                 process_id: _,
                 text,
             } if !text.is_empty() => {
-                crate::clipboard::write(text.clone());
+                crate::clipboard::write(text);
+            }
+            ServiceMessage::AgentCommand {
+                request_id,
+                command,
+            } => {
+                agent_writer.write(crate::agent::AgentCommandRequest {
+                    _request_id: request_id,
+                    command,
+                });
             }
             _ => {} // ProcessOutput handled elsewhere if needed
         }
+    }
+}
+
+fn flush_pending_terminal_input(
+    pending: Query<
+        (Entity, &ServiceProcessHandle, &PendingTerminalInput),
+        (
+            With<Terminal>,
+            Without<PendingServiceCreate>,
+            Without<AwaitingProcessCreated>,
+            Without<ProcessExited>,
+        ),
+    >,
+    service: Option<Res<ServiceClient>>,
+    mut commands: Commands,
+) {
+    let Some(service) = service else { return };
+    for (entity, handle, input) in &pending {
+        service.0.send(ClientMessage::ProcessInput {
+            process_id: handle.process_id,
+            data: input.data.clone(),
+        });
+        commands.entity(entity).remove::<PendingTerminalInput>();
     }
 }
 
