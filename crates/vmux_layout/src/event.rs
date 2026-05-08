@@ -5,12 +5,36 @@ pub const PROCESSES_WEBVIEW_URL: &str = "vmux://services/";
 pub const LAYOUT_STATE_EVENT: &str = "layout-state";
 pub const TABS_EVENT: &str = "tabs";
 pub const RELOAD_EVENT: &str = "reload";
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ReloadEvent;
 pub const SPACES_EVENT: &str = "spaces";
 pub const PANE_TREE_EVENT: &str = "pane-tree";
 pub const SIDE_SHEET_COMMAND_EVENT: &str = "side-sheet-command";
 pub const SIDE_SHEET_DRAG_EVENT: &str = "side-sheet-drag";
 
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct LayoutStateEvent {
     #[serde(default)]
     pub header_open: bool,
@@ -160,14 +184,57 @@ mod tests {
 
         assert_eq!(row.address_text(), "https://www.google.com");
     }
+
+    #[test]
+    fn header_command_event_rkyv_roundtrip() {
+        let original = HeaderCommandEvent {
+            header_command: "back".into(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
+        let recovered =
+            rkyv::from_bytes::<HeaderCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(recovered.header_command, "back");
+    }
+
+    #[test]
+    fn footer_command_event_rkyv_roundtrip() {
+        let original = FooterCommandEvent {
+            command: "switch-space".into(),
+            space_id: Some("work".into()),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
+        let recovered =
+            rkyv::from_bytes::<FooterCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(recovered.command, "switch-space");
+        assert_eq!(recovered.space_id.as_deref(), Some("work"));
+    }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct HeaderCommandEvent {
     pub header_command: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct TabsHostEvent {
     pub tabs: Vec<TabRow>,
     #[serde(default)]
@@ -176,7 +243,17 @@ pub struct TabsHostEvent {
     pub can_go_forward: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct TabRow {
     pub title: String,
     pub url: String,
@@ -191,38 +268,94 @@ impl TabRow {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct SpacesHostEvent {
     pub spaces: Vec<SpaceRow>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct SpaceRow {
     pub id: String,
     pub name: String,
     pub is_active: bool,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct FooterCommandEvent {
     pub command: String,
     #[serde(default)]
     pub space_id: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct PaneTreeEvent {
     pub panes: Vec<PaneNode>,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct PaneNode {
     pub id: u64,
     pub is_active: bool,
     pub tabs: Vec<TabNode>,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct TabNode {
     pub title: String,
     pub url: String,
@@ -231,27 +364,57 @@ pub struct TabNode {
     #[serde(default)]
     pub is_active: bool,
     #[serde(default)]
-    pub tab_index: usize,
+    pub tab_index: u32,
     #[serde(default)]
     pub is_loading: bool,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct SideSheetCommandEvent {
     pub command: String,
     #[serde(default)]
     pub pane_id: String,
     #[serde(default)]
-    pub tab_index: usize,
+    pub tab_index: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub enum SplitDirection {
     Row,
     Column,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub enum Edge {
     Left,
     Right,

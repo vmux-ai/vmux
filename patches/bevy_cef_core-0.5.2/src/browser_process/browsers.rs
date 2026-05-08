@@ -1,6 +1,8 @@
 use crate::browser_process::BrpHandler;
 use crate::browser_process::ClientHandlerBuilder;
-use crate::browser_process::client_handler::{IpcEventRaw, JsEmitEventHandler};
+use crate::browser_process::client_handler::{
+    BinEmitEventHandler, BinIpcEventRaw, IpcEventRaw, JsEmitEventHandler,
+};
 use crate::prelude::*;
 use async_channel::{Sender, TryRecvError};
 use bevy::input::ButtonState;
@@ -11,8 +13,8 @@ use cef::{
     Browser, BrowserHost, BrowserSettings, CefString, Client, CompositionUnderline,
     DictionaryValue, ImplBrowser, ImplBrowserHost, ImplDictionaryValue, ImplFrame, ImplListValue,
     ImplProcessMessage, ImplRequestContext, MouseButtonType, ProcessId, Range, RequestContext,
-    RequestContextSettings, WindowInfo, browser_host_create_browser_sync, dictionary_value_create,
-    process_message_create, register_scheme_handler_factory,
+    RequestContextSettings, WindowInfo, binary_value_create, browser_host_create_browser_sync,
+    dictionary_value_create, process_message_create, register_scheme_handler_factory,
 };
 use cef_dll_sys::{cef_event_flags_t, cef_mouse_button_type_t};
 #[allow(deprecated)]
@@ -86,6 +88,7 @@ impl Browsers {
         device_scale_factor: f32,
         requester: Requester,
         ipc_event_sender: Sender<IpcEventRaw>,
+        bin_ipc_event_sender: Sender<BinIpcEventRaw>,
         brp_sender: Sender<BrpMessage>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
@@ -109,6 +112,7 @@ impl Browsers {
             size.clone(),
             device_scale.clone(),
             ipc_event_sender,
+            bin_ipc_event_sender,
             brp_sender,
             system_cursor_icon_sender,
             webview_loading_state_sender,
@@ -456,6 +460,24 @@ impl Browsers {
         };
     }
 
+    #[allow(dead_code)]
+    pub fn emit_event_bytes(&self, webview: &Entity, id: impl Into<String>, payload: &[u8]) {
+        if let Some(mut process_message) =
+            process_message_create(Some(&PROCESS_MESSAGE_BIN_HOST_EMIT.into()))
+            && let Some(argument_list) = process_message.argument_list()
+            && let Some(mut binary) = binary_value_create(Some(payload))
+            && let Some(browser) = self.browsers.get(webview)
+            && let Some(frame) = browser.client.main_frame()
+        {
+            argument_list.set_string(0, Some(&id.into().as_str().into()));
+            argument_list.set_binary(1, Some(&mut binary));
+            frame.send_process_message(
+                ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
+                Some(&mut process_message),
+            );
+        };
+    }
+
     pub fn resize(&self, webview: &Entity, size: Vec2, device_scale_factor: f32) {
         if let Some(browser) = self.browsers.get(webview) {
             browser.size.set(size);
@@ -756,6 +778,7 @@ impl Browsers {
         size: SharedViewSize,
         device_scale: SharedDeviceScaleFactor,
         ipc_event_sender: Sender<IpcEventRaw>,
+        bin_ipc_event_sender: Sender<BinIpcEventRaw>,
         brp_sender: Sender<BrpMessage>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
@@ -785,6 +808,7 @@ impl Browsers {
         ))
         .with_request_handler(RequestHandlerBuilder::build(webview, webview_popup_sender))
         .with_message_handler(JsEmitEventHandler::new(webview, ipc_event_sender))
+        .with_message_handler(BinEmitEventHandler::new(webview, bin_ipc_event_sender))
         .with_message_handler(BrpHandler::new(brp_sender))
         .build()
     }

@@ -72,10 +72,10 @@ impl Plugin for CommandBarInputPlugin {
         app.init_resource::<NewTabContext>()
             .init_resource::<AgentProviders>()
             .init_resource::<Messages<AgentLaunchRequested>>()
-            .add_plugins(JsEmitEventPlugin::<CommandBarActionEvent>::default())
-            .add_plugins(JsEmitEventPlugin::<PathCompleteRequest>::default())
-            .add_plugins(JsEmitEventPlugin::<CommandBarReadyEvent>::default())
-            .add_plugins(JsEmitEventPlugin::<CommandBarRenderedEvent>::default())
+            .add_plugins(BinJsEmitEventPlugin::<CommandBarActionEvent>::default())
+            .add_plugins(BinJsEmitEventPlugin::<PathCompleteRequest>::default())
+            .add_plugins(BinJsEmitEventPlugin::<CommandBarReadyEvent>::default())
+            .add_plugins(BinJsEmitEventPlugin::<CommandBarRenderedEvent>::default())
             .add_observer(on_command_bar_action)
             .add_observer(on_path_complete_request)
             .add_observer(on_command_bar_ready)
@@ -262,13 +262,16 @@ fn should_requeue_command_bar_open_after_emit(_command_bar_ready: bool) -> bool 
     false
 }
 
-fn on_command_bar_ready(trigger: On<Receive<CommandBarReadyEvent>>, mut commands: Commands) {
+fn on_command_bar_ready(trigger: On<BinReceive<CommandBarReadyEvent>>, mut commands: Commands) {
     commands
         .entity(trigger.event().webview)
         .insert(CommandBarReady);
 }
 
-fn on_command_bar_rendered(trigger: On<Receive<CommandBarRenderedEvent>>, mut commands: Commands) {
+fn on_command_bar_rendered(
+    trigger: On<BinReceive<CommandBarRenderedEvent>>,
+    mut commands: Commands,
+) {
     commands
         .entity(trigger.event().webview)
         .insert(CommandBarRenderedOpen(trigger.event().payload.open_id));
@@ -587,7 +590,7 @@ fn handle_open_command_bar(
                                     title: meta.title.clone(),
                                     url: meta.url.clone(),
                                     pane_id: pane_e.to_bits(),
-                                    tab_index,
+                                    tab_index: tab_index as u32,
                                     is_active: tab_is_active,
                                 });
                             }
@@ -657,10 +660,10 @@ fn handle_open_command_bar(
     );
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     let ron_body_len = ron_body.len();
-    commands.trigger(HostEmitEvent::new(
+    commands.trigger(BinHostEmitEvent::from_rkyv(
         modal_e,
         COMMAND_BAR_OPEN_EVENT,
-        &ron_body,
+        &payload,
     ));
     if should_start_command_bar_reveal(
         has_browser,
@@ -774,7 +777,7 @@ fn spawn_sessions_page_layout_from_command_bar(
 }
 
 fn on_command_bar_action(
-    trigger: On<Receive<CommandBarActionEvent>>,
+    trigger: On<BinReceive<CommandBarActionEvent>>,
     mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
@@ -1470,7 +1473,7 @@ fn mark_command_bar_painted(
 }
 
 fn on_path_complete_request(
-    trigger: On<Receive<PathCompleteRequest>>,
+    trigger: On<BinReceive<PathCompleteRequest>>,
     modal_q: Query<Entity, With<Modal>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -1485,11 +1488,10 @@ fn on_path_complete_request(
 
     let completions = complete_path(query);
     let payload = PathCompleteResponse { completions };
-    let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    commands.trigger(HostEmitEvent::new(
+    commands.trigger(BinHostEmitEvent::from_rkyv(
         modal_e,
         PATH_COMPLETE_RESPONSE,
-        &ron_body,
+        &payload,
     ));
 }
 
@@ -2166,7 +2168,7 @@ mod tests {
     struct CapturedSessionCommand(Option<SessionCommandEvent>);
 
     fn capture_session_command(
-        trigger: On<Receive<SessionCommandEvent>>,
+        trigger: On<BinReceive<SessionCommandEvent>>,
         mut captured: ResMut<CapturedSessionCommand>,
     ) {
         captured.0 = Some(trigger.event().payload.clone());

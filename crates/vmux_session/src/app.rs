@@ -5,11 +5,11 @@ use vmux_session::event::{
     SESSIONS_LIST_EVENT, SessionCommandEvent, SessionRow, SessionsListEvent,
 };
 use vmux_session::model::DEFAULT_SESSION_ID;
-use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 
 fn emit_command(command: &str, session_id: Option<String>, name: Option<String>) {
-    let _ = try_cef_emit_serde(&SessionCommandEvent {
+    let _ = try_cef_bin_emit_rkyv(&SessionCommandEvent {
         command: command.to_string(),
         session_id,
         name,
@@ -22,10 +22,11 @@ pub fn App() -> Element {
     let mut state = use_signal(SessionsListEvent::default);
     let mut selected = use_signal(|| 0usize);
 
-    let _listener = use_event_listener::<SessionsListEvent, _>(SESSIONS_LIST_EVENT, move |data| {
-        selected.set(0);
-        state.set(data);
-    });
+    let _listener =
+        use_bin_event_listener::<SessionsListEvent, _>(SESSIONS_LIST_EVENT, move |data| {
+            selected.set(0);
+            state.set(data);
+        });
 
     use_effect(move || {
         if let Some(el) = web_sys::window()

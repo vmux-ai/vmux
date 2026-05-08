@@ -3,11 +3,11 @@
 use dioxus::prelude::*;
 use vmux_layout::event::{
     FooterCommandEvent, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT,
-    PaneNode, PaneTreeEvent, RELOAD_EVENT, SPACES_EVENT, SpaceRow, SpacesHostEvent, TABS_EVENT,
-    TabNode, TabRow, TabsHostEvent, titlebar_nav_style,
+    PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, SPACES_EVENT, SpaceRow, SpacesHostEvent,
+    TABS_EVENT, TabNode, TabRow, TabsHostEvent, titlebar_nav_style,
 };
 use vmux_ui::components::icon::Icon;
-use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 
 fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
     let s = page_url.trim();
@@ -57,7 +57,7 @@ pub fn App() -> Element {
 
     let mut layout_state = use_signal(LayoutStateEvent::default);
     let _layout_listener =
-        use_event_listener::<LayoutStateEvent, _>(LAYOUT_STATE_EVENT, move |data| {
+        use_bin_event_listener::<LayoutStateEvent, _>(LAYOUT_STATE_EVENT, move |data| {
             layout_state.set(data);
         });
 
@@ -102,12 +102,12 @@ pub fn App() -> Element {
 #[component]
 fn HeaderView(titlebar_height: f32) -> Element {
     let mut tabs_state = use_signal(TabsHostEvent::default);
-    let listener = use_event_listener::<TabsHostEvent, _>(TABS_EVENT, move |data| {
+    let listener = use_bin_event_listener::<TabsHostEvent, _>(TABS_EVENT, move |data| {
         tabs_state.set(data);
     });
 
     let mut reload_key = use_signal(|| 0u32);
-    let _reload_listener = use_event_listener::<(), _>(RELOAD_EVENT, move |_| {
+    let _reload_listener = use_bin_event_listener::<ReloadEvent, _>(RELOAD_EVENT, move |_| {
         reload_key.set(reload_key() + 1);
     });
 
@@ -194,7 +194,7 @@ fn HeaderAddressBar(
         div {
             class: bar_class,
             onclick: move |_| {
-                let _ = try_cef_emit_serde(&HeaderCommandEvent {
+                let _ = try_cef_bin_emit_rkyv(&HeaderCommandEvent {
                     header_command: "focus_address_bar".to_string(),
                 });
             },
@@ -285,7 +285,7 @@ fn NavButton(
             class,
             onclick: move |_| {
                 if !disabled {
-                    let _ = try_cef_emit_serde(&HeaderCommandEvent {
+                    let _ = try_cef_bin_emit_rkyv(&HeaderCommandEvent {
                         header_command: command.to_string(),
                     });
                 }
@@ -298,7 +298,7 @@ fn NavButton(
 #[component]
 fn FooterView() -> Element {
     let mut spaces_state = use_signal(SpacesHostEvent::default);
-    let listener = use_event_listener::<SpacesHostEvent, _>(SPACES_EVENT, move |data| {
+    let listener = use_bin_event_listener::<SpacesHostEvent, _>(SPACES_EVENT, move |data| {
         spaces_state.set(data);
     });
 
@@ -341,7 +341,7 @@ fn SpacePill(index: usize, space: SpaceRow) -> Element {
                 title: "{name}",
                 class: "flex min-w-0 cursor-pointer items-center gap-2",
                 onclick: move |_| {
-                    let _ = try_cef_emit_serde(&FooterCommandEvent {
+                    let _ = try_cef_bin_emit_rkyv(&FooterCommandEvent {
                         command: "switch".to_string(),
                         space_id: Some(id_switch.clone()),
                     });
@@ -356,7 +356,7 @@ fn SpacePill(index: usize, space: SpaceRow) -> Element {
                 class: close_class,
                 onclick: move |evt| {
                     evt.stop_propagation();
-                    let _ = try_cef_emit_serde(&FooterCommandEvent {
+                    let _ = try_cef_bin_emit_rkyv(&FooterCommandEvent {
                         command: "close".to_string(),
                         space_id: Some(id_close.clone()),
                     });
@@ -379,7 +379,7 @@ fn NewSpaceButton() -> Element {
             title: "New space",
             class: "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
             onclick: move |_| {
-                let _ = try_cef_emit_serde(&FooterCommandEvent {
+                let _ = try_cef_bin_emit_rkyv(&FooterCommandEvent {
                     command: "new".to_string(),
                     space_id: None,
                 });
@@ -395,7 +395,7 @@ fn NewSpaceButton() -> Element {
 #[component]
 fn SideSheetView() -> Element {
     let mut tree_state = use_signal(PaneTreeEvent::default);
-    let listener = use_event_listener::<PaneTreeEvent, _>(PANE_TREE_EVENT, move |data| {
+    let listener = use_bin_event_listener::<PaneTreeEvent, _>(PANE_TREE_EVENT, move |data| {
         tree_state.set(data);
     });
 
@@ -475,7 +475,7 @@ fn SideSheetTabRow(tab: TabNode, pane_id: u64) -> Element {
                 "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground"
             },
             onclick: move |_| {
-                let _ = try_cef_emit_serde(&vmux_layout::event::SideSheetCommandEvent {
+                let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
                     command: "activate_tab".to_string(),
                     pane_id: pane_id.to_string(),
                     tab_index,
@@ -494,7 +494,7 @@ fn SideSheetTabRow(tab: TabNode, pane_id: u64) -> Element {
                 class: "cursor-pointer ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-sm opacity-0 transition-colors group-hover:opacity-100 hover:bg-foreground/10 active:bg-transparent",
                 onclick: move |evt| {
                     evt.stop_propagation();
-                    let _ = try_cef_emit_serde(&vmux_layout::event::SideSheetCommandEvent {
+                    let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
                         command: "close_tab".to_string(),
                         pane_id: pane_id.to_string(),
                         tab_index,

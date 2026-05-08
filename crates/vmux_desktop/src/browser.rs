@@ -34,8 +34,8 @@ use vmux_layout::{
     Footer, Header, LayoutChrome, NavigationState, Open,
     event::{
         FOOTER_HEIGHT_PX, HEADER_HEIGHT_PX, HeaderCommandEvent, LAYOUT_STATE_EVENT,
-        LayoutStateEvent, PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, TABS_EVENT,
-        TabNode, TabRow, TabsHostEvent, effective_titlebar_height,
+        LayoutStateEvent, PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent,
+        TABS_EVENT, TabNode, TabRow, TabsHostEvent, effective_titlebar_height,
     },
 };
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
@@ -56,8 +56,8 @@ impl Plugin for BrowserPlugin {
                 embedded_hosts,
                 ..default()
             })
-            .add_plugins(JsEmitEventPlugin::<HeaderCommandEvent>::default())
-            .add_plugins(JsEmitEventPlugin::<SideSheetCommandEvent>::default())
+            .add_plugins(BinJsEmitEventPlugin::<HeaderCommandEvent>::default())
+            .add_plugins(BinJsEmitEventPlugin::<SideSheetCommandEvent>::default())
             .add_observer(on_webview_ready_send_theme)
             .add_observer(on_header_command_emit)
             .add_observer(on_side_sheet_command_emit)
@@ -117,8 +117,7 @@ fn on_webview_ready_send_theme(
         let payload = ThemeEvent {
             radius: settings.layout.pane.radius,
         };
-        let body = ron::ser::to_string(&payload).unwrap_or_default();
-        commands.trigger(HostEmitEvent::new(entity, THEME_EVENT, &body));
+        commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
     }
 }
 
@@ -664,7 +663,11 @@ fn push_layout_state_emit(
     if !should_emit_cached_payload(&body, &last, ui_ready.is_changed()) {
         return;
     }
-    commands.trigger(HostEmitEvent::new(chrome_e, LAYOUT_STATE_EVENT, &body));
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        chrome_e,
+        LAYOUT_STATE_EVENT,
+        &payload,
+    ));
     *last = body;
 }
 
@@ -764,7 +767,7 @@ fn push_tabs_host_emit(
         payload.tabs.len(),
         ron_body.len()
     );
-    commands.trigger(HostEmitEvent::new(chrome_e, TABS_EVENT, &ron_body));
+    commands.trigger(BinHostEmitEvent::from_rkyv(chrome_e, TABS_EVENT, &payload));
     *last = ron_body;
 }
 
@@ -837,7 +840,7 @@ fn push_pane_tree_emit(
                                     meta.favicon_url.clone()
                                 },
                                 is_active: tab_is_active,
-                                tab_index,
+                                tab_index: tab_index as u32,
                                 is_loading: loading,
                             });
                             found_browser = true;
@@ -850,7 +853,7 @@ fn push_pane_tree_emit(
                         url: String::new(),
                         favicon_url: String::new(),
                         is_active: tab_is_active,
-                        tab_index,
+                        tab_index: tab_index as u32,
                         is_loading: false,
                     });
                 }
@@ -868,7 +871,11 @@ fn push_pane_tree_emit(
     if !should_emit_cached_payload(&ron_body, &last, ui_ready.is_changed()) {
         return;
     }
-    commands.trigger(HostEmitEvent::new(chrome_e, PANE_TREE_EVENT, &ron_body));
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        chrome_e,
+        PANE_TREE_EVENT,
+        &payload,
+    ));
     *last = ron_body;
 }
 
@@ -962,7 +969,7 @@ fn handle_browser_commands(
 }
 
 fn on_header_command_emit(
-    trigger: On<Receive<HeaderCommandEvent>>,
+    trigger: On<BinReceive<HeaderCommandEvent>>,
     mut messages: ResMut<Messages<AppCommand>>,
 ) {
     let cmd = match trigger.event().payload.header_command.as_str() {
@@ -984,7 +991,11 @@ fn on_reload_notify_header(
     let Some(chrome) = chrome else { return };
     let chrome_e = *chrome;
     if browsers.has_browser(chrome_e) && browsers.host_emit_ready(&chrome_e) {
-        commands.trigger(HostEmitEvent::new(chrome_e, RELOAD_EVENT, &"()"));
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            chrome_e,
+            RELOAD_EVENT,
+            &ReloadEvent,
+        ));
     }
 }
 
@@ -997,12 +1008,16 @@ fn on_hard_reload_notify_header(
     let Some(chrome) = chrome else { return };
     let chrome_e = *chrome;
     if browsers.has_browser(chrome_e) && browsers.host_emit_ready(&chrome_e) {
-        commands.trigger(HostEmitEvent::new(chrome_e, RELOAD_EVENT, &"()"));
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            chrome_e,
+            RELOAD_EVENT,
+            &ReloadEvent,
+        ));
     }
 }
 
 fn on_side_sheet_command_emit(
-    trigger: On<Receive<SideSheetCommandEvent>>,
+    trigger: On<BinReceive<SideSheetCommandEvent>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
@@ -1038,7 +1053,7 @@ fn on_side_sheet_command_emit(
 
     match evt.command.as_str() {
         "activate_tab" => {
-            let Some(&target_tab) = tab_entities.get(evt.tab_index) else {
+            let Some(&target_tab) = tab_entities.get(evt.tab_index as usize) else {
                 return;
             };
             commands.entity(target_pane).insert(LastActivatedAt::now());
@@ -1055,7 +1070,7 @@ fn on_side_sheet_command_emit(
             }
         }
         "close_tab" => {
-            let Some(&target_tab) = tab_entities.get(evt.tab_index) else {
+            let Some(&target_tab) = tab_entities.get(evt.tab_index as usize) else {
                 return;
             };
 

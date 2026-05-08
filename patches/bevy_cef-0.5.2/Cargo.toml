@@ -124,6 +124,9 @@ features = ["mesh_picking"]
 [dependencies.cef]
 version = "145.6.1"
 
+[dependencies.rkyv]
+workspace = true
+
 [dependencies.raw-window-handle]
 version = "0.6"
 

@@ -1,10 +1,13 @@
-use crate::prelude::{BRP_PROMISES, LISTEN_EVENTS, PROCESS_MESSAGE_BRP, PROCESS_MESSAGE_JS_EMIT};
+use crate::prelude::{
+    BRP_PROMISES, LISTEN_EVENTS, PROCESS_MESSAGE_BIN_JS_EMIT, PROCESS_MESSAGE_BRP,
+    PROCESS_MESSAGE_JS_EMIT,
+};
 use crate::util::{IntoString, v8_value_to_json};
 use cef::rc::{Rc, RcImpl};
 use cef::{
     CefString, ImplFrame, ImplListValue, ImplProcessMessage, ImplV8Context, ImplV8Handler,
-    ImplV8Value, ProcessId, V8Value, WrapV8Handler, process_message_create, sys,
-    v8_context_get_current_context, v8_value_create_promise, v8_value_create_string,
+    ImplV8Value, ProcessId, V8Value, WrapV8Handler, binary_value_create, process_message_create,
+    sys, v8_context_get_current_context, v8_value_create_promise, v8_value_create_string,
 };
 use cef_dll_sys::cef_process_id_t;
 use std::os::raw::c_int;
@@ -73,6 +76,7 @@ impl ImplV8Handler for CefApiHandler {
             "__cef_brp" => self.execute_brp(arguments, ret),
             "__cef_emit" => self.execute_emit(arguments),
             "__cef_listen" => self.execute_listen(arguments),
+            "__cef_bin_emit" => self.execute_bin_emit(arguments),
             _ => 0,
         }
     }
@@ -146,6 +150,47 @@ impl CefApiHandler {
                 ProcessId::from(cef_process_id_t::PID_BROWSER),
                 Some(&mut process),
             );
+        }
+        1
+    }
+
+    fn execute_bin_emit(&self, arguments: Option<&[Option<V8Value>]>) -> c_int {
+        let Some(context) = v8_context_get_current_context() else {
+            return 0;
+        };
+        let Some(frame) = context.frame() else {
+            return 0;
+        };
+
+        if let Some(mut process) = process_message_create(Some(&PROCESS_MESSAGE_BIN_JS_EMIT.into()))
+            && let Some(arguments_list) = process.argument_list()
+            && let Some(arguments) = arguments
+            && let Some(Some(arg)) = arguments.first()
+            && arg.is_array_buffer().is_positive()
+        {
+            let len = arg.array_buffer_byte_length();
+            // Empty payloads are valid (e.g. unit-shaped events like UiReady).
+            // Allocate an empty Vec rather than reading from a possibly-null ptr.
+            let bytes: Vec<u8> = if len == 0 {
+                Vec::new()
+            } else {
+                let data_ptr = arg.array_buffer_data();
+                if data_ptr.is_null() {
+                    return 1;
+                }
+                // SAFETY: V8 guarantees the ArrayBuffer backing store is valid for `len` bytes
+                // for the duration of this synchronous call. We copy into an owned Vec immediately.
+                unsafe { std::slice::from_raw_parts(data_ptr.cast::<u8>(), len).to_vec() }
+            };
+
+            if let Some(mut binary) = binary_value_create(Some(&bytes)) {
+                arguments_list.set_binary(0, Some(&mut binary));
+                crate::util::webview_debug_log(format!("render cef.binEmit payload_len={len}"));
+                frame.send_process_message(
+                    ProcessId::from(cef_process_id_t::PID_BROWSER),
+                    Some(&mut process),
+                );
+            }
         }
         1
     }

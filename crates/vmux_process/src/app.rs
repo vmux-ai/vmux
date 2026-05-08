@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_process::event::*;
-use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 
 #[component]
 pub fn App() -> Element {
@@ -14,7 +14,7 @@ pub fn App() -> Element {
     let mut search = use_signal(String::new);
 
     let _listener =
-        use_event_listener::<ProcessesListEvent, _>(PROCESSES_LIST_EVENT, move |event| {
+        use_bin_event_listener::<ProcessesListEvent, _>(PROCESSES_LIST_EVENT, move |event| {
             state.set(event);
         });
 
@@ -63,7 +63,7 @@ pub fn App() -> Element {
                         class: "rounded bg-red-500/10 px-2.5 py-1 text-xs text-red-400 hover:bg-red-500/20 transition-colors",
                         onclick: move |e: Event<MouseData>| {
                             e.stop_propagation();
-                            let _ = try_cef_emit_serde(&ProcessKillAllEvent { kill_all: true });
+                            let _ = try_cef_bin_emit_rkyv(&ProcessKillAllEvent { kill_all: true });
                         },
                         "Kill All"
                     }
@@ -169,7 +169,7 @@ fn ProcessCard(process: ProcessEntry) -> Element {
     let kill_id = process.id.clone();
 
     let onclick = move |_| {
-        let _ = try_cef_emit_serde(&ProcessNavigateEvent {
+        let _ = try_cef_bin_emit_rkyv(&ProcessNavigateEvent {
             process_id: nav_id.clone(),
             navigate: true,
         });
@@ -177,7 +177,7 @@ fn ProcessCard(process: ProcessEntry) -> Element {
 
     let onkill = move |e: Event<MouseData>| {
         e.stop_propagation();
-        let _ = try_cef_emit_serde(&ProcessKillEvent {
+        let _ = try_cef_bin_emit_rkyv(&ProcessKillEvent {
             process_id: kill_id.clone(),
             kill: true,
         });

@@ -1,8 +1,8 @@
 use crate::chrome_state::WebviewChromeStateSender;
 use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
-    HostWindow, IpcEventRawSender, ResolvedWebviewUri, WebviewSize, WebviewSource,
-    WebviewTransparent,
+    BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, WebviewSize,
+    WebviewSource, WebviewTransparent,
 };
 use crate::cursor_icon::SystemCursorIconSender;
 use crate::loading_state::WebviewLoadingStateSender;
@@ -172,6 +172,7 @@ fn create_webview(
     disk_profile: Res<CefDiskProfileRoot>,
     requester: Res<Requester>,
     ipc_event_sender: Res<IpcEventRawSender>,
+    bin_ipc_event_sender: Res<BinIpcEventRawSender>,
     brp_sender: Res<BrpSender>,
     cursor_icon_sender: Res<SystemCursorIconSender>,
     loading_state_sender: Res<WebviewLoadingStateSender>,
@@ -224,6 +225,7 @@ fn create_webview(
                 device_scale_factor,
                 requester.clone(),
                 ipc_event_sender.0.clone(),
+                bin_ipc_event_sender.0.clone(),
                 brp_sender.clone(),
                 cursor_icon_sender.clone(),
                 loading_state_sender.0.clone(),

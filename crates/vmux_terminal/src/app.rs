@@ -9,8 +9,7 @@ use vmux_terminal::render_model::{
     cursor_cell_style, span_background_overlay, span_classes, span_inline_style,
     span_looks_like_suggestion,
 };
-use vmux_ui::cef_bridge::try_cef_emit_keyed;
-use vmux_ui::hooks::{use_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -45,69 +44,71 @@ pub fn App() -> Element {
     let mut copy_mode = use_signal(|| false);
     let mut theme = use_signal(|| None::<TermThemeEvent>);
 
-    let _listener = use_event_listener::<TermViewportPatch, _>(TERM_VIEWPORT_EVENT, move |patch| {
-        let current_cols = *cols.peek();
-        let current_rows = rows.peek().len() as u16;
-        if patch.requires_row_rebuild(current_cols, current_rows) {
-            resize_row_signals(&mut rows, patch.rows as usize);
-            resize_cursor_row_signals(&mut cursor_rows, patch.rows as usize);
-        }
-
-        let targets = rows.with_peek(|row_signals| {
-            patch
-                .changed_lines
-                .iter()
-                .filter_map(|(row_idx, line)| {
-                    row_signals
-                        .get(*row_idx as usize)
-                        .copied()
-                        .map(|row| (row, line.clone()))
-                })
-                .collect::<Vec<_>>()
-        });
-        for (mut row, line) in targets {
-            if *row.peek() != line {
-                row.set(line);
+    let _listener =
+        use_bin_event_listener::<TermViewportPatch, _>(TERM_VIEWPORT_EVENT, move |patch| {
+            let current_cols = *cols.peek();
+            let current_rows = rows.peek().len() as u16;
+            if patch.requires_row_rebuild(current_cols, current_rows) {
+                resize_row_signals(&mut rows, patch.rows as usize);
+                resize_cursor_row_signals(&mut cursor_rows, patch.rows as usize);
             }
-        }
 
-        if cursor.peek().as_ref() != Some(&patch.cursor) {
-            let next_cursor = patch.cursor.clone();
-            let update = cursor_row_update(cursor.peek().as_ref(), &next_cursor);
-            let targets = cursor_rows.with_peek(|row_signals| CursorRowSignalUpdate {
-                clear: update
-                    .clear
-                    .and_then(|row| row_signals.get(row as usize).copied()),
-                set: update
-                    .set
-                    .and_then(|row| row_signals.get(row as usize).copied()),
+            let targets = rows.with_peek(|row_signals| {
+                patch
+                    .changed_lines
+                    .iter()
+                    .filter_map(|(row_idx, line)| {
+                        row_signals
+                            .get(*row_idx as usize)
+                            .copied()
+                            .map(|row| (row, line.clone()))
+                    })
+                    .collect::<Vec<_>>()
             });
-            if let Some(mut clear) = targets.clear
-                && clear.peek().is_some()
-            {
-                clear.set(None);
+            for (mut row, line) in targets {
+                if *row.peek() != line {
+                    row.set(line);
+                }
             }
-            if let Some(mut set) = targets.set
-                && *set.peek() != Some(next_cursor.clone())
-            {
-                set.set(Some(next_cursor.clone()));
-            }
-            cursor.set(Some(next_cursor));
-        }
-        if *cols.peek() != patch.cols {
-            cols.set(patch.cols);
-        }
-        if *selection.peek() != patch.selection {
-            selection.set(patch.selection);
-        }
-        if *copy_mode.peek() != patch.copy_mode {
-            copy_mode.set(patch.copy_mode);
-        }
-    });
 
-    let _theme_listener = use_event_listener::<TermThemeEvent, _>(TERM_THEME_EVENT, move |data| {
-        theme.set(Some(data));
-    });
+            if cursor.peek().as_ref() != Some(&patch.cursor) {
+                let next_cursor = patch.cursor.clone();
+                let update = cursor_row_update(cursor.peek().as_ref(), &next_cursor);
+                let targets = cursor_rows.with_peek(|row_signals| CursorRowSignalUpdate {
+                    clear: update
+                        .clear
+                        .and_then(|row| row_signals.get(row as usize).copied()),
+                    set: update
+                        .set
+                        .and_then(|row| row_signals.get(row as usize).copied()),
+                });
+                if let Some(mut clear) = targets.clear
+                    && clear.peek().is_some()
+                {
+                    clear.set(None);
+                }
+                if let Some(mut set) = targets.set
+                    && *set.peek() != Some(next_cursor.clone())
+                {
+                    set.set(Some(next_cursor.clone()));
+                }
+                cursor.set(Some(next_cursor));
+            }
+            if *cols.peek() != patch.cols {
+                cols.set(patch.cols);
+            }
+            if *selection.peek() != patch.selection {
+                selection.set(patch.selection);
+            }
+            if *copy_mode.peek() != patch.copy_mode {
+                copy_mode.set(patch.copy_mode);
+            }
+        });
+
+    let _theme_listener =
+        use_bin_event_listener::<TermThemeEvent, _>(TERM_THEME_EVENT, move |data| {
+            theme.set(Some(data));
+        });
 
     // Cell dimensions (char_width, char_height), updated by resize observer.
     let cell_dims = use_signal(|| (0.0f64, 0.0f64));
@@ -425,12 +426,12 @@ fn do_measure(mut cell_dims: Signal<(f64, f64)>) {
     let vw = container.client_width() as f64 - pad_x;
     let vh = container.client_height() as f64 - pad_y;
 
-    try_cef_emit_keyed(&[
-        ("char_width", JsValue::from_f64(cw)),
-        ("char_height", JsValue::from_f64(ch)),
-        ("viewport_width", JsValue::from_f64(vw)),
-        ("viewport_height", JsValue::from_f64(vh)),
-    ]);
+    let _ = try_cef_bin_emit_rkyv(&TermResizeEvent {
+        char_width: cw as f32,
+        char_height: ch as f32,
+        viewport_width: vw as f32,
+        viewport_height: vh as f32,
+    });
 }
 
 fn parse_px(cs: &web_sys::CssStyleDeclaration, prop: &str) -> f64 {
@@ -506,14 +507,14 @@ fn modifier_bits(e: &Event<MouseData>) -> u8 {
 
 /// Emit a TermMouseEvent to the Bevy host via the CEF bridge.
 fn emit_mouse(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool, moving: bool) {
-    try_cef_emit_keyed(&[
-        ("button", JsValue::from_f64(button as f64)),
-        ("col", JsValue::from_f64(col as f64)),
-        ("row", JsValue::from_f64(row as f64)),
-        ("modifiers", JsValue::from_f64(modifiers as f64)),
-        ("pressed", JsValue::from_bool(pressed)),
-        ("moving", JsValue::from_bool(moving)),
-    ]);
+    let _ = try_cef_bin_emit_rkyv(&TermMouseEvent {
+        button,
+        col,
+        row,
+        modifiers,
+        pressed,
+        moving,
+    });
 }
 
 // ---------------------------------------------------------------------------

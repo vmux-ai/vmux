@@ -71,6 +71,30 @@ fn decode_host_emit_js<T: DeserializeOwned>(e: &JsValue) -> Option<T> {
     serde_json::from_str(&s).ok()
 }
 
+#[allow(dead_code)]
+pub fn decode_bin_host_emit_js<T>(e: &JsValue) -> Option<T>
+where
+    T: rkyv::Archive,
+    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    use js_sys::{ArrayBuffer, Uint8Array};
+
+    let buffer: ArrayBuffer = if let Some(buf) = e.dyn_ref::<ArrayBuffer>() {
+        buf.clone()
+    } else if let Some(arr) = e.dyn_ref::<Uint8Array>() {
+        arr.buffer()
+    } else {
+        return None;
+    };
+
+    let view = Uint8Array::new(&buffer);
+    let mut bytes = vec![0u8; view.length() as usize];
+    view.copy_to(&mut bytes);
+
+    rkyv::from_bytes::<T, rkyv::rancor::Error>(&bytes).ok()
+}
+
 fn cef_emit_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
     let Ok(emit) = js_sys::Reflect::get(cef, &JsValue::from_str("emit")) else {
         return Err(EventListenerError::NoEmitMethod);
@@ -91,6 +115,41 @@ pub fn try_cef_emit_serde<T: serde::Serialize>(payload: &T) -> Result<(), EventL
     let json = serde_json::to_string(payload).map_err(|_| EventListenerError::SerializePayload)?;
     let value = js_sys::JSON::parse(&json).map_err(|_| EventListenerError::InvalidJson)?;
     try_cef_emit(&value)
+}
+
+fn cef_bin_emit_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
+    let Ok(emit) = js_sys::Reflect::get(cef, &JsValue::from_str("binEmit")) else {
+        return Err(EventListenerError::NoEmitMethod);
+    };
+    emit.dyn_into::<Function>()
+        .map_err(|_| EventListenerError::EmitNotCallable)
+}
+
+#[allow(dead_code)]
+pub fn try_cef_bin_emit_rkyv<T>(payload: &T) -> Result<(), EventListenerError>
+where
+    T: for<'a> rkyv::Serialize<
+            rkyv::api::high::HighSerializer<
+                rkyv::util::AlignedVec,
+                rkyv::ser::allocator::ArenaHandle<'a>,
+                rkyv::rancor::Error,
+            >,
+        >,
+{
+    use js_sys::{ArrayBuffer, Uint8Array};
+
+    let cef = window_cef()?;
+    let emit_fn = cef_bin_emit_fn(&cef)?;
+
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload)
+        .map_err(|_| EventListenerError::SerializePayload)?;
+
+    let buffer = ArrayBuffer::new(bytes.len() as u32);
+    let view = Uint8Array::new(&buffer);
+    view.copy_from(&bytes);
+
+    let _ = emit_fn.call1(&cef, &buffer.into());
+    Ok(())
 }
 
 pub fn try_cef_listen<T, F>(name: &str, on_event: F) -> Result<(), EventListenerError>
@@ -119,8 +178,56 @@ where
     Ok(())
 }
 
+fn cef_bin_listen_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
+    let Ok(listen) = js_sys::Reflect::get(cef, &JsValue::from_str("binListen")) else {
+        return Err(EventListenerError::NoListenMethod);
+    };
+    listen
+        .dyn_into::<Function>()
+        .map_err(|_| EventListenerError::ListenNotCallable)
+}
+
+#[allow(dead_code)]
+pub fn try_cef_bin_listen<T, F>(name: &str, on_event: F) -> Result<(), EventListenerError>
+where
+    T: rkyv::Archive + 'static,
+    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    F: FnMut(T) + 'static,
+{
+    let cef = window_cef()?;
+    let listen_fn = cef_bin_listen_fn(&cef)?;
+
+    let mut on_event = on_event;
+    let closure = Closure::wrap(Box::new(move |e: JsValue| {
+        if let Some(msg) = decode_bin_host_emit_js::<T>(&e) {
+            on_event(msg);
+        }
+    }) as Box<dyn FnMut(JsValue)>);
+
+    let cb = closure.as_ref().unchecked_ref();
+    let _ = listen_fn.call2(&cef, &JsValue::from_str(name), cb);
+    closure.forget();
+    Ok(())
+}
+
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+struct UiReadyPayload {}
+
 pub fn try_emit_ui_ready() -> Result<(), EventListenerError> {
-    try_cef_emit(&JsValue::from(js_sys::Object::new()))
+    use js_sys::{ArrayBuffer, Uint8Array};
+
+    let cef = window_cef()?;
+    let emit_fn = cef_bin_emit_fn(&cef)?;
+
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&UiReadyPayload {})
+        .map_err(|_| EventListenerError::SerializePayload)?;
+    let buffer = ArrayBuffer::new(bytes.len() as u32);
+    let view = Uint8Array::new(&buffer);
+    view.copy_from(&bytes);
+
+    let _ = emit_fn.call1(&cef, &buffer.into());
+    Ok(())
 }
 
 const LISTENER_RETRY_MS: i32 = 16;
@@ -189,6 +296,62 @@ where
             Err(e) => {
                 is_loading.set(true);
                 error.set(Some(format!("cef.listen failed: {e}")));
+                schedule_listener_retry(retry_tick, current_retry);
+            }
+        }
+    });
+
+    BevyState { is_loading, error }
+}
+
+#[allow(dead_code)]
+pub fn use_bin_event_listener<T, F>(name: &'static str, on_event: F) -> BevyState
+where
+    T: rkyv::Archive + 'static,
+    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+    F: FnMut(T) + 'static,
+{
+    let listener = use_hook(|| GuardedListener::new(on_event));
+    let listener_guard = listener.guard();
+    use_drop(move || listener_guard.deactivate());
+    let mut is_loading = use_signal(|| true);
+    let mut error = use_signal(|| None::<String>);
+    let mut is_listening = use_signal(|| false);
+    let retry_tick = use_signal(|| 0u32);
+
+    use_effect(move || {
+        let current_retry = retry_tick();
+        if is_listening() {
+            return;
+        }
+        let listener = listener.clone();
+        let Some(rt) = Runtime::try_current() else {
+            is_loading.set(false);
+            error.set(Some(
+                "use_bin_event_listener: no Dioxus runtime (internal error)".into(),
+            ));
+            return;
+        };
+        let scope = current_scope_id();
+        match try_cef_bin_listen::<T, _>(name, move |msg| {
+            let listener = listener.clone();
+            rt.in_scope(scope, || {
+                listener.call(msg);
+            });
+        }) {
+            Ok(()) => {
+                is_listening.set(true);
+                is_loading.set(false);
+                error.set(None);
+                match try_emit_ui_ready() {
+                    Ok(()) => {}
+                    Err(e) => error.set(Some(format!("cef.binEmit/emit failed: {e}"))),
+                }
+            }
+            Err(e) => {
+                is_loading.set(true);
+                error.set(Some(format!("cef.binListen failed: {e}")));
                 schedule_listener_retry(retry_tick, current_retry);
             }
         }

@@ -1,3 +1,4 @@
+mod bin_emit_event_handler;
 mod brp_handler;
 mod js_emit_event_handler;
 
@@ -11,6 +12,7 @@ use cef::{
 };
 use std::os::raw::c_int;
 
+pub use bin_emit_event_handler::{BinEmitEventHandler, BinIpcEventRaw};
 pub use brp_handler::BrpHandler;
 pub use js_emit_event_handler::{IpcEventRaw, JsEmitEventHandler};
 

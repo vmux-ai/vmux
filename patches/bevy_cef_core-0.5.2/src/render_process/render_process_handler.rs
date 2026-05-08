@@ -7,11 +7,11 @@ use bevy::platform::collections::HashMap;
 use bevy_remote::BrpResult;
 use cef::rc::{Rc, RcImpl};
 use cef::{
-    Browser, CefString, DictionaryValue, Frame, ImplBrowser, ImplCommandLine, ImplDictionaryValue,
-    ImplFrame, ImplListValue, ImplProcessMessage, ImplRenderProcessHandler, ImplV8Context,
-    ImplV8Exception, ImplV8Value, ProcessId, ProcessMessage, V8Context, V8Handler, V8Value,
-    WrapRenderProcessHandler, command_line_get_global, register_extension, sys,
-    v8_value_create_object,
+    Browser, CefString, DictionaryValue, Frame, ImplBinaryValue, ImplBrowser, ImplCommandLine,
+    ImplDictionaryValue, ImplFrame, ImplListValue, ImplProcessMessage, ImplRenderProcessHandler,
+    ImplV8Context, ImplV8Exception, ImplV8Value, ProcessId, ProcessMessage, V8Context, V8Handler,
+    V8Value, WrapRenderProcessHandler, command_line_get_global, register_extension, sys,
+    v8_value_create_array_buffer_with_copy, v8_value_create_object,
 };
 use std::collections::HashMap as StdHashMap;
 use std::os::raw::c_int;
@@ -25,9 +25,12 @@ if (!cef) cef = {};
   native function __cef_brp();
   native function __cef_emit();
   native function __cef_listen();
+  native function __cef_bin_emit();
   cef.brp = __cef_brp;
   cef.emit = __cef_emit;
   cef.listen = __cef_listen;
+  cef.binEmit = __cef_bin_emit;
+  cef.binListen = __cef_listen;
 })();
 "#;
 
@@ -40,6 +43,8 @@ pub const INIT_SCRIPT_KEY: &str = "init_script";
 pub const PROCESS_MESSAGE_BRP: &str = "brp";
 pub const PROCESS_MESSAGE_HOST_EMIT: &str = "host-emit";
 pub const PROCESS_MESSAGE_JS_EMIT: &str = "js-emit";
+pub const PROCESS_MESSAGE_BIN_HOST_EMIT: &str = "bin-host-emit";
+pub const PROCESS_MESSAGE_BIN_JS_EMIT: &str = "bin-js-emit";
 
 pub struct RenderProcessHandlerBuilder {
     object: *mut RcImpl<sys::_cef_render_process_handler_t, Self>,
@@ -141,6 +146,9 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
                 }
                 PROCESS_MESSAGE_HOST_EMIT => {
                     handle_listen_message(message, ctx);
+                }
+                PROCESS_MESSAGE_BIN_HOST_EMIT => {
+                    handle_bin_listen_message(message, ctx);
                 }
                 _ => {}
             }
@@ -258,6 +266,43 @@ fn handle_listen_message(message: &ProcessMessage, mut ctx: V8Context) {
         );
     }
     ctx.exit();
+}
+
+fn handle_bin_listen_message(message: &ProcessMessage, mut ctx: V8Context) {
+    let Some(argument_list) = message.argument_list() else {
+        return;
+    };
+    let id = argument_list.string(0).into_string();
+    let Some(binary) = argument_list.binary(1) else {
+        return;
+    };
+    let len = binary.size();
+    let mut buffer = vec![0u8; len];
+    binary.data(Some(&mut buffer), 0);
+
+    let callback = {
+        let Ok(events) = LISTEN_EVENTS.lock() else {
+            return;
+        };
+        events.get(&id).cloned()
+    };
+    let Some(callback) = callback else {
+        return;
+    };
+
+    if ctx.enter().is_positive() {
+        let array_buffer = v8_value_create_array_buffer_with_copy(buffer.as_mut_ptr(), len);
+        let mut this = v8_value_create_object(
+            Some(&mut V8DefaultAccessorBuilder::build()),
+            Some(&mut V8DefaultInterceptorBuilder::build()),
+        );
+        let _ = callback.execute_function_with_context(
+            Some(&mut ctx),
+            this.as_mut(),
+            Some(&[array_buffer]),
+        );
+        ctx.exit();
+    }
 }
 
 fn register_extensions_from_command_line() {

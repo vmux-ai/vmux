@@ -2,12 +2,12 @@
 
 use dioxus::prelude::*;
 use vmux_history::event::{HISTORY_EVENT, HistoryEvent};
-use vmux_ui::hooks::use_event_listener;
+use vmux_ui::hooks::use_bin_event_listener;
 
 #[component]
 pub fn App() -> Element {
     let mut history = use_signal(Vec::<String>::new);
-    let listener = use_event_listener::<HistoryEvent, _>(HISTORY_EVENT, move |data| {
+    let listener = use_bin_event_listener::<HistoryEvent, _>(HISTORY_EVENT, move |data| {
         history.set(data.history);
     });
 

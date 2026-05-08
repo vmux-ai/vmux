@@ -1,6 +1,14 @@
 pub const HISTORY_EVENT: &str = "history";
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct HistoryEvent {
     pub url: String,
     pub history: Vec<String>,

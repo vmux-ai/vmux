@@ -15,7 +15,7 @@ use vmux_command::results::{
 };
 use vmux_command::style::{command_bar_shell_class, result_item_class};
 use vmux_ui::components::icon::Icon;
-use vmux_ui::hooks::{try_cef_emit_serde, use_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -28,7 +28,7 @@ fn looks_like_path(s: &str) -> bool {
 }
 
 fn emit_action(action: &str, value: &str) {
-    let _ = try_cef_emit_serde(&CommandBarActionEvent {
+    let _ = try_cef_bin_emit_rkyv(&CommandBarActionEvent {
         action: action.to_string(),
         value: value.to_string(),
     });
@@ -50,13 +50,13 @@ pub fn App() -> Element {
     let mut path_completions = use_signal(Vec::<PathEntry>::new);
 
     let open_listener =
-        use_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
+        use_bin_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
             let open_id = data.open_id;
             let should_reset_input =
                 command_bar_open_should_reset_input(current_open_id(), open_id);
             if !should_reset_input {
                 if command_bar_open_should_ack(open_id) {
-                    let _ = try_cef_emit_serde(&CommandBarRenderedEvent { open_id });
+                    let _ = try_cef_bin_emit_rkyv(&CommandBarRenderedEvent { open_id });
                 }
                 return;
             }
@@ -76,7 +76,7 @@ pub fn App() -> Element {
     use_effect(move || {
         if !(open_listener.is_loading)()
             && !ready_sent()
-            && try_cef_emit_serde(&CommandBarReadyEvent).is_ok()
+            && try_cef_bin_emit_rkyv(&CommandBarReadyEvent).is_ok()
         {
             ready_sent.set(true);
         }
@@ -88,14 +88,14 @@ pub fn App() -> Element {
         if open
             && open_id != 0
             && last_rendered_open_id() != open_id
-            && try_cef_emit_serde(&CommandBarRenderedEvent { open_id }).is_ok()
+            && try_cef_bin_emit_rkyv(&CommandBarRenderedEvent { open_id }).is_ok()
         {
             last_rendered_open_id.set(open_id);
         }
     });
 
     let _path_listener =
-        use_event_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
+        use_bin_event_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
             path_completions.set(data.completions);
         });
 
@@ -105,7 +105,7 @@ pub fn App() -> Element {
             path_completions.set(Vec::new());
             return;
         }
-        let _ = try_cef_emit_serde(&PathCompleteRequest {
+        let _ = try_cef_bin_emit_rkyv(&PathCompleteRequest {
             query: q.trim().to_string(),
         });
     });

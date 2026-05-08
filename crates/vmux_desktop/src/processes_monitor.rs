@@ -93,9 +93,9 @@ impl Plugin for ProcessesMonitorPlugin {
                 1.0,
                 TimerMode::Repeating,
             )))
-            .add_plugins(JsEmitEventPlugin::<ProcessNavigateEvent>::default())
-            .add_plugins(JsEmitEventPlugin::<ProcessKillEvent>::default())
-            .add_plugins(JsEmitEventPlugin::<ProcessKillAllEvent>::default())
+            .add_plugins(BinJsEmitEventPlugin::<ProcessNavigateEvent>::default())
+            .add_plugins(BinJsEmitEventPlugin::<ProcessKillEvent>::default())
+            .add_plugins(BinJsEmitEventPlugin::<ProcessKillAllEvent>::default())
             .add_systems(
                 Update,
                 (request_process_list, broadcast_to_monitors).chain(),
@@ -168,14 +168,18 @@ fn broadcast_to_monitors(
 
     for entity in &monitors {
         if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
-            commands.trigger(HostEmitEvent::new(entity, PROCESSES_LIST_EVENT, &event));
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                PROCESSES_LIST_EVENT,
+                &event,
+            ));
         }
     }
 }
 
 /// Navigate to the terminal tab for the clicked process, or open a new one.
 fn on_process_navigate(
-    trigger: On<Receive<ProcessNavigateEvent>>,
+    trigger: On<BinReceive<ProcessNavigateEvent>>,
     terminals: Query<(Entity, &ServiceProcessHandle, &ChildOf), With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Tab>>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
@@ -230,7 +234,7 @@ fn on_process_navigate(
 
 /// Kill a single service-managed process and close the associated terminal tab if any.
 fn on_process_kill(
-    trigger: On<Receive<ProcessKillEvent>>,
+    trigger: On<BinReceive<ProcessKillEvent>>,
     service: Option<Res<ServiceClient>>,
     mut process_list: ResMut<ServiceProcessList>,
     terminals: Query<(Entity, &ServiceProcessHandle, &ChildOf), With<Terminal>>,
@@ -261,7 +265,7 @@ fn on_process_kill(
 
 /// Kill all service-managed processes and close their terminal tabs.
 fn on_process_kill_all(
-    _trigger: On<Receive<ProcessKillAllEvent>>,
+    _trigger: On<BinReceive<ProcessKillAllEvent>>,
     service: Option<Res<ServiceClient>>,
     mut process_list: ResMut<ServiceProcessList>,
     terminals: Query<(Entity, &ServiceProcessHandle, &ChildOf), With<Terminal>>,

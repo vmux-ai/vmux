@@ -10,14 +10,32 @@ pub const PROCESSES_NAVIGATE_EVENT: &str = "processes_navigate";
 pub const PROCESSES_WEBVIEW_URL: &str = "vmux://services/";
 
 /// Service connection status + process list, sent periodically to the webview.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct ProcessesListEvent {
     pub connected: bool,
     pub processes: Vec<ProcessEntry>,
 }
 
 /// A single service-managed process's metadata.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct ProcessEntry {
     pub id: String,
     pub shell: String,
@@ -33,13 +51,24 @@ pub struct ProcessEntry {
 }
 
 /// A simplified terminal line for the preview.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct PreviewLine {
     pub text: String,
 }
 
 /// Emitted by the processes webview when user clicks a process card.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct ProcessNavigateEvent {
     pub process_id: String,
     /// Discriminator so serde doesn't confuse with ProcessKillEvent.
@@ -47,7 +76,9 @@ pub struct ProcessNavigateEvent {
 }
 
 /// Emitted to kill a single service-managed process.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct ProcessKillEvent {
     pub process_id: String,
     /// Discriminator so serde doesn't confuse with ProcessNavigateEvent.
@@ -55,7 +86,9 @@ pub struct ProcessKillEvent {
 }
 
 /// Emitted to kill all service-managed processes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct ProcessKillAllEvent {
     /// Discriminator field so serde doesn't match arbitrary IPC payloads.
     pub kill_all: bool,

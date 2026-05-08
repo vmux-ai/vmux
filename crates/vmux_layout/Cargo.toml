@@ -23,6 +23,7 @@ path = "src/lib.rs"
 vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
 
 [dependencies]
+rkyv = { workspace = true }
 serde = { workspace = true }
 vmux_core = { path = "../vmux_core" }
 

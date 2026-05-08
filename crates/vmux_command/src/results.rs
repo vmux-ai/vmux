@@ -46,7 +46,7 @@ fn session_result(session: &CommandBarSession) -> CommandBarResultItem {
         name: session.name.clone(),
         profile: session.profile.clone(),
         is_active: session.is_active,
-        tab_count: session.tab_count,
+        tab_count: session.tab_count as usize,
     }
 }
 
@@ -129,7 +129,7 @@ pub fn filter_results(
             title: t.title.clone(),
             url: t.url.clone(),
             pane_id: t.pane_id,
-            tab_index: t.tab_index,
+            tab_index: t.tab_index as usize,
         }));
         items.extend(command_results(commands));
         return items;
@@ -184,7 +184,7 @@ pub fn filter_results(
                     title: t.title.clone(),
                     url: t.url.clone(),
                     pane_id: t.pane_id,
-                    tab_index: t.tab_index,
+                    tab_index: t.tab_index as usize,
                 });
             }
         }

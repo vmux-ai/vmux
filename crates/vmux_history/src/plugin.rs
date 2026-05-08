@@ -42,8 +42,7 @@ fn push_history_via_host_emit(
             .collect();
         let url = history.join(", ");
         let payload = HistoryEvent { url, history };
-        let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-        commands.trigger(HostEmitEvent::new(wv, HISTORY_EVENT, &ron_body));
+        commands.trigger(BinHostEmitEvent::from_rkyv(wv, HISTORY_EVENT, &payload));
         commands.entity(wv).insert(Sent(now_millis()));
     }
 }

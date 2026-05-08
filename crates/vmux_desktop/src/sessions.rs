@@ -115,7 +115,7 @@ impl Plugin for SessionsPlugin {
                 .resource_mut::<WebviewAppRegistry>()
                 .as_mut(),
         );
-        app.add_plugins(JsEmitEventPlugin::<SessionCommandEvent>::default())
+        app.add_plugins(BinJsEmitEventPlugin::<SessionCommandEvent>::default())
             .add_observer(on_session_command)
             .add_systems(
                 Update,
@@ -195,7 +195,11 @@ fn session_rows(
                 name: session.name.clone(),
                 profile: session.profile.clone(),
                 is_active,
-                tab_count: if is_active { active_tab_count } else { 0 },
+                tab_count: if is_active {
+                    active_tab_count as u32
+                } else {
+                    0
+                },
             }
         })
         .collect()
@@ -261,7 +265,11 @@ fn broadcast_sessions_to_views(
         }
     }
     for entity in session_emit_targets(&ready, &body, &mut cache) {
-        commands.trigger(HostEmitEvent::new(entity, SESSIONS_LIST_EVENT, &payload));
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            SESSIONS_LIST_EVENT,
+            &payload,
+        ));
     }
 }
 
@@ -362,7 +370,7 @@ fn spawn_sessions_page_layout(
 }
 
 fn on_session_command(
-    trigger: On<Receive<SessionCommandEvent>>,
+    trigger: On<BinReceive<SessionCommandEvent>>,
     mut active: ResMut<ActiveSession>,
     session_entities: Query<
         Entity,

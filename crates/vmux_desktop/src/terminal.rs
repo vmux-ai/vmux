@@ -194,8 +194,8 @@ impl Plugin for TerminalInputPlugin {
         app.init_resource::<MouseSelectionState>()
             .init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
-            .add_plugins(JsEmitEventPlugin::<TermResizeEvent>::default())
-            .add_plugins(JsEmitEventPlugin::<TermMouseEvent>::default())
+            .add_plugins(BinJsEmitEventPlugin::<TermResizeEvent>::default())
+            .add_plugins(BinJsEmitEventPlugin::<TermMouseEvent>::default())
             .add_systems(
                 PreUpdate,
                 (
@@ -666,7 +666,11 @@ fn poll_service_messages(
                             copy_mode,
                             full,
                         };
-                        commands.trigger(HostEmitEvent::new(entity, TERM_VIEWPORT_EVENT, &patch));
+                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                            entity,
+                            TERM_VIEWPORT_EVENT,
+                            &patch,
+                        ));
                         break;
                     }
                 }
@@ -696,7 +700,11 @@ fn poll_service_messages(
                             copy_mode: false,
                             full: true,
                         };
-                        commands.trigger(HostEmitEvent::new(entity, TERM_VIEWPORT_EVENT, &patch));
+                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                            entity,
+                            TERM_VIEWPORT_EVENT,
+                            &patch,
+                        ));
                         break;
                     }
                 }
@@ -1547,7 +1555,7 @@ fn send_mouse_action(service: &ServiceHandle, process_id: ProcessId, action: Mou
 /// intercepted and translated into selection commands sent to the service.
 /// Anything else is forwarded as SGR mouse-report bytes to the PTY.
 fn on_term_mouse(
-    trigger: On<Receive<TermMouseEvent>>,
+    trigger: On<BinReceive<TermMouseEvent>>,
     q: Query<&ServiceProcessHandle, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
     mode_map: Res<TerminalModeMap>,
@@ -1590,7 +1598,7 @@ fn on_term_ready(
 
 /// Handle resize event from webview (reports char cell dimensions).
 fn on_term_resize(
-    trigger: On<Receive<TermResizeEvent>>,
+    trigger: On<BinReceive<TermResizeEvent>>,
     webview_q: Query<&WebviewSize, With<Terminal>>,
     handle_q: Query<&ServiceProcessHandle, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
@@ -1692,7 +1700,11 @@ fn sync_terminal_theme(
 
     for entity in targets {
         if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
-            commands.trigger(HostEmitEvent::new(entity, TERM_THEME_EVENT, &body));
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                TERM_THEME_EVENT,
+                &event,
+            ));
         }
     }
 }

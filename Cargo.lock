@@ -895,6 +895,7 @@ dependencies = [
  "cef",
  "objc",
  "raw-window-handle",
+ "rkyv",
  "serde",
  "serde_json",
 ]
@@ -8966,6 +8967,7 @@ dependencies = [
  "dioxus",
  "js-sys",
  "muda",
+ "rkyv",
  "serde",
  "vmux_macro",
  "vmux_ui",
@@ -9033,6 +9035,7 @@ dependencies = [
  "chrono",
  "dioxus",
  "moonshine-save",
+ "rkyv",
  "ron 0.8.1",
  "serde",
  "url",
@@ -9059,6 +9062,7 @@ dependencies = [
  "moonshine-save",
  "raw-window-handle",
  "rfd",
+ "rkyv",
  "ron 0.8.1",
  "serde",
  "vmux_command",
@@ -9095,6 +9099,7 @@ dependencies = [
  "bevy",
  "bevy_cef",
  "dioxus",
+ "rkyv",
  "serde",
  "vmux_ui",
  "vmux_webview_app",
@@ -9122,6 +9127,7 @@ name = "vmux_session"
 version = "0.0.2"
 dependencies = [
  "dioxus",
+ "rkyv",
  "serde",
  "vmux_ui",
  "vmux_webview_app",
@@ -9153,6 +9159,7 @@ dependencies = [
  "dioxus",
  "dioxus-primitives",
  "js-sys",
+ "rkyv",
  "ron 0.8.1",
  "serde",
  "serde_json",
@@ -9170,6 +9177,7 @@ dependencies = [
  "bevy_cef",
  "bevy_cef_core",
  "regex",
+ "rkyv",
  "serde",
 ]
 

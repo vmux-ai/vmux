@@ -26,7 +26,9 @@ pub enum TermColor {
     Rgb(u8, u8, u8),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub struct TermThemeEvent {
     pub foreground: [u8; 3],
     pub background: [u8; 3],
@@ -232,7 +234,17 @@ pub const MOD_ALT: u8 = 2;
 pub const MOD_SHIFT: u8 = 4;
 pub const MOD_SUPER: u8 = 8;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Default,
+    PartialEq,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct TermMouseEvent {
     /// 0=left, 1=middle, 2=right, 3=none (release/motion), 64=scroll_up, 65=scroll_down
     pub button: u8,
@@ -246,7 +258,17 @@ pub struct TermMouseEvent {
     pub moving: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Default,
+    PartialEq,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct TermResizeEvent {
     pub char_width: f32,
     pub char_height: f32,

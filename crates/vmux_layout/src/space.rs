@@ -29,7 +29,7 @@ pub struct SpaceCommandSet;
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Space>()
-            .add_plugins(JsEmitEventPlugin::<FooterCommandEvent>::default())
+            .add_plugins(BinJsEmitEventPlugin::<FooterCommandEvent>::default())
             .add_observer(on_footer_command_emit)
             .add_systems(
                 Update,
@@ -388,12 +388,16 @@ fn push_spaces_host_emit(
     if !ui_ready.is_changed() && body == *last {
         return;
     }
-    commands.trigger(HostEmitEvent::new(chrome_e, SPACES_EVENT, &body));
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        chrome_e,
+        SPACES_EVENT,
+        &payload,
+    ));
     *last = body;
 }
 
 fn on_footer_command_emit(
-    trigger: On<Receive<FooterCommandEvent>>,
+    trigger: On<BinReceive<FooterCommandEvent>>,
     spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
     space_q: Query<Entity, With<Space>>,
     main_q: Query<Entity, With<MainNode>>,

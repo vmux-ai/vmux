@@ -3,7 +3,7 @@ use bevy::prelude::{
     App, Commands, Component, IntoScheduleConfigs, On, Plugin, Res, ResMut, Resource, Startup,
     SystemSet,
 };
-use bevy_cef::prelude::{JsEmitEventPlugin, Receive};
+use bevy_cef::prelude::{BinJsEmitEventPlugin, BinReceive};
 use bevy_cef_core::prelude::{CefEmbeddedHost, CefEmbeddedHosts, webview_debug_log};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -14,8 +14,44 @@ pub mod build;
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WebviewAppEmbedSet;
 
-#[derive(Clone, Copy, Component, Debug, Default, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Component,
+    Debug,
+    Default,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct UiReady {}
+
+#[cfg(test)]
+mod ui_ready_tests {
+    use super::*;
+
+    #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+    struct UiReadyPayloadProbe {}
+
+    #[test]
+    fn ui_ready_cross_type_rkyv_compat() {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&UiReadyPayloadProbe {}).expect("ser");
+        println!("UiReady archive byte length: {}", bytes.len());
+        println!("UiReady archive bytes: {:?}", &bytes[..]);
+        let _decoded =
+            rkyv::from_bytes::<UiReady, rkyv::rancor::Error>(&bytes).expect("cross-type decode");
+    }
+
+    #[test]
+    fn ui_ready_self_rkyv_roundtrip() {
+        let original = UiReady {};
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
+        println!("UiReady self archive byte length: {}", bytes.len());
+        let _decoded =
+            rkyv::from_bytes::<UiReady, rkyv::rancor::Error>(&bytes).expect("self decode");
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct WebviewAppConfig {
@@ -100,12 +136,12 @@ pub struct JsEmitUiReadyPlugin;
 
 impl Plugin for JsEmitUiReadyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(JsEmitEventPlugin::<UiReady>::default())
+        app.add_plugins(BinJsEmitEventPlugin::<UiReady>::default())
             .add_observer(mark_webview_ui_ready_on_js_emit);
     }
 }
 
-fn mark_webview_ui_ready_on_js_emit(trigger: On<Receive<UiReady>>, mut commands: Commands) {
+fn mark_webview_ui_ready_on_js_emit(trigger: On<BinReceive<UiReady>>, mut commands: Commands) {
     webview_debug_log(format!("UiReady entity={:?}", trigger.event().webview));
     commands
         .entity(trigger.event().webview)
