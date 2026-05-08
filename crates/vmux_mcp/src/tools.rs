@@ -70,6 +70,20 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
         }),
     });
 
+    tools.push(ToolDefinition {
+        name: "browser_navigate".to_string(),
+        description: "Navigate the active webview to a URL.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string"
+                }
+            },
+            "required": ["url"]
+        }),
+    });
+
     tools
 }
 
@@ -109,6 +123,15 @@ pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<Agen
                     .to_string(),
                 mode,
             })
+        }
+        "browser_navigate" => {
+            let url = optional_string(&arguments, "url")
+                .ok_or_else(|| "browser_navigate.url is required".to_string())?
+                .to_string();
+            if url.trim().is_empty() {
+                return Err("browser_navigate.url is empty".to_string());
+            }
+            Ok(AgentCommand::BrowserNavigate { url })
         }
         other => {
             if AppCommand::from_agent_id(other).is_some() {
@@ -180,6 +203,32 @@ mod tests {
     #[test]
     fn unknown_tool_returns_error() {
         assert!(agent_command_from_tool_call("nope_not_a_tool", serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn list_tools_includes_browser_navigate() {
+        let names = tool_names();
+        assert!(names.contains(&"browser_navigate".to_string()));
+    }
+
+    #[test]
+    fn browser_navigate_dispatches_with_url() {
+        let command = agent_command_from_tool_call(
+            "browser_navigate",
+            serde_json::json!({"url": "https://example.com"}),
+        )
+        .unwrap();
+        assert_eq!(
+            command,
+            AgentCommand::BrowserNavigate {
+                url: "https://example.com".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn browser_navigate_missing_url_returns_error() {
+        assert!(agent_command_from_tool_call("browser_navigate", serde_json::json!({})).is_err());
     }
 
     #[test]

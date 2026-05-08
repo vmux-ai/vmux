@@ -13,7 +13,9 @@ use crate::{
     terminal::{PendingTerminalInput, ProcessExited, ServiceMessageSet, Terminal},
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
-use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
+use bevy_cef::prelude::{CefKeyboardTarget, RequestNavigate, WebviewExtendStandardMaterial};
+
+use crate::browser::Browser;
 use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
 use vmux_layout::event::TERMINAL_WEBVIEW_URL;
@@ -184,12 +186,30 @@ fn active_terminal_for_tab(
         .find_map(|(entity, child_of)| (child_of.get() == tab).then_some(entity))
 }
 
+fn active_webview_for_tab(
+    tab: Option<Entity>,
+    browsers: &Query<(Entity, &ChildOf), With<Browser>>,
+    terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+) -> Option<Entity> {
+    let tab = tab?;
+    browsers.iter().find_map(|(entity, child_of)| {
+        if child_of.get() != tab {
+            return None;
+        }
+        if terminals.iter().any(|(t, _)| t == entity) {
+            return None;
+        }
+        Some(entity)
+    })
+}
+
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
     focus: Res<FocusedTab>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    browsers: Query<(Entity, &ChildOf), With<Browser>>,
     settings: Res<AppSettings>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -256,6 +276,16 @@ fn handle_agent_commands(
                     &mut webview_mt,
                     &settings,
                 );
+            }
+            ServiceAgentCommand::BrowserNavigate { url } => {
+                let Some(webview) = active_webview_for_tab(focus.tab, &browsers, &terminals) else {
+                    warn!("agent browser_navigate has no active webview");
+                    continue;
+                };
+                commands.trigger(RequestNavigate {
+                    webview,
+                    url: url.clone(),
+                });
             }
         }
     }
@@ -348,6 +378,56 @@ mod tests {
             cwd: cwd.to_path_buf(),
             command: "echo agent".to_string(),
         })
+    }
+
+    #[derive(Resource, Default)]
+    struct CapturedNavigateUrls(Vec<String>);
+
+    #[test]
+    fn browser_navigate_triggers_request_navigate_with_url() {
+        use crate::browser::Browser;
+        use bevy_cef::prelude::RequestNavigate;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.init_resource::<CapturedNavigateUrls>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        let tab = app
+            .world_mut()
+            .spawn(crate::layout::tab::tab_bundle())
+            .insert(ChildOf(pane))
+            .id();
+        app.world_mut().spawn(Browser).insert(ChildOf(tab));
+
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedTab>().tab = Some(tab);
+
+        app.add_observer(
+            |trigger: On<RequestNavigate>, mut captured: ResMut<CapturedNavigateUrls>| {
+                captured.0.push(trigger.url.clone());
+            },
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                _request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::BrowserNavigate {
+                    url: "https://example.com".to_string(),
+                },
+            });
+
+        app.update();
+
+        let captured = app.world().resource::<CapturedNavigateUrls>();
+        assert_eq!(captured.0, vec!["https://example.com".to_string()]);
     }
 
     #[test]

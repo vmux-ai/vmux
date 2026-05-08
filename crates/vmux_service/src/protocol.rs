@@ -76,6 +76,9 @@ pub enum AgentCommand {
         cwd: String,
         mode: AgentShellMode,
     },
+    BrowserNavigate {
+        url: String,
+    },
 }
 
 pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str> {
@@ -83,6 +86,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         AgentCommand::AppCommand { id } if id.trim().is_empty() => Err("app_command.id is empty"),
         AgentCommand::RunShell { command, .. } if command.trim().is_empty() => {
             Err("run_shell.command is empty")
+        }
+        AgentCommand::BrowserNavigate { url } if url.trim().is_empty() => {
+            Err("browser_navigate.url is empty")
         }
         _ => Ok(()),
     }
@@ -320,6 +326,14 @@ mod tests {
         let decoded = rkyv::from_bytes::<AgentRequestId, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(decoded, request_id);
+    }
+
+    #[test]
+    fn empty_browser_navigate_url_is_invalid() {
+        assert_eq!(
+            validate_agent_command(&AgentCommand::BrowserNavigate { url: String::new() }),
+            Err("browser_navigate.url is empty")
+        );
     }
 
     #[test]
