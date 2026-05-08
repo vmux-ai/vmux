@@ -1690,8 +1690,6 @@ fn sync_terminal_theme(
         cursor_style: theme.cursor_style.clone(),
         cursor_blink: theme.cursor_blink,
     };
-    let body = ron::ser::to_string(&event).unwrap_or_default();
-
     let targets: Vec<Entity> = if theme_changed {
         q.iter().collect()
     } else {
