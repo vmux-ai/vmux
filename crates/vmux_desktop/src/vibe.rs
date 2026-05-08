@@ -112,7 +112,7 @@ fn mcp_servers_env_value(cwd: &Path) -> Result<String, String> {
 }
 
 fn resolve_mcp_server_config(cwd: &Path) -> Result<McpServerConfig, String> {
-    let sidecar = vmux_mcp_sidecar_path()?;
+    let sidecar = vmux_sidecar_path()?;
     mcp_server_config_for(&sidecar, cwd)
 }
 
@@ -120,18 +120,18 @@ fn mcp_server_config_for(sidecar: &Path, cwd: &Path) -> Result<McpServerConfig, 
     if is_executable(sidecar) {
         return Ok(McpServerConfig {
             command: sidecar.to_string_lossy().to_string(),
-            args: Vec::new(),
+            args: vec!["mcp".to_string()],
             cwd: None,
         });
     }
 
     let workspace = find_workspace_dir(cwd)
-        .ok_or_else(|| format!("vmux_mcp executable not found: {}", sidecar.display()))?;
+        .ok_or_else(|| format!("vmux executable not found: {}", sidecar.display()))?;
 
     Ok(McpServerConfig {
         command: "cargo".to_string(),
         args: [
-            "run", "--quiet", "-p", "vmux_mcp", "--bin", "vmux_mcp", "--",
+            "run", "--quiet", "-p", "vmux_cli", "--bin", "vmux", "--", "mcp",
         ]
         .into_iter()
         .map(str::to_string)
@@ -150,13 +150,13 @@ fn find_workspace_dir(cwd: &Path) -> Option<PathBuf> {
     }
 }
 
-fn vmux_mcp_sidecar_path() -> Result<PathBuf, String> {
+fn vmux_sidecar_path() -> Result<PathBuf, String> {
     let current = std::env::current_exe()
         .map_err(|error| format!("resolve current executable failed: {error}"))?;
     let Some(dir) = current.parent() else {
         return Err("current executable has no parent directory".to_string());
     };
-    Ok(dir.join("vmux_mcp"))
+    Ok(dir.join("vmux"))
 }
 
 fn shell_quote(value: &str) -> Result<String, String> {
@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn launch_command_cds_and_passes_mcp_servers_to_vibe() {
         let command = build_bash_launch_command(
-            r#"[{"name":"vmux","transport":"stdio","command":"target/debug/vmux_mcp"}]"#,
+            r#"[{"name":"vmux","transport":"stdio","command":"target/debug/vmux","args":["mcp"]}]"#,
             Path::new("/Users/test/.local/bin/vibe"),
             Path::new("/tmp/work tree"),
         )
@@ -229,7 +229,7 @@ mod tests {
 
         assert_eq!(
             command,
-            "bash -lc 'cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" exec \"$3\" --trust' bash '/tmp/work tree' '[{\"name\":\"vmux\",\"transport\":\"stdio\",\"command\":\"target/debug/vmux_mcp\"}]' '/Users/test/.local/bin/vibe'"
+            "bash -lc 'cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" exec \"$3\" --trust' bash '/tmp/work tree' '[{\"name\":\"vmux\",\"transport\":\"stdio\",\"command\":\"target/debug/vmux\",\"args\":[\"mcp\"]}]' '/Users/test/.local/bin/vibe'"
         );
     }
 
@@ -240,7 +240,7 @@ mod tests {
         std::fs::create_dir_all(&workspace).unwrap();
         std::fs::write(workspace.join("Cargo.toml"), b"[workspace]\n").unwrap();
 
-        let config = mcp_server_config_for(&temp.join("missing-vmux-mcp"), &workspace).unwrap();
+        let config = mcp_server_config_for(&temp.join("missing-vmux"), &workspace).unwrap();
 
         let _ = std::fs::remove_dir_all(&temp);
 
@@ -248,7 +248,7 @@ mod tests {
         assert_eq!(
             config.args,
             vec![
-                "run", "--quiet", "-p", "vmux_mcp", "--bin", "vmux_mcp", "--"
+                "run", "--quiet", "-p", "vmux_cli", "--bin", "vmux", "--", "mcp"
             ]
         );
         assert_eq!(config.cwd, Some(workspace));

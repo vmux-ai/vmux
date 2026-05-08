@@ -58,11 +58,11 @@ copyright = "Copyright 2024-2025 Junichi Sugiura. MIT License."
 homepage = "https://vmux.ai"
 formats = ["app", "dmg"]
 icons = ["../../packaging/macos/Vmux.icns"]
-before-packaging-command = "env -u CEF_PATH cargo build -p vmux_desktop -p vmux_mcp -p bevy_cef_debug_render_process --release"
+before-packaging-command = "env -u CEF_PATH cargo build -p vmux_desktop -p vmux_cli -p bevy_cef_debug_render_process --release"
 before-each-package-command = "bash ../../scripts/inject-cef.sh"
 binaries = [
     { path = "Vmux", main = true },
-    { path = "vmux_mcp" },
+    { path = "vmux" },
 ]
 
 [package.metadata.packager.dmg]
