@@ -69,6 +69,20 @@ find "$APP_BUNDLE/Contents/Frameworks" -name "*.app" -type d | while read -r hel
         "$helper"
 done
 
+# Sign all auxiliary executables in Contents/MacOS (e.g. vmux CLI alongside main Vmux binary)
+find "$APP_BUNDLE/Contents/MacOS" -type f -perm +111 | while read -r binary; do
+    file "$binary" | grep -q "Mach-O" || continue
+    name="$(basename "$binary")"
+    [ "$name" = "Vmux" ] && continue
+    echo "  Signing: ${binary#$APP_BUNDLE/}"
+    codesign --force --verify --verbose \
+        "${CODESIGN_KEYCHAIN_ARGS[@]}" \
+        --sign "$APPLE_SIGNING_IDENTITY" \
+        --options runtime \
+        --entitlements "$ENTITLEMENTS" \
+        "$binary"
+done
+
 # Sign the main app bundle
 echo "  Signing: Vmux.app"
 codesign --force --verify --verbose \
@@ -98,11 +112,21 @@ NOTARIZE_ZIP="$ROOT/target/release/Vmux-notarize.zip"
 ditto -c -k --keepParent "$APP_BUNDLE" "$NOTARIZE_ZIP"
 
 echo "==> Submitting for notarization (this may take several minutes)"
-xcrun notarytool submit "$NOTARIZE_ZIP" \
+SUBMIT_OUTPUT="$(xcrun notarytool submit "$NOTARIZE_ZIP" \
     --apple-id "$APPLE_ID" \
     --password "$APPLE_APP_PASSWORD" \
     --team-id "$APPLE_TEAM_ID" \
-    --wait
+    --wait 2>&1)"
+echo "$SUBMIT_OUTPUT"
+SUBMIT_ID="$(echo "$SUBMIT_OUTPUT" | awk '/^  id:/ {print $2; exit}')"
+if echo "$SUBMIT_OUTPUT" | grep -q "status: Invalid\|status: Rejected"; then
+    echo "==> Notarization failed; fetching log for $SUBMIT_ID"
+    xcrun notarytool log "$SUBMIT_ID" \
+        --apple-id "$APPLE_ID" \
+        --password "$APPLE_APP_PASSWORD" \
+        --team-id "$APPLE_TEAM_ID" || true
+    exit 1
+fi
 
 echo "==> Stapling notarization ticket"
 xcrun stapler staple "$APP_BUNDLE"
