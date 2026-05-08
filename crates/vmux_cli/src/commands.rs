@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 pub mod mcp;
+pub mod open;
 
 #[derive(Debug, Parser)]
 #[command(name = "vmux", version, about = "Vmux command-line interface")]
