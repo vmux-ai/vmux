@@ -2,6 +2,9 @@
 //!
 //! Bevy-side hosting, embedded `dist/` serving, and GPU/UI tokens live in **`vmux_ui_native`**.
 
+#[cfg(any(target_arch = "wasm32", test))]
+mod bin_ipc_envelope;
+
 pub mod theme;
 
 #[cfg(any(target_arch = "wasm32", test))]

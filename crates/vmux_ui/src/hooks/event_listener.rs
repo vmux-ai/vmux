@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::bin_ipc_envelope::encode_bin_ipc_envelope;
 use crate::listener_guard::GuardedListener;
 use dioxus::core::{Runtime, current_scope_id};
 use dioxus::prelude::*;
@@ -146,15 +147,12 @@ where
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload)
         .map_err(|_| EventListenerError::SerializePayload)?;
 
-    let buffer = ArrayBuffer::new(bytes.len() as u32);
+    let envelope = encode_bin_ipc_envelope(std::any::type_name::<T>(), &bytes);
+    let buffer = ArrayBuffer::new(envelope.len() as u32);
     let view = Uint8Array::new(&buffer);
-    view.copy_from(&bytes);
+    view.copy_from(&envelope);
 
-    let _ = emit_fn.call2(
-        &cef,
-        &JsValue::from_str(std::any::type_name::<T>()),
-        &buffer.into(),
-    );
+    let _ = emit_fn.call1(&cef, &buffer.into());
     Ok(())
 }
 
@@ -228,15 +226,12 @@ pub fn try_emit_ui_ready() -> Result<(), EventListenerError> {
 
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&UiReadyPayload {})
         .map_err(|_| EventListenerError::SerializePayload)?;
-    let buffer = ArrayBuffer::new(bytes.len() as u32);
+    let envelope = encode_bin_ipc_envelope(UI_READY_BIN_EVENT_ID, &bytes);
+    let buffer = ArrayBuffer::new(envelope.len() as u32);
     let view = Uint8Array::new(&buffer);
-    view.copy_from(&bytes);
+    view.copy_from(&envelope);
 
-    let _ = emit_fn.call2(
-        &cef,
-        &JsValue::from_str(UI_READY_BIN_EVENT_ID),
-        &buffer.into(),
-    );
+    let _ = emit_fn.call1(&cef, &buffer.into());
     Ok(())
 }
 

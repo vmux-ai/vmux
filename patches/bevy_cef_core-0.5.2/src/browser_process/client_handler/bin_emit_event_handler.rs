@@ -12,6 +12,54 @@ pub struct BinIpcEventRaw {
     pub payload: Vec<u8>,
 }
 
+const BIN_IPC_ENVELOPE_MAGIC: &[u8] = b"vmux-bin-ipc-v1\0";
+
+fn decode_bin_ipc_envelope(bytes: &[u8]) -> Option<(String, Vec<u8>)> {
+    let id_len_start = BIN_IPC_ENVELOPE_MAGIC.len();
+    let id_start = id_len_start + 4;
+    if bytes.len() < id_start || !bytes.starts_with(BIN_IPC_ENVELOPE_MAGIC) {
+        return None;
+    }
+    let id_len = u32::from_le_bytes(bytes[id_len_start..id_start].try_into().ok()?) as usize;
+    let payload_start = id_start.checked_add(id_len)?;
+    if bytes.len() < payload_start {
+        return None;
+    }
+    let id = std::str::from_utf8(&bytes[id_start..payload_start])
+        .ok()?
+        .to_string();
+    Some((id, bytes[payload_start..].to_vec()))
+}
+
+#[cfg(test)]
+mod bin_ipc_envelope_tests {
+    use super::*;
+
+    fn encode_test_envelope(id: &str, payload: &[u8]) -> Vec<u8> {
+        let mut encoded = Vec::new();
+        encoded.extend_from_slice(BIN_IPC_ENVELOPE_MAGIC);
+        encoded.extend_from_slice(&(id.len() as u32).to_le_bytes());
+        encoded.extend_from_slice(id.as_bytes());
+        encoded.extend_from_slice(payload);
+        encoded
+    }
+
+    #[test]
+    fn decode_bin_ipc_envelope_extracts_id_and_payload() {
+        let encoded = encode_test_envelope("event-id", &[1, 2, 3]);
+
+        let (id, payload) = decode_bin_ipc_envelope(&encoded).expect("envelope");
+
+        assert_eq!(id, "event-id");
+        assert_eq!(payload, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn decode_bin_ipc_envelope_ignores_legacy_payload() {
+        assert!(decode_bin_ipc_envelope(&[1, 2, 3]).is_none());
+    }
+}
+
 pub struct BinEmitEventHandler {
     webview: Entity,
     sender: Sender<BinIpcEventRaw>,
@@ -42,6 +90,11 @@ impl ProcessMessageHandler for BinEmitEventHandler {
                 buf
             }
             None => Vec::new(),
+        };
+        let (id, payload) = if id.is_empty() {
+            decode_bin_ipc_envelope(&payload).unwrap_or((id, payload))
+        } else {
+            (id, payload)
         };
         crate::util::webview_debug_log(format!(
             "browser bin_js_emit entity={:?} id={} payload_len={}",
