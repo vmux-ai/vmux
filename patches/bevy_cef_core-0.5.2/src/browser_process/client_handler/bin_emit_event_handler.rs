@@ -1,5 +1,6 @@
 use crate::browser_process::client_handler::ProcessMessageHandler;
 use crate::prelude::PROCESS_MESSAGE_BIN_JS_EMIT;
+use crate::util::IntoString;
 use async_channel::Sender;
 use bevy::prelude::Entity;
 use cef::{Browser, Frame, ImplBinaryValue, ImplListValue, ListValue};
@@ -7,6 +8,7 @@ use cef::{Browser, Frame, ImplBinaryValue, ImplListValue, ListValue};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BinIpcEventRaw {
     pub webview: Entity,
+    pub id: String,
     pub payload: Vec<u8>,
 }
 
@@ -27,9 +29,12 @@ impl ProcessMessageHandler for BinEmitEventHandler {
     }
 
     fn handle_message(&self, _browser: &mut Browser, _frame: &mut Frame, args: Option<ListValue>) {
-        // Empty payloads (e.g. unit-shaped events like UiReady) arrive with no
-        // binary arg because CEF's BinaryValue rejects zero-length data.
-        let payload = match args.and_then(|args| args.binary(0)) {
+        let Some(args) = args else {
+            return;
+        };
+        let id = args.string(0).into_string();
+        let payload_index = if id.is_empty() { 0 } else { 1 };
+        let payload = match args.binary(payload_index) {
             Some(binary) => {
                 let len = binary.size();
                 let mut buf = vec![0u8; len];
@@ -39,12 +44,14 @@ impl ProcessMessageHandler for BinEmitEventHandler {
             None => Vec::new(),
         };
         crate::util::webview_debug_log(format!(
-            "browser bin_js_emit entity={:?} payload_len={}",
+            "browser bin_js_emit entity={:?} id={} payload_len={}",
             self.webview,
+            id,
             payload.len()
         ));
         let _ = self.sender.send_blocking(BinIpcEventRaw {
             webview: self.webview,
+            id,
             payload,
         });
     }
@@ -61,9 +68,11 @@ mod tests {
         let payload = vec![1, 2, 3, 4];
         let raw = BinIpcEventRaw {
             webview,
+            id: "test-id".to_string(),
             payload: payload.clone(),
         };
         assert_eq!(raw.webview, webview);
+        assert_eq!(raw.id, "test-id");
         assert_eq!(raw.payload, payload);
     }
 }

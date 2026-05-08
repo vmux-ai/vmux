@@ -8,6 +8,8 @@ use bevy_cef_core::prelude::{CefEmbeddedHost, CefEmbeddedHosts, webview_debug_lo
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+const UI_READY_BIN_EVENT_ID: &str = "vmux-ui-ready";
+
 #[cfg(feature = "build")]
 pub mod build;
 
@@ -136,8 +138,10 @@ pub struct JsEmitUiReadyPlugin;
 
 impl Plugin for JsEmitUiReadyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinJsEmitEventPlugin::<UiReady>::default())
-            .add_observer(mark_webview_ui_ready_on_js_emit);
+        app.add_plugins(BinJsEmitEventPlugin::<UiReady>::with_id(
+            UI_READY_BIN_EVENT_ID,
+        ))
+        .add_observer(mark_webview_ui_ready_on_js_emit);
     }
 }
 

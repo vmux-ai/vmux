@@ -1178,7 +1178,7 @@ fn on_command_bar_action(
         "session" => {
             custom_keyboard_restore = true;
             if !evt.value.is_empty() {
-                commands.trigger(Receive {
+                commands.trigger(BinReceive {
                     webview,
                     payload: SessionCommandEvent {
                         command: "attach".to_string(),
@@ -2078,7 +2078,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(modal)
-            .trigger(|webview| Receive {
+            .trigger(|webview| BinReceive {
                 webview,
                 payload: CommandBarActionEvent {
                     action: "navigate".to_string(),
@@ -2121,7 +2121,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(modal)
-            .trigger(|webview| Receive {
+            .trigger(|webview| BinReceive {
                 webview,
                 payload: CommandBarActionEvent {
                     action: "navigate".to_string(),
@@ -2211,7 +2211,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(modal)
-            .trigger(|webview| Receive {
+            .trigger(|webview| BinReceive {
                 webview,
                 payload: CommandBarActionEvent {
                     action: "session".to_string(),
@@ -2268,7 +2268,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(modal)
-            .trigger(|webview| Receive {
+            .trigger(|webview| BinReceive {
                 webview,
                 payload: CommandBarActionEvent {
                     action: "session".to_string(),
@@ -2316,7 +2316,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(modal)
-            .trigger(|webview| Receive {
+            .trigger(|webview| BinReceive {
                 webview,
                 payload: CommandBarActionEvent {
                     action: "session".to_string(),
@@ -2382,7 +2382,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(modal)
-            .trigger(|webview| Receive {
+            .trigger(|webview| BinReceive {
                 webview,
                 payload: CommandBarActionEvent {
                     action: "dismiss".to_string(),

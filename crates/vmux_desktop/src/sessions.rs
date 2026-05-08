@@ -699,7 +699,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(webview)
-            .trigger(|webview| Receive {
+            .trigger(|webview| BinReceive {
                 webview,
                 payload: SessionCommandEvent {
                     command: "delete".to_string(),
@@ -758,7 +758,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(webview)
-            .trigger(|webview| Receive {
+            .trigger(|webview| BinReceive {
                 webview,
                 payload: SessionCommandEvent {
                     command: "delete".to_string(),
@@ -834,7 +834,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(webview)
-            .trigger(|webview| Receive {
+            .trigger(|webview| BinReceive {
                 webview,
                 payload: SessionCommandEvent {
                     command: "new".to_string(),

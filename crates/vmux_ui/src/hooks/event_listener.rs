@@ -10,6 +10,8 @@ use wasm_bindgen::JsValue;
 use wasm_bindgen::closure::Closure;
 use web_sys::window;
 
+const UI_READY_BIN_EVENT_ID: &str = "vmux-ui-ready";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventListenerError {
     NoWindow,
@@ -148,7 +150,11 @@ where
     let view = Uint8Array::new(&buffer);
     view.copy_from(&bytes);
 
-    let _ = emit_fn.call1(&cef, &buffer.into());
+    let _ = emit_fn.call2(
+        &cef,
+        &JsValue::from_str(std::any::type_name::<T>()),
+        &buffer.into(),
+    );
     Ok(())
 }
 
@@ -226,7 +232,11 @@ pub fn try_emit_ui_ready() -> Result<(), EventListenerError> {
     let view = Uint8Array::new(&buffer);
     view.copy_from(&bytes);
 
-    let _ = emit_fn.call1(&cef, &buffer.into());
+    let _ = emit_fn.call2(
+        &cef,
+        &JsValue::from_str(UI_READY_BIN_EVENT_ID),
+        &buffer.into(),
+    );
     Ok(())
 }
 

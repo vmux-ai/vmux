@@ -162,19 +162,31 @@ impl CefApiHandler {
             return 0;
         };
 
-        if let Some(mut process) =
-            process_message_create(Some(&PROCESS_MESSAGE_BIN_JS_EMIT.into()))
+        if let Some(mut process) = process_message_create(Some(&PROCESS_MESSAGE_BIN_JS_EMIT.into()))
             && let Some(arguments_list) = process.argument_list()
             && let Some(arguments) = arguments
-            && let Some(Some(arg)) = arguments.first()
-            && arg.is_array_buffer().is_positive()
+            && let Some(Some(first)) = arguments.first()
         {
+            let (id, payload_index) = if first.is_string().is_positive() {
+                (first.string_value().into_string(), 1)
+            } else {
+                (String::new(), 0)
+            };
+            if !id.is_empty() {
+                arguments_list.set_string(0, Some(&id.as_str().into()));
+            }
+            let Some(Some(arg)) = arguments.get(payload_index) else {
+                return 1;
+            };
+            if !arg.is_array_buffer().is_positive() {
+                return 1;
+            }
             let len = arg.array_buffer_byte_length();
-            // CEF's BinaryValue rejects zero-length data. For unit-shaped payloads
-            // (e.g. UiReady) we send an empty argument list; the receiver treats
-            // a missing binary arg as Vec::new().
             if len == 0 {
-                crate::util::webview_debug_log("render cef.binEmit payload_len=0 (no binary arg)");
+                crate::util::webview_debug_log(format!(
+                    "render cef.binEmit id={} payload_len=0 (no binary arg)",
+                    id
+                ));
                 frame.send_process_message(
                     ProcessId::from(cef_process_id_t::PID_BROWSER),
                     Some(&mut process),
@@ -187,12 +199,15 @@ impl CefApiHandler {
             }
             // SAFETY: V8 guarantees the ArrayBuffer backing store is valid for `len`
             // bytes for the duration of this synchronous call. Copy out before drop.
-            let bytes =
-                unsafe { std::slice::from_raw_parts(data_ptr.cast::<u8>(), len).to_vec() };
+            let bytes = unsafe { std::slice::from_raw_parts(data_ptr.cast::<u8>(), len).to_vec() };
 
             if let Some(mut binary) = binary_value_create(Some(&bytes)) {
-                arguments_list.set_binary(0, Some(&mut binary));
-                crate::util::webview_debug_log(format!("render cef.binEmit payload_len={len}"));
+                let binary_index = if id.is_empty() { 0 } else { 1 };
+                arguments_list.set_binary(binary_index, Some(&mut binary));
+                crate::util::webview_debug_log(format!(
+                    "render cef.binEmit id={} payload_len={len}",
+                    id
+                ));
                 frame.send_process_message(
                     ProcessId::from(cef_process_id_t::PID_BROWSER),
                     Some(&mut process),
