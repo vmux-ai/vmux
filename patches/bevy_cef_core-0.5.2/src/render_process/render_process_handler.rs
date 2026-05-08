@@ -273,12 +273,18 @@ fn handle_bin_listen_message(message: &ProcessMessage, mut ctx: V8Context) {
         return;
     };
     let id = argument_list.string(0).into_string();
-    let Some(binary) = argument_list.binary(1) else {
-        return;
+    // CEF rejects zero-length BinaryValue, so empty payloads arrive without arg 1.
+    // Treat absent binary as empty bytes.
+    let mut buffer = match argument_list.binary(1) {
+        Some(binary) => {
+            let len = binary.size();
+            let mut buf = vec![0u8; len];
+            binary.data(Some(&mut buf), 0);
+            buf
+        }
+        None => Vec::new(),
     };
-    let len = binary.size();
-    let mut buffer = vec![0u8; len];
-    binary.data(Some(&mut buffer), 0);
+    let len = buffer.len();
 
     let callback = {
         let Ok(events) = LISTEN_EVENTS.lock() else {

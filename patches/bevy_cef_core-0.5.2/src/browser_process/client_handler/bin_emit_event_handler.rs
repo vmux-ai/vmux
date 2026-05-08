@@ -27,21 +27,26 @@ impl ProcessMessageHandler for BinEmitEventHandler {
     }
 
     fn handle_message(&self, _browser: &mut Browser, _frame: &mut Frame, args: Option<ListValue>) {
-        if let Some(args) = args
-            && let Some(binary) = args.binary(0)
-        {
-            let len = binary.size();
-            let mut buf = vec![0u8; len];
-            binary.data(Some(&mut buf), 0);
-            crate::util::webview_debug_log(format!(
-                "browser bin_js_emit entity={:?} payload_len={}",
-                self.webview, len
-            ));
-            let _ = self.sender.send_blocking(BinIpcEventRaw {
-                webview: self.webview,
-                payload: buf,
-            });
-        }
+        // Empty payloads (e.g. unit-shaped events like UiReady) arrive with no
+        // binary arg because CEF's BinaryValue rejects zero-length data.
+        let payload = match args.and_then(|args| args.binary(0)) {
+            Some(binary) => {
+                let len = binary.size();
+                let mut buf = vec![0u8; len];
+                binary.data(Some(&mut buf), 0);
+                buf
+            }
+            None => Vec::new(),
+        };
+        crate::util::webview_debug_log(format!(
+            "browser bin_js_emit entity={:?} payload_len={}",
+            self.webview,
+            payload.len()
+        ));
+        let _ = self.sender.send_blocking(BinIpcEventRaw {
+            webview: self.webview,
+            payload,
+        });
     }
 }
 

@@ -162,26 +162,33 @@ impl CefApiHandler {
             return 0;
         };
 
-        if let Some(mut process) = process_message_create(Some(&PROCESS_MESSAGE_BIN_JS_EMIT.into()))
+        if let Some(mut process) =
+            process_message_create(Some(&PROCESS_MESSAGE_BIN_JS_EMIT.into()))
             && let Some(arguments_list) = process.argument_list()
             && let Some(arguments) = arguments
             && let Some(Some(arg)) = arguments.first()
             && arg.is_array_buffer().is_positive()
         {
             let len = arg.array_buffer_byte_length();
-            // Empty payloads are valid (e.g. unit-shaped events like UiReady).
-            // Allocate an empty Vec rather than reading from a possibly-null ptr.
-            let bytes: Vec<u8> = if len == 0 {
-                Vec::new()
-            } else {
-                let data_ptr = arg.array_buffer_data();
-                if data_ptr.is_null() {
-                    return 1;
-                }
-                // SAFETY: V8 guarantees the ArrayBuffer backing store is valid for `len` bytes
-                // for the duration of this synchronous call. We copy into an owned Vec immediately.
-                unsafe { std::slice::from_raw_parts(data_ptr.cast::<u8>(), len).to_vec() }
-            };
+            // CEF's BinaryValue rejects zero-length data. For unit-shaped payloads
+            // (e.g. UiReady) we send an empty argument list; the receiver treats
+            // a missing binary arg as Vec::new().
+            if len == 0 {
+                crate::util::webview_debug_log("render cef.binEmit payload_len=0 (no binary arg)");
+                frame.send_process_message(
+                    ProcessId::from(cef_process_id_t::PID_BROWSER),
+                    Some(&mut process),
+                );
+                return 1;
+            }
+            let data_ptr = arg.array_buffer_data();
+            if data_ptr.is_null() {
+                return 1;
+            }
+            // SAFETY: V8 guarantees the ArrayBuffer backing store is valid for `len`
+            // bytes for the duration of this synchronous call. Copy out before drop.
+            let bytes =
+                unsafe { std::slice::from_raw_parts(data_ptr.cast::<u8>(), len).to_vec() };
 
             if let Some(mut binary) = binary_value_create(Some(&bytes)) {
                 arguments_list.set_binary(0, Some(&mut binary));

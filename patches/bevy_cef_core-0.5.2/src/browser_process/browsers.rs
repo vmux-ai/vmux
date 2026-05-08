@@ -465,12 +465,18 @@ impl Browsers {
         if let Some(mut process_message) =
             process_message_create(Some(&PROCESS_MESSAGE_BIN_HOST_EMIT.into()))
             && let Some(argument_list) = process_message.argument_list()
-            && let Some(mut binary) = binary_value_create(Some(payload))
             && let Some(browser) = self.browsers.get(webview)
             && let Some(frame) = browser.client.main_frame()
         {
             argument_list.set_string(0, Some(&id.into().as_str().into()));
-            argument_list.set_binary(1, Some(&mut binary));
+            // CEF's BinaryValue rejects zero-length data. For unit-shaped payloads
+            // we send only the id; the receiver (handle_bin_listen_message) treats
+            // a missing binary arg as Vec::new().
+            if !payload.is_empty()
+                && let Some(mut binary) = binary_value_create(Some(payload))
+            {
+                argument_list.set_binary(1, Some(&mut binary));
+            }
             frame.send_process_message(
                 ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
                 Some(&mut process_message),
