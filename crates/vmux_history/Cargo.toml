@@ -32,9 +32,7 @@ bevy_cef = { workspace = true }
 bevy_reflect = { workspace = true }
 moonshine-save = { workspace = true }
 bevy_ecs = { workspace = true }
-chrono = { workspace = true }
 ron = { workspace = true }
-url = { workspace = true }
 vmux_core = { path = "../vmux_core" }
 vmux_webview_app = { path = "../vmux_webview_app" }
 
