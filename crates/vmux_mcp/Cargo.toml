@@ -5,10 +5,6 @@ edition.workspace = true
 description = "MCP stdio server for Vmux workspace controls"
 publish = false
 
-[[bin]]
-name = "vmux_mcp"
-path = "src/main.rs"
-
 [lib]
 name = "vmux_mcp"
 path = "src/lib.rs"
