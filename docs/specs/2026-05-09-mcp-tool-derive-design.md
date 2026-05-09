@@ -312,7 +312,21 @@ async fn tool_call_result(params: &Value) -> Result<Value, String> {
 
 The old `agent_command_from_tool_call` and `agent_query_from_tool_call` functions are removed (their behavior is now inside `dispatch_from_tool_call`). The hand-written `run_agent_command` and `run_agent_query` IPC helpers stay unchanged — they handle the response loop.
 
-### 9. Tests
+### 9. Remove deprecated `ServiceMessage::AgentCommandAccepted` variant
+
+The variant has zero remaining references in the codebase (verified: only the definition remains; the prior wave's `run_agent_command` rewrite removed the matcher, and the service no longer sends it). Pure cleanup.
+
+In `crates/vmux_service/src/protocol.rs`, delete this variant from `pub enum ServiceMessage`:
+
+```rust
+    AgentCommandAccepted {
+        request_id: AgentRequestId,
+    },
+```
+
+This is a wire-format break for any older binary that expects to deserialize the variant — but no such consumer exists. `vmux_mcp` and `vmux_desktop` ship together.
+
+### 10. Tests
 
 **`vmux_macro`** (no test crate today; covered downstream):
 - (Optional, time permitting) Add a small `tests/` directory with a sample enum to verify the derive expands correctly.
@@ -342,8 +356,8 @@ The old `agent_command_from_tool_call` and `agent_query_from_tool_call` function
 ## Out of Scope
 
 - Per-tool timeouts (still single 5s `AGENT_COMMAND_TIMEOUT`).
-- Removing the deprecated `ServiceMessage::AgentCommandAccepted` variant.
-- Adding `target_pane` to `terminal_send` was discussed but **is included** in this design (Section 5 + 6 + 9) — minor addition, scoped within the same wave.
+- Adding `target_pane` to `terminal_send` was discussed but **is included** in this design (Sections 5, 6, 10) — minor addition, scoped within the same wave.
+- Removing the deprecated `ServiceMessage::AgentCommandAccepted` variant **is included** in this wave (Section 9) — verified to have no remaining references in the codebase.
 
 ## Risks
 
@@ -357,7 +371,7 @@ The old `agent_command_from_tool_call` and `agent_query_from_tool_call` function
 
 - **Modify** `crates/vmux_macro/src/lib.rs` — add `McpTool` derive (new proc-macro), the `McpToolEntry` struct, attribute parsing, schema generation logic. Remove `agent_entries` / `from_agent_id` from `CommandBar` derive.
 - **Modify** `crates/vmux_command/src/command.rs` — add `#[derive(McpTool)]` to `AppCommand` and every sub-enum. Add `#[mcp(description = "...")]` on `split_v` and `split_h`. Update test naming and APIs.
-- **Modify** `crates/vmux_service/src/protocol.rs` — add `pane: Option<String>` to `AgentCommand::BrowserNavigate`; add `terminal: Option<String>` to `AgentCommand::TerminalSend`; rkyv roundtrip tests.
+- **Modify** `crates/vmux_service/src/protocol.rs` — add `pane: Option<String>` to `AgentCommand::BrowserNavigate`; add `terminal: Option<String>` to `AgentCommand::TerminalSend`; remove deprecated `ServiceMessage::AgentCommandAccepted` variant; rkyv roundtrip tests.
 - **Modify** `crates/vmux_desktop/src/agent.rs` — update `BrowserNavigate` and `TerminalSend` arms to honor target pane/terminal id (with parse + validate). Add `parse_pane_target` / `parse_terminal_target` helpers. Update tests.
 - **Modify** `crates/vmux_desktop/src/agent_query.rs` — switch entity-id encoding from `to_string()` to `to_bits().to_string()`. Update test.
 - **Modify** `crates/vmux_mcp/src/tools.rs` — remove hand-written tool list, dispatch, and `agent_query_from_tool_call`. Add `McpParamTool` and `McpQueryTool` enums (both with `McpTool` derive). Add `to_agent_command` and `to_agent_query` impls. Add `DispatchTarget` enum. New `dispatch_from_tool_call` replaces the old per-kind dispatchers. Update tests.
