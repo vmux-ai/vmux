@@ -21,13 +21,19 @@ The user also requested architectural cleanup: MCP tool concerns should live in 
 
 ### Architecture
 
-Two enums, one macro:
+Three enums, one macro:
 
-- **`AppCommand`** (existing, in `vmux_command::command`): gains `#[derive(McpTool)]`. Each variant has at most a `#[mcp(description = "...")]` attribute. Macro generates `mcp_tool_entries()` and `from_mcp_id()` for the ~50 zero-arg tools.
+- **`AppCommand`** (existing, in `vmux_command::command`): gains `#[derive(McpTool)]`. Each variant has at most a `#[mcp(description = "...")]` attribute. Macro generates `mcp_tool_entries()` and `from_mcp_id()` for the ~50 zero-arg auto-generated tools.
 
-- **`McpParamTool`** (new, in `vmux_mcp::tools`): explicitly enumerates the 6 param-bearing tools. Variants have fields. Macro generates `mcp_tool_entries()` (with JSON schema inferred from field types) and `from_mcp_call()` (parses JSON args into the variant).
+- **`McpParamTool`** (new, in `vmux_mcp::tools`): explicitly enumerates the 6 param-bearing command tools. Variants have fields. Macro generates `mcp_tool_entries()` (with JSON schema inferred from field types) and `from_mcp_call()` (parses JSON args into the variant).
 
-A small hand-written `McpParamTool::to_agent_command()` performs the per-variant translation to `AgentCommand` (e.g. `OpenCommandBar { mode }` → `AppCommand { id: format!("browser_open_{mode}") }`).
+- **`McpQueryTool`** (new, in `vmux_mcp::tools`): enumerates the 5 query tools. Currently all zero-arg, so the macro emits `from_mcp_id()` (same shape as `AppCommand`). When a future query needs params, switch the affected variants to fielded form and the macro emits `from_mcp_call()` instead.
+
+Per-enum hand-written translation:
+- `McpParamTool::to_agent_command()` → `AgentCommand` (e.g. `OpenCommandBar { mode }` → `AppCommand { id: format!("browser_open_{mode}") }`).
+- `McpQueryTool::to_agent_query()` → `AgentQuery` (1:1 mapping for now: `GetState` → `AgentQuery::GetState`, etc.).
+
+A unified dispatcher in `vmux_mcp::tools` returns a `DispatchTarget` enum (Command or Query), and `tool_call_result` in `vmux_mcp::protocol` routes to the appropriate `run_agent_*` helper.
 
 ### Entity-id encoding
 
@@ -217,15 +223,51 @@ In `crates/vmux_desktop/src/agent_query.rs`, replace every `entity.to_string()` 
 
 Update existing test `focused_info_propagates_entity_ids` to compare against `entity.to_bits().to_string()`.
 
-### 8. `vmux_mcp::tools` simplification
+### 8. `vmux_mcp::tools` unification
 
-Replace the existing hand-written tool list and dispatch with:
+Define `McpQueryTool` (new):
 
 ```rust
+#[derive(Debug, McpTool)]
+pub enum McpQueryTool {
+    #[mcp(description = "Return the full vmux layout snapshot (spaces, panes, tabs, focused).")]
+    GetState,
+    #[mcp(description = "List all tabs across all spaces with title, url, and kind.")]
+    ListTabs,
+    #[mcp(description = "List all spaces with their panes and tabs.")]
+    ListSpaces,
+    #[mcp(description = "List all terminal processes with cwd and pid.")]
+    ListTerminals,
+    #[mcp(description = "Return the currently focused space, pane, and tab ids.")]
+    GetFocused,
+}
+
+impl McpQueryTool {
+    pub fn to_agent_query(self) -> AgentQuery {
+        match self {
+            Self::GetState => AgentQuery::GetState,
+            Self::ListTabs => AgentQuery::ListTabs,
+            Self::ListSpaces => AgentQuery::ListSpaces,
+            Self::ListTerminals => AgentQuery::ListTerminals,
+            Self::GetFocused => AgentQuery::GetFocused,
+        }
+    }
+}
+```
+
+Define a unified dispatcher in `vmux_mcp::tools`:
+
+```rust
+pub enum DispatchTarget {
+    Command(AgentCommand),
+    Query(AgentQuery),
+}
+
 pub fn tool_definitions() -> Vec<ToolDefinition> {
     AppCommand::mcp_tool_entries()
         .into_iter()
         .chain(McpParamTool::mcp_tool_entries())
+        .chain(McpQueryTool::mcp_tool_entries())
         .map(|entry| ToolDefinition {
             name: entry.name.to_string(),
             description: entry.description.to_string(),
@@ -234,20 +276,41 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
         .collect()
 }
 
-pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<AgentCommand, String> {
+pub fn dispatch_from_tool_call(
+    name: &str,
+    arguments: Value,
+) -> Result<DispatchTarget, String> {
+    if let Some(parsed) = McpQueryTool::from_mcp_id(name) {
+        return Ok(DispatchTarget::Query(parsed.to_agent_query()));
+    }
     if let Some(parsed) = McpParamTool::from_mcp_call(name, arguments) {
-        return parsed?.to_agent_command();
+        return Ok(DispatchTarget::Command(parsed?.to_agent_command()?));
     }
     if AppCommand::from_mcp_id(name).is_some() {
-        return Ok(AgentCommand::AppCommand { id: name.to_string() });
+        return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
+            id: name.to_string(),
+        }));
     }
     Err(format!("unknown tool: {name}"))
 }
 ```
 
-The query-tool dispatch (`agent_query_from_tool_call`) and the call-result helpers in `vmux_mcp::protocol` are unaffected. Query tools are a separate concern — they don't go through `McpParamTool`.
+Replace `vmux_mcp::protocol::tool_call_result` body to route via `DispatchTarget`:
 
-(Future iteration could move query-tool registration into the same derive pattern, but they have a different return shape — keep them hand-written for now.)
+```rust
+async fn tool_call_result(params: &Value) -> Result<Value, String> {
+    let name = params.get("name").and_then(Value::as_str)
+        .ok_or_else(|| "tools/call missing name".to_string())?;
+    let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+
+    match crate::tools::dispatch_from_tool_call(name, arguments)? {
+        DispatchTarget::Command(cmd) => run_agent_command(cmd).await,
+        DispatchTarget::Query(query) => run_agent_query(query).await,
+    }
+}
+```
+
+The old `agent_command_from_tool_call` and `agent_query_from_tool_call` functions are removed (their behavior is now inside `dispatch_from_tool_call`). The hand-written `run_agent_command` and `run_agent_query` IPC helpers stay unchanged — they handle the response loop.
 
 ### 9. Tests
 
@@ -271,13 +334,13 @@ The query-tool dispatch (`agent_query_from_tool_call`) and the call-result helpe
 - Update `focused_info_propagates_entity_ids` to compare bits format.
 
 **`vmux_mcp::tools::tests`**:
-- Update tool list inclusion tests — all 6 param tools and 50+ auto-gen still present.
-- Update dispatch tests to flow through `McpParamTool::from_mcp_call` and `to_agent_command`.
-- New test: `browser_navigate` JSON with `pane` arg flows through to `AgentCommand::BrowserNavigate { pane: Some(...) }`.
+- Update tool list inclusion tests — all 6 param tools, 5 query tools, and 50+ auto-gen still present.
+- Update dispatch tests to flow through `dispatch_from_tool_call`. Assert command tools return `DispatchTarget::Command(...)` and query tools return `DispatchTarget::Query(...)`.
+- New test: `browser_navigate` JSON with `pane` arg flows through to `DispatchTarget::Command(AgentCommand::BrowserNavigate { pane: Some(...) })`.
+- New test: `get_state` flows through to `DispatchTarget::Query(AgentQuery::GetState)`.
 
 ## Out of Scope
 
-- Migrating MCP query tools (`get_state`, `list_tabs`, etc.) to the `McpTool` derive. Their result types differ (each variant returns a different `AgentQueryResult` variant); needs its own design.
 - Per-tool timeouts (still single 5s `AGENT_COMMAND_TIMEOUT`).
 - Removing the deprecated `ServiceMessage::AgentCommandAccepted` variant.
 - Adding `target_pane` to `terminal_send` was discussed but **is included** in this design (Section 5 + 6 + 9) — minor addition, scoped within the same wave.
@@ -297,6 +360,7 @@ The query-tool dispatch (`agent_query_from_tool_call`) and the call-result helpe
 - **Modify** `crates/vmux_service/src/protocol.rs` — add `pane: Option<String>` to `AgentCommand::BrowserNavigate`; add `terminal: Option<String>` to `AgentCommand::TerminalSend`; rkyv roundtrip tests.
 - **Modify** `crates/vmux_desktop/src/agent.rs` — update `BrowserNavigate` and `TerminalSend` arms to honor target pane/terminal id (with parse + validate). Add `parse_pane_target` / `parse_terminal_target` helpers. Update tests.
 - **Modify** `crates/vmux_desktop/src/agent_query.rs` — switch entity-id encoding from `to_string()` to `to_bits().to_string()`. Update test.
-- **Modify** `crates/vmux_mcp/src/tools.rs` — remove hand-written tool list and dispatch. Add `McpParamTool` enum with `McpTool` derive. Add `to_agent_command` impl. Simplify `tool_definitions` and `agent_command_from_tool_call` to flow through derives. Update tests.
+- **Modify** `crates/vmux_mcp/src/tools.rs` — remove hand-written tool list, dispatch, and `agent_query_from_tool_call`. Add `McpParamTool` and `McpQueryTool` enums (both with `McpTool` derive). Add `to_agent_command` and `to_agent_query` impls. Add `DispatchTarget` enum. New `dispatch_from_tool_call` replaces the old per-kind dispatchers. Update tests.
+- **Modify** `crates/vmux_mcp/src/protocol.rs` — `tool_call_result` routes via `DispatchTarget`. The `run_agent_command` and `run_agent_query` IPC helpers stay unchanged.
 
 No new files. No deletions of existing files.
