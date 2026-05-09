@@ -450,6 +450,7 @@ async fn handle_client(
                 if let Some(tx) = pending_queries.lock().await.remove(&request_id) {
                     let _ = tx.send(result);
                 }
+                in_flight_query_ids.remove(&request_id);
             }
         }
     }
