@@ -148,7 +148,7 @@ mod tests {
         let source = include_str!("lib.rs");
 
         assert!(source.contains("vmux_layout::"));
-        assert!(!source.contains("vmux_layout::footer"));
+        assert!(!source.contains(&["vmux_layout", "::footer"].concat()));
         assert!(!source.contains(&["vmux_", "header::HeaderPlugin"].concat()));
         assert!(!source.contains(&["vmux_", "side_sheet::SideSheetPlugin"].concat()));
     }
