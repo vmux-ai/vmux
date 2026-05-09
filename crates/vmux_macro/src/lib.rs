@@ -20,6 +20,15 @@ pub fn derive_default_shortcuts(input: TokenStream) -> TokenStream {
     }
 }
 
+#[proc_macro_derive(McpTool, attributes(mcp, menu))]
+pub fn derive_mcp_tool(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match impl_mcp_tool(input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
 #[proc_macro_derive(OsSubMenu, attributes(menu))]
 pub fn derive_os_sub_menu(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -565,30 +574,14 @@ fn impl_command_bar_leaf(
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut entries = Vec::new();
-    let mut agent_entries = Vec::new();
-    let mut agent_arms = Vec::new();
 
     for variant in &data.variants {
         let props = MenuProps::from_attrs(&variant.attrs)?;
-        let variant_ident = &variant.ident;
 
         let Some(id) = &props.id else {
             continue;
         };
         let id_lit = id.as_str();
-
-        let description = props
-            .label
-            .as_deref()
-            .map(|l| l.split('\t').next().unwrap_or(l).trim())
-            .unwrap_or("");
-
-        agent_entries.push(quote! {
-            (#id_lit, #description)
-        });
-        agent_arms.push(quote! {
-            #id_lit => ::core::option::Option::Some(#ident::#variant_ident),
-        });
 
         if props.hidden {
             continue;
@@ -621,17 +614,6 @@ fn impl_command_bar_leaf(
             pub fn command_bar_entries() -> ::std::vec::Vec<(&'static str, &'static str, &'static str)> {
                 ::std::vec![#(#entries),*]
             }
-
-            pub fn agent_entries() -> ::std::vec::Vec<(&'static str, &'static str)> {
-                ::std::vec![#(#agent_entries),*]
-            }
-
-            pub fn from_agent_id(id: &str) -> ::core::option::Option<Self> {
-                match id {
-                    #(#agent_arms)*
-                    _ => ::core::option::Option::None,
-                }
-            }
         }
     })
 }
@@ -641,8 +623,6 @@ fn impl_command_bar_root(
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut extend_calls = Vec::new();
-    let mut agent_extend_calls = Vec::new();
-    let mut agent_clauses = Vec::new();
 
     for variant in &data.variants {
         let Fields::Unnamed(fields) = &variant.fields else {
@@ -658,27 +638,10 @@ fn impl_command_bar_root(
             ));
         };
         let inner_ty = &field.ty;
-        let variant_ident = &variant.ident;
         extend_calls.push(quote! {
             entries.extend(<#inner_ty>::command_bar_entries());
         });
-        agent_extend_calls.push(quote! {
-            entries.extend(<#inner_ty>::agent_entries());
-        });
-        agent_clauses.push(quote! {
-            <#inner_ty>::from_agent_id(id).map(#ident::#variant_ident)
-        });
     }
-
-    let from_agent_body = if agent_clauses.is_empty() {
-        quote! { ::core::option::Option::None }
-    } else {
-        let first = &agent_clauses[0];
-        let chained = agent_clauses[1..]
-            .iter()
-            .fold(quote! { #first }, |acc, c| quote! { #acc.or_else(|| #c) });
-        quote! { #chained }
-    };
 
     Ok(quote! {
         impl #ident {
@@ -687,15 +650,167 @@ fn impl_command_bar_root(
                 #(#extend_calls)*
                 entries
             }
+        }
+    })
+}
 
-            pub fn agent_entries() -> ::std::vec::Vec<(&'static str, &'static str)> {
+struct McpProps {
+    description: Option<String>,
+    skip: bool,
+}
+
+impl McpProps {
+    fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
+        let mut description = None;
+        let mut skip = false;
+        for attr in attrs {
+            if !attr.path().is_ident("mcp") {
+                continue;
+            }
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("description") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    description = Some(v.value());
+                } else if meta.path.is_ident("skip") {
+                    skip = true;
+                } else if meta.path.is_ident("enum_values") {
+                    let _ = meta.value()?;
+                }
+                Ok(())
+            })?;
+        }
+        Ok(McpProps { description, skip })
+    }
+}
+
+fn impl_mcp_tool(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let ident = &input.ident;
+    let Data::Enum(data) = &input.data else {
+        return Err(syn::Error::new_spanned(
+            ident,
+            "McpTool only supports enums",
+        ));
+    };
+
+    let first_variant = data.variants.first();
+    let is_leaf = first_variant
+        .map(|v| matches!(v.fields, Fields::Unit))
+        .unwrap_or(true);
+
+    if is_leaf {
+        impl_mcp_tool_leaf_unit(ident, data)
+    } else {
+        impl_mcp_tool_root(ident, data)
+    }
+}
+
+fn impl_mcp_tool_leaf_unit(
+    ident: &syn::Ident,
+    data: &syn::DataEnum,
+) -> syn::Result<proc_macro2::TokenStream> {
+    let mut entries = Vec::new();
+    let mut id_arms = Vec::new();
+
+    for variant in &data.variants {
+        let mcp_props = McpProps::from_attrs(&variant.attrs)?;
+        if mcp_props.skip {
+            continue;
+        }
+        let menu_props = MenuProps::from_attrs(&variant.attrs)?;
+        let Some(id) = &menu_props.id else {
+            continue;
+        };
+        let id_lit = id.as_str();
+        let variant_ident = &variant.ident;
+
+        let description = mcp_props
+            .description
+            .clone()
+            .or_else(|| {
+                menu_props
+                    .label
+                    .as_deref()
+                    .map(|l| l.split('\t').next().unwrap_or(l).trim().to_string())
+            })
+            .unwrap_or_default();
+
+        entries.push(quote! {
+            (#id_lit, #description, ::serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }))
+        });
+        id_arms.push(quote! {
+            #id_lit => ::core::option::Option::Some(#ident::#variant_ident),
+        });
+    }
+
+    Ok(quote! {
+        impl #ident {
+            pub fn mcp_tool_entries() -> ::std::vec::Vec<(&'static str, &'static str, ::serde_json::Value)> {
+                ::std::vec![#(#entries),*]
+            }
+
+            pub fn from_mcp_id(id: &str) -> ::core::option::Option<Self> {
+                match id {
+                    #(#id_arms)*
+                    _ => ::core::option::Option::None,
+                }
+            }
+        }
+    })
+}
+
+fn impl_mcp_tool_root(
+    ident: &syn::Ident,
+    data: &syn::DataEnum,
+) -> syn::Result<proc_macro2::TokenStream> {
+    let mut extend_calls = Vec::new();
+    let mut id_clauses = Vec::new();
+
+    for variant in &data.variants {
+        let Fields::Unnamed(fields) = &variant.fields else {
+            return Err(syn::Error::new_spanned(
+                &variant.fields,
+                "McpTool root expects tuple variants",
+            ));
+        };
+        let Some(field) = fields.unnamed.first() else {
+            return Err(syn::Error::new_spanned(
+                variant,
+                "tuple variant needs one field",
+            ));
+        };
+        let inner_ty = &field.ty;
+        let variant_ident = &variant.ident;
+        extend_calls.push(quote! {
+            entries.extend(<#inner_ty>::mcp_tool_entries());
+        });
+        id_clauses.push(quote! {
+            <#inner_ty>::from_mcp_id(id).map(#ident::#variant_ident)
+        });
+    }
+
+    let from_id_body = if id_clauses.is_empty() {
+        quote! { ::core::option::Option::None }
+    } else {
+        let first = &id_clauses[0];
+        let chained = id_clauses[1..]
+            .iter()
+            .fold(quote! { #first }, |acc, c| quote! { #acc.or_else(|| #c) });
+        quote! { #chained }
+    };
+
+    Ok(quote! {
+        impl #ident {
+            pub fn mcp_tool_entries() -> ::std::vec::Vec<(&'static str, &'static str, ::serde_json::Value)> {
                 let mut entries = ::std::vec::Vec::new();
-                #(#agent_extend_calls)*
+                #(#extend_calls)*
                 entries
             }
 
-            pub fn from_agent_id(id: &str) -> ::core::option::Option<Self> {
-                #from_agent_body
+            pub fn from_mcp_id(id: &str) -> ::core::option::Option<Self> {
+                #from_id_body
             }
         }
     })

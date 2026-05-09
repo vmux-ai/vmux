@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_macro::{CommandBar, DefaultShortcuts, OsMenu, OsSubMenu};
+use vmux_macro::{CommandBar, DefaultShortcuts, McpTool, OsMenu, OsSubMenu};
 use vmux_webview_app::{WebviewAppConfig, WebviewAppRegistry};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -31,7 +31,9 @@ pub fn build_native_root_menu(menu: &mut muda::Menu) -> Result<(), muda::Error> 
     AppCommand::build_native_root_menu(menu)
 }
 
-#[derive(Message, OsMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Message, OsMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq,
+)]
 pub enum AppCommand {
     #[menu(label = "Scene")]
     Scene(SceneCommand),
@@ -71,7 +73,9 @@ pub enum AppCommand {
 }
 
 #[allow(dead_code)]
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum TabCommand {
     #[default]
     #[menu(id = "tab_new", label = "New Tab", accel = "super+t")]
@@ -127,7 +131,9 @@ pub enum TabCommand {
 }
 
 #[allow(dead_code)]
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum TerminalCommand {
     #[default]
     #[menu(id = "terminal_new", label = "New Terminal")]
@@ -149,7 +155,9 @@ pub enum TerminalCommand {
 }
 
 #[allow(dead_code)]
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum BrowserCommand {
     #[default]
     #[menu(id = "browser_prev_page", label = "Back", accel = "super+[")]
@@ -213,14 +221,18 @@ pub enum BrowserCommand {
 }
 
 #[allow(dead_code)]
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum ServiceCommand {
     #[default]
     #[menu(id = "service_open", label = "Open Service Monitor")]
     Open,
 }
 
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum SessionCommand {
     #[default]
     #[menu(id = "session_open", label = "Sessions\t<leader> s")]
@@ -229,13 +241,17 @@ pub enum SessionCommand {
 }
 
 #[allow(dead_code)]
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum PaneCommand {
     #[default]
     #[menu(id = "split_v", label = "Split Vertically\t<leader> %")]
+    #[mcp(description = "Split current pane into LEFT and RIGHT halves.")]
     #[shortcut(chord = "Ctrl+g, %")]
     SplitV,
     #[menu(id = "split_h", label = "Split Horizontally\t<leader> \"")]
+    #[mcp(description = "Split current pane into TOP and BOTTOM halves.")]
     #[shortcut(chord = "Ctrl+g, \"")]
     SplitH,
     #[menu(id = "toggle_pane", label = "Next Pane\t<leader> o", hidden)]
@@ -300,7 +316,9 @@ pub enum PaneCommand {
 }
 
 #[allow(dead_code)]
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum SpaceCommand {
     #[default]
     #[menu(id = "new_space", label = "New Space\t<leader> c")]
@@ -325,7 +343,9 @@ pub enum SpaceCommand {
 }
 
 #[allow(dead_code)]
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum SideSheetCommand {
     #[default]
     #[menu(
@@ -351,7 +371,9 @@ pub enum SideSheetCommand {
     ToggleBottom,
 }
 
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum SceneCommand {
     #[default]
     #[menu(id = "toggle_player_mode", label = "Toggle Player Mode")]
@@ -359,14 +381,18 @@ pub enum SceneCommand {
     TogglePlayerMode,
 }
 
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum HeaderCommand {
     #[default]
     #[menu(id = "toggle_header", label = "Toggle Header", accel = "super+shift+h")]
     Toggle,
 }
 
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum FooterCommand {
     #[default]
     #[menu(id = "toggle_footer", label = "Toggle Footer", accel = "super+shift+f")]
@@ -374,7 +400,9 @@ pub enum FooterCommand {
 }
 
 #[allow(dead_code)]
-#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum WindowCommand {
     #[default]
     #[menu(id = "new_window", label = "New Window", accel = "super+n", hidden)]
@@ -436,34 +464,42 @@ mod tests {
     }
 
     #[test]
-    fn agent_lookup_resolves_every_command_id() {
-        let entries = AppCommand::agent_entries();
-        assert!(!entries.is_empty(), "agent_entries should not be empty");
+    fn mcp_lookup_resolves_every_command_id() {
+        let entries = AppCommand::mcp_tool_entries();
+        assert!(!entries.is_empty(), "mcp_tool_entries should not be empty");
 
-        for (id, _description) in &entries {
+        for (id, _description, _schema) in &entries {
             assert!(
-                AppCommand::from_agent_id(id).is_some(),
-                "from_agent_id failed to resolve {id}"
+                AppCommand::from_mcp_id(id).is_some(),
+                "from_mcp_id failed to resolve {id}"
             );
         }
 
         assert_eq!(
-            AppCommand::from_agent_id("tab_close"),
+            AppCommand::from_mcp_id("tab_close"),
             Some(AppCommand::Tab(TabCommand::Close))
         );
         assert_eq!(
-            AppCommand::from_agent_id("split_v"),
+            AppCommand::from_mcp_id("split_v"),
             Some(AppCommand::Pane(PaneCommand::SplitV))
-        );
-        assert_eq!(
-            AppCommand::from_agent_id("browser_open_command_bar"),
-            Some(AppCommand::Browser(BrowserCommand::OpenCommandBar))
         );
 
         let split_v = entries
             .iter()
-            .find(|(id, _)| *id == "split_v")
-            .expect("split_v in agent_entries");
-        assert_eq!(split_v.1, "Split Vertically");
+            .find(|(id, _, _)| *id == "split_v")
+            .expect("split_v in mcp_tool_entries");
+        assert_eq!(
+            split_v.1, "Split current pane into LEFT and RIGHT halves.",
+            "split_v description should come from #[mcp(description = ...)] override"
+        );
+
+        let tab_close = entries
+            .iter()
+            .find(|(id, _, _)| *id == "tab_close")
+            .expect("tab_close in mcp_tool_entries");
+        assert_eq!(
+            tab_close.1, "Close Tab",
+            "tab_close description should fall back to the menu label (\\t-stripped)"
+        );
     }
 }

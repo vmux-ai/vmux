@@ -258,7 +258,7 @@ fn handle_agent_commands(
     for request in reader.read() {
         let result = match &request.command {
             ServiceAgentCommand::AppCommand { id } => {
-                if let Some(command) = AppCommand::from_agent_id(id) {
+                if let Some(command) = AppCommand::from_mcp_id(id) {
                     app_commands.write(command);
                     AgentCommandResult::Ok
                 } else {

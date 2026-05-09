@@ -12,15 +12,12 @@ pub struct ToolDefinition {
 }
 
 pub fn tool_definitions() -> Vec<ToolDefinition> {
-    let mut tools: Vec<ToolDefinition> = AppCommand::agent_entries()
+    let mut tools: Vec<ToolDefinition> = AppCommand::mcp_tool_entries()
         .into_iter()
-        .map(|(id, description)| ToolDefinition {
+        .map(|(id, description, schema)| ToolDefinition {
             name: id.to_string(),
             description: description.to_string(),
-            input_schema: json!({
-                "type": "object",
-                "properties": {}
-            }),
+            input_schema: schema,
         })
         .collect();
 
@@ -217,7 +214,7 @@ pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<Agen
             })
         }
         other => {
-            if AppCommand::from_agent_id(other).is_some() {
+            if AppCommand::from_mcp_id(other).is_some() {
                 Ok(AgentCommand::AppCommand {
                     id: other.to_string(),
                 })
