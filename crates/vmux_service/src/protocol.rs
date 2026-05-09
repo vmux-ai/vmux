@@ -84,6 +84,10 @@ pub enum AgentCommand {
         text: String,
         terminal: Option<String>,
     },
+    SplitAndNavigate {
+        direction: String,
+        url: String,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -168,6 +172,12 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::TerminalSend { text, .. } if text.is_empty() => {
             Err("terminal_send.text is empty")
+        }
+        AgentCommand::SplitAndNavigate { direction, .. } if direction.is_empty() => {
+            Err("split_and_navigate.direction is empty")
+        }
+        AgentCommand::SplitAndNavigate { url, .. } if url.trim().is_empty() => {
+            Err("split_and_navigate.url is empty")
         }
         _ => Ok(()),
     }
@@ -572,6 +582,39 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded, cmd);
+    }
+
+    #[test]
+    fn split_and_navigate_roundtrips() {
+        let cmd = AgentCommand::SplitAndNavigate {
+            direction: "right".to_string(),
+            url: "https://example.com".to_string(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
+        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded, cmd);
+    }
+
+    #[test]
+    fn empty_split_and_navigate_url_is_invalid() {
+        assert_eq!(
+            validate_agent_command(&AgentCommand::SplitAndNavigate {
+                direction: "right".to_string(),
+                url: String::new(),
+            }),
+            Err("split_and_navigate.url is empty")
+        );
+    }
+
+    #[test]
+    fn empty_split_and_navigate_direction_is_invalid() {
+        assert_eq!(
+            validate_agent_command(&AgentCommand::SplitAndNavigate {
+                direction: String::new(),
+                url: "https://example.com".to_string(),
+            }),
+            Err("split_and_navigate.direction is empty")
+        );
     }
 
     #[test]
