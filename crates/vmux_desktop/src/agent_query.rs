@@ -74,9 +74,9 @@ pub(crate) fn handle_agent_queries(
 
 fn focused_info(focused: &FocusedTab) -> FocusedInfo {
     FocusedInfo {
-        space: focused.space.map(|e| e.to_string()),
-        pane: focused.pane.map(|e| e.to_string()),
-        tab: focused.tab.map(|e| e.to_string()),
+        space: focused.space.map(|e| e.to_bits().to_string()),
+        pane: focused.pane.map(|e| e.to_bits().to_string()),
+        tab: focused.tab.map(|e| e.to_bits().to_string()),
     }
 }
 
@@ -92,7 +92,7 @@ fn collect_terminals(
                 .iter()
                 .find(|p| p.id == handle.process_id);
             TerminalInfo {
-                id: entity.to_string(),
+                id: entity.to_bits().to_string(),
                 cwd: info.map(|i| i.cwd.clone()).unwrap_or_default(),
                 pid: info.map(|i| i.pid).unwrap_or(0),
             }
@@ -118,7 +118,7 @@ fn tab_info(
     terminals: &TerminalQuery,
 ) -> TabInfo {
     TabInfo {
-        id: entity.to_string(),
+        id: entity.to_bits().to_string(),
         title: page.map(|p| p.title.clone()).unwrap_or_default(),
         url: page.map(|p| p.url.clone()).unwrap_or_default(),
         kind: tab_kind(children, terminals).to_string(),
@@ -144,12 +144,12 @@ fn collect_spaces(
         .map(|(space_entity, space, space_children)| {
             let leaf_panes = gather_leaf_panes(space_children, panes, all_children);
             SpaceInfo {
-                id: space_entity.to_string(),
+                id: space_entity.to_bits().to_string(),
                 name: space.name.clone(),
                 panes: leaf_panes
                     .into_iter()
                     .map(|(pane_entity, pane_children)| PaneInfo {
-                        id: pane_entity.to_string(),
+                        id: pane_entity.to_bits().to_string(),
                         tabs: pane_children
                             .iter()
                             .filter_map(|grandchild| tabs.get(grandchild).ok())
@@ -217,9 +217,9 @@ mod tests {
             focus.tab = Some(tab);
         }
         let info = focused_info(app.world().resource::<FocusedTab>());
-        assert_eq!(info.space, Some(space.to_string()));
-        assert_eq!(info.pane, Some(pane.to_string()));
-        assert_eq!(info.tab, Some(tab.to_string()));
+        assert_eq!(info.space, Some(space.to_bits().to_string()));
+        assert_eq!(info.pane, Some(pane.to_bits().to_string()));
+        assert_eq!(info.tab, Some(tab.to_bits().to_string()));
     }
 
     #[test]

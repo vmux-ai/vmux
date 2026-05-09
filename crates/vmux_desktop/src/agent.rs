@@ -240,6 +240,24 @@ fn active_webview_for_tab(
     })
 }
 
+fn parse_pane_target(
+    s: &str,
+    panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+) -> Option<Entity> {
+    let bits = s.parse::<u64>().ok()?;
+    let entity = Entity::try_from_bits(bits)?;
+    panes.contains(entity).then_some(entity)
+}
+
+fn parse_terminal_target(
+    s: &str,
+    terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+) -> Option<Entity> {
+    let bits = s.parse::<u64>().ok()?;
+    let entity = Entity::try_from_bits(bits)?;
+    terminals.iter().any(|(e, _)| e == entity).then_some(entity)
+}
+
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
@@ -315,28 +333,64 @@ fn handle_agent_commands(
                     AgentCommandResult::Error("no active pane".to_string())
                 }
             }
-            ServiceAgentCommand::BrowserNavigate { url, pane: _pane } => {
-                if let Some(webview) = active_webview_for_tab(focus.tab, &browsers, &terminals) {
+            ServiceAgentCommand::BrowserNavigate { url, pane } => {
+                if let Some(s) = pane.as_deref() {
+                    if let Some(target) = parse_pane_target(s, &panes) {
+                        spawn_browser_tab(
+                            target,
+                            url,
+                            &mut commands,
+                            &mut meshes,
+                            &mut webview_mt,
+                        );
+                        AgentCommandResult::Ok
+                    } else {
+                        AgentCommandResult::Error(format!(
+                            "browser_navigate: invalid pane id '{s}'"
+                        ))
+                    }
+                } else if let Some(webview) =
+                    active_webview_for_tab(focus.tab, &browsers, &terminals)
+                {
                     commands.trigger(RequestNavigate {
                         webview,
                         url: url.clone(),
                     });
                     AgentCommandResult::Ok
-                } else if let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane)) {
-                    spawn_browser_tab(pane, url, &mut commands, &mut meshes, &mut webview_mt);
+                } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
+                    spawn_browser_tab(
+                        pane,
+                        url,
+                        &mut commands,
+                        &mut meshes,
+                        &mut webview_mt,
+                    );
                     AgentCommandResult::Ok
                 } else {
                     AgentCommandResult::Error("browser_navigate: no focused pane".to_string())
                 }
             }
-            ServiceAgentCommand::TerminalSend { text, terminal: _terminal } => {
-                if let Some(terminal) = active_terminal_for_tab(focus.tab, &terminals) {
-                    commands.entity(terminal).insert(PendingTerminalInput {
-                        data: text.as_bytes().to_vec(),
-                    });
-                    AgentCommandResult::Ok
+            ServiceAgentCommand::TerminalSend { text, terminal } => {
+                let target = if let Some(s) = terminal.as_deref() {
+                    match parse_terminal_target(s, &terminals) {
+                        Some(t) => Ok(Some(t)),
+                        None => Err(format!("terminal_send: invalid terminal id '{s}'")),
+                    }
                 } else {
-                    AgentCommandResult::Error("terminal_send: no active terminal".to_string())
+                    Ok(active_terminal_for_tab(focus.tab, &terminals))
+                };
+
+                match target {
+                    Err(message) => AgentCommandResult::Error(message),
+                    Ok(Some(terminal_entity)) => {
+                        commands.entity(terminal_entity).insert(PendingTerminalInput {
+                            data: text.as_bytes().to_vec(),
+                        });
+                        AgentCommandResult::Ok
+                    }
+                    Ok(None) => AgentCommandResult::Error(
+                        "terminal_send: no active terminal".to_string(),
+                    ),
                 }
             }
         };
@@ -636,5 +690,47 @@ mod tests {
             urls.contains(&"https://example.com".to_string()),
             "browser entity with the URL should exist; found {urls:?}"
         );
+    }
+
+    #[test]
+    fn browser_navigate_targets_specific_pane_when_id_provided() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane_a = app.world_mut().spawn(Pane).id();
+        let pane_b = app.world_mut().spawn(Pane).id();
+
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane_a);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::BrowserNavigate {
+                    url: "https://example.com".to_string(),
+                    pane: Some(pane_b.to_bits().to_string()),
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let mut tabs = world.query_filtered::<&ChildOf, With<crate::layout::tab::Tab>>();
+        let tabs_in_b = tabs
+            .iter(world)
+            .filter(|child_of| child_of.get() == pane_b)
+            .count();
+        let tabs_in_a = tabs
+            .iter(world)
+            .filter(|child_of| child_of.get() == pane_a)
+            .count();
+        assert_eq!(tabs_in_b, 1, "tab should be spawned in target pane B");
+        assert_eq!(tabs_in_a, 0, "no tab should be spawned in focused pane A");
     }
 }
