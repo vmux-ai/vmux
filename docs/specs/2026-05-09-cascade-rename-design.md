@@ -113,9 +113,18 @@ The `vmux_layout::lib.rs` test that asserts `Space::type_path() == "vmux_desktop
 | `super+s` | `SideSheetCommand::Toggle` |
 | `super+shift+h` | `HeaderCommand::Toggle` |
 | `super+shift+f` | `FooterCommand::Toggle` |
-| `Ctrl+g` chord (was Space cmds) | freed entirely |
+| `Ctrl+g, r` | `SideSheetCommand::ToggleRight` |
+| `Ctrl+g, b` | `SideSheetCommand::ToggleBottom` |
+| `Ctrl+g, c/&/n/p/Comma` (Space cmds) | `SpaceCommand::New/Close/Next/Previous/Rename` (replaced by `cmd+t` etc.) |
+| `Ctrl+g, ArrowLeft / ArrowRight` (programmatic Space switch) | replaced by `cmd+shift+[`/`]` |
 
-The commands themselves (`SideSheetCommand::Toggle`, `HeaderCommand::Toggle`, `FooterCommand::Toggle`) are deleted from the codebase. The chrome components remain — they're now toggled only via `ZenCommand::Toggle` (collectively).
+The commands themselves are deleted from the codebase:
+
+- `HeaderCommand::Toggle`
+- `FooterCommand::Toggle`
+- `SideSheetCommand::Toggle`, `SideSheetCommand::ToggleRight`, `SideSheetCommand::ToggleBottom` (all three)
+
+The chrome components remain — they're now toggled only via `ZenCommand::Toggle`, which hides/shows Header, Footer, and all SideSheet positions (Left, Right, Bottom) collectively.
 
 `cmd+w` retains today's `Tab::Close` behavior (renamed to `StackCommand::Close`) — close the focused Stack, prompt confirmation for last-of-its-kind closures via the existing dialog. No new multi-level cascade is introduced in this PR.
 
@@ -128,7 +137,9 @@ State: a single `bool` `ZenMode` resource. No snapshot of prior state.
 - **Off → On:** hide Header, SideSheet, Footer.
 - **On → Off:** show Header, SideSheet, Footer.
 
-Default chrome state on app launch: **all visible** (Header + SideSheet + Footer). The footer-hidden default that exists today is dropped, since users no longer have a way to toggle individual chrome anyway.
+Default chrome state on app launch: **all visible** (Header + SideSheet + Footer). Today's default — Footer shown, Header and SideSheet hidden — is replaced. Since users no longer have a way to toggle individual chrome, the new default surfaces everything.
+
+The persisted `HeaderState` / `SideSheetState` markers (used today to remember per-session chrome visibility) become dead state once individual toggles are removed. They are deleted in this PR (allow-list entry, struct definition, and any references).
 
 ## Implementation strategy
 
@@ -157,8 +168,9 @@ One PR, but ordered commits for bisect:
 6. **Zen toggle + delete individual chrome toggles**
    - Add `ZenCommand::Toggle` and `ZenMode` resource
    - Bind to `cmd+shift+s`
-   - Delete `HeaderCommand::Toggle`, `FooterCommand::Toggle`, `SideSheetCommand::Toggle` and call sites
-   - Default all chrome to visible on launch
+   - Delete `HeaderCommand::Toggle`, `FooterCommand::Toggle`, `SideSheetCommand::Toggle/ToggleRight/ToggleBottom` and their handlers / call sites
+   - Delete `HeaderState` / `SideSheetState` (now dead)
+   - Default all chrome to visible on launch (insert `Open` on Header + Footer + all SideSheet positions at spawn time)
 
 `make lint` and `make test` must pass after each commit (so the branch is bisectable).
 
