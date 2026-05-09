@@ -78,9 +78,11 @@ pub enum AgentCommand {
     },
     BrowserNavigate {
         url: String,
+        pane: Option<String>,
     },
     TerminalSend {
         text: String,
+        terminal: Option<String>,
     },
 }
 
@@ -161,10 +163,10 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         AgentCommand::RunShell { command, .. } if command.trim().is_empty() => {
             Err("run_shell.command is empty")
         }
-        AgentCommand::BrowserNavigate { url } if url.trim().is_empty() => {
+        AgentCommand::BrowserNavigate { url, .. } if url.trim().is_empty() => {
             Err("browser_navigate.url is empty")
         }
-        AgentCommand::TerminalSend { text } if text.is_empty() => {
+        AgentCommand::TerminalSend { text, .. } if text.is_empty() => {
             Err("terminal_send.text is empty")
         }
         _ => Ok(()),
@@ -387,9 +389,6 @@ pub enum ServiceMessage {
         request_id: AgentRequestId,
         command: AgentCommand,
     },
-    AgentCommandAccepted {
-        request_id: AgentRequestId,
-    },
     AgentQuery {
         request_id: AgentRequestId,
         query: AgentQuery,
@@ -432,7 +431,10 @@ mod tests {
     #[test]
     fn empty_browser_navigate_url_is_invalid() {
         assert_eq!(
-            validate_agent_command(&AgentCommand::BrowserNavigate { url: String::new() }),
+            validate_agent_command(&AgentCommand::BrowserNavigate {
+                url: String::new(),
+                pane: None,
+            }),
             Err("browser_navigate.url is empty")
         );
     }
@@ -454,6 +456,7 @@ mod tests {
         assert_eq!(
             validate_agent_command(&AgentCommand::TerminalSend {
                 text: String::new(),
+                terminal: None,
             }),
             Err("terminal_send.text is empty")
         );
@@ -547,5 +550,38 @@ mod tests {
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&service_msg).unwrap();
         let _decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
+    }
+
+    #[test]
+    fn browser_navigate_with_pane_roundtrips() {
+        let cmd = AgentCommand::BrowserNavigate {
+            url: "https://example.com".to_string(),
+            pane: Some("12345".to_string()),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
+        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded, cmd);
+    }
+
+    #[test]
+    fn browser_navigate_without_pane_roundtrips() {
+        let cmd = AgentCommand::BrowserNavigate {
+            url: "https://example.com".to_string(),
+            pane: None,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
+        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded, cmd);
+    }
+
+    #[test]
+    fn terminal_send_with_terminal_roundtrips() {
+        let cmd = AgentCommand::TerminalSend {
+            text: "hi".to_string(),
+            terminal: Some("67890".to_string()),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
+        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded, cmd);
     }
 }

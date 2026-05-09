@@ -188,7 +188,7 @@ pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<Agen
             if url.trim().is_empty() {
                 return Err("browser_navigate.url is empty".to_string());
             }
-            Ok(AgentCommand::BrowserNavigate { url })
+            Ok(AgentCommand::BrowserNavigate { url, pane: None })
         }
         "terminal_send" => {
             let text = optional_string(&arguments, "text")
@@ -197,7 +197,7 @@ pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<Agen
             if text.is_empty() {
                 return Err("terminal_send.text is empty".to_string());
             }
-            Ok(AgentCommand::TerminalSend { text })
+            Ok(AgentCommand::TerminalSend { text, terminal: None })
         }
         "select_tab" => {
             let index = arguments
@@ -314,6 +314,7 @@ mod tests {
             command,
             AgentCommand::BrowserNavigate {
                 url: "https://example.com".to_string(),
+                pane: None,
             }
         );
     }
@@ -345,6 +346,7 @@ mod tests {
             command,
             AgentCommand::TerminalSend {
                 text: "ls".to_string(),
+                terminal: None,
             }
         );
     }

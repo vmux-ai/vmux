@@ -315,7 +315,7 @@ fn handle_agent_commands(
                     AgentCommandResult::Error("no active pane".to_string())
                 }
             }
-            ServiceAgentCommand::BrowserNavigate { url } => {
+            ServiceAgentCommand::BrowserNavigate { url, pane: _pane } => {
                 if let Some(webview) = active_webview_for_tab(focus.tab, &browsers, &terminals) {
                     commands.trigger(RequestNavigate {
                         webview,
@@ -329,7 +329,7 @@ fn handle_agent_commands(
                     AgentCommandResult::Error("browser_navigate: no focused pane".to_string())
                 }
             }
-            ServiceAgentCommand::TerminalSend { text } => {
+            ServiceAgentCommand::TerminalSend { text, terminal: _terminal } => {
                 if let Some(terminal) = active_terminal_for_tab(focus.tab, &terminals) {
                     commands.entity(terminal).insert(PendingTerminalInput {
                         data: text.as_bytes().to_vec(),
@@ -479,6 +479,7 @@ mod tests {
                 request_id: AgentRequestId::new(),
                 command: ServiceAgentCommand::BrowserNavigate {
                     url: "https://example.com".to_string(),
+                    pane: None,
                 },
             });
 
@@ -567,6 +568,7 @@ mod tests {
                 request_id: AgentRequestId::new(),
                 command: ServiceAgentCommand::TerminalSend {
                     text: "ls".to_string(),
+                    terminal: None,
                 },
             });
 
@@ -603,6 +605,7 @@ mod tests {
                 request_id: AgentRequestId::new(),
                 command: ServiceAgentCommand::BrowserNavigate {
                     url: "https://example.com".to_string(),
+                    pane: None,
                 },
             });
 
