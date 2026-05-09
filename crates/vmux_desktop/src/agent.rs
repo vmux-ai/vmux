@@ -336,13 +336,7 @@ fn handle_agent_commands(
             ServiceAgentCommand::BrowserNavigate { url, pane } => {
                 if let Some(s) = pane.as_deref() {
                     if let Some(target) = parse_pane_target(s, &panes) {
-                        spawn_browser_tab(
-                            target,
-                            url,
-                            &mut commands,
-                            &mut meshes,
-                            &mut webview_mt,
-                        );
+                        spawn_browser_tab(target, url, &mut commands, &mut meshes, &mut webview_mt);
                         AgentCommandResult::Ok
                     } else {
                         AgentCommandResult::Error(format!(
@@ -358,13 +352,7 @@ fn handle_agent_commands(
                     });
                     AgentCommandResult::Ok
                 } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
-                    spawn_browser_tab(
-                        pane,
-                        url,
-                        &mut commands,
-                        &mut meshes,
-                        &mut webview_mt,
-                    );
+                    spawn_browser_tab(pane, url, &mut commands, &mut meshes, &mut webview_mt);
                     AgentCommandResult::Ok
                 } else {
                     AgentCommandResult::Error("browser_navigate: no focused pane".to_string())
@@ -383,14 +371,16 @@ fn handle_agent_commands(
                 match target {
                     Err(message) => AgentCommandResult::Error(message),
                     Ok(Some(terminal_entity)) => {
-                        commands.entity(terminal_entity).insert(PendingTerminalInput {
-                            data: text.as_bytes().to_vec(),
-                        });
+                        commands
+                            .entity(terminal_entity)
+                            .insert(PendingTerminalInput {
+                                data: text.as_bytes().to_vec(),
+                            });
                         AgentCommandResult::Ok
                     }
-                    Ok(None) => AgentCommandResult::Error(
-                        "terminal_send: no active terminal".to_string(),
-                    ),
+                    Ok(None) => {
+                        AgentCommandResult::Error("terminal_send: no active terminal".to_string())
+                    }
                 }
             }
         };
