@@ -18,6 +18,14 @@ type PendingQueries = Arc<
         >,
     >,
 >;
+type PendingCommands = Arc<
+    Mutex<
+        HashMap<
+            crate::protocol::AgentRequestId,
+            tokio::sync::oneshot::Sender<crate::protocol::AgentCommandResult>,
+        >,
+    >,
+>;
 
 /// Acquire the manager lock and run `f` against the process if it exists.
 /// Returns Some(result) when the process was found, None otherwise.
@@ -43,6 +51,7 @@ pub async fn run_server(listener: UnixListener) {
     let input_writers = Arc::new(Mutex::new(HashMap::new()));
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
     let pending_queries: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
+    let pending_commands: PendingCommands = Arc::new(Mutex::new(HashMap::new()));
 
     // Poll at ~60Hz for exits, and immediately when PTY output arrives.
     let poll_mgr = Arc::clone(&manager);
@@ -88,9 +97,17 @@ pub async fn run_server(listener: UnixListener) {
         let input_writers = Arc::clone(&input_writers);
         let agent_tx = agent_tx.clone();
         let pending_queries = Arc::clone(&pending_queries);
+        let pending_commands = Arc::clone(&pending_commands);
         tokio::spawn(async move {
-            if let Err(e) =
-                handle_client(stream, mgr, input_writers, agent_tx, pending_queries).await
+            if let Err(e) = handle_client(
+                stream,
+                mgr,
+                input_writers,
+                agent_tx,
+                pending_queries,
+                pending_commands,
+            )
+            .await
             {
                 eprintln!("client error: {e}");
             }
@@ -112,6 +129,7 @@ async fn handle_client(
     input_writers: InputWriters,
     agent_tx: broadcast::Sender<ServiceMessage>,
     pending_queries: PendingQueries,
+    pending_commands: PendingCommands,
 ) -> std::io::Result<()> {
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -122,6 +140,8 @@ async fn handle_client(
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let mut agent_subscription: Option<tokio::task::JoinHandle<()>> = None;
     let mut in_flight_query_ids: std::collections::HashSet<crate::protocol::AgentRequestId> =
+        std::collections::HashSet::new();
+    let mut in_flight_command_ids: std::collections::HashSet<crate::protocol::AgentRequestId> =
         std::collections::HashSet::new();
 
     loop {
@@ -358,27 +378,69 @@ async fn handle_client(
                 request_id,
                 command,
             } => {
-                let resp = if let Err(message) = validate_agent_command(&command) {
-                    ServiceMessage::Error {
+                if let Err(message) = validate_agent_command(&command) {
+                    let resp = ServiceMessage::Error {
                         message: message.to_string(),
-                    }
-                } else if agent_tx.receiver_count() == 0 {
-                    ServiceMessage::Error {
+                    };
+                    let mut w = writer.lock().await;
+                    write_message!(&mut *w, &resp)?;
+                    continue;
+                }
+                if agent_tx.receiver_count() == 0 {
+                    let resp = ServiceMessage::Error {
                         message: "no desktop subscribed to agent commands".to_string(),
-                    }
-                } else {
-                    match agent_tx.send(ServiceMessage::AgentCommand {
+                    };
+                    let mut w = writer.lock().await;
+                    write_message!(&mut *w, &resp)?;
+                    continue;
+                }
+
+                let (tx, rx) =
+                    tokio::sync::oneshot::channel::<crate::protocol::AgentCommandResult>();
+                pending_commands.lock().await.insert(request_id, tx);
+                in_flight_command_ids.insert(request_id);
+
+                if agent_tx
+                    .send(ServiceMessage::AgentCommand {
                         request_id,
                         command,
-                    }) {
-                        Ok(_) => ServiceMessage::AgentCommandAccepted { request_id },
-                        Err(_) => ServiceMessage::Error {
-                            message: "no desktop subscribed to agent commands".to_string(),
-                        },
-                    }
-                };
-                let mut w = writer.lock().await;
-                write_message!(&mut *w, &resp)?;
+                    })
+                    .is_err()
+                {
+                    pending_commands.lock().await.remove(&request_id);
+                    in_flight_command_ids.remove(&request_id);
+                    let resp = ServiceMessage::Error {
+                        message: "no desktop subscribed to agent commands".to_string(),
+                    };
+                    let mut w = writer.lock().await;
+                    write_message!(&mut *w, &resp)?;
+                    continue;
+                }
+
+                let writer = writer.clone();
+                let pending_commands = Arc::clone(&pending_commands);
+                tokio::spawn(async move {
+                    let resp = match tokio::time::timeout(
+                        crate::protocol::AGENT_COMMAND_TIMEOUT,
+                        rx,
+                    )
+                    .await
+                    {
+                        Ok(Ok(result)) => ServiceMessage::AgentCommandResult { request_id, result },
+                        _ => {
+                            pending_commands.lock().await.remove(&request_id);
+                            ServiceMessage::Error {
+                                message: "agent command timed out".to_string(),
+                            }
+                        }
+                    };
+                    let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&resp) {
+                        Ok(b) => b,
+                        Err(_) => return,
+                    };
+                    let mut w = writer.lock().await;
+                    let _ = crate::framing::write_raw_frame(&mut *w, &bytes).await;
+                });
             }
 
             ClientMessage::Shutdown => {
@@ -453,7 +515,15 @@ async fn handle_client(
                 in_flight_query_ids.remove(&request_id);
             }
 
-            ClientMessage::AgentCommandResponse { .. } => {}
+            ClientMessage::AgentCommandResponse {
+                request_id,
+                result,
+            } => {
+                if let Some(tx) = pending_commands.lock().await.remove(&request_id) {
+                    let _ = tx.send(result);
+                }
+                in_flight_command_ids.remove(&request_id);
+            }
         }
     }
 
@@ -472,13 +542,22 @@ async fn handle_client(
         }
     }
 
+    {
+        let mut pending = pending_commands.lock().await;
+        for id in &in_flight_command_ids {
+            pending.remove(id);
+        }
+    }
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{AgentQuery, AgentQueryResult, AgentRequestId, FocusedInfo};
+    use crate::protocol::{
+        AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, FocusedInfo,
+    };
     use tokio::sync::oneshot;
 
     #[test]
@@ -521,5 +600,20 @@ mod tests {
         assert!(pending.lock().await.remove(&request_id).is_none());
 
         let _ = AgentQuery::ListTabs;
+    }
+
+    #[tokio::test]
+    async fn pending_commands_roundtrips_oneshot() {
+        let pending: PendingCommands = Arc::new(Mutex::new(HashMap::new()));
+        let request_id = AgentRequestId::new();
+        let (tx, rx) = oneshot::channel::<AgentCommandResult>();
+        pending.lock().await.insert(request_id, tx);
+
+        let result = AgentCommandResult::Ok;
+        let resp_tx = pending.lock().await.remove(&request_id).expect("entry");
+        resp_tx.send(result.clone()).expect("send");
+
+        let received = rx.await.expect("recv");
+        assert_eq!(received, result);
     }
 }
