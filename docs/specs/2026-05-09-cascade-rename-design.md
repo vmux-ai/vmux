@@ -101,10 +101,12 @@ The `vmux_layout::lib.rs` test that asserts `Space::type_path() == "vmux_desktop
 | `cmd+t` | `TabCommand::New` (opens a new Tab — top-level workspace) |
 | `cmd+n` | `StackCommand::New` (pushes a new Stack on top in the focused Pane) |
 | `cmd+w` | `StackCommand::Close` (closes the focused Stack, with existing close-confirmation dialog) |
-| `cmd+[` / `cmd+]` | prev/next Stack in the focused Pane |
-| `cmd+shift+[` / `cmd+shift+]` | prev/next Tab |
-| `cmd+1`..`cmd+9` | jump to Tab #N |
+| `cmd+shift+n` / `cmd+shift+p` | `StackCommand::Next` / `StackCommand::Previous` (cycle stacks in the focused Pane) |
+| `cmd+shift+[` / `cmd+shift+]` | `TabCommand::Previous` / `TabCommand::Next` |
+| `cmd+1`..`cmd+9` | `TabCommand::SelectIndex1..8` / `SelectLast` |
 | `cmd+shift+s` | `ZenCommand::Toggle` — hide all chrome / show all chrome |
+
+Browser navigation (`cmd+[` / `cmd+]` = `BrowserCommand::PrevPage` / `NextPage`) is **unchanged** — kept on its current bindings since Stack switching uses `cmd+shift+n/p` instead.
 
 ### Removed
 
