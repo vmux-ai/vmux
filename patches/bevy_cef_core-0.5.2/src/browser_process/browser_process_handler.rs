@@ -7,7 +7,7 @@ use winit::event_loop::EventLoopProxy;
 
 pub type WakeProxy = EventLoopProxy<bevy_winit::WinitUserEvent>;
 
-const WAKE_MIN_INTERVAL: Duration = Duration::from_millis(16);
+const WAKE_MIN_INTERVAL: Duration = Duration::from_millis(8);
 
 /// ## Reference
 ///
@@ -63,9 +63,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cef_wake_throttle_caps_foreground_work_to_60hz() {
-        assert!(WAKE_MIN_INTERVAL >= Duration::from_millis(16));
-        assert!(WAKE_MIN_INTERVAL <= Duration::from_millis(17));
+    fn cef_wake_throttle_caps_foreground_work_to_120hz() {
+        assert!(WAKE_MIN_INTERVAL >= Duration::from_millis(8));
+        assert!(WAKE_MIN_INTERVAL <= Duration::from_millis(9));
     }
 }
 

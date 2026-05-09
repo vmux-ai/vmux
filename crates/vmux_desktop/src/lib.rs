@@ -88,13 +88,10 @@ impl Plugin for VmuxPlugin {
             ..default()
         };
 
-        // CEF's `on_schedule_message_pump_work` can request delayed work (e.g.
-        // 100ms from now).  The wake throttler fires the WakeUp immediately, so
-        // by the time Bevy runs the pump the work isn't ready yet.  A short
-        // reactive timeout guarantees we re-poll promptly instead of stalling
-        // for the default 5-second desktop_app() timeout.
+        // Continuous while focused: drives the bevy_cef external BeginFrame system
+        // every Bevy update so CEF paints align with host display refresh.
         app.insert_resource(WinitSettings {
-            focused_mode: bevy::winit::UpdateMode::reactive(Duration::from_millis(50)),
+            focused_mode: bevy::winit::UpdateMode::Continuous,
             unfocused_mode: bevy::winit::UpdateMode::reactive_low_power(Duration::from_secs(1)),
         })
         .add_plugins(vmux_core::CorePlugin)

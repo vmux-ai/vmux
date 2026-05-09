@@ -187,7 +187,7 @@ impl Browsers {
         let browser = browser_host_create_browser_sync(
             Some(&WindowInfo {
                 windowless_rendering_enabled: true as _,
-                external_begin_frame_enabled: false as _,
+                external_begin_frame_enabled: true as _,
                 #[cfg(target_os = "macos")]
                 parent_view: match _window_handle {
                     Some(RawWindowHandle::AppKit(handle)) => handle.ns_view.as_ptr(),
@@ -206,9 +206,9 @@ impl Browsers {
             Some(&mut client),
             Some(&_uri.into()),
             Some(&BrowserSettings {
-                // Cap OSR paints to one 60Hz frame budget. Higher rates can saturate a full core
+                // Cap OSR paints to one 120Hz frame budget. Higher rates can saturate a full core
                 // per active webview because each paint copies and uploads a full texture.
-                windowless_frame_rate: 60,
+                windowless_frame_rate: 120,
                 background_color: background_color.unwrap_or(CEF_OSR_BACKGROUND_COLOR_ARGB),
                 ..Default::default()
             }),
@@ -347,6 +347,17 @@ impl Browsers {
                 mouse_up as _,
                 1,
             );
+        }
+    }
+
+    /// [`SendExternalBeginFrame`](https://cef-builds.spotifycdn.com/docs/145.6/classCefBrowserHost.html#a78a87fa64517c4d6e2e1ac80d7e72f23)
+    ///
+    /// Drives a single CEF paint when `external_begin_frame_enabled` was set on
+    /// the underlying browser. Caller is responsible for pacing (typically once
+    /// per host vsync).
+    pub fn send_external_begin_frame(&self, webview: &Entity) {
+        if let Some(browser) = self.browsers.get(webview) {
+            browser.host.send_external_begin_frame();
         }
     }
 
@@ -920,11 +931,11 @@ mod tests {
     }
 
     #[test]
-    fn osr_frame_rate_is_capped_at_60hz() {
+    fn osr_frame_rate_is_capped_at_120hz() {
         let implementation = include_str!("browsers.rs")
             .split("#[cfg(test)]\nmod tests")
             .next()
             .unwrap_or_default();
-        assert!(implementation.contains("windowless_frame_rate: 60"));
+        assert!(implementation.contains("windowless_frame_rate: 120"));
     }
 }

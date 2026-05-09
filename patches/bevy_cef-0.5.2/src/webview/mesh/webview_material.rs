@@ -72,6 +72,7 @@ fn send_render_textures(mut ew: MessageWriter<RenderTextureMessage>, browsers: N
 }
 
 pub(crate) fn update_webview_image(texture: RenderTextureMessage, image: &mut Image) {
+    let buffer = std::sync::Arc::try_unwrap(texture.buffer).unwrap_or_else(|arc| (*arc).clone());
     *image = Image::new(
         Extent3d {
             width: texture.width,
@@ -79,7 +80,7 @@ pub(crate) fn update_webview_image(texture: RenderTextureMessage, image: &mut Im
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        texture.buffer,
+        buffer,
         TextureFormat::Bgra8UnormSrgb,
         RenderAssetUsages::all(),
     );

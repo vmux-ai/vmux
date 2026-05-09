@@ -1851,7 +1851,7 @@ mod tests {
                 ty: bevy_cef_core::prelude::RenderPaintElementType::View,
                 width: 1,
                 height: 1,
-                buffer: vec![0, 0, 0, 255],
+                buffer: std::sync::Arc::new(vec![0, 0, 0, 255]),
             });
 
         app.update();

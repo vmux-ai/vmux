@@ -24,8 +24,11 @@ pub struct RenderTextureMessage {
     pub width: u32,
     /// The height of the texture.
     pub height: u32,
-    /// This buffer will be `width` *`height` * 4 bytes in size and represents a BGRA image with an upper-left origin
-    pub buffer: Vec<u8>,
+    /// This buffer will be `width` *`height` * 4 bytes in size and represents a BGRA image with an upper-left origin.
+    ///
+    /// Wrapped in `Arc` so the message survives Bevy's per-reader clone (3 consumers — mesh,
+    /// extend-material, sprite) without copying the full BGRA buffer each time.
+    pub buffer: Arc<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -151,9 +154,9 @@ impl ImplRenderHandler for RenderHandlerBuilder {
             ty,
             width: width as u32,
             height: height as u32,
-            buffer: unsafe {
+            buffer: Arc::new(unsafe {
                 std::slice::from_raw_parts(buffer, (width * height * 4) as usize).to_vec()
-            },
+            }),
         };
         send_render_texture(&self.texture_sender, self.texture_wake.as_ref(), texture);
     }
@@ -197,7 +200,7 @@ mod tests {
                 ty: RenderPaintElementType::View,
                 width: 1,
                 height: 1,
-                buffer: vec![0, 0, 0, 0],
+                buffer: Arc::new(vec![0, 0, 0, 0]),
             },
         );
 

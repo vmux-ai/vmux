@@ -27,7 +27,7 @@ mod mesh;
 mod pinch_zoom;
 mod webview_sprite;
 
-const TEXTURE_WAKE_MIN_INTERVAL: Duration = Duration::from_millis(16);
+const TEXTURE_WAKE_MIN_INTERVAL: Duration = Duration::from_millis(8);
 
 #[derive(Resource, Clone)]
 struct TextureWakeCallback(Option<TextureWake>);
@@ -114,6 +114,7 @@ impl Plugin for WebviewPlugin {
                 )
                     .in_set(CefSystems::CreateAndResize),
             )
+            .add_systems(Last, drive_external_begin_frames)
             .add_observer(apply_request_show_devtool)
             .add_observer(apply_request_close_devtool);
 
@@ -138,6 +139,21 @@ impl Plugin for WebviewPlugin {
 
 fn any_resized(webviews: Query<Entity, Changed<WebviewSize>>) -> bool {
     !webviews.is_empty()
+}
+
+/// Drives one CEF paint per Bevy frame for every active webview.
+///
+/// Pairs with `external_begin_frame_enabled: true` on browser creation. Bevy's
+/// frame loop is gated by winit/wgpu vsync, so this naturally produces frames at
+/// the host display refresh rate instead of CEF's free-running internal clock —
+/// eliminating phase drift between CEF compositor frames and display vsync.
+fn drive_external_begin_frames(
+    browsers: NonSend<Browsers>,
+    webviews: Query<Entity, With<WebviewSource>>,
+) {
+    for entity in webviews.iter() {
+        browsers.send_external_begin_frame(&entity);
+    }
 }
 
 fn spawn_texture_wake_throttler(wrapper: &bevy::winit::EventLoopProxyWrapper) -> TextureWake {
@@ -289,8 +305,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn texture_wake_throttle_caps_to_60hz() {
-        assert!(TEXTURE_WAKE_MIN_INTERVAL >= Duration::from_millis(16));
-        assert!(TEXTURE_WAKE_MIN_INTERVAL <= Duration::from_millis(17));
+    fn texture_wake_throttle_caps_to_120hz() {
+        assert!(TEXTURE_WAKE_MIN_INTERVAL >= Duration::from_millis(8));
+        assert!(TEXTURE_WAKE_MIN_INTERVAL <= Duration::from_millis(9));
     }
 }
