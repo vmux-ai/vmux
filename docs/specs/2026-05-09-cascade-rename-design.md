@@ -58,6 +58,25 @@ Multiple Stacks per Pane. Only the top Stack is visible (z-stacked). `cmd+[` / `
 
 `#[type_path = "..."]` annotations are updated to match the new module/type names. They are not pinned to old paths — see Persistence.
 
+### vmux:// URL scheme
+
+The internal CEF scheme paths follow the type rename:
+
+| Today | After |
+|-------|-------|
+| `vmux://sessions/` | `vmux://spaces/` |
+
+Affected files:
+
+- `crates/vmux_session/src/event.rs:1` — `SESSIONS_WEBVIEW_URL` const → `SPACES_WEBVIEW_URL`
+- `crates/vmux_command/src/results.rs:3-4` — `SESSIONS_QUERY`, `SESSIONS_PAGE_URL` consts → `SPACES_*`
+- `crates/vmux_command/src/results.rs:237,276` — test strings
+- `crates/vmux_desktop/src/command_bar.rs:1918` — string literal
+- `crates/vmux_desktop/src/sessions.rs` (file rename → `spaces.rs`)
+- CEF scheme handler registration (search for `"sessions"` in scheme setup)
+
+Other `vmux://` paths (`terminal`, `services`, `command-bar`, `header`, `footer`) are unaffected — they refer to component types not in the rename map.
+
 ## Persistence
 
 The product is pre-release; no users depend on saved state. We accept data loss instead of writing migration code.
@@ -126,6 +145,8 @@ One PR, but ordered commits for bisect:
 3. **Crate: `vmux_session → vmux_space`**
    - Rename crate directory and `Cargo.toml` package name
    - Rename `SessionRecord`, `SessionRegistry`, `SessionCommand` types
+   - Rename `vmux://sessions/ → vmux://spaces/` (and constants)
+   - Rename `vmux_desktop/src/sessions.rs → spaces.rs`
    - Update workspace `Cargo.toml` and all `vmux_session = ...` deps
    - Update `#[type_path]`, lib.rs test
 4. **Persistence cleanup**
