@@ -389,9 +389,7 @@ fn handle_agent_commands(
                 let split_dir_result = match direction.as_str() {
                     "right" => Ok(vmux_layout::pane::PaneSplitDirection::Row),
                     "down" => Ok(vmux_layout::pane::PaneSplitDirection::Column),
-                    other => Err(format!(
-                        "split_and_navigate: invalid direction '{other}'"
-                    )),
+                    other => Err(format!("split_and_navigate: invalid direction '{other}'")),
                 };
 
                 match split_dir_result {
@@ -400,9 +398,7 @@ fn handle_agent_commands(
                         if let Some(active_pane) = focus.pane.filter(|p| panes.contains(*p)) {
                             let existing_tabs: Vec<Entity> = pane_children
                                 .get(active_pane)
-                                .map(|c| {
-                                    c.iter().filter(|&e| tab_filter.contains(e)).collect()
-                                })
+                                .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                                 .unwrap_or_default();
 
                             let (_pane1, pane2) = vmux_layout::pane::split_pane_in_two(
