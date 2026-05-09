@@ -37,6 +37,12 @@ pub enum McpParamTool {
     },
     #[mcp(description = "Select a tab by index (1-8).")]
     SelectTab { index: u8 },
+    #[mcp(description = "Split current pane and open a URL in the new pane. Direction 'right' = side-by-side (vertical separator), 'down' = top/bottom.")]
+    SplitAndNavigate {
+        #[mcp(enum_values = ["right", "down"])]
+        direction: String,
+        url: String,
+    },
 }
 
 impl McpParamTool {
@@ -90,6 +96,17 @@ impl McpParamTool {
                 Ok(AgentCommand::AppCommand {
                     id: format!("tab_select_{index}"),
                 })
+            }
+            McpParamTool::SplitAndNavigate { direction, url } => {
+                if !["right", "down"].contains(&direction.as_str()) {
+                    return Err(format!(
+                        "split_and_navigate: direction must be 'right' or 'down', got '{direction}'"
+                    ));
+                }
+                if url.trim().is_empty() {
+                    return Err("split_and_navigate.url is empty".to_string());
+                }
+                Ok(AgentCommand::SplitAndNavigate { direction, url })
             }
         }
     }
@@ -426,5 +443,46 @@ mod tests {
     #[test]
     fn dispatch_from_tool_call_unknown_returns_error() {
         assert!(dispatch_from_tool_call("nope", serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn mcp_param_tool_entries_includes_split_and_navigate() {
+        let names: Vec<&'static str> = McpParamTool::mcp_tool_entries()
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect();
+        assert!(names.contains(&"split_and_navigate"));
+    }
+
+    #[test]
+    fn split_and_navigate_dispatches_to_agent_command() {
+        let target = dispatch_from_tool_call(
+            "split_and_navigate",
+            serde_json::json!({"direction": "right", "url": "https://example.com"}),
+        )
+        .unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Command(AgentCommand::SplitAndNavigate { direction, url })
+                if direction == "right" && url == "https://example.com"
+        ));
+    }
+
+    #[test]
+    fn split_and_navigate_invalid_direction_returns_error() {
+        let result = dispatch_from_tool_call(
+            "split_and_navigate",
+            serde_json::json!({"direction": "sideways", "url": "https://example.com"}),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn split_and_navigate_missing_url_returns_error() {
+        let result = dispatch_from_tool_call(
+            "split_and_navigate",
+            serde_json::json!({"direction": "right"}),
+        );
+        assert!(result.is_err());
     }
 }
