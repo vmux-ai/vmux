@@ -23,7 +23,7 @@ use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentRequestId
 
 #[derive(Message)]
 pub(crate) struct AgentCommandRequest {
-    pub(crate) _request_id: AgentRequestId,
+    pub(crate) request_id: AgentRequestId,
     pub(crate) command: ServiceAgentCommand,
 }
 
@@ -187,6 +187,27 @@ pub(crate) fn spawn_terminal_tab(
     terminal
 }
 
+pub(crate) fn spawn_browser_tab(
+    pane: Entity,
+    url: &str,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) -> Entity {
+    let tab = commands
+        .spawn((
+            crate::layout::tab::tab_bundle(),
+            LastActivatedAt::now(),
+            ChildOf(pane),
+        ))
+        .id();
+    commands.spawn((
+        crate::browser::Browser::new(meshes, webview_mt, url),
+        ChildOf(tab),
+    ));
+    tab
+}
+
 fn active_terminal_for_tab(
     tab: Option<Entity>,
     terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
@@ -222,40 +243,43 @@ fn handle_agent_commands(
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     settings: Res<AppSettings>,
+    service: Option<Res<crate::terminal::ServiceClient>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
+    use vmux_service::protocol::{AgentCommandResult, ClientMessage};
+
     for request in reader.read() {
-        match &request.command {
+        let result = match &request.command {
             ServiceAgentCommand::AppCommand { id } => {
                 if let Some(command) = AppCommand::from_agent_id(id) {
                     app_commands.write(command);
+                    AgentCommandResult::Ok
                 } else {
-                    warn!("unknown agent app command: {id}");
+                    AgentCommandResult::Error(format!("unknown app command: {id}"))
                 }
             }
             ServiceAgentCommand::NewTerminalTab { cwd } => {
-                let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane)) else {
-                    warn!("agent terminal command has no active pane");
-                    continue;
-                };
-                let cwd = match valid_cwd(cwd) {
-                    Ok(cwd) => cwd,
-                    Err(message) => {
-                        warn!("{message}");
-                        continue;
+                if let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane)) {
+                    match valid_cwd(cwd) {
+                        Ok(cwd_path) => {
+                            spawn_terminal_tab(
+                                pane,
+                                cwd_path.as_deref(),
+                                None,
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                                &settings,
+                            );
+                            AgentCommandResult::Ok
+                        }
+                        Err(message) => AgentCommandResult::Error(message),
                     }
-                };
-                spawn_terminal_tab(
-                    pane,
-                    cwd.as_deref(),
-                    None,
-                    &mut commands,
-                    &mut meshes,
-                    &mut webview_mt,
-                    &settings,
-                );
+                } else {
+                    AgentCommandResult::Error("no active pane".to_string())
+                }
             }
             ServiceAgentCommand::RunShell { command, cwd, mode } => {
                 let input = shell_command_input(command);
@@ -265,48 +289,57 @@ fn handle_agent_commands(
                     commands
                         .entity(terminal)
                         .insert(PendingTerminalInput { data: input });
-                    continue;
-                }
-                let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane)) else {
-                    warn!("agent shell command has no active pane");
-                    continue;
-                };
-                let cwd = match valid_cwd(cwd) {
-                    Ok(cwd) => cwd,
-                    Err(message) => {
-                        warn!("{message}");
-                        continue;
+                    AgentCommandResult::Ok
+                } else if let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane)) {
+                    match valid_cwd(cwd) {
+                        Ok(cwd_path) => {
+                            spawn_terminal_tab(
+                                pane,
+                                cwd_path.as_deref(),
+                                Some(input),
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                                &settings,
+                            );
+                            AgentCommandResult::Ok
+                        }
+                        Err(message) => AgentCommandResult::Error(message),
                     }
-                };
-                spawn_terminal_tab(
-                    pane,
-                    cwd.as_deref(),
-                    Some(input),
-                    &mut commands,
-                    &mut meshes,
-                    &mut webview_mt,
-                    &settings,
-                );
+                } else {
+                    AgentCommandResult::Error("no active pane".to_string())
+                }
             }
             ServiceAgentCommand::BrowserNavigate { url } => {
-                let Some(webview) = active_webview_for_tab(focus.tab, &browsers, &terminals) else {
-                    warn!("agent browser_navigate has no active webview");
-                    continue;
-                };
-                commands.trigger(RequestNavigate {
-                    webview,
-                    url: url.clone(),
-                });
+                if let Some(webview) = active_webview_for_tab(focus.tab, &browsers, &terminals) {
+                    commands.trigger(RequestNavigate {
+                        webview,
+                        url: url.clone(),
+                    });
+                    AgentCommandResult::Ok
+                } else if let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane)) {
+                    spawn_browser_tab(pane, url, &mut commands, &mut meshes, &mut webview_mt);
+                    AgentCommandResult::Ok
+                } else {
+                    AgentCommandResult::Error("browser_navigate: no focused pane".to_string())
+                }
             }
             ServiceAgentCommand::TerminalSend { text } => {
-                let Some(terminal) = active_terminal_for_tab(focus.tab, &terminals) else {
-                    warn!("agent terminal_send has no active terminal");
-                    continue;
-                };
-                commands.entity(terminal).insert(PendingTerminalInput {
-                    data: text.as_bytes().to_vec(),
-                });
+                if let Some(terminal) = active_terminal_for_tab(focus.tab, &terminals) {
+                    commands.entity(terminal).insert(PendingTerminalInput {
+                        data: text.as_bytes().to_vec(),
+                    });
+                    AgentCommandResult::Ok
+                } else {
+                    AgentCommandResult::Error("terminal_send: no active terminal".to_string())
+                }
             }
+        };
+        if let Some(service) = service.as_ref() {
+            service.0.send(ClientMessage::AgentCommandResponse {
+                request_id: request.request_id,
+                result,
+            });
         }
     }
 }
@@ -438,7 +471,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
             .write(AgentCommandRequest {
-                _request_id: AgentRequestId::new(),
+                request_id: AgentRequestId::new(),
                 command: ServiceAgentCommand::BrowserNavigate {
                     url: "https://example.com".to_string(),
                 },
@@ -526,7 +559,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
             .write(AgentCommandRequest {
-                _request_id: AgentRequestId::new(),
+                request_id: AgentRequestId::new(),
                 command: ServiceAgentCommand::TerminalSend {
                     text: "ls".to_string(),
                 },
@@ -539,5 +572,53 @@ mod tests {
             .get::<PendingTerminalInput>(terminal)
             .expect("PendingTerminalInput inserted");
         assert_eq!(pending.data, b"ls".to_vec());
+    }
+
+    #[test]
+    fn browser_navigate_auto_spawns_tab_when_pane_is_empty() {
+        use crate::browser::Browser;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedTab>().tab = None;
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::BrowserNavigate {
+                    url: "https://example.com".to_string(),
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let mut tabs = world.query_filtered::<&ChildOf, With<crate::layout::tab::Tab>>();
+        let tab_count_under_pane = tabs
+            .iter(world)
+            .filter(|child_of| child_of.get() == pane)
+            .count();
+        assert_eq!(
+            tab_count_under_pane, 1,
+            "browser_navigate should have spawned exactly one tab in the focused pane"
+        );
+
+        let mut browsers = world.query::<(&Browser, &PageMetadata)>();
+        let urls: Vec<String> = browsers.iter(world).map(|(_, p)| p.url.clone()).collect();
+        assert!(
+            urls.contains(&"https://example.com".to_string()),
+            "browser entity with the URL should exist; found {urls:?}"
+        );
     }
 }

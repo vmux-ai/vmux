@@ -779,7 +779,7 @@ fn poll_service_messages(
                 command,
             } => {
                 agent_writer.write(crate::agent::AgentCommandRequest {
-                    _request_id: request_id,
+                    request_id,
                     command,
                 });
             }
