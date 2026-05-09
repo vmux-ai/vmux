@@ -619,12 +619,9 @@ mod tests {
             "browser_navigate should have spawned exactly one tab in the focused pane"
         );
 
-        let mut tab_metadata = world
-            .query_filtered::<&PageMetadata, With<crate::layout::tab::Tab>>();
-        let tab_urls: Vec<String> = tab_metadata
-            .iter(world)
-            .map(|p| p.url.clone())
-            .collect();
+        let mut tab_metadata =
+            world.query_filtered::<&PageMetadata, With<crate::layout::tab::Tab>>();
+        let tab_urls: Vec<String> = tab_metadata.iter(world).map(|p| p.url.clone()).collect();
         assert!(
             tab_urls.contains(&"https://example.com".to_string()),
             "tab entity should have PageMetadata with the URL; found {tab_urls:?}"

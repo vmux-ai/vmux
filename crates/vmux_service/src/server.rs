@@ -515,10 +515,7 @@ async fn handle_client(
                 in_flight_query_ids.remove(&request_id);
             }
 
-            ClientMessage::AgentCommandResponse {
-                request_id,
-                result,
-            } => {
+            ClientMessage::AgentCommandResponse { request_id, result } => {
                 if let Some(tx) = pending_commands.lock().await.remove(&request_id) {
                     let _ = tx.send(result);
                 }
