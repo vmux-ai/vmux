@@ -159,6 +159,39 @@ fn spawn_leaf_pane(commands: &mut Commands, parent: Entity) -> Entity {
         .id()
 }
 
+pub fn split_pane_in_two(
+    commands: &mut Commands,
+    active: Entity,
+    direction: PaneSplitDirection,
+    pane_settings: &crate::settings::PaneSettings,
+    existing_tabs: &[Entity],
+) -> (Entity, Entity) {
+    let pane1 = spawn_leaf_pane(commands, active);
+    let pane2 = spawn_leaf_pane(commands, active);
+
+    for tab in existing_tabs {
+        commands.entity(*tab).insert(ChildOf(pane1));
+    }
+
+    let flex_direction = match direction {
+        PaneSplitDirection::Row => FlexDirection::Row,
+        PaneSplitDirection::Column => FlexDirection::Column,
+    };
+    let gap = pane_split_gaps(direction, pane_settings.gap);
+    commands.entity(active).insert(PaneSplit { direction });
+    commands.entity(active).insert(Node {
+        flex_grow: 1.0,
+        flex_direction,
+        column_gap: gap.column_gap,
+        row_gap: gap.row_gap,
+        align_items: AlignItems::Stretch,
+        ..default()
+    });
+    commands.entity(pane2).insert(LastActivatedAt::now());
+
+    (pane1, pane2)
+}
+
 /// Compute clamped flex_grow values after a resize delta.
 /// Returns (new_pane_grow, new_sibling_grow).
 fn compute_resize(pane_grow: f32, sib_grow: f32, delta: f32, parent_len: f32) -> (f32, f32) {
@@ -259,23 +292,14 @@ fn handle_pane_commands(
                 } else {
                     PaneSplitDirection::Column
                 };
-                let direction = if pane_cmd == PaneCommand::SplitV {
-                    FlexDirection::Row
-                } else {
-                    FlexDirection::Column
-                };
 
                 let existing_tabs: Vec<Entity> = pane_children
                     .get(active)
                     .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                     .unwrap_or_default();
 
-                let pane1 = spawn_leaf_pane(&mut commands, active);
-                let pane2 = spawn_leaf_pane(&mut commands, active);
-
-                for tab in existing_tabs {
-                    commands.entity(tab).insert(ChildOf(pane1));
-                }
+                let (_pane1, pane2) =
+                    split_pane_in_two(&mut commands, active, split_dir, &settings.pane, &existing_tabs);
 
                 let new_tab = commands
                     .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane2)))
@@ -284,20 +308,6 @@ fn handle_pane_commands(
                 new_tab_ctx.previous_tab = active_tab_opt;
                 new_tab_ctx.needs_open = true;
 
-                commands.entity(active).insert(PaneSplit {
-                    direction: split_dir,
-                });
-                let gap = pane_split_gaps(split_dir, settings.pane.gap);
-                commands.entity(active).insert(Node {
-                    flex_grow: 1.0,
-                    flex_direction: direction,
-                    column_gap: gap.column_gap,
-                    row_gap: gap.row_gap,
-                    align_items: AlignItems::Stretch,
-                    ..default()
-                });
-
-                commands.entity(pane2).insert(LastActivatedAt::now());
                 hover_intent.target = None;
                 hover_intent.last_activation = Some(Instant::now());
                 resize_q.p3().target = Some(pane2);
