@@ -1,6 +1,7 @@
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use vmux_command::command::AppCommand;
+use vmux_macro::McpTool;
 use vmux_service::protocol::{AgentCommand, AgentShellMode};
 
 #[derive(Clone, Debug, Serialize)]
@@ -11,106 +12,99 @@ pub struct ToolDefinition {
     pub input_schema: Value,
 }
 
+#[derive(Debug, McpTool)]
+pub enum McpParamTool {
+    #[mcp(description = "Open the Vmux command bar.")]
+    OpenCommandBar {
+        #[mcp(enum_values = ["default", "commands", "path"])]
+        mode: Option<String>,
+    },
+    #[mcp(description = "Create a visible Vmux terminal tab.")]
+    NewTerminalTab { cwd: Option<String> },
+    #[mcp(description = "Run a shell command in a visible Vmux terminal.")]
+    RunShell {
+        command: String,
+        cwd: Option<String>,
+        #[mcp(enum_values = ["new_tab", "active"])]
+        mode: Option<String>,
+    },
+    #[mcp(description = "Navigate the active webview to a URL.")]
+    BrowserNavigate { url: String, pane: Option<String> },
+    #[mcp(description = "Send raw text to the active terminal (no carriage return appended).")]
+    TerminalSend {
+        text: String,
+        terminal: Option<String>,
+    },
+    #[mcp(description = "Select a tab by index (1-8).")]
+    SelectTab { index: u8 },
+}
+
+impl McpParamTool {
+    pub fn to_agent_command(self) -> Result<AgentCommand, String> {
+        match self {
+            McpParamTool::OpenCommandBar { mode } => {
+                let id = match mode.as_deref().unwrap_or("default") {
+                    "default" => "browser_open_command_bar",
+                    "commands" => "browser_open_commands",
+                    "path" => "browser_open_path_bar",
+                    other => return Err(format!("unknown command bar mode: {other}")),
+                };
+                Ok(AgentCommand::AppCommand { id: id.to_string() })
+            }
+            McpParamTool::NewTerminalTab { cwd } => Ok(AgentCommand::NewTerminalTab {
+                cwd: cwd.unwrap_or_default(),
+            }),
+            McpParamTool::RunShell { command, cwd, mode } => {
+                if command.trim().is_empty() {
+                    return Err("run_shell.command is empty".to_string());
+                }
+                let mode = match mode.as_deref().unwrap_or("new_tab") {
+                    "new_tab" => AgentShellMode::NewTab,
+                    "active" => AgentShellMode::Active,
+                    other => return Err(format!("unknown shell mode: {other}")),
+                };
+                Ok(AgentCommand::RunShell {
+                    command,
+                    cwd: cwd.unwrap_or_default(),
+                    mode,
+                })
+            }
+            McpParamTool::BrowserNavigate { url, pane } => {
+                if url.trim().is_empty() {
+                    return Err("browser_navigate.url is empty".to_string());
+                }
+                Ok(AgentCommand::BrowserNavigate { url, pane })
+            }
+            McpParamTool::TerminalSend { text, terminal } => {
+                if text.is_empty() {
+                    return Err("terminal_send.text is empty".to_string());
+                }
+                Ok(AgentCommand::TerminalSend { text, terminal })
+            }
+            McpParamTool::SelectTab { index } => {
+                if !(1..=8).contains(&index) {
+                    return Err(format!(
+                        "select_tab.index must be between 1 and 8, got {index}"
+                    ));
+                }
+                Ok(AgentCommand::AppCommand {
+                    id: format!("tab_select_{index}"),
+                })
+            }
+        }
+    }
+}
+
 pub fn tool_definitions() -> Vec<ToolDefinition> {
     let mut tools: Vec<ToolDefinition> = AppCommand::mcp_tool_entries()
         .into_iter()
-        .map(|(id, description, schema)| ToolDefinition {
-            name: id.to_string(),
+        .chain(McpParamTool::mcp_tool_entries())
+        .map(|(name, description, schema)| ToolDefinition {
+            name: name.to_string(),
             description: description.to_string(),
             input_schema: schema,
         })
         .collect();
-
-    tools.push(ToolDefinition {
-        name: "open_command_bar".to_string(),
-        description: "Open the Vmux command bar.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "mode": {
-                    "type": "string",
-                    "enum": ["default", "commands", "path"]
-                }
-            }
-        }),
-    });
-    tools.push(ToolDefinition {
-        name: "new_terminal_tab".to_string(),
-        description: "Create a visible Vmux terminal tab.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "cwd": {
-                    "type": "string"
-                }
-            }
-        }),
-    });
-    tools.push(ToolDefinition {
-        name: "run_shell".to_string(),
-        description: "Run a shell command in a visible Vmux terminal.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string"
-                },
-                "cwd": {
-                    "type": "string"
-                },
-                "mode": {
-                    "type": "string",
-                    "enum": ["new_tab", "active"]
-                }
-            },
-            "required": ["command"]
-        }),
-    });
-
-    tools.push(ToolDefinition {
-        name: "browser_navigate".to_string(),
-        description: "Navigate the active webview to a URL.".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string"
-                }
-            },
-            "required": ["url"]
-        }),
-    });
-
-    tools.push(ToolDefinition {
-        name: "terminal_send".to_string(),
-        description: "Send raw text to the active terminal (no carriage return appended)."
-            .to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "text": {
-                    "type": "string"
-                }
-            },
-            "required": ["text"]
-        }),
-    });
-
-    tools.push(ToolDefinition {
-        name: "select_tab".to_string(),
-        description: "Select a tab by index (1-8).".to_string(),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "index": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 8
-                }
-            },
-            "required": ["index"]
-        }),
-    });
 
     for (name, description) in [
         (
@@ -134,7 +128,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
         tools.push(ToolDefinition {
             name: name.to_string(),
             description: description.to_string(),
-            input_schema: json!({
+            input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
             }),
@@ -145,88 +139,15 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 }
 
 pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<AgentCommand, String> {
-    match name {
-        "open_command_bar" => {
-            let mode = optional_string(&arguments, "mode").unwrap_or("default");
-            let id = match mode {
-                "default" => "browser_open_command_bar",
-                "commands" => "browser_open_commands",
-                "path" => "browser_open_path_bar",
-                other => return Err(format!("unknown command bar mode: {other}")),
-            };
-            Ok(AgentCommand::AppCommand { id: id.to_string() })
-        }
-        "new_terminal_tab" => Ok(AgentCommand::NewTerminalTab {
-            cwd: optional_string(&arguments, "cwd")
-                .unwrap_or_default()
-                .to_string(),
-        }),
-        "run_shell" => {
-            let command = optional_string(&arguments, "command")
-                .ok_or_else(|| "run_shell.command is required".to_string())?
-                .to_string();
-            if command.trim().is_empty() {
-                return Err("run_shell.command is empty".to_string());
-            }
-            let mode = match optional_string(&arguments, "mode").unwrap_or("new_tab") {
-                "new_tab" => AgentShellMode::NewTab,
-                "active" => AgentShellMode::Active,
-                other => return Err(format!("unknown shell mode: {other}")),
-            };
-            Ok(AgentCommand::RunShell {
-                command,
-                cwd: optional_string(&arguments, "cwd")
-                    .unwrap_or_default()
-                    .to_string(),
-                mode,
-            })
-        }
-        "browser_navigate" => {
-            let url = optional_string(&arguments, "url")
-                .ok_or_else(|| "browser_navigate.url is required".to_string())?
-                .to_string();
-            if url.trim().is_empty() {
-                return Err("browser_navigate.url is empty".to_string());
-            }
-            Ok(AgentCommand::BrowserNavigate { url, pane: None })
-        }
-        "terminal_send" => {
-            let text = optional_string(&arguments, "text")
-                .ok_or_else(|| "terminal_send.text is required".to_string())?
-                .to_string();
-            if text.is_empty() {
-                return Err("terminal_send.text is empty".to_string());
-            }
-            Ok(AgentCommand::TerminalSend { text, terminal: None })
-        }
-        "select_tab" => {
-            let index = arguments
-                .get("index")
-                .and_then(Value::as_i64)
-                .ok_or_else(|| "select_tab.index is required (integer 1-8)".to_string())?;
-            if !(1..=8).contains(&index) {
-                return Err(format!(
-                    "select_tab.index must be between 1 and 8, got {index}"
-                ));
-            }
-            Ok(AgentCommand::AppCommand {
-                id: format!("tab_select_{index}"),
-            })
-        }
-        other => {
-            if AppCommand::from_mcp_id(other).is_some() {
-                Ok(AgentCommand::AppCommand {
-                    id: other.to_string(),
-                })
-            } else {
-                Err(format!("unknown tool: {other}"))
-            }
-        }
+    if let Some(parsed) = McpParamTool::from_mcp_call(name, arguments.clone()) {
+        return parsed.and_then(McpParamTool::to_agent_command);
     }
-}
-
-fn optional_string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key).and_then(Value::as_str)
+    if AppCommand::from_mcp_id(name).is_some() {
+        return Ok(AgentCommand::AppCommand {
+            id: name.to_string(),
+        });
+    }
+    Err(format!("unknown tool: {name}"))
 }
 
 pub fn agent_query_from_tool_call(name: &str) -> Option<vmux_service::protocol::AgentQuery> {
@@ -430,5 +351,64 @@ mod tests {
     #[test]
     fn agent_query_from_tool_call_unknown_returns_none() {
         assert!(agent_query_from_tool_call("not_a_query").is_none());
+    }
+
+    #[test]
+    fn mcp_param_tool_entries_includes_all_param_tools() {
+        let names: Vec<&'static str> = McpParamTool::mcp_tool_entries()
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect();
+        for expected in [
+            "open_command_bar",
+            "new_terminal_tab",
+            "run_shell",
+            "browser_navigate",
+            "terminal_send",
+            "select_tab",
+        ] {
+            assert!(names.contains(&expected), "missing param tool {expected}");
+        }
+    }
+
+    #[test]
+    fn mcp_param_tool_browser_navigate_schema_marks_url_required() {
+        let entry = McpParamTool::mcp_tool_entries()
+            .into_iter()
+            .find(|(name, _, _)| *name == "browser_navigate")
+            .expect("browser_navigate present");
+        let schema = entry.2;
+        let required = schema.get("required").expect("required key");
+        assert_eq!(required, &serde_json::json!(["url"]));
+        let properties = schema.get("properties").expect("properties key");
+        assert!(properties.get("url").is_some());
+        assert!(properties.get("pane").is_some());
+    }
+
+    #[test]
+    fn mcp_param_tool_from_mcp_call_browser_navigate() {
+        let parsed = McpParamTool::from_mcp_call(
+            "browser_navigate",
+            serde_json::json!({"url": "https://example.com", "pane": "12345"}),
+        )
+        .expect("recognized")
+        .expect("parsed");
+        assert!(matches!(
+            parsed,
+            McpParamTool::BrowserNavigate { url, pane: Some(p) }
+                if url == "https://example.com" && p == "12345"
+        ));
+    }
+
+    #[test]
+    fn mcp_param_tool_from_mcp_call_browser_navigate_missing_url_errors() {
+        let result = McpParamTool::from_mcp_call("browser_navigate", serde_json::json!({}))
+            .expect("recognized");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn mcp_param_tool_from_mcp_call_unknown_returns_none() {
+        assert!(McpParamTool::from_mcp_call("nope", serde_json::json!({})).is_none());
     }
 }

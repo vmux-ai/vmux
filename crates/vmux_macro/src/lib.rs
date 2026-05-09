@@ -683,6 +683,70 @@ impl McpProps {
     }
 }
 
+struct McpFieldProps {
+    enum_values: Vec<String>,
+}
+
+impl McpFieldProps {
+    fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
+        let mut enum_values = Vec::new();
+        for attr in attrs {
+            if !attr.path().is_ident("mcp") {
+                continue;
+            }
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("enum_values") {
+                    let value: syn::ExprArray = meta.value()?.parse()?;
+                    for el in value.elems {
+                        if let syn::Expr::Lit(syn::ExprLit {
+                            lit: syn::Lit::Str(s),
+                            ..
+                        }) = el
+                        {
+                            enum_values.push(s.value());
+                        } else {
+                            return Err(meta.error("enum_values must contain string literals"));
+                        }
+                    }
+                }
+                Ok(())
+            })?;
+        }
+        Ok(McpFieldProps { enum_values })
+    }
+}
+
+fn unwrap_option(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::Path(path) = ty else {
+        return None;
+    };
+    let last = path.path.segments.last()?;
+    if last.ident != "Option" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return None;
+    };
+    let syn::GenericArgument::Type(inner) = args.args.first()? else {
+        return None;
+    };
+    Some(inner)
+}
+
+fn type_schema_kind(ty: &syn::Type) -> Option<&'static str> {
+    let syn::Type::Path(path) = ty else {
+        return None;
+    };
+    let last = path.path.segments.last()?;
+    let name = last.ident.to_string();
+    Some(match name.as_str() {
+        "String" => "string",
+        "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" => "integer",
+        "bool" => "boolean",
+        _ => return None,
+    })
+}
+
 fn impl_mcp_tool(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let ident = &input.ident;
     let Data::Enum(data) = &input.data else {
@@ -693,15 +757,219 @@ fn impl_mcp_tool(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     };
 
     let first_variant = data.variants.first();
-    let is_leaf = first_variant
-        .map(|v| matches!(v.fields, Fields::Unit))
-        .unwrap_or(true);
+    let is_root_tuple = first_variant
+        .map(|v| matches!(v.fields, Fields::Unnamed(_)))
+        .unwrap_or(false);
 
-    if is_leaf {
-        impl_mcp_tool_leaf_unit(ident, data)
-    } else {
-        impl_mcp_tool_root(ident, data)
+    if is_root_tuple {
+        return impl_mcp_tool_root(ident, data);
     }
+
+    let any_fielded = data
+        .variants
+        .iter()
+        .any(|v| matches!(v.fields, Fields::Named(_)));
+
+    if any_fielded {
+        impl_mcp_tool_leaf_fielded(ident, data)
+    } else {
+        impl_mcp_tool_leaf_unit(ident, data)
+    }
+}
+
+fn impl_mcp_tool_leaf_fielded(
+    ident: &syn::Ident,
+    data: &syn::DataEnum,
+) -> syn::Result<proc_macro2::TokenStream> {
+    let mut entries = Vec::new();
+    let mut call_arms = Vec::new();
+
+    for variant in &data.variants {
+        let mcp_props = McpProps::from_attrs(&variant.attrs)?;
+        if mcp_props.skip {
+            continue;
+        }
+        let variant_ident = &variant.ident;
+        let tool_name = heck_variant_snake_case(&variant_ident.to_string());
+        let description = mcp_props.description.clone().ok_or_else(|| {
+            syn::Error::new_spanned(
+                variant_ident,
+                "fielded McpTool variants require #[mcp(description = \"...\")]",
+            )
+        })?;
+
+        let mut property_inserts = Vec::new();
+        let mut required_strs = Vec::new();
+        let mut field_extracts = Vec::new();
+        let mut field_constructs = Vec::new();
+
+        let Fields::Named(fields) = &variant.fields else {
+            return Err(syn::Error::new_spanned(
+                variant,
+                "expected named-field variant",
+            ));
+        };
+
+        for field in &fields.named {
+            let field_ident = field.ident.as_ref().expect("named field has ident");
+            let field_name = field_ident.to_string();
+            let field_props = McpFieldProps::from_attrs(&field.attrs)?;
+
+            let (effective_ty, is_optional) = if let Some(inner) = unwrap_option(&field.ty) {
+                (inner.clone(), true)
+            } else {
+                (field.ty.clone(), false)
+            };
+
+            let kind = type_schema_kind(&effective_ty).ok_or_else(|| {
+                syn::Error::new_spanned(
+                    &field.ty,
+                    "unsupported McpTool field type (use String, integer types, bool, or Option<T>)",
+                )
+            })?;
+
+            let schema_fragment = if !field_props.enum_values.is_empty() {
+                if kind != "string" {
+                    return Err(syn::Error::new_spanned(
+                        &field.ty,
+                        "#[mcp(enum_values = ...)] requires String/Option<String>",
+                    ));
+                }
+                let values = &field_props.enum_values;
+                quote! {
+                    ::serde_json::json!({"type": "string", "enum": [ #(#values),* ]})
+                }
+            } else {
+                quote! {
+                    ::serde_json::json!({"type": #kind})
+                }
+            };
+
+            property_inserts.push(quote! {
+                properties.insert(#field_name.to_string(), #schema_fragment);
+            });
+            if !is_optional {
+                required_strs.push(field_name.clone());
+            }
+
+            let extract = match kind {
+                "string" => {
+                    let extract = quote! {
+                        args.get(#field_name).and_then(|v| v.as_str()).map(::std::string::String::from)
+                    };
+                    if is_optional {
+                        quote! { let #field_ident: ::core::option::Option<::std::string::String> = #extract; }
+                    } else {
+                        quote! {
+                            let #field_ident: ::std::string::String = match #extract {
+                                ::core::option::Option::Some(v) => v,
+                                ::core::option::Option::None => {
+                                    return ::core::option::Option::Some(
+                                        ::core::result::Result::Err(format!("{} is required", #field_name))
+                                    );
+                                }
+                            };
+                        }
+                    }
+                }
+                "integer" => {
+                    let ty_ident = match &effective_ty {
+                        syn::Type::Path(p) => &p.path.segments.last().unwrap().ident,
+                        _ => unreachable!(),
+                    };
+                    let extract = quote! {
+                        args.get(#field_name)
+                            .and_then(|v| v.as_i64())
+                            .and_then(|n| <#ty_ident as ::core::convert::TryFrom<i64>>::try_from(n).ok())
+                    };
+                    if is_optional {
+                        quote! { let #field_ident: ::core::option::Option<#ty_ident> = #extract; }
+                    } else {
+                        quote! {
+                            let #field_ident: #ty_ident = match #extract {
+                                ::core::option::Option::Some(v) => v,
+                                ::core::option::Option::None => {
+                                    return ::core::option::Option::Some(
+                                        ::core::result::Result::Err(format!("{} is required (integer)", #field_name))
+                                    );
+                                }
+                            };
+                        }
+                    }
+                }
+                "boolean" => {
+                    let extract = quote! {
+                        args.get(#field_name).and_then(|v| v.as_bool())
+                    };
+                    if is_optional {
+                        quote! { let #field_ident: ::core::option::Option<bool> = #extract; }
+                    } else {
+                        quote! {
+                            let #field_ident: bool = match #extract {
+                                ::core::option::Option::Some(v) => v,
+                                ::core::option::Option::None => {
+                                    return ::core::option::Option::Some(
+                                        ::core::result::Result::Err(format!("{} is required (boolean)", #field_name))
+                                    );
+                                }
+                            };
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            };
+
+            field_extracts.push(extract);
+            field_constructs.push(quote! { #field_ident });
+        }
+
+        let required_array = if required_strs.is_empty() {
+            quote! { ::serde_json::json!([]) }
+        } else {
+            let strs = &required_strs;
+            quote! { ::serde_json::json!([ #(#strs),* ]) }
+        };
+
+        entries.push(quote! {
+            ({
+                let mut properties = ::serde_json::Map::new();
+                #(#property_inserts)*
+                let schema = ::serde_json::json!({
+                    "type": "object",
+                    "properties": ::serde_json::Value::Object(properties),
+                    "required": #required_array
+                });
+                (#tool_name, #description, schema)
+            })
+        });
+
+        call_arms.push(quote! {
+            #tool_name => {
+                #(#field_extracts)*
+                ::core::option::Option::Some(::core::result::Result::Ok(
+                    #ident::#variant_ident { #(#field_constructs),* }
+                ))
+            }
+        });
+    }
+
+    Ok(quote! {
+        impl #ident {
+            pub fn mcp_tool_entries() -> ::std::vec::Vec<(&'static str, &'static str, ::serde_json::Value)> {
+                ::std::vec![#(#entries),*]
+            }
+
+            pub fn from_mcp_call(
+                name: &str,
+                args: ::serde_json::Value,
+            ) -> ::core::option::Option<::core::result::Result<Self, ::std::string::String>> {
+                match name {
+                    #(#call_arms)*
+                    _ => ::core::option::Option::None,
+                }
+            }
+        }
+    })
 }
 
 fn impl_mcp_tool_leaf_unit(
