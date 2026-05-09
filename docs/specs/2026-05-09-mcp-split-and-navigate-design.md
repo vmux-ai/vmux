@@ -180,19 +180,7 @@ McpParamTool::SplitAndNavigate { direction, url } => {
 
 ### 4. `vmux_desktop::agent`
 
-New handler arm (after `TerminalSend`):
-
-```rust
-ServiceAgentCommand::SplitAndNavigate { direction, url } => {
-    let Some(active_pane) = focus.pane.filter(|p| panes.contains(*p)) else {
-        AgentCommandResult::Error("split_and_navigate: no focused pane".to_string())
-    };
-    // (compile-checked: arm body is the `else` — restructure to compute result inline)
-    // …
-}
-```
-
-Final shape:
+New handler arm (after `TerminalSend`). Compute direction first; then spawn if focused pane exists:
 
 ```rust
 ServiceAgentCommand::SplitAndNavigate { direction, url } => {
@@ -200,8 +188,7 @@ ServiceAgentCommand::SplitAndNavigate { direction, url } => {
         "right" => vmux_layout::pane::PaneSplitDirection::Row,
         "down" => vmux_layout::pane::PaneSplitDirection::Column,
         other => {
-            // Computed inside arm — see final layout in plan
-            // Returns AgentCommandResult::Error
+            return_error(format!("split_and_navigate: invalid direction '{other}'"))
         }
     };
 
@@ -218,13 +205,15 @@ ServiceAgentCommand::SplitAndNavigate { direction, url } => {
             &settings.layout.pane,
             &existing_tabs,
         );
-        spawn_browser_tab(pane2, &url, &mut commands, &mut meshes, &mut webview_mt);
+        spawn_browser_tab(pane2, url, &mut commands, &mut meshes, &mut webview_mt);
         AgentCommandResult::Ok
     } else {
         AgentCommandResult::Error("split_and_navigate: no focused pane".to_string())
     }
 }
 ```
+
+The `return_error` placeholder above means: produce `AgentCommandResult::Error(message)` directly (the surrounding `let result = match { ... }` makes early-return-as-expression awkward). Idiomatic rewrite: compute `split_dir` as `Result<PaneSplitDirection, String>`, then nest the focus check inside an `Ok(_)` arm — see the implementation plan for the concrete code.
 
 The handler needs new query parameters:
 - `pane_children: Query<&Children, With<vmux_layout::pane::Pane>>` (or filtered to leaf panes — match what the existing pane handler uses).
