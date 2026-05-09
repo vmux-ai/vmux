@@ -452,6 +452,8 @@ async fn handle_client(
                 }
                 in_flight_query_ids.remove(&request_id);
             }
+
+            ClientMessage::AgentCommandResponse { .. } => {}
         }
     }
 

@@ -86,6 +86,14 @@ pub enum AgentCommand {
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+pub const AGENT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AgentCommandResult {
+    Ok,
+    Error(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentQuery {
     GetState,
@@ -240,6 +248,10 @@ pub enum ClientMessage {
         request_id: AgentRequestId,
         result: AgentQueryResult,
     },
+    AgentCommandResponse {
+        request_id: AgentRequestId,
+        result: AgentCommandResult,
+    },
 }
 
 /// Vim-style visual/copy-mode action sent by the GUI to the service.
@@ -386,6 +398,10 @@ pub enum ServiceMessage {
         request_id: AgentRequestId,
         result: AgentQueryResult,
     },
+    AgentCommandResult {
+        request_id: AgentRequestId,
+        result: AgentCommandResult,
+    },
 }
 
 /// Metadata about a process, returned in ProcessList.
@@ -497,6 +513,37 @@ mod tests {
                 pane: None,
                 tab: None,
             }),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&service_msg).unwrap();
+        let _decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
+    }
+
+    #[test]
+    fn agent_command_result_roundtrips() {
+        for variant in [
+            AgentCommandResult::Ok,
+            AgentCommandResult::Error("boom".to_string()),
+        ] {
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&variant).unwrap();
+            let decoded =
+                rkyv::from_bytes::<AgentCommandResult, rkyv::rancor::Error>(&bytes).unwrap();
+            assert_eq!(decoded, variant);
+        }
+    }
+
+    #[test]
+    fn agent_command_response_messages_roundtrip() {
+        let request_id = AgentRequestId::new();
+        let client_msg = ClientMessage::AgentCommandResponse {
+            request_id,
+            result: AgentCommandResult::Ok,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client_msg).unwrap();
+        let _decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
+
+        let service_msg = ServiceMessage::AgentCommandResult {
+            request_id,
+            result: AgentCommandResult::Error("nope".to_string()),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&service_msg).unwrap();
         let _decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
