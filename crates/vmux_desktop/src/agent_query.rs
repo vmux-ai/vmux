@@ -23,6 +23,7 @@ type PaneQuery<'world, 'state> =
     Query<'world, 'state, (Entity, &'static Children), (With<Pane>, Without<PaneSplit>)>;
 type SpaceQuery<'world, 'state> =
     Query<'world, 'state, (Entity, &'static Space, &'static Children)>;
+type ChildrenQuery<'world, 'state> = Query<'world, 'state, &'static Children>;
 
 pub(crate) fn handle_agent_queries(
     mut reader: MessageReader<AgentQueryRequest>,
@@ -31,6 +32,7 @@ pub(crate) fn handle_agent_queries(
     panes: PaneQuery,
     tabs: TabQuery,
     terminals: TerminalQuery,
+    all_children: ChildrenQuery,
     process_list: Option<Res<ServiceProcessList>>,
     focused: Option<Res<FocusedTab>>,
 ) {
@@ -46,7 +48,7 @@ pub(crate) fn handle_agent_queries(
                 &panes,
                 &tabs,
                 &terminals,
-                process_list,
+                &all_children,
                 &focused,
             )),
             AgentQuery::ListTabs => AgentQueryResult::Tabs(collect_tabs(&tabs, &terminals)),
@@ -55,6 +57,7 @@ pub(crate) fn handle_agent_queries(
                 &panes,
                 &tabs,
                 &terminals,
+                &all_children,
                 &focused,
             )),
             AgentQuery::ListTerminals => {
@@ -133,30 +136,52 @@ fn collect_spaces(
     panes: &PaneQuery,
     tabs: &TabQuery,
     terminals: &TerminalQuery,
+    all_children: &ChildrenQuery,
     focused: &FocusedTab,
 ) -> Vec<SpaceInfo> {
     spaces
         .iter()
-        .map(|(space_entity, space, space_children)| SpaceInfo {
-            id: space_entity.to_string(),
-            name: space.name.clone(),
-            panes: space_children
-                .iter()
-                .filter_map(|child| panes.get(child).ok())
-                .map(|(pane_entity, pane_children)| PaneInfo {
-                    id: pane_entity.to_string(),
-                    tabs: pane_children
-                        .iter()
-                        .filter_map(|grandchild| tabs.get(grandchild).ok())
-                        .map(|(tab_entity, tab_children, page)| {
-                            tab_info(tab_entity, tab_children, page, terminals)
-                        })
-                        .collect(),
-                })
-                .collect(),
-            active: focused.space == Some(space_entity),
+        .map(|(space_entity, space, space_children)| {
+            let leaf_panes = gather_leaf_panes(space_children, panes, all_children);
+            SpaceInfo {
+                id: space_entity.to_string(),
+                name: space.name.clone(),
+                panes: leaf_panes
+                    .into_iter()
+                    .map(|(pane_entity, pane_children)| PaneInfo {
+                        id: pane_entity.to_string(),
+                        tabs: pane_children
+                            .iter()
+                            .filter_map(|grandchild| tabs.get(grandchild).ok())
+                            .map(|(tab_entity, tab_children, page)| {
+                                tab_info(tab_entity, tab_children, page, terminals)
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+                active: focused.space == Some(space_entity),
+            }
         })
         .collect()
+}
+
+fn gather_leaf_panes<'a>(
+    roots: &'a Children,
+    panes: &'a PaneQuery,
+    all_children: &'a ChildrenQuery,
+) -> Vec<(Entity, &'a Children)> {
+    let mut out = Vec::new();
+    let mut stack: Vec<Entity> = roots.iter().collect();
+    while let Some(entity) = stack.pop() {
+        if let Ok((pane_entity, pane_children)) = panes.get(entity) {
+            out.push((pane_entity, pane_children));
+        } else if let Ok(children) = all_children.get(entity) {
+            for child in children.iter() {
+                stack.push(child);
+            }
+        }
+    }
+    out
 }
 
 fn build_state_snapshot(
@@ -164,11 +189,11 @@ fn build_state_snapshot(
     panes: &PaneQuery,
     tabs: &TabQuery,
     terminals: &TerminalQuery,
-    _process_list: &ServiceProcessList,
+    all_children: &ChildrenQuery,
     focused: &FocusedTab,
 ) -> StateSnapshot {
     StateSnapshot {
-        spaces: collect_spaces(spaces, panes, tabs, terminals, focused),
+        spaces: collect_spaces(spaces, panes, tabs, terminals, all_children, focused),
         focused: focused_info(focused),
     }
 }
@@ -195,5 +220,73 @@ mod tests {
         assert_eq!(info.space, Some(space.to_string()));
         assert_eq!(info.pane, Some(pane.to_string()));
         assert_eq!(info.tab, Some(tab.to_string()));
+    }
+
+    #[test]
+    fn collect_spaces_descends_through_pane_splits() {
+        use crate::layout::pane::{PaneSplitDirection};
+        use crate::layout::space::Space;
+        use crate::layout::tab::Tab;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(FocusedTab::default());
+
+        let space = app.world_mut().spawn(Space { name: "S1".into() }).id();
+        let root_split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(space),
+            ))
+            .id();
+        let nested_split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Column,
+                },
+                ChildOf(root_split),
+            ))
+            .id();
+        let leaf_a = app.world_mut().spawn((Pane, ChildOf(nested_split))).id();
+        let leaf_b = app.world_mut().spawn((Pane, ChildOf(nested_split))).id();
+        let leaf_c = app.world_mut().spawn((Pane, ChildOf(root_split))).id();
+        let _tab_a = app.world_mut().spawn((Tab::default(), ChildOf(leaf_a))).id();
+        let _tab_b = app.world_mut().spawn((Tab::default(), ChildOf(leaf_b))).id();
+        let _tab_c = app.world_mut().spawn((Tab::default(), ChildOf(leaf_c))).id();
+
+        let world = app.world_mut();
+        let root_children: Vec<Entity> = world
+            .get::<Children>(space)
+            .unwrap()
+            .iter()
+            .collect();
+        let mut all_children_q = world.query::<&Children>();
+        let mut leaf_panes_q =
+            world.query_filtered::<(Entity, &Children), (With<Pane>, Without<PaneSplit>)>();
+
+        let mut leaves: Vec<Entity> = Vec::new();
+        let mut stack: Vec<Entity> = root_children;
+        while let Some(entity) = stack.pop() {
+            if let Ok((leaf_entity, _)) = leaf_panes_q.get(world, entity) {
+                leaves.push(leaf_entity);
+            } else if let Ok(children) = all_children_q.get(world, entity) {
+                for child in children.iter() {
+                    stack.push(child);
+                }
+            }
+        }
+        leaves.sort();
+        let mut expected = vec![leaf_a, leaf_b, leaf_c];
+        expected.sort();
+        assert_eq!(
+            leaves, expected,
+            "should find all 3 leaf panes through nested splits"
+        );
     }
 }
