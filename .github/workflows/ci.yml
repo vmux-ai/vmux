@@ -15,6 +15,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  TAILWINDCSS_VERSION: "4.2.4"
 
 jobs:
   lint:
@@ -84,12 +85,7 @@ jobs:
         run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
       - name: Install tailwindcss
-        run: |
-          if ! command -v tailwindcss >/dev/null 2>&1; then
-            curl -sLO https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.19/tailwindcss-linux-x64
-            chmod +x tailwindcss-linux-x64
-            sudo mv tailwindcss-linux-x64 /usr/local/bin/tailwindcss
-          fi
+        run: ./scripts/install-tailwindcss.sh
 
       - name: Clippy
         run: |
@@ -156,12 +152,7 @@ jobs:
         run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
       - name: Install tailwindcss
-        run: |
-          if ! command -v tailwindcss >/dev/null 2>&1; then
-            curl -sLO https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.19/tailwindcss-linux-x64
-            chmod +x tailwindcss-linux-x64
-            sudo mv tailwindcss-linux-x64 /usr/local/bin/tailwindcss
-          fi
+        run: ./scripts/install-tailwindcss.sh
 
       - name: Run tests
         run: env -u CEF_PATH cargo test --workspace --exclude bevy_cef_core
@@ -262,12 +253,7 @@ jobs:
         run: cargo install --path patches/cargo-packager-0.11.8
 
       - name: Install tailwindcss
-        run: |
-          if ! command -v tailwindcss >/dev/null 2>&1; then
-            curl -sLO https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.19/tailwindcss-macos-arm64
-            chmod +x tailwindcss-macos-arm64
-            sudo mv tailwindcss-macos-arm64 /usr/local/bin/tailwindcss
-          fi
+        run: ./scripts/install-tailwindcss.sh
 
       - name: Build, sign, notarize, and package DMG
         env:

@@ -594,7 +594,7 @@ fn compile_tailwind_index_css(manifest_dir: &Path, dist_assets: &Path) -> io::Re
     let Some(tw) = tailwind_cli() else {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            "tailwindcss not found (install v3 CLI on PATH or set TAILWINDCSS)",
+            "tailwindcss not found (install v4 CLI on PATH or set TAILWINDCSS)",
         ));
     };
     let out = dist_assets.join(CEF_EMBEDDED_APP_INDEX_CSS);
