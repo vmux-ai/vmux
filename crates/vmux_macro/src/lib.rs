@@ -985,8 +985,12 @@ fn impl_mcp_tool_leaf_unit(
             continue;
         }
         let menu_props = MenuProps::from_attrs(&variant.attrs)?;
-        let Some(id) = &menu_props.id else {
-            continue;
+        let id = match &menu_props.id {
+            Some(id) => id.clone(),
+            None if mcp_props.description.is_some() => {
+                heck_variant_snake_case(&variant.ident.to_string())
+            }
+            None => continue,
         };
         let id_lit = id.as_str();
         let variant_ident = &variant.ident;

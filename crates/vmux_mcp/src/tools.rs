@@ -95,83 +95,85 @@ impl McpParamTool {
     }
 }
 
+#[derive(Debug, McpTool)]
+pub enum McpQueryTool {
+    #[mcp(description = "Return the full vmux layout snapshot (spaces, panes, tabs, focused).")]
+    GetState,
+    #[mcp(description = "List all tabs across all spaces with title, url, and kind.")]
+    ListTabs,
+    #[mcp(description = "List all spaces with their panes and tabs.")]
+    ListSpaces,
+    #[mcp(description = "List all terminal processes with cwd and pid.")]
+    ListTerminals,
+    #[mcp(description = "Return the currently focused space, pane, and tab ids.")]
+    GetFocused,
+}
+
+impl McpQueryTool {
+    pub fn to_agent_query(self) -> vmux_service::protocol::AgentQuery {
+        use vmux_service::protocol::AgentQuery;
+        match self {
+            McpQueryTool::GetState => AgentQuery::GetState,
+            McpQueryTool::ListTabs => AgentQuery::ListTabs,
+            McpQueryTool::ListSpaces => AgentQuery::ListSpaces,
+            McpQueryTool::ListTerminals => AgentQuery::ListTerminals,
+            McpQueryTool::GetFocused => AgentQuery::GetFocused,
+        }
+    }
+}
+
+pub enum DispatchTarget {
+    Command(AgentCommand),
+    Query(vmux_service::protocol::AgentQuery),
+}
+
 pub fn tool_definitions() -> Vec<ToolDefinition> {
-    let mut tools: Vec<ToolDefinition> = AppCommand::mcp_tool_entries()
+    AppCommand::mcp_tool_entries()
         .into_iter()
         .chain(McpParamTool::mcp_tool_entries())
+        .chain(McpQueryTool::mcp_tool_entries())
         .map(|(name, description, schema)| ToolDefinition {
             name: name.to_string(),
             description: description.to_string(),
             input_schema: schema,
         })
-        .collect();
-
-    for (name, description) in [
-        (
-            "get_state",
-            "Return the full vmux layout snapshot (spaces, panes, tabs, focused).",
-        ),
-        (
-            "list_tabs",
-            "List all tabs across all spaces with title, url, and kind.",
-        ),
-        ("list_spaces", "List all spaces with their panes and tabs."),
-        (
-            "list_terminals",
-            "List all terminal processes with cwd and pid.",
-        ),
-        (
-            "get_focused",
-            "Return the currently focused space, pane, and tab ids.",
-        ),
-    ] {
-        tools.push(ToolDefinition {
-            name: name.to_string(),
-            description: description.to_string(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": {}
-            }),
-        });
-    }
-
-    tools
+        .collect()
 }
 
-pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<AgentCommand, String> {
-    if let Some(parsed) = McpParamTool::from_mcp_call(name, arguments.clone()) {
-        return parsed.and_then(McpParamTool::to_agent_command);
+pub fn dispatch_from_tool_call(name: &str, arguments: Value) -> Result<DispatchTarget, String> {
+    if let Some(parsed) = McpQueryTool::from_mcp_id(name) {
+        return Ok(DispatchTarget::Query(parsed.to_agent_query()));
+    }
+    if let Some(parsed) = McpParamTool::from_mcp_call(name, arguments) {
+        return parsed
+            .and_then(McpParamTool::to_agent_command)
+            .map(DispatchTarget::Command);
     }
     if AppCommand::from_mcp_id(name).is_some() {
-        return Ok(AgentCommand::AppCommand {
+        return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
             id: name.to_string(),
-        });
+        }));
     }
     Err(format!("unknown tool: {name}"))
-}
-
-pub fn agent_query_from_tool_call(name: &str) -> Option<vmux_service::protocol::AgentQuery> {
-    use vmux_service::protocol::AgentQuery;
-    match name {
-        "get_state" => Some(AgentQuery::GetState),
-        "list_tabs" => Some(AgentQuery::ListTabs),
-        "list_spaces" => Some(AgentQuery::ListSpaces),
-        "list_terminals" => Some(AgentQuery::ListTerminals),
-        "get_focused" => Some(AgentQuery::GetFocused),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_service::protocol::AgentCommand;
+    use vmux_service::protocol::{AgentCommand, AgentQuery};
 
     fn tool_names() -> Vec<String> {
         tool_definitions()
             .into_iter()
             .map(|tool| tool.name)
             .collect()
+    }
+
+    fn dispatch_command(name: &str, args: serde_json::Value) -> Result<AgentCommand, String> {
+        match dispatch_from_tool_call(name, args)? {
+            DispatchTarget::Command(cmd) => Ok(cmd),
+            DispatchTarget::Query(_) => Err("expected Command, got Query".to_string()),
+        }
     }
 
     #[test]
@@ -204,7 +206,7 @@ mod tests {
 
     #[test]
     fn auto_generated_tool_dispatches_as_app_command() {
-        let command = agent_command_from_tool_call("split_v", serde_json::json!({})).unwrap();
+        let command = dispatch_command("split_v", serde_json::json!({})).unwrap();
         assert_eq!(
             command,
             AgentCommand::AppCommand {
@@ -215,7 +217,7 @@ mod tests {
 
     #[test]
     fn unknown_tool_returns_error() {
-        assert!(agent_command_from_tool_call("nope_not_a_tool", serde_json::json!({})).is_err());
+        assert!(dispatch_from_tool_call("nope_not_a_tool", serde_json::json!({})).is_err());
     }
 
     #[test]
@@ -226,7 +228,7 @@ mod tests {
 
     #[test]
     fn browser_navigate_dispatches_with_url() {
-        let command = agent_command_from_tool_call(
+        let command = dispatch_command(
             "browser_navigate",
             serde_json::json!({"url": "https://example.com"}),
         )
@@ -242,14 +244,12 @@ mod tests {
 
     #[test]
     fn browser_navigate_missing_url_returns_error() {
-        assert!(agent_command_from_tool_call("browser_navigate", serde_json::json!({})).is_err());
+        assert!(dispatch_from_tool_call("browser_navigate", serde_json::json!({})).is_err());
     }
 
     #[test]
     fn empty_run_shell_command_returns_tool_error() {
-        assert!(
-            agent_command_from_tool_call("run_shell", serde_json::json!({"command": ""})).is_err()
-        );
+        assert!(dispatch_from_tool_call("run_shell", serde_json::json!({"command": ""})).is_err());
     }
 
     #[test]
@@ -260,9 +260,7 @@ mod tests {
 
     #[test]
     fn terminal_send_dispatches_with_text() {
-        let command =
-            agent_command_from_tool_call("terminal_send", serde_json::json!({"text": "ls"}))
-                .unwrap();
+        let command = dispatch_command("terminal_send", serde_json::json!({"text": "ls"})).unwrap();
         assert_eq!(
             command,
             AgentCommand::TerminalSend {
@@ -274,7 +272,7 @@ mod tests {
 
     #[test]
     fn terminal_send_missing_text_returns_error() {
-        assert!(agent_command_from_tool_call("terminal_send", serde_json::json!({})).is_err());
+        assert!(dispatch_from_tool_call("terminal_send", serde_json::json!({})).is_err());
     }
 
     #[test]
@@ -285,8 +283,7 @@ mod tests {
 
     #[test]
     fn select_tab_dispatches_to_tab_select_id() {
-        let command =
-            agent_command_from_tool_call("select_tab", serde_json::json!({"index": 3})).unwrap();
+        let command = dispatch_command("select_tab", serde_json::json!({"index": 3})).unwrap();
         assert_eq!(
             command,
             AgentCommand::AppCommand {
@@ -297,12 +294,8 @@ mod tests {
 
     #[test]
     fn select_tab_out_of_range_returns_error() {
-        assert!(
-            agent_command_from_tool_call("select_tab", serde_json::json!({"index": 0})).is_err()
-        );
-        assert!(
-            agent_command_from_tool_call("select_tab", serde_json::json!({"index": 9})).is_err()
-        );
+        assert!(dispatch_from_tool_call("select_tab", serde_json::json!({"index": 0})).is_err());
+        assert!(dispatch_from_tool_call("select_tab", serde_json::json!({"index": 9})).is_err());
     }
 
     #[test]
@@ -320,37 +313,6 @@ mod tests {
                 "missing query tool {query}"
             );
         }
-    }
-
-    #[test]
-    fn agent_query_from_tool_call_dispatches_each_tool() {
-        use vmux_service::protocol::AgentQuery;
-
-        assert_eq!(
-            agent_query_from_tool_call("get_state").unwrap(),
-            AgentQuery::GetState
-        );
-        assert_eq!(
-            agent_query_from_tool_call("list_tabs").unwrap(),
-            AgentQuery::ListTabs
-        );
-        assert_eq!(
-            agent_query_from_tool_call("list_spaces").unwrap(),
-            AgentQuery::ListSpaces
-        );
-        assert_eq!(
-            agent_query_from_tool_call("list_terminals").unwrap(),
-            AgentQuery::ListTerminals
-        );
-        assert_eq!(
-            agent_query_from_tool_call("get_focused").unwrap(),
-            AgentQuery::GetFocused
-        );
-    }
-
-    #[test]
-    fn agent_query_from_tool_call_unknown_returns_none() {
-        assert!(agent_query_from_tool_call("not_a_query").is_none());
     }
 
     #[test]
@@ -410,5 +372,59 @@ mod tests {
     #[test]
     fn mcp_param_tool_from_mcp_call_unknown_returns_none() {
         assert!(McpParamTool::from_mcp_call("nope", serde_json::json!({})).is_none());
+    }
+
+    #[test]
+    fn mcp_query_tool_entries_includes_all_query_tools() {
+        let names: Vec<&'static str> = McpQueryTool::mcp_tool_entries()
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect();
+        for expected in [
+            "get_state",
+            "list_tabs",
+            "list_spaces",
+            "list_terminals",
+            "get_focused",
+        ] {
+            assert!(names.contains(&expected), "missing query tool {expected}");
+        }
+    }
+
+    #[test]
+    fn dispatch_from_tool_call_routes_command() {
+        let target = dispatch_from_tool_call("split_v", serde_json::json!({})).unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Command(AgentCommand::AppCommand { id }) if id == "split_v"
+        ));
+    }
+
+    #[test]
+    fn dispatch_from_tool_call_routes_query() {
+        let target = dispatch_from_tool_call("get_state", serde_json::json!({})).unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Query(AgentQuery::GetState)
+        ));
+    }
+
+    #[test]
+    fn dispatch_from_tool_call_routes_param_command_with_pane() {
+        let target = dispatch_from_tool_call(
+            "browser_navigate",
+            serde_json::json!({"url": "https://example.com", "pane": "12345"}),
+        )
+        .unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Command(AgentCommand::BrowserNavigate { url, pane: Some(p) })
+                if url == "https://example.com" && p == "12345"
+        ));
+    }
+
+    #[test]
+    fn dispatch_from_tool_call_unknown_returns_error() {
+        assert!(dispatch_from_tool_call("nope", serde_json::json!({})).is_err());
     }
 }

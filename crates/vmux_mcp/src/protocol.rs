@@ -91,12 +91,10 @@ async fn tool_call_result(params: &Value) -> Result<Value, String> {
         .cloned()
         .unwrap_or_else(|| json!({}));
 
-    if let Some(query) = crate::tools::agent_query_from_tool_call(name) {
-        return run_agent_query(query).await;
+    match crate::tools::dispatch_from_tool_call(name, arguments)? {
+        crate::tools::DispatchTarget::Command(command) => run_agent_command(command).await,
+        crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
     }
-
-    let command = crate::tools::agent_command_from_tool_call(name, arguments)?;
-    run_agent_command(command).await
 }
 
 async fn run_agent_command(command: AgentCommand) -> Result<Value, String> {
