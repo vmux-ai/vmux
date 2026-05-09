@@ -201,6 +201,11 @@ pub(crate) fn spawn_browser_tab(
             ChildOf(pane),
         ))
         .id();
+    commands.entity(tab).insert(PageMetadata {
+        url: url.to_string(),
+        title: url.to_string(),
+        ..default()
+    });
     commands.spawn((
         crate::browser::Browser::new(meshes, webview_mt, url),
         ChildOf(tab),
@@ -612,6 +617,17 @@ mod tests {
         assert_eq!(
             tab_count_under_pane, 1,
             "browser_navigate should have spawned exactly one tab in the focused pane"
+        );
+
+        let mut tab_metadata = world
+            .query_filtered::<&PageMetadata, With<crate::layout::tab::Tab>>();
+        let tab_urls: Vec<String> = tab_metadata
+            .iter(world)
+            .map(|p| p.url.clone())
+            .collect();
+        assert!(
+            tab_urls.contains(&"https://example.com".to_string()),
+            "tab entity should have PageMetadata with the URL; found {tab_urls:?}"
         );
 
         let mut browsers = world.query::<(&Browser, &PageMetadata)>();
