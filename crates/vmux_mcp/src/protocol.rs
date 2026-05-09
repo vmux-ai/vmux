@@ -121,17 +121,17 @@ async fn run_agent_command(command: AgentCommand) -> Result<Value, String> {
             return Err("vmux_service disconnected".to_string());
         };
         match message {
-            ServiceMessage::AgentCommandAccepted {
-                request_id: accepted,
-            } if accepted == request_id => {
-                return Ok(json!({
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "accepted"
-                        }
-                    ]
-                }));
+            ServiceMessage::AgentCommandResult {
+                request_id: received,
+                result,
+            } if received == request_id => {
+                use vmux_service::protocol::AgentCommandResult;
+                return match result {
+                    AgentCommandResult::Ok => Ok(json!({
+                        "content": [{"type": "text", "text": "ok"}]
+                    })),
+                    AgentCommandResult::Error(message) => Err(message),
+                };
             }
             ServiceMessage::Error { message } => return Err(message),
             _ => {}
