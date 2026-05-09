@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
-use vmux_service::protocol::{ClientMessage, ServiceMessage};
+use vmux_service::protocol::{AgentCommand, ClientMessage, ServiceMessage};
 
 pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
     let mut line = String::new();
@@ -90,7 +90,16 @@ async fn tool_call_result(params: &Value) -> Result<Value, String> {
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
+
+    if let Some(query) = crate::tools::agent_query_from_tool_call(name) {
+        return run_agent_query(query).await;
+    }
+
     let command = crate::tools::agent_command_from_tool_call(name, arguments)?;
+    run_agent_command(command).await
+}
+
+async fn run_agent_command(command: AgentCommand) -> Result<Value, String> {
     let request_id = vmux_service::protocol::AgentRequestId::new();
     let connection = vmux_service::client::ServiceConnection::connect()
         .await
@@ -128,6 +137,99 @@ async fn tool_call_result(params: &Value) -> Result<Value, String> {
             _ => {}
         }
     }
+}
+
+async fn run_agent_query(query: vmux_service::protocol::AgentQuery) -> Result<Value, String> {
+    let request_id = vmux_service::protocol::AgentRequestId::new();
+    let connection = vmux_service::client::ServiceConnection::connect()
+        .await
+        .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
+    connection
+        .send(&ClientMessage::AgentQuery { request_id, query })
+        .await
+        .map_err(|error| format!("cannot send agent query: {error}"))?;
+
+    loop {
+        let Some(message) = connection
+            .recv()
+            .await
+            .map_err(|error| format!("cannot read service response: {error}"))?
+        else {
+            return Err("vmux_service disconnected".to_string());
+        };
+        match message {
+            ServiceMessage::AgentQueryResult {
+                request_id: received,
+                result,
+            } if received == request_id => {
+                return Ok(query_result_to_mcp_response(result));
+            }
+            ServiceMessage::Error { message } => return Err(message),
+            _ => {}
+        }
+    }
+}
+
+fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult) -> Value {
+    use vmux_service::protocol::AgentQueryResult;
+    let payload = match result {
+        AgentQueryResult::State(snapshot) => json!({
+            "spaces": snapshot.spaces.iter().map(space_info_to_json).collect::<Vec<_>>(),
+            "focused": focused_info_to_json(&snapshot.focused),
+        }),
+        AgentQueryResult::Tabs(tabs) => json!({
+            "tabs": tabs.iter().map(tab_info_to_json).collect::<Vec<_>>(),
+        }),
+        AgentQueryResult::Spaces(spaces) => json!({
+            "spaces": spaces.iter().map(space_info_to_json).collect::<Vec<_>>(),
+        }),
+        AgentQueryResult::Terminals(terminals) => json!({
+            "terminals": terminals.iter().map(terminal_info_to_json).collect::<Vec<_>>(),
+        }),
+        AgentQueryResult::Focused(focused) => focused_info_to_json(&focused),
+        AgentQueryResult::Error(message) => {
+            return json!({
+                "isError": true,
+                "content": [{"type": "text", "text": message}]
+            });
+        }
+    };
+    json!({
+        "content": [
+            {
+                "type": "text",
+                "text": serde_json::to_string(&payload).unwrap_or_default()
+            }
+        ]
+    })
+}
+
+fn tab_info_to_json(t: &vmux_service::protocol::TabInfo) -> Value {
+    json!({"id": t.id, "title": t.title, "url": t.url, "kind": t.kind})
+}
+
+fn terminal_info_to_json(t: &vmux_service::protocol::TerminalInfo) -> Value {
+    json!({"id": t.id, "cwd": t.cwd, "pid": t.pid})
+}
+
+fn pane_info_to_json(p: &vmux_service::protocol::PaneInfo) -> Value {
+    json!({
+        "id": p.id,
+        "tabs": p.tabs.iter().map(tab_info_to_json).collect::<Vec<_>>(),
+    })
+}
+
+fn space_info_to_json(s: &vmux_service::protocol::SpaceInfo) -> Value {
+    json!({
+        "id": s.id,
+        "name": s.name,
+        "active": s.active,
+        "panes": s.panes.iter().map(pane_info_to_json).collect::<Vec<_>>(),
+    })
+}
+
+fn focused_info_to_json(f: &vmux_service::protocol::FocusedInfo) -> Value {
+    json!({"space": f.space, "pane": f.pane, "tab": f.tab})
 }
 
 fn tool_error(message: &str) -> Value {

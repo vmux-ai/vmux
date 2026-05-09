@@ -115,6 +115,35 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
         }),
     });
 
+    for (name, description) in [
+        (
+            "get_state",
+            "Return the full vmux layout snapshot (spaces, panes, tabs, focused).",
+        ),
+        (
+            "list_tabs",
+            "List all tabs across all spaces with title, url, and kind.",
+        ),
+        ("list_spaces", "List all spaces with their panes and tabs."),
+        (
+            "list_terminals",
+            "List all terminal processes with cwd and pid.",
+        ),
+        (
+            "get_focused",
+            "Return the currently focused space, pane, and tab ids.",
+        ),
+    ] {
+        tools.push(ToolDefinition {
+            name: name.to_string(),
+            description: description.to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {}
+            }),
+        });
+    }
+
     tools
 }
 
@@ -201,6 +230,18 @@ pub fn agent_command_from_tool_call(name: &str, arguments: Value) -> Result<Agen
 
 fn optional_string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
+}
+
+pub fn agent_query_from_tool_call(name: &str) -> Option<vmux_service::protocol::AgentQuery> {
+    use vmux_service::protocol::AgentQuery;
+    match name {
+        "get_state" => Some(AgentQuery::GetState),
+        "list_tabs" => Some(AgentQuery::ListTabs),
+        "list_spaces" => Some(AgentQuery::ListSpaces),
+        "list_terminals" => Some(AgentQuery::ListTerminals),
+        "get_focused" => Some(AgentQuery::GetFocused),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -342,5 +383,53 @@ mod tests {
         assert!(
             agent_command_from_tool_call("select_tab", serde_json::json!({"index": 9})).is_err()
         );
+    }
+
+    #[test]
+    fn tool_list_includes_query_tools() {
+        let names = tool_names();
+        for query in [
+            "get_state",
+            "list_tabs",
+            "list_spaces",
+            "list_terminals",
+            "get_focused",
+        ] {
+            assert!(
+                names.contains(&query.to_string()),
+                "missing query tool {query}"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_query_from_tool_call_dispatches_each_tool() {
+        use vmux_service::protocol::AgentQuery;
+
+        assert_eq!(
+            agent_query_from_tool_call("get_state").unwrap(),
+            AgentQuery::GetState
+        );
+        assert_eq!(
+            agent_query_from_tool_call("list_tabs").unwrap(),
+            AgentQuery::ListTabs
+        );
+        assert_eq!(
+            agent_query_from_tool_call("list_spaces").unwrap(),
+            AgentQuery::ListSpaces
+        );
+        assert_eq!(
+            agent_query_from_tool_call("list_terminals").unwrap(),
+            AgentQuery::ListTerminals
+        );
+        assert_eq!(
+            agent_query_from_tool_call("get_focused").unwrap(),
+            AgentQuery::GetFocused
+        );
+    }
+
+    #[test]
+    fn agent_query_from_tool_call_unknown_returns_none() {
+        assert!(agent_query_from_tool_call("not_a_query").is_none());
     }
 }
