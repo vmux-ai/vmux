@@ -37,7 +37,9 @@ pub enum McpParamTool {
     },
     #[mcp(description = "Select a tab by index (1-8).")]
     SelectTab { index: u8 },
-    #[mcp(description = "Split current pane and open a URL in the new pane. Direction 'right' = side-by-side (vertical separator), 'down' = top/bottom.")]
+    #[mcp(
+        description = "Split current pane and open a URL in the new pane. Direction 'right' = side-by-side (vertical separator), 'down' = top/bottom."
+    )]
     SplitAndNavigate {
         #[mcp(enum_values = ["right", "down"])]
         direction: String,
