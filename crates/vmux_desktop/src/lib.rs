@@ -6,6 +6,7 @@
 )]
 
 mod agent;
+mod agent_query;
 mod browser;
 mod clipboard;
 mod command;

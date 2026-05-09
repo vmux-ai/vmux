@@ -27,6 +27,12 @@ pub(crate) struct AgentCommandRequest {
     pub(crate) command: ServiceAgentCommand,
 }
 
+#[derive(Message)]
+pub(crate) struct AgentQueryRequest {
+    pub(crate) request_id: AgentRequestId,
+    pub(crate) query: vmux_service::protocol::AgentQuery,
+}
+
 #[derive(Clone)]
 pub(crate) struct AgentProvider {
     pub(crate) id: &'static str,
@@ -105,10 +111,15 @@ impl Plugin for AgentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AgentProviders>()
             .add_message::<AgentCommandRequest>()
+            .add_message::<AgentQueryRequest>()
             .add_message::<AgentLaunchRequested>()
             .add_systems(
                 Update,
-                (handle_agent_launch_requests, handle_agent_commands)
+                (
+                    handle_agent_launch_requests,
+                    handle_agent_commands,
+                    crate::agent_query::handle_agent_queries,
+                )
                     .chain()
                     .in_set(WriteAppCommands)
                     .after(ServiceMessageSet),

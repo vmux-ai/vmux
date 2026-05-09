@@ -582,6 +582,7 @@ fn poll_service_messages(
     mut commands: Commands,
     mut writer: MessageWriter<AppCommand>,
     mut agent_writer: MessageWriter<crate::agent::AgentCommandRequest>,
+    mut agent_query_writer: MessageWriter<crate::agent::AgentQueryRequest>,
     mut mode_map: ResMut<TerminalModeMap>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
     mut mouse_state: ResMut<MouseSelectionState>,
@@ -782,7 +783,11 @@ fn poll_service_messages(
                     command,
                 });
             }
-            _ => {} // ProcessOutput handled elsewhere if needed
+            ServiceMessage::AgentQuery { request_id, query } => {
+                agent_query_writer
+                    .write(crate::agent::AgentQueryRequest { request_id, query });
+            }
+            _ => {}
         }
     }
 }
