@@ -264,6 +264,8 @@ fn handle_agent_commands(
     focus: Res<FocusedTab>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    pane_children: Query<&Children, With<Pane>>,
+    tab_filter: Query<(), With<crate::layout::tab::Tab>>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     settings: Res<AppSettings>,
     service: Option<Res<crate::terminal::ServiceClient>>,
@@ -380,6 +382,49 @@ fn handle_agent_commands(
                     }
                     Ok(None) => {
                         AgentCommandResult::Error("terminal_send: no active terminal".to_string())
+                    }
+                }
+            }
+            ServiceAgentCommand::SplitAndNavigate { direction, url } => {
+                let split_dir_result = match direction.as_str() {
+                    "right" => Ok(vmux_layout::pane::PaneSplitDirection::Row),
+                    "down" => Ok(vmux_layout::pane::PaneSplitDirection::Column),
+                    other => Err(format!(
+                        "split_and_navigate: invalid direction '{other}'"
+                    )),
+                };
+
+                match split_dir_result {
+                    Err(message) => AgentCommandResult::Error(message),
+                    Ok(split_dir) => {
+                        if let Some(active_pane) = focus.pane.filter(|p| panes.contains(*p)) {
+                            let existing_tabs: Vec<Entity> = pane_children
+                                .get(active_pane)
+                                .map(|c| {
+                                    c.iter().filter(|&e| tab_filter.contains(e)).collect()
+                                })
+                                .unwrap_or_default();
+
+                            let (_pane1, pane2) = vmux_layout::pane::split_pane_in_two(
+                                &mut commands,
+                                active_pane,
+                                split_dir,
+                                &settings.layout.pane,
+                                &existing_tabs,
+                            );
+                            spawn_browser_tab(
+                                pane2,
+                                url,
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                            );
+                            AgentCommandResult::Ok
+                        } else {
+                            AgentCommandResult::Error(
+                                "split_and_navigate: no focused pane".to_string(),
+                            )
+                        }
                     }
                 }
             }
@@ -722,5 +767,48 @@ mod tests {
             .count();
         assert_eq!(tabs_in_b, 1, "tab should be spawned in target pane B");
         assert_eq!(tabs_in_a, 0, "no tab should be spawned in focused pane A");
+    }
+
+    #[test]
+    fn split_and_navigate_creates_split_and_browser_tab() {
+        use crate::browser::Browser;
+        use vmux_layout::pane::PaneSplit;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::SplitAndNavigate {
+                    direction: "right".to_string(),
+                    url: "https://example.com".to_string(),
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        assert!(
+            world.get::<PaneSplit>(pane).is_some(),
+            "active pane should now be a PaneSplit"
+        );
+
+        let mut browsers = world.query::<(&Browser, &PageMetadata)>();
+        let urls: Vec<String> = browsers.iter(world).map(|(_, p)| p.url.clone()).collect();
+        assert!(
+            urls.contains(&"https://example.com".to_string()),
+            "browser entity with the URL should exist; found {urls:?}"
+        );
     }
 }
