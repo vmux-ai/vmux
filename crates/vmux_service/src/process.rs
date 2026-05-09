@@ -1,7 +1,7 @@
 use crate::protocol::{ProcessId, ProcessInfo, ServiceMessage};
 use alacritty_terminal::{
     event::{Event as TermEvent, EventListener as TermEventListener},
-    grid::Dimensions,
+    grid::{Dimensions, Scroll},
     index::{Column, Line},
     term::{Config as TermConfig, Term, cell::Flags as CellFlags},
     vte::ansi::{Color, NamedColor, Processor},
@@ -144,6 +144,38 @@ enum CopyModeCharClass {
 /// copy-mode word motions. A "word" is a maximal run of these characters.
 fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || matches!(c, '_' | '.' | '/' | '-')
+}
+
+fn offset_row(row: u16, delta: i32) -> u16 {
+    if delta >= 0 {
+        row.saturating_add(delta as u16)
+    } else {
+        row.saturating_sub((-delta) as u16)
+    }
+}
+
+fn copy_mode_scroll_input(
+    mode: &alacritty_terminal::term::TermMode,
+    delta: i32,
+    cols: u16,
+    rows: u16,
+) -> Option<(Vec<u8>, i32)> {
+    if !mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN) {
+        return None;
+    }
+    let button = match delta.cmp(&0) {
+        std::cmp::Ordering::Greater => 64,
+        std::cmp::Ordering::Less => 65,
+        std::cmp::Ordering::Equal => return None,
+    };
+    let x = cols.saturating_div(2).saturating_add(1).max(1);
+    let y = rows.saturating_div(2).saturating_add(1).max(1);
+    let scroll_rows = match delta.cmp(&0) {
+        std::cmp::Ordering::Greater => 2,
+        std::cmp::Ordering::Less => -2,
+        std::cmp::Ordering::Equal => 0,
+    };
+    Some((format!("\x1b[<{button};{x};{y}M").into_bytes(), scroll_rows))
 }
 
 impl Process {
@@ -406,7 +438,6 @@ impl Process {
         let sel = self.selection.as_ref()?;
         let grid = self.term.grid();
         let num_cols = grid.columns();
-        let num_lines = grid.screen_lines();
         let offset = grid.display_offset() as i32;
 
         // Normalize so (start_row, start_col) <= (end_row, end_col) row-major.
@@ -417,6 +448,8 @@ impl Process {
         };
 
         let max_col = num_cols.saturating_sub(1);
+        let top_line = grid.topmost_line().0;
+        let bottom_line = grid.bottommost_line().0;
         // Block selections require per-axis min/max independently of row order.
         let (block_lo, block_hi) = if sel.is_block {
             (
@@ -428,10 +461,14 @@ impl Process {
         };
         let mut lines: Vec<String> = Vec::new();
         for row_idx in sr..=er {
-            if (row_idx as usize) >= num_lines {
+            let line_idx = row_idx as i32 - offset;
+            if line_idx > bottom_line {
                 break;
             }
-            let line = &grid[Line(row_idx as i32 - offset)];
+            if line_idx < top_line {
+                continue;
+            }
+            let line = &grid[Line(line_idx)];
             let (lo, hi) = if sel.is_block {
                 (block_lo, block_hi)
             } else if sr == er {
@@ -575,8 +612,8 @@ impl Process {
         let (new_col, new_row) = match key {
             K::Left => (cur_col.saturating_sub(1), cur_row),
             K::Right => ((cur_col + 1).min(cols.saturating_sub(1)), cur_row),
-            K::Up => (cur_col, cur_row.saturating_sub(1)),
-            K::Down => (cur_col, (cur_row + 1).min(rows.saturating_sub(1))),
+            K::Up => self.move_copy_mode_cursor_vertically(cur_col, cur_row, -1),
+            K::Down => self.move_copy_mode_cursor_vertically(cur_col, cur_row, 1),
             K::LineStart => (0, cur_row),
             K::LineEnd => (cols.saturating_sub(1), cur_row),
             K::LastNonBlank => (self.last_non_blank_col(cur_row), cur_row),
@@ -646,8 +683,12 @@ impl Process {
             K::RepeatFindReverse => last_find
                 .and_then(|find| self.find_on_line(cur_col, cur_row, find.reversed()))
                 .unwrap_or((cur_col, cur_row)),
-            K::PageUp => (cur_col, cur_row.saturating_sub(rows / 2)),
-            K::PageDown => (cur_col, (cur_row + rows / 2).min(rows.saturating_sub(1))),
+            K::PageUp => {
+                self.move_copy_mode_cursor_vertically(cur_col, cur_row, -i32::from(rows / 2))
+            }
+            K::PageDown => {
+                self.move_copy_mode_cursor_vertically(cur_col, cur_row, i32::from(rows / 2))
+            }
             K::StartSelection
             | K::StartLineSelection
             | K::SwapSelectionEnds
@@ -695,6 +736,59 @@ impl Process {
             }
             None => None,
         };
+    }
+
+    fn move_copy_mode_cursor_vertically(&mut self, col: u16, row: u16, delta: i32) -> (u16, u16) {
+        match delta.cmp(&0) {
+            std::cmp::Ordering::Less => {
+                let distance = (-delta) as u16;
+                if row >= distance {
+                    return (col, row - distance);
+                }
+                let missing = distance - row;
+                let scrolled = self.scroll_copy_mode_viewport(i32::from(missing));
+                let row = offset_row(row, scrolled);
+                (
+                    col,
+                    row.saturating_sub(distance)
+                        .min(self.rows.saturating_sub(1)),
+                )
+            }
+            std::cmp::Ordering::Greater => {
+                let distance = delta as u16;
+                let max_row = self.rows.saturating_sub(1);
+                if row.saturating_add(distance) <= max_row {
+                    return (col, row + distance);
+                }
+                let missing = row.saturating_add(distance).saturating_sub(max_row);
+                let scrolled = self.scroll_copy_mode_viewport(-i32::from(missing));
+                let row = offset_row(row, scrolled);
+                (col, row.saturating_add(distance).min(max_row))
+            }
+            std::cmp::Ordering::Equal => (col, row),
+        }
+    }
+
+    fn scroll_copy_mode_viewport(&mut self, delta: i32) -> i32 {
+        let old_offset = self.term.grid().display_offset() as i32;
+        self.term.scroll_display(Scroll::Delta(delta));
+        let new_offset = self.term.grid().display_offset() as i32;
+        let mut actual = new_offset - old_offset;
+        if actual == 0
+            && let Some((bytes, rows)) =
+                copy_mode_scroll_input(self.term.mode(), delta, self.cols, self.rows)
+        {
+            Self::write_input_to_writer(&self.pty_writer, &bytes);
+            actual = rows;
+        }
+        if actual != 0 {
+            self.line_hashes.clear();
+            if let Some(cm) = self.copy_mode.as_mut() {
+                cm.cursor.1 = offset_row(cm.cursor.1, actual);
+                cm.anchor.1 = offset_row(cm.anchor.1, actual);
+            }
+        }
+        actual
     }
 
     fn last_non_blank_col(&self, row: u16) -> u16 {
@@ -1050,7 +1144,8 @@ impl Process {
         // longer points at the same characters. Clear it (browser-style:
         // typing into a textarea drops the selection). Skip on `full` resyncs
         // (initial population) which mark every row as "changed".
-        if !full
+        if self.copy_mode.is_none()
+            && !full
             && let Some(sel) = self.selection
             && changed_lines.iter().any(|(row, _)| {
                 let r = *row;
@@ -1519,5 +1614,46 @@ mod tests {
         Process::write_input_to_writer(&writer, b"abc");
 
         assert_eq!(*captured.lock().unwrap(), b"abc".to_vec());
+    }
+
+    #[test]
+    fn copy_mode_up_at_alt_screen_top_uses_mouse_wheel_scroll() {
+        #[derive(Clone)]
+        struct CapturingWriter(Arc<Mutex<Vec<u8>>>);
+
+        impl Write for CapturingWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let (wake_tx, _) = mpsc::unbounded_channel();
+        let mut process = Process::new_with_wake(
+            "/bin/sh".to_string(),
+            String::new(),
+            Vec::new(),
+            12,
+            8,
+            wake_tx,
+        )
+        .expect("process should spawn");
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        process.pty_writer = Arc::new(Mutex::new(Box::new(CapturingWriter(captured.clone()))));
+
+        process.process_output_for_test(b"\x1b[?1049h\x1b[Hone\r\ntwo\r\nthree\x1b[H");
+        process.enter_copy_mode();
+        process.copy_mode_key(crate::protocol::CopyModeKey::StartLineSelection);
+        process.copy_mode_key(crate::protocol::CopyModeKey::Up);
+
+        assert_eq!(process.copy_mode.as_ref().unwrap().cursor.1, 1);
+        process.copy_mode_key(crate::protocol::CopyModeKey::Up);
+        process.kill();
+
+        assert_eq!(*captured.lock().unwrap(), b"\x1b[<64;7;5M".to_vec());
     }
 }

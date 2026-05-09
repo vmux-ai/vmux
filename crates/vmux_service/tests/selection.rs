@@ -24,9 +24,14 @@ impl std::ops::DerefMut for TestProcess {
 }
 
 fn new_process() -> TestProcess {
+    new_process_with_size(80, 24)
+}
+
+fn new_process_with_size(cols: u16, rows: u16) -> TestProcess {
     let guard = PTY_TEST_LOCK.lock().expect("pty test lock");
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-    let process = Process::new(shell, String::new(), Vec::new(), 80, 24).expect("spawn process");
+    let process =
+        Process::new(shell, String::new(), Vec::new(), cols, rows).expect("spawn process");
 
     TestProcess {
         _guard: guard,
@@ -230,6 +235,36 @@ fn line_visual_mode_selects_current_line_then_copy_clears() {
     assert_eq!(copied.as_deref(), Some("hello world"));
     assert!(!process.is_copy_mode());
     assert!(process.selection_text().is_none());
+}
+
+#[test]
+fn line_visual_mode_scrolls_up_past_viewport_top() {
+    let mut process = new_process_with_size(12, 3);
+    process.process_output_for_test(b"\x1b[2J\x1b[Hone\r\ntwo\r\nthree\r\nfour\r\nfive");
+
+    process.enter_copy_mode();
+    process.copy_mode_key(CopyModeKey::StartLineSelection);
+    process.copy_mode_key(CopyModeKey::Up);
+    process.copy_mode_key(CopyModeKey::Up);
+    process.copy_mode_key(CopyModeKey::Up);
+
+    assert_eq!(
+        process.selection_text().as_deref(),
+        Some("two\nthree\nfour\nfive")
+    );
+}
+
+#[test]
+fn copy_mode_selection_survives_screen_redraw() {
+    let mut process = new_process_with_size(12, 3);
+    process.process_output_for_test(b"\x1b[2J\x1b[Hone\r\ntwo\r\nthree");
+
+    process.enter_copy_mode();
+    process.copy_mode_key(CopyModeKey::StartLineSelection);
+    process.copy_mode_key(CopyModeKey::Up);
+    process.process_output_for_test(b"\x1b[Htwo\r\nthree\r\nfour");
+
+    assert!(process.selection_text().is_some());
 }
 
 #[test]
