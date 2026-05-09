@@ -298,8 +298,13 @@ fn handle_pane_commands(
                     .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                     .unwrap_or_default();
 
-                let (_pane1, pane2) =
-                    split_pane_in_two(&mut commands, active, split_dir, &settings.pane, &existing_tabs);
+                let (_pane1, pane2) = split_pane_in_two(
+                    &mut commands,
+                    active,
+                    split_dir,
+                    &settings.pane,
+                    &existing_tabs,
+                );
 
                 let new_tab = commands
                     .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane2)))
