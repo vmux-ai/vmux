@@ -213,6 +213,101 @@ pub(crate) fn spawn_browser_tab(
     tab
 }
 
+pub(crate) fn spawn_sessions_tab(
+    pane: Entity,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) -> Entity {
+    let tab = commands
+        .spawn((
+            crate::layout::tab::tab_bundle(),
+            LastActivatedAt::now(),
+            ChildOf(pane),
+        ))
+        .id();
+    commands.entity(tab).insert(PageMetadata {
+        url: vmux_session::event::SESSIONS_WEBVIEW_URL.to_string(),
+        title: "Sessions".to_string(),
+        ..default()
+    });
+    commands.spawn((
+        crate::sessions::SessionsView::new(meshes, webview_mt),
+        ChildOf(tab),
+    ));
+    tab
+}
+
+pub(crate) fn spawn_processes_tab(
+    pane: Entity,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) -> Entity {
+    let tab = commands
+        .spawn((
+            crate::layout::tab::tab_bundle(),
+            LastActivatedAt::now(),
+            ChildOf(pane),
+        ))
+        .id();
+    commands.entity(tab).insert(PageMetadata {
+        url: vmux_process::event::PROCESSES_WEBVIEW_URL.to_string(),
+        title: "Background Services".to_string(),
+        ..default()
+    });
+    commands.spawn((
+        crate::processes_monitor::ProcessesMonitor::new(meshes, webview_mt),
+        ChildOf(tab),
+    ));
+    tab
+}
+
+fn spawn_vmux_tab(
+    url: &str,
+    pane: Entity,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|e| format!("invalid vmux URL '{url}': {e}"))?;
+    let host = parsed.host_str().unwrap_or("");
+
+    match host {
+        "terminal" => {
+            let cwd_param = parsed
+                .query_pairs()
+                .find(|(k, _)| k == "cwd")
+                .map(|(_, v)| v.into_owned());
+            let cwd_path = if let Some(c) = cwd_param.as_deref() {
+                valid_cwd(c)?
+            } else {
+                None
+            };
+            spawn_terminal_tab(
+                pane,
+                cwd_path.as_deref(),
+                None,
+                commands,
+                meshes,
+                webview_mt,
+                settings,
+            );
+            Ok(())
+        }
+        "sessions" => {
+            spawn_sessions_tab(pane, commands, meshes, webview_mt);
+            Ok(())
+        }
+        "services" => {
+            spawn_processes_tab(pane, commands, meshes, webview_mt);
+            Ok(())
+        }
+        other => Err(format!("unknown vmux URL host '{other}' in '{url}'")),
+    }
+}
+
 fn active_terminal_for_tab(
     tab: Option<Entity>,
     terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
@@ -336,7 +431,46 @@ fn handle_agent_commands(
                 }
             }
             ServiceAgentCommand::BrowserNavigate { url, pane } => {
-                if let Some(s) = pane.as_deref() {
+                if url.starts_with("vmux://") {
+                    let target = match pane.as_deref() {
+                        Some(s) => match parse_pane_target(s, &panes) {
+                            Some(t) => Some(t),
+                            None => {
+                                let result = AgentCommandResult::Error(format!(
+                                    "browser_navigate: invalid pane id '{s}'"
+                                ));
+                                if let Some(service) = service.as_ref() {
+                                    service.0.send(ClientMessage::AgentCommandResponse {
+                                        request_id: request.request_id,
+                                        result,
+                                    });
+                                }
+                                continue;
+                            }
+                        },
+                        None => focus.pane.filter(|p| panes.contains(*p)),
+                    };
+
+                    if let Some(pane_entity) = target {
+                        match spawn_vmux_tab(
+                            url,
+                            pane_entity,
+                            &mut commands,
+                            &mut meshes,
+                            &mut webview_mt,
+                            &settings,
+                        ) {
+                            Ok(()) => AgentCommandResult::Ok,
+                            Err(message) => {
+                                AgentCommandResult::Error(format!("browser_navigate: {message}"))
+                            }
+                        }
+                    } else {
+                        AgentCommandResult::Error(
+                            "browser_navigate: no focused pane for vmux URL".to_string(),
+                        )
+                    }
+                } else if let Some(s) = pane.as_deref() {
                     if let Some(target) = parse_pane_target(s, &panes) {
                         spawn_browser_tab(target, url, &mut commands, &mut meshes, &mut webview_mt);
                         AgentCommandResult::Ok
@@ -408,14 +542,30 @@ fn handle_agent_commands(
                                 &settings.layout.pane,
                                 &existing_tabs,
                             );
-                            spawn_browser_tab(
-                                pane2,
-                                url,
-                                &mut commands,
-                                &mut meshes,
-                                &mut webview_mt,
-                            );
-                            AgentCommandResult::Ok
+                            if url.starts_with("vmux://") {
+                                match spawn_vmux_tab(
+                                    url,
+                                    pane2,
+                                    &mut commands,
+                                    &mut meshes,
+                                    &mut webview_mt,
+                                    &settings,
+                                ) {
+                                    Ok(()) => AgentCommandResult::Ok,
+                                    Err(message) => AgentCommandResult::Error(format!(
+                                        "split_and_navigate: {message}"
+                                    )),
+                                }
+                            } else {
+                                spawn_browser_tab(
+                                    pane2,
+                                    url,
+                                    &mut commands,
+                                    &mut meshes,
+                                    &mut webview_mt,
+                                );
+                                AgentCommandResult::Ok
+                            }
                         } else {
                             AgentCommandResult::Error(
                                 "split_and_navigate: no focused pane".to_string(),
@@ -763,6 +913,333 @@ mod tests {
             .count();
         assert_eq!(tabs_in_b, 1, "tab should be spawned in target pane B");
         assert_eq!(tabs_in_a, 0, "no tab should be spawned in focused pane A");
+    }
+
+    #[test]
+    fn split_and_navigate_with_terminal_url_spawns_terminal() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::SplitAndNavigate {
+                    direction: "right".to_string(),
+                    url: "vmux://terminal/".to_string(),
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let terminal_count = world.query::<&Terminal>().iter(world).count();
+        assert!(terminal_count >= 1, "expected at least one Terminal entity");
+    }
+
+    #[test]
+    fn split_and_navigate_with_terminal_url_and_cwd_query_uses_cwd() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+
+        let cwd = std::env::current_dir().unwrap().display().to_string();
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::SplitAndNavigate {
+                    direction: "right".to_string(),
+                    url: format!("vmux://terminal/?cwd={cwd}"),
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let terminal_count = world.query::<&Terminal>().iter(world).count();
+        assert!(
+            terminal_count >= 1,
+            "expected at least one Terminal entity (cwd path was valid)"
+        );
+    }
+
+    #[test]
+    fn split_and_navigate_with_terminal_url_and_invalid_cwd_errors() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::SplitAndNavigate {
+                    direction: "right".to_string(),
+                    url: "vmux://terminal/?cwd=/this/does/not/exist".to_string(),
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let terminal_count = world.query::<&Terminal>().iter(world).count();
+        assert_eq!(
+            terminal_count, 0,
+            "no terminal should be spawned with invalid cwd"
+        );
+    }
+
+    #[test]
+    fn split_and_navigate_with_sessions_url_spawns_sessions_view() {
+        use crate::sessions::SessionsView;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::SplitAndNavigate {
+                    direction: "right".to_string(),
+                    url: "vmux://sessions/".to_string(),
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let count = world.query::<&SessionsView>().iter(world).count();
+        assert!(count >= 1, "expected at least one SessionsView entity");
+    }
+
+    #[test]
+    fn split_and_navigate_with_processes_url_spawns_processes_monitor() {
+        use crate::processes_monitor::ProcessesMonitor;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::SplitAndNavigate {
+                    direction: "right".to_string(),
+                    url: "vmux://services/".to_string(),
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let count = world.query::<&ProcessesMonitor>().iter(world).count();
+        assert!(count >= 1, "expected at least one ProcessesMonitor entity");
+    }
+
+    #[test]
+    fn split_and_navigate_with_unknown_vmux_url_errors() {
+        use crate::browser::Browser;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::SplitAndNavigate {
+                    direction: "right".to_string(),
+                    url: "vmux://nonsense/".to_string(),
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let browser_count = world.query::<&Browser>().iter(world).count();
+        let terminal_count = world.query::<&Terminal>().iter(world).count();
+        assert_eq!(
+            browser_count, 0,
+            "no browser should be spawned for unknown vmux URL"
+        );
+        assert_eq!(
+            terminal_count, 0,
+            "no terminal should be spawned for unknown vmux URL"
+        );
+    }
+
+    #[test]
+    fn browser_navigate_with_terminal_url_spawns_terminal_in_focused_pane() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::BrowserNavigate {
+                    url: "vmux://terminal/".to_string(),
+                    pane: None,
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let terminal_count = world.query::<&Terminal>().iter(world).count();
+        assert!(
+            terminal_count >= 1,
+            "terminal should be spawned in focused pane"
+        );
+    }
+
+    #[test]
+    fn browser_navigate_with_terminal_url_and_target_pane_uses_target() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane_a = app.world_mut().spawn(Pane).id();
+        let pane_b = app.world_mut().spawn(Pane).id();
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane_a);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::BrowserNavigate {
+                    url: "vmux://terminal/".to_string(),
+                    pane: Some(pane_b.to_bits().to_string()),
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let mut terminals = world.query_filtered::<&ChildOf, With<Terminal>>();
+        let term_parents: Vec<Entity> = terminals.iter(world).map(|c| c.get()).collect();
+        let mut found_in_b = 0;
+        let mut found_in_a = 0;
+        for tab in &term_parents {
+            if let Some(co) = world.get::<ChildOf>(*tab) {
+                if co.get() == pane_b {
+                    found_in_b += 1;
+                } else if co.get() == pane_a {
+                    found_in_a += 1;
+                }
+            }
+        }
+        assert_eq!(found_in_b, 1, "terminal should be in target pane B");
+        assert_eq!(found_in_a, 0, "no terminal in focused pane A");
+    }
+
+    #[test]
+    fn browser_navigate_with_unknown_vmux_url_errors() {
+        use crate::browser::Browser;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.insert_resource(FocusedTab::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::BrowserNavigate {
+                    url: "vmux://nonsense/".to_string(),
+                    pane: None,
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let browser_count = world.query::<&Browser>().iter(world).count();
+        let terminal_count = world.query::<&Terminal>().iter(world).count();
+        assert_eq!(
+            browser_count, 0,
+            "no browser should be spawned for unknown vmux URL"
+        );
+        assert_eq!(
+            terminal_count, 0,
+            "no terminal should be spawned for unknown vmux URL"
+        );
     }
 
     #[test]

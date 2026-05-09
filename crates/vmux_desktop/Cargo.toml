@@ -41,6 +41,7 @@ vmux_process = { path = "../vmux_process" }
 vmux_session = { path = "../vmux_session" }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_webview_app = { path = "../vmux_webview_app" }
+url = { workspace = true }
 
 rfd = { workspace = true }
 notify = { workspace = true }
