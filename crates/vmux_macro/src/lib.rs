@@ -309,18 +309,9 @@ fn impl_leaf_shortcuts(
         let bind_props = BindProps::from_attrs(&variant.attrs)?;
         let menu_props = MenuProps::from_attrs(&variant.attrs)?;
 
-        let binding_str = match (&bind_props.direct, &bind_props.chord) {
-            (Some(_), Some(_)) => {
-                return Err(syn::Error::new_spanned(
-                    variant,
-                    "cannot specify both direct and chord on the same variant",
-                ));
-            }
-            (None, None) => continue,
-            (Some(s), None) => s.clone(),
-            (None, Some(s)) => s.clone(),
-        };
-        let is_chord = bind_props.chord.is_some();
+        if bind_props.bindings.is_empty() {
+            continue;
+        }
 
         let Some(menu_id) = &menu_props.id else {
             return Err(syn::Error::new_spanned(
@@ -328,31 +319,36 @@ fn impl_leaf_shortcuts(
                 "variant with #[shortcut(...)] must also have #[menu(id = \"...\")]",
             ));
         };
-
-        let binding_tokens = if is_chord {
-            let parts: Vec<&str> = binding_str.split(',').collect();
-            if parts.len() != 2 {
-                return Err(syn::Error::new_spanned(
-                    variant,
-                    "chord binding must have exactly two parts separated by comma",
-                ));
-            }
-            let prefix_tokens = parse_key_combo_tokens(parts[0].trim(), variant)?;
-            let second_tokens = parse_key_combo_tokens(parts[1].trim(), variant)?;
-            quote! {
-                crate::shortcut::Shortcut::Chord(#prefix_tokens, #second_tokens)
-            }
-        } else {
-            let combo_tokens = parse_key_combo_tokens(&binding_str, variant)?;
-            quote! {
-                crate::shortcut::Shortcut::Direct(#combo_tokens)
-            }
-        };
-
         let menu_id_str = menu_id.as_str();
-        binding_entries.push(quote! {
-            (#binding_tokens, ::std::string::String::from(#menu_id_str))
-        });
+
+        for binding in &bind_props.bindings {
+            let binding_tokens = match binding {
+                Binding::Chord(s) => {
+                    let parts: Vec<&str> = s.split(',').collect();
+                    if parts.len() != 2 {
+                        return Err(syn::Error::new_spanned(
+                            variant,
+                            "chord binding must have exactly two parts separated by comma",
+                        ));
+                    }
+                    let prefix_tokens = parse_key_combo_tokens(parts[0].trim(), variant)?;
+                    let second_tokens = parse_key_combo_tokens(parts[1].trim(), variant)?;
+                    quote! {
+                        crate::shortcut::Shortcut::Chord(#prefix_tokens, #second_tokens)
+                    }
+                }
+                Binding::Direct(s) => {
+                    let combo_tokens = parse_key_combo_tokens(s, variant)?;
+                    quote! {
+                        crate::shortcut::Shortcut::Direct(#combo_tokens)
+                    }
+                }
+            };
+
+            binding_entries.push(quote! {
+                (#binding_tokens, ::std::string::String::from(#menu_id_str))
+            });
+        }
     }
 
     Ok(quote! {
@@ -516,15 +512,18 @@ fn parse_key_combo_tokens(
     })
 }
 
+enum Binding {
+    Direct(String),
+    Chord(String),
+}
+
 struct BindProps {
-    direct: Option<String>,
-    chord: Option<String>,
+    bindings: Vec<Binding>,
 }
 
 impl BindProps {
     fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
-        let mut direct = None;
-        let mut chord = None;
+        let mut bindings = Vec::new();
         for attr in attrs {
             if !attr.path().is_ident("shortcut") {
                 continue;
@@ -532,15 +531,15 @@ impl BindProps {
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("direct") {
                     let v: LitStr = meta.value()?.parse()?;
-                    direct = Some(v.value());
+                    bindings.push(Binding::Direct(v.value()));
                 } else if meta.path.is_ident("chord") {
                     let v: LitStr = meta.value()?.parse()?;
-                    chord = Some(v.value());
+                    bindings.push(Binding::Chord(v.value()));
                 }
                 Ok(())
             })?;
         }
-        Ok(BindProps { direct, chord })
+        Ok(BindProps { bindings })
     }
 }
 

@@ -574,6 +574,14 @@ impl Browsers {
     }
 
     /// Navigate a specific webview to a new URL.
+    pub fn execute_js(&self, webview: &Entity, script: &str) {
+        if let Some(browser) = self.browsers.get(webview)
+            && let Some(frame) = browser.client.main_frame()
+        {
+            frame.execute_java_script(Some(&script.into()), None, 0);
+        }
+    }
+
     pub fn navigate(&self, webview: &Entity, url: &str) {
         if let Some(browser) = self.browsers.get(webview)
             && let Some(frame) = browser.client.main_frame()

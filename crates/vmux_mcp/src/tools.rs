@@ -29,7 +29,7 @@ pub enum McpParamTool {
         mode: Option<String>,
     },
     #[mcp(
-        description = "Navigate the active webview to a URL, or open a URL in a target pane. URLs starting with 'vmux://terminal/' open a terminal (use '?cwd=/path' to set working dir), 'vmux://sessions/' opens the sessions view, 'vmux://services/' opens the processes monitor; other 'vmux://' URLs are rejected; everything else opens as a browser. With 'vmux://' URLs, a new tab is always created in the target pane (defaulting to the focused pane)."
+        description = "Navigate the active webview to a URL, or open a URL in a target pane. URLs starting with 'vmux://terminal/' open a terminal (use '?cwd=/path' to set working dir), 'vmux://spaces/' opens the spaces view, 'vmux://services/' opens the processes monitor; other 'vmux://' URLs are rejected; everything else opens as a browser. With 'vmux://' URLs, a new tab is always created in the target pane (defaulting to the focused pane)."
     )]
     BrowserNavigate { url: String, pane: Option<String> },
     #[mcp(description = "Send raw text to the active terminal (no carriage return appended).")]
@@ -40,7 +40,7 @@ pub enum McpParamTool {
     #[mcp(description = "Select a tab by index (1-8).")]
     SelectTab { index: u8 },
     #[mcp(
-        description = "Split current pane and open a URL in the new pane. Direction 'right' = side-by-side (vertical separator), 'down' = top/bottom. URLs starting with 'vmux://terminal/' open a terminal (use '?cwd=/path' to set working dir), 'vmux://sessions/' opens the sessions view, 'vmux://services/' opens the processes monitor; other 'vmux://' URLs are rejected; everything else opens as a browser."
+        description = "Split current pane and open a URL in the new pane. Direction 'right' = side-by-side (vertical separator), 'down' = top/bottom. URLs starting with 'vmux://terminal/' open a terminal (use '?cwd=/path' to set working dir), 'vmux://spaces/' opens the spaces view, 'vmux://services/' opens the processes monitor; other 'vmux://' URLs are rejected; everything else opens as a browser."
     )]
     SplitAndNavigate {
         #[mcp(enum_values = ["right", "down"])]
@@ -208,8 +208,10 @@ mod tests {
             );
         }
         for auto in [
-            "tab_new",
-            "tab_close",
+            "stack_new",
+            "stack_close",
+            "new_tab",
+            "close_tab",
             "split_v",
             "terminal_clear",
             "browser_reload",
@@ -219,10 +221,6 @@ mod tests {
                 "missing auto-generated {auto}"
             );
         }
-        assert!(
-            !names.contains(&"new_tab".to_string()),
-            "removed hand-written new_tab should not appear"
-        );
     }
 
     #[test]

@@ -1,16 +1,14 @@
-use super::{Open, SideSheetState};
+use super::Open;
 use crate::settings::LayoutSettings;
 #[cfg(target_os = "macos")]
 use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
 use bevy::{prelude::*, ui::UiSystems, window::PrimaryWindow};
-use vmux_command::{AppCommand, ReadAppCommands, SideSheetCommand};
 
 pub(crate) struct SideSheetLayoutPlugin;
 
 impl Plugin for SideSheetLayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(SideSheetWidth(0.0)) // set from settings on first sync
-            .add_systems(Update, handle_side_sheet_toggle.in_set(ReadAppCommands))
+        app.insert_resource(SideSheetWidth(0.0))
             .add_systems(Update, side_sheet_drag_resize)
             .add_systems(
                 PostUpdate,
@@ -46,39 +44,6 @@ struct SideSheetDrag {
 const MIN_SIDE_SHEET_WIDTH: f32 = 120.0;
 const MAX_SIDE_SHEET_WIDTH: f32 = 800.0;
 const EDGE_HIT_ZONE: f32 = 6.0;
-
-fn handle_side_sheet_toggle(
-    mut reader: MessageReader<AppCommand>,
-    side_sheet_q: Query<(Entity, &SideSheetPosition, Has<Open>), With<SideSheet>>,
-    state_q: Query<(Entity, Has<Open>), With<SideSheetState>>,
-    mut commands: Commands,
-) {
-    for cmd in reader.read() {
-        match cmd {
-            AppCommand::SideSheet(SideSheetCommand::Toggle) => {
-                for (entity, pos, is_open) in &side_sheet_q {
-                    if *pos == SideSheetPosition::Left {
-                        if is_open {
-                            commands.entity(entity).remove::<Open>();
-                        } else {
-                            commands.entity(entity).insert(Open);
-                        }
-                    }
-                }
-                for (entity, is_open) in &state_q {
-                    if is_open {
-                        commands.entity(entity).remove::<Open>();
-                    } else {
-                        commands.entity(entity).insert(Open);
-                    }
-                }
-            }
-            AppCommand::SideSheet(SideSheetCommand::ToggleRight) => {}
-            AppCommand::SideSheet(SideSheetCommand::ToggleBottom) => {}
-            _ => {}
-        }
-    }
-}
 
 fn side_sheet_drag_resize(
     windows: Query<&Window, With<PrimaryWindow>>,

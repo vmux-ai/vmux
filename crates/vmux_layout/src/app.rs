@@ -2,12 +2,51 @@
 
 use dioxus::prelude::*;
 use vmux_layout::event::{
-    FooterCommandEvent, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT,
-    PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, SPACES_EVENT, SpaceRow, SpacesHostEvent,
-    TABS_EVENT, TabNode, TabRow, TabsHostEvent, titlebar_nav_style,
+    HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
+    PaneTreeEvent, RELOAD_EVENT, ReloadEvent, SPACES_EVENT, SpaceRow, SpacesCommandEvent,
+    SpacesHostEvent, TABS_EVENT, TabNode, TabRow, TabsHostEvent, titlebar_nav_style,
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+
+fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
+    let trimmed = s.trim();
+    if let Some(rest) = trimmed.strip_prefix('#') {
+        if rest.len() == 6 {
+            let r = u8::from_str_radix(&rest[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&rest[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&rest[4..6], 16).ok()?;
+            return Some((r, g, b));
+        }
+    }
+    if let Some(inner) = trimmed
+        .strip_prefix("rgb(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+        if parts.len() == 3 {
+            return Some((
+                parts[0].parse().ok()?,
+                parts[1].parse().ok()?,
+                parts[2].parse().ok()?,
+            ));
+        }
+    }
+    None
+}
+
+fn text_color_class_for_bg(bg: &str) -> &'static str {
+    parse_rgb(bg)
+        .map(|(r, g, b)| {
+            let lum = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+            if lum > 128.0 {
+                "text-zinc-900"
+            } else {
+                "text-zinc-100"
+            }
+        })
+        .unwrap_or("text-foreground")
+}
 
 fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
     let s = page_url.trim();
@@ -51,6 +90,13 @@ fn space_close_button_class(is_active: bool) -> &'static str {
     }
 }
 
+fn header_position_style(state: &LayoutStateEvent) -> String {
+    let left = state.main_chrome_left();
+    let top = 4.0;
+    let height = state.header_height_total();
+    format!("left:{left}px;top:{top}px;right:0;height:{height}px;")
+}
+
 #[component]
 pub fn App() -> Element {
     use_theme();
@@ -62,13 +108,10 @@ pub fn App() -> Element {
         });
 
     let state = layout_state();
-    let main_left = state.main_chrome_left();
-    let footer_style = format!(
-        "left:{main_left}px;right:0;bottom:0;height:{}px;",
-        state.footer_height
+    let side_sheet_style = format!(
+        "left:0;top:0;bottom:0;width:{}px;padding-top:22px;",
+        state.side_sheet_width
     );
-    let side_sheet_style = format!("left:0;top:0;bottom:0;width:{}px;", state.side_sheet_width);
-    let header_style = format!("height:{}px;", state.side_sheet_header_height());
 
     rsx! {
         div { class: "fixed inset-0 pointer-events-none text-foreground",
@@ -77,22 +120,15 @@ pub fn App() -> Element {
                     class: "pointer-events-auto fixed min-h-0 overflow-hidden",
                     style: side_sheet_style,
                     div { class: "flex h-full min-h-0 flex-col",
-                        if state.side_sheet_header_visible() {
-                            header {
-                                class: "flex min-w-0 shrink-0",
-                                style: header_style,
-                                HeaderView { titlebar_height: state.titlebar_height }
-                            }
-                        }
                         SideSheetView {}
                     }
                 }
             }
-            if state.footer_open {
-                footer {
-                    class: "pointer-events-auto fixed flex min-w-0 items-center",
-                    style: footer_style,
-                    FooterView {}
+            if state.header_visible() {
+                div {
+                    class: "pointer-events-auto fixed",
+                    style: header_position_style(&state),
+                    HeaderView { titlebar_height: state.titlebar_height }
                 }
             }
         }
@@ -106,6 +142,11 @@ fn HeaderView(titlebar_height: f32) -> Element {
         tabs_state.set(data);
     });
 
+    let mut spaces_state = use_signal(SpacesHostEvent::default);
+    let spaces_listener = use_bin_event_listener::<SpacesHostEvent, _>(SPACES_EVENT, move |data| {
+        spaces_state.set(data);
+    });
+
     let mut reload_key = use_signal(|| 0u32);
     let _reload_listener = use_bin_event_listener::<ReloadEvent, _>(RELOAD_EVENT, move |_| {
         reload_key.set(reload_key() + 1);
@@ -116,7 +157,9 @@ fn HeaderView(titlebar_height: f32) -> Element {
         can_go_back,
         can_go_forward,
     } = tabs_state();
+    let SpacesHostEvent { spaces } = spaces_state();
     let active_row = tabs.iter().find(|t| t.is_active).cloned();
+    let active_bg_color = active_row.as_ref().and_then(|r| r.bg_color.clone());
     let favicon_src = active_row.as_ref().and_then(favicon_src_for_tab);
     let mut favicon_error = use_signal(|| false);
     let mut prev_src = use_signal(|| None::<String>);
@@ -126,44 +169,63 @@ fn HeaderView(titlebar_height: f32) -> Element {
     }
     let listener_loading = (listener.is_loading)();
     let listener_error = (listener.error)();
+    let spaces_loading = (spaces_listener.is_loading)();
+    let spaces_error = (spaces_listener.error)();
     let titlebar_style = titlebar_nav_style(titlebar_height);
 
     rsx! {
         div { class: "flex min-h-0 min-w-0 flex-1 flex-col text-foreground",
-            div { class: "flex min-w-0 shrink-0 items-center gap-1 px-2", style: titlebar_style,
-                NavButton { label: "Back", command: "prev_page", disabled: listener_loading || listener_error.is_some() || !can_go_back,
-                    Icon { class: "h-4 w-4",
-                        path { d: "M19 12H5" }
-                        path { d: "M12 19l-7-7 7-7" }
-                    }
-                }
-                NavButton { label: "Forward", command: "next_page", disabled: listener_loading || listener_error.is_some() || !can_go_forward,
-                    Icon { class: "h-4 w-4",
-                        path { d: "M5 12h14" }
-                        path { d: "M12 5l7 7-7 7" }
-                    }
-                }
-                NavButton { label: "Reload", command: "reload", disabled: listener_loading || listener_error.is_some() || active_row.as_ref().is_none_or(|t| t.url.is_empty()),
-                    span {
-                        key: "{reload_key}",
-                        class: if reload_key() > 0 { "inline-flex animate-spin-once" } else { "inline-flex" },
-                        Icon { class: "h-4 w-4",
-                            path { d: "M21 12a9 9 0 11-3-6.7L21 8" }
-                            path { d: "M21 3v5h-5" }
+            div { class: "flex min-w-0 shrink-0 items-center gap-1 px-2 pb-1",
+                if spaces_loading {
+                    span { class: "text-ui text-muted-foreground", "Connecting..." }
+                } else if let Some(err) = spaces_error {
+                    span { class: "text-ui text-destructive", "{err}" }
+                } else {
+                    div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
+                        for (idx, space) in spaces.iter().enumerate() {
+                            SpacePill {
+                                key: "{space.id}",
+                                index: idx + 1,
+                                space: space.clone(),
+                                active_bg_color: active_bg_color.clone(),
+                            }
                         }
                     }
                 }
             }
-            div { class: "flex min-w-0 flex-1 items-center px-2 pb-2",
+            div { class: "flex min-w-0 shrink-0 items-center gap-1 px-2 pb-1",
                 if listener_loading {
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
                 } else if let Some(err) = listener_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
                     HeaderAddressBar {
-                        active_row,
+                        active_row: active_row.clone(),
                         favicon_src,
                         favicon_error,
+                        bg_color: active_bg_color.clone(),
+                    }
+                    NavButton { label: "Back", command: "prev_page", disabled: !can_go_back,
+                        Icon { class: "h-4 w-4",
+                            path { d: "M19 12H5" }
+                            path { d: "M12 19l-7-7 7-7" }
+                        }
+                    }
+                    NavButton { label: "Forward", command: "next_page", disabled: !can_go_forward,
+                        Icon { class: "h-4 w-4",
+                            path { d: "M5 12h14" }
+                            path { d: "M12 5l7 7-7 7" }
+                        }
+                    }
+                    NavButton { label: "Reload", command: "reload", disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()),
+                        span {
+                            key: "{reload_key}",
+                            class: if reload_key() > 0 { "inline-flex animate-spin-once" } else { "inline-flex" },
+                            Icon { class: "h-4 w-4",
+                                path { d: "M21 12a9 9 0 11-3-6.7L21 8" }
+                                path { d: "M21 3v5h-5" }
+                            }
+                        }
                     }
                 }
             }
@@ -176,6 +238,7 @@ fn HeaderAddressBar(
     active_row: Option<TabRow>,
     favicon_src: Option<String>,
     favicon_error: Signal<bool>,
+    bg_color: Option<String>,
 ) -> Element {
     let has_content = active_row.as_ref().is_some_and(|t| !t.url.is_empty());
     let address_value = active_row
@@ -183,16 +246,37 @@ fn HeaderAddressBar(
         .map(TabRow::address_text)
         .unwrap_or_default()
         .to_string();
-    let placeholder = if has_content { "" } else { "New tab" };
-    let bar_class = if has_content {
-        "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-glass-border bg-glass px-2.5 shadow-sm backdrop-blur-xl backdrop-saturate-150"
+    let placeholder = if has_content { "" } else { "New Stack" };
+
+    let (bar_style, bar_class, input_class) = if let Some(ref color) = bg_color {
+        let text_class = text_color_class_for_bg(color);
+        (
+            format!("background-color: {};", color),
+            format!(
+                "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2.5 shadow-sm {text_class}"
+            ),
+            format!(
+                "min-w-0 flex-1 cursor-pointer bg-transparent text-ui outline-none placeholder:opacity-50 {text_class}"
+            ),
+        )
+    } else if has_content {
+        (
+            String::new(),
+            "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-glass-border bg-glass px-2.5 shadow-sm backdrop-blur-xl backdrop-saturate-150".to_string(),
+            "min-w-0 flex-1 cursor-pointer bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground".to_string(),
+        )
     } else {
-        "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-glass-border bg-glass px-2.5 backdrop-blur-md"
+        (
+            String::new(),
+            "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-glass-border bg-glass px-2.5 backdrop-blur-md".to_string(),
+            "min-w-0 flex-1 cursor-pointer bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground".to_string(),
+        )
     };
 
     rsx! {
         div {
-            class: bar_class,
+            class: "{bar_class}",
+            style: "{bar_style}",
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&HeaderCommandEvent {
                     header_command: "focus_address_bar".to_string(),
@@ -211,7 +295,7 @@ fn HeaderAddressBar(
             input {
                 r#type: "text",
                 readonly: true,
-                class: "min-w-0 flex-1 cursor-pointer bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground",
+                class: "{input_class}",
                 value: "{address_value}",
                 placeholder: "{placeholder}",
             }
@@ -242,7 +326,7 @@ fn TabIcon(
                     onerror: move |_| favicon_error.set(true),
                 }
             }
-        } else if title == "New Tab" && url.is_empty() {
+        } else if title == "New Stack" && url.is_empty() {
             Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                 path { d: "M5 12h14" }
                 path { d: "M12 5v14" }
@@ -296,67 +380,67 @@ fn NavButton(
 }
 
 #[component]
-fn FooterView() -> Element {
-    let mut spaces_state = use_signal(SpacesHostEvent::default);
-    let listener = use_bin_event_listener::<SpacesHostEvent, _>(SPACES_EVENT, move |data| {
-        spaces_state.set(data);
-    });
-
-    let SpacesHostEvent { spaces } = spaces_state();
-
-    rsx! {
-        div { class: "flex h-full min-h-0 min-w-0 flex-1 items-center gap-1 rounded-lg pr-1.5 text-foreground",
-            if (listener.is_loading)() {
-                span { class: "text-ui text-muted-foreground", "Connecting..." }
-            } else if let Some(err) = (listener.error)() {
-                span { class: "text-ui text-destructive", "{err}" }
-            } else {
-                div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
-                    for (idx, space) in spaces.iter().enumerate() {
-                        SpacePill {
-                            key: "{space.id}",
-                            index: idx + 1,
-                            space: space.clone(),
-                        }
-                    }
-                    NewSpaceButton {}
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn SpacePill(index: usize, space: SpaceRow) -> Element {
-    let pill_class = space_pill_class(space.is_active);
+fn SpacePill(index: usize, space: SpaceRow, active_bg_color: Option<String>) -> Element {
     let id_switch = space.id.clone();
     let id_close = space.id.clone();
     let name = space.name.clone();
     let is_active = space.is_active;
-    let close_class = space_close_button_class(is_active);
+
+    let (pill_style, pill_class, index_class, close_class) = if is_active {
+        if let Some(ref color) = active_bg_color {
+            let text_class = text_color_class_for_bg(color);
+            (
+                format!("background-color: {};", color),
+                format!(
+                    "group flex h-6 items-center gap-1 rounded-full pl-2.5 pr-1 text-ui-xs shadow-sm {text_class}"
+                ),
+                format!("font-mono {text_class}"),
+                format!(
+                    "flex h-4 w-4 cursor-pointer items-center justify-center rounded-full opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/20 {text_class}"
+                ),
+            )
+        } else {
+            (
+                String::new(),
+                space_pill_class(true).to_string(),
+                "font-mono text-sidebar-primary-foreground".to_string(),
+                space_close_button_class(true).to_string(),
+            )
+        }
+    } else {
+        (
+            String::new(),
+            space_pill_class(false).to_string(),
+            "font-mono text-muted-foreground".to_string(),
+            space_close_button_class(false).to_string(),
+        )
+    };
+
     rsx! {
-        div { class: pill_class,
+        div {
+            class: "{pill_class}",
+            style: "{pill_style}",
             button {
                 r#type: "button",
                 title: "{name}",
                 class: "flex min-w-0 cursor-pointer items-center gap-2",
                 onclick: move |_| {
-                    let _ = try_cef_bin_emit_rkyv(&FooterCommandEvent {
+                    let _ = try_cef_bin_emit_rkyv(&SpacesCommandEvent {
                         command: "switch".to_string(),
                         space_id: Some(id_switch.clone()),
                     });
                 },
-                span { class: if is_active { "font-mono text-sidebar-primary-foreground" } else { "font-mono text-muted-foreground" }, "{index}" }
+                span { class: "{index_class}", "{index}" }
                 span { class: "min-w-0 truncate", "{name}" }
             }
             button {
                 r#type: "button",
                 aria_label: "Close space",
                 title: "Close space",
-                class: close_class,
+                class: "{close_class}",
                 onclick: move |evt| {
                     evt.stop_propagation();
-                    let _ = try_cef_bin_emit_rkyv(&FooterCommandEvent {
+                    let _ = try_cef_bin_emit_rkyv(&SpacesCommandEvent {
                         command: "close".to_string(),
                         space_id: Some(id_close.clone()),
                     });
@@ -379,7 +463,7 @@ fn NewSpaceButton() -> Element {
             title: "New space",
             class: "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&FooterCommandEvent {
+                let _ = try_cef_bin_emit_rkyv(&SpacesCommandEvent {
                     command: "new".to_string(),
                     space_id: None,
                 });
@@ -413,7 +497,7 @@ fn SideSheetView() -> Element {
                 }
             } else if panes.is_empty() {
                 div { class: "flex items-center px-2 py-1",
-                    span { class: "text-ui text-muted-foreground", "No panes" }
+                    span { class: "text-ui text-muted-foreground", "No stacks" }
                 }
             } else {
                 for (i, pane) in panes.iter().enumerate() {
@@ -426,7 +510,7 @@ fn SideSheetView() -> Element {
 
 #[component]
 fn PaneSection(pane: PaneNode, index: usize) -> Element {
-    let label = format!("Pane {}", index + 1);
+    let label = format!("Stack {}", index + 1);
     let pane_id = pane.id;
     let any_loading = pane.tabs.iter().any(|t| t.is_loading);
 

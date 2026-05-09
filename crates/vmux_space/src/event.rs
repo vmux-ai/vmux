@@ -1,5 +1,5 @@
-pub const SESSIONS_WEBVIEW_URL: &str = "vmux://sessions/";
-pub const SESSIONS_LIST_EVENT: &str = "sessions_list";
+pub const SPACES_WEBVIEW_URL: &str = "vmux://spaces/";
+pub const SPACES_LIST_EVENT: &str = "spaces_list";
 
 #[derive(
     Clone,
@@ -13,8 +13,8 @@ pub const SESSIONS_LIST_EVENT: &str = "sessions_list";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct SessionsListEvent {
-    pub sessions: Vec<SessionRow>,
+pub struct SpacesListEvent {
+    pub spaces: Vec<SpaceRow>,
 }
 
 #[derive(
@@ -29,7 +29,7 @@ pub struct SessionsListEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct SessionRow {
+pub struct SpaceRow {
     pub id: String,
     pub name: String,
     pub profile: String,
@@ -49,10 +49,10 @@ pub struct SessionRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct SessionCommandEvent {
+pub struct SpaceCommandEvent {
     pub command: String,
     #[serde(default)]
-    pub session_id: Option<String>,
+    pub space_id: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
 }
@@ -62,8 +62,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn session_row_keeps_profile_and_active_state() {
-        let row = SessionRow {
+    fn space_row_keeps_profile_and_active_state() {
+        let row = SpaceRow {
             id: "work".to_string(),
             name: "Work".to_string(),
             profile: "default".to_string(),
@@ -76,32 +76,32 @@ mod tests {
     }
 
     #[test]
-    fn attach_event_carries_target_session_id() {
-        let event = SessionCommandEvent {
+    fn attach_event_carries_target_space_id() {
+        let event = SpaceCommandEvent {
             command: "attach".to_string(),
-            session_id: Some("work".to_string()),
+            space_id: Some("work".to_string()),
             name: None,
         };
-        assert_eq!(event.session_id.as_deref(), Some("work"));
+        assert_eq!(event.space_id.as_deref(), Some("work"));
     }
 
     #[test]
-    fn session_command_event_rkyv_roundtrip() {
-        let original = SessionCommandEvent {
+    fn space_command_event_rkyv_roundtrip() {
+        let original = SpaceCommandEvent {
             command: "attach".to_string(),
-            session_id: Some("work".to_string()),
+            space_id: Some("work".to_string()),
             name: Some("Work".to_string()),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
-        let recovered = rkyv::from_bytes::<SessionCommandEvent, rkyv::rancor::Error>(&bytes)
+        let recovered = rkyv::from_bytes::<SpaceCommandEvent, rkyv::rancor::Error>(&bytes)
             .expect("deserialize");
         assert_eq!(original, recovered);
     }
 
     #[test]
-    fn sessions_list_event_rkyv_roundtrip() {
-        let original = SessionsListEvent {
-            sessions: vec![SessionRow {
+    fn spaces_list_event_rkyv_roundtrip() {
+        let original = SpacesListEvent {
+            spaces: vec![SpaceRow {
                 id: "work".to_string(),
                 name: "Work".to_string(),
                 profile: "default".to_string(),
@@ -110,8 +110,8 @@ mod tests {
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
-        let recovered = rkyv::from_bytes::<SessionsListEvent, rkyv::rancor::Error>(&bytes)
-            .expect("deserialize");
+        let recovered =
+            rkyv::from_bytes::<SpacesListEvent, rkyv::rancor::Error>(&bytes).expect("deserialize");
         assert_eq!(original, recovered);
     }
 }

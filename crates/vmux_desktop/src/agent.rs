@@ -7,7 +7,7 @@ use crate::{
     command::{AppCommand, WriteAppCommands},
     layout::{
         pane::{Pane, PaneSplit},
-        tab::FocusedTab,
+        stack::FocusedStack,
     },
     settings::AppSettings,
     terminal::{PendingTerminalInput, ProcessExited, ServiceMessageSet, Terminal},
@@ -159,7 +159,7 @@ pub(crate) fn spawn_terminal_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::tab::tab_bundle(),
+            crate::layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -196,7 +196,7 @@ pub(crate) fn spawn_browser_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::tab::tab_bundle(),
+            crate::layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -221,18 +221,18 @@ pub(crate) fn spawn_sessions_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::tab::tab_bundle(),
+            crate::layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
         .id();
     commands.entity(tab).insert(PageMetadata {
-        url: vmux_session::event::SESSIONS_WEBVIEW_URL.to_string(),
+        url: vmux_space::event::SPACES_WEBVIEW_URL.to_string(),
         title: "Sessions".to_string(),
         ..default()
     });
     commands.spawn((
-        crate::sessions::SessionsView::new(meshes, webview_mt),
+        crate::spaces::SpacesView::new(meshes, webview_mt),
         ChildOf(tab),
     ));
     tab
@@ -246,7 +246,7 @@ pub(crate) fn spawn_processes_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::tab::tab_bundle(),
+            crate::layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -356,11 +356,11 @@ fn parse_terminal_target(
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
-    focus: Res<FocusedTab>,
+    focus: Res<FocusedStack>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     pane_children: Query<&Children, With<Pane>>,
-    tab_filter: Query<(), With<crate::layout::tab::Tab>>,
+    tab_filter: Query<(), With<crate::layout::stack::Stack>>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     settings: Res<AppSettings>,
     service: Option<Res<crate::terminal::ServiceClient>>,
@@ -404,7 +404,7 @@ fn handle_agent_commands(
             ServiceAgentCommand::RunShell { command, cwd, mode } => {
                 let input = shell_command_input(command);
                 if matches!(mode, AgentShellMode::Active)
-                    && let Some(terminal) = active_terminal_for_tab(focus.tab, &terminals)
+                    && let Some(terminal) = active_terminal_for_tab(focus.stack, &terminals)
                 {
                     commands
                         .entity(terminal)
@@ -480,7 +480,7 @@ fn handle_agent_commands(
                         ))
                     }
                 } else if let Some(webview) =
-                    active_webview_for_tab(focus.tab, &browsers, &terminals)
+                    active_webview_for_tab(focus.stack, &browsers, &terminals)
                 {
                     commands.trigger(RequestNavigate {
                         webview,
@@ -501,7 +501,7 @@ fn handle_agent_commands(
                         None => Err(format!("terminal_send: invalid terminal id '{s}'")),
                     }
                 } else {
-                    Ok(active_terminal_for_tab(focus.tab, &terminals))
+                    Ok(active_terminal_for_tab(focus.stack, &terminals))
                 };
 
                 match target {
@@ -587,7 +587,7 @@ fn handle_agent_commands(
 fn handle_agent_launch_requests(
     mut reader: MessageReader<AgentLaunchRequested>,
     providers: Res<AgentProviders>,
-    focus: Res<FocusedTab>,
+    focus: Res<FocusedStack>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     settings: Res<AppSettings>,
     mut commands: Commands,
@@ -685,22 +685,22 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
         app.init_resource::<CapturedNavigateUrls>();
 
         let pane = app.world_mut().spawn(Pane).id();
-        let tab = app
+        let stack = app
             .world_mut()
-            .spawn(crate::layout::tab::tab_bundle())
+            .spawn(crate::layout::stack::stack_bundle())
             .insert(ChildOf(pane))
             .id();
-        app.world_mut().spawn(Browser).insert(ChildOf(tab));
+        app.world_mut().spawn(Browser).insert(ChildOf(stack));
 
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
-        app.world_mut().resource_mut::<FocusedTab>().tab = Some(tab);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
 
         app.add_observer(
             |trigger: On<RequestNavigate>, mut captured: ResMut<CapturedNavigateUrls>| {
@@ -730,13 +730,13 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
         app.world_mut()
             .resource_mut::<AgentProviders>()
             .register(AgentProvider {
@@ -768,7 +768,11 @@ mod tests {
         assert_eq!(rows[0].0, b"echo agent\r".to_vec());
 
         let tab = rows[0].1;
-        assert!(app.world().get::<crate::layout::tab::Tab>(tab).is_some());
+        assert!(
+            app.world()
+                .get::<crate::layout::stack::Stack>(tab)
+                .is_some()
+        );
         assert_eq!(
             app.world().get::<PageMetadata>(tab).unwrap().url,
             TERMINAL_WEBVIEW_URL
@@ -781,21 +785,21 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
-        let tab = app
+        let stack = app
             .world_mut()
-            .spawn(crate::layout::tab::tab_bundle())
+            .spawn(crate::layout::stack::stack_bundle())
             .insert(ChildOf(pane))
             .id();
-        let terminal = app.world_mut().spawn(Terminal).insert(ChildOf(tab)).id();
+        let terminal = app.world_mut().spawn(Terminal).insert(ChildOf(stack)).id();
 
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
-        app.world_mut().resource_mut::<FocusedTab>().tab = Some(tab);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
 
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
@@ -824,15 +828,15 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
 
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
-        app.world_mut().resource_mut::<FocusedTab>().tab = None;
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().stack = None;
 
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
@@ -847,7 +851,7 @@ mod tests {
         app.update();
 
         let world = app.world_mut();
-        let mut tabs = world.query_filtered::<&ChildOf, With<crate::layout::tab::Tab>>();
+        let mut tabs = world.query_filtered::<&ChildOf, With<crate::layout::stack::Stack>>();
         let tab_count_under_pane = tabs
             .iter(world)
             .filter(|child_of| child_of.get() == pane)
@@ -858,7 +862,7 @@ mod tests {
         );
 
         let mut tab_metadata =
-            world.query_filtered::<&PageMetadata, With<crate::layout::tab::Tab>>();
+            world.query_filtered::<&PageMetadata, With<crate::layout::stack::Stack>>();
         let tab_urls: Vec<String> = tab_metadata.iter(world).map(|p| p.url.clone()).collect();
         assert!(
             tab_urls.contains(&"https://example.com".to_string()),
@@ -879,7 +883,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
@@ -887,7 +891,7 @@ mod tests {
         let pane_a = app.world_mut().spawn(Pane).id();
         let pane_b = app.world_mut().spawn(Pane).id();
 
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane_a);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane_a);
 
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
@@ -902,7 +906,7 @@ mod tests {
         app.update();
 
         let world = app.world_mut();
-        let mut tabs = world.query_filtered::<&ChildOf, With<crate::layout::tab::Tab>>();
+        let mut tabs = world.query_filtered::<&ChildOf, With<crate::layout::stack::Stack>>();
         let tabs_in_b = tabs
             .iter(world)
             .filter(|child_of| child_of.get() == pane_b)
@@ -921,13 +925,13 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
 
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
@@ -952,13 +956,13 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
 
         let cwd = std::env::current_dir().unwrap().display().to_string();
         app.world_mut()
@@ -987,13 +991,13 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
 
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
@@ -1017,19 +1021,19 @@ mod tests {
 
     #[test]
     fn split_and_navigate_with_sessions_url_spawns_sessions_view() {
-        use crate::sessions::SessionsView;
+        use crate::spaces::SpacesView;
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
 
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
@@ -1044,8 +1048,8 @@ mod tests {
         app.update();
 
         let world = app.world_mut();
-        let count = world.query::<&SessionsView>().iter(world).count();
-        assert!(count >= 1, "expected at least one SessionsView entity");
+        let count = world.query::<&SpacesView>().iter(world).count();
+        assert!(count >= 1, "expected at least one SpacesView entity");
     }
 
     #[test]
@@ -1056,13 +1060,13 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
 
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
@@ -1089,13 +1093,13 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
 
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
@@ -1128,13 +1132,13 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
 
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
@@ -1162,14 +1166,14 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane_a = app.world_mut().spawn(Pane).id();
         let pane_b = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane_a);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane_a);
 
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
@@ -1209,13 +1213,13 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
 
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
@@ -1251,13 +1255,13 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
-        app.insert_resource(FocusedTab::default());
+        app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedTab>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
 
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()

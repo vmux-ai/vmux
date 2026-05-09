@@ -8973,7 +8973,7 @@ dependencies = [
  "vmux_macro",
  "vmux_process",
  "vmux_service",
- "vmux_session",
+ "vmux_space",
  "vmux_terminal",
  "vmux_ui",
  "vmux_webview_app",
@@ -9078,12 +9078,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "vmux_session"
+name = "vmux_space"
 version = "0.0.3"
 dependencies = [
  "dioxus",
  "rkyv",
  "serde",
+ "tempfile",
  "vmux_ui",
  "vmux_webview_app",
  "wasm-bindgen",

@@ -1,6 +1,6 @@
 use crate::{
     browser::Browser,
-    command::{AppCommand, TabCommand, WriteAppCommands},
+    command::{AppCommand, StackCommand, WriteAppCommands},
     layout::window::WEBVIEW_MESH_DEPTH_BIAS,
     processes_monitor::ProcessesMonitor,
     settings::AppSettings,
@@ -215,7 +215,7 @@ impl Plugin for TerminalInputPlugin {
 fn add_terminal_update_systems(app: &mut App) -> &mut App {
     app.add_systems(
         Update,
-        spawn_layout_requested_content.after(crate::layout::tab::TabCommandSet),
+        spawn_layout_requested_content.after(crate::layout::stack::StackCommandSet),
     )
     .add_systems(
         Update,
@@ -241,19 +241,19 @@ fn spawn_layout_requested_content(
 ) {
     for request in reader.read() {
         match *request {
-            LayoutSpawnRequest::Terminal { tab } => {
+            LayoutSpawnRequest::Terminal { stack } => {
                 let terminal = commands
                     .spawn((
                         Terminal::new(&mut meshes, &mut webview_mt, &settings),
-                        ChildOf(tab),
+                        ChildOf(stack),
                     ))
                     .id();
                 commands.entity(terminal).insert(CefKeyboardTarget);
             }
-            LayoutSpawnRequest::ProcessesMonitor { tab } => {
+            LayoutSpawnRequest::ProcessesMonitor { stack } => {
                 commands.spawn((
                     ProcessesMonitor::new(&mut meshes, &mut webview_mt),
-                    ChildOf(tab),
+                    ChildOf(stack),
                 ));
             }
         }
@@ -316,6 +316,7 @@ impl Terminal {
                     title: format!("Terminal ({})", &process_id.to_string()[..8]),
                     url: format!("{}{}", TERMINAL_WEBVIEW_URL, process_id),
                     favicon_url: String::new(),
+                    bg_color: None,
                 },
                 WebviewSource::new(TERMINAL_WEBVIEW_URL),
                 ResolvedWebviewUri(TERMINAL_WEBVIEW_URL.to_string()),
@@ -369,6 +370,7 @@ impl Terminal {
                     title: format!("Terminal ({})", &process_id.to_string()[..8]),
                     url: format!("{}{}", TERMINAL_WEBVIEW_URL, process_id),
                     favicon_url: String::new(),
+                    bg_color: None,
                 },
                 WebviewSource::new(TERMINAL_WEBVIEW_URL),
                 ResolvedWebviewUri(TERMINAL_WEBVIEW_URL.to_string()),
@@ -726,7 +728,7 @@ fn poll_service_messages(
                             .remove::<CloseRequiresConfirmation>();
                         let tab = child_of.get();
                         commands.entity(tab).insert(LastActivatedAt::now());
-                        writer.write(AppCommand::Tab(TabCommand::Close));
+                        writer.write(AppCommand::Stack(StackCommand::Close));
                         break;
                     }
                 }
@@ -858,7 +860,7 @@ fn handle_terminal_keyboard(
     targeted_terminals: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ServiceProcessHandle, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    focus: Res<crate::layout::tab::FocusedTab>,
+    focus: Res<crate::layout::stack::FocusedStack>,
     mode: Res<crate::scene::InteractionMode>,
     input: Res<ButtonInput<KeyCode>>,
     chord_state: Res<crate::shortcut::ChordState>,
@@ -869,7 +871,7 @@ fn handle_terminal_keyboard(
     let target_processes = resolve_terminal_input_targets(
         targeted_terminals.iter().map(|handle| handle.process_id),
         !keyboard_targets.is_empty(),
-        focus.tab,
+        focus.stack,
         terminals
             .iter()
             .map(|(handle, child_of)| (child_of.get(), handle.process_id)),
@@ -1304,14 +1306,14 @@ fn handle_terminal_scroll(
     targeted_terminals: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ServiceProcessHandle, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    focus: Res<crate::layout::tab::FocusedTab>,
+    focus: Res<crate::layout::stack::FocusedStack>,
     mode: Res<crate::scene::InteractionMode>,
     service: Option<Res<ServiceClient>>,
 ) {
     let target_processes = resolve_terminal_input_targets(
         targeted_terminals.iter().map(|handle| handle.process_id),
         !keyboard_targets.is_empty(),
-        focus.tab,
+        focus.stack,
         terminals
             .iter()
             .map(|(handle, child_of)| (child_of.get(), handle.process_id)),
@@ -1760,7 +1762,7 @@ fn handle_terminal_copy_mode_command(
     targeted_terminals: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ServiceProcessHandle, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    focus: Res<crate::layout::tab::FocusedTab>,
+    focus: Res<crate::layout::stack::FocusedStack>,
     mode: Res<crate::scene::InteractionMode>,
     service: Option<Res<ServiceClient>>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
@@ -1772,7 +1774,7 @@ fn handle_terminal_copy_mode_command(
     let target_processes = resolve_terminal_input_targets(
         targeted_terminals.iter().map(|handle| handle.process_id),
         !keyboard_targets.is_empty(),
-        focus.tab,
+        focus.stack,
         terminals
             .iter()
             .map(|(handle, child_of)| (child_of.get(), handle.process_id)),
@@ -1917,7 +1919,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(crate::command::CommandPlugin)
-            .add_plugins(vmux_layout::tab::TabPlugin)
+            .add_plugins(vmux_layout::stack::StackPlugin)
             .add_message::<LayoutSpawnRequest>();
         add_terminal_update_systems(&mut app);
 

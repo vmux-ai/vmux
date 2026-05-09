@@ -1,21 +1,21 @@
-use crate::event::{CommandBarCommandEntry, CommandBarSession, CommandBarTab};
+use crate::event::{CommandBarCommandEntry, CommandBarSpace, CommandBarTab};
 
-const SESSIONS_QUERY: &str = "vmux://sessions";
-pub const SESSIONS_PAGE_URL: &str = "vmux://sessions/";
-const SESSIONS_QUERY_PREFIX: &str = SESSIONS_PAGE_URL;
+const SPACES_QUERY: &str = "vmux://spaces";
+pub const SPACES_PAGE_URL: &str = "vmux://spaces/";
+const SPACES_QUERY_PREFIX: &str = SPACES_PAGE_URL;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandBarResultItem {
     Terminal {
         path: String,
     },
-    Tab {
+    Stack {
         title: String,
         url: String,
         pane_id: u64,
         tab_index: usize,
     },
-    Session {
+    Space {
         id: String,
         name: String,
         profile: String,
@@ -40,52 +40,49 @@ fn looks_like_path(s: &str) -> bool {
         || s.contains('/') && !s.contains(' ') && !s.contains("://")
 }
 
-fn session_result(session: &CommandBarSession) -> CommandBarResultItem {
-    CommandBarResultItem::Session {
-        id: session.id.clone(),
-        name: session.name.clone(),
-        profile: session.profile.clone(),
-        is_active: session.is_active,
-        tab_count: session.tab_count as usize,
+fn space_result(space: &CommandBarSpace) -> CommandBarResultItem {
+    CommandBarResultItem::Space {
+        id: space.id.clone(),
+        name: space.name.clone(),
+        profile: space.profile.clone(),
+        is_active: space.is_active,
+        tab_count: space.tab_count as usize,
     }
 }
 
-fn session_matches(session: &CommandBarSession, search_lower: &str) -> bool {
+fn space_matches(space: &CommandBarSpace, search_lower: &str) -> bool {
     search_lower.is_empty()
-        || session.name.to_lowercase().contains(search_lower)
-        || session.id.to_lowercase().contains(search_lower)
-        || session.profile.to_lowercase().contains(search_lower)
+        || space.name.to_lowercase().contains(search_lower)
+        || space.id.to_lowercase().contains(search_lower)
+        || space.profile.to_lowercase().contains(search_lower)
 }
 
-fn session_query(q: &str) -> Option<&str> {
-    if q == SESSIONS_QUERY {
+fn space_query(q: &str) -> Option<&str> {
+    if q == SPACES_QUERY {
         Some("")
     } else {
-        q.strip_prefix(SESSIONS_QUERY_PREFIX)
+        q.strip_prefix(SPACES_QUERY_PREFIX)
     }
 }
 
-fn sessions_page_matches(search_lower: &str) -> bool {
+fn spaces_page_matches(search_lower: &str) -> bool {
     search_lower.is_empty()
-        || "sessions".contains(search_lower)
-        || SESSIONS_PAGE_URL.contains(search_lower)
+        || "spaces".contains(search_lower)
+        || SPACES_PAGE_URL.contains(search_lower)
 }
 
-fn session_results(
-    sessions: &[CommandBarSession],
-    search_lower: &str,
-) -> Vec<CommandBarResultItem> {
+fn space_results(spaces: &[CommandBarSpace], search_lower: &str) -> Vec<CommandBarResultItem> {
     let mut results = Vec::new();
-    if sessions_page_matches(search_lower) {
+    if spaces_page_matches(search_lower) {
         results.push(CommandBarResultItem::Navigate {
-            url: SESSIONS_PAGE_URL.to_string(),
+            url: SPACES_PAGE_URL.to_string(),
         });
     }
     results.extend(
-        sessions
+        spaces
             .iter()
-            .filter(|session| session_matches(session, search_lower))
-            .map(session_result),
+            .filter(|space| space_matches(space, search_lower))
+            .map(space_result),
     );
     results
 }
@@ -104,13 +101,13 @@ pub fn filter_results(
     query: &str,
     tabs: &[CommandBarTab],
     commands: &[CommandBarCommandEntry],
-    sessions: &[CommandBarSession],
+    spaces: &[CommandBarSpace],
     new_tab: bool,
 ) -> Vec<CommandBarResultItem> {
     let q = query.trim();
-    if let Some(search) = session_query(q) {
+    if let Some(search) = space_query(q) {
         let search_lower = search.trim().to_lowercase();
-        let mut items = session_results(sessions, &search_lower);
+        let mut items = space_results(spaces, &search_lower);
         if search_lower.is_empty() {
             items.extend(command_results(commands));
         }
@@ -125,7 +122,7 @@ pub fn filter_results(
                 path: String::new(),
             });
         }
-        items.extend(tabs.iter().map(|t| CommandBarResultItem::Tab {
+        items.extend(tabs.iter().map(|t| CommandBarResultItem::Stack {
             title: t.title.clone(),
             url: t.url.clone(),
             pane_id: t.pane_id,
@@ -171,7 +168,7 @@ pub fn filter_results(
     }
 
     if !starts_with_cmd && !is_path {
-        items.extend(session_results(sessions, &search_lower));
+        items.extend(space_results(spaces, &search_lower));
     }
 
     if !starts_with_cmd || !search.is_empty() {
@@ -180,7 +177,7 @@ pub fn filter_results(
                 || t.title.to_lowercase().contains(&search_lower)
                 || t.url.to_lowercase().contains(&search_lower)
             {
-                items.push(CommandBarResultItem::Tab {
+                items.push(CommandBarResultItem::Stack {
                     title: t.title.clone(),
                     url: t.url.clone(),
                     pane_id: t.pane_id,
@@ -216,8 +213,8 @@ mod tests {
     use super::*;
     use crate::event::{CommandBarCommandEntry, CommandBarTab};
 
-    fn session(id: &str, name: &str, active: bool) -> CommandBarSession {
-        CommandBarSession {
+    fn space(id: &str, name: &str, active: bool) -> CommandBarSpace {
+        CommandBarSpace {
             id: id.to_string(),
             name: name.to_string(),
             profile: "default".to_string(),
@@ -227,17 +224,17 @@ mod tests {
     }
 
     #[test]
-    fn sessions_url_lists_all_sessions() {
-        let sessions = vec![
-            session("default", "Default", false),
-            session("work", "Work", true),
+    fn spaces_url_lists_all_spaces() {
+        let spaces = vec![
+            space("default", "Default", false),
+            space("work", "Work", true),
         ];
 
         let results = filter_results(
-            "vmux://sessions/",
+            "vmux://spaces/",
             &[],
             &[] as &[CommandBarCommandEntry],
-            &sessions,
+            &spaces,
             false,
         );
 
@@ -245,16 +242,16 @@ mod tests {
             results,
             vec![
                 CommandBarResultItem::Navigate {
-                    url: SESSIONS_PAGE_URL.to_string(),
+                    url: SPACES_PAGE_URL.to_string(),
                 },
-                CommandBarResultItem::Session {
+                CommandBarResultItem::Space {
                     id: "default".to_string(),
                     name: "Default".to_string(),
                     profile: "default".to_string(),
                     is_active: false,
                     tab_count: 0,
                 },
-                CommandBarResultItem::Session {
+                CommandBarResultItem::Space {
                     id: "work".to_string(),
                     name: "Work".to_string(),
                     profile: "default".to_string(),
@@ -266,17 +263,17 @@ mod tests {
     }
 
     #[test]
-    fn sessions_url_includes_normal_commands() {
+    fn spaces_url_includes_normal_commands() {
         let commands = vec![CommandBarCommandEntry {
             id: "browser_open_command_bar".to_string(),
             name: "Command Bar".to_string(),
             shortcut: "super+k".to_string(),
         }];
 
-        let results = filter_results("vmux://sessions/", &[], &commands, &[], false);
+        let results = filter_results("vmux://spaces/", &[], &commands, &[], false);
 
         assert!(results.contains(&CommandBarResultItem::Navigate {
-            url: SESSIONS_PAGE_URL.to_string(),
+            url: SPACES_PAGE_URL.to_string(),
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
             id: "browser_open_command_bar".to_string(),
@@ -286,38 +283,38 @@ mod tests {
     }
 
     #[test]
-    fn sessions_query_includes_sessions_page_and_command() {
+    fn spaces_query_includes_spaces_page_and_command() {
         let commands = vec![CommandBarCommandEntry {
-            id: "session_open".to_string(),
-            name: "Sessions".to_string(),
+            id: "space_open".to_string(),
+            name: "Spaces".to_string(),
             shortcut: "<leader> s".to_string(),
         }];
 
-        let results = filter_results("sessions", &[], &commands, &[], false);
+        let results = filter_results("spaces", &[], &commands, &[], false);
 
         assert!(results.contains(&CommandBarResultItem::Navigate {
-            url: SESSIONS_PAGE_URL.to_string(),
+            url: SPACES_PAGE_URL.to_string(),
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
-            id: "session_open".to_string(),
-            name: "Sessions".to_string(),
+            id: "space_open".to_string(),
+            name: "Spaces".to_string(),
             shortcut: "<leader> s".to_string(),
         }));
     }
 
     #[test]
-    fn session_names_are_searchable() {
-        let sessions = vec![
-            session("default", "Default", false),
-            session("client", "Client Work", false),
+    fn space_names_are_searchable() {
+        let spaces = vec![
+            space("default", "Default", false),
+            space("client", "Client Work", false),
         ];
         let tabs: Vec<CommandBarTab> = Vec::new();
 
-        let results = filter_results("client", &tabs, &[], &sessions, false);
+        let results = filter_results("client", &tabs, &[], &spaces, false);
 
         assert!(matches!(
             results.first(),
-            Some(CommandBarResultItem::Session { id, .. }) if id == "client"
+            Some(CommandBarResultItem::Space { id, .. }) if id == "client"
         ));
     }
 }

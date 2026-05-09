@@ -2,19 +2,19 @@ use crate::{
     agent::{AgentCommandEntry, AgentLaunchRequested, AgentProviders},
     browser::Browser,
     command::{
-        AppCommand, BrowserCommand, PaneCommand, ReadAppCommands, SessionCommand, TabCommand,
+        AppCommand, BrowserCommand, PaneCommand, ReadAppCommands, SpaceCommand, StackCommand,
         TerminalCommand,
     },
     layout::{
         pane::{Pane, PaneSplit},
         side_sheet::SideSheet,
-        space::Space,
-        tab::{Tab, active_among, collect_leaf_panes, focused_tab},
+        stack::{Stack, active_among, collect_leaf_panes, focused_stack},
+        tab::Tab,
         window::{Main, Modal},
     },
     processes_monitor::ProcessesMonitor,
-    sessions::{ActiveSession, SessionsView},
     settings::AppSettings,
+    spaces::{ActiveSpace, SpacesView},
     terminal::Terminal,
 };
 use bevy::{
@@ -25,18 +25,18 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
-    CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSession, CommandBarTab,
+    CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSpace, CommandBarTab,
     PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
 };
 use vmux_core::PageMetadata;
 use vmux_history::{LastActivatedAt, now_millis};
-pub(crate) use vmux_layout::NewTabContext;
+pub(crate) use vmux_layout::NewStackContext;
 use vmux_layout::{
     Header,
     event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL},
 };
 use vmux_service::protocol::ProcessId;
-use vmux_session::event::{SESSIONS_WEBVIEW_URL, SessionCommandEvent};
+use vmux_space::event::{SPACES_WEBVIEW_URL, SpaceCommandEvent};
 
 /// Try to extract a process UUID from `vmux://terminal/{uuid}`.
 fn parse_process_id_from_url(url: &str) -> Option<ProcessId> {
@@ -69,7 +69,7 @@ pub(crate) struct CommandBarInputPlugin;
 
 impl Plugin for CommandBarInputPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<NewTabContext>()
+        app.init_resource::<NewStackContext>()
             .init_resource::<AgentProviders>()
             .init_resource::<Messages<AgentLaunchRequested>>()
             .add_plugins(BinJsEmitEventPlugin::<CommandBarActionEvent>::default())
@@ -89,8 +89,8 @@ impl Plugin for CommandBarInputPlugin {
                 handle_open_command_bar
                     .in_set(ReadAppCommands)
                     .after(prewarm_command_bar_modal)
-                    .after(crate::layout::space::SpaceCommandSet)
-                    .after(crate::layout::tab::TabCommandSet),
+                    .after(crate::layout::tab::TabCommandSet)
+                    .after(crate::layout::stack::StackCommandSet),
             )
             .add_systems(
                 Update,
@@ -100,7 +100,7 @@ impl Plugin for CommandBarInputPlugin {
                 Update,
                 deferred_dismiss_modal
                     .after(ReadAppCommands)
-                    .before(crate::layout::tab::ComputeFocusSet),
+                    .before(crate::layout::stack::ComputeFocusSet),
             )
             .add_systems(
                 PostUpdate,
@@ -306,14 +306,14 @@ fn command_bar_open_request(
                 request.should_toggle = true;
                 request.url_override = Some(">".to_string());
             }
-            AppCommand::Session(SessionCommand::Open) => {
+            AppCommand::Space(SpaceCommand::Open) => {
                 request.should_toggle = true;
-                request.url_override = Some(SESSIONS_WEBVIEW_URL.to_string());
+                request.url_override = Some(SPACES_WEBVIEW_URL.to_string());
             }
-            AppCommand::Tab(TabCommand::Close) => {
+            AppCommand::Stack(StackCommand::Close) => {
                 request.should_dismiss = true;
             }
-            AppCommand::Tab(TabCommand::Next | TabCommand::Previous)
+            AppCommand::Stack(StackCommand::Next | StackCommand::Previous)
             | AppCommand::Pane(
                 PaneCommand::SelectLeft
                 | PaneCommand::SelectRight
@@ -344,13 +344,13 @@ fn handle_open_command_bar(
     >,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
     browsers: NonSend<Browsers>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tab_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
-    tab_q: Query<Entity, With<Tab>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    stack_q: Query<Entity, With<Stack>>,
     browser_meta: Query<&PageMetadata, With<Browser>>,
     child_of_q: Query<&ChildOf>,
     content_browsers: Query<
@@ -362,21 +362,21 @@ fn handle_open_command_bar(
             Without<Modal>,
         ),
     >,
-    mut session_params: ParamSet<(
-        Res<ActiveSession>,
+    mut space_params: ParamSet<(
+        Res<ActiveSpace>,
         Option<Res<AgentProviders>>,
-        ResMut<NewTabContext>,
+        ResMut<NewStackContext>,
     )>,
     mut commands: Commands,
 ) {
-    let active_tab_count = tab_q.iter().count();
-    let active_session = session_params.p0().clone();
-    let session_name = active_session.record.name.clone();
-    let agent_entries = session_params
+    let active_stack_count = stack_q.iter().count();
+    let active_space = space_params.p0().clone();
+    let space_name = active_space.record.name.clone();
+    let agent_entries = space_params
         .p1()
         .map(|providers| providers.command_entries())
         .unwrap_or_default();
-    let mut new_tab_ctx = session_params.p2();
+    let mut new_stack_ctx = space_params.p2();
 
     let request = command_bar_open_request(reader.read().copied());
     let mut should_open = false;
@@ -408,9 +408,9 @@ fn handle_open_command_bar(
                 .remove::<CommandBarPaintedOpen>()
                 .remove::<PendingCommandBarReveal>();
             // Discard empty tab created by a previous Cmd+T
-            if let Some(tab_e) = new_tab_ctx.tab.take() {
-                commands.entity(tab_e).despawn();
-                if let Some(prev) = new_tab_ctx.previous_tab.take()
+            if let Some(stack_e) = new_stack_ctx.stack.take() {
+                commands.entity(stack_e).despawn();
+                if let Some(prev) = new_stack_ctx.previous_stack.take()
                     && let Ok(children) = all_children.get(prev)
                 {
                     for child in children.iter() {
@@ -420,15 +420,15 @@ fn handle_open_command_bar(
                     }
                 }
             } else {
-                let (_, _, active_tab) = focused_tab(
-                    &spaces,
+                let (_, _, active_stack) = focused_stack(
+                    &tab_q,
                     &all_children,
                     &leaf_panes,
                     &pane_ts,
                     &pane_children,
-                    &tab_ts,
+                    &stack_ts,
                 );
-                if let Some(tab) = active_tab {
+                if let Some(tab) = active_stack {
                     for browser_e in &content_browsers {
                         let is_child = child_of_q
                             .get(browser_e)
@@ -441,7 +441,7 @@ fn handle_open_command_bar(
                     }
                 }
             }
-            new_tab_ctx.needs_open = false;
+            new_stack_ctx.needs_open = false;
             return;
         }
     }
@@ -470,14 +470,14 @@ fn handle_open_command_bar(
                 .remove::<CommandBarRenderedOpen>()
                 .remove::<CommandBarPaintedOpen>()
                 .remove::<PendingCommandBarReveal>();
-            new_tab_ctx.needs_open = false;
+            new_stack_ctx.needs_open = false;
             return;
         }
     }
 
-    if new_tab_ctx.needs_open {
+    if new_stack_ctx.needs_open {
         should_open = true;
-        new_tab_ctx.needs_open = false;
+        new_stack_ctx.needs_open = false;
     }
 
     if should_toggle {
@@ -511,7 +511,7 @@ fn handle_open_command_bar(
         return;
     };
 
-    let is_new_tab = new_tab_ctx.tab.is_some();
+    let is_new_stack = new_stack_ctx.stack.is_some();
     let was_open = command_bar_modal_is_open(modal_node.display, has_keyboard_target);
 
     if !was_open {
@@ -537,18 +537,18 @@ fn handle_open_command_bar(
     // Gather current URL (empty for new tab mode)
     let current_url = if let Some(override_url) = url_override {
         override_url
-    } else if is_new_tab {
+    } else if is_new_stack {
         String::new()
     } else {
-        let (_, _, active_tab) = focused_tab(
-            &spaces,
+        let (_, _, active_stack) = focused_stack(
+            &tab_q,
             &all_children,
             &leaf_panes,
             &pane_ts,
             &pane_children,
-            &tab_ts,
+            &stack_ts,
         );
-        active_tab
+        active_stack
             .and_then(|tab| {
                 let Ok(children) = all_children.get(tab) else {
                     return None;
@@ -560,29 +560,29 @@ fn handle_open_command_bar(
     };
 
     // Gather all tabs
-    let active_space = active_among(spaces.iter());
+    let active_tab = active_among(tab_q.iter());
     let mut bar_tabs = Vec::new();
-    if let Some(space) = active_space {
-        let (_, _, active_tab) = focused_tab(
-            &spaces,
+    if let Some(active_tab_e) = active_tab {
+        let (_, _, active_stack) = focused_stack(
+            &tab_q,
             &all_children,
             &leaf_panes,
             &pane_ts,
             &pane_children,
-            &tab_ts,
+            &stack_ts,
         );
-        let active_pane = active_tab.and_then(|t| child_of_q.get(t).ok().map(|co| co.get()));
-        let mut space_panes = Vec::new();
-        collect_leaf_panes(space, &all_children, &leaf_panes, &mut space_panes);
-        for &pane_e in &space_panes {
+        let active_pane = active_stack.and_then(|t| child_of_q.get(t).ok().map(|co| co.get()));
+        let mut tab_panes = Vec::new();
+        collect_leaf_panes(active_tab_e, &all_children, &leaf_panes, &mut tab_panes);
+        for &pane_e in &tab_panes {
             let is_active_pane = active_pane == Some(pane_e);
             if let Ok(children) = pane_children.get(pane_e) {
                 let mut tab_index = 0usize;
                 for child in children.iter() {
-                    if !tab_q.contains(child) {
+                    if !stack_q.contains(child) {
                         continue;
                     }
-                    let tab_is_active = active_tab == Some(child) && is_active_pane;
+                    let stack_is_active = active_stack == Some(child) && is_active_pane;
                     if let Ok(tab_kids) = all_children.get(child) {
                         for browser_e in tab_kids.iter() {
                             if let Ok(meta) = browser_meta.get(browser_e) {
@@ -591,7 +591,7 @@ fn handle_open_command_bar(
                                     url: meta.url.clone(),
                                     pane_id: pane_e.to_bits(),
                                     tab_index: tab_index as u32,
-                                    is_active: tab_is_active,
+                                    is_active: stack_is_active,
                                 });
                             }
                         }
@@ -616,7 +616,7 @@ fn handle_open_command_bar(
     let host_emit_ready = browsers.host_emit_ready(&modal_e);
     let rendered_matches = rendered_open.is_some_and(|rendered| rendered.0 != 0);
     webview_debug_log(format!(
-        "command_bar open entity={modal_e:?} was_open={was_open} has_browser={has_browser} host_emit_ready={host_emit_ready} command_bar_ready={command_bar_ready} rendered={rendered_matches} pending_reveal={} visibility={:?} new_tab={is_new_tab}",
+        "command_bar open entity={modal_e:?} was_open={was_open} has_browser={has_browser} host_emit_ready={host_emit_ready} command_bar_ready={command_bar_ready} rendered={rendered_matches} pending_reveal={} visibility={:?} new_tab={is_new_stack}",
         modal_pending_reveal.is_some(),
         *modal_vis
     ));
@@ -630,18 +630,18 @@ fn handle_open_command_bar(
                 open_id: 0,
                 payload: None,
             });
-        new_tab_ctx.needs_open = true;
+        new_stack_ctx.needs_open = true;
         return;
     }
 
-    let bar_sessions = crate::sessions::active_session_rows(&active_session, active_tab_count)
+    let bar_spaces = crate::spaces::active_space_rows(&active_space, active_stack_count)
         .into_iter()
-        .map(|session| CommandBarSession {
-            id: session.id,
-            name: session.name,
-            profile: session.profile,
-            is_active: session.is_active,
-            tab_count: session.tab_count,
+        .map(|space| CommandBarSpace {
+            id: space.id,
+            name: space.name,
+            profile: space.profile,
+            is_active: space.is_active,
+            tab_count: space.tab_count,
         })
         .collect();
 
@@ -651,12 +651,12 @@ fn handle_open_command_bar(
     );
     let payload = command_bar_open_payload(
         open_id,
-        session_name,
+        space_name,
         current_url,
-        bar_sessions,
+        bar_spaces,
         bar_tabs,
         bar_commands,
-        is_new_tab,
+        is_new_stack,
     );
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     let ron_body_len = ron_body.len();
@@ -699,15 +699,15 @@ fn handle_open_command_bar(
         payload.commands.len()
     ));
     if should_requeue_command_bar_open_after_emit(command_bar_ready) {
-        new_tab_ctx.needs_open = true;
+        new_stack_ctx.needs_open = true;
     }
 }
 
 fn command_bar_open_payload(
     open_id: u64,
-    session_name: String,
+    space_name: String,
     url: String,
-    sessions: Vec<CommandBarSession>,
+    spaces: Vec<CommandBarSpace>,
     tabs: Vec<CommandBarTab>,
     commands: Vec<CommandBarCommandEntry>,
     new_tab: bool,
@@ -715,35 +715,35 @@ fn command_bar_open_payload(
     CommandBarOpenEvent {
         open_id,
         url,
-        session_name,
-        sessions,
+        space_name,
+        spaces,
         tabs,
         commands,
         new_tab,
     }
 }
 
-fn attach_sessions_page_to_tab(
+fn attach_spaces_page_to_tab(
     tab: Entity,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     commands.entity(tab).insert(PageMetadata {
-        url: SESSIONS_WEBVIEW_URL.to_string(),
-        title: "Sessions".to_string(),
+        url: SPACES_WEBVIEW_URL.to_string(),
+        title: "Spaces".to_string(),
         ..default()
     });
-    commands.spawn((SessionsView::new(meshes, webview_mt), ChildOf(tab)));
+    commands.spawn((SpacesView::new(meshes, webview_mt), ChildOf(tab)));
 }
 
 #[allow(clippy::too_many_arguments)]
-fn spawn_sessions_page_layout_from_command_bar(
+fn spawn_spaces_page_layout_from_command_bar(
     main: Option<Entity>,
     primary_window: Option<Entity>,
     settings: &AppSettings,
-    new_tab_ctx: &mut NewTabContext,
-    focus: Option<&mut crate::layout::tab::FocusedTab>,
+    new_stack_ctx: &mut NewStackContext,
+    focus: Option<&mut crate::layout::stack::FocusedStack>,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -754,42 +754,42 @@ fn spawn_sessions_page_layout_from_command_bar(
     let Some(primary_window) = primary_window else {
         return false;
     };
-    let spawned = crate::layout::window::spawn_default_session_layout(
+    let spawned = crate::layout::window::spawn_default_space_layout(
         main,
         primary_window,
         &settings.layout,
-        new_tab_ctx,
+        new_stack_ctx,
         commands,
     );
     if let Some(focus) = focus {
-        focus.space = Some(spawned.space);
-        focus.pane = Some(spawned.pane);
         focus.tab = Some(spawned.tab);
+        focus.pane = Some(spawned.pane);
+        focus.stack = Some(spawned.stack);
     }
-    let Some(tab) = new_tab_ctx.tab.take() else {
+    let Some(tab) = new_stack_ctx.stack.take() else {
         return false;
     };
-    new_tab_ctx.previous_tab = None;
-    new_tab_ctx.needs_open = false;
-    new_tab_ctx.dismiss_modal = false;
-    attach_sessions_page_to_tab(tab, commands, meshes, webview_mt);
+    new_stack_ctx.previous_stack = None;
+    new_stack_ctx.needs_open = false;
+    new_stack_ctx.dismiss_modal = false;
+    attach_spaces_page_to_tab(tab, commands, meshes, webview_mt);
     true
 }
 
 fn on_command_bar_action(
     trigger: On<BinReceive<CommandBarActionEvent>>,
     mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tab_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
-    mut tab_params: ParamSet<(
-        Query<Entity, With<Tab>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    mut stack_params: ParamSet<(
+        Query<Entity, With<Stack>>,
         Query<Entity, With<Main>>,
         Query<Entity, With<PrimaryWindow>>,
-        Option<ResMut<crate::layout::tab::FocusedTab>>,
+        Option<ResMut<crate::layout::stack::FocusedStack>>,
     )>,
     child_of_q: Query<&ChildOf>,
     content_browsers: Query<
@@ -802,7 +802,7 @@ fn on_command_bar_action(
         ),
     >,
     mut resource_params: ParamSet<(Res<AppSettings>, Option<Res<AgentProviders>>)>,
-    mut new_tab_ctx: ResMut<NewTabContext>,
+    mut new_stack_ctx: ResMut<NewStackContext>,
     mut writer_params: ParamSet<(
         MessageWriter<AppCommand>,
         Option<MessageWriter<AgentLaunchRequested>>,
@@ -814,8 +814,8 @@ fn on_command_bar_action(
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
     let settings = resource_params.p0().clone();
-    let empty_tab = new_tab_ctx.tab;
-    let previous_tab = new_tab_ctx.previous_tab;
+    let empty_stack = new_stack_ctx.stack;
+    let previous_stack = new_stack_ctx.previous_stack;
     // Track whether we handle keyboard restore ourselves
     let mut custom_keyboard_restore = false;
 
@@ -845,8 +845,8 @@ fn on_command_bar_action(
                 } else {
                     expanded.parent().unwrap_or(&expanded)
                 };
-                if let Some(tab_e) = empty_tab {
-                    commands.entity(tab_e).insert(PageMetadata {
+                if let Some(stack_e) = empty_stack {
+                    commands.entity(stack_e).insert(PageMetadata {
                         url: TERMINAL_WEBVIEW_URL.to_string(),
                         title: format!("Terminal ({})", dir.display()),
                         ..default()
@@ -859,12 +859,12 @@ fn on_command_bar_action(
                                 &settings,
                                 Some(dir),
                             ),
-                            ChildOf(tab_e),
+                            ChildOf(stack_e),
                         ))
                         .id();
                     commands.entity(term_e).insert(CefKeyboardTarget);
-                    new_tab_ctx.tab = None;
-                    new_tab_ctx.previous_tab = None;
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.previous_stack = None;
                     custom_keyboard_restore = true;
                 }
             } else {
@@ -876,18 +876,18 @@ fn on_command_bar_action(
                     format!("https://www.google.com/search?q={}", evt.value)
                 };
 
-                if let Some(tab_e) = empty_tab {
+                if let Some(stack_e) = empty_stack {
                     // New tab mode: attach content to the empty tab
                     if url.starts_with("vmux://terminal") {
                         let term_e = if let Some(pid) = parse_process_id_from_url(&url) {
                             commands
                                 .spawn((
                                     Terminal::reattach(&mut meshes, &mut webview_mt, pid),
-                                    ChildOf(tab_e),
+                                    ChildOf(stack_e),
                                 ))
                                 .id()
                         } else {
-                            commands.entity(tab_e).insert(PageMetadata {
+                            commands.entity(stack_e).insert(PageMetadata {
                                 url: TERMINAL_WEBVIEW_URL.to_string(),
                                 title: "Terminal".to_string(),
                                 ..default()
@@ -895,24 +895,24 @@ fn on_command_bar_action(
                             commands
                                 .spawn((
                                     Terminal::new(&mut meshes, &mut webview_mt, &settings),
-                                    ChildOf(tab_e),
+                                    ChildOf(stack_e),
                                 ))
                                 .id()
                         };
                         commands.entity(term_e).insert(CefKeyboardTarget);
                     } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
-                        commands.entity(tab_e).insert(PageMetadata {
+                        commands.entity(stack_e).insert(PageMetadata {
                             url: PROCESSES_WEBVIEW_URL.to_string(),
                             title: "Background Services".to_string(),
                             ..default()
                         });
                         commands.spawn((
                             ProcessesMonitor::new(&mut meshes, &mut webview_mt),
-                            ChildOf(tab_e),
+                            ChildOf(stack_e),
                         ));
-                    } else if url.starts_with(SESSIONS_WEBVIEW_URL.trim_end_matches('/')) {
-                        attach_sessions_page_to_tab(
-                            tab_e,
+                    } else if url.starts_with(SPACES_WEBVIEW_URL.trim_end_matches('/')) {
+                        attach_spaces_page_to_tab(
+                            stack_e,
                             &mut commands,
                             &mut meshes,
                             &mut webview_mt,
@@ -921,30 +921,30 @@ fn on_command_bar_action(
                         let browser_e = commands
                             .spawn((
                                 Browser::new(&mut meshes, &mut webview_mt, &url),
-                                ChildOf(tab_e),
+                                ChildOf(stack_e),
                             ))
                             .id();
                         commands.entity(browser_e).insert(CefKeyboardTarget);
                     }
-                    new_tab_ctx.tab = None;
-                    new_tab_ctx.previous_tab = None;
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.previous_stack = None;
                     custom_keyboard_restore = true;
                 } else {
                     // Normal mode: navigate or spawn terminal in current tab
                     if let Some(pid) = parse_process_id_from_url(&url) {
                         // Reattach to existing service-managed process in a new tab
-                        let (_, active_pane_opt, _) = focused_tab(
-                            &spaces,
+                        let (_, active_pane_opt, _) = focused_stack(
+                            &tab_q,
                             &all_children,
                             &leaf_panes,
                             &pane_ts,
                             &pane_children,
-                            &tab_ts,
+                            &stack_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
-                            let tab_e = commands
+                            let stack_e = commands
                                 .spawn((
-                                    crate::layout::tab::tab_bundle(),
+                                    crate::layout::stack::stack_bundle(),
                                     LastActivatedAt::now(),
                                     ChildOf(pane_e),
                                 ))
@@ -952,7 +952,7 @@ fn on_command_bar_action(
                             let term_e = commands
                                 .spawn((
                                     Terminal::reattach(&mut meshes, &mut webview_mt, pid),
-                                    ChildOf(tab_e),
+                                    ChildOf(stack_e),
                                 ))
                                 .id();
                             commands.entity(term_e).insert(CefKeyboardTarget);
@@ -966,39 +966,39 @@ fn on_command_bar_action(
                         writer_params
                             .p0()
                             .write(AppCommand::Service(ServiceCommand::Open));
-                    } else if url.starts_with(SESSIONS_WEBVIEW_URL.trim_end_matches('/')) {
-                        let (_, active_pane_opt, _) = focused_tab(
-                            &spaces,
+                    } else if url.starts_with(SPACES_WEBVIEW_URL.trim_end_matches('/')) {
+                        let (_, active_pane_opt, _) = focused_stack(
+                            &tab_q,
                             &all_children,
                             &leaf_panes,
                             &pane_ts,
                             &pane_children,
-                            &tab_ts,
+                            &stack_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
-                            let tab_e = commands
+                            let stack_e = commands
                                 .spawn((
-                                    crate::layout::tab::tab_bundle(),
+                                    crate::layout::stack::stack_bundle(),
                                     LastActivatedAt::now(),
                                     ChildOf(pane_e),
                                 ))
                                 .id();
-                            attach_sessions_page_to_tab(
-                                tab_e,
+                            attach_spaces_page_to_tab(
+                                stack_e,
                                 &mut commands,
                                 &mut meshes,
                                 &mut webview_mt,
                             );
                             custom_keyboard_restore = true;
                         } else {
-                            let main = tab_params.p1().single().ok();
-                            let primary_window = tab_params.p2().single().ok();
-                            let mut focus = tab_params.p3();
-                            if spawn_sessions_page_layout_from_command_bar(
+                            let main = stack_params.p1().single().ok();
+                            let primary_window = stack_params.p2().single().ok();
+                            let mut focus = stack_params.p3();
+                            if spawn_spaces_page_layout_from_command_bar(
                                 main,
                                 primary_window,
                                 &settings,
-                                &mut new_tab_ctx,
+                                &mut new_stack_ctx,
                                 focus.as_deref_mut(),
                                 &mut commands,
                                 &mut meshes,
@@ -1008,15 +1008,15 @@ fn on_command_bar_action(
                             }
                         }
                     } else {
-                        let (_, _, active_tab) = focused_tab(
-                            &spaces,
+                        let (_, _, active_stack) = focused_stack(
+                            &tab_q,
                             &all_children,
                             &leaf_panes,
                             &pane_ts,
                             &pane_children,
-                            &tab_ts,
+                            &stack_ts,
                         );
-                        if let Some(tab) = active_tab {
+                        if let Some(tab) = active_stack {
                             for browser_e in &content_browsers {
                                 let is_child = child_of_q
                                     .get(browser_e)
@@ -1035,30 +1035,30 @@ fn on_command_bar_action(
         "terminal" => {
             // Check if value is a vmux://terminal/{id} URL — reattach
             if let Some(pid) = parse_process_id_from_url(&evt.value) {
-                if let Some(tab_e) = empty_tab {
+                if let Some(stack_e) = empty_stack {
                     let term_e = commands
                         .spawn((
                             Terminal::reattach(&mut meshes, &mut webview_mt, pid),
-                            ChildOf(tab_e),
+                            ChildOf(stack_e),
                         ))
                         .id();
                     commands.entity(term_e).insert(CefKeyboardTarget);
-                    new_tab_ctx.tab = None;
-                    new_tab_ctx.previous_tab = None;
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.previous_stack = None;
                     custom_keyboard_restore = true;
                 } else {
-                    let (_, active_pane_opt, _) = focused_tab(
-                        &spaces,
+                    let (_, active_pane_opt, _) = focused_stack(
+                        &tab_q,
                         &all_children,
                         &leaf_panes,
                         &pane_ts,
                         &pane_children,
-                        &tab_ts,
+                        &stack_ts,
                     );
                     if let Some(pane_e) = active_pane_opt {
-                        let tab_e = commands
+                        let stack_e = commands
                             .spawn((
-                                crate::layout::tab::tab_bundle(),
+                                crate::layout::stack::stack_bundle(),
                                 LastActivatedAt::now(),
                                 ChildOf(pane_e),
                             ))
@@ -1066,7 +1066,7 @@ fn on_command_bar_action(
                         let term_e = commands
                             .spawn((
                                 Terminal::reattach(&mut meshes, &mut webview_mt, pid),
-                                ChildOf(tab_e),
+                                ChildOf(stack_e),
                             ))
                             .id();
                         commands.entity(term_e).insert(CefKeyboardTarget);
@@ -1089,8 +1089,8 @@ fn on_command_bar_action(
                     };
                     Some(expanded)
                 };
-                if let Some(tab_e) = empty_tab {
-                    commands.entity(tab_e).insert(PageMetadata {
+                if let Some(stack_e) = empty_stack {
+                    commands.entity(stack_e).insert(PageMetadata {
                         url: TERMINAL_WEBVIEW_URL.to_string(),
                         title: "Terminal".to_string(),
                         ..default()
@@ -1103,31 +1103,31 @@ fn on_command_bar_action(
                                 &settings,
                                 cwd.as_deref(),
                             ),
-                            ChildOf(tab_e),
+                            ChildOf(stack_e),
                         ))
                         .id();
                     commands.entity(term_e).insert(CefKeyboardTarget);
-                    new_tab_ctx.tab = None;
-                    new_tab_ctx.previous_tab = None;
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.previous_stack = None;
                     custom_keyboard_restore = true;
                 } else {
-                    let (_, active_pane_opt, _) = focused_tab(
-                        &spaces,
+                    let (_, active_pane_opt, _) = focused_stack(
+                        &tab_q,
                         &all_children,
                         &leaf_panes,
                         &pane_ts,
                         &pane_children,
-                        &tab_ts,
+                        &stack_ts,
                     );
                     if let Some(pane_e) = active_pane_opt {
-                        let tab_e = commands
+                        let stack_e = commands
                             .spawn((
-                                crate::layout::tab::tab_bundle(),
+                                crate::layout::stack::stack_bundle(),
                                 LastActivatedAt::now(),
                                 ChildOf(pane_e),
                             ))
                             .id();
-                        commands.entity(tab_e).insert(PageMetadata {
+                        commands.entity(stack_e).insert(PageMetadata {
                             url: TERMINAL_WEBVIEW_URL.to_string(),
                             title: "Terminal".to_string(),
                             ..default()
@@ -1140,7 +1140,7 @@ fn on_command_bar_action(
                                     &settings,
                                     cwd.as_deref(),
                                 ),
-                                ChildOf(tab_e),
+                                ChildOf(stack_e),
                             ))
                             .id();
                         commands.entity(term_e).insert(CefKeyboardTarget);
@@ -1169,36 +1169,36 @@ fn on_command_bar_action(
                 writer_params.p0().write(cmd);
             }
             // If in new-tab mode and a command was executed, clean up the empty tab
-            if let Some(tab_e) = empty_tab {
-                commands.entity(tab_e).despawn();
-                new_tab_ctx.tab = None;
-                new_tab_ctx.previous_tab = None;
+            if let Some(stack_e) = empty_stack {
+                commands.entity(stack_e).despawn();
+                new_stack_ctx.stack = None;
+                new_stack_ctx.previous_stack = None;
             }
         }
-        "session" => {
+        "space" => {
             custom_keyboard_restore = true;
             if !evt.value.is_empty() {
                 commands.trigger(BinReceive {
                     webview,
-                    payload: SessionCommandEvent {
+                    payload: SpaceCommandEvent {
                         command: "attach".to_string(),
-                        session_id: Some(evt.value.clone()),
+                        space_id: Some(evt.value.clone()),
                         name: None,
                     },
                 });
             }
-            if let Some(tab_e) = empty_tab {
-                commands.entity(tab_e).despawn();
-                new_tab_ctx.tab = None;
-                new_tab_ctx.previous_tab = None;
+            if let Some(stack_e) = empty_stack {
+                commands.entity(stack_e).despawn();
+                new_stack_ctx.stack = None;
+                new_stack_ctx.previous_stack = None;
             }
         }
         "switch_tab" => {
             // Despawn empty tab if in new-tab mode
-            if let Some(tab_e) = empty_tab {
-                commands.entity(tab_e).despawn();
-                new_tab_ctx.tab = None;
-                new_tab_ctx.previous_tab = None;
+            if let Some(stack_e) = empty_stack {
+                commands.entity(stack_e).despawn();
+                new_stack_ctx.stack = None;
+                new_stack_ctx.previous_stack = None;
             }
             if let Some((pane_bits, tab_idx)) = evt.value.split_once(':')
                 && let (Ok(pane_id), Ok(tab_index)) =
@@ -1207,34 +1207,34 @@ fn on_command_bar_action(
             {
                 commands.entity(target_pane).insert(LastActivatedAt::now());
                 if let Ok(children) = pane_children.get(target_pane) {
-                    let tab_q = tab_params.p0();
-                    let tabs: Vec<Entity> =
-                        children.iter().filter(|&e| tab_q.contains(e)).collect();
-                    if let Some(&target_tab) = tabs.get(tab_index) {
-                        commands.entity(target_tab).insert(LastActivatedAt::now());
+                    let stack_q = stack_params.p0();
+                    let stacks: Vec<Entity> =
+                        children.iter().filter(|&e| stack_q.contains(e)).collect();
+                    if let Some(&target_stack) = stacks.get(tab_index) {
+                        commands.entity(target_stack).insert(LastActivatedAt::now());
                     }
                 }
             }
         }
         _ => {
             // "dismiss" and unknown actions
-            if let Some(tab_e) = empty_tab {
-                let tab_q = tab_params.p0();
-                let closed_space = close_space_if_only_pending_tab(
-                    tab_e,
-                    &spaces,
+            if let Some(stack_e) = empty_stack {
+                let stack_q = stack_params.p0();
+                let closed_tab = close_tab_if_only_pending_stack(
+                    stack_e,
+                    &tab_q,
                     &child_of_q,
                     &all_children,
-                    &tab_q,
+                    &stack_q,
                     &mut commands,
                 );
-                if !closed_space {
-                    commands.entity(tab_e).despawn();
+                if !closed_tab {
+                    commands.entity(stack_e).despawn();
                 }
-                new_tab_ctx.tab = None;
-                if !closed_space {
+                new_stack_ctx.stack = None;
+                if !closed_tab {
                     // Restore keyboard to previous tab's browser
-                    if let Some(prev) = previous_tab
+                    if let Some(prev) = previous_stack
                         && let Ok(children) = all_children.get(prev)
                     {
                         for child in children.iter() {
@@ -1244,7 +1244,7 @@ fn on_command_bar_action(
                         }
                     }
                 }
-                new_tab_ctx.previous_tab = None;
+                new_stack_ctx.previous_stack = None;
                 custom_keyboard_restore = true;
             }
         }
@@ -1264,15 +1264,15 @@ fn on_command_bar_action(
             .remove::<PendingCommandBarReveal>();
     }
     if !custom_keyboard_restore {
-        let (_, _, active_tab) = focused_tab(
-            &spaces,
+        let (_, _, active_stack) = focused_stack(
+            &tab_q,
             &all_children,
             &leaf_panes,
             &pane_ts,
             &pane_children,
-            &tab_ts,
+            &stack_ts,
         );
-        if let Some(tab) = active_tab {
+        if let Some(tab) = active_stack {
             for browser_e in &content_browsers {
                 let is_child = child_of_q
                     .get(browser_e)
@@ -1287,39 +1287,39 @@ fn on_command_bar_action(
     }
 }
 
-fn close_space_if_only_pending_tab(
-    tab: Entity,
-    spaces: &Query<(Entity, &LastActivatedAt), With<Space>>,
+fn close_tab_if_only_pending_stack(
+    stack: Entity,
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
-    tab_q: &Query<Entity, With<Tab>>,
+    stack_q: &Query<Entity, With<Stack>>,
     commands: &mut Commands,
 ) -> bool {
-    let Some(space) = ancestor_space(tab, spaces, child_of_q) else {
+    let Some(tab) = ancestor_tab(stack, tab_q, child_of_q) else {
         return false;
     };
-    if entity_tree_contains_tab_other_than(space, tab, all_children, tab_q) {
+    if entity_tree_contains_stack_other_than(tab, stack, all_children, stack_q) {
         return false;
     }
-    let siblings = sibling_spaces(space, spaces, child_of_q, all_children);
+    let siblings = sibling_tabs(tab, tab_q, child_of_q, all_children);
     if siblings.len() <= 1 {
         return false;
     }
-    if let Some(next) = pick_space_after_close(space, &siblings) {
+    if let Some(next) = pick_tab_after_close(tab, &siblings) {
         commands.entity(next).insert(LastActivatedAt::now());
     }
-    commands.entity(space).despawn();
+    commands.entity(tab).despawn();
     true
 }
 
-fn ancestor_space(
+fn ancestor_tab(
     entity: Entity,
-    spaces: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: &Query<&ChildOf>,
 ) -> Option<Entity> {
     let mut current = entity;
     while let Ok(parent) = child_of_q.get(current).map(Relationship::get) {
-        if spaces.get(parent).is_ok() {
+        if tab_q.get(parent).is_ok() {
             return Some(parent);
         }
         current = parent;
@@ -1327,36 +1327,36 @@ fn ancestor_space(
     None
 }
 
-fn entity_tree_contains_tab_other_than(
+fn entity_tree_contains_stack_other_than(
     entity: Entity,
-    ignored_tab: Entity,
+    ignored_stack: Entity,
     all_children: &Query<&Children>,
-    tab_q: &Query<Entity, With<Tab>>,
+    stack_q: &Query<Entity, With<Stack>>,
 ) -> bool {
-    (tab_q.contains(entity) && entity != ignored_tab)
+    (stack_q.contains(entity) && entity != ignored_stack)
         || all_children.get(entity).is_ok_and(|children| {
             children.iter().any(|child| {
-                entity_tree_contains_tab_other_than(child, ignored_tab, all_children, tab_q)
+                entity_tree_contains_stack_other_than(child, ignored_stack, all_children, stack_q)
             })
         })
 }
 
-fn sibling_spaces(
-    space: Entity,
-    spaces: &Query<(Entity, &LastActivatedAt), With<Space>>,
+fn sibling_tabs(
+    tab: Entity,
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
 ) -> Vec<Entity> {
-    let Ok(parent) = child_of_q.get(space).map(Relationship::get) else {
-        return vec![space];
+    let Ok(parent) = child_of_q.get(tab).map(Relationship::get) else {
+        return vec![tab];
     };
     let Ok(children) = all_children.get(parent) else {
-        return vec![space];
+        return vec![tab];
     };
-    children.iter().filter(|e| spaces.get(*e).is_ok()).collect()
+    children.iter().filter(|e| tab_q.get(*e).is_ok()).collect()
 }
 
-fn pick_space_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
+fn pick_tab_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
     if siblings.len() <= 1 {
         return None;
     }
@@ -1366,18 +1366,18 @@ fn pick_space_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity>
     if target == active { None } else { Some(target) }
 }
 
-/// Closes the command bar modal when `NewTabContext::dismiss_modal` is set.
+/// Closes the command bar modal when `NewStackContext::dismiss_modal` is set.
 /// Runs after `ReadAppCommands` so that `handle_tab_commands` can validate
 /// the target index before requesting a dismiss.
 fn deferred_dismiss_modal(
-    mut new_tab_ctx: ResMut<NewTabContext>,
+    mut new_stack_ctx: ResMut<NewStackContext>,
     mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
     mut commands: Commands,
 ) {
-    if !new_tab_ctx.dismiss_modal {
+    if !new_stack_ctx.dismiss_modal {
         return;
     }
-    new_tab_ctx.dismiss_modal = false;
+    new_stack_ctx.dismiss_modal = false;
     if let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut()
         && modal_node.display != Display::None
     {
@@ -1887,7 +1887,7 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_payload_includes_session_name() {
+    fn command_bar_payload_includes_space_name() {
         let payload = command_bar_open_payload(
             7,
             "Work".to_string(),
@@ -1898,13 +1898,13 @@ mod tests {
             false,
         );
 
-        assert_eq!(payload.session_name, "Work");
+        assert_eq!(payload.space_name, "Work");
         assert_eq!(payload.open_id, 7);
     }
 
     #[test]
-    fn command_bar_payload_includes_sessions() {
-        let sessions = vec![CommandBarSession {
+    fn command_bar_payload_includes_spaces() {
+        let spaces = vec![CommandBarSpace {
             id: "work".to_string(),
             name: "Work".to_string(),
             profile: "default".to_string(),
@@ -1915,27 +1915,27 @@ mod tests {
         let payload = command_bar_open_payload(
             8,
             "Work".to_string(),
-            "vmux://sessions/".to_string(),
-            sessions.clone(),
+            "vmux://spaces/".to_string(),
+            spaces.clone(),
             Vec::new(),
             Vec::new(),
             false,
         );
 
-        assert_eq!(payload.sessions, sessions);
+        assert_eq!(payload.spaces, spaces);
     }
 
     #[test]
-    fn session_open_command_prefills_sessions_url() {
-        let request = command_bar_open_request([AppCommand::Session(SessionCommand::Open)]);
+    fn space_open_command_prefills_spaces_url() {
+        let request = command_bar_open_request([AppCommand::Space(SpaceCommand::Open)]);
 
         assert!(request.should_toggle);
-        assert_eq!(request.url_override, Some(SESSIONS_WEBVIEW_URL.to_string()));
+        assert_eq!(request.url_override, Some(SPACES_WEBVIEW_URL.to_string()));
     }
 
     #[test]
     fn tab_new_command_does_not_dismiss_command_bar() {
-        let request = command_bar_open_request([AppCommand::Tab(TabCommand::New)]);
+        let request = command_bar_open_request([AppCommand::Stack(StackCommand::New)]);
 
         assert!(!request.should_dismiss);
     }
@@ -1945,7 +1945,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
-        app.add_plugins(vmux_layout::tab::TabPlugin);
+        app.add_plugins(vmux_layout::stack::StackPlugin);
         app.add_plugins(CommandBarInputPlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
@@ -1954,11 +1954,11 @@ mod tests {
         let graph = update.graph();
         let tab_command_set = graph
             .system_sets
-            .get_key(vmux_layout::tab::TabCommandSet.intern())
+            .get_key(vmux_layout::stack::StackCommandSet.intern())
             .unwrap();
         let read_command_systems = graph.systems_in_set(ReadAppCommands.intern()).unwrap();
         let tab_command_systems = graph
-            .systems_in_set(vmux_layout::tab::TabCommandSet.intern())
+            .systems_in_set(vmux_layout::stack::StackCommandSet.intern())
             .unwrap();
         let command_bar_open_system = read_command_systems
             .iter()
@@ -1977,8 +1977,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
-        app.init_resource::<NewTabContext>();
-        app.init_resource::<ActiveSession>();
+        app.init_resource::<NewStackContext>();
+        app.init_resource::<ActiveSpace>();
         app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
         app.insert_non_send_resource(Browsers::default());
         app.add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands));
@@ -2005,7 +2005,7 @@ mod tests {
 
         assert_eq!(node.display, Display::Flex);
         assert_eq!(reveal.open_id, 0);
-        assert!(app.world().resource::<NewTabContext>().needs_open);
+        assert!(app.world().resource::<NewStackContext>().needs_open);
     }
 
     #[test]
@@ -2013,8 +2013,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
-        app.init_resource::<NewTabContext>();
-        app.init_resource::<ActiveSession>();
+        app.init_resource::<NewStackContext>();
+        app.init_resource::<ActiveSpace>();
         app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
         app.insert_non_send_resource(Browsers::default());
         app.add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands));
@@ -2036,20 +2036,20 @@ mod tests {
         ));
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Session(SessionCommand::Open));
+            .write(AppCommand::Space(SpaceCommand::Open));
 
         app.update();
 
-        assert!(app.world().resource::<NewTabContext>().needs_open);
+        assert!(app.world().resource::<NewStackContext>().needs_open);
     }
 
     #[test]
-    fn sessions_url_from_command_bar_opens_sessions_tab() {
+    fn spaces_url_from_command_bar_opens_spaces_tab() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
         app.add_observer(on_command_bar_action);
-        app.init_resource::<NewTabContext>();
+        app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
@@ -2067,14 +2067,14 @@ mod tests {
             .id();
         let space = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(space)))
             .id();
         app.world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(pane)));
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
 
         app.world_mut()
             .entity_mut(modal)
@@ -2082,25 +2082,25 @@ mod tests {
                 webview,
                 payload: CommandBarActionEvent {
                     action: "navigate".to_string(),
-                    value: SESSIONS_WEBVIEW_URL.to_string(),
+                    value: SPACES_WEBVIEW_URL.to_string(),
                 },
             });
         app.update();
 
-        let mut sessions_query = app.world_mut().query::<&SessionsView>();
-        let sessions_count = sessions_query.iter(app.world()).count();
+        let mut spaces_query = app.world_mut().query::<&SpacesView>();
+        let spaces_count = spaces_query.iter(app.world()).count();
 
-        assert_eq!(sessions_count, 1);
+        assert_eq!(spaces_count, 1);
     }
 
     #[test]
-    fn sessions_url_without_active_pane_spawns_sessions_page_layout() {
+    fn spaces_url_without_active_pane_spawns_spaces_page_layout() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
         app.add_observer(on_command_bar_action);
-        app.init_resource::<NewTabContext>();
-        app.insert_resource(crate::layout::tab::FocusedTab::default());
+        app.init_resource::<NewStackContext>();
+        app.insert_resource(crate::layout::stack::FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
@@ -2125,64 +2125,64 @@ mod tests {
                 webview,
                 payload: CommandBarActionEvent {
                     action: "navigate".to_string(),
-                    value: SESSIONS_WEBVIEW_URL.to_string(),
+                    value: SPACES_WEBVIEW_URL.to_string(),
                 },
             });
         app.update();
 
-        let mut sessions_query = app.world_mut().query::<&SessionsView>();
-        assert_eq!(sessions_query.iter(app.world()).count(), 1);
+        let mut spaces_query = app.world_mut().query::<&SpacesView>();
+        assert_eq!(spaces_query.iter(app.world()).count(), 1);
 
-        let mut spaces = app.world_mut().query::<&Space>();
-        assert_eq!(spaces.iter(app.world()).count(), 1);
+        let mut tabs = app.world_mut().query::<&Tab>();
+        assert_eq!(tabs.iter(app.world()).count(), 1);
 
         let tabs = {
             let mut tab_q = app
                 .world_mut()
-                .query_filtered::<(Entity, &PageMetadata, &Children), With<Tab>>();
+                .query_filtered::<(Entity, &PageMetadata, &Children), With<Stack>>();
             tab_q
                 .iter(app.world())
                 .map(|(entity, meta, children)| {
-                    let has_sessions_view = children
+                    let has_spaces_view = children
                         .iter()
-                        .any(|child| app.world().get::<SessionsView>(child).is_some());
-                    (entity, meta.url.clone(), has_sessions_view)
+                        .any(|child| app.world().get::<SpacesView>(child).is_some());
+                    (entity, meta.url.clone(), has_spaces_view)
                 })
                 .collect::<Vec<_>>()
         };
         assert_eq!(tabs.len(), 1);
-        assert_eq!(tabs[0].1, SESSIONS_WEBVIEW_URL);
+        assert_eq!(tabs[0].1, SPACES_WEBVIEW_URL);
         assert!(tabs[0].2);
 
-        let ctx = app.world().resource::<NewTabContext>();
+        let ctx = app.world().resource::<NewStackContext>();
         assert!(!ctx.needs_open);
-        assert!(ctx.tab.is_none());
+        assert!(ctx.stack.is_none());
 
-        let focus = app.world().resource::<crate::layout::tab::FocusedTab>();
-        assert!(focus.space.is_some());
-        assert!(focus.pane.is_some());
+        let focus = app.world().resource::<crate::layout::stack::FocusedStack>();
         assert!(focus.tab.is_some());
+        assert!(focus.pane.is_some());
+        assert!(focus.stack.is_some());
     }
 
     #[derive(Resource, Default)]
-    struct CapturedSessionCommand(Option<SessionCommandEvent>);
+    struct CapturedSpaceCommand(Option<SpaceCommandEvent>);
 
-    fn capture_session_command(
-        trigger: On<BinReceive<SessionCommandEvent>>,
-        mut captured: ResMut<CapturedSessionCommand>,
+    fn capture_space_command(
+        trigger: On<BinReceive<SpaceCommandEvent>>,
+        mut captured: ResMut<CapturedSpaceCommand>,
     ) {
         captured.0 = Some(trigger.event().payload.clone());
     }
 
     #[test]
-    fn session_action_forwards_attach_event() {
+    fn space_action_forwards_attach_event() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
         app.add_observer(on_command_bar_action);
-        app.add_observer(capture_session_command);
-        app.init_resource::<NewTabContext>();
-        app.init_resource::<CapturedSessionCommand>();
+        app.add_observer(capture_space_command);
+        app.init_resource::<NewStackContext>();
+        app.init_resource::<CapturedSpaceCommand>();
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
@@ -2200,21 +2200,21 @@ mod tests {
             .id();
         let space = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(space)))
             .id();
         app.world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(pane)));
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
 
         app.world_mut()
             .entity_mut(modal)
             .trigger(|webview| BinReceive {
                 webview,
                 payload: CommandBarActionEvent {
-                    action: "session".to_string(),
+                    action: "space".to_string(),
                     value: "work".to_string(),
                 },
             });
@@ -2222,21 +2222,21 @@ mod tests {
 
         let captured = app
             .world()
-            .resource::<CapturedSessionCommand>()
+            .resource::<CapturedSpaceCommand>()
             .0
             .clone()
             .unwrap();
         assert_eq!(captured.command, "attach");
-        assert_eq!(captured.session_id.as_deref(), Some("work"));
+        assert_eq!(captured.space_id.as_deref(), Some("work"));
     }
 
     #[test]
-    fn session_action_does_not_restore_keyboard_to_old_browser() {
+    fn space_action_does_not_restore_keyboard_to_old_browser() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
         app.add_observer(on_command_bar_action);
-        app.init_resource::<NewTabContext>();
+        app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
@@ -2254,7 +2254,7 @@ mod tests {
             .id();
         let space = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -2262,7 +2262,7 @@ mod tests {
             .id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(pane)))
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
         let browser = app.world_mut().spawn((Browser, ChildOf(tab))).id();
 
@@ -2271,7 +2271,7 @@ mod tests {
             .trigger(|webview| BinReceive {
                 webview,
                 payload: CommandBarActionEvent {
-                    action: "session".to_string(),
+                    action: "space".to_string(),
                     value: "work".to_string(),
                 },
             });
@@ -2281,12 +2281,12 @@ mod tests {
     }
 
     #[test]
-    fn session_action_disables_modal_picking() {
+    fn space_action_disables_modal_picking() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
         app.add_observer(on_command_bar_action);
-        app.init_resource::<NewTabContext>();
+        app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
@@ -2305,21 +2305,21 @@ mod tests {
             .id();
         let space = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(space)))
             .id();
         app.world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(pane)));
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
 
         app.world_mut()
             .entity_mut(modal)
             .trigger(|webview| BinReceive {
                 webview,
                 payload: CommandBarActionEvent {
-                    action: "session".to_string(),
+                    action: "space".to_string(),
                     value: "work".to_string(),
                 },
             });
@@ -2332,12 +2332,12 @@ mod tests {
     }
 
     #[test]
-    fn dismissing_only_pending_tab_in_new_space_closes_space() {
+    fn dismissing_only_pending_stack_in_new_space_closes_space() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
         app.add_observer(on_command_bar_action);
-        app.init_resource::<NewTabContext>();
+        app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
@@ -2356,7 +2356,7 @@ mod tests {
         let root = app.world_mut().spawn_empty().id();
         let old_space = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(1), ChildOf(root)))
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
             .id();
         let old_pane = app
             .world_mut()
@@ -2364,21 +2364,21 @@ mod tests {
             .id();
         let old_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(old_pane)))
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(old_pane)))
             .id();
         let new_space = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(2), ChildOf(root)))
+            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(root)))
             .id();
         let new_pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt(2), ChildOf(new_space)))
             .id();
-        let pending_tab = app
+        let pending_stack = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(new_pane)))
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(new_pane)))
             .id();
-        app.world_mut().resource_mut::<NewTabContext>().tab = Some(pending_tab);
+        app.world_mut().resource_mut::<NewStackContext>().stack = Some(pending_stack);
 
         app.world_mut()
             .entity_mut(modal)
@@ -2394,6 +2394,6 @@ mod tests {
         assert!(app.world().get_entity(new_space).is_err());
         assert!(app.world().get_entity(old_space).is_ok());
         assert!(app.world().get_entity(old_tab).is_ok());
-        assert_eq!(app.world().resource::<NewTabContext>().tab, None);
+        assert_eq!(app.world().resource::<NewStackContext>().stack, None);
     }
 }

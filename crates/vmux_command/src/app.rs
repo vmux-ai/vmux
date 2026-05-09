@@ -10,9 +10,7 @@ use vmux_command::keyboard::{
     CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code,
     ignore_physical_rerouted_ctrl_keydown,
 };
-use vmux_command::results::{
-    CommandBarResultItem as ResultItem, SESSIONS_PAGE_URL, filter_results,
-};
+use vmux_command::results::{CommandBarResultItem as ResultItem, SPACES_PAGE_URL, filter_results};
 use vmux_command::style::{command_bar_shell_class, result_item_class};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
@@ -121,8 +119,8 @@ pub fn App() -> Element {
 
     let CommandBarOpenEvent {
         url: _,
-        session_name,
-        sessions,
+        space_name,
+        spaces,
         tabs,
         commands,
         new_tab: _,
@@ -131,7 +129,7 @@ pub fn App() -> Element {
     let q = query();
     let is_new_tab = new_tab();
     let results = {
-        let mut r = filter_results(&q, &tabs, &commands, &sessions, is_new_tab);
+        let mut r = filter_results(&q, &tabs, &commands, &spaces, is_new_tab);
         let completions = if looks_like_path(q.trim()) {
             path_completions()
         } else {
@@ -173,8 +171,8 @@ pub fn App() -> Element {
         match &active_item {
             Some(ResultItem::Command { name, .. }) => format!("> {name}"),
             Some(ResultItem::Navigate { url }) => url.clone(),
-            Some(ResultItem::Tab { url, .. }) => url.clone(),
-            Some(ResultItem::Session { name, .. }) => name.clone(),
+            Some(ResultItem::Stack { url, .. }) => url.clone(),
+            Some(ResultItem::Space { name, .. }) => name.clone(),
             Some(ResultItem::Terminal { path }) if path.is_empty() => "Terminal".to_string(),
             Some(ResultItem::Terminal { path }) => path.clone(),
             None => q.clone(),
@@ -221,7 +219,7 @@ pub fn App() -> Element {
             ResultItem::Terminal { path } => {
                 emit_action("terminal", path);
             }
-            ResultItem::Tab {
+            ResultItem::Stack {
                 pane_id, tab_index, ..
             } => {
                 emit_action("switch_tab", &format!("{pane_id}:{tab_index}"));
@@ -229,8 +227,8 @@ pub fn App() -> Element {
             ResultItem::Command { id, .. } => {
                 emit_action("command", id);
             }
-            ResultItem::Session { id, .. } => {
-                emit_action("session", id);
+            ResultItem::Space { id, .. } => {
+                emit_action("space", id);
             }
             ResultItem::Navigate { url } => {
                 if !url.is_empty() {
@@ -255,11 +253,11 @@ pub fn App() -> Element {
                 div { class: "pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-white/20 to-transparent" }
                 div { class: "p-2",
                     div { class: "flex items-center gap-2 rounded-lg bg-white/5 px-3",
-                        if !session_name.is_empty() {
+                        if !space_name.is_empty() {
                             span {
-                                title: "{session_name}",
+                                title: "{space_name}",
                                 class: "max-w-36 shrink-0 truncate rounded-md bg-glass-hover px-2 py-1 text-ui-xs font-medium text-muted-foreground",
-                                "{session_name}"
+                                "{space_name}"
                             }
                         }
                         {
@@ -269,8 +267,8 @@ pub fn App() -> Element {
                                     Some(ResultItem::Command { .. }) => (true, false, false),
                                     Some(ResultItem::Terminal { path }) if path.is_empty() => (true, false, false),
                                     Some(ResultItem::Terminal { .. }) => (false, true, false),
-                                    Some(ResultItem::Tab { .. }) => (false, false, true),
-                                    Some(ResultItem::Session { .. }) => (false, false, false),
+                                    Some(ResultItem::Stack { .. }) => (false, false, true),
+                                    Some(ResultItem::Space { .. }) => (false, false, false),
                                     Some(ResultItem::Navigate { url }) => {
                                         let is_u = url.contains("://") || (url.contains('.') && !url.contains(' '));
                                         (false, false, is_u)
@@ -415,14 +413,14 @@ pub fn App() -> Element {
                                             }
                                         }
                                     },
-                                    ResultItem::Tab { title, url, .. } => rsx! {
+                                    ResultItem::Stack { title, url, .. } => rsx! {
                                         div { class: "flex min-w-0 flex-col",
                                             span { class: "truncate text-base text-foreground", "{title}" }
                                             span { class: "truncate text-sm text-muted-foreground", "{url}" }
                                         }
-                                        span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "Tab" }
+                                        span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "Stack" }
                                     },
-                                    ResultItem::Session { name, profile, is_active, tab_count, .. } => rsx! {
+                                    ResultItem::Space { name, profile, is_active, tab_count, .. } => rsx! {
                                         div { class: "flex min-w-0 flex-col",
                                             div { class: "flex min-w-0 items-center gap-2",
                                                 span { class: "truncate text-base text-foreground", "{name}" }
@@ -447,9 +445,9 @@ pub fn App() -> Element {
                                                 circle { cx: "11", cy: "11", r: "8" }
                                                 path { d: "m21 21-4.3-4.3" }
                                             }
-                                            if url == SESSIONS_PAGE_URL {
+                                            if url == SPACES_PAGE_URL {
                                                 div { class: "flex min-w-0 flex-col",
-                                                    span { class: "truncate text-base text-foreground", "Sessions Page" }
+                                                    span { class: "truncate text-base text-foreground", "Spaces Page" }
                                                     span { class: "truncate text-sm text-muted-foreground", "{url}" }
                                                 }
                                             } else if url.is_empty() {
@@ -458,7 +456,7 @@ pub fn App() -> Element {
                                                 span { class: "min-w-0 break-all text-base text-foreground", "Search \"{url}\"" }
                                             }
                                         }
-                                        if url == SESSIONS_PAGE_URL {
+                                        if url == SPACES_PAGE_URL {
                                             span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "New tab" }
                                         } else if !url.is_empty() {
                                             span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "\u{21b5}" }

@@ -38,14 +38,10 @@ pub const SIDE_SHEET_DRAG_EVENT: &str = "side-sheet-drag";
 pub struct LayoutStateEvent {
     #[serde(default)]
     pub header_open: bool,
-    #[serde(default = "default_footer_open")]
-    pub footer_open: bool,
     #[serde(default)]
     pub side_sheet_open: bool,
     #[serde(default = "default_header_height")]
     pub header_height: f32,
-    #[serde(default = "default_footer_height")]
-    pub footer_height: f32,
     #[serde(default = "default_side_sheet_width")]
     pub side_sheet_width: f32,
     #[serde(default = "default_pane_gap")]
@@ -63,25 +59,17 @@ impl LayoutStateEvent {
         }
     }
 
-    pub fn side_sheet_header_height(&self) -> f32 {
+    pub fn header_height_total(&self) -> f32 {
         self.titlebar_height + self.header_height
     }
 
-    pub fn side_sheet_header_visible(&self) -> bool {
-        self.side_sheet_open
+    pub fn header_visible(&self) -> bool {
+        self.header_open
     }
-}
-
-fn default_footer_open() -> bool {
-    true
 }
 
 fn default_header_height() -> f32 {
     HEADER_HEIGHT_PX
-}
-
-fn default_footer_height() -> f32 {
-    FOOTER_HEIGHT_PX
 }
 
 fn default_side_sheet_width() -> f32 {
@@ -111,8 +99,7 @@ pub fn titlebar_nav_style(titlebar_height: f32) -> String {
     )
 }
 
-pub const HEADER_HEIGHT_PX: f32 = 40.0;
-pub const FOOTER_HEIGHT_PX: f32 = 32.0;
+pub const HEADER_HEIGHT_PX: f32 = 60.0;
 
 #[cfg(test)]
 mod tests {
@@ -138,25 +125,31 @@ mod tests {
     }
 
     #[test]
-    fn side_sheet_header_height_clears_titlebar_controls() {
+    fn header_height_total_clears_titlebar_controls() {
         let state = LayoutStateEvent {
             header_height: 40.0,
             titlebar_height: 28.0,
             ..Default::default()
         };
 
-        assert_eq!(state.side_sheet_header_height(), 68.0);
+        assert_eq!(state.header_height_total(), 68.0);
     }
 
     #[test]
-    fn side_sheet_header_visibility_tracks_side_sheet_not_header_toggle() {
-        let state = LayoutStateEvent {
-            side_sheet_open: true,
+    fn header_visibility_tracks_header_open() {
+        let open = LayoutStateEvent {
+            header_open: true,
+            side_sheet_open: false,
+            ..Default::default()
+        };
+        let closed = LayoutStateEvent {
             header_open: false,
+            side_sheet_open: true,
             ..Default::default()
         };
 
-        assert!(state.side_sheet_header_visible());
+        assert!(open.header_visible());
+        assert!(!closed.header_visible());
     }
 
     #[test]
@@ -180,6 +173,7 @@ mod tests {
             url: "https://www.google.com".to_string(),
             favicon_url: String::new(),
             is_active: true,
+            bg_color: None,
         };
 
         assert_eq!(row.address_text(), "https://www.google.com");
@@ -197,14 +191,14 @@ mod tests {
     }
 
     #[test]
-    fn footer_command_event_rkyv_roundtrip() {
-        let original = FooterCommandEvent {
+    fn spaces_command_event_rkyv_roundtrip() {
+        let original = SpacesCommandEvent {
             command: "switch-space".into(),
             space_id: Some("work".into()),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
         let recovered =
-            rkyv::from_bytes::<FooterCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
+            rkyv::from_bytes::<SpacesCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
         assert_eq!(recovered.command, "switch-space");
         assert_eq!(recovered.space_id.as_deref(), Some("work"));
     }
@@ -260,6 +254,8 @@ pub struct TabRow {
     #[serde(default)]
     pub favicon_url: String,
     pub is_active: bool,
+    #[serde(default)]
+    pub bg_color: Option<String>,
 }
 
 impl TabRow {
@@ -299,6 +295,8 @@ pub struct SpaceRow {
     pub id: String,
     pub name: String,
     pub is_active: bool,
+    #[serde(default)]
+    pub bg_color: Option<String>,
 }
 
 #[derive(
@@ -310,7 +308,7 @@ pub struct SpaceRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct FooterCommandEvent {
+pub struct SpacesCommandEvent {
     pub command: String,
     #[serde(default)]
     pub space_id: Option<String>,
@@ -367,6 +365,8 @@ pub struct TabNode {
     pub tab_index: u32,
     #[serde(default)]
     pub is_loading: bool,
+    #[serde(default)]
+    pub bg_color: Option<String>,
 }
 
 #[derive(
@@ -437,11 +437,16 @@ pub enum LayoutNode {
     },
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct PageBgColorEvent {
+    pub color: String,
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), derive(bevy_ecs::message::Message))]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind")]
 pub enum SideSheetDragCommand {
-    MoveTab {
+    MoveStack {
         from_pane: u64,
         from_index: usize,
         to_pane: u64,

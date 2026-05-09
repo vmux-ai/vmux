@@ -15,9 +15,9 @@ pub struct CommandBarOpenEvent {
     pub open_id: u64,
     pub url: String,
     #[serde(default)]
-    pub session_name: String,
+    pub space_name: String,
     #[serde(default)]
-    pub sessions: Vec<CommandBarSession>,
+    pub spaces: Vec<CommandBarSpace>,
     pub tabs: Vec<CommandBarTab>,
     pub commands: Vec<CommandBarCommandEntry>,
     pub new_tab: bool,
@@ -34,7 +34,7 @@ pub struct CommandBarOpenEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct CommandBarSession {
+pub struct CommandBarSpace {
     pub id: String,
     pub name: String,
     pub profile: String,
@@ -324,13 +324,13 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_open_event_carries_session_name() {
+    fn command_bar_open_event_carries_space_name() {
         let event = CommandBarOpenEvent {
-            session_name: "Work".to_string(),
+            space_name: "Work".to_string(),
             ..Default::default()
         };
 
-        assert_eq!(event.session_name, "Work");
+        assert_eq!(event.space_name, "Work");
     }
 
     #[test]
@@ -358,9 +358,9 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_open_event_carries_sessions() {
+    fn command_bar_open_event_carries_spaces() {
         let event = CommandBarOpenEvent {
-            sessions: vec![CommandBarSession {
+            spaces: vec![CommandBarSpace {
                 id: "work".to_string(),
                 name: "Work".to_string(),
                 profile: "default".to_string(),
@@ -370,7 +370,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(event.sessions[0].id, "work");
-        assert!(event.sessions[0].is_active);
+        assert_eq!(event.spaces[0].id, "work");
+        assert!(event.spaces[0].is_active);
     }
 }

@@ -75,6 +75,7 @@ impl Browser {
                 title: url.to_string(),
                 url: url.to_string(),
                 favicon_url: String::new(),
+                bg_color: None,
             },
             WebviewSource::new(url),
             ResolvedWebviewUri(url.to_string()),

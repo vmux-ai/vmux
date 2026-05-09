@@ -12,8 +12,8 @@ use crate::{
     browser::Browser,
     layout::{
         pane::{Pane, PaneSplit},
-        space::Space,
-        tab::{Tab, focused_tab, tab_bundle},
+        stack::{Stack, focused_stack, stack_bundle},
+        tab::Tab,
         window::WEBVIEW_MESH_DEPTH_BIAS,
     },
     terminal::{ServiceClient, ServiceProcessHandle, Terminal},
@@ -39,6 +39,7 @@ impl ProcessesMonitor {
                     title: "Background Services".to_string(),
                     url: PROCESSES_WEBVIEW_URL.to_string(),
                     favicon_url: String::new(),
+                    bg_color: None,
                 },
                 Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
                     Vec3::Z,
@@ -181,13 +182,13 @@ fn broadcast_to_monitors(
 fn on_process_navigate(
     trigger: On<BinReceive<ProcessNavigateEvent>>,
     terminals: Query<(Entity, &ServiceProcessHandle, &ChildOf), With<Terminal>>,
-    tab_parent: Query<&ChildOf, With<Tab>>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tab_parent: Query<&ChildOf, With<Stack>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut commands: Commands,
@@ -213,18 +214,18 @@ fn on_process_navigate(
         warn!("Invalid process ID from navigate event: {pid}");
         return;
     };
-    let (_, active_pane, _) = focused_tab(
-        &spaces,
+    let (_, active_pane, _) = focused_stack(
+        &tabs,
         &all_children,
         &leaf_panes,
         &pane_ts,
         &pane_children,
-        &tab_ts,
+        &stack_ts,
     );
     let Some(pane) = active_pane else { return };
 
     let tab = commands
-        .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
     commands.spawn((
         Terminal::reattach(&mut meshes, &mut webview_mt, process_id),
@@ -238,7 +239,7 @@ fn on_process_kill(
     service: Option<Res<ServiceClient>>,
     mut process_list: ResMut<ServiceProcessList>,
     terminals: Query<(Entity, &ServiceProcessHandle, &ChildOf), With<Terminal>>,
-    tab_parent: Query<&ChildOf, With<Tab>>,
+    tab_parent: Query<&ChildOf, With<Stack>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };

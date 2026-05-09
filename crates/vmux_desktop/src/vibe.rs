@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::agent::{AgentProvider, AgentProviders, PreparedAgentLaunch};
 
 pub(crate) const VIBE_NEW_ID: &str = "vibe_new";
-pub(crate) const VIBE_NEW_TAB_ID: &str = "vibe_new_tab";
+pub(crate) const VIBE_NEW_STACK_ID: &str = "vibe_new_stack";
 
 pub(crate) struct VibePlugin;
 
@@ -41,8 +41,8 @@ impl Plugin for VibePlugin {
             prepare: prepare_launch,
         });
         providers.register(AgentProvider {
-            id: VIBE_NEW_TAB_ID,
-            name: "Vibe New Tab",
+            id: VIBE_NEW_STACK_ID,
+            name: "Vibe New Stack",
             shortcut: "",
             executable: "vibe",
             available: vibe_available,
@@ -262,8 +262,11 @@ mod tests {
 
         let providers = app.world().resource::<crate::agent::AgentProviders>();
         assert!(providers.contains(VIBE_NEW_ID));
-        assert!(providers.contains(VIBE_NEW_TAB_ID));
+        assert!(providers.contains(VIBE_NEW_STACK_ID));
         assert_eq!(providers.get(VIBE_NEW_ID).unwrap().name, "Vibe New");
-        assert_eq!(providers.get(VIBE_NEW_TAB_ID).unwrap().name, "Vibe New Tab");
+        assert_eq!(
+            providers.get(VIBE_NEW_STACK_ID).unwrap().name,
+            "Vibe New Stack"
+        );
     }
 }

@@ -38,7 +38,7 @@ tokio = { workspace = true }
 uuid = { workspace = true }
 vmux_service = { path = "../vmux_service" }
 vmux_process = { path = "../vmux_process" }
-vmux_session = { path = "../vmux_session" }
+vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_webview_app = { path = "../vmux_webview_app" }
 url = { workspace = true }

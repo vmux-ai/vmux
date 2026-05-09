@@ -4,8 +4,7 @@
     ),
     layout: (
         window: (
-            padding: 8.0,
-            padding_top: Some(28.0),
+            padding: 4.0,
         ),
         pane: (
             gap: 8.0,
@@ -33,15 +32,14 @@
         leader: (key: "b", ctrl: true),
         chord_timeout_ms: 1000,
         bindings: [
-            (command: "tab_next", binding: Direct((key: "Tab", ctrl: true))),
-            (command: "tab_previous", binding: Direct((key: "Tab", ctrl: true, shift: true))),
-            (command: "tab_new", binding: Direct((key: "t", super_key: true))),
+            (command: "stack_next", binding: Direct((key: "Tab", ctrl: true))),
+            (command: "stack_previous", binding: Direct((key: "Tab", ctrl: true, shift: true))),
             (command: "split_v", binding: Leader((key: "%"))),
             (command: "split_h", binding: Leader((key: "\""))),
             (command: "toggle_pane", binding: Leader((key: "o"))),
             (command: "close_pane", binding: Leader((key: "x"))),
-            (command: "tab_new", binding: Leader((key: "c"))),
-            (command: "tab_close", binding: Leader((key: "&"))),
+            (command: "stack_new", binding: Leader((key: "c"))),
+            (command: "stack_close", binding: Leader((key: "&"))),
             (command: "zoom_pane", binding: Leader((key: "z"))),
             (command: "select_pane_left", binding: Leader((key: "h"))),
             (command: "select_pane_down", binding: Leader((key: "j"))),

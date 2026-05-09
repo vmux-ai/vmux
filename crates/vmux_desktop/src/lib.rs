@@ -19,9 +19,9 @@ mod persistence;
 mod processes_monitor;
 pub mod profile;
 mod scene;
-mod sessions;
 mod settings;
 pub(crate) mod shortcut;
+mod spaces;
 mod terminal;
 mod themes;
 mod tray;
@@ -43,9 +43,9 @@ use {
     os_menu::OsMenuPlugin,
     persistence::PersistencePlugin,
     processes_monitor::ProcessesMonitorPlugin,
-    sessions::SessionsPlugin,
     settings::SettingsPlugin,
     shortcut::ShortcutPlugin,
+    spaces::SpacesPlugin,
     terminal::TerminalInputPlugin,
     vibe::VibePlugin,
     vmux_layout::{LayoutChromePlugin, profile::ProfilePlugin, scene::ScenePlugin},
@@ -117,7 +117,7 @@ impl Plugin for VmuxPlugin {
             ProcessesPlugin,
             CommandBarInputPlugin,
         ))
-        .add_plugins(SessionsPlugin)
+        .add_plugins(SpacesPlugin)
         .add_plugins(BrowserPlugin)
         .add_plugins((
             TerminalInputPlugin,
@@ -148,7 +148,7 @@ mod tests {
         let source = include_str!("lib.rs");
 
         assert!(source.contains("vmux_layout::"));
-        assert!(!source.contains(&["vmux_", "footer::FooterPlugin"].concat()));
+        assert!(!source.contains("vmux_layout::footer"));
         assert!(!source.contains(&["vmux_", "header::HeaderPlugin"].concat()));
         assert!(!source.contains(&["vmux_", "side_sheet::SideSheetPlugin"].concat()));
     }

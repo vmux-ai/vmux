@@ -1,4 +1,4 @@
 pub(crate) use vmux_layout::{
-    Header, HeaderState, LayoutPlugin, LayoutStartupSet, Open, PendingWebviewReveal,
-    SessionFilePresent, SideSheetState, pane, side_sheet, space, tab, window,
+    LayoutPlugin, LayoutStartupSet, Open, PendingWebviewReveal, SpaceFilePresent, pane, side_sheet,
+    stack, tab, window,
 };

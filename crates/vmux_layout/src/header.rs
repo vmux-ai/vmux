@@ -1,7 +1,6 @@
-use super::{HeaderState, Open};
+use super::Open;
 use crate::event::HEADER_HEIGHT_PX;
 use bevy::prelude::*;
-use vmux_command::{AppCommand, HeaderCommand, ReadAppCommands};
 
 #[derive(Component)]
 pub struct Header;
@@ -10,37 +9,10 @@ pub(crate) struct HeaderLayoutPlugin;
 
 impl Plugin for HeaderLayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, handle_header_toggle.in_set(ReadAppCommands))
-            .add_systems(
-                PostUpdate,
-                sync_header_visibility.before(bevy::ui::UiSystems::Layout),
-            );
-    }
-}
-
-fn handle_header_toggle(
-    mut reader: MessageReader<AppCommand>,
-    header_q: Query<(Entity, Has<Open>), With<Header>>,
-    state_q: Query<(Entity, Has<Open>), With<HeaderState>>,
-    mut commands: Commands,
-) {
-    for cmd in reader.read() {
-        if matches!(cmd, AppCommand::Header(HeaderCommand::Toggle)) {
-            for (entity, is_open) in &header_q {
-                if is_open {
-                    commands.entity(entity).remove::<Open>();
-                } else {
-                    commands.entity(entity).insert(Open);
-                }
-            }
-            for (entity, is_open) in &state_q {
-                if is_open {
-                    commands.entity(entity).remove::<Open>();
-                } else {
-                    commands.entity(entity).insert(Open);
-                }
-            }
-        }
+        app.add_systems(
+            PostUpdate,
+            sync_header_visibility.before(bevy::ui::UiSystems::Layout),
+        );
     }
 }
 

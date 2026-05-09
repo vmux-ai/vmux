@@ -2,7 +2,7 @@ use crate::{
     chrome::Loading,
     pane::Pane,
     settings::LayoutSettings,
-    tab::{Tab, active_tab_in_pane},
+    stack::{Stack, active_stack_in_pane},
     window::{VmuxWindow, WEBVIEW_Z_FOCUS_RING},
 };
 use bevy::{
@@ -84,7 +84,7 @@ fn spawn_focus_ring(
 }
 
 fn sync_focus_ring_to_active_pane(
-    focus: Res<crate::tab::FocusedTab>,
+    focus: Res<crate::stack::FocusedStack>,
     pane_layout: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     glass: Single<(&ComputedNode, &UiGlobalTransform, &Transform), With<VmuxWindow>>,
     settings: Res<LayoutSettings>,
@@ -99,8 +99,8 @@ fn sync_focus_ring_to_active_pane(
     >,
     mut ring_materials: ResMut<Assets<FocusRingMaterial>>,
     pane_children: Query<&Children, With<Pane>>,
-    tab_children: Query<&Children, With<Tab>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_children: Query<&Children, With<Stack>>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     loading_q: Query<(), With<Loading>>,
 ) {
     let Ok((mut tf, mat_h, mut visibility)) = ring_q.single_mut() else {
@@ -159,8 +159,8 @@ fn sync_focus_ring_to_active_pane(
     let w_i = inner_logical.x.max(1.0e-6);
     let h_i = inner_logical.y.max(1.0e-6);
 
-    let active_tab = active_tab_in_pane(active_entity, &pane_children, &tab_ts);
-    let is_loading = active_tab
+    let active_stack = active_stack_in_pane(active_entity, &pane_children, &tab_ts);
+    let is_loading = active_stack
         .and_then(|tab| tab_children.get(tab).ok())
         .map(|children| children.iter().any(|e| loading_q.contains(e)))
         .unwrap_or(false);

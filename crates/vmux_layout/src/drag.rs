@@ -2,7 +2,7 @@ use crate::event::SideSheetDragCommand;
 use bevy::prelude::*;
 
 use crate::pane::Pane;
-use crate::tab::Tab;
+use crate::stack::Stack;
 
 pub fn handle_drag_commands(
     mut commands: Commands,
@@ -11,7 +11,7 @@ pub fn handle_drag_commands(
     for event in events.read() {
         let event = event.clone();
         commands.queue(move |world: &mut World| match event {
-            SideSheetDragCommand::MoveTab {
+            SideSheetDragCommand::MoveStack {
                 from_pane,
                 from_index,
                 to_pane,
@@ -97,7 +97,7 @@ pub fn move_tab_impl(
         return;
     };
 
-    if !world.get_entity(tab).is_ok_and(|e| e.contains::<Tab>()) {
+    if !world.get_entity(tab).is_ok_and(|e| e.contains::<Stack>()) {
         return;
     }
 
@@ -116,7 +116,7 @@ mod tests {
     fn spawn_pane_with_tabs(world: &mut World, n: usize) -> (Entity, Vec<Entity>) {
         let pane = world.spawn(Pane).id();
         let tabs: Vec<Entity> = (0..n)
-            .map(|_| world.spawn((Tab::default(), ChildOf(pane))).id())
+            .map(|_| world.spawn((Stack::default(), ChildOf(pane))).id())
             .collect();
         (pane, tabs)
     }

@@ -9,22 +9,26 @@ use std::path::PathBuf;
 use crate::{
     browser::Browser,
     layout::{
-        Header, HeaderState, LayoutStartupSet, Open, SessionFilePresent, SideSheetState,
+        LayoutStartupSet, Open, SpaceFilePresent,
         pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
-        side_sheet::{SideSheet, SideSheetPosition},
-        space::Space,
+        stack::Stack,
         tab::Tab,
         window::Main,
     },
     profile::Profile,
-    sessions::{ActiveSession, SessionsView},
     settings::AppSettings,
+    spaces::{ActiveSpace, SpacesView},
     terminal::Terminal,
 };
 use vmux_core::PageMetadata;
 use vmux_layout::event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
 use vmux_service::protocol::ProcessId;
-use vmux_session::event::SESSIONS_WEBVIEW_URL;
+use vmux_space::event::SPACES_WEBVIEW_URL;
+use vmux_space::migration::migrate_legacy_session_files;
+
+fn run_legacy_migration() {
+    migrate_legacy_session_files(crate::profile::shared_data_dir());
+}
 
 pub(crate) struct PersistencePlugin;
 
@@ -37,45 +41,32 @@ impl Plugin for PersistencePlugin {
         })
         .add_observer(save_on_default_event)
         .add_observer(load_on_default_event)
+        .add_systems(Startup, run_legacy_migration.before(load_space_on_startup))
         .add_systems(
             Startup,
-            load_session_on_startup.in_set(LayoutStartupSet::Persistence),
+            load_space_on_startup.in_set(LayoutStartupSet::Persistence),
         )
-        .add_systems(
-            Startup,
-            (
-                rebuild_session_views,
-                ensure_layout_state_entities,
-                apply_persisted_layout_state,
-            )
-                .chain()
-                .in_set(LayoutStartupSet::Post),
-        )
-        .add_observer(mark_session_views_need_rebuild)
+        .add_systems(Startup, rebuild_space_views.in_set(LayoutStartupSet::Post))
+        .add_observer(mark_space_views_need_rebuild)
         .add_systems(
             Update,
-            (
-                rebuild_session_views,
-                ensure_layout_state_entities,
-                apply_persisted_layout_state,
-                clear_session_views_need_rebuild,
-            )
+            (rebuild_space_views, clear_space_views_need_rebuild)
                 .chain()
-                .run_if(resource_exists::<SessionViewsNeedRebuild>),
+                .run_if(resource_exists::<SpaceViewsNeedRebuild>),
         )
         .add_systems(Update, (mark_dirty_on_change, auto_save_system).chain());
     }
 }
 
 #[derive(Resource)]
-struct SessionViewsNeedRebuild;
+struct SpaceViewsNeedRebuild;
 
-fn mark_session_views_need_rebuild(_trigger: On<Loaded>, mut commands: Commands) {
-    commands.insert_resource(SessionViewsNeedRebuild);
+fn mark_space_views_need_rebuild(_trigger: On<Loaded>, mut commands: Commands) {
+    commands.insert_resource(SpaceViewsNeedRebuild);
 }
 
-fn clear_session_views_need_rebuild(mut commands: Commands) {
-    commands.remove_resource::<SessionViewsNeedRebuild>();
+fn clear_space_views_need_rebuild(mut commands: Commands) {
+    commands.remove_resource::<SpaceViewsNeedRebuild>();
 }
 
 #[derive(Resource)]
@@ -85,42 +76,29 @@ struct AutoSave {
     dirty: bool,
 }
 
-pub(crate) fn session_path(active: &ActiveSession) -> PathBuf {
+pub(crate) fn space_path(active: &ActiveSpace) -> PathBuf {
     active.layout_path()
 }
 
 fn mark_dirty_on_change(
     mut auto_save: ResMut<AutoSave>,
-    added_tabs: Query<(), Added<Tab>>,
+    added_stacks: Query<(), Added<Stack>>,
     added_panes: Query<(), Added<Pane>>,
-    added_spaces: Query<(), Added<Space>>,
-    removed_tabs: RemovedComponents<Tab>,
+    added_tabs: Query<(), Added<Tab>>,
+    removed_stacks: RemovedComponents<Stack>,
     removed_panes: RemovedComponents<Pane>,
-    changed_meta: Query<(), (Changed<PageMetadata>, With<Tab>)>,
+    changed_meta: Query<(), (Changed<PageMetadata>, With<Stack>)>,
     changed_size: Query<(), Changed<PaneSize>>,
     changed_children: Query<(), Changed<Children>>,
-    open_on_state: Query<
-        (),
-        (
-            Or<(With<HeaderState>, With<SideSheetState>)>,
-            Or<(Added<Open>, Changed<Open>)>,
-        ),
-    >,
-    mut removed_open: RemovedComponents<Open>,
-    state_entities: Query<Entity, Or<(With<HeaderState>, With<SideSheetState>)>>,
 ) {
-    let open_state_changed =
-        !open_on_state.is_empty() || removed_open.read().any(|e| state_entities.contains(e));
-
-    if !added_tabs.is_empty()
+    if !added_stacks.is_empty()
         || !added_panes.is_empty()
-        || !added_spaces.is_empty()
-        || !removed_tabs.is_empty()
+        || !added_tabs.is_empty()
+        || !removed_stacks.is_empty()
         || !removed_panes.is_empty()
         || !changed_meta.is_empty()
         || !changed_size.is_empty()
         || !changed_children.is_empty()
-        || open_state_changed
     {
         auto_save.dirty = true;
         auto_save.debounce.reset();
@@ -130,7 +108,7 @@ fn mark_dirty_on_change(
 fn auto_save_system(
     time: Res<Time>,
     mut auto_save: ResMut<AutoSave>,
-    active: Res<ActiveSession>,
+    active: Res<ActiveSpace>,
     mut commands: Commands,
 ) {
     auto_save.periodic.tick(time.delta());
@@ -138,17 +116,17 @@ fn auto_save_system(
     if auto_save.dirty {
         auto_save.debounce.tick(time.delta());
         if auto_save.debounce.is_finished() {
-            save_session_to_path(&mut commands, session_path(&active));
+            save_space_to_path(&mut commands, space_path(&active));
             auto_save.dirty = false;
         }
     }
 
     if auto_save.periodic.just_finished() {
-        save_session_to_path(&mut commands, session_path(&active));
+        save_space_to_path(&mut commands, space_path(&active));
     }
 }
 
-pub(crate) fn save_session_to_path(commands: &mut Commands, path: PathBuf) {
+pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -160,15 +138,13 @@ pub(crate) fn save_session_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<Save>()
         .allow::<ChildOf>()
         .allow::<Children>()
+        .allow::<Stack>()
         .allow::<Tab>()
-        .allow::<Space>()
         .allow::<Pane>()
         .allow::<PaneSplit>()
         .allow::<PaneSize>()
         .allow::<Profile>()
         .allow::<Open>()
-        .allow::<HeaderState>()
-        .allow::<SideSheetState>()
         .allow::<PageMetadata>()
         .allow::<vmux_history::CreatedAt>()
         .allow::<vmux_history::LastActivatedAt>()
@@ -177,10 +153,10 @@ pub(crate) fn save_session_to_path(commands: &mut Commands, path: PathBuf) {
 }
 
 /// Check if a session file exists and trigger load on startup.
-pub(crate) fn load_session_on_startup(active: Res<ActiveSession>, mut commands: Commands) {
-    let path = session_path(&active);
+pub(crate) fn load_space_on_startup(active: Res<ActiveSpace>, mut commands: Commands) {
+    let path = space_path(&active);
     let exists = path.exists();
-    commands.insert_resource(SessionFilePresent(exists));
+    commands.insert_resource(SpaceFilePresent(exists));
     if exists {
         info!("Loading session from {:?}", path);
         commands.trigger_load(LoadWorld::default_from_file(path));
@@ -190,16 +166,16 @@ pub(crate) fn load_session_on_startup(active: Res<ActiveSession>, mut commands: 
 /// Rebuild view components (Node, Transform, Browser, etc.) for entities
 /// that were loaded from session.ron. Loaded entities only have model
 /// components; this system adds the visual layer.
-pub(crate) fn rebuild_session_views(
+pub(crate) fn rebuild_space_views(
     main_q: Query<Entity, With<Main>>,
-    spaces_need_view: Query<Entity, (With<Space>, Without<Node>)>,
+    tabs_need_view: Query<Entity, (With<Tab>, Without<Node>)>,
     splits_need_view: Query<(Entity, &PaneSplit), Without<Node>>,
     panes_need_view: Query<Entity, (With<Pane>, Without<PaneSplit>, Without<Node>)>,
-    tabs_need_view: Query<(Entity, &PageMetadata), (With<Tab>, Without<Node>)>,
+    stacks_need_view: Query<(Entity, &PageMetadata), (With<Stack>, Without<Node>)>,
     pane_sizes: Query<&PaneSize>,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
-    tab_children_q: Query<&Children, With<Tab>>,
+    tab_children_q: Query<&Children, With<Stack>>,
     browser_q: Query<(), With<Browser>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     settings: Res<AppSettings>,
@@ -207,10 +183,10 @@ pub(crate) fn rebuild_session_views(
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
-    if spaces_need_view.is_empty()
+    if tabs_need_view.is_empty()
         && splits_need_view.is_empty()
         && panes_need_view.is_empty()
-        && tabs_need_view.is_empty()
+        && stacks_need_view.is_empty()
     {
         return;
     }
@@ -218,9 +194,8 @@ pub(crate) fn rebuild_session_views(
     let Ok(main) = main_q.single() else { return };
     let pw = *primary_window;
 
-    // -- Space: add layout node, re-parent to Main container --
-    for space in &spaces_need_view {
-        commands.entity(space).insert((
+    for tab_e in &tabs_need_view {
+        commands.entity(tab_e).insert((
             Transform::default(),
             GlobalTransform::default(),
             Node {
@@ -277,9 +252,9 @@ pub(crate) fn rebuild_session_views(
         ));
     }
 
-    // -- Tab: add absolute-fill node + spawn Browser child --
+    // -- Stack: add absolute-fill node + spawn Browser child --
     let mut despawned = std::collections::HashSet::new();
-    for (entity, meta) in &tabs_need_view {
+    for (entity, meta) in &stacks_need_view {
         // Discard empty tabs (no URL, no content) that were saved mid-session
         if meta.url.is_empty() {
             despawned.insert(entity);
@@ -341,10 +316,10 @@ pub(crate) fn rebuild_session_views(
             } else {
                 if meta
                     .url
-                    .starts_with(SESSIONS_WEBVIEW_URL.trim_end_matches('/'))
+                    .starts_with(SPACES_WEBVIEW_URL.trim_end_matches('/'))
                 {
                     commands.spawn((
-                        SessionsView::new(&mut meshes, &mut webview_mt),
+                        SpacesView::new(&mut meshes, &mut webview_mt),
                         ChildOf(entity),
                     ));
                 } else {
@@ -368,7 +343,7 @@ pub(crate) fn rebuild_session_views(
         .iter()
         .map(|(e, _)| e)
         .chain(panes_need_view.iter())
-        .chain(tabs_need_view.iter().map(|(e, _)| e))
+        .chain(stacks_need_view.iter().map(|(e, _)| e))
     {
         let Ok(co) = child_of_q.get(entity) else {
             continue;
@@ -391,53 +366,12 @@ pub(crate) fn rebuild_session_views(
     }
 
     info!(
-        "Rebuilt session views: {} spaces, {} splits, {} panes, {} tabs",
-        spaces_need_view.iter().count(),
+        "Rebuilt session views: {} tabs, {} splits, {} panes, {} stacks",
+        tabs_need_view.iter().count(),
         splits_need_view.iter().count(),
         panes_need_view.iter().count(),
-        tabs_need_view.iter().count(),
+        stacks_need_view.iter().count(),
     );
-}
-
-/// Spawn persisted layout-state entities if they don't already exist
-/// (handles first launch and migration from older sessions).
-pub(crate) fn ensure_layout_state_entities(
-    header_state_q: Query<(), With<HeaderState>>,
-    side_sheet_state_q: Query<(), With<SideSheetState>>,
-    mut commands: Commands,
-) {
-    if header_state_q.is_empty() {
-        commands.spawn(HeaderState);
-    }
-    if side_sheet_state_q.is_empty() {
-        commands.spawn(SideSheetState);
-    }
-}
-
-/// Apply persisted open state from state entities to UI entities after load.
-pub(crate) fn apply_persisted_layout_state(
-    header_state_q: Query<Has<Open>, With<HeaderState>>,
-    side_sheet_state_q: Query<Has<Open>, With<SideSheetState>>,
-    header_q: Query<Entity, With<Header>>,
-    side_sheet_q: Query<(Entity, &SideSheetPosition), With<SideSheet>>,
-    mut commands: Commands,
-) {
-    for is_open in &header_state_q {
-        if is_open {
-            for entity in &header_q {
-                commands.entity(entity).insert(Open);
-            }
-        }
-    }
-    for is_open in &side_sheet_state_q {
-        if is_open {
-            for (entity, pos) in &side_sheet_q {
-                if *pos == SideSheetPosition::Left {
-                    commands.entity(entity).insert(Open);
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -517,14 +451,11 @@ mod tests {
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.add_systems(Update, rebuild_session_views);
+        app.add_systems(Update, rebuild_space_views);
 
         let main = app.world_mut().spawn(Main).id();
         app.world_mut().spawn(PrimaryWindow);
-        let space = app
-            .world_mut()
-            .spawn((Space::default(), ChildOf(main)))
-            .id();
+        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let saved_url = format!(
             "{}{}",
@@ -534,11 +465,12 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Stack::default(),
                 PageMetadata {
                     title: "Terminal".to_string(),
                     url: saved_url.clone(),
                     favicon_url: String::new(),
+                    bg_color: None,
                 },
                 ChildOf(pane),
             ))
@@ -562,8 +494,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.insert_resource(test_settings());
-        app.insert_resource(ActiveSession {
-            record: vmux_session::model::default_session_record(),
+        app.insert_resource(ActiveSpace {
+            record: vmux_space::model::default_space_record(),
         });
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
@@ -573,19 +505,17 @@ mod tests {
         app.world_mut().spawn(PrimaryWindow);
         app.update();
 
-        let space = app
-            .world_mut()
-            .spawn((Space::default(), ChildOf(main)))
-            .id();
+        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Stack::default(),
                 PageMetadata {
                     title: "Example".to_string(),
                     url: "https://example.com".to_string(),
                     favicon_url: String::new(),
+                    bg_color: None,
                 },
                 ChildOf(pane),
             ))

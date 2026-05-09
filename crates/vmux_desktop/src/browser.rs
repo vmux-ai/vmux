@@ -3,13 +3,13 @@ use crate::{
     command_bar::PendingCommandBarReveal,
     layout::{
         PendingWebviewReveal,
-        pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_tab_in_pane},
+        pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_stack_in_pane},
         side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
-        space::Space,
-        tab::{
-            CloseConfirmed, PendingTabClose, Tab, active_tab_in_pane, collect_leaf_panes,
-            focused_tab, tab_bundle,
+        stack::{
+            CloseConfirmed, PendingStackClose, Stack, active_stack_in_pane, collect_leaf_panes,
+            focused_stack, stack_bundle,
         },
+        tab::Tab,
         window::{
             Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL,
             WEBVIEW_Z_SIDE_SHEET,
@@ -28,14 +28,14 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
 use vmux_core::PageMetadata;
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
-use vmux_layout::event::SideSheetCommandEvent;
+use vmux_layout::event::{PageBgColorEvent, SideSheetCommandEvent};
 pub(crate) use vmux_layout::{Browser, Loading};
 use vmux_layout::{
-    Footer, Header, LayoutChrome, NavigationState, Open,
+    Header, LayoutChrome, NavigationState, Open,
     event::{
-        FOOTER_HEIGHT_PX, HEADER_HEIGHT_PX, HeaderCommandEvent, LAYOUT_STATE_EVENT,
-        LayoutStateEvent, PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent,
-        TABS_EVENT, TabNode, TabRow, TabsHostEvent, effective_titlebar_height,
+        HEADER_HEIGHT_PX, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent,
+        PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, TABS_EVENT, TabNode,
+        TabRow, TabsHostEvent, effective_titlebar_height,
     },
 };
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
@@ -58,11 +58,13 @@ impl Plugin for BrowserPlugin {
             })
             .add_plugins(BinJsEmitEventPlugin::<HeaderCommandEvent>::default())
             .add_plugins(BinJsEmitEventPlugin::<SideSheetCommandEvent>::default())
+            .add_plugins(JsEmitEventPlugin::<PageBgColorEvent>::default())
             .add_observer(on_webview_ready_send_theme)
             .add_observer(on_header_command_emit)
             .add_observer(on_side_sheet_command_emit)
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
+            .add_observer(on_page_bg_color_emit)
             .add_systems(
                 Update,
                 (
@@ -70,6 +72,7 @@ impl Plugin for BrowserPlugin {
                     vmux_layout::apply_chrome_state_from_cef,
                     drain_loading_state,
                     spawn_popup_tabs,
+                    inject_bg_color_script,
                 ),
             )
             .add_systems(
@@ -86,7 +89,7 @@ impl Plugin for BrowserPlugin {
                     push_pane_tree_emit,
                 )
                     .after(vmux_layout::apply_chrome_state_from_cef)
-                    .after(crate::layout::tab::ComputeFocusSet),
+                    .after(crate::layout::stack::ComputeFocusSet),
             )
             .add_systems(
                 PostUpdate,
@@ -123,7 +126,7 @@ fn on_webview_ready_send_theme(
 
 fn sync_keyboard_target(
     mode: Res<crate::scene::InteractionMode>,
-    focus: Res<crate::layout::tab::FocusedTab>,
+    focus: Res<crate::layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
@@ -148,8 +151,8 @@ fn sync_keyboard_target(
             return;
         }
     }
-    let active_tab_opt = focus.tab;
-    let Some(active_tab_entity) = active_tab_opt else {
+    let active_stack_opt = focus.stack;
+    let Some(active_stack_entity) = active_stack_opt else {
         return;
     };
     for (browser_e, has_kb) in &content_q {
@@ -160,7 +163,7 @@ fn sync_keyboard_target(
         let in_active = child_of_q
             .get(browser_e)
             .ok()
-            .map(|co| co.get() == active_tab_entity)
+            .map(|co| co.get() == active_stack_entity)
             .unwrap_or(false);
 
         if in_active {
@@ -185,7 +188,6 @@ fn sync_children_to_ui(
             &ChildOf,
             &mut WebviewSize,
             Option<&Header>,
-            Option<&Footer>,
             Option<&SideSheet>,
             Option<&Modal>,
             Option<&Visibility>,
@@ -198,8 +200,8 @@ fn sync_children_to_ui(
     child_of_q: Query<&ChildOf>,
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
-    new_tab_ctx: Res<crate::command_bar::NewTabContext>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    new_stack_ctx: Res<crate::command_bar::NewStackContext>,
     glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<VmuxWindow>>,
 ) {
     let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
@@ -213,7 +215,6 @@ fn sync_children_to_ui(
         child_of,
         mut webview_size,
         status,
-        footer,
         side_sheet,
         modal,
         visibility,
@@ -246,30 +247,26 @@ fn sync_children_to_ui(
             continue;
         }
 
-        // Chrome browsers (Header / Footer / SideSheet / Modal) are not
-        // tab content even though their parent isn't `glass_entity`
-        // (Footer's parent is now `MainColumn`, Header's too). Treat them
-        // like Header/SideSheet for active/inactive logic.
-        let is_chrome =
-            status.is_some() || footer.is_some() || side_sheet.is_some() || modal.is_some();
+        let is_chrome = status.is_some() || side_sheet.is_some() || modal.is_some();
 
         // Check if this browser's parent tab is the active tab in its pane
-        let is_active_tab = if parent != glass_entity && !is_chrome {
-            active_tab_in_pane(pane_entity, &pane_children, &tab_ts) == Some(parent)
+        let is_active_stack = if parent != glass_entity && !is_chrome {
+            active_stack_in_pane(pane_entity, &pane_children, &tab_ts) == Some(parent)
         } else {
             true
         };
 
         // Keep rendering the previous tab behind while a new empty tab
         // (without CEF content) is pending in the command bar flow.
-        let is_previous_tab = new_tab_ctx.tab.is_some() && new_tab_ctx.previous_tab == Some(parent);
+        let is_previous_stack =
+            new_stack_ctx.stack.is_some() && new_stack_ctx.previous_stack == Some(parent);
 
-        let is_inactive_tab =
-            parent != glass_entity && !is_chrome && !is_active_tab && !is_previous_tab;
+        let is_inactive_stack =
+            parent != glass_entity && !is_chrome && !is_active_stack && !is_previous_stack;
 
         let sx = size_px.x / glass_size_px.x;
         let sy = size_px.y / glass_size_px.y;
-        let new_scale = if is_inactive_tab {
+        let new_scale = if is_inactive_stack {
             Vec3::splat(1e-6)
         } else {
             Vec3::new(sx, sy, 1.0)
@@ -277,7 +274,7 @@ fn sync_children_to_ui(
         if parent != glass_entity && !is_chrome && (tf.scale - new_scale).length() > 0.01 {
             info!(
                 "[ui] browser child_of={:?} scale {:?} -> {:?} (inactive={})",
-                parent, tf.scale, new_scale, is_inactive_tab
+                parent, tf.scale, new_scale, is_inactive_stack
             );
         }
         tf.scale = new_scale;
@@ -290,12 +287,12 @@ fn sync_children_to_ui(
         let ty = -delta_px.y / glass_size_px.y;
         let z = if modal.is_some() {
             WEBVIEW_Z_MODAL
-        } else if status.is_some() || footer.is_some() {
+        } else if status.is_some() {
             WEBVIEW_Z_HEADER
         } else if side_sheet.is_some() {
             WEBVIEW_Z_SIDE_SHEET
         } else if parent != glass_entity {
-            if is_active_tab {
+            if is_active_stack {
                 WEBVIEW_Z_MAIN
             } else {
                 WEBVIEW_Z_MAIN - 0.01
@@ -419,11 +416,11 @@ fn sync_osr_webview_focus(
         With<WebviewSource>,
     >,
     primary_window: Single<&Window, With<PrimaryWindow>>,
-    focus: Res<crate::layout::tab::FocusedTab>,
-    new_tab_ctx: Res<crate::command_bar::NewTabContext>,
+    focus: Res<crate::layout::stack::FocusedStack>,
+    new_stack_ctx: Res<crate::command_bar::NewStackContext>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children_q: Query<&Children, With<Pane>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     child_of_q: Query<&ChildOf>,
 
     mut ready: Local<Vec<Entity>>,
@@ -466,14 +463,14 @@ fn sync_osr_webview_focus(
     ready.sort_by_key(|e| e.to_bits());
     let window_focused = primary_window.focused;
 
-    let active_tab_opt = focus.tab;
-    let active_tab = active_tab_opt.and_then(|tab| {
+    let active_stack_opt = focus.stack;
+    let active_stack = active_stack_opt.and_then(|tab| {
         ready
             .iter()
             .copied()
             .find(|&b| child_of_q.get(b).ok().map(|co| co.get()) == Some(tab))
     });
-    let active = choose_osr_active_webview(modal_keyboard_target, active_tab, ready[0]);
+    let active = choose_osr_active_webview(modal_keyboard_target, active_stack, ready[0]);
 
     if !window_focused {
         if last_active.is_some() || *last_ready_set != *ready {
@@ -495,27 +492,29 @@ fn sync_osr_webview_focus(
         last_ready_set.clone_from(&ready);
     }
     for &e in ready.iter() {
-        let mut parent_is_tab = false;
+        let mut parent_is_stack = false;
         let mut pane_is_leaf = false;
         let mut is_active = false;
         let mut is_prev = false;
 
         if let Ok(parent) = child_of_q.get(e).map(|co| co.get()) {
-            parent_is_tab = tab_ts.get(parent).is_ok();
-            if parent_is_tab && let Ok(pane) = child_of_q.get(parent).map(|co| co.get()) {
+            parent_is_stack = tab_ts.get(parent).is_ok();
+            if parent_is_stack && let Ok(pane) = child_of_q.get(parent).map(|co| co.get()) {
                 pane_is_leaf = leaf_panes.contains(pane);
                 if pane_is_leaf {
-                    is_active = active_tab_in_pane(pane, &pane_children_q, &tab_ts) == Some(parent);
+                    is_active =
+                        active_stack_in_pane(pane, &pane_children_q, &tab_ts) == Some(parent);
                     // Keep previous tab's webview visible while an empty new tab is
                     // pending (user is picking content in the command bar).
-                    is_prev = new_tab_ctx.tab.is_some() && new_tab_ctx.previous_tab == Some(parent);
+                    is_prev = new_stack_ctx.stack.is_some()
+                        && new_stack_ctx.previous_stack == Some(parent);
                 }
             }
         }
 
         if should_show_osr_webview(
             window_focused,
-            parent_is_tab,
+            parent_is_stack,
             pane_is_leaf,
             is_active,
             is_prev,
@@ -547,23 +546,23 @@ fn webview_osr_should_run(
 
 fn choose_osr_active_webview(
     modal_keyboard_target: Option<Entity>,
-    active_tab: Option<Entity>,
+    active_stack: Option<Entity>,
     fallback: Entity,
 ) -> Entity {
-    modal_keyboard_target.or(active_tab).unwrap_or(fallback)
+    modal_keyboard_target.or(active_stack).unwrap_or(fallback)
 }
 
 fn should_show_osr_webview(
     _window_focused: bool,
-    parent_is_tab: bool,
+    parent_is_stack: bool,
     pane_is_leaf: bool,
-    tab_is_active: bool,
-    tab_is_previous_new_tab: bool,
+    stack_is_active: bool,
+    stack_is_previous_new_stack: bool,
 ) -> bool {
-    if !parent_is_tab || !pane_is_leaf {
+    if !parent_is_stack || !pane_is_leaf {
         return true;
     }
-    tab_is_active || tab_is_previous_new_tab
+    stack_is_active || stack_is_previous_new_stack
 }
 
 fn drain_loading_state(receiver: Res<WebviewLoadingStateReceiver>, mut commands: Commands) {
@@ -586,7 +585,7 @@ fn drain_loading_state(receiver: Res<WebviewLoadingStateReceiver>, mut commands:
 fn spawn_popup_tabs(
     popup_rx: Res<WebviewPopupReceiver>,
     child_of_q: Query<&ChildOf>,
-    tab_q: Query<(), With<Tab>>,
+    tab_q: Query<(), With<Stack>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -610,12 +609,12 @@ fn spawn_popup_tabs(
         if !leaf_panes.contains(pane) {
             continue;
         }
-        let new_tab = commands
-            .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+        let new_stack = commands
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
         commands.spawn((
             Browser::new(&mut meshes, &mut webview_mt, &ev.target_url),
-            ChildOf(new_tab),
+            ChildOf(new_stack),
         ));
     }
 }
@@ -634,7 +633,6 @@ fn push_layout_state_emit(
     browsers: NonSend<Browsers>,
     chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
     header_q: Query<Has<Open>, With<Header>>,
-    footer_q: Query<Has<Open>, With<Footer>>,
     side_sheet_q: Query<(&SideSheetPosition, Has<Open>), With<SideSheet>>,
     side_sheet_width: Res<SideSheetWidth>,
     settings: Res<AppSettings>,
@@ -649,12 +647,10 @@ fn push_layout_state_emit(
 
     let payload = LayoutStateEvent {
         header_open: header_q.iter().any(|is_open| is_open),
-        footer_open: footer_q.iter().any(|is_open| is_open),
         side_sheet_open: side_sheet_q
             .iter()
             .any(|(pos, is_open)| *pos == SideSheetPosition::Left && is_open),
         header_height: HEADER_HEIGHT_PX,
-        footer_height: FOOTER_HEIGHT_PX,
         side_sheet_width: side_sheet_width.0,
         pane_gap: settings.layout.pane.gap,
         titlebar_height: effective_titlebar_height(settings.layout.window.pad_top()),
@@ -671,15 +667,15 @@ fn push_layout_state_emit(
     *last = body;
 }
 
-fn should_emit_new_tab_placeholder(
-    pending_tab: Option<Entity>,
-    active_tab: Option<Entity>,
+fn should_emit_new_stack_placeholder(
+    pending_stack: Option<Entity>,
+    active_stack: Option<Entity>,
     rows: &[TabRow],
 ) -> bool {
-    let Some(pending_tab) = pending_tab else {
+    let Some(pending_stack) = pending_stack else {
         return false;
     };
-    if active_tab != Some(pending_tab) {
+    if active_stack != Some(pending_stack) {
         return false;
     }
     !rows
@@ -696,9 +692,9 @@ fn push_tabs_host_emit(
     browsers: NonSend<Browsers>,
     chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
     browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), With<Browser>>,
-    tab_q: Query<(), With<Tab>>,
-    new_tab_ctx: Res<crate::command_bar::NewTabContext>,
-    focus: Res<crate::layout::tab::FocusedTab>,
+    tab_q: Query<(), With<Stack>>,
+    new_stack_ctx: Res<crate::command_bar::NewStackContext>,
+    focus: Res<crate::layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
     mut last: Local<String>,
 ) {
@@ -709,24 +705,24 @@ fn push_tabs_host_emit(
         return;
     }
     let active_pane = focus.pane;
-    let active_tab_opt = focus.tab;
-    if let Some(active_tab_entity) = active_tab_opt
-        && !tab_q.contains(active_tab_entity)
+    let active_stack_opt = focus.stack;
+    if let Some(active_stack_entity) = active_stack_opt
+        && !tab_q.contains(active_stack_entity)
     {
         return;
     }
     let mut rows: Vec<TabRow> = Vec::new();
     let mut can_go_back = false;
     let mut can_go_forward = false;
-    let _ = active_tab_opt.is_none();
-    if let Some(active_tab_entity) = active_tab_opt {
+    let _ = active_stack_opt.is_none();
+    if let Some(active_stack_entity) = active_stack_opt {
         for (meta, child_of, nav_state) in &browser_q {
-            let tab_entity = child_of.get();
-            let tab_pane = child_of_q.get(tab_entity).ok().map(|co| co.get());
-            if tab_pane != active_pane {
+            let stack_entity = child_of.get();
+            let stack_pane = child_of_q.get(stack_entity).ok().map(|co| co.get());
+            if stack_pane != active_pane {
                 continue;
             }
-            let is_active = tab_entity == active_tab_entity;
+            let is_active = stack_entity == active_stack_entity;
             if is_active && let Some(ns) = nav_state {
                 can_go_back = ns.can_go_back;
                 can_go_forward = ns.can_go_forward;
@@ -736,21 +732,21 @@ fn push_tabs_host_emit(
                 url: meta.url.clone(),
                 favicon_url: meta.favicon_url.clone(),
                 is_active,
+                bg_color: meta.bg_color.clone(),
             });
         }
     }
-    // If the active tab is a new-tab (pending content selection),
-    // replace any pre-spawned browser row with a "New tab" placeholder.
-    if should_emit_new_tab_placeholder(new_tab_ctx.tab, active_tab_opt, &rows) {
+    if should_emit_new_stack_placeholder(new_stack_ctx.stack, active_stack_opt, &rows) {
         rows.retain(|r| !r.is_active);
         rows.push(TabRow {
-            title: "New Tab".to_string(),
+            title: "New Stack".to_string(),
             url: String::new(),
             favicon_url: String::new(),
             is_active: true,
+            bg_color: None,
         });
     }
-    if active_tab_opt.is_some() && rows.is_empty() {
+    if active_stack_opt.is_some() && rows.is_empty() {
         return;
     }
     let payload = TabsHostEvent {
@@ -775,15 +771,15 @@ fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
-    new_tab_ctx: Res<crate::command_bar::NewTabContext>,
-    focus: Res<crate::layout::tab::FocusedTab>,
-    space_q: Query<(), With<Space>>,
+    new_stack_ctx: Res<crate::command_bar::NewStackContext>,
+    focus: Res<crate::layout::stack::FocusedStack>,
+    tab_q: Query<(), With<Tab>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
-    tab_q: Query<Entity, With<Tab>>,
-    tab_children: Query<&Children>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    stack_q: Query<Entity, With<Stack>>,
+    stack_children: Query<&Children>,
     browser_meta: Query<(&PageMetadata, Has<Loading>), With<Browser>>,
     mut last: Local<String>,
 ) {
@@ -796,74 +792,76 @@ fn push_pane_tree_emit(
 
     let active_pane = focus.pane;
 
-    let Some(space) = focus.space else {
+    let Some(tab_e) = focus.tab else {
         return;
     };
-    if !space_q.contains(space) {
+    if !tab_q.contains(tab_e) {
         return;
     }
-    let mut space_leaf_panes = Vec::new();
-    collect_leaf_panes(space, &all_children, &leaf_pane_q, &mut space_leaf_panes);
+    let mut tab_leaf_panes = Vec::new();
+    collect_leaf_panes(tab_e, &all_children, &leaf_pane_q, &mut tab_leaf_panes);
 
     let mut panes: Vec<PaneNode> = Vec::new();
-    for &pane_entity in &space_leaf_panes {
+    for &pane_entity in &tab_leaf_panes {
         let is_active = active_pane == Some(pane_entity);
-        let active_tab = active_tab_in_pane(pane_entity, &pane_children, &tab_ts);
-        let mut tabs: Vec<TabNode> = Vec::new();
-        let mut tab_index: usize = 0;
+        let active_stack = active_stack_in_pane(pane_entity, &pane_children, &stack_ts);
+        let mut stacks: Vec<TabNode> = Vec::new();
+        let mut stack_index: usize = 0;
         if let Ok(children) = pane_children.get(pane_entity) {
             for child in children.iter() {
-                if !tab_q.contains(child) {
+                if !stack_q.contains(child) {
                     continue;
                 }
-                let tab_is_active = active_tab == Some(child);
+                let stack_is_active = active_stack == Some(child);
                 let mut found_browser = false;
-                if let Ok(tab_kids) = tab_children.get(child) {
-                    for browser_e in tab_kids.iter() {
+                if let Ok(stack_kids) = stack_children.get(child) {
+                    for browser_e in stack_kids.iter() {
                         if let Ok((meta, loading)) = browser_meta.get(browser_e) {
-                            let is_new_tab = new_tab_ctx.tab == Some(child)
+                            let is_new_stack = new_stack_ctx.stack == Some(child)
                                 && (meta.url.is_empty() || meta.url == "about:blank");
-                            tabs.push(TabNode {
-                                title: if is_new_tab {
-                                    "New Tab".to_string()
+                            stacks.push(TabNode {
+                                title: if is_new_stack {
+                                    "New Stack".to_string()
                                 } else {
                                     meta.title.clone()
                                 },
-                                url: if is_new_tab {
+                                url: if is_new_stack {
                                     String::new()
                                 } else {
                                     meta.url.clone()
                                 },
-                                favicon_url: if is_new_tab {
+                                favicon_url: if is_new_stack {
                                     String::new()
                                 } else {
                                     meta.favicon_url.clone()
                                 },
-                                is_active: tab_is_active,
-                                tab_index: tab_index as u32,
+                                is_active: stack_is_active,
+                                tab_index: stack_index as u32,
                                 is_loading: loading,
+                                bg_color: meta.bg_color.clone(),
                             });
                             found_browser = true;
                         }
                     }
                 }
                 if !found_browser {
-                    tabs.push(TabNode {
-                        title: "New tab".to_string(),
+                    stacks.push(TabNode {
+                        title: "New Stack".to_string(),
                         url: String::new(),
                         favicon_url: String::new(),
-                        is_active: tab_is_active,
-                        tab_index: tab_index as u32,
+                        is_active: stack_is_active,
+                        tab_index: stack_index as u32,
                         is_loading: false,
+                        bg_color: None,
                     });
                 }
-                tab_index += 1;
+                stack_index += 1;
             }
         }
         panes.push(PaneNode {
             id: pane_entity.to_bits(),
             is_active,
-            tabs,
+            tabs: stacks,
         });
     }
     let payload = PaneTreeEvent { panes };
@@ -881,12 +879,12 @@ fn push_pane_tree_emit(
 
 fn handle_browser_commands(
     mut reader: MessageReader<AppCommand>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     terminal_q: Query<(), With<Terminal>>,
@@ -896,15 +894,15 @@ fn handle_browser_commands(
         let AppCommand::Browser(browser_cmd) = *cmd else {
             continue;
         };
-        let (_, _, active_tab_opt) = focused_tab(
-            &spaces,
+        let (_, _, active_stack_opt) = focused_stack(
+            &tabs,
             &all_children,
             &leaf_panes,
             &pane_ts,
             &pane_children,
-            &tab_ts,
+            &stack_ts,
         );
-        let Some(active) = active_tab_opt else {
+        let Some(active) = active_stack_opt else {
             continue;
         };
         let Some(webview) = browsers
@@ -1019,12 +1017,12 @@ fn on_hard_reload_notify_header(
 fn on_side_sheet_command_emit(
     trigger: On<BinReceive<SideSheetCommandEvent>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tab_query: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
-    tab_q: Query<Entity, With<Tab>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    stack_q: Query<Entity, With<Stack>>,
     child_of_q: Query<&ChildOf>,
     split_q: Query<(), With<PaneSplit>>,
     mut close_extra: ParamSet<(
@@ -1032,7 +1030,7 @@ fn on_side_sheet_command_emit(
         Query<'static, 'static, &'static mut Window, With<PrimaryWindow>>,
         Query<'static, 'static, (), (With<Terminal>, Without<PtyExited>)>,
         Query<'static, 'static, (), With<CloseConfirmed>>,
-        Query<'static, 'static, (), With<PendingTabClose>>,
+        Query<'static, 'static, (), With<PendingStackClose>>,
     )>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     settings: Res<AppSettings>,
@@ -1049,15 +1047,15 @@ fn on_side_sheet_command_emit(
     let Ok(children) = pane_children.get(target_pane) else {
         return;
     };
-    let tab_entities: Vec<Entity> = children.iter().filter(|&e| tab_q.contains(e)).collect();
+    let stack_entities: Vec<Entity> = children.iter().filter(|&e| stack_q.contains(e)).collect();
 
     match evt.command.as_str() {
         "activate_tab" => {
-            let Some(&target_tab) = tab_entities.get(evt.tab_index as usize) else {
+            let Some(&target_stack) = stack_entities.get(evt.tab_index as usize) else {
                 return;
             };
             commands.entity(target_pane).insert(LastActivatedAt::now());
-            commands.entity(target_tab).insert(LastActivatedAt::now());
+            commands.entity(target_stack).insert(LastActivatedAt::now());
 
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
@@ -1070,33 +1068,33 @@ fn on_side_sheet_command_emit(
             }
         }
         "close_tab" => {
-            let Some(&target_tab) = tab_entities.get(evt.tab_index as usize) else {
+            let Some(&target_stack) = stack_entities.get(evt.tab_index as usize) else {
                 return;
             };
 
             // Confirm close if terminal is still running
             let needs_confirm = terminal::should_confirm_close(&settings)
-                && terminal::has_live_terminal(target_tab, &all_children, &close_extra.p2());
+                && terminal::has_live_terminal(target_stack, &all_children, &close_extra.p2());
             if needs_confirm {
-                if close_extra.p3().contains(target_tab) {
-                    commands.entity(target_tab).remove::<CloseConfirmed>();
+                if close_extra.p3().contains(target_stack) {
+                    commands.entity(target_stack).remove::<CloseConfirmed>();
                 } else {
-                    if !close_extra.p4().contains(target_tab) {
-                        commands.entity(target_tab).insert(PendingTabClose);
+                    if !close_extra.p4().contains(target_stack) {
+                        commands.entity(target_stack).insert(PendingStackClose);
                     }
                     return;
                 }
             }
 
-            if tab_entities.len() > 1 {
-                let is_active =
-                    active_tab_in_pane(target_pane, &pane_children, &tab_ts) == Some(target_tab);
-                commands.entity(target_tab).despawn();
+            if stack_entities.len() > 1 {
+                let is_active = active_stack_in_pane(target_pane, &pane_children, &stack_ts)
+                    == Some(target_stack);
+                commands.entity(target_stack).despawn();
                 if is_active {
-                    let next = tab_entities
+                    let next = stack_entities
                         .iter()
                         .copied()
-                        .find(|&e| e != target_tab)
+                        .find(|&e| e != target_stack)
                         .unwrap();
                     commands.entity(next).insert(LastActivatedAt::now());
                 }
@@ -1118,13 +1116,13 @@ fn on_side_sheet_command_emit(
                     return;
                 };
 
-                let (_, current_active_pane, _) = focused_tab(
-                    &spaces,
+                let (_, current_active_pane, _) = focused_stack(
+                    &tab_query,
                     &all_children,
                     &leaf_panes,
                     &pane_ts,
                     &pane_children,
-                    &tab_ts,
+                    &stack_ts,
                 );
                 let target_pane_is_active = current_active_pane == Some(target_pane);
                 let sibling_is_active = current_active_pane == Some(sibling);
@@ -1140,8 +1138,10 @@ fn on_side_sheet_command_emit(
                 let (new_active_pane, tab_to_activate);
                 if split_q.contains(sibling) {
                     new_active_pane = first_leaf_descendant(sibling, &pane_children, &leaf_panes);
-                    tab_to_activate = active_tab_in_pane(new_active_pane, &pane_children, &tab_ts)
-                        .or_else(|| first_tab_in_pane(new_active_pane, &pane_children, &tab_q));
+                    tab_to_activate =
+                        active_stack_in_pane(new_active_pane, &pane_children, &stack_ts).or_else(
+                            || first_stack_in_pane(new_active_pane, &pane_children, &stack_q),
+                        );
                     commands.entity(sibling).remove::<ChildOf>();
                     commands.queue(move |world: &mut World| {
                         world.despawn(sibling);
@@ -1151,12 +1151,12 @@ fn on_side_sheet_command_emit(
                     tab_to_activate = sibling_children
                         .iter()
                         .copied()
-                        .find(|&e| tab_ts.get(e).is_ok())
+                        .find(|&e| stack_ts.get(e).is_ok())
                         .or_else(|| {
                             sibling_children
                                 .iter()
                                 .copied()
-                                .find(|&e| tab_q.contains(e))
+                                .find(|&e| stack_q.contains(e))
                         });
                     commands.entity(parent).remove::<PaneSplit>();
                     commands.entity(parent).insert(Node {
@@ -1188,8 +1188,70 @@ fn on_side_sheet_command_emit(
     }
 }
 
+const BG_COLOR_SCRIPT: &str = r#"
+(function(){
+    function pick(){
+        if(!document.body)return null;
+        var b=window.getComputedStyle(document.body).backgroundColor;
+        if(b&&b!=='rgba(0, 0, 0, 0)'&&b!=='transparent')return b;
+        var r=window.getComputedStyle(document.documentElement).backgroundColor;
+        if(r&&r!=='rgba(0, 0, 0, 0)'&&r!=='transparent')return r;
+        return null;
+    }
+    function send(c){if(c&&window.cef&&window.cef.emit)window.cef.emit({color:c});}
+    send(pick());
+    window.addEventListener('load',function(){send(pick());});
+})();
+"#;
+
+fn inject_bg_color_script(
+    browsers: NonSend<Browsers>,
+    q: Query<
+        (Entity, &PageMetadata),
+        (
+            With<Browser>,
+            Without<Loading>,
+            Without<Header>,
+            Without<SideSheet>,
+            Without<Modal>,
+            Without<Terminal>,
+            Without<LayoutChrome>,
+        ),
+    >,
+    mut injected: Local<std::collections::HashMap<u64, String>>,
+) {
+    for (entity, meta) in &q {
+        if meta.url.is_empty() || meta.url == "about:blank" {
+            continue;
+        }
+        if !browsers.has_browser(entity) {
+            continue;
+        }
+        let key = entity.to_bits();
+        let already = injected.get(&key).map(|u| u == &meta.url).unwrap_or(false);
+        if already {
+            continue;
+        }
+        injected.insert(key, meta.url.clone());
+        browsers.execute_js(&entity, BG_COLOR_SCRIPT);
+    }
+}
+
+fn on_page_bg_color_emit(
+    trigger: On<Receive<PageBgColorEvent>>,
+    mut meta_q: Query<&mut PageMetadata, With<Browser>>,
+) {
+    let webview = trigger.event_target();
+    let color = &trigger.event().payload.color;
+    if let Ok(mut meta) = meta_q.get_mut(webview)
+        && meta.bg_color.as_deref() != Some(color.as_str())
+    {
+        meta.bg_color = Some(color.clone());
+    }
+}
+
 fn spawn_visit_on_navigation(
-    changed_tabs: Query<(Entity, &PageMetadata), (With<Tab>, Changed<PageMetadata>)>,
+    changed_tabs: Query<(Entity, &PageMetadata), (With<Stack>, Changed<PageMetadata>)>,
     mut last_urls: Local<std::collections::HashMap<u64, String>>,
     mut commands: Commands,
 ) {
@@ -1213,7 +1275,7 @@ fn spawn_visit_on_navigation(
 
 fn sync_page_metadata_to_tab(
     browser_q: Query<(&PageMetadata, &ChildOf), (With<Browser>, Changed<PageMetadata>)>,
-    tab_q: Query<(), With<Tab>>,
+    tab_q: Query<(), With<Stack>>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
     mut commands: Commands,
@@ -1307,16 +1369,17 @@ mod tests {
     }
 
     #[test]
-    fn active_browser_url_wins_over_stale_new_tab_placeholder() {
+    fn active_browser_url_wins_over_stale_new_stack_placeholder() {
         let tab = Entity::from_bits(1);
         let rows = [TabRow {
             title: "Google".to_string(),
             url: "https://www.google.com".to_string(),
             favicon_url: String::new(),
             is_active: true,
+            bg_color: None,
         }];
 
-        assert!(!should_emit_new_tab_placeholder(
+        assert!(!should_emit_new_stack_placeholder(
             Some(tab),
             Some(tab),
             &rows

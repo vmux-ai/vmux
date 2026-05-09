@@ -1,51 +1,48 @@
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT_SESSION_ID: &str = "default";
+pub const DEFAULT_SPACE_ID: &str = "default";
 pub const DEFAULT_PROFILE_ID: &str = "default";
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SessionRecord {
+pub struct SpaceRecord {
     pub id: String,
     pub name: String,
     pub profile: String,
 }
 
-impl Default for SessionRecord {
+impl Default for SpaceRecord {
     fn default() -> Self {
-        default_session_record()
+        default_space_record()
     }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct SessionRegistry {
-    pub sessions: Vec<SessionRecord>,
+pub struct SpaceRegistry {
+    pub spaces: Vec<SpaceRecord>,
 }
 
-pub fn default_session_record() -> SessionRecord {
-    SessionRecord {
-        id: DEFAULT_SESSION_ID.to_string(),
+pub fn default_space_record() -> SpaceRecord {
+    SpaceRecord {
+        id: DEFAULT_SPACE_ID.to_string(),
         name: "Default".to_string(),
         profile: DEFAULT_PROFILE_ID.to_string(),
     }
 }
 
 pub fn registry_path(root: &Path) -> PathBuf {
-    root.join("sessions.ron")
+    root.join("spaces.ron")
 }
 
-pub fn session_layout_path_for(root: &Path, session_id: &str, profile: &str) -> PathBuf {
+pub fn space_layout_path_for(root: &Path, space_id: &str, profile: &str) -> PathBuf {
     let profile_root = root.join("profiles").join(profile);
-    if session_id == DEFAULT_SESSION_ID {
-        profile_root.join("session.ron")
+    if space_id == DEFAULT_SPACE_ID {
+        profile_root.join("space.ron")
     } else {
-        profile_root
-            .join("sessions")
-            .join(session_id)
-            .join("session.ron")
+        profile_root.join("spaces").join(space_id).join("space.ron")
     }
 }
 
-pub fn normalize_session_id(input: &str) -> String {
+pub fn normalize_space_id(input: &str) -> String {
     let mut out = String::new();
     let mut pending_dash = false;
     for ch in input.chars().flat_map(char::to_lowercase) {
@@ -60,17 +57,17 @@ pub fn normalize_session_id(input: &str) -> String {
         }
     }
     if out.is_empty() {
-        "session".to_string()
+        "space".to_string()
     } else {
         out
     }
 }
 
-pub fn unique_session_id<'a>(
-    records: impl IntoIterator<Item = &'a SessionRecord>,
+pub fn unique_space_id<'a>(
+    records: impl IntoIterator<Item = &'a SpaceRecord>,
     name: &str,
 ) -> String {
-    let base = normalize_session_id(name);
+    let base = normalize_space_id(name);
     let existing: std::collections::HashSet<&str> = records
         .into_iter()
         .map(|record| record.id.as_str())
@@ -92,47 +89,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_session_uses_legacy_profile_session_file() {
+    fn default_space_uses_profile_space_file() {
         let root = PathBuf::from("/tmp/vmux");
         assert_eq!(
-            session_layout_path_for(&root, "default", "default"),
-            root.join("profiles").join("default").join("session.ron")
+            space_layout_path_for(&root, "default", "default"),
+            root.join("profiles").join("default").join("space.ron")
         );
     }
 
     #[test]
-    fn named_session_is_scoped_under_attached_profile() {
+    fn named_space_is_scoped_under_attached_profile() {
         let root = PathBuf::from("/tmp/vmux");
         assert_eq!(
-            session_layout_path_for(&root, "work", "client-a"),
+            space_layout_path_for(&root, "work", "client-a"),
             root.join("profiles")
                 .join("client-a")
-                .join("sessions")
+                .join("spaces")
                 .join("work")
-                .join("session.ron")
+                .join("space.ron")
         );
     }
 
     #[test]
-    fn session_ids_are_slugged() {
-        assert_eq!(normalize_session_id("Client A!"), "client-a");
-        assert_eq!(normalize_session_id("  "), "session");
+    fn space_ids_are_slugged() {
+        assert_eq!(normalize_space_id("Client A!"), "client-a");
+        assert_eq!(normalize_space_id("  "), "space");
     }
 
     #[test]
-    fn session_ids_are_unique() {
+    fn space_ids_are_unique() {
         let records = vec![
-            SessionRecord {
+            SpaceRecord {
                 id: "work".to_string(),
                 name: "Work".to_string(),
                 profile: "default".to_string(),
             },
-            SessionRecord {
+            SpaceRecord {
                 id: "work-2".to_string(),
                 name: "Work 2".to_string(),
                 profile: "default".to_string(),
             },
         ];
-        assert_eq!(unique_session_id(&records, "Work"), "work-3");
+        assert_eq!(unique_space_id(&records, "Work"), "work-3");
     }
 }

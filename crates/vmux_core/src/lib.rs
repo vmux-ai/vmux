@@ -32,12 +32,13 @@ pub fn now_millis() -> i64 {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Clone, Debug, Reflect, Default)]
-#[reflect(Component)]
+#[reflect(Component, Default)]
 #[type_path = "vmux_header::system"]
 pub struct PageMetadata {
     pub title: String,
     pub url: String,
     pub favicon_url: String,
+    pub bg_color: Option<String>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]

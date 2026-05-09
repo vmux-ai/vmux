@@ -1,15 +1,14 @@
 use crate::event::COMMAND_BAR_WEBVIEW_URL;
 use crate::{
-    Footer, Header, LayoutStartupSet, SessionFilePresent,
+    Header, LayoutStartupSet, SpaceFilePresent,
     chrome::{Browser, layout_chrome_bundle},
-    event::FOOTER_HEIGHT_PX,
     glass::{GlassCorners, GlassMaterial},
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
     profile::Profile,
     scene::MainCamera,
     settings::LayoutSettings,
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
-    space::space_bundle,
+    stack::stack_bundle,
     tab::tab_bundle,
     unit::{PIXELS_PER_METER, WindowExt},
 };
@@ -26,6 +25,8 @@ use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, ReadAppCommands, WindowCommand};
 use vmux_history::{CreatedAt, LastActivatedAt};
 use vmux_webview_app::WebviewAppEmbedSet;
+
+pub const SIDE_SHEET_TOP_PADDING_PX: f32 = 22.0;
 
 pub const WEBVIEW_Z_MAIN: f32 = 0.018;
 pub const WEBVIEW_Z_FOCUS_RING: f32 = 0.02;
@@ -60,13 +61,13 @@ impl Plugin for WindowPlugin {
         )
         .add_systems(
             Startup,
-            spawn_default_session.in_set(LayoutStartupSet::DefaultSession),
+            spawn_default_space.in_set(LayoutStartupSet::DefaultSpace),
         )
         .add_systems(
             Startup,
             (
                 spawn_glass_panes,
-                crate::tab::open_command_bar_if_no_tabs,
+                crate::stack::open_command_bar_if_no_stacks,
                 fit_window_to_screen,
             )
                 .chain()
@@ -84,7 +85,7 @@ impl Plugin for WindowPlugin {
             Update,
             (
                 maximize_window_to_screen.run_if(not(resource_exists::<ScreenMaximized>)),
-                crate::tab::open_command_bar_if_no_tabs,
+                crate::stack::open_command_bar_if_no_stacks,
             ),
         )
         .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
@@ -215,26 +216,30 @@ fn setup(
                     bottom: Val::Px(settings.window.pad_bottom()),
                     left: Val::Px(settings.window.pad_left()),
                 },
-                column_gap: Val::Px(settings.pane.gap),
+                column_gap: Val::Px(0.0),
                 ..default()
             },
             ui_target: UiTargetCamera(*main_camera),
         })
         .id();
 
-    let left_side_sheet = commands
+    let _left_side_sheet = commands
         .spawn((
             SideSheet,
             SideSheetPosition::Left,
+            crate::Open,
             Transform::default(),
             GlobalTransform::default(),
-            Visibility::Hidden,
+            Visibility::Inherited,
             Node {
                 width: Val::Px(settings.side_sheet.width),
                 min_height: Val::Px(0.0),
                 flex_shrink: 0.0,
                 flex_direction: FlexDirection::Column,
-                display: Display::None,
+                padding: UiRect {
+                    top: Val::Px(SIDE_SHEET_TOP_PADDING_PX),
+                    ..default()
+                },
                 ..default()
             },
             ZIndex(2),
@@ -252,7 +257,7 @@ fn setup(
                 flex_basis: Val::Px(0.0),
                 min_width: Val::Px(0.0),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(settings.pane.gap),
+                row_gap: Val::Px(0.0),
                 ..default()
             },
             ChildOf(root),
@@ -261,17 +266,17 @@ fn setup(
 
     commands.spawn((
         Header,
+        crate::Open,
         ZIndex(1),
-        Visibility::Hidden,
+        Visibility::Inherited,
         Transform::default(),
         GlobalTransform::default(),
         Node {
-            height: Val::Px(0.0),
+            height: Val::Px(crate::event::HEADER_HEIGHT_PX),
             flex_shrink: 0.0,
-            display: Display::None,
             ..default()
         },
-        ChildOf(left_side_sheet),
+        ChildOf(main_column),
     ));
 
     commands.spawn((
@@ -286,26 +291,12 @@ fn setup(
         ChildOf(main_column),
     ));
 
-    commands.spawn((
-        Footer,
-        crate::Open,
-        ZIndex(1),
-        Transform::default(),
-        GlobalTransform::default(),
-        Visibility::Inherited,
-        Node {
-            height: Val::Px(FOOTER_HEIGHT_PX),
-            flex_shrink: 0.0,
-            ..default()
-        },
-        ChildOf(main_column),
-    ));
-
     // Right & Bottom side sheets remain absolute overlays (slide-in semantics);
     // they're not part of the natural flex layout.
     commands.spawn((
         SideSheet,
         SideSheetPosition::Right,
+        crate::Open,
         Node {
             width: Val::Px(280.0),
             position_type: PositionType::Absolute,
@@ -321,6 +312,7 @@ fn setup(
     commands.spawn((
         SideSheet,
         SideSheetPosition::Bottom,
+        crate::Open,
         Node {
             height: Val::Px(200.0),
             position_type: PositionType::Absolute,
@@ -373,50 +365,50 @@ fn setup(
     ));
 }
 
-/// Spawns the default session (Profile/Space/Pane/Tab) if none was loaded.
-fn spawn_default_session(
+/// Spawns the default session (Profile/Tab/Pane/Stack) if none was loaded.
+fn spawn_default_space(
     main_q: Query<Entity, With<Main>>,
     profile_q: Query<(), With<Profile>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     settings: Res<LayoutSettings>,
-    session_file: Option<Res<SessionFilePresent>>,
-    mut new_tab_ctx: ResMut<crate::NewTabContext>,
+    space_file: Option<Res<SpaceFilePresent>>,
+    mut new_stack_ctx: ResMut<crate::NewStackContext>,
     mut commands: Commands,
 ) {
     // If profiles already exist (loaded from session.ron) or a session
     // file is present (entities may still be arriving from the load
     // observer), skip default session creation.
-    if !profile_q.is_empty() || session_file.as_deref().is_some_and(|s| s.0) {
+    if !profile_q.is_empty() || space_file.as_deref().is_some_and(|s| s.0) {
         return;
     }
 
     let Ok(main) = main_q.single() else { return };
-    spawn_default_session_layout(
+    spawn_default_space_layout(
         main,
         *primary_window,
         &settings,
-        &mut new_tab_ctx,
+        &mut new_stack_ctx,
         &mut commands,
     );
 }
 
 pub struct SpawnedSessionLayout {
-    pub space: Entity,
-    pub pane: Entity,
     pub tab: Entity,
+    pub pane: Entity,
+    pub stack: Entity,
 }
 
-pub fn spawn_default_session_layout(
+pub fn spawn_default_space_layout(
     main: Entity,
     pw: Entity,
     settings: &LayoutSettings,
-    new_tab_ctx: &mut crate::NewTabContext,
+    new_stack_ctx: &mut crate::NewStackContext,
     commands: &mut Commands,
 ) -> SpawnedSessionLayout {
     commands.spawn(Profile::default_profile());
-    let space = commands
+    let tab_e = commands
         .spawn((
-            space_bundle(),
+            tab_bundle(),
             LastActivatedAt::now(),
             CreatedAt::now(),
             ChildOf(main),
@@ -441,7 +433,7 @@ pub fn spawn_default_session_layout(
                 row_gap: gap.row_gap,
                 ..default()
             },
-            ChildOf(space),
+            ChildOf(tab_e),
         ))
         .id();
 
@@ -453,23 +445,21 @@ pub fn spawn_default_session_layout(
         ))
         .id();
 
-    // Create an empty tab (no browser content) and open the command bar
-    // so the user is immediately prompted instead of seeing an empty pane.
-    let tab = commands
+    let stack = commands
         .spawn((
-            tab_bundle(),
+            stack_bundle(),
             LastActivatedAt::now(),
             CreatedAt::now(),
             ChildOf(leaf),
         ))
         .id();
-    new_tab_ctx.tab = Some(tab);
-    new_tab_ctx.previous_tab = None;
-    new_tab_ctx.needs_open = true;
+    new_stack_ctx.stack = Some(stack);
+    new_stack_ctx.previous_stack = None;
+    new_stack_ctx.needs_open = true;
     SpawnedSessionLayout {
-        space,
+        tab: tab_e,
         pane: leaf,
-        tab,
+        stack,
     }
 }
 
@@ -686,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    fn header_lives_inside_left_side_sheet() {
+    fn header_lives_in_main_column_above_main() {
         let mut app = setup_window_app();
         app.update();
 
@@ -695,19 +685,18 @@ mod tests {
             .query_filtered::<Entity, With<Header>>()
             .single(app.world())
             .expect("header");
-        let side_sheet = app
+        let main_col = app
             .world_mut()
-            .query_filtered::<(Entity, &SideSheetPosition), With<SideSheet>>()
-            .iter(app.world())
-            .find_map(|(entity, position)| (*position == SideSheetPosition::Left).then_some(entity))
-            .expect("left side sheet");
+            .query_filtered::<Entity, With<MainColumn>>()
+            .single(app.world())
+            .expect("main column");
         let parent = app
             .world()
             .get::<ChildOf>(header)
             .map(Relationship::get)
             .expect("header parent");
 
-        assert_eq!(parent, side_sheet);
+        assert_eq!(parent, main_col);
     }
 
     #[test]
@@ -729,7 +718,7 @@ mod tests {
         let _home = HomeEnvGuard::use_temp_home("default-session");
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.init_resource::<crate::NewTabContext>();
+        app.init_resource::<crate::NewStackContext>();
         app.insert_resource(LayoutSettings {
             window: crate::settings::WindowSettings {
                 padding: 0.0,
@@ -745,15 +734,15 @@ mod tests {
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),
         });
-        app.add_systems(Update, spawn_default_session);
+        app.add_systems(Update, spawn_default_space);
 
         app.world_mut().spawn(PrimaryWindow);
         app.world_mut().spawn(Main);
 
         app.update();
 
-        let ctx = app.world().resource::<crate::NewTabContext>();
-        assert!(ctx.tab.is_some());
+        let ctx = app.world().resource::<crate::NewStackContext>();
+        assert!(ctx.stack.is_some());
         assert!(ctx.needs_open);
     }
 }

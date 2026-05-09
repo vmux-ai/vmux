@@ -41,23 +41,17 @@ pub enum AppCommand {
     #[menu(label = "Window")]
     Window(WindowCommand),
 
-    #[menu(label = "Header")]
-    Header(HeaderCommand),
+    #[menu(label = "Zen")]
+    Zen(ZenCommand),
 
-    #[menu(label = "Footer")]
-    Footer(FooterCommand),
-
-    #[menu(label = "Side Sheet")]
-    SideSheet(SideSheetCommand),
-
-    #[menu(label = "Space")]
-    Space(SpaceCommand),
+    #[menu(label = "Tab")]
+    Tab(TabCommand),
 
     #[menu(label = "Pane")]
     Pane(PaneCommand),
 
-    #[menu(label = "Tab")]
-    Tab(TabCommand),
+    #[menu(label = "Stack")]
+    Stack(StackCommand),
 
     #[menu(label = "Terminal")]
     Terminal(TerminalCommand),
@@ -68,64 +62,54 @@ pub enum AppCommand {
     #[menu(label = "Service")]
     Service(ServiceCommand),
 
-    #[menu(label = "Session")]
-    Session(SessionCommand),
+    #[menu(label = "Space")]
+    Space(SpaceCommand),
 }
 
 #[allow(dead_code)]
 #[derive(
     OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
 )]
-pub enum TabCommand {
+pub enum StackCommand {
     #[default]
-    #[menu(id = "tab_new", label = "New Tab", accel = "super+t")]
+    #[menu(id = "stack_new", label = "New Stack", accel = "super+n")]
     New,
-    #[menu(id = "tab_close", label = "Close Tab", accel = "super+w")]
+    #[menu(id = "stack_close", label = "Close Stack", accel = "super+w")]
     Close,
-    #[menu(id = "tab_next", label = "Next Tab", accel = "super+shift+]")]
+    #[menu(id = "stack_next", label = "Next Stack", accel = "super+shift+n")]
+    #[shortcut(direct = "Super+Shift+J")]
+    #[shortcut(direct = "Super+Shift+ArrowDown")]
     Next,
-    #[menu(id = "tab_previous", label = "Previous Tab", accel = "super+shift+[")]
-    Previous,
-    #[menu(id = "tab_select_1", label = "Select Tab 1", accel = "super+1")]
-    SelectIndex1,
-    #[menu(id = "tab_select_2", label = "Select Tab 2", accel = "super+2")]
-    SelectIndex2,
-    #[menu(id = "tab_select_3", label = "Select Tab 3", accel = "super+3")]
-    SelectIndex3,
-    #[menu(id = "tab_select_4", label = "Select Tab 4", accel = "super+4")]
-    SelectIndex4,
-    #[menu(id = "tab_select_5", label = "Select Tab 5", accel = "super+5")]
-    SelectIndex5,
-    #[menu(id = "tab_select_6", label = "Select Tab 6", accel = "super+6")]
-    SelectIndex6,
-    #[menu(id = "tab_select_7", label = "Select Tab 7", accel = "super+7")]
-    SelectIndex7,
-    #[menu(id = "tab_select_8", label = "Select Tab 8", accel = "super+8")]
-    SelectIndex8,
-    #[menu(id = "tab_select_last", label = "Select Last Tab", accel = "super+9")]
-    SelectLast,
     #[menu(
-        id = "tab_reopen",
-        label = "Reopen Closed Tab",
+        id = "stack_previous",
+        label = "Previous Stack",
+        accel = "super+shift+p"
+    )]
+    #[shortcut(direct = "Super+Shift+K")]
+    #[shortcut(direct = "Super+Shift+ArrowUp")]
+    Previous,
+    #[menu(
+        id = "stack_reopen",
+        label = "Reopen Closed Stack",
         accel = "super+shift+t",
         hidden
     )]
     Reopen,
-    #[menu(id = "tab_duplicate", label = "Duplicate Tab\t<leader> d", hidden)]
+    #[menu(id = "stack_duplicate", label = "Duplicate Stack\t<leader> d", hidden)]
     #[shortcut(chord = "Ctrl+g, d")]
     Duplicate,
 
     #[menu(
-        id = "tab_move_to_pane",
-        label = "Move Tab to Pane\t<leader> !",
+        id = "stack_move_to_pane",
+        label = "Move Stack to Pane\t<leader> !",
         hidden
     )]
     #[shortcut(chord = "Ctrl+g, !")]
     MoveToPane,
-    #[menu(id = "tab_swap_prev", label = "Move Tab Left\t<leader> <")]
+    #[menu(id = "stack_swap_prev", label = "Move Stack Left\t<leader> <")]
     #[shortcut(chord = "Ctrl+g, <")]
     SwapPrev,
-    #[menu(id = "tab_swap_next", label = "Move Tab Right\t<leader> >")]
+    #[menu(id = "stack_swap_next", label = "Move Stack Right\t<leader> >")]
     #[shortcut(chord = "Ctrl+g, >")]
     SwapNext,
 }
@@ -233,9 +217,9 @@ pub enum ServiceCommand {
 #[derive(
     OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
 )]
-pub enum SessionCommand {
+pub enum SpaceCommand {
     #[default]
-    #[menu(id = "session_open", label = "Sessions\t<leader> s")]
+    #[menu(id = "space_open", label = "Spaces\t<leader> s")]
     #[shortcut(chord = "Ctrl+g, s")]
     Open,
 }
@@ -319,26 +303,43 @@ pub enum PaneCommand {
 #[derive(
     OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
 )]
-pub enum SpaceCommand {
+pub enum TabCommand {
     #[default]
-    #[menu(id = "new_space", label = "New Space\t<leader> c")]
-    #[shortcut(chord = "Ctrl+g, c")]
+    #[menu(id = "new_tab", label = "New Tab", accel = "super+t")]
     New,
-    #[menu(id = "close_space", label = "Close Space\t<leader> &")]
-    #[shortcut(chord = "Ctrl+g, &")]
+    #[menu(id = "close_tab", label = "Close Tab")]
     Close,
-    #[menu(id = "next_space", label = "Next Space\t<leader> n")]
-    #[shortcut(chord = "Ctrl+g, n")]
+    #[menu(id = "next_tab", label = "Next Tab", accel = "super+shift+]")]
+    #[shortcut(direct = "Super+Shift+L")]
+    #[shortcut(direct = "Super+Shift+ArrowRight")]
     Next,
-    #[menu(id = "prev_space", label = "Previous Space\t<leader> p")]
-    #[shortcut(chord = "Ctrl+g, p")]
+    #[menu(id = "prev_tab", label = "Previous Tab", accel = "super+shift+[")]
+    #[shortcut(direct = "Super+Shift+H")]
+    #[shortcut(direct = "Super+Shift+ArrowLeft")]
     Previous,
-    #[menu(id = "rename_space", label = "Rename Space\t<leader> ,")]
-    #[shortcut(chord = "Ctrl+g, Comma")]
+    #[menu(id = "rename_tab", label = "Rename Tab")]
     Rename,
-    #[menu(id = "swap_space_prev", label = "Move Space Left", hidden)]
+    #[menu(id = "tab_select_1", label = "Select Tab 1", accel = "super+1")]
+    SelectIndex1,
+    #[menu(id = "tab_select_2", label = "Select Tab 2", accel = "super+2")]
+    SelectIndex2,
+    #[menu(id = "tab_select_3", label = "Select Tab 3", accel = "super+3")]
+    SelectIndex3,
+    #[menu(id = "tab_select_4", label = "Select Tab 4", accel = "super+4")]
+    SelectIndex4,
+    #[menu(id = "tab_select_5", label = "Select Tab 5", accel = "super+5")]
+    SelectIndex5,
+    #[menu(id = "tab_select_6", label = "Select Tab 6", accel = "super+6")]
+    SelectIndex6,
+    #[menu(id = "tab_select_7", label = "Select Tab 7", accel = "super+7")]
+    SelectIndex7,
+    #[menu(id = "tab_select_8", label = "Select Tab 8", accel = "super+8")]
+    SelectIndex8,
+    #[menu(id = "tab_select_last", label = "Select Last Tab", accel = "super+9")]
+    SelectLast,
+    #[menu(id = "swap_tab_prev", label = "Move Tab Left", hidden)]
     SwapPrev,
-    #[menu(id = "swap_space_next", label = "Move Space Right", hidden)]
+    #[menu(id = "swap_tab_next", label = "Move Tab Right", hidden)]
     SwapNext,
 }
 
@@ -346,29 +347,10 @@ pub enum SpaceCommand {
 #[derive(
     OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
 )]
-pub enum SideSheetCommand {
+pub enum ZenCommand {
     #[default]
-    #[menu(
-        id = "toggle_side_sheet",
-        label = "Toggle Side Sheet",
-        accel = "super+s"
-    )]
-    #[shortcut(direct = "Super+s")]
+    #[menu(id = "zen_toggle", label = "Toggle Zen Mode", accel = "super+shift+s")]
     Toggle,
-    #[menu(
-        id = "toggle_side_sheet_right",
-        label = "Toggle Right Sheet\t<leader> r",
-        hidden
-    )]
-    #[shortcut(chord = "Ctrl+g, r")]
-    ToggleRight,
-    #[menu(
-        id = "toggle_side_sheet_bottom",
-        label = "Toggle Bottom Sheet\t<leader> b",
-        hidden
-    )]
-    #[shortcut(chord = "Ctrl+g, b")]
-    ToggleBottom,
 }
 
 #[derive(
@@ -381,31 +363,13 @@ pub enum SceneCommand {
     TogglePlayerMode,
 }
 
-#[derive(
-    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
-)]
-pub enum HeaderCommand {
-    #[default]
-    #[menu(id = "toggle_header", label = "Toggle Header", accel = "super+shift+h")]
-    Toggle,
-}
-
-#[derive(
-    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
-)]
-pub enum FooterCommand {
-    #[default]
-    #[menu(id = "toggle_footer", label = "Toggle Footer", accel = "super+shift+f")]
-    Toggle,
-}
-
 #[allow(dead_code)]
 #[derive(
     OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
 )]
 pub enum WindowCommand {
     #[default]
-    #[menu(id = "new_window", label = "New Window", accel = "super+n", hidden)]
+    #[menu(id = "new_window", label = "New Window", hidden)]
     NewWindow,
     #[menu(
         id = "close_window",
@@ -476,7 +440,7 @@ mod tests {
         }
 
         assert_eq!(
-            AppCommand::from_mcp_id("tab_close"),
+            AppCommand::from_mcp_id("close_tab"),
             Some(AppCommand::Tab(TabCommand::Close))
         );
         assert_eq!(
@@ -493,13 +457,13 @@ mod tests {
             "split_v description should come from #[mcp(description = ...)] override"
         );
 
-        let tab_close = entries
+        let close_tab = entries
             .iter()
-            .find(|(id, _, _)| *id == "tab_close")
-            .expect("tab_close in mcp_tool_entries");
+            .find(|(id, _, _)| *id == "close_tab")
+            .expect("close_tab in mcp_tool_entries");
         assert_eq!(
-            tab_close.1, "Close Tab",
-            "tab_close description should fall back to the menu label (\\t-stripped)"
+            close_tab.1, "Close Tab",
+            "close_tab description should fall back to the menu label (\\t-stripped)"
         );
     }
 }

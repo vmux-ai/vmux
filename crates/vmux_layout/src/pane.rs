@@ -1,12 +1,12 @@
 use crate::{
-    CloseRequiresConfirmation, NewTabContext,
+    CloseRequiresConfirmation, NewStackContext,
     settings::{ConfirmCloseSettings, LayoutSettings},
-    space::Space,
-    swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
-    tab::{
-        CloseConfirmed, Tab, active_among, active_pane_in_space, active_tab_in_pane, focused_tab,
-        tab_bundle,
+    stack::{
+        CloseConfirmed, Stack, active_among, active_pane_in_tab, active_stack_in_pane,
+        focused_stack, stack_bundle,
     },
+    swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
+    tab::Tab,
 };
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
@@ -233,10 +233,10 @@ pub fn first_leaf_descendant(
     entity
 }
 
-pub fn first_tab_in_pane(
+pub fn first_stack_in_pane(
     pane: Entity,
     pane_children: &Query<&Children, With<Pane>>,
-    tab_q: &Query<Entity, With<Tab>>,
+    tab_q: &Query<Entity, With<Stack>>,
 ) -> Option<Entity> {
     let children = pane_children.get(pane).ok()?;
     children.iter().find(|&e| tab_q.contains(e))
@@ -244,20 +244,20 @@ pub fn first_tab_in_pane(
 
 fn handle_pane_commands(
     mut reader: MessageReader<AppCommand>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    tab_ts: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
-    tab_filter: Query<Entity, With<Tab>>,
+    tab_filter: Query<Entity, With<Stack>>,
     settings: Res<LayoutSettings>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     mut commands: Commands,
     mut hover_intent: ResMut<PaneHoverIntent>,
-    mut new_tab_ctx: ResMut<NewTabContext>,
+    mut new_stack_ctx: ResMut<NewStackContext>,
     mut resize_q: ParamSet<(
         Query<&mut Node>,
         Query<&mut PaneSize>,
@@ -273,13 +273,13 @@ fn handle_pane_commands(
         let AppCommand::Pane(pane_cmd) = *cmd else {
             continue;
         };
-        let (_, active_pane_opt, active_tab_opt) = focused_tab(
-            &spaces,
+        let (_, active_pane_opt, active_stack_opt) = focused_stack(
+            &tabs,
             &all_children,
             &leaf_panes,
             &pane_ts,
             &pane_children,
-            &tab_ts,
+            &stack_ts,
         );
         let Some(active) = active_pane_opt else {
             continue;
@@ -306,12 +306,12 @@ fn handle_pane_commands(
                     &existing_tabs,
                 );
 
-                let new_tab = commands
-                    .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(pane2)))
+                let new_stack = commands
+                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane2)))
                     .id();
-                new_tab_ctx.tab = Some(new_tab);
-                new_tab_ctx.previous_tab = active_tab_opt;
-                new_tab_ctx.needs_open = true;
+                new_stack_ctx.stack = Some(new_stack);
+                new_stack_ctx.previous_stack = active_stack_opt;
+                new_stack_ctx.needs_open = true;
 
                 hover_intent.target = None;
                 hover_intent.last_activation = Some(Instant::now());
@@ -349,12 +349,12 @@ fn handle_pane_commands(
                         commands.entity(active).despawn();
                         let leaf = spawn_leaf_pane(&mut commands, parent);
                         let tab = commands
-                            .spawn((tab_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
+                            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
                             .id();
                         commands.entity(leaf).insert(LastActivatedAt::now());
-                        new_tab_ctx.tab = Some(tab);
-                        new_tab_ctx.previous_tab = None;
-                        new_tab_ctx.needs_open = true;
+                        new_stack_ctx.stack = Some(tab);
+                        new_stack_ctx.previous_stack = None;
+                        new_stack_ctx.needs_open = true;
                     }
                     continue;
                 }
@@ -402,8 +402,8 @@ fn handle_pane_commands(
                 commands
                     .entity(new_active_pane)
                     .insert(LastActivatedAt::now());
-                let tab = active_tab_in_pane(new_active_pane, &pane_children, &tab_ts)
-                    .or_else(|| first_tab_in_pane(new_active_pane, &pane_children, &tab_filter))
+                let tab = active_stack_in_pane(new_active_pane, &pane_children, &stack_ts)
+                    .or_else(|| first_stack_in_pane(new_active_pane, &pane_children, &tab_filter))
                     .or_else(|| {
                         sibling_children
                             .iter()
@@ -573,14 +573,14 @@ fn handle_pane_commands(
 
 fn on_pane_select(
     mut reader: MessageReader<AppCommand>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tab_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_pos_q: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     mut pending_warp: ResMut<PendingCursorWarp>,
-    mut new_tab_ctx: ResMut<NewTabContext>,
+    mut new_stack_ctx: ResMut<NewStackContext>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -592,21 +592,20 @@ fn on_pane_select(
             _ => continue,
         };
 
-        // Despawn empty tab from Cmd+T command bar when navigating panes
-        if let Some(e) = new_tab_ctx.tab.take() {
+        if let Some(e) = new_stack_ctx.stack.take() {
             commands.entity(e).despawn();
-            new_tab_ctx.previous_tab = None;
+            new_stack_ctx.previous_stack = None;
         }
 
-        let active_space = active_among(spaces.iter());
-        let Some(space) = active_space else {
+        let active_tab = active_among(tab_q.iter());
+        let Some(tab_e) = active_tab else {
             continue;
         };
-        let panes = collect_space_leaf_panes(space, &all_children, &leaf_pane_q);
+        let panes = collect_tab_leaf_panes(tab_e, &all_children, &leaf_pane_q);
         if panes.len() < 2 {
             continue;
         }
-        let current = active_pane_in_space(space, &all_children, &leaf_pane_q, &pane_ts);
+        let current = active_pane_in_tab(tab_e, &all_children, &leaf_pane_q, &pane_ts);
         let Some(current) = current else {
             continue;
         };
@@ -997,7 +996,7 @@ fn sync_pane_split_gaps_to_settings(
     }
 }
 
-fn collect_space_leaf_panes(
+fn collect_tab_leaf_panes(
     root: Entity,
     all_children: &Query<&Children>,
     leaf_q: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -1075,13 +1074,9 @@ fn process_pending_pane_closes(world: &mut World) {
             if let Ok(mut entity_mut) = world.get_entity_mut(pane) {
                 entity_mut.insert((CloseConfirmed, LastActivatedAt::now()));
             }
-            // Walk up to activate the parent Space
             let mut current = pane;
             for _ in 0..10 {
-                if world
-                    .get_entity(current)
-                    .is_ok_and(|e| e.contains::<Space>())
-                {
+                if world.get_entity(current).is_ok_and(|e| e.contains::<Tab>()) {
                     if let Ok(mut entity_mut) = world.get_entity_mut(current) {
                         entity_mut.insert(LastActivatedAt::now());
                     }
@@ -1137,22 +1132,22 @@ mod tests {
         app.add_plugins(CommandPlugin);
         app.init_resource::<PaneHoverIntent>();
         app.init_resource::<PendingCursorWarp>();
-        app.init_resource::<NewTabContext>();
+        app.init_resource::<NewStackContext>();
         app.init_resource::<ConfirmCloseSettings>();
         app.insert_resource(test_settings());
         app.add_systems(Update, handle_pane_commands.in_set(WriteAppCommands));
 
         let window = app.world_mut().spawn(PrimaryWindow).id();
-        let space = app
+        let tab_e = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
-            .spawn((Pane, LastActivatedAt::now(), ChildOf(space)))
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab_e)))
             .id();
         app.world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(pane)));
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
             .write(AppCommand::Pane(PaneCommand::Close));

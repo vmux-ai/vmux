@@ -31,32 +31,6 @@ fn init_shortcuts(mut commands: Commands, settings: Option<Res<AppSettings>>) {
         chord_timeout_ms: 1000,
     };
 
-    // Extra default chord bindings that the macro can't express
-    // (multiple shortcuts per variant). Prefix is replaced with the
-    // configured leader below.
-    let placeholder_prefix = KeyCombo {
-        key: KeyCode::KeyG,
-        modifiers: Modifiers {
-            ctrl: true,
-            ..Default::default()
-        },
-    };
-    for (key, menu_id) in [
-        (KeyCode::ArrowLeft, "prev_space"),
-        (KeyCode::ArrowRight, "next_space"),
-    ] {
-        map.bindings.push((
-            Shortcut::Chord(
-                placeholder_prefix.clone(),
-                KeyCombo {
-                    key,
-                    modifiers: Modifiers::default(),
-                },
-            ),
-            menu_id.to_string(),
-        ));
-    }
-
     if let Some(settings) = settings {
         map.chord_timeout_ms = settings.shortcuts.chord_timeout_ms;
 
@@ -246,7 +220,7 @@ fn is_modifier_key(key: KeyCode) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::{CommandPlugin, SessionCommand};
+    use crate::command::{CommandPlugin, SpaceCommand};
     use crate::settings::{
         AppSettings, BrowserSettings, FocusRingSettings, KeyComboDef, LayoutSettings, PaneSettings,
         ShortcutSettings, SideSheetSettings, WindowSettings,
@@ -330,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn leader_s_emits_session_open_command() {
+    fn leader_s_emits_space_open_command() {
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
@@ -349,7 +323,7 @@ mod tests {
             .drain()
             .collect();
 
-        assert_eq!(commands, vec![AppCommand::Session(SessionCommand::Open)]);
+        assert_eq!(commands, vec![AppCommand::Space(SpaceCommand::Open)]);
     }
 
     #[test]
@@ -367,7 +341,7 @@ mod tests {
             .drain()
             .collect();
 
-        assert_eq!(commands, vec![AppCommand::Session(SessionCommand::Open)]);
+        assert_eq!(commands, vec![AppCommand::Space(SpaceCommand::Open)]);
     }
 
     #[test]
@@ -387,7 +361,7 @@ mod tests {
             .drain()
             .collect();
 
-        assert_eq!(commands, vec![AppCommand::Session(SessionCommand::Open)]);
+        assert_eq!(commands, vec![AppCommand::Space(SpaceCommand::Open)]);
     }
 
     #[test]
@@ -413,6 +387,6 @@ mod tests {
             .drain()
             .collect();
 
-        assert_eq!(commands, vec![AppCommand::Session(SessionCommand::Open)]);
+        assert_eq!(commands, vec![AppCommand::Space(SpaceCommand::Open)]);
     }
 }
