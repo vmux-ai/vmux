@@ -92,7 +92,7 @@ fn space_close_button_class(is_active: bool) -> &'static str {
 
 fn header_position_style(state: &LayoutStateEvent) -> String {
     let left = state.main_chrome_left();
-    let top = 4.0;
+    let top = vmux_layout::event::HEADER_TOP_PX;
     let height = state.header_height_total();
     format!("left:{left}px;top:{top}px;right:0;height:{height}px;")
 }
@@ -109,8 +109,9 @@ pub fn App() -> Element {
 
     let state = layout_state();
     let side_sheet_style = format!(
-        "left:0;top:0;bottom:0;width:{}px;padding-top:22px;",
-        state.side_sheet_width
+        "left:0;top:0;bottom:0;width:{}px;padding-top:{}px;",
+        state.side_sheet_width,
+        vmux_layout::event::url_bar_top(),
     );
 
     rsx! {
@@ -199,12 +200,6 @@ fn HeaderView(titlebar_height: f32) -> Element {
                 } else if let Some(err) = listener_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
-                    HeaderAddressBar {
-                        active_row: active_row.clone(),
-                        favicon_src,
-                        favicon_error,
-                        bg_color: active_bg_color.clone(),
-                    }
                     NavButton { label: "Back", command: "prev_page", disabled: !can_go_back,
                         Icon { class: "h-4 w-4",
                             path { d: "M19 12H5" }
@@ -226,6 +221,12 @@ fn HeaderView(titlebar_height: f32) -> Element {
                                 path { d: "M21 3v5h-5" }
                             }
                         }
+                    }
+                    HeaderAddressBar {
+                        active_row: active_row.clone(),
+                        favicon_src,
+                        favicon_error,
+                        bg_color: active_bg_color.clone(),
                     }
                 }
             }

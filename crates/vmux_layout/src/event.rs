@@ -68,6 +68,10 @@ impl LayoutStateEvent {
     }
 }
 
+pub fn url_bar_top() -> f32 {
+    HEADER_TOP_PX + SPACES_ROW_HEIGHT_PX
+}
+
 fn default_header_height() -> f32 {
     HEADER_HEIGHT_PX
 }
@@ -100,6 +104,8 @@ pub fn titlebar_nav_style(titlebar_height: f32) -> String {
 }
 
 pub const HEADER_HEIGHT_PX: f32 = 60.0;
+pub const HEADER_TOP_PX: f32 = 4.0;
+pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
 #[cfg(test)]
 mod tests {
