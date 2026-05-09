@@ -1,14 +1,14 @@
-# MCP `split_and_navigate` vmux:// URL Support — Design
+# MCP vmux:// URL Support in `split_and_navigate` and `browser_navigate` — Design
 
 Linear: [VMX-107](https://linear.app/vmux/issue/VMX-107/expose-all-app-commands-to-mcp) (scope extended)
 
 ## Goal
 
-Extend the `split_and_navigate` MCP tool to recognize the three established `vmux://` protocol URLs and spawn the matching internal entity instead of a generic browser webview. No new MCP tool — same composite, just smarter routing.
+Recognize the three established `vmux://` protocol URLs (terminal, sessions, services) in BOTH `split_and_navigate` AND `browser_navigate` MCP tools, spawning the matching internal entity instead of a generic browser webview. Support `?cwd=…` query parameter for `vmux://terminal/`. No new MCP tool — same composites, smarter routing.
 
 ## Why
 
-Agents need to "open a terminal on the right" with the same atomic / no-focus-race guarantee that `split_and_navigate` provides for URLs. The vmux protocol already uses dedicated `vmux://` URLs for internal views (terminal, sessions, processes/services). Reusing those conventions lets agents request the right view via a familiar URL form without adding three more MCP tools.
+Agents need to "open a terminal on the right" with the same atomic / no-focus-race guarantee that `split_and_navigate` provides for URLs. They also need to open a terminal in the focused pane (or a target pane) without splitting first — `browser_navigate(url='vmux://terminal/')` is the natural API for that. The vmux protocol already uses dedicated `vmux://` URLs for internal views (terminal, sessions, processes/services). Reusing those conventions in both navigation tools lets agents request the right view via a familiar URL form without adding more MCP tools.
 
 ## Approach
 
@@ -33,33 +33,12 @@ Update the `McpParamTool::SplitAndNavigate` description so agents know about the
 
 ## Changes
 
-### `vmux_desktop::agent::handle_agent_commands::SplitAndNavigate` arm
+### Shared helper: `spawn_vmux_tab`
 
-Replace the unconditional `spawn_browser_tab(pane2, url, ...)` call (added in the previous wave) with vmux:// detection + URL parsing:
-
-```rust
-if url.starts_with("vmux://") {
-    match handle_vmux_split_url(
-        url,
-        pane2,
-        &mut commands,
-        &mut meshes,
-        &mut webview_mt,
-        &settings,
-    ) {
-        Ok(()) => AgentCommandResult::Ok,
-        Err(message) => AgentCommandResult::Error(message),
-    }
-} else {
-    spawn_browser_tab(pane2, url, &mut commands, &mut meshes, &mut webview_mt);
-    AgentCommandResult::Ok
-}
-```
-
-Add a new private dispatcher next to the helpers:
+A single private dispatcher in `agent.rs` handles vmux:// URL spawning for ANY pane. Both `SplitAndNavigate` and `BrowserNavigate` call it.
 
 ```rust
-fn handle_vmux_split_url(
+fn spawn_vmux_tab(
     url: &str,
     pane: Entity,
     commands: &mut Commands,
@@ -68,7 +47,7 @@ fn handle_vmux_split_url(
     settings: &AppSettings,
 ) -> Result<(), String> {
     let parsed = url::Url::parse(url)
-        .map_err(|e| format!("split_and_navigate: invalid vmux URL '{url}': {e}"))?;
+        .map_err(|e| format!("invalid vmux URL '{url}': {e}"))?;
     let host = parsed.host_str().unwrap_or("");
 
     match host {
@@ -105,15 +84,110 @@ fn handle_vmux_split_url(
             Ok(())
         }
         other => Err(format!(
-            "split_and_navigate: unknown vmux URL host '{other}' in '{url}'"
+            "unknown vmux URL host '{other}' in '{url}'"
         )),
     }
 }
 ```
 
+Error messages are generic ("invalid vmux URL", "unknown vmux URL host") — callers prepend their tool name (e.g. `format!("split_and_navigate: {message}")`) for context.
+
 `url::Url` is already a workspace dependency (`url = "2"` in the root `Cargo.toml`). Add `url = { workspace = true }` to `crates/vmux_desktop/Cargo.toml` if not already present.
 
 `valid_cwd` is the existing helper in `agent.rs` used by `NewTerminalTab`. Reused for consistency.
+
+### `vmux_desktop::agent::handle_agent_commands::SplitAndNavigate` arm
+
+Replace the unconditional `spawn_browser_tab(pane2, url, ...)` call (added in the previous wave) with vmux:// detection:
+
+```rust
+if url.starts_with("vmux://") {
+    match spawn_vmux_tab(
+        url,
+        pane2,
+        &mut commands,
+        &mut meshes,
+        &mut webview_mt,
+        &settings,
+    ) {
+        Ok(()) => AgentCommandResult::Ok,
+        Err(message) => AgentCommandResult::Error(format!("split_and_navigate: {message}")),
+    }
+} else {
+    spawn_browser_tab(pane2, url, &mut commands, &mut meshes, &mut webview_mt);
+    AgentCommandResult::Ok
+}
+```
+
+### `vmux_desktop::agent::handle_agent_commands::BrowserNavigate` arm
+
+The current handler (added in the MTD wave) has three branches:
+1. Explicit pane provided → spawn_browser_tab in target pane.
+2. No pane + active webview → trigger `RequestNavigate` (in-place URL change).
+3. No pane + no webview but focused pane exists → spawn_browser_tab in focused pane.
+
+Add vmux:// handling at the top: if URL starts with `vmux://`, ALWAYS create a new tab (the active-webview navigate path doesn't apply — vmux:// URLs need the right entity type, can't be navigated into a Browser entity). Restructure:
+
+```rust
+ServiceAgentCommand::BrowserNavigate { url, pane } => {
+    let target_pane = if let Some(s) = pane.as_deref() {
+        match parse_pane_target(s, &panes) {
+            Some(target) => Some(target),
+            None => {
+                return AgentCommandResult::Error(format!(
+                    "browser_navigate: invalid pane id '{s}'"
+                ));
+            }
+        }
+    } else {
+        focus.pane.filter(|p| panes.contains(*p))
+    };
+
+    if url.starts_with("vmux://") {
+        if let Some(pane_entity) = target_pane {
+            return match spawn_vmux_tab(
+                url,
+                pane_entity,
+                &mut commands,
+                &mut meshes,
+                &mut webview_mt,
+                &settings,
+            ) {
+                Ok(()) => AgentCommandResult::Ok,
+                Err(message) => AgentCommandResult::Error(format!("browser_navigate: {message}")),
+            };
+        }
+        return AgentCommandResult::Error(
+            "browser_navigate: no focused pane for vmux URL".to_string(),
+        );
+    }
+
+    if let Some(s) = pane.as_deref() {
+        if let Some(target) = parse_pane_target(s, &panes) {
+            spawn_browser_tab(target, url, &mut commands, &mut meshes, &mut webview_mt);
+            AgentCommandResult::Ok
+        } else {
+            AgentCommandResult::Error(format!("browser_navigate: invalid pane id '{s}'"))
+        }
+    } else if let Some(webview) = active_webview_for_tab(focus.tab, &browsers, &terminals) {
+        commands.trigger(RequestNavigate { webview, url: url.clone() });
+        AgentCommandResult::Ok
+    } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
+        spawn_browser_tab(pane, url, &mut commands, &mut meshes, &mut webview_mt);
+        AgentCommandResult::Ok
+    } else {
+        AgentCommandResult::Error("browser_navigate: no focused pane".to_string())
+    }
+}
+```
+
+Note: the early-return `match parse_pane_target(...)` at the top duplicates work with the later branch. Refactor opportunity exists but the structure as written is correct. The implementer can collapse the duplicate `parse_pane_target` call if a clean factoring presents itself.
+
+Behaviour:
+- `browser_navigate(url='vmux://terminal/?cwd=/tmp', pane=<id>)` → spawn terminal in target pane.
+- `browser_navigate(url='vmux://sessions/')` → spawn sessions view in focused pane.
+- `browser_navigate(url='https://...', pane=<id>)` → existing behaviour, browser tab in target.
+- `browser_navigate(url='https://...')` → existing behaviour (active webview navigate or auto-spawn).
 
 ### New spawn helpers in `vmux_desktop::agent`
 
@@ -163,32 +237,43 @@ pub(crate) fn spawn_processes_tab(
 
 Both follow the existing `spawn_terminal_tab` / `spawn_browser_tab` pattern. Constructors `SessionsView::new` and `ProcessesMonitor::new` already exist with the same `(meshes, webview_mt)` signature. Verify exact import paths during implementation.
 
-### `vmux_mcp::tools::McpParamTool::SplitAndNavigate` description
+### `vmux_mcp::tools::McpParamTool` description updates
 
-Current: `"Split current pane and open a URL in the new pane. Direction 'right' = side-by-side (vertical separator), 'down' = top/bottom."`
-
-New:
+**`SplitAndNavigate`** — replace description with:
 
 ```
 Split current pane and open a URL in the new pane. Direction 'right' = side-by-side (vertical separator), 'down' = top/bottom. URLs starting with 'vmux://terminal/' open a terminal (use '?cwd=/path' to set working dir), 'vmux://sessions/' opens the sessions view, 'vmux://services/' opens the processes monitor; other 'vmux://' URLs are rejected; everything else opens as a browser.
 ```
 
+**`BrowserNavigate`** — replace description with:
+
+```
+Navigate the active webview to a URL, or open a URL in a target pane. URLs starting with 'vmux://terminal/' open a terminal (use '?cwd=/path' to set working dir), 'vmux://sessions/' opens the sessions view, 'vmux://services/' opens the processes monitor; other 'vmux://' URLs are rejected; everything else opens as a browser. With 'vmux://' URLs, a new tab is always created (the target pane is required, defaulting to the focused pane).
+```
+
 ### Tests
 
-`vmux_desktop::agent::tests`:
+`vmux_desktop::agent::tests` (split_and_navigate paths):
 
-- `split_and_navigate_with_terminal_url_spawns_terminal` — focused pane + `SplitAndNavigate { direction: "right", url: "vmux://terminal/" }`. Assert PaneSplit on original pane and a `Terminal` entity exists.
-- `split_and_navigate_with_terminal_url_and_cwd_query_uses_cwd` — pass `vmux://terminal/?cwd=<existing-dir>`. Verify the spawned terminal got the cwd. (Use `std::env::current_dir()` for a guaranteed-existing dir; assert the spawn helper saw it via the `Terminal::cwd` field or by spying on `spawn_terminal_tab` arguments — easiest: assert no Error is returned and a Terminal entity exists.)
+- `split_and_navigate_with_terminal_url_spawns_terminal` — `SplitAndNavigate { direction: "right", url: "vmux://terminal/" }`. Assert PaneSplit on original pane and a `Terminal` entity exists.
+- `split_and_navigate_with_terminal_url_and_cwd_query_uses_cwd` — pass `vmux://terminal/?cwd=<existing-dir>`. Use `std::env::current_dir()` for a guaranteed-existing dir; assert no Error and a Terminal entity exists.
 - `split_and_navigate_with_terminal_url_and_invalid_cwd_errors` — `vmux://terminal/?cwd=/this/does/not/exist`. Assert command result is Error.
 - `split_and_navigate_with_sessions_url_spawns_sessions_view` — assert `SessionsView` entity.
 - `split_and_navigate_with_processes_url_spawns_processes_monitor` — assert `ProcessesMonitor` entity.
 - `split_and_navigate_with_unknown_vmux_url_errors` — send `vmux://nonsense/`. Assert Error.
 - Existing `split_and_navigate_creates_split_and_browser_tab` (from prior wave) still passes for non-`vmux://` URLs.
 
+`vmux_desktop::agent::tests` (browser_navigate vmux:// paths):
+
+- `browser_navigate_with_terminal_url_spawns_terminal_in_focused_pane` — focused pane (no tabs); `BrowserNavigate { url: "vmux://terminal/", pane: None }`. Assert Terminal entity exists in focused pane.
+- `browser_navigate_with_terminal_url_and_target_pane_uses_target` — two panes; focused = A, target = B (via `pane: Some(B.bits)`); URL `vmux://terminal/`. Assert Terminal in pane B, none in pane A.
+- `browser_navigate_with_unknown_vmux_url_errors` — `vmux://nonsense/`. Assert Error.
+- Existing `browser_navigate_*` tests (from earlier waves) still pass for non-`vmux://` URLs.
+
 ## Out of Scope
 
 - A separate `split_and_terminal` named tool. Decided against — vmux:// URLs cover it.
-- Recognizing vmux:// in other tools (e.g. `browser_navigate`). Future ticket if useful.
+- Recognizing vmux:// in tools beyond `split_and_navigate` and `browser_navigate` (e.g. `terminal_send` doesn't take URLs). Future ticket if useful.
 
 ## Risks
 
@@ -200,5 +285,5 @@ Split current pane and open a URL in the new pane. Direction 'right' = side-by-s
 ## File Map
 
 - **Modify** `crates/vmux_desktop/Cargo.toml` — add `url = { workspace = true }` if not already present.
-- **Modify** `crates/vmux_desktop/src/agent.rs` — add `spawn_sessions_tab` and `spawn_processes_tab` helpers; add private `handle_vmux_split_url` dispatcher with `?cwd=` query parsing for terminals; update `SplitAndNavigate` arm to delegate to it; add 6 new tests.
-- **Modify** `crates/vmux_mcp/src/tools.rs` — update the `SplitAndNavigate` `#[mcp(description = ...)]` string.
+- **Modify** `crates/vmux_desktop/src/agent.rs` — add `spawn_sessions_tab` and `spawn_processes_tab` helpers; add private `spawn_vmux_tab` dispatcher with `?cwd=` query parsing for terminals; update `SplitAndNavigate` arm to delegate; restructure `BrowserNavigate` arm to handle vmux:// URLs by always creating a new tab in the resolved target/focused pane; add 9 new tests.
+- **Modify** `crates/vmux_mcp/src/tools.rs` — update the `SplitAndNavigate` and `BrowserNavigate` `#[mcp(description = ...)]` strings.
