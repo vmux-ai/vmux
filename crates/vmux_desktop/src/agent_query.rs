@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn collect_spaces_descends_through_pane_splits() {
-        use crate::layout::pane::{PaneSplitDirection};
+        use crate::layout::pane::PaneSplitDirection;
         use crate::layout::space::Space;
         use crate::layout::tab::Tab;
 
@@ -256,16 +256,21 @@ mod tests {
         let leaf_a = app.world_mut().spawn((Pane, ChildOf(nested_split))).id();
         let leaf_b = app.world_mut().spawn((Pane, ChildOf(nested_split))).id();
         let leaf_c = app.world_mut().spawn((Pane, ChildOf(root_split))).id();
-        let _tab_a = app.world_mut().spawn((Tab::default(), ChildOf(leaf_a))).id();
-        let _tab_b = app.world_mut().spawn((Tab::default(), ChildOf(leaf_b))).id();
-        let _tab_c = app.world_mut().spawn((Tab::default(), ChildOf(leaf_c))).id();
+        let _tab_a = app
+            .world_mut()
+            .spawn((Tab::default(), ChildOf(leaf_a)))
+            .id();
+        let _tab_b = app
+            .world_mut()
+            .spawn((Tab::default(), ChildOf(leaf_b)))
+            .id();
+        let _tab_c = app
+            .world_mut()
+            .spawn((Tab::default(), ChildOf(leaf_c)))
+            .id();
 
         let world = app.world_mut();
-        let root_children: Vec<Entity> = world
-            .get::<Children>(space)
-            .unwrap()
-            .iter()
-            .collect();
+        let root_children: Vec<Entity> = world.get::<Children>(space).unwrap().iter().collect();
         let mut all_children_q = world.query::<&Children>();
         let mut leaf_panes_q =
             world.query_filtered::<(Entity, &Children), (With<Pane>, Without<PaneSplit>)>();

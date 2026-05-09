@@ -784,8 +784,7 @@ fn poll_service_messages(
                 });
             }
             ServiceMessage::AgentQuery { request_id, query } => {
-                agent_query_writer
-                    .write(crate::agent::AgentQueryRequest { request_id, query });
+                agent_query_writer.write(crate::agent::AgentQueryRequest { request_id, query });
             }
             _ => {}
         }
