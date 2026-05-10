@@ -85,10 +85,12 @@ build-website-css:
 	cd website && tailwindcss -i tailwind.input.css -o public/style.css --minify
 
 run-website: build-website-css
-	@cd website && tailwindcss -i tailwind.input.css -o public/style.css --watch & \
+	@cd website && { \
+		tailwindcss -i tailwind.input.css -o public/style.css --watch & \
 		WATCHER_PID=$$!; \
-		trap 'kill $$WATCHER_PID 2>/dev/null || true' EXIT INT TERM; \
-		"$(DX_BIN)" serve --platform web
+		trap "kill $$WATCHER_PID 2>/dev/null || true" EXIT INT TERM; \
+		"$(DX_BIN)" serve --platform web; \
+	}
 
 build-website: build-website-css
 	cd website && "$(DX_BIN)" build --platform web --release
