@@ -77,10 +77,48 @@ pub(crate) fn package(ctx: &Context) -> crate::Result<Vec<PathBuf>> {
         .map(|p| p.y)
         .unwrap_or(120);
 
-    // Calculate size: app size + 20MB headroom
+    // Calculate size: 1.5x app size + 200MB headroom. CEF-bearing bundles
+    // contain many small helper bundles + a >700MB framework; HFS+ allocation
+    // overhead easily eats the previous 20MB headroom and produces ENOSPC
+    // partway through the copy.
     let app_size_bytes = dir_size(&app_bundle_path);
     let app_size_bytes = if app_size_bytes == 0 { 600_000_000 } else { app_size_bytes };
-    let dmg_size_kb = (app_size_bytes / 1024) + 20480;
+    let app_size_kb = app_size_bytes / 1024;
+    let dmg_size_kb = (app_size_kb * 3 / 2) + 204_800;
+
+    // Detach any stale `/Volumes/<product_name>*` mounts from interrupted
+    // earlier runs so the new image mounts at the expected path. macOS
+    // appends " 2", " 3", ... to disambiguate when the desired name is
+    // taken, which would break the AppleScript layout step and copy paths.
+    //
+    // `hdiutil info` partition lines look like:
+    //   /dev/disk5s1<TAB><HFS-UUID><TAB>/Volumes/<volume name>
+    // The volume name may contain spaces, so we match on the trimmed
+    // mount path at the end of the line (NOT on the substring "Apple_HFS"
+    // -- that only appears in `diskutil list`, not `hdiutil info`).
+    if let Ok(info) = Command::new("hdiutil").arg("info").output() {
+        let stdout = String::from_utf8_lossy(&info.stdout);
+        let prefix = format!("/Volumes/{}", config.product_name);
+        let prefix_with_space = format!("{} ", prefix);
+        for line in stdout.lines() {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with("/dev/") {
+                continue;
+            }
+            let mount_idx = match line.find("/Volumes/") {
+                Some(idx) => idx,
+                None => continue,
+            };
+            let mount = line[mount_idx..].trim_end();
+            let matches = mount == prefix || mount.starts_with(&prefix_with_space);
+            if !matches {
+                continue;
+            }
+            if let Some(dev) = trimmed.split_whitespace().next() {
+                let _ = Command::new("hdiutil").args(["detach", dev]).output();
+            }
+        }
+    }
 
     // 1. Create empty read-write HFS+ sparse image
     tracing::debug!("Creating sparse HFS+ image");
@@ -234,48 +272,55 @@ end tell
     let _ = Command::new("sync").output();
     std::thread::sleep(std::time::Duration::from_secs(2));
 
-    // 6. Create compressed read-only DMG from mounted device partition
-    //    Uses -srcdevice instead of hdiutil convert to avoid macOS 26 Tahoe
-    //    mandatory file locking regression (EAGAIN on output file).
-    tracing::debug!("Creating compressed UDZO DMG from device");
-    let diskutil_output = Command::new("diskutil")
-        .args(["list", &device])
-        .output()
+    // 6. Stage the laid-out volume to a regular tempdir so the final
+    //    -srcfolder includes hidden files like .DS_Store and .background.
+    //    `hdiutil create -srcfolder` strips dotfiles when the source is a
+    //    /Volumes/ mount point but preserves them when the source is a
+    //    plain directory. We'd lose the AppleScript-generated layout
+    //    otherwise. We can't use -srcdevice (raw block read bypasses the
+    //    OS cache so the freshly-written .DS_Store may be missing) and we
+    //    can't use `hdiutil convert` on the sparseimage (broken on macOS 26
+    //    Tahoe -- mandatory file locking returns EAGAIN).
+    tracing::debug!("Staging laid-out volume to tempdir");
+    let stage_tmp = tempfile::Builder::new()
+        .prefix("cargo-packager-dmg-stage")
+        .tempdir()
         .map_err(|e| Error::Io(e))?;
-
-    let diskutil_stdout = String::from_utf8_lossy(&diskutil_output.stdout);
-    let partition = diskutil_stdout
-        .lines()
-        .find(|l| l.contains("Apple_HFS"))
-        .and_then(|l| l.split_whitespace().last())
-        .ok_or_else(|| {
-            crate::Error::CreateDmgFailed(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Failed to find HFS+ partition in diskutil output",
-            ))
-        })?;
-
-    Command::new("hdiutil")
-        .args([
-            "create",
-            "-srcdevice",
-            &format!("/dev/{}", partition),
-            "-format",
-            "UDZO",
-            "-ov",
-            "-o",
-        ])
-        .arg(&dmg_path)
+    let stage_dir = stage_tmp.path();
+    Command::new("ditto")
+        .arg(&mount_dir)
+        .arg(stage_dir)
         .output_ok()
         .map_err(crate::Error::CreateDmgFailed)?;
 
-    // 7. Detach and clean up
-    tracing::debug!("Detaching and cleaning up");
+    // Detach the sparse image now that we have the staged copy. Doing this
+    // before the final create avoids holding two large handles open.
     let _ = Command::new("hdiutil")
         .args(["detach", &device, "-quiet"])
         .output();
     let _ = fs::remove_file(&rw_dmg_path);
     let _ = fs::remove_file(&rw_dmg_base);
+
+    // 7. Build the final compressed DMG from the staged directory.
+    tracing::debug!("Creating compressed UDZO DMG from staged tempdir");
+    Command::new("hdiutil")
+        .args(["create", "-srcfolder"])
+        .arg(stage_dir)
+        .args([
+            "-fs",
+            "HFS+",
+            "-volname",
+            &config.product_name,
+            "-format",
+            "UDZO",
+            "-imagekey",
+            "zlib-level=9",
+            "-ov",
+        ])
+        .arg(&dmg_path)
+        .output_ok()
+        .map_err(crate::Error::CreateDmgFailed)?;
+    drop(stage_tmp);
 
     // Sign DMG if needed
     if let Some(identity) = &config

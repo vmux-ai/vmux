@@ -42,7 +42,7 @@ find "$APP_BUNDLE/Contents/Frameworks" -type f \( -name "*.dylib" -o -perm +111 
     file "$binary" | grep -q "Mach-O" || continue
     echo "  Signing: ${binary#$APP_BUNDLE/}"
     codesign --force --verify --verbose \
-        "${CODESIGN_KEYCHAIN_ARGS[@]}" \
+        ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} \
         --sign "$APPLE_SIGNING_IDENTITY" \
         --options runtime \
         "$binary"
@@ -52,7 +52,7 @@ done
 if [ -d "$APP_BUNDLE/Contents/Frameworks/Chromium Embedded Framework.framework" ]; then
     echo "  Signing: Chromium Embedded Framework.framework"
     codesign --force --verify --verbose \
-        "${CODESIGN_KEYCHAIN_ARGS[@]}" \
+        ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} \
         --sign "$APPLE_SIGNING_IDENTITY" \
         --options runtime \
         "$APP_BUNDLE/Contents/Frameworks/Chromium Embedded Framework.framework"
@@ -62,7 +62,7 @@ fi
 find "$APP_BUNDLE/Contents/Frameworks" -name "*.app" -type d | while read -r helper; do
     echo "  Signing: ${helper#$APP_BUNDLE/}"
     codesign --force --verify --verbose \
-        "${CODESIGN_KEYCHAIN_ARGS[@]}" \
+        ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} \
         --sign "$APPLE_SIGNING_IDENTITY" \
         --options runtime \
         --entitlements "$ENTITLEMENTS" \
@@ -76,7 +76,7 @@ find "$APP_BUNDLE/Contents/MacOS" -type f -perm +111 | while read -r binary; do
     [ "$name" = "Vmux" ] && continue
     echo "  Signing: ${binary#$APP_BUNDLE/}"
     codesign --force --verify --verbose \
-        "${CODESIGN_KEYCHAIN_ARGS[@]}" \
+        ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} \
         --sign "$APPLE_SIGNING_IDENTITY" \
         --options runtime \
         --entitlements "$ENTITLEMENTS" \
@@ -86,7 +86,7 @@ done
 # Sign the main app bundle
 echo "  Signing: Vmux.app"
 codesign --force --verify --verbose \
-    "${CODESIGN_KEYCHAIN_ARGS[@]}" \
+    ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} \
     --sign "$APPLE_SIGNING_IDENTITY" \
     --options runtime \
     --entitlements "$ENTITLEMENTS" \
@@ -108,8 +108,11 @@ if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_APP_PASSWORD:-}" ] || [ -z "${APPLE_T
 fi
 
 echo "==> Creating zip for notarization"
-NOTARIZE_ZIP="$ROOT/target/release/Vmux-notarize.zip"
+APP_BASENAME="$(basename "$APP_BUNDLE" .app)"
+NOTARIZE_ZIP="$ROOT/target/release/${APP_BASENAME// /_}-notarize.zip"
+rm -f "$NOTARIZE_ZIP"
 ditto -c -k --keepParent "$APP_BUNDLE" "$NOTARIZE_ZIP"
+ls -lh "$NOTARIZE_ZIP"
 
 echo "==> Submitting for notarization (this may take several minutes)"
 SUBMIT_OUTPUT="$(xcrun notarytool submit "$NOTARIZE_ZIP" \

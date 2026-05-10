@@ -253,3 +253,6 @@ features = [
 level = "warn"
 priority = 0
 check-cfg = ["cfg(doc_cfg)"]
+
+[workspace]
+

@@ -33,14 +33,11 @@ package-local-mac:
 package-release-mac:
 	./scripts/package.sh release
 
-build-mac-local: package-local-mac
-	@HASH=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown); \
-	APP="target/release/Vmux ($$HASH).app"; \
-	APP_BUNDLE="$$APP" ./scripts/sign-and-notarize.sh && \
-	APP_BUNDLE="$$APP" ./scripts/create-dmg.sh
+build-mac-local:
+	./scripts/build-mac-release.sh local
 
 build-mac-release:
-	./scripts/build-mac-release.sh
+	./scripts/build-mac-release.sh release
 
 # One-time CEF download (macOS paths; pin matches bevy_cef 0.5.x)
 setup-cef:

@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Build Vmux for macOS. Imports the signing certificate from the
+# APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD env vars (or `.env`)
+# into a temporary keychain so signing works the same way locally and
+# in CI. Without those env vars, falls back to the user's login keychain.
+#
+# Usage:
+#   ./scripts/build-mac.sh           # release (default)
+#   ./scripts/build-mac.sh release
+#   ./scripts/build-mac.sh local
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROFILE="${1:-release}"
 
 if [[ -f "$ROOT/.env" ]]; then
     while IFS= read -r line || [[ -n "$line" ]]; do
@@ -14,7 +25,7 @@ if [[ -f "$ROOT/.env" ]]; then
     done < "$ROOT/.env"
 fi
 
-CERT_FILE=""
+TMP_DIR=""
 KEYCHAIN=""
 ORIGINAL_KEYCHAINS=()
 
@@ -31,8 +42,8 @@ cleanup() {
     if [[ -n "$KEYCHAIN" ]]; then
         security delete-keychain "$KEYCHAIN" >/dev/null 2>&1 || true
     fi
-    if [[ -n "$CERT_FILE" ]]; then
-        rm -f "$CERT_FILE"
+    if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
+        rm -rf "$TMP_DIR"
     fi
 }
 trap cleanup EXIT
@@ -42,8 +53,12 @@ if [[ -n "${APPLE_CERTIFICATE:-}" || -n "${APPLE_CERTIFICATE_PASSWORD:-}" ]]; th
     : "${APPLE_CERTIFICATE_PASSWORD:?missing APPLE_CERTIFICATE_PASSWORD}"
     : "${APPLE_SIGNING_IDENTITY:?missing APPLE_SIGNING_IDENTITY}"
 
-    CERT_FILE="$(mktemp /tmp/vmux-cert.XXXXXX.p12)"
-    KEYCHAIN="$(mktemp -u /tmp/vmux-signing.XXXXXX.keychain-db)"
+    echo "==> Setting up ephemeral signing keychain"
+    # Use a temp directory; BSD mktemp on macOS doesn't substitute X's that
+    # aren't at the end of the template, which causes literal-name clashes.
+    TMP_DIR="$(mktemp -d -t vmux-build)"
+    CERT_FILE="$TMP_DIR/cert.p12"
+    KEYCHAIN="$TMP_DIR/signing.keychain-db"
     KEYCHAIN_PASSWORD="$(uuidgen)"
 
     echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_FILE"
@@ -62,11 +77,11 @@ if [[ -n "${APPLE_CERTIFICATE:-}" || -n "${APPLE_CERTIFICATE_PASSWORD:-}" ]]; th
         exit 1
     fi
     export CODESIGN_KEYCHAIN="$KEYCHAIN"
+else
+    echo "==> APPLE_CERTIFICATE not set; falling back to login keychain"
+    echo "    (set APPLE_CERTIFICATE + APPLE_CERTIFICATE_PASSWORD in .env to import"
+    echo "     the cert into a temp keychain like CI does)"
 fi
 
 cd "$ROOT"
-env -u CEF_PATH cargo packager --release --formats app
-CARGO_PACKAGER_FORMAT=dmg "$ROOT/scripts/inject-cef.sh"
-
-APP_BUNDLE="$ROOT/target/release/Vmux.app" "$ROOT/scripts/sign-and-notarize.sh"
-"$ROOT/scripts/create-dmg.sh"
+WITH_DMG=1 "$ROOT/scripts/package.sh" "$PROFILE"

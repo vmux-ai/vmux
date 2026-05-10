@@ -47,7 +47,7 @@ hdiutil create \
     "$DMG_PATH"
 
 if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
-    codesign --force "${CODESIGN_KEYCHAIN_ARGS[@]}" --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG_PATH"
+    codesign --force ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$DMG_PATH"
 fi
 
 echo "Done: $DMG_PATH"

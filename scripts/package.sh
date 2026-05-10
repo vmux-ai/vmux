@@ -37,13 +37,16 @@ echo "==> Packaging profile: $PROFILE"
 echo "    Product name: $PRODUCT_NAME"
 echo "    Bundle ID:    $BUNDLE_ID"
 
-# Backup originals
-cp "$CARGO_TOML" "$CARGO_TOML.bak"
-cp "$INFO_PLIST" "$INFO_PLIST.bak"
+# Backup originals. Skip if a .bak already exists from a crashed earlier
+# run -- overwriting it would clobber the original with the patched state
+# and permanently corrupt the working tree.
+[[ -f "$CARGO_TOML.bak" ]] || cp "$CARGO_TOML" "$CARGO_TOML.bak"
+[[ -f "$INFO_PLIST.bak" ]] || cp "$INFO_PLIST" "$INFO_PLIST.bak"
 
 restore() {
-    mv "$CARGO_TOML.bak" "$CARGO_TOML"
-    mv "$INFO_PLIST.bak" "$INFO_PLIST"
+    [[ -f "$CARGO_TOML.bak" ]] && mv -f "$CARGO_TOML.bak" "$CARGO_TOML"
+    [[ -f "$INFO_PLIST.bak" ]] && mv -f "$INFO_PLIST.bak" "$INFO_PLIST"
+    return 0
 }
 trap restore EXIT
 
@@ -71,15 +74,22 @@ export VMUX_APP_BUNDLE="$ROOT/target/release/$APP_NAME.app"
 
 echo "==> Running cargo packager"
 cd "$ROOT"
-env -u CEF_PATH VMUX_PROFILE="$PROFILE" cargo packager --release
-
-# For local builds (app-only format), inject-cef.sh doesn't run via
-# before-each-package-command because it only fires for DMG format
-# (the .app doesn't exist yet during the app format pass).
-# Run CEF injection manually after cargo-packager finishes.
-if [[ "$PROFILE" == "local" && -d "$VMUX_APP_BUNDLE" ]]; then
-    echo "==> Injecting CEF into .app (local build)"
-    CARGO_PACKAGER_FORMAT=dmg bash "$ROOT/scripts/inject-cef.sh"
+if [[ "${WITH_DMG:-0}" == "1" ]]; then
+    # Single invocation builds the .app, then for the dmg pass the
+    # before-each-package hook injects CEF + signs + notarizes the .app
+    # before dmg::package wraps it. Uses formats=["app","dmg"] from
+    # Cargo.toml.
+    env -u CEF_PATH VMUX_PROFILE="$PROFILE" cargo packager --release
+else
+    # App-only build (no signing/notarization needed for local debugging).
+    env -u CEF_PATH VMUX_PROFILE="$PROFILE" cargo packager --release --formats app
+    # The before-each hook fires for the app pass too but inject-cef.sh
+    # self-skips when the format isn't dmg (and when the .app doesn't
+    # exist yet). Run it manually now so the freshly-built .app gets CEF.
+    if [[ -d "$VMUX_APP_BUNDLE" ]]; then
+        echo "==> Injecting CEF into .app"
+        CARGO_PACKAGER_FORMAT=dmg bash "$ROOT/scripts/inject-cef.sh"
+    fi
 fi
 
 echo "==> Packaging complete: $VMUX_APP_BUNDLE"

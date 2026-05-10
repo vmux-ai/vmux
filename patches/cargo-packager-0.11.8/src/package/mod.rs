@@ -111,11 +111,24 @@ pub fn package(config: &Config) -> crate::Result<Vec<PackageOutput>> {
                     .iter()
                     .any(|b: &PackageOutput| b.format == PackageFormat::App)
                 {
-                    let paths = app::package(&ctx)?;
-                    packages.push(PackageOutput {
-                        format: PackageFormat::App,
-                        paths,
-                    });
+                    // Patched: if a pre-built .app already exists at the expected
+                    // path (produced by an earlier `cargo packager --formats app`
+                    // run plus an external sign/notarize/staple step), reuse it
+                    // instead of rebuilding. We deliberately do NOT push this
+                    // into `packages` so the post-loop cleanup (which removes
+                    // the .app when only dmg was requested) leaves the
+                    // externally-managed bundle intact. dmg::package reads the
+                    // .app via config, not via the packages list.
+                    let app_bundle_path = config
+                        .out_dir()
+                        .join(format!("{}.app", config.product_name));
+                    if !app_bundle_path.exists() {
+                        let paths = app::package(&ctx)?;
+                        packages.push(PackageOutput {
+                            format: PackageFormat::App,
+                            paths,
+                        });
+                    }
                 }
                 dmg::package(&ctx)
             }
