@@ -33,6 +33,6 @@ copy_webview_app "command-bar" "vmux_command"
 copy_webview_app "terminal" "vmux_terminal"
 copy_webview_app "services" "vmux_process"
 copy_webview_app "history" "vmux_history"
-copy_webview_app "sessions" "vmux_session"
+copy_webview_app "spaces" "vmux_space"
 
 echo "copy-webview-assets: copied webview assets to $WEBVIEW_ROOT"
