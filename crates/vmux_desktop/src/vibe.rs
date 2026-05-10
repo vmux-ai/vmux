@@ -69,9 +69,10 @@ fn build_launch_command(cwd: &Path) -> Result<String, String> {
 }
 
 pub(crate) fn find_executable(command: &str) -> Option<PathBuf> {
-    std::env::var_os("PATH")
+    let from_path = std::env::var_os("PATH")
         .and_then(|path| path.into_string().ok())
-        .and_then(|path| find_executable_in_path(command, &path))
+        .and_then(|path| find_executable_in_path(command, &path));
+    from_path.or_else(|| find_executable_in_fallback_dirs(command))
 }
 
 fn find_executable_in_path(command: &str, path_env: &str) -> Option<PathBuf> {
@@ -79,6 +80,20 @@ fn find_executable_in_path(command: &str, path_env: &str) -> Option<PathBuf> {
         .split(':')
         .filter(|part| !part.is_empty())
         .map(|part| Path::new(part).join(command))
+        .find(|path| is_executable(path))
+}
+
+fn find_executable_in_fallback_dirs(command: &str) -> Option<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        dirs.push(home.join(".local/bin"));
+        dirs.push(home.join(".cargo/bin"));
+    }
+    dirs.push(PathBuf::from("/opt/homebrew/bin"));
+    dirs.push(PathBuf::from("/usr/local/bin"));
+    dirs.into_iter()
+        .map(|dir| dir.join(command))
         .find(|path| is_executable(path))
 }
 
@@ -214,6 +229,46 @@ mod tests {
         let found = find_executable_in_path("vibe", temp.to_string_lossy().as_ref());
         let _ = std::fs::remove_file(&exe);
         let _ = std::fs::remove_dir(&temp);
+
+        assert_eq!(found, Some(exe));
+    }
+
+    #[test]
+    fn command_lookup_finds_executable_in_home_local_bin_when_path_misses() {
+        let _guard = crate::profile::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let old_home = std::env::var_os("HOME");
+        let old_path = std::env::var_os("PATH");
+        let temp = std::env::temp_dir().join(format!("vmux-vibe-home-{}", std::process::id()));
+        let bin = temp.join(".local/bin");
+        let exe = bin.join("vibe");
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(&exe, b"").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        unsafe {
+            std::env::set_var("HOME", &temp);
+            std::env::set_var("PATH", "/usr/bin:/bin");
+        }
+        let found = find_executable("vibe");
+        unsafe {
+            match old_home {
+                Some(home) => std::env::set_var("HOME", home),
+                None => std::env::remove_var("HOME"),
+            }
+            match old_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&temp);
 
         assert_eq!(found, Some(exe));
     }

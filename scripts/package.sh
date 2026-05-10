@@ -13,6 +13,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROFILE="${1:-local}"
+export PATH="${HOME}/.cargo/bin:${PATH}"
 
 CARGO_TOML="$ROOT/crates/vmux_desktop/Cargo.toml"
 INFO_PLIST="$ROOT/packaging/macos/Info.plist"
@@ -23,8 +24,7 @@ case "$PROFILE" in
         BUNDLE_ID="ai.vmux.desktop"
         ;;
     local)
-        GIT_HASH=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-        PRODUCT_NAME="Vmux ($GIT_HASH)"
+        PRODUCT_NAME="Vmux Local"
         BUNDLE_ID="ai.vmux.desktop.local"
         ;;
     *)
@@ -74,22 +74,23 @@ export VMUX_APP_BUNDLE="$ROOT/target/release/$APP_NAME.app"
 
 echo "==> Running cargo packager"
 cd "$ROOT"
-if [[ "${WITH_DMG:-0}" == "1" ]]; then
-    # Single invocation builds the .app, then for the dmg pass the
-    # before-each-package hook injects CEF + signs + notarizes the .app
-    # before dmg::package wraps it. Uses formats=["app","dmg"] from
-    # Cargo.toml.
-    env -u CEF_PATH VMUX_PROFILE="$PROFILE" cargo packager --release
-else
-    # App-only build (no signing/notarization needed for local debugging).
+if [[ "$PROFILE" == "local" ]]; then
+    # Local skips the dmg pass; `make build-mac-local` ad-hoc-signs the
+    # .app separately via sign-and-notarize.sh + SKIP_NOTARIZE=1.
     env -u CEF_PATH VMUX_PROFILE="$PROFILE" cargo packager --release --formats app
-    # The before-each hook fires for the app pass too but inject-cef.sh
-    # self-skips when the format isn't dmg (and when the .app doesn't
-    # exist yet). Run it manually now so the freshly-built .app gets CEF.
-    if [[ -d "$VMUX_APP_BUNDLE" ]]; then
-        echo "==> Injecting CEF into .app"
-        CARGO_PACKAGER_FORMAT=dmg bash "$ROOT/scripts/inject-cef.sh"
-    fi
+else
+    # Release: single invocation builds the .app, then the dmg pass'
+    # before-each hook injects CEF + signs + notarizes before
+    # dmg::package wraps it. Uses formats=["app","dmg"] from Cargo.toml.
+    env -u CEF_PATH VMUX_PROFILE="$PROFILE" cargo packager --release
+fi
+
+# inject-cef only meaningfully runs in the dmg-format pass (the .app
+# doesn't exist during the app-format pass). For local app-only builds,
+# run it manually here so the freshly-built .app gets CEF + webview assets.
+if [[ "$PROFILE" == "local" && -d "$VMUX_APP_BUNDLE" ]]; then
+    echo "==> Injecting CEF into .app (local build)"
+    CARGO_PACKAGER_FORMAT=dmg bash "$ROOT/scripts/inject-cef.sh"
 fi
 
 echo "==> Packaging complete: $VMUX_APP_BUNDLE"

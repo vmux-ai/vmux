@@ -390,7 +390,7 @@ mod tests {
 
     impl HomeEnvGuard {
         fn use_temp_home(name: &str) -> Self {
-            let guard = crate::profile::HOME_ENV_LOCK.lock().expect("home env lock");
+            let guard = crate::profile::ENV_LOCK.lock().expect("env lock");
             let old_home = std::env::var_os("HOME");
             let home =
                 std::env::temp_dir().join(format!("vmux-test-{name}-{}", std::process::id()));

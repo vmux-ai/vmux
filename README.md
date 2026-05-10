@@ -37,7 +37,7 @@ Requires macOS 13.0 (Ventura) or later.
 # Check prerequisites
 make run-doctor
 
-# Run in debug mode
+# Run signed debug binary
 make run-mac
 ```
 

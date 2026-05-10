@@ -43,7 +43,7 @@ if [[ ! -f "$HELPER_BIN" ]]; then
 fi
 
 echo "==> inject-cef: running bevy_cef_bundle_app"
-bevy_cef_bundle_app --app "$APP_BUNDLE" --bundle-id-base "$BUNDLE_ID_BASE" --helper-bin "$HELPER_BIN"
+bevy_cef_bundle_app --app "$APP_BUNDLE" --bundle-id-base "$BUNDLE_ID_BASE" --helper-bin "$HELPER_BIN" --no-sign
 
 # Copy app icon (cargo-packager handles this via icons config, but ensure it's there)
 ICNS_SRC="$ROOT/packaging/macos/Vmux.icns"

@@ -19,13 +19,6 @@ fn main() {
         std::env::current_exe().ok()
     ));
 
-    // Fix up the macOS keychain ACL on the Chromium safe-storage item so
-    // future signed builds (manual install, brew upgrade, auto-update)
-    // inherit access without prompting the user. No-op on non-macOS, and
-    // no-op the very first run when the item does not yet exist.
-    #[cfg(target_os = "macos")]
-    vmux_desktop::keychain::ensure_chromium_safe_storage_acl();
-
     println!(
         "\n\
          \x1b[36m \x1b[1m\\              /\x1b[0m\x1b[36m  |\\            /|  |        |  \\      /\x1b[0m\n\

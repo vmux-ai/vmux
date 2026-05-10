@@ -4,8 +4,7 @@
 ///
 /// # Default Switches
 ///
-/// On macOS debug builds, the following switches are enabled by default:
-/// - `use-mock-keychain`: Uses a mock keychain for testing
+/// No switches are enabled by default.
 ///
 /// # Example
 ///
@@ -29,13 +28,26 @@ pub struct CommandLineConfig {
     pub switch_values: Vec<(&'static str, &'static str)>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_uses_real_macos_keychain() {
+        let forbidden = ["use", "-mock", "-keychain"].concat();
+
+        assert!(
+            !CommandLineConfig::default()
+                .switches
+                .contains(&forbidden.as_str())
+        );
+    }
+}
+
 impl Default for CommandLineConfig {
     fn default() -> Self {
         Self {
-            switches: vec![
-                #[cfg(all(target_os = "macos", debug_assertions))]
-                "use-mock-keychain",
-            ],
+            switches: Vec::new(),
             switch_values: Vec::new(),
         }
     }

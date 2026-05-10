@@ -504,7 +504,7 @@ mod tests {
 
     impl HomeEnvGuard {
         fn use_temp_home(name: &str) -> Self {
-            let guard = profile::HOME_ENV_LOCK
+            let guard = profile::ENV_LOCK
                 .lock()
                 .unwrap_or_else(|err| err.into_inner());
             let old_home = std::env::var_os("HOME");

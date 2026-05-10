@@ -11,8 +11,6 @@ mod browser;
 mod clipboard;
 mod command;
 mod command_bar;
-#[cfg(target_os = "macos")]
-pub mod keychain;
 mod layout;
 mod os_menu;
 mod persistence;

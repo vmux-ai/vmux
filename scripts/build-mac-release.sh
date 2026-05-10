@@ -84,4 +84,4 @@ else
 fi
 
 cd "$ROOT"
-WITH_DMG=1 "$ROOT/scripts/package.sh" "$PROFILE"
+"$ROOT/scripts/package.sh" "$PROFILE"
