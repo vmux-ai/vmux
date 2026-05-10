@@ -10,23 +10,54 @@ Use superpower. Invoke relevant skills BEFORE any response or action. Even a 1% 
 
 ## Pre-commit Checks
 
-NEVER commit or push without running these checks locally first and confirming they pass:
+NEVER commit or push without running fmt + clippy + test on the **changed crates only** (not the whole workspace) and confirming they pass.
 
 ```bash
-# 1. Format check (all workspace packages, excluding patches)
-PKGS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | .name')
-for pkg in $PKGS; do
+# Compute the set of crates touched vs the base branch (defaults to main).
+# Excludes vendored `patches/`. Run from the workspace root.
+BASE="${BASE:-main}"
+ROOT="$(git rev-parse --show-toplevel)"
+CHANGED_PKGS=$(
+  cargo metadata --no-deps --format-version 1 \
+  | jq -r '.packages[]
+      | select(.manifest_path | test("patches") | not)
+      | "\(.name)\t\(.manifest_path | sub("/Cargo\\.toml$"; ""))"' \
+  | while IFS=$'\t' read -r name dir; do
+      rel="${dir#"$ROOT"/}"
+      [ -z "$rel" ] && rel="."
+      if ! git diff --quiet "$BASE" -- "$rel"; then
+        echo "$name"
+      fi
+    done
+)
+
+# 1. Format check
+for pkg in $CHANGED_PKGS; do
   cargo fmt -p "$pkg" -- --check
 done
 
-# 2. Clippy (all workspace packages, excluding patches)
-for pkg in $PKGS; do
+# 2. Clippy
+for pkg in $CHANGED_PKGS; do
   env -u CEF_PATH cargo clippy -p "$pkg" --all-targets -- -D warnings
 done
 
 # 3. Tests
-env -u CEF_PATH cargo test --workspace --exclude bevy_cef_core
+for pkg in $CHANGED_PKGS; do
+  env -u CEF_PATH cargo test -p "$pkg"
+done
 ```
+
+If a change ripples into a downstream crate that is NOT in the changed set, lint/test that crate too.
+
+The `website/` directory is its own cargo workspace (separate `Cargo.lock`). When `website/**` changes, run fmt + clippy from inside `website/` against `wasm32-unknown-unknown`:
+
+```bash
+cd website
+cargo fmt -- --check
+env -u CEF_PATH cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings
+```
+
+There is no host-runnable test target for `vmux_website` (it builds for `wasm32-unknown-unknown`); skip `cargo test` here unless wasm-bindgen-test is wired up.
 
 If any check fails, fix the issue before committing. Do not push broken code.
 
@@ -67,12 +98,12 @@ Always prefer `git rebase` over `git merge` when updating branches. Use `git pus
 
 ## Before Pushing / Opening PRs
 
-**Mandatory**: Run `make lint` and `make test` before every `git push` or PR creation. Do not push or open a PR if either command fails. Fix all errors first.
+**Mandatory**: Run fmt + clippy + test on the **changed crates only** before every `git push` or PR creation. Do not push or open a PR if any check fails. Fix all errors first.
+
+Use the `Pre-commit Checks` snippet above to compute the changed-crate set and run the three loops. The repo-wide `make lint` / `make test` targets still exist (they iterate every workspace package) but are slow and intended for periodic full sweeps, not per-push validation.
 
 ```sh
-make lint      # fmt --check + clippy -D warnings (excludes vendored patches)
-make test      # cargo test --workspace (excludes bevy_cef_core)
-make lint-fix  # auto-fix: runs fmt + clippy --fix
+make lint-fix  # auto-fix on every workspace package: runs fmt + clippy --fix
 ```
 
-If `make lint` fails with formatting errors, run `make lint-fix` to auto-format, then verify with `make lint` again.
+If formatting fails, run `make lint-fix` to auto-format, then re-run the changed-crate loops.
