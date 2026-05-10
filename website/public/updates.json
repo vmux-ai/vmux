@@ -1,10 +1,10 @@
 {
-  "version": "v0.0.3",
-  "pub_date": "2026-05-08T23:34:57Z",
+  "version": "v0.0.4",
+  "pub_date": "2026-05-10T01:47:50Z",
   "platforms": {
     "macos-aarch64": {
-      "url": "https://github.com/vmux-ai/vmux/releases/download/v0.0.3/Vmux-v0.0.3-aarch64-apple-darwin.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVUN1lFWllXRE5HTzFiRVdQNkQwVGlWcEFKYUFmdVltVmlrRCtpN1dCVnRvNnBHaGc1bjZ5R3E0YkRVbmpNN0NOdERuSDJhYm83Ry9RcWlFbnJRRkNoU25SdEpHQjlvUVFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4MjgzMjk3CWZpbGU6Vm11eC12MC4wLjMtYWFyY2g2NC1hcHBsZS1kYXJ3aW4uYXBwLnRhci5negp4ZFZXZnk5QVpycmU0dDZsai9kY2htRzU2MEZxZFBkRklhbUFSNWNUandmdE1CaXFORTVkZlBPZTliTk52anM3ZUg1VW1kbElHRTNCbWJxeHBqNStBdz09Cg==",
+      "url": "https://github.com/vmux-ai/vmux/releases/download/v0.0.4/Vmux-v0.0.4-aarch64-apple-darwin.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVUN1lFWllXRE5HTytpTzNXVllRQVhtcVp4VHZoM0NPZXgrbjBWU2o5UWdlTnl3a0ZJR0ZJTzhVMkhiN3FiOG1sbVZTVGRvWHFvSlBZM29iUHUyTWs1Mmh6SkJkMncxdHc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4Mzc3NjcwCWZpbGU6Vm11eC12MC4wLjQtYWFyY2g2NC1hcHBsZS1kYXJ3aW4uYXBwLnRhci5negpYRlZsUXBjMFoxNVlyK3RCNEZXZU9oM2tKOCtRRHJSR01uNjNVMUNrMlRmdE9VQm9UY3UrME5MeE5kY3Z2aHVoOTVpQjl1MVNQZE02d1luUjZaVHZCdz09Cg==",
       "format": "app"
     }
   }
