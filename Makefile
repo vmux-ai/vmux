@@ -35,7 +35,9 @@ package-release-mac:
 
 build-mac-local: package-local-mac
 	@HASH=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown); \
-	APP_BUNDLE="target/release/Vmux ($$HASH).app" ./scripts/sign-and-notarize.sh
+	APP="target/release/Vmux ($$HASH).app"; \
+	APP_BUNDLE="$$APP" ./scripts/sign-and-notarize.sh && \
+	APP_BUNDLE="$$APP" ./scripts/create-dmg.sh
 
 build-mac-release:
 	./scripts/build-mac-release.sh
