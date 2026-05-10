@@ -1,7 +1,13 @@
-use dioxus::prelude::*;
+mod hooks;
 
-const CSS: Asset = asset!("/assets/style.css");
+use dioxus::prelude::*;
+use dioxus_primitives::toast::{ToastOptions, ToastProvider, use_toast};
+
+use hooks::{use_clipboard_copy, use_dmg_download, use_is_mac};
+
 const ICON: Asset = asset!("/assets/icon.png");
+const GITHUB_URL: &str = "https://github.com/vmux-ai/vmux";
+const INSTALL_CMD: &str = "curl -fsSL https://vmux.ai/install | sh";
 
 fn main() {
     dioxus::launch(App);
@@ -10,32 +16,69 @@ fn main() {
 #[component]
 fn App() -> Element {
     rsx! {
-        document::Stylesheet { href: CSS }
-        Hero {}
-        Features {}
-        Install {}
-        Footer {}
+        ToastProvider {
+            Hero {}
+            Features {}
+            Footer {}
+        }
     }
 }
 
 #[component]
 fn Hero() -> Element {
+    let toast_api = use_toast();
+    let is_mac = use_is_mac();
+    let copy = use_clipboard_copy();
+    let download = use_dmg_download();
+
     rsx! {
-        section { class: "hero",
-            img { src: ICON, alt: "Vmux icon", class: "hero-icon" }
-            h1 { "Vmux" }
-            p { class: "tagline", "Vibe Multiplexer — AI-native workspace combining browser and terminal panes." }
-            div { class: "install-oneliner",
-                code { "curl -fsSL https://vmux.ai/install | sh" }
+        section { class: "text-center max-w-3xl mx-auto pt-16 pb-12 px-6 sm:pt-24 sm:pb-16 sm:px-8",
+            img {
+                src: ICON,
+                alt: "Vmux icon",
+                class: "w-32 h-32 mb-6 inline-block rounded-3xl",
+            }
+            h1 { class: "text-4xl sm:text-5xl font-bold mb-2 tracking-tight", "Vmux" }
+            p { class: "text-base sm:text-xl text-text-muted mb-10 max-w-md mx-auto",
+                "Vibe Multiplexer — AI-native workspace combining browser and terminal panes."
+            }
+            div { class: "flex flex-wrap justify-center gap-3 mb-6",
                 button {
-                    class: "copy-btn",
+                    class: "inline-flex items-center px-6 py-3 rounded-lg text-base font-semibold border border-transparent bg-accent text-black cursor-pointer transition-colors hover:bg-accent-hover",
                     onclick: move |_| {
-                        spawn(async {
-                            let _ = document::eval(r#"navigator.clipboard.writeText("curl -fsSL https://vmux.ai/install | sh")"#).await;
-                        });
+                        if is_mac {
+                            download(());
+                        } else {
+                            toast_api
+                                .info(
+                                    "Not supported".to_string(),
+                                    ToastOptions::new()
+                                        .description("Windows/Linux not supported yet — see GitHub Releases"),
+                                );
+                        }
+                    },
+                    "Download .dmg"
+                }
+                a {
+                    class: "inline-flex items-center px-6 py-3 rounded-lg text-base font-semibold no-underline border border-border bg-transparent text-text transition-colors hover:border-accent hover:text-accent",
+                    href: GITHUB_URL,
+                    target: "_blank",
+                    "GitHub"
+                }
+            }
+            div { class: "inline-flex flex-col sm:flex-row items-center gap-2 sm:gap-3 bg-code-bg border border-border rounded-lg px-4 py-3 text-sm sm:text-base mb-4",
+                code { class: "font-mono text-accent", "{INSTALL_CMD}" }
+                button {
+                    class: "bg-accent text-black border-0 rounded px-3 py-1.5 text-sm font-semibold cursor-pointer transition-colors hover:bg-accent-hover",
+                    onclick: move |_| {
+                        copy(INSTALL_CMD.to_string());
+                        toast_api.success("Copied!".to_string(), ToastOptions::new());
                     },
                     "Copy"
                 }
+            }
+            p { class: "text-sm text-text-muted",
+                "Requires macOS 13.0 (Ventura) or later."
             }
         }
     }
@@ -63,58 +106,16 @@ fn Features() -> Element {
     ];
 
     rsx! {
-        section { class: "features",
-            h2 { "Features" }
-            div { class: "feature-grid",
+        section { class: "max-w-3xl mx-auto py-12 px-8",
+            h2 { class: "text-center text-3xl mb-8", "Features" }
+            div { class: "grid grid-cols-1 md:grid-cols-2 gap-5",
                 for (title, desc) in features {
-                    div { class: "feature-card",
-                        h3 { "{title}" }
-                        p { "{desc}" }
+                    div { class: "bg-surface border border-border rounded-xl p-6",
+                        h3 { class: "text-base mb-2 text-accent", "{title}" }
+                        p { class: "text-sm text-text-muted leading-relaxed", "{desc}" }
                     }
                 }
             }
-        }
-    }
-}
-
-#[component]
-fn Install() -> Element {
-    rsx! {
-        section { class: "install",
-            h2 { "Install" }
-
-            div { class: "install-methods",
-                div { class: "install-method",
-                    h3 { "Quick Install" }
-                    pre {
-                        code { "curl -fsSL https://vmux.ai/install | sh" }
-                    }
-                }
-
-                div { class: "install-method",
-                    h3 { "Homebrew" }
-                    pre {
-                        code { "brew tap vmux-ai/vmux https://github.com/vmux-ai/vmux\nbrew install --cask vmux" }
-                    }
-                }
-
-                div { class: "install-method",
-                    h3 { "Download" }
-                    p {
-                        "Grab the latest "
-                        code { ".dmg" }
-                        " from "
-                        a {
-                            href: "https://github.com/vmux-ai/vmux/releases",
-                            target: "_blank",
-                            "GitHub Releases"
-                        }
-                        "."
-                    }
-                }
-            }
-
-            p { class: "requirement", "Requires macOS 13.0 (Ventura) or later." }
         }
     }
 }
@@ -122,15 +123,17 @@ fn Install() -> Element {
 #[component]
 fn Footer() -> Element {
     rsx! {
-        footer {
+        footer { class: "text-center py-12 px-8 text-text-muted text-sm",
             p {
                 a {
-                    href: "https://github.com/vmux-ai/vmux",
+                    class: "text-text-muted no-underline hover:text-text",
+                    href: GITHUB_URL,
                     target: "_blank",
                     "GitHub"
                 }
                 " · "
                 a {
+                    class: "text-text-muted no-underline hover:text-text",
                     href: "https://github.com/vmux-ai/vmux/blob/main/LICENSE",
                     target: "_blank",
                     "MIT License"

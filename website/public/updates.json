@@ -7,5 +7,11 @@
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVUN1lFWllXRE5HTytpTzNXVllRQVhtcVp4VHZoM0NPZXgrbjBWU2o5UWdlTnl3a0ZJR0ZJTzhVMkhiN3FiOG1sbVZTVGRvWHFvSlBZM29iUHUyTWs1Mmh6SkJkMncxdHc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4Mzc3NjcwCWZpbGU6Vm11eC12MC4wLjQtYWFyY2g2NC1hcHBsZS1kYXJ3aW4uYXBwLnRhci5negpYRlZsUXBjMFoxNVlyK3RCNEZXZU9oM2tKOCtRRHJSR01uNjNVMUNrMlRmdE9VQm9UY3UrME5MeE5kY3Z2aHVoOTVpQjl1MVNQZE02d1luUjZaVHZCdz09Cg==",
       "format": "app"
     }
+  },
+  "downloads": {
+    "macos-aarch64": {
+      "url": "https://github.com/vmux-ai/vmux/releases/download/v0.0.4/Vmux_0.0.4_aarch64.dmg",
+      "filename": "Vmux_0.0.4_aarch64.dmg"
+    }
   }
 }

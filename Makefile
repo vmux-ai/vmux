@@ -1,4 +1,4 @@
-.PHONY: run-mac run-mac-local run-doctor build-mac-debug build build-mac-local build-mac-release package-local-mac package-release-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps run-website build-website lint lint-fix fmt clippy test
+.PHONY: run-mac run-mac-local run-doctor build-mac-debug build build-mac-local build-mac-release package-local-mac package-release-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps run-website build-website build-website-css lint lint-fix fmt clippy test
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 RUSTUP_BIN := $(or $(shell command -v rustup 2>/dev/null),$(HOME)/.cargo/bin/rustup)
@@ -79,10 +79,16 @@ test:
 	env -u CEF_PATH "$(CARGO_BIN)" test --workspace --exclude bevy_cef_core
 
 # Website
-run-website:
-	cd website && "$(DX_BIN)" serve --platform web
+build-website-css:
+	cd website && tailwindcss -i tailwind.input.css -o public/style.css --minify
 
-build-website:
+run-website: build-website-css
+	@cd website && tailwindcss -i tailwind.input.css -o public/style.css --watch & \
+		WATCHER_PID=$$!; \
+		trap 'kill $$WATCHER_PID 2>/dev/null || true' EXIT INT TERM; \
+		"$(DX_BIN)" serve --platform web
+
+build-website: build-website-css
 	cd website && "$(DX_BIN)" build --platform web --release
 
 # Friendly prerequisite report (colors / emoji when terminal); README: make run-doctor

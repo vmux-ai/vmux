@@ -22,3 +22,5 @@ build/
 
 # Website
 website/target/
+# Tailwind output (run `make build-website-css` to regenerate)
+website/public/style.css

@@ -46,6 +46,13 @@ jobs:
       - name: Install dioxus-cli
         run: cargo install dioxus-cli --locked --version 0.7.4
 
+      - name: Install Tailwind CSS
+        run: ./scripts/install-tailwindcss.sh
+
+      - name: Build Tailwind CSS
+        working-directory: website
+        run: tailwindcss -i tailwind.input.css -o public/style.css --minify
+
       - name: Build website
         working-directory: website
         run: dx build --platform web --release

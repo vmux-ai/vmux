@@ -195,6 +195,9 @@ jobs:
           TARBALL="target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
           SIG=$(cat "${TARBALL}.sig")
           URL="https://github.com/vmux-ai/vmux/releases/download/v${VERSION}/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
+          DMG_PATH=$(ls target/release/Vmux_*.dmg)
+          DMG_NAME=$(basename "$DMG_PATH")
+          DMG_URL="https://github.com/vmux-ai/vmux/releases/download/v${VERSION}/${DMG_NAME}"
           DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           mkdir -p website/public
           cat > website/public/updates.json <<EOF
@@ -206,6 +209,12 @@ jobs:
                 "url": "${URL}",
                 "signature": "${SIG}",
                 "format": "app"
+              }
+            },
+            "downloads": {
+              "macos-aarch64": {
+                "url": "${DMG_URL}",
+                "filename": "${DMG_NAME}"
               }
             }
           }
