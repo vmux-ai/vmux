@@ -1234,7 +1234,7 @@ bash -c "git add crates/vmux_desktop/src/vibe/session.rs crates/vmux_desktop/src
 
 ---
 
-## Task 10: Desktop — vibe URL dispatcher (`vmux://vibe/` and `vmux://vibe/<id>`)
+## Task 10: Desktop — vibe URL dispatcher (`vmux://vibe/` and `vmux://vibe/<session>`)
 
 **Files:**
 - Modify: `crates/vmux_desktop/src/agent.rs:266-308` (add `vibe` host arm)
@@ -1707,9 +1707,9 @@ bash -c "make run"
 
 Open a window. With `vibe` installed:
 
-- [ ] `Cmd+T` (or new-stack shortcut) → vibe launches in the new pane; the pane's URL becomes `vmux://vibe/<session_id>` within ~6s. No command bar appears.
+- [ ] `Cmd+T` (or new-stack shortcut) → vibe launches in the new pane; the pane's URL becomes `vmux://vibe/<session>` within ~6s. No command bar appears.
 - [ ] Command-bar keybinding (whatever's bound — check `settings.ron` or the keybindings doc) opens the command bar from any page.
-- [ ] Open a vibe pane, copy its URL via the URL bar, close the pane, open command bar, paste URL → spawns `vibe --resume <id>`.
+- [ ] Open a vibe pane, copy its URL via the URL bar, close the pane, open command bar, paste URL → spawns `vibe --resume <session>`.
 - [ ] Open a regular shell pane (e.g., via the command bar's terminal item). URL is `vmux://terminal/<pid>` where `<pid>` matches `ps` output for the shell.
 - [ ] Copy `vmux://terminal/<pid>` for an existing pane, switch to a different tab, paste into command bar → focuses the original terminal.
 - [ ] In `~/.../settings.ron`, set `startup_url: Some("vmux://services/")`, restart vmux. `Cmd+T` opens the services view.

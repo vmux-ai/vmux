@@ -9,7 +9,7 @@ Four coordinated changes to vmux:
 
 1. Add a configurable `startup_url` setting. When vmux creates a fresh empty pane (new stack/tab/pane/space, or app start with no restored layout), it navigates that pane to `startup_url`. Default is `vmux://vibe/` when the `vibe` CLI is detected on disk, else `vmux://terminal/`.
 2. Remove the auto-open of the command bar on empty-pane creation. The command bar is now invoked exclusively via its keybinding; it works as a manual toggle on every page.
-3. Add a new URL route `vmux://vibe/<session_id>` that identifies a vibe pane by its vibe CLI session UUID.
+3. Add a new URL route `vmux://vibe/<session>` that identifies a vibe pane by its vibe CLI session UUID.
 4. Change the existing terminal URL form from `vmux://terminal/<process-id-uuid>` to `vmux://terminal/<os-pid>`. Hard cut, no UUID compatibility.
 
 ## Motivation
@@ -138,7 +138,7 @@ pub struct VibeSessionToEntity(pub HashMap<String, Entity>);
 
 `SessionId` lives in `vibe/session.rs` because vibe is the only consumer today. If a second agent ships, promote it to `crates/vmux_desktop/src/agent/session.rs` (or wherever agent-shared code lands) — refactor at that point, not before.
 
-The `VibeSessionToEntity` map name stays vibe-scoped because the `vmux://vibe/<id>` URL specifically resolves to vibe panes; a future `vmux://claude/<id>` would have its own `ClaudeSessionToEntity` map and own marker.
+The `VibeSessionToEntity` map name stays vibe-scoped because the `vmux://vibe/<session>` URL specifically resolves to vibe panes; a future `vmux://claude/<session>` would have its own `ClaudeSessionToEntity` map and own marker.
 
 No `DefaultPaneKind` resource — replaced by the `startup_url` setting + resolver.
 
@@ -179,7 +179,7 @@ A polling system runs every 200ms over entities with `PendingVibeSession`:
 Two callers:
 
 - **Fresh session** (`vmux://vibe/` no-path, including default `startup_url` flow): `vibe --trust`. Discovery runs.
-- **Resume** (`vmux://vibe/<id>` for unknown session): `vibe --trust --resume <id>`. Discovery skipped — session ID is already known and stamped on the entity at spawn time.
+- **Resume** (`vmux://vibe/<session>` for unknown session): `vibe --trust --resume <session>`. Discovery skipped — session ID is already known and stamped on the entity at spawn time.
 
 Both share the existing `bash -lc 'cd "$1" && VIBE_MCP_SERVERS="$2" exec "$3" --trust [...]' bash <cwd> <mcp_json> <vibe_path>` template.
 
@@ -194,7 +194,7 @@ Add `vibe` host arm. Updated routing table:
 | `terminal` | empty | Spawn new terminal |
 | `terminal` | `<u32>` | Look up `PidToEntity`. Hit → focus pane. Miss → log error, navigate to `startup_url`. |
 | `vibe` | empty | Spawn new fresh vibe pane (discovery flow) |
-| `vibe` | `<session-id>` | Look up `VibeSessionToEntity`. Hit → focus pane. Miss → spawn new pane with `--resume <id>`, stamp `SessionId(id)` immediately. |
+| `vibe` | `<session>` | Look up `VibeSessionToEntity`. Hit → focus pane. Miss → spawn new pane with `--resume <session>`, stamp `SessionId(session)` immediately. |
 | `sessions`, `services` | — | unchanged |
 
 **File:** `crates/vmux_desktop/src/command_bar.rs` — `parse_process_id_from_url` at lines 42–45 becomes `parse_pid_from_url` returning `Option<u32>`. The `on_command_bar_action` handler's terminal arm uses `PidToEntity` for reattach lookups.
@@ -241,7 +241,7 @@ User: Cmd+T (or shortcut)
   → discovery system polls ~/.vibe/logs/session/ each 200ms
   → on match: stamp SessionId(id), remove PendingVibeSession,
      insert into VibeSessionToEntity
-  → URL formatter updates PageMetadata.url to "vmux://vibe/<id>"
+  → URL formatter updates PageMetadata.url to "vmux://vibe/<session>"
 ```
 
 ### URL navigation
@@ -259,7 +259,7 @@ vmux://terminal/
 vmux://vibe/ae724a54-c387-...
   → VibeSessionToEntity.get(&id)
   → Some(entity): focus that pane's tab
-  → None: spawn new entity with vibe-cmd containing --resume <id>,
+  → None: spawn new entity with vibe-cmd containing --resume <session>,
      mark Terminal + Vibe, stamp SessionId(id) at spawn time, skip discovery,
      insert into VibeSessionToEntity
 
@@ -276,7 +276,7 @@ vmux://vibe/
 - **Vibe binary disappears mid-session** — same handling as a regular shell exit. Out of scope.
 - **Old `vmux://terminal/<uuid>` references** (e.g., MCP commands stored in vibe history) — fail to parse as `u32`, return error, log. Acceptable: pre-1.0, no public API contract.
 - **Malformed `startup_url`** — log warning, fall back to spawning empty terminal (`vmux://terminal/`).
-- **`startup_url` set to a specific-pane URL** (e.g., `vmux://terminal/12345` or `vmux://vibe/<id>`) — every new pane tries to focus that pane, which means subsequent `Cmd+T` presses focus the same existing tab instead of creating new tabs. Behavior is consistent with the URL semantics; we do not special-case it. Documented in changelog/settings notes.
+- **`startup_url` set to a specific-pane URL** (e.g., `vmux://terminal/12345` or `vmux://vibe/<session>`) — every new pane tries to focus that pane, which means subsequent `Cmd+T` presses focus the same existing tab instead of creating new tabs. Behavior is consistent with the URL semantics; we do not special-case it. Documented in changelog/settings notes.
 - **`startup_url` pointing at a regular http URL** (e.g., `https://example.com`) — works; the URL dispatcher already handles non-vmux URLs through the browser webview path.
 - **Multiple spaces** — `PidToEntity` and `VibeSessionToEntity` are global resources, not space-scoped. URL navigation can target a pane in any space and the existing pane-focus machinery handles cross-space switching.
 
@@ -294,12 +294,12 @@ vmux://vibe/
 - `open_startup_url_if_no_stacks`: when active space has no stacks, dispatches startup_url to a freshly spawned stack.
 
 **Integration:**
-- Spawn vibe → assert URL transitions from `vmux://vibe/` to `vmux://vibe/<id>` within 6s. Test guarded with `#[cfg]` or skipped when `vibe` binary not present (matches existing pattern in vibe.rs).
+- Spawn vibe → assert URL transitions from `vmux://vibe/` to `vmux://vibe/<session>` within 6s. Test guarded with `#[cfg]` or skipped when `vibe` binary not present (matches existing pattern in vibe.rs).
 
 **Manual (vibe-installed machine):**
 - `Cmd+T` (or new-stack shortcut) launches vibe; no command bar appears.
 - Command-bar keybinding opens command bar from any page.
-- Open vibe pane, copy its URL, close pane, paste URL into command bar → spawns `vibe --resume <id>`.
+- Open vibe pane, copy its URL, close pane, paste URL into command bar → spawns `vibe --resume <session>`.
 - Spawn terminal, copy `vmux://terminal/<pid>`, switch tabs, paste URL → focuses original terminal.
 - Set `startup_url = "vmux://services/"` in settings.ron, restart vmux, `Cmd+T` opens services view.
 - Uninstall vibe binary, restart vmux, `Cmd+T` opens regular terminal (not command bar).
