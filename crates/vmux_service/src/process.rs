@@ -24,15 +24,26 @@ pub type PtyInputWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 
 #[derive(Clone)]
 struct ServiceEventProxy {
+    process_id: ProcessId,
     pty_writer: PtyInputWriter,
+    patch_tx: broadcast::Sender<ServiceMessage>,
 }
 
 impl TermEventListener for ServiceEventProxy {
     fn send_event(&self, event: TermEvent) {
-        if let TermEvent::PtyWrite(text) = event
-            && let Ok(mut writer) = self.pty_writer.lock()
-        {
-            let _ = writer.write_all(text.as_bytes());
+        match event {
+            TermEvent::PtyWrite(text) => {
+                if let Ok(mut writer) = self.pty_writer.lock() {
+                    let _ = writer.write_all(text.as_bytes());
+                }
+            }
+            TermEvent::Title(title) => {
+                let _ = self.patch_tx.send(ServiceMessage::ProcessTitle {
+                    process_id: self.process_id,
+                    title,
+                });
+            }
+            _ => {}
         }
     }
 }
@@ -262,12 +273,14 @@ impl Process {
             })
             .map_err(|e| format!("failed to spawn PTY reader: {e}"))?;
 
+        let (patch_tx, _) = broadcast::channel(256);
         let event_proxy = ServiceEventProxy {
+            process_id: id,
             pty_writer: Arc::clone(&writer),
+            patch_tx: patch_tx.clone(),
         };
         let dims = PtyDimensions { cols, rows };
         let term = Term::new(TermConfig::default(), &dims, event_proxy);
-        let (patch_tx, _) = broadcast::channel(256);
 
         Ok(Self {
             id,
@@ -1669,5 +1682,33 @@ mod tests {
             .expect("spawn");
         assert!(pid > 0, "expected real pid, got {pid}");
         assert!(mgr.processes.contains_key(&id));
+    }
+
+    #[test]
+    fn proxy_broadcasts_process_title_on_term_title_event() {
+        use std::io;
+
+        let (tx, mut rx) = broadcast::channel::<ServiceMessage>(8);
+        let writer: PtyInputWriter = Arc::new(Mutex::new(Box::new(io::sink())));
+        let process_id = ProcessId::new();
+        let proxy = ServiceEventProxy {
+            process_id,
+            pty_writer: writer,
+            patch_tx: tx,
+        };
+
+        proxy.send_event(TermEvent::Title("hello-osc".into()));
+
+        let msg = rx.try_recv().expect("ProcessTitle should be broadcast");
+        match msg {
+            ServiceMessage::ProcessTitle {
+                process_id: got_id,
+                title,
+            } => {
+                assert_eq!(got_id, process_id);
+                assert_eq!(title, "hello-osc");
+            }
+            other => panic!("expected ProcessTitle, got {other:?}"),
+        }
     }
 }
