@@ -1240,63 +1240,61 @@ bash -c "git add crates/vmux_desktop/src/vibe/session.rs crates/vmux_desktop/src
 - Modify: `crates/vmux_desktop/src/agent.rs:266-308` (add `vibe` host arm)
 - Modify: `crates/vmux_desktop/src/vibe.rs` (expose helpers: `spawn_fresh_vibe_pane(target)`, `spawn_vibe_resume_pane(target, session_id)`, `vibe_command_for_resume(session_id)`)
 
-- [ ] **Step 1: Refactor existing vibe launch builder**
+- [ ] **Step 1: Add a `--resume` variant of the launch-command builder; reuse MCP injection**
 
-Open `crates/vmux_desktop/src/vibe.rs` and find the existing command-construction block at lines 203–211. Extract two helpers next to it (signatures match the existing code's argument types — copy from the surrounding context):
+The existing `build_bash_launch_command` at `crates/vmux_desktop/src/vibe.rs:203-211` already injects `VIBE_MCP_SERVERS` properly via `shell_quote`/`shell_quote_path`. The MCP JSON is produced by `mcp_servers_env_value(cwd)` at line 116, which:
+
+- Resolves the vmux sidecar binary next to the current executable (`vmux_sidecar_path`).
+- Falls back to `cargo run --quiet -p vmux_cli --bin vmux -- mcp` when the sidecar is missing (workspace-dev path).
+- Serializes the result as the `[{"name":"vmux","transport":"stdio","command":...,"args":...,"cwd":...}]` JSON that vibe expects.
+
+Both new spawn paths (fresh + resume) **must call `mcp_servers_env_value(cwd)?`** to produce the MCP JSON. Do not inline a different MCP construction — the sidecar/cargo-run fallback logic must be shared so a developer-build vibe pane gets the same MCP wiring as a packaged-build vibe pane.
+
+Add a parallel builder for the resume case in `vibe.rs`, right after `build_bash_launch_command`:
 
 ```rust
-pub(crate) fn vibe_command_fresh(vibe_path: &Path, cwd: &Path, mcp_json: &str) -> String {
-    let cwd_arg = cwd.to_string_lossy();
-    let vibe_arg = vibe_path.to_string_lossy();
-    format!(
-        "bash -lc 'cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" exec \"$3\" --trust' bash {cwd_arg:?} {mcp_json:?} {vibe_arg:?}"
-    )
-}
-
-pub(crate) fn vibe_command_resume(
-    vibe_path: &Path,
+fn build_bash_launch_command_resume(
+    mcp_servers: &str,
+    vibe: &Path,
     cwd: &Path,
-    mcp_json: &str,
     session_id: &str,
-) -> String {
-    let cwd_arg = cwd.to_string_lossy();
-    let vibe_arg = vibe_path.to_string_lossy();
-    format!(
-        "bash -lc 'cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" exec \"$3\" --trust --resume \"$4\"' bash {cwd_arg:?} {mcp_json:?} {vibe_arg:?} {session_id:?}"
-    )
+) -> Result<String, String> {
+    Ok(format!(
+        "bash -lc {} bash {} {} {} {}",
+        shell_quote("cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" exec \"$3\" --trust --resume \"$4\"")?,
+        shell_quote_path(cwd)?,
+        shell_quote(mcp_servers)?,
+        shell_quote_path(vibe)?,
+        shell_quote(session_id)?,
+    ))
 }
 ```
 
-(Using `{:?}` quotes the argument with backslash escapes — adequate for shell-safe arguments. If the existing code at lines 203–211 already uses a custom escape helper, swap that in.)
+The existing `build_bash_launch_command` stays as-is for the fresh path. The existing AgentLaunch consumer at `agent.rs:587-622` keeps using `build_bash_launch_command` and stays byte-identical.
 
-Update the existing call site at `agent.rs:587-622` (the `handle_agent_launch_requests` system) to call `vibe_command_fresh(...)` so the existing AgentLaunch path keeps working byte-identically.
-
-Add a unit test in `mod tests` of `vibe.rs`:
+Add a unit test in `mod tests` of `vibe.rs`, alongside the existing `launch_command_cds_and_passes_mcp_servers_to_vibe` (line 277):
 
 ```rust
 #[test]
-fn vibe_command_resume_includes_session_flag() {
-    let cmd = vibe_command_resume(
-        Path::new("/usr/bin/vibe"),
-        Path::new("/tmp/work"),
-        "[]",
-        "ae724a54-c387",
-    );
+fn launch_command_resume_includes_session_id_and_mcp_servers() {
+    let mcp = r#"[{"name":"vmux","transport":"stdio","command":"target/debug/vmux","args":["mcp"]}]"#;
+    let cmd = build_bash_launch_command_resume(
+        mcp,
+        Path::new("/Users/test/.local/bin/vibe"),
+        Path::new("/tmp/work tree"),
+        "ae724a54-c387-5359-0687-ccfc155558b6",
+    )
+    .expect("build");
     assert!(cmd.contains("--resume"));
-    assert!(cmd.contains("ae724a54-c387"));
-}
-
-#[test]
-fn vibe_command_fresh_omits_resume_flag() {
-    let cmd = vibe_command_fresh(Path::new("/usr/bin/vibe"), Path::new("/tmp/work"), "[]");
-    assert!(!cmd.contains("--resume"));
-    assert!(cmd.contains("--trust"));
+    assert!(cmd.contains("ae724a54-c387-5359-0687-ccfc155558b6"));
+    assert!(cmd.contains("VIBE_MCP_SERVERS"));
+    assert!(cmd.contains("\"name\":\"vmux\""));
 }
 ```
 
 - [ ] **Step 2: Add `spawn_fresh_vibe_pane` / `spawn_vibe_resume_pane` helpers**
 
-Add to `crates/vmux_desktop/src/vibe.rs`. The bundle mirrors `Terminal::new_with_cwd` (`crates/vmux_desktop/src/terminal.rs:283-353`) — copy that bundle's structure, swap the shell field for the vibe command, add `Vibe` marker, add `PendingVibeSession` (fresh) or `SessionId` (resume).
+Add to `crates/vmux_desktop/src/vibe.rs`. Both helpers call `mcp_servers_env_value(&cwd)?` to build the MCP JSON, then call the appropriate `build_bash_launch_command*` builder. The bundle mirrors `Terminal::new_with_cwd` (`crates/vmux_desktop/src/terminal.rs:283-353`) but with `Vibe` marker stamped, plus either `PendingVibeSession` (fresh) or `SessionId` (resume).
 
 ```rust
 pub(crate) fn spawn_fresh_vibe_pane(
@@ -1306,11 +1304,11 @@ pub(crate) fn spawn_fresh_vibe_pane(
     target_stack: Entity,
     cwd: PathBuf,
     vibe_path: PathBuf,
-    mcp_json: String,
-) -> Entity {
-    let cmd = vibe_command_fresh(&vibe_path, &cwd, &mcp_json);
-    let bundle = make_terminal_bundle_with_command(meshes, webview_mt, cmd, cwd.clone());
-    commands
+) -> Result<Entity, String> {
+    let mcp_json = mcp_servers_env_value(&cwd)?;
+    let shell_cmd = build_bash_launch_command(&mcp_json, &vibe_path, &cwd)?;
+    let bundle = make_terminal_bundle_with_command(meshes, webview_mt, shell_cmd, cwd.clone());
+    let entity = commands
         .spawn(bundle)
         .insert(crate::vibe::session::Vibe)
         .insert(crate::vibe::session::PendingVibeSession {
@@ -1319,7 +1317,8 @@ pub(crate) fn spawn_fresh_vibe_pane(
             attempts: 0,
         })
         .insert(ChildOf(target_stack))
-        .id()
+        .id();
+    Ok(entity)
 }
 
 pub(crate) fn spawn_vibe_resume_pane(
@@ -1329,19 +1328,22 @@ pub(crate) fn spawn_vibe_resume_pane(
     target_stack: Entity,
     cwd: PathBuf,
     vibe_path: PathBuf,
-    mcp_json: String,
     session_id: String,
-) -> Entity {
-    let cmd = vibe_command_resume(&vibe_path, &cwd, &mcp_json, &session_id);
-    let bundle = make_terminal_bundle_with_command(meshes, webview_mt, cmd, cwd);
-    commands
+) -> Result<Entity, String> {
+    let mcp_json = mcp_servers_env_value(&cwd)?;
+    let shell_cmd = build_bash_launch_command_resume(&mcp_json, &vibe_path, &cwd, &session_id)?;
+    let bundle = make_terminal_bundle_with_command(meshes, webview_mt, shell_cmd, cwd);
+    let entity = commands
         .spawn(bundle)
         .insert(crate::vibe::session::Vibe)
         .insert(crate::vibe::session::SessionId(session_id))
         .insert(ChildOf(target_stack))
-        .id()
+        .id();
+    Ok(entity)
 }
 ```
+
+Both call `mcp_servers_env_value(&cwd)?` so the vmux MCP server is wired into every vibe pane spawn — sidecar binary when packaged, `cargo run -p vmux_cli --bin vmux -- mcp` in dev. Do not bypass this helper.
 
 `make_terminal_bundle_with_command` is a refactor of the existing `Terminal::new_with_cwd` body that takes the shell-command string directly (instead of resolving from settings). Extract it from `terminal.rs:283-353` so both the regular-terminal path and the vibe paths can call it. The signature:
 
@@ -1377,7 +1379,9 @@ In `crates/vmux_desktop/src/agent.rs:266-308`, extend the host match. The exact 
 }
 ```
 
-Add `spawn_fresh_vibe_tab` / `spawn_vibe_resume_tab` next to the existing `spawn_terminal_tab` in `agent.rs`. They wire `spawn_fresh_vibe_pane` / `spawn_vibe_resume_pane` into the world (resolving `cwd`, `vibe_path`, `mcp_json` the same way the existing `handle_agent_launch_requests` already does — copy from `agent.rs:587-622`).
+Add `spawn_fresh_vibe_tab` / `spawn_vibe_resume_tab` next to the existing `spawn_terminal_tab` in `agent.rs`. Both call `crate::vibe::spawn_fresh_vibe_pane` / `crate::vibe::spawn_vibe_resume_pane` — pass `cwd` (current working dir or the active pane's cwd, matching the existing `handle_agent_launch_requests` resolution at `agent.rs:587-622`) and `vibe_path` (from `crate::vibe::find_executable("vibe")`). The MCP JSON is built inside the spawn helpers via `mcp_servers_env_value`, so callers do not pass it.
+
+If `spawn_fresh_vibe_pane` returns `Err` (vibe binary missing or MCP config build failed), log a warning and fall back to `spawn_terminal_tab` so the user gets a usable shell rather than an empty pane.
 
 - [ ] **Step 4: Write a test for the resume-path lookup**
 
