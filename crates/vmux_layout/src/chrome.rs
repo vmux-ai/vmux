@@ -6,7 +6,7 @@ use bevy::render::alpha::AlphaMode;
 use bevy_cef::prelude::*;
 use vmux_webview_app::{WebviewAppConfig, WebviewAppRegistry};
 
-use crate::event::{LAYOUT_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
+use crate::event::LAYOUT_WEBVIEW_URL;
 use crate::window::WEBVIEW_MESH_DEPTH_BIAS;
 
 #[derive(Component)]
@@ -46,14 +46,15 @@ pub fn apply_chrome_state_from_cef(
         let Ok(mut meta) = browser_meta.get_mut(ev.webview) else {
             continue;
         };
+        let owned_by_native_view = meta.url.starts_with("vmux://");
         if let Some(url) = ev.url
-            && !meta.url.starts_with(TERMINAL_WEBVIEW_URL)
+            && !owned_by_native_view
         {
             meta.url = url;
             meta.favicon_url.clear();
         }
         if let Some(title) = ev.title
-            && !meta.url.starts_with(TERMINAL_WEBVIEW_URL)
+            && !owned_by_native_view
         {
             meta.title = title;
         }
