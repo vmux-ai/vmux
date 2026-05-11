@@ -815,10 +815,11 @@ fn on_pane_select(
             if pane == current {
                 continue;
             }
-            let Ok((_, gt)) = pane_pos_q.get(pane) else {
+            let Ok((tgt_node, gt)) = pane_pos_q.get(pane) else {
                 continue;
             };
             let center = gt.transform_point2(Vec2::ZERO);
+            let tgt_size = tgt_node.size;
             let delta = center - cur_center;
 
             let along = delta.dot(direction);
@@ -826,14 +827,20 @@ fn on_pane_select(
                 continue;
             }
 
-            let cross_axis = Vec2::new(-direction.y, direction.x);
-            let cross = delta.dot(cross_axis).abs();
-            let threshold = if direction.x.abs() > 0.5 {
-                cur_size.y * 0.5
+            let overlaps = if direction.x.abs() > 0.5 {
+                let cur_min = cur_center.y - cur_size.y * 0.5;
+                let cur_max = cur_center.y + cur_size.y * 0.5;
+                let tgt_min = center.y - tgt_size.y * 0.5;
+                let tgt_max = center.y + tgt_size.y * 0.5;
+                cur_min.max(tgt_min) < cur_max.min(tgt_max)
             } else {
-                cur_size.x * 0.5
+                let cur_min = cur_center.x - cur_size.x * 0.5;
+                let cur_max = cur_center.x + cur_size.x * 0.5;
+                let tgt_min = center.x - tgt_size.x * 0.5;
+                let tgt_max = center.x + tgt_size.x * 0.5;
+                cur_min.max(tgt_min) < cur_max.min(tgt_max)
             };
-            if cross > threshold {
+            if !overlaps {
                 continue;
             }
 
@@ -1320,15 +1327,12 @@ mod tests {
         }
     }
 
-    fn place_pane(
-        app: &mut App,
-        parent: Entity,
-        center: Vec2,
-        size: Vec2,
-    ) -> Entity {
+    fn place_pane(app: &mut App, parent: Entity, center: Vec2, size: Vec2) -> Entity {
         use bevy::ui::{ComputedNode, UiGlobalTransform};
-        let mut node = ComputedNode::default();
-        node.size = size;
+        let node = ComputedNode {
+            size,
+            ..default()
+        };
         let id = app
             .world_mut()
             .spawn((
@@ -1343,6 +1347,88 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(id)));
         id
+    }
+
+    #[test]
+    fn select_left_picks_full_height_neighbor_from_sub_split_pane() {
+        // Layout: A on left (full height), B top-right, C bottom-right.
+        // From B, pressing 'h' should navigate to A (their bounding boxes overlap on Y).
+        use bevy::ui::{ComputedNode, UiGlobalTransform};
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.init_resource::<PaneHoverIntent>();
+        app.init_resource::<PendingCursorWarp>();
+        app.init_resource::<NewStackContext>();
+        app.add_systems(Update, on_pane_select.in_set(WriteAppCommands));
+
+        let _window = app.world_mut().spawn(PrimaryWindow).id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let split_v = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        // Realistic layout with gaps (8px pane gap, 4px window padding):
+        // A: left, full height (791x892)
+        let a = place_pane(
+            &mut app,
+            split_v,
+            Vec2::new(399.5, 450.0),
+            Vec2::new(791.0, 892.0),
+        );
+        let split_h = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Column,
+                },
+                ChildOf(split_v),
+            ))
+            .id();
+        // B: top-right, half height (793x442)
+        let b = place_pane(
+            &mut app,
+            split_h,
+            Vec2::new(1199.5, 225.0),
+            Vec2::new(793.0, 442.0),
+        );
+        // C: bottom-right, half height (793x442)
+        let _c = place_pane(
+            &mut app,
+            split_h,
+            Vec2::new(1199.5, 675.0),
+            Vec2::new(793.0, 442.0),
+        );
+
+        let _ = (a, b);
+        // sanity: ensure ComputedNode is set
+        let _ = app.world().get::<ComputedNode>(b).unwrap();
+        let _ = app.world().get::<UiGlobalTransform>(b).unwrap();
+
+        // Make B the active pane
+        app.world_mut().entity_mut(b).insert(LastActivatedAt::now());
+        let prev_a = app.world().get::<LastActivatedAt>(a).unwrap().0;
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Pane(PaneCommand::SelectLeft));
+        app.update();
+
+        let new_a = app.world().get::<LastActivatedAt>(a).unwrap().0;
+        assert!(
+            new_a > prev_a,
+            "SelectLeft from B should navigate to A (full-height left neighbor)"
+        );
     }
 
     #[test]
@@ -1371,8 +1457,18 @@ mod tests {
                 ChildOf(tab),
             ))
             .id();
-        let left = place_pane(&mut app, split, Vec2::new(400.0, 450.0), Vec2::new(800.0, 900.0));
-        let right = place_pane(&mut app, split, Vec2::new(1200.0, 450.0), Vec2::new(800.0, 900.0));
+        let left = place_pane(
+            &mut app,
+            split,
+            Vec2::new(400.0, 450.0),
+            Vec2::new(800.0, 900.0),
+        );
+        let right = place_pane(
+            &mut app,
+            split,
+            Vec2::new(1200.0, 450.0),
+            Vec2::new(800.0, 900.0),
+        );
 
         // make `right` the active pane
         app.world_mut()
@@ -1385,7 +1481,10 @@ mod tests {
             Vec2::new(800.0, 900.0)
         );
         assert_eq!(
-            app.world().get::<UiGlobalTransform>(right).unwrap().transform_point2(Vec2::ZERO),
+            app.world()
+                .get::<UiGlobalTransform>(right)
+                .unwrap()
+                .transform_point2(Vec2::ZERO),
             Vec2::new(1200.0, 450.0)
         );
 
