@@ -800,6 +800,22 @@ fn poll_service_messages(
                     }
                 }
             }
+            ServiceMessage::ProcessTitle { process_id, title } => {
+                for (entity, handle, _) in &terminals {
+                    if handle.process_id == process_id {
+                        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                            break;
+                        }
+                        let evt = TermTitleEvent { title };
+                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                            entity,
+                            TERM_TITLE_EVENT,
+                            &evt,
+                        ));
+                        break;
+                    }
+                }
+            }
             ServiceMessage::Snapshot {
                 process_id,
                 lines,
