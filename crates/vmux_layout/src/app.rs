@@ -228,6 +228,13 @@ fn HeaderView(titlebar_height: f32) -> Element {
                         favicon_error,
                         bg_color: active_bg_color.clone(),
                     }
+                    if is_zoomed {
+                        span {
+                            class: "inline-flex h-5 items-center rounded px-1.5 text-ui-xs font-mono bg-glass-hover text-foreground",
+                            title: "Pane zoomed",
+                            "Z"
+                        }
+                    }
                 }
             }
         }
