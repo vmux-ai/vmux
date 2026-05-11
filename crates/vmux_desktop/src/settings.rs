@@ -19,6 +19,12 @@ impl Plugin for SettingsPlugin {
         )
         .init_resource::<vmux_layout::settings::EffectiveStartupUrl>()
         .add_systems(Startup, load_settings.in_set(SettingsLoadSet))
+        .add_systems(
+            Startup,
+            update_effective_startup_url
+                .after(SettingsLoadSet)
+                .before(vmux_layout::LayoutStartupSet::Post),
+        )
         .add_systems(Update, reload_settings_on_change)
         .add_systems(Update, update_effective_startup_url);
     }
