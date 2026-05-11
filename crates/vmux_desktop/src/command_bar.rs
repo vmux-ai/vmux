@@ -865,6 +865,10 @@ fn on_command_bar_action(
                         ))
                         .id();
                     commands.entity(term_e).insert(CefKeyboardTarget);
+                    commands.entity(stack_e).insert(LastActivatedAt::now());
+                    if let Ok(parent) = child_of_q.get(stack_e) {
+                        commands.entity(parent.0).insert(LastActivatedAt::now());
+                    }
                     new_stack_ctx.stack = None;
                     new_stack_ctx.previous_stack = None;
                     custom_keyboard_restore = true;
@@ -927,6 +931,10 @@ fn on_command_bar_action(
                             ))
                             .id();
                         commands.entity(browser_e).insert(CefKeyboardTarget);
+                    }
+                    commands.entity(stack_e).insert(LastActivatedAt::now());
+                    if let Ok(parent) = child_of_q.get(stack_e) {
+                        commands.entity(parent.0).insert(LastActivatedAt::now());
                     }
                     new_stack_ctx.stack = None;
                     new_stack_ctx.previous_stack = None;
