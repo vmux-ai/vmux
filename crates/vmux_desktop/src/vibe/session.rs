@@ -50,13 +50,18 @@ struct MetaJson {
     environment: MetaEnvironment,
 }
 
+fn normalize_cwd(path: &std::path::Path) -> String {
+    let canon = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    canon.to_string_lossy().trim_end_matches('/').to_string()
+}
+
 pub(crate) fn discover_session_id_for(
     sessions_root: &std::path::Path,
     cwd: &std::path::Path,
     spawn_time: SystemTime,
     claimed: &std::collections::HashSet<String>,
 ) -> Option<String> {
-    let cwd_str = cwd.to_string_lossy().to_string();
+    let cwd_norm = normalize_cwd(cwd);
     let spawn_secs = spawn_time
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -73,7 +78,8 @@ pub(crate) fn discover_session_id_for(
         let Ok(meta) = serde_json::from_str::<MetaJson>(&text) else {
             continue;
         };
-        if meta.environment.working_directory != cwd_str {
+        let meta_cwd = normalize_cwd(std::path::Path::new(&meta.environment.working_directory));
+        if meta_cwd != cwd_norm {
             continue;
         }
         if claimed.contains(&meta.session_id) {
@@ -146,6 +152,10 @@ pub fn poll_pending_vibe_sessions(
         if let Some(id) =
             discover_session_id_for(&sessions_root, &pending.cwd, pending.spawn_time, &claimed)
         {
+            bevy::log::info!(
+                "vibe session discovered for entity {entity:?}: {id} (cwd={})",
+                pending.cwd.display()
+            );
             commands
                 .entity(entity)
                 .insert(SessionId(id))
@@ -154,7 +164,11 @@ pub fn poll_pending_vibe_sessions(
         }
         pending.attempts = pending.attempts.saturating_add(1);
         if pending.attempts >= DISCOVERY_MAX_ATTEMPTS {
-            bevy::log::warn!("vibe session discovery timed out for entity {entity:?}");
+            bevy::log::warn!(
+                "vibe session discovery timed out for entity {entity:?} (cwd={}, sessions_root={})",
+                pending.cwd.display(),
+                sessions_root.display()
+            );
             commands.entity(entity).remove::<PendingVibeSession>();
         }
     }
