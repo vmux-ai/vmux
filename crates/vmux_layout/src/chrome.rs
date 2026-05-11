@@ -46,16 +46,14 @@ pub fn apply_chrome_state_from_cef(
         let Ok(mut meta) = browser_meta.get_mut(ev.webview) else {
             continue;
         };
-        let owned_by_native_view = meta.url.starts_with("vmux://");
+        let url_owned_by_native_view = meta.url.starts_with("vmux://");
         if let Some(url) = ev.url
-            && !owned_by_native_view
+            && !url_owned_by_native_view
         {
             meta.url = url;
             meta.favicon_url.clear();
         }
-        if let Some(title) = ev.title
-            && !owned_by_native_view
-        {
+        if let Some(title) = ev.title {
             meta.title = title;
         }
         if let Some(favicon) = ev.favicon_url {
