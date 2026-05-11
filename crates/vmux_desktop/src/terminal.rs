@@ -434,6 +434,19 @@ pub(crate) struct PendingTerminalInput {
 #[derive(Component)]
 struct AwaitingProcessCreated;
 
+pub(crate) fn apply_process_created(
+    commands: &mut Commands,
+    entity: Entity,
+    process_id: ProcessId,
+    process_pid: u32,
+) {
+    commands
+        .entity(entity)
+        .insert(ServiceProcessHandle { process_id })
+        .insert(pid::Pid(process_pid))
+        .remove::<AwaitingProcessCreated>();
+}
+
 fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
 }
@@ -631,25 +644,30 @@ fn poll_service_messages(
     let mut restarted_missing_processes = Vec::new();
     for msg in service.0.drain() {
         match msg {
-            ServiceMessage::ProcessCreated { process_id, pid: _ } => {
-                // Match the first unmatched terminal awaiting a ProcessCreated response.
+            ServiceMessage::ProcessCreated { process_id, pid } => {
                 if let Some((entity, _, _)) = (&awaiting_create)
                     .into_iter()
                     .find(|(e, _, _)| !matched_entities.contains(e))
                 {
                     matched_entities.push(entity);
-                    // Attach to receive viewport patches
                     service.0.send(ClientMessage::AttachProcess { process_id });
-                    // Update handle with real service-managed process ID
-                    commands
-                        .entity(entity)
-                        .insert(ServiceProcessHandle { process_id })
-                        .remove::<AwaitingProcessCreated>();
-                    // Update PageMetadata URL so persistence saves the real ID
+                    apply_process_created(&mut commands, entity, process_id, pid);
                     if let Ok(mut meta) = meta_q.get_mut(entity) {
-                        meta.url = format!("{}{}", TERMINAL_WEBVIEW_URL, process_id);
                         meta.title = format!("Terminal ({})", &process_id.to_string()[..8]);
                     }
+                }
+            }
+            ServiceMessage::ProcessCreateFailed { reason } => {
+                bevy::log::warn!("service failed to create process: {reason}");
+                if let Some((entity, _, _)) = (&awaiting_create)
+                    .into_iter()
+                    .find(|(e, _, _)| !matched_entities.contains(e))
+                {
+                    matched_entities.push(entity);
+                    commands
+                        .entity(entity)
+                        .insert(ProcessExited)
+                        .remove::<AwaitingProcessCreated>();
                 }
             }
             ServiceMessage::ViewportPatch {
@@ -2272,5 +2290,31 @@ mod tests {
         }
 
         assert!(!local_copy_mode.active.contains(&process_id));
+    }
+
+    #[test]
+    fn apply_process_created_stamps_pid_and_handle() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let entity = app
+            .world_mut()
+            .spawn((Terminal, AwaitingProcessCreated))
+            .id();
+        let id = process_id(7);
+        let pid_val = 4242u32;
+        app.world_mut()
+            .run_system_cached_with(
+                |In((entity, id, pid_val)): In<(Entity, ProcessId, u32)>,
+                 mut commands: Commands| {
+                    apply_process_created(&mut commands, entity, id, pid_val);
+                },
+                (entity, id, pid_val),
+            )
+            .unwrap();
+        let stored_pid = app.world().get::<pid::Pid>(entity).unwrap();
+        assert_eq!(stored_pid.0, pid_val);
+        assert!(app.world().get::<AwaitingProcessCreated>(entity).is_none());
+        let handle = app.world().get::<ServiceProcessHandle>(entity).unwrap();
+        assert_eq!(handle.process_id, id);
     }
 }
