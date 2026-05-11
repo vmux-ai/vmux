@@ -110,6 +110,15 @@ pub fn App() -> Element {
             theme.set(Some(data));
         });
 
+    let _title_listener =
+        use_bin_event_listener::<TermTitleEvent, _>(TERM_TITLE_EVENT, move |evt| {
+            if let Some(window) = web_sys::window()
+                && let Some(doc) = window.document()
+            {
+                doc.set_title(&evt.title);
+            }
+        });
+
     // Cell dimensions (char_width, char_height), updated by resize observer.
     let cell_dims = use_signal(|| (0.0f64, 0.0f64));
     // Last emitted mouse cell position for move-event throttling.
