@@ -48,7 +48,11 @@ pub fn track_pid_removals(
 pub fn format_terminal_url(
     mut q: Query<
         (Option<&Pid>, &mut PageMetadata),
-        (With<Terminal>, Or<(Changed<Pid>, Added<PageMetadata>)>),
+        (
+            With<Terminal>,
+            Without<crate::vibe::session::Vibe>,
+            Or<(Changed<Pid>, Added<PageMetadata>)>,
+        ),
     >,
 ) {
     for (pid, mut meta) in &mut q {

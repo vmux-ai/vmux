@@ -109,6 +109,32 @@ pub fn vibe_sessions_root() -> PathBuf {
 
 pub const DISCOVERY_MAX_ATTEMPTS: u8 = 30;
 
+pub const VIBE_WEBVIEW_URL: &str = "vmux://vibe/";
+
+pub fn format_vibe_url(
+    mut q: Query<
+        (Option<&SessionId>, &mut vmux_core::PageMetadata),
+        (
+            With<Vibe>,
+            Or<(
+                Changed<SessionId>,
+                Added<vmux_core::PageMetadata>,
+                Added<Vibe>,
+            )>,
+        ),
+    >,
+) {
+    for (sid, mut meta) in &mut q {
+        let next = match sid {
+            Some(SessionId(id)) => format!("{VIBE_WEBVIEW_URL}{id}"),
+            None => VIBE_WEBVIEW_URL.to_string(),
+        };
+        if meta.url != next {
+            meta.url = next;
+        }
+    }
+}
+
 pub fn poll_pending_vibe_sessions(
     mut commands: Commands,
     mut q: Query<(Entity, &mut PendingVibeSession), With<Vibe>>,
@@ -224,6 +250,51 @@ mod tests {
             discover_session_id_for(&sessions, std::path::Path::new(cwd), spawn_time, &claimed);
         assert_eq!(result.as_deref(), Some("this-uuid"));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    fn empty_meta() -> vmux_core::PageMetadata {
+        vmux_core::PageMetadata {
+            title: String::new(),
+            url: String::new(),
+            favicon_url: String::new(),
+            bg_color: None,
+        }
+    }
+
+    #[test]
+    fn formatter_emits_session_url_for_vibe_with_session() {
+        let mut app = App::new();
+        app.add_systems(Update, format_vibe_url);
+        let e = app
+            .world_mut()
+            .spawn((
+                Vibe,
+                SessionId("ae724a54-c387-5359-0687-ccfc155558b6".into()),
+                empty_meta(),
+            ))
+            .id();
+        app.update();
+        let url = &app.world().get::<vmux_core::PageMetadata>(e).unwrap().url;
+        assert_eq!(url, "vmux://vibe/ae724a54-c387-5359-0687-ccfc155558b6");
+    }
+
+    #[test]
+    fn formatter_emits_placeholder_for_vibe_without_session() {
+        let mut app = App::new();
+        app.add_systems(Update, format_vibe_url);
+        let e = app
+            .world_mut()
+            .spawn((
+                Vibe,
+                vmux_core::PageMetadata {
+                    url: "stale".into(),
+                    ..empty_meta()
+                },
+            ))
+            .id();
+        app.update();
+        let url = &app.world().get::<vmux_core::PageMetadata>(e).unwrap().url;
+        assert_eq!(url, "vmux://vibe/");
     }
 
     #[test]
