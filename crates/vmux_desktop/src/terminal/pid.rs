@@ -1,8 +1,20 @@
 use crate::terminal::Terminal;
+use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use std::collections::HashMap;
 use vmux_core::PageMetadata;
+use vmux_history::LastActivatedAt;
 use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
+
+pub fn focus_pane_entity(entity: Entity, commands: &mut Commands, child_of_q: &Query<&ChildOf>) {
+    commands.entity(entity).insert(LastActivatedAt::now());
+    let mut current = entity;
+    while let Ok(parent_rel) = child_of_q.get(current) {
+        let parent = parent_rel.get();
+        commands.entity(parent).insert(LastActivatedAt::now());
+        current = parent;
+    }
+}
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pid(pub u32);

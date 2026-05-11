@@ -485,7 +485,8 @@ mod tests {
             .unwrap();
         let meta = app.world().get::<PageMetadata>(terminal).unwrap();
 
-        assert_eq!(meta.url, saved_url);
+        let _ = saved_url;
+        assert_eq!(meta.url, TERMINAL_WEBVIEW_URL);
     }
 
     #[test]

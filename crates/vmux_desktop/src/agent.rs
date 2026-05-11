@@ -270,12 +270,31 @@ fn spawn_vmux_tab(
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
+    pid_to_entity: Option<&crate::terminal::pid::PidToEntity>,
+    child_of_q: &Query<&ChildOf>,
 ) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| format!("invalid vmux URL '{url}': {e}"))?;
     let host = parsed.host_str().unwrap_or("");
 
     match host {
         "terminal" => {
+            let path = parsed.path().trim_start_matches('/');
+            if !path.is_empty() {
+                match path.parse::<u32>() {
+                    Ok(pid) => {
+                        if let Some(map) = pid_to_entity
+                            && let Some(&entity) = map.0.get(&pid)
+                        {
+                            crate::terminal::pid::focus_pane_entity(entity, commands, child_of_q);
+                            return Ok(());
+                        }
+                        bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
+                    }
+                    Err(_) => {
+                        return Err(format!("malformed terminal URL '{url}'"));
+                    }
+                }
+            }
             let cwd_param = parsed
                 .query_pairs()
                 .find(|(k, _)| k == "cwd")
@@ -362,6 +381,8 @@ fn handle_agent_commands(
     pane_children: Query<&Children, With<Pane>>,
     tab_filter: Query<(), With<crate::layout::stack::Stack>>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
+    child_of_q: Query<&ChildOf>,
+    pid_to_entity: Option<Res<crate::terminal::pid::PidToEntity>>,
     settings: Res<AppSettings>,
     service: Option<Res<crate::terminal::ServiceClient>>,
     mut commands: Commands,
@@ -459,6 +480,8 @@ fn handle_agent_commands(
                             &mut meshes,
                             &mut webview_mt,
                             &settings,
+                            pid_to_entity.as_deref(),
+                            &child_of_q,
                         ) {
                             Ok(()) => AgentCommandResult::Ok,
                             Err(message) => {
@@ -550,6 +573,8 @@ fn handle_agent_commands(
                                     &mut meshes,
                                     &mut webview_mt,
                                     &settings,
+                                    pid_to_entity.as_deref(),
+                                    &child_of_q,
                                 ) {
                                     Ok(()) => AgentCommandResult::Ok,
                                     Err(message) => AgentCommandResult::Error(format!(
