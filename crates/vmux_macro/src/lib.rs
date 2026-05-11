@@ -47,6 +47,15 @@ pub fn derive_os_menu(input: TokenStream) -> TokenStream {
     }
 }
 
+#[proc_macro_derive(OsSubMenuGroup, attributes(menu))]
+pub fn derive_os_sub_menu_group(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match impl_os_sub_menu_group(input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
 fn impl_os_sub_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let ident = &input.ident;
     let Data::Enum(data) = &input.data else {
@@ -215,6 +224,99 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 #(#submenu_blocks)*
                 let refs: ::std::vec::Vec<&dyn ::muda::IsMenuItem> = submenus.iter().map(|s| s.as_ref()).collect();
                 menu.append_items(&refs)?;
+                Ok(())
+            }
+
+            pub fn from_menu_id(id: &str) -> ::core::option::Option<Self> {
+                #from_menu_body
+            }
+        }
+    })
+}
+
+fn impl_os_sub_menu_group(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let ident = &input.ident;
+    let Data::Enum(data) = &input.data else {
+        return Err(syn::Error::new_spanned(
+            ident,
+            "OsSubMenuGroup only supports enums",
+        ));
+    };
+
+    let mut nested_blocks = Vec::new();
+    let mut visible_terms = Vec::new();
+    let mut from_menu_clauses = Vec::new();
+
+    for variant in &data.variants {
+        let Fields::Unnamed(fields) = &variant.fields else {
+            return Err(syn::Error::new_spanned(
+                &variant.fields,
+                "OsSubMenuGroup expects tuple variants like Window(WindowCommand)",
+            ));
+        };
+        let Some(field) = fields.unnamed.first() else {
+            return Err(syn::Error::new_spanned(
+                variant,
+                "OsSubMenuGroup tuple variant needs one field",
+            ));
+        };
+        let inner_ty = &field.ty;
+        let props = MenuProps::from_attrs(&variant.attrs)?;
+        let Some(title) = props.label.clone() else {
+            return Err(syn::Error::new_spanned(
+                variant,
+                "each variant needs #[menu(label = \"...\")] for the nested submenu title",
+            ));
+        };
+        let variant_ident = &variant.ident;
+        let nested_ident = syn::Ident::new(
+            &format!(
+                "{}_nested_submenu",
+                heck_variant_snake_case(&variant.ident.to_string())
+            ),
+            variant.ident.span(),
+        );
+
+        nested_blocks.push(quote! {
+            if <#inner_ty>::HAS_VISIBLE_ITEMS {
+                let mut #nested_ident = ::muda::Submenu::new(#title, true);
+                <#inner_ty>::append_native_menu_leaf(&mut #nested_ident)?;
+                submenu.append(&#nested_ident)?;
+            }
+        });
+
+        visible_terms.push(quote! { <#inner_ty>::HAS_VISIBLE_ITEMS });
+        from_menu_clauses.push(quote! {
+            <#inner_ty>::from_menu_id(id).map(#ident::#variant_ident)
+        });
+    }
+
+    let visible_expr = if visible_terms.is_empty() {
+        quote! { false }
+    } else {
+        let first = &visible_terms[0];
+        visible_terms[1..]
+            .iter()
+            .fold(quote! { #first }, |acc, t| quote! { #acc || #t })
+    };
+
+    let from_menu_body = if from_menu_clauses.is_empty() {
+        quote! { ::core::option::Option::None }
+    } else {
+        let first = &from_menu_clauses[0];
+        from_menu_clauses[1..]
+            .iter()
+            .fold(quote! { #first }, |acc, c| quote! { #acc.or_else(|| #c) })
+    };
+
+    Ok(quote! {
+        impl #ident {
+            pub(crate) const HAS_VISIBLE_ITEMS: bool = #visible_expr;
+
+            pub(crate) fn append_native_menu_leaf(
+                submenu: &mut ::muda::Submenu,
+            ) -> Result<(), ::muda::Error> {
+                #(#nested_blocks)*
                 Ok(())
             }
 

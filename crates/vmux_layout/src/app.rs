@@ -4,20 +4,20 @@ use dioxus::prelude::*;
 use vmux_layout::event::{
     HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
     PaneTreeEvent, RELOAD_EVENT, ReloadEvent, SPACES_EVENT, SpaceRow, SpacesCommandEvent,
-    SpacesHostEvent, TABS_EVENT, TabNode, TabRow, TabsHostEvent, titlebar_nav_style,
+    SpacesHostEvent, TABS_EVENT, TabNode, TabRow, TabsHostEvent,
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 
 fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
     let trimmed = s.trim();
-    if let Some(rest) = trimmed.strip_prefix('#') {
-        if rest.len() == 6 {
-            let r = u8::from_str_radix(&rest[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&rest[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&rest[4..6], 16).ok()?;
-            return Some((r, g, b));
-        }
+    if let Some(rest) = trimmed.strip_prefix('#')
+        && rest.len() == 6
+    {
+        let r = u8::from_str_radix(&rest[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&rest[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&rest[4..6], 16).ok()?;
+        return Some((r, g, b));
     }
     if let Some(inner) = trimmed
         .strip_prefix("rgb(")
@@ -172,7 +172,6 @@ fn HeaderView(titlebar_height: f32) -> Element {
     let listener_error = (listener.error)();
     let spaces_loading = (spaces_listener.is_loading)();
     let spaces_error = (spaces_listener.error)();
-    let titlebar_style = titlebar_nav_style(titlebar_height);
 
     rsx! {
         div { class: "flex min-h-0 min-w-0 flex-1 flex-col text-foreground",

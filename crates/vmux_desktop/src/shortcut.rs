@@ -220,7 +220,7 @@ fn is_modifier_key(key: KeyCode) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::{CommandPlugin, SpaceCommand};
+    use crate::command::{CommandPlugin, LayoutCommand, SpaceCommand};
     use crate::settings::{
         AppSettings, BrowserSettings, FocusRingSettings, KeyComboDef, LayoutSettings, PaneSettings,
         ShortcutSettings, SideSheetSettings, WindowSettings,
@@ -323,7 +323,10 @@ mod tests {
             .drain()
             .collect();
 
-        assert_eq!(commands, vec![AppCommand::Space(SpaceCommand::Open)]);
+        assert_eq!(
+            commands,
+            vec![AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))]
+        );
     }
 
     #[test]
@@ -341,7 +344,10 @@ mod tests {
             .drain()
             .collect();
 
-        assert_eq!(commands, vec![AppCommand::Space(SpaceCommand::Open)]);
+        assert_eq!(
+            commands,
+            vec![AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))]
+        );
     }
 
     #[test]
@@ -361,7 +367,10 @@ mod tests {
             .drain()
             .collect();
 
-        assert_eq!(commands, vec![AppCommand::Space(SpaceCommand::Open)]);
+        assert_eq!(
+            commands,
+            vec![AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))]
+        );
     }
 
     #[test]
@@ -387,6 +396,9 @@ mod tests {
             .drain()
             .collect();
 
-        assert_eq!(commands, vec![AppCommand::Space(SpaceCommand::Open)]);
+        assert_eq!(
+            commands,
+            vec![AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))]
+        );
     }
 }

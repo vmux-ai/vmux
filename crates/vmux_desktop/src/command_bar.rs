@@ -2,8 +2,8 @@ use crate::{
     agent::{AgentCommandEntry, AgentLaunchRequested, AgentProviders},
     browser::Browser,
     command::{
-        AppCommand, BrowserCommand, PaneCommand, ReadAppCommands, SpaceCommand, StackCommand,
-        TerminalCommand,
+        AppCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands, SpaceCommand,
+        StackCommand, TerminalCommand,
     },
     layout::{
         pane::{Pane, PaneSplit},
@@ -306,20 +306,22 @@ fn command_bar_open_request(
                 request.should_toggle = true;
                 request.url_override = Some(">".to_string());
             }
-            AppCommand::Space(SpaceCommand::Open) => {
+            AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)) => {
                 request.should_toggle = true;
                 request.url_override = Some(SPACES_WEBVIEW_URL.to_string());
             }
-            AppCommand::Stack(StackCommand::Close) => {
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)) => {
                 request.should_dismiss = true;
             }
-            AppCommand::Stack(StackCommand::Next | StackCommand::Previous)
-            | AppCommand::Pane(
+            AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Next | StackCommand::Previous,
+            ))
+            | AppCommand::Layout(LayoutCommand::Pane(
                 PaneCommand::SelectLeft
                 | PaneCommand::SelectRight
                 | PaneCommand::SelectUp
                 | PaneCommand::SelectDown,
-            ) => {
+            )) => {
                 request.should_dismiss_nav = true;
             }
             _ => {}
@@ -1927,7 +1929,9 @@ mod tests {
 
     #[test]
     fn space_open_command_prefills_spaces_url() {
-        let request = command_bar_open_request([AppCommand::Space(SpaceCommand::Open)]);
+        let request = command_bar_open_request([AppCommand::Layout(LayoutCommand::Space(
+            SpaceCommand::Open,
+        ))]);
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, Some(SPACES_WEBVIEW_URL.to_string()));
@@ -1935,7 +1939,8 @@ mod tests {
 
     #[test]
     fn tab_new_command_does_not_dismiss_command_bar() {
-        let request = command_bar_open_request([AppCommand::Stack(StackCommand::New)]);
+        let request =
+            command_bar_open_request([AppCommand::Layout(LayoutCommand::Stack(StackCommand::New))]);
 
         assert!(!request.should_dismiss);
     }
@@ -2036,7 +2041,7 @@ mod tests {
         ));
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Space(SpaceCommand::Open));
+            .write(AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)));
 
         app.update();
 

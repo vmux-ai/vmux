@@ -11,7 +11,9 @@ use bevy::{
     window::{ClosingWindow, PrimaryWindow},
 };
 use moonshine_save::prelude::*;
-use vmux_command::{AppCommand, ReadAppCommands, ServiceCommand, StackCommand, TerminalCommand};
+use vmux_command::{
+    AppCommand, LayoutCommand, ReadAppCommands, ServiceCommand, StackCommand, TerminalCommand,
+};
 use vmux_history::LastActivatedAt;
 
 /// Cached result of `focused_stack()`, computed once per frame in `Update`
@@ -192,7 +194,7 @@ fn handle_stack_commands(
 ) {
     for cmd in reader.read() {
         let (stack_cmd, is_terminal, is_processes) = match *cmd {
-            AppCommand::Stack(t) => (t, false, false),
+            AppCommand::Layout(LayoutCommand::Stack(t)) => (t, false, false),
             AppCommand::Terminal(TerminalCommand::New) => (StackCommand::New, true, false),
             AppCommand::Service(ServiceCommand::Open) => (StackCommand::New, false, true),
             _ => continue,
@@ -640,7 +642,9 @@ mod tests {
             .id();
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Stack(StackCommand::Close));
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
 
         app.update();
 
@@ -702,7 +706,9 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Stack(StackCommand::Close));
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
 
         app.update();
 

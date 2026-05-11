@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_macro::{CommandBar, DefaultShortcuts, McpTool, OsMenu, OsSubMenu};
+use vmux_macro::{CommandBar, DefaultShortcuts, McpTool, OsMenu, OsSubMenu, OsSubMenuGroup};
 use vmux_webview_app::{WebviewAppConfig, WebviewAppRegistry};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -38,6 +38,23 @@ pub enum AppCommand {
     #[menu(label = "Scene")]
     Scene(SceneCommand),
 
+    #[menu(label = "Layout")]
+    Layout(LayoutCommand),
+
+    #[menu(label = "Terminal")]
+    Terminal(TerminalCommand),
+
+    #[menu(label = "Browser")]
+    Browser(BrowserCommand),
+
+    #[menu(label = "Service")]
+    Service(ServiceCommand),
+}
+
+#[derive(
+    OsSubMenuGroup, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq,
+)]
+pub enum LayoutCommand {
     #[menu(label = "Window")]
     Window(WindowCommand),
 
@@ -52,15 +69,6 @@ pub enum AppCommand {
 
     #[menu(label = "Stack")]
     Stack(StackCommand),
-
-    #[menu(label = "Terminal")]
-    Terminal(TerminalCommand),
-
-    #[menu(label = "Browser")]
-    Browser(BrowserCommand),
-
-    #[menu(label = "Service")]
-    Service(ServiceCommand),
 
     #[menu(label = "Space")]
     Space(SpaceCommand),
@@ -441,11 +449,11 @@ mod tests {
 
         assert_eq!(
             AppCommand::from_mcp_id("close_tab"),
-            Some(AppCommand::Tab(TabCommand::Close))
+            Some(AppCommand::Layout(LayoutCommand::Tab(TabCommand::Close)))
         );
         assert_eq!(
             AppCommand::from_mcp_id("split_v"),
-            Some(AppCommand::Pane(PaneCommand::SplitV))
+            Some(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SplitV)))
         );
 
         let split_v = entries
@@ -464,6 +472,22 @@ mod tests {
         assert_eq!(
             close_tab.1, "Close Tab",
             "close_tab description should fall back to the menu label (\\t-stripped)"
+        );
+    }
+
+    #[test]
+    fn layout_menu_id_resolves_through_nested_chain() {
+        assert_eq!(
+            AppCommand::from_menu_id("split_v"),
+            Some(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SplitV)))
+        );
+        assert_eq!(
+            AppCommand::from_menu_id("zen_toggle"),
+            Some(AppCommand::Layout(LayoutCommand::Zen(ZenCommand::Toggle)))
+        );
+        assert_eq!(
+            AppCommand::from_menu_id("space_open"),
+            Some(AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)))
         );
     }
 }

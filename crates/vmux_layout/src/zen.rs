@@ -2,7 +2,7 @@ use crate::Open;
 use crate::header::Header;
 use crate::side_sheet::SideSheet;
 use bevy::prelude::*;
-use vmux_command::{AppCommand, ReadAppCommands, ZenCommand};
+use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, ZenCommand};
 
 #[derive(Resource, Default, Debug)]
 pub struct ZenMode {
@@ -26,7 +26,10 @@ fn handle_zen_toggle(
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        if !matches!(cmd, AppCommand::Zen(ZenCommand::Toggle)) {
+        if !matches!(
+            cmd,
+            AppCommand::Layout(LayoutCommand::Zen(ZenCommand::Toggle))
+        ) {
             continue;
         }
         zen.active = !zen.active;

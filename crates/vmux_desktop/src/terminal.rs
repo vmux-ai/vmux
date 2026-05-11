@@ -1,6 +1,6 @@
 use crate::{
     browser::Browser,
-    command::{AppCommand, StackCommand, WriteAppCommands},
+    command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands},
     layout::window::WEBVIEW_MESH_DEPTH_BIAS,
     processes_monitor::ProcessesMonitor,
     settings::AppSettings,
@@ -728,7 +728,9 @@ fn poll_service_messages(
                             .remove::<CloseRequiresConfirmation>();
                         let tab = child_of.get();
                         commands.entity(tab).insert(LastActivatedAt::now());
-                        writer.write(AppCommand::Stack(StackCommand::Close));
+                        writer.write(AppCommand::Layout(LayoutCommand::Stack(
+                            StackCommand::Close,
+                        )));
                         break;
                     }
                 }

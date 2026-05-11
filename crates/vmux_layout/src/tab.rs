@@ -17,7 +17,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_command::{AppCommand, ReadAppCommands, TabCommand};
+use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, TabCommand};
 use vmux_history::{CreatedAt, LastActivatedAt};
 use vmux_webview_app::UiReady;
 
@@ -163,7 +163,7 @@ fn handle_tab_commands(
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let AppCommand::Tab(tab_cmd) = *cmd else {
+        let AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) = *cmd else {
             continue;
         };
 
@@ -449,7 +449,7 @@ fn on_spaces_command_emit(
     let active_tab = tabs.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
     match evt.command.as_str() {
         "new" => {
-            messages.write(AppCommand::Tab(TabCommand::New));
+            messages.write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::New)));
         }
         "close" => {
             let target = space_target_tab(

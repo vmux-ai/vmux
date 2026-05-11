@@ -22,7 +22,7 @@ use bevy::{
     winit::WINIT_WINDOWS,
 };
 use bevy_cef::prelude::*;
-use vmux_command::{AppCommand, ReadAppCommands, WindowCommand};
+use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
 use vmux_history::{CreatedAt, LastActivatedAt};
 use vmux_webview_app::WebviewAppEmbedSet;
 
@@ -98,7 +98,7 @@ fn handle_window_commands(
     primary_window: Single<Entity, With<PrimaryWindow>>,
 ) {
     for cmd in reader.read() {
-        if let AppCommand::Window(WindowCommand::Minimize) = cmd {
+        if let AppCommand::Layout(LayoutCommand::Window(WindowCommand::Minimize)) = cmd {
             let entity = *primary_window;
             WINIT_WINDOWS.with_borrow(|winit_windows| {
                 if let Some(winit_win) = winit_windows.get_window(entity) {

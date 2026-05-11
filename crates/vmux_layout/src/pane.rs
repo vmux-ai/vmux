@@ -18,7 +18,7 @@ use bevy::{
 use bevy_cef::prelude::CefKeyboardTarget;
 use moonshine_save::prelude::*;
 use std::time::Instant;
-use vmux_command::{AppCommand, PaneCommand, ReadAppCommands};
+use vmux_command::{AppCommand, LayoutCommand, PaneCommand, ReadAppCommands};
 use vmux_history::LastActivatedAt;
 
 /// Marker: pane is waiting for close confirmation dialog.
@@ -270,7 +270,7 @@ fn handle_pane_commands(
     )>,
 ) {
     for cmd in reader.read() {
-        let AppCommand::Pane(pane_cmd) = *cmd else {
+        let AppCommand::Layout(LayoutCommand::Pane(pane_cmd)) = *cmd else {
             continue;
         };
         let (_, active_pane_opt, active_stack_opt) = focused_stack(
@@ -585,10 +585,14 @@ fn on_pane_select(
 ) {
     for cmd in reader.read() {
         let direction: Vec2 = match cmd {
-            AppCommand::Pane(PaneCommand::SelectLeft) => Vec2::new(-1.0, 0.0),
-            AppCommand::Pane(PaneCommand::SelectRight) => Vec2::new(1.0, 0.0),
-            AppCommand::Pane(PaneCommand::SelectUp) => Vec2::new(0.0, -1.0),
-            AppCommand::Pane(PaneCommand::SelectDown) => Vec2::new(0.0, 1.0),
+            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectLeft)) => {
+                Vec2::new(-1.0, 0.0)
+            }
+            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectRight)) => {
+                Vec2::new(1.0, 0.0)
+            }
+            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectUp)) => Vec2::new(0.0, -1.0),
+            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectDown)) => Vec2::new(0.0, 1.0),
             _ => continue,
         };
 
@@ -1090,7 +1094,7 @@ fn process_pending_pane_closes(world: &mut World) {
             }
             world
                 .resource_mut::<Messages<AppCommand>>()
-                .write(AppCommand::Pane(PaneCommand::Close));
+                .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
         }
     }
 }
@@ -1150,7 +1154,7 @@ mod tests {
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Pane(PaneCommand::Close));
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
 
         app.update();
 
