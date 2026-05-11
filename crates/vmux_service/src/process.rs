@@ -226,7 +226,9 @@ impl Process {
             .slave
             .spawn_command(cmd)
             .map_err(|e| format!("failed to spawn shell: {e}"))?;
-        let pid = child.process_id().unwrap_or(0);
+        let pid = child
+            .process_id()
+            .ok_or_else(|| "spawned PTY child has no PID".to_string())?;
         let reader = pair
             .master
             .try_clone_reader()
@@ -1290,11 +1292,12 @@ impl ProcessManager {
         env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
-    ) -> Result<ProcessId, String> {
+    ) -> Result<(ProcessId, u32), String> {
         let process = Process::new_with_wake(shell, cwd, env, cols, rows, self.wake_tx.clone())?;
         let id = process.id;
+        let pid = process.pid;
         self.processes.insert(id, process);
-        Ok(id)
+        Ok((id, pid))
     }
 
     pub fn poll_all(&mut self) -> Vec<ProcessId> {
@@ -1655,5 +1658,16 @@ mod tests {
         process.kill();
 
         assert_eq!(*captured.lock().unwrap(), b"\x1b[<64;7;5M".to_vec());
+    }
+
+    #[test]
+    fn create_process_returns_real_pid() {
+        let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
+        let mut mgr = ProcessManager::new(wake_tx);
+        let (id, pid) = mgr
+            .create_process("/bin/sh".into(), String::new(), Vec::new(), 80, 24)
+            .expect("spawn");
+        assert!(pid > 0, "expected real pid, got {pid}");
+        assert!(mgr.processes.contains_key(&id));
     }
 }

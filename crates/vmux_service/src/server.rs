@@ -161,23 +161,23 @@ async fn handle_client(
                 let created = {
                     let mut mgr = manager.lock().await;
                     mgr.create_process(shell, cwd, env, cols, rows)
-                        .map(|id| (id, mgr.input_writer(&id)))
+                        .map(|(id, pid)| (id, pid, mgr.input_writer(&id)))
                 };
                 match created {
-                    Ok((id, input_writer)) => {
+                    Ok((id, pid, input_writer)) => {
                         if let Some(input_writer) = input_writer {
                             input_writers.lock().await.insert(id, input_writer);
                         }
                         let resp = ServiceMessage::ProcessCreated {
                             process_id: id,
-                            pid: 0,
+                            pid,
                         };
                         let w = writer.clone();
                         let mut w = w.lock().await;
                         write_message!(&mut *w, &resp)?;
                     }
-                    Err(e) => {
-                        let resp = ServiceMessage::Error { message: e };
+                    Err(reason) => {
+                        let resp = ServiceMessage::ProcessCreateFailed { reason };
                         let w = writer.clone();
                         let mut w = w.lock().await;
                         write_message!(&mut *w, &resp)?;
