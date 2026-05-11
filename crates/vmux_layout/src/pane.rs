@@ -9,7 +9,10 @@ use crate::{
     tab::Tab,
 };
 use bevy::{
-    ecs::{message::Messages, relationship::Relationship},
+    ecs::{
+        lifecycle::HookContext, message::Messages, relationship::Relationship,
+        world::DeferredWorld,
+    },
     input::mouse::AccumulatedMouseMotion,
     prelude::*,
     ui::{FlexDirection, UiGlobalTransform},
@@ -57,7 +60,24 @@ impl Plugin for PanePlugin {
                 sync_zoom_visibility.before(bevy::ui::UiSystems::Layout),
             )
             .add_systems(PostUpdate, warp_cursor_to_active_pane);
+        register_zoom_hooks(app);
     }
+}
+
+fn register_zoom_hooks(app: &mut App) {
+    app.world_mut()
+        .register_component_hooks::<Zoomed>()
+        .on_remove(|mut world: DeferredWorld, ctx: HookContext| {
+            let Some(z) = world.get::<Zoomed>(ctx.entity) else {
+                return;
+            };
+            let hidden = z.hidden.clone();
+            for e in hidden {
+                if let Some(mut node) = world.get_mut::<Node>(e) {
+                    node.display = Display::Flex;
+                }
+            }
+        });
 }
 
 /// Signals that the cursor should be warped to the active pane once layout is computed.
@@ -1234,6 +1254,43 @@ mod tests {
         let z = app.world().get::<Zoomed>(tab).expect("Zoomed present");
         assert_eq!(z.leaf, leaf);
         assert!(z.hidden.is_empty());
+    }
+
+    #[test]
+    fn removing_zoomed_restores_display_flex() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        register_zoom_hooks(&mut app);
+
+        let leaf = app.world_mut().spawn((Pane, Node::default())).id();
+        let sib = app
+            .world_mut()
+            .spawn((
+                Pane,
+                Node {
+                    display: Display::None,
+                    ..default()
+                },
+            ))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                Zoomed {
+                    leaf,
+                    hidden: vec![sib],
+                },
+            ))
+            .id();
+
+        app.update();
+
+        app.world_mut().entity_mut(tab).remove::<Zoomed>();
+        app.update();
+
+        assert_eq!(app.world().get::<Node>(sib).unwrap().display, Display::Flex);
+        let _ = leaf;
     }
 
     #[test]
