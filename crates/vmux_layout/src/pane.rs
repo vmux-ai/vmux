@@ -74,6 +74,28 @@ pub struct Zoomed {
     pub hidden: Vec<Entity>,
 }
 
+#[cfg(test)]
+fn siblings_to_hide(world: &World, leaf: Entity, tab: Entity) -> Vec<Entity> {
+    let mut result = Vec::new();
+    let mut cur = leaf;
+    while cur != tab {
+        let Some(parent) = world.get::<ChildOf>(cur).map(|p| p.0) else {
+            break;
+        };
+        if world.get::<PaneSplit>(parent).is_some()
+            && let Some(children) = world.get::<Children>(parent)
+        {
+            for child in children.iter() {
+                if child != cur {
+                    result.push(child);
+                }
+            }
+        }
+        cur = parent;
+    }
+    result
+}
+
 #[derive(Component, Reflect)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::pane"]
@@ -1198,6 +1220,62 @@ mod tests {
         let z = app.world().get::<Zoomed>(tab).expect("Zoomed present");
         assert_eq!(z.leaf, leaf);
         assert!(z.hidden.is_empty());
+    }
+
+    #[test]
+    fn siblings_to_hide_collects_sibling_at_each_split_ancestor() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        let tab = app.world_mut().spawn(Tab::default()).id();
+        let split_root = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let left = app.world_mut().spawn((Pane, ChildOf(split_root))).id();
+        let right_split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Column,
+                },
+                ChildOf(split_root),
+            ))
+            .id();
+        let right_top = app.world_mut().spawn((Pane, ChildOf(right_split))).id();
+        let right_bot = app.world_mut().spawn((Pane, ChildOf(right_split))).id();
+
+        let result = {
+            let world = app.world();
+            siblings_to_hide(world, right_top, tab)
+        };
+
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&right_bot));
+        assert!(result.contains(&left));
+    }
+
+    #[test]
+    fn siblings_to_hide_is_empty_for_single_pane_tab() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        let tab = app.world_mut().spawn(Tab::default()).id();
+        let only = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+
+        let result = {
+            let world = app.world();
+            siblings_to_hide(world, only, tab)
+        };
+
+        assert!(result.is_empty());
     }
 
     #[test]
