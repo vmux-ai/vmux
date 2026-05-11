@@ -50,6 +50,12 @@ impl Plugin for VibePlugin {
             )
             .add_systems(
                 Update,
+                session::poll_active_vibe_sessions_for_exit.run_if(
+                    bevy::time::common_conditions::on_timer(std::time::Duration::from_millis(500)),
+                ),
+            )
+            .add_systems(
+                Update,
                 session::format_vibe_url.after(session::track_session_id_inserts),
             );
         let mut providers = app.world_mut().resource_mut::<AgentProviders>();
@@ -224,7 +230,9 @@ fn shell_quote_path(path: &Path) -> Result<String, String> {
 fn build_bash_launch_command(mcp_servers: &str, vibe: &Path, cwd: &Path) -> Result<String, String> {
     Ok(format!(
         "bash -lc {} bash {} {} {}",
-        shell_quote("cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" exec \"$3\" --trust")?,
+        shell_quote(
+            "cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" \"$3\" --trust; exec \"${SHELL:-bash}\""
+        )?,
         shell_quote_path(cwd)?,
         shell_quote(mcp_servers)?,
         shell_quote_path(vibe)?
@@ -239,7 +247,9 @@ fn build_bash_launch_command_resume(
 ) -> Result<String, String> {
     Ok(format!(
         "bash -lc {} bash {} {} {} {}",
-        shell_quote("cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" exec \"$3\" --trust --resume \"$4\"")?,
+        shell_quote(
+            "cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" \"$3\" --trust --resume \"$4\"; exec \"${SHELL:-bash}\""
+        )?,
         shell_quote_path(cwd)?,
         shell_quote(mcp_servers)?,
         shell_quote_path(vibe)?,
@@ -350,11 +360,13 @@ mod tests {
             Path::new("/tmp/work tree"),
         )
         .unwrap();
-
-        assert_eq!(
-            command,
-            "bash -lc 'cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" exec \"$3\" --trust' bash '/tmp/work tree' '[{\"name\":\"vmux\",\"transport\":\"stdio\",\"command\":\"target/debug/vmux\",\"args\":[\"mcp\"]}]' '/Users/test/.local/bin/vibe'"
-        );
+        assert!(command.contains("--trust"));
+        assert!(!command.contains("exec \"$3\""));
+        assert!(command.contains("exec \"${SHELL:-bash}\""));
+        assert!(command.contains("/tmp/work tree"));
+        assert!(command.contains("VIBE_MCP_SERVERS"));
+        assert!(command.contains("\"name\":\"vmux\""));
+        assert!(command.contains("/Users/test/.local/bin/vibe"));
     }
 
     #[test]

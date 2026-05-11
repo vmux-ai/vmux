@@ -141,6 +141,65 @@ pub fn format_vibe_url(
     }
 }
 
+pub fn poll_active_vibe_sessions_for_exit(
+    mut commands: Commands,
+    mut q: Query<(Entity, &SessionId, &mut vmux_core::PageMetadata), With<Vibe>>,
+    pid_q: Query<&crate::terminal::pid::Pid>,
+) {
+    let sessions_root = vibe_sessions_root();
+    let Ok(entries) = std::fs::read_dir(&sessions_root) else {
+        return;
+    };
+    let mut session_dirs: HashMap<String, std::path::PathBuf> = HashMap::new();
+    for entry in entries.flatten() {
+        let meta_path = entry.path().join("meta.json");
+        let Ok(text) = std::fs::read_to_string(&meta_path) else {
+            continue;
+        };
+        let Ok(meta) = serde_json::from_str::<MetaJsonHead>(&text) else {
+            continue;
+        };
+        session_dirs.insert(meta.session_id, meta_path);
+    }
+    for (entity, SessionId(id), mut meta) in &mut q {
+        let Some(meta_path) = session_dirs.get(id) else {
+            continue;
+        };
+        let Ok(text) = std::fs::read_to_string(meta_path) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<MetaJsonExit>(&text) else {
+            continue;
+        };
+        if parsed.end_time.is_some() {
+            bevy::log::info!("vibe session {id} ended; reverting entity {entity:?} to terminal");
+            commands
+                .entity(entity)
+                .remove::<Vibe>()
+                .remove::<SessionId>();
+            let next = match pid_q.get(entity).ok() {
+                Some(crate::terminal::pid::Pid(p)) => {
+                    format!("{}{}", vmux_terminal::event::TERMINAL_WEBVIEW_URL, p)
+                }
+                None => vmux_terminal::event::TERMINAL_WEBVIEW_URL.to_string(),
+            };
+            if meta.url != next {
+                meta.url = next;
+            }
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct MetaJsonHead {
+    session_id: String,
+}
+
+#[derive(serde::Deserialize)]
+struct MetaJsonExit {
+    end_time: Option<String>,
+}
+
 pub fn poll_pending_vibe_sessions(
     mut commands: Commands,
     mut q: Query<(Entity, &mut PendingVibeSession), With<Vibe>>,
