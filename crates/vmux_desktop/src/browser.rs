@@ -693,6 +693,7 @@ fn push_tabs_host_emit(
     chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
     browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), With<Browser>>,
     tab_q: Query<(), With<Stack>>,
+    zoomed_q: Query<(), With<vmux_layout::pane::Zoomed>>,
     new_stack_ctx: Res<crate::command_bar::NewStackContext>,
     focus: Res<crate::layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
@@ -749,11 +750,15 @@ fn push_tabs_host_emit(
     if active_stack_opt.is_some() && rows.is_empty() {
         return;
     }
+    let is_zoomed = focus
+        .tab
+        .map(|t| zoomed_q.get(t).is_ok())
+        .unwrap_or(false);
     let payload = TabsHostEvent {
         tabs: rows,
         can_go_back,
         can_go_forward,
-        is_zoomed: false,
+        is_zoomed,
     };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     if !should_emit_cached_payload(&ron_body, &last, ui_ready.is_changed()) {
