@@ -68,6 +68,12 @@ pub struct PendingCursorWarp {
 #[require(Save)]
 pub struct Pane;
 
+#[derive(Component, Debug)]
+pub struct Zoomed {
+    pub leaf: Entity,
+    pub hidden: Vec<Entity>,
+}
+
 #[derive(Component, Reflect)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::pane"]
@@ -1170,6 +1176,28 @@ mod tests {
         assert_eq!(row.row_gap, Val::Px(0.0));
         assert_eq!(column.column_gap, Val::Px(0.0));
         assert_eq!(column.row_gap, Val::Px(8.0));
+    }
+
+    #[test]
+    fn zoomed_component_constructs_and_reads_back() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        let leaf = app.world_mut().spawn(Pane).id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                Zoomed {
+                    leaf,
+                    hidden: vec![],
+                },
+            ))
+            .id();
+
+        let z = app.world().get::<Zoomed>(tab).expect("Zoomed present");
+        assert_eq!(z.leaf, leaf);
+        assert!(z.hidden.is_empty());
     }
 
     #[test]
