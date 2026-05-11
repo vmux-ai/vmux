@@ -1,7 +1,9 @@
 use bevy::prelude::*;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::sync::{Mutex, mpsc};
+use std::time::{Duration, SystemTime};
 
 #[derive(Component, Debug)]
 pub struct Vibe;
@@ -16,6 +18,84 @@ pub struct PendingVibeSession {
     pub cwd: PathBuf,
     pub attempts: u8,
 }
+
+#[derive(Resource)]
+pub struct VibeSessionWatcher {
+    rx: Mutex<mpsc::Receiver<()>>,
+    _watcher: RecommendedWatcher,
+}
+
+pub fn start_vibe_session_watcher(mut commands: Commands) {
+    let root = vibe_sessions_root();
+    if std::fs::create_dir_all(&root).is_err() {
+        return;
+    }
+    let (tx, rx) = mpsc::channel();
+    let watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+        if let Ok(event) = res
+            && (event.kind.is_create() || event.kind.is_modify())
+        {
+            let _ = tx.send(());
+        }
+    });
+    let Ok(mut watcher) = watcher else {
+        bevy::log::warn!("vibe session watcher init failed");
+        return;
+    };
+    if let Err(e) = watcher.watch(&root, RecursiveMode::Recursive) {
+        bevy::log::warn!("vibe session watch({}) failed: {e}", root.display());
+        return;
+    }
+    bevy::log::info!("watching {} for vibe session changes", root.display());
+    commands.insert_resource(VibeSessionWatcher {
+        rx: Mutex::new(rx),
+        _watcher: watcher,
+    });
+}
+
+fn drain_watcher(watcher: &VibeSessionWatcher) -> bool {
+    let Ok(rx) = watcher.rx.lock() else {
+        return false;
+    };
+    let mut had = false;
+    while rx.try_recv().is_ok() {
+        had = true;
+    }
+    had
+}
+
+#[derive(Resource, Default)]
+pub struct VibeSessionDirty(pub bool);
+
+pub fn mark_vibe_session_dirty_on_change(
+    watcher: Option<Res<VibeSessionWatcher>>,
+    mut dirty: ResMut<VibeSessionDirty>,
+) {
+    let Some(watcher) = watcher else { return };
+    if drain_watcher(&watcher) {
+        dirty.0 = true;
+    }
+}
+
+pub fn mark_vibe_session_dirty_on_pending_added(
+    added_pending: Query<(), Added<PendingVibeSession>>,
+    added_session: Query<(), Added<SessionId>>,
+    mut dirty: ResMut<VibeSessionDirty>,
+) {
+    if !added_pending.is_empty() || !added_session.is_empty() {
+        dirty.0 = true;
+    }
+}
+
+pub fn vibe_session_dirty_run_condition(dirty: Res<VibeSessionDirty>) -> bool {
+    dirty.0
+}
+
+pub fn clear_vibe_session_dirty(mut dirty: ResMut<VibeSessionDirty>) {
+    dirty.0 = false;
+}
+
+pub const PENDING_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Resource, Default, Debug)]
 pub struct VibeSessionToEntity(pub HashMap<String, Entity>);
@@ -113,6 +193,7 @@ pub fn vibe_sessions_root() -> PathBuf {
         .join("session")
 }
 
+#[allow(dead_code)]
 pub const DISCOVERY_MAX_ATTEMPTS: u8 = 30;
 
 pub const VIBE_WEBVIEW_URL: &str = "vmux://vibe/";
@@ -141,7 +222,7 @@ pub fn format_vibe_url(
     }
 }
 
-pub fn poll_active_vibe_sessions_for_exit(
+pub fn detect_vibe_session_exit_on_change(
     mut commands: Commands,
     mut q: Query<(Entity, &SessionId, &mut vmux_core::PageMetadata), With<Vibe>>,
     pid_q: Query<&crate::terminal::pid::Pid>,
@@ -200,14 +281,15 @@ struct MetaJsonExit {
     end_time: Option<String>,
 }
 
-pub fn poll_pending_vibe_sessions(
+pub fn discover_pending_vibe_sessions_on_change(
     mut commands: Commands,
-    mut q: Query<(Entity, &mut PendingVibeSession), With<Vibe>>,
+    mut q: Query<(Entity, &PendingVibeSession), With<Vibe>>,
     map: Res<VibeSessionToEntity>,
 ) {
     let sessions_root = vibe_sessions_root();
     let claimed: std::collections::HashSet<String> = map.0.keys().cloned().collect();
-    for (entity, mut pending) in &mut q {
+    let now = SystemTime::now();
+    for (entity, pending) in &mut q {
         if let Some(id) =
             discover_session_id_for(&sessions_root, &pending.cwd, pending.spawn_time, &claimed)
         {
@@ -221,8 +303,7 @@ pub fn poll_pending_vibe_sessions(
                 .remove::<PendingVibeSession>();
             continue;
         }
-        pending.attempts = pending.attempts.saturating_add(1);
-        if pending.attempts >= DISCOVERY_MAX_ATTEMPTS {
+        if now.duration_since(pending.spawn_time).unwrap_or_default() >= PENDING_DISCOVERY_TIMEOUT {
             bevy::log::warn!(
                 "vibe session discovery timed out for entity {entity:?} (cwd={}, sessions_root={})",
                 pending.cwd.display(),

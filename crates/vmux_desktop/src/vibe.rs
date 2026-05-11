@@ -34,6 +34,8 @@ impl Plugin for VibePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AgentProviders>()
             .init_resource::<session::VibeSessionToEntity>()
+            .init_resource::<session::VibeSessionDirty>()
+            .add_systems(Startup, session::start_vibe_session_watcher)
             .add_systems(
                 Update,
                 (
@@ -44,15 +46,22 @@ impl Plugin for VibePlugin {
             )
             .add_systems(
                 Update,
-                session::poll_pending_vibe_sessions.run_if(
-                    bevy::time::common_conditions::on_timer(std::time::Duration::from_millis(200)),
+                (
+                    session::mark_vibe_session_dirty_on_change,
+                    session::mark_vibe_session_dirty_on_pending_added,
                 ),
             )
             .add_systems(
                 Update,
-                session::poll_active_vibe_sessions_for_exit.run_if(
-                    bevy::time::common_conditions::on_timer(std::time::Duration::from_millis(500)),
-                ),
+                (
+                    session::discover_pending_vibe_sessions_on_change,
+                    session::detect_vibe_session_exit_on_change,
+                    session::clear_vibe_session_dirty,
+                )
+                    .chain()
+                    .after(session::mark_vibe_session_dirty_on_change)
+                    .after(session::mark_vibe_session_dirty_on_pending_added)
+                    .run_if(session::vibe_session_dirty_run_condition),
             )
             .add_systems(
                 Update,
