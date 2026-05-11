@@ -5,6 +5,8 @@ use serde::Serialize;
 
 use crate::agent::{AgentProvider, AgentProviders, PreparedAgentLaunch};
 
+pub(crate) mod session;
+
 pub(crate) const VIBE_NEW_ID: &str = "vibe_new";
 pub(crate) const VIBE_NEW_STACK_ID: &str = "vibe_new_stack";
 
@@ -30,7 +32,16 @@ struct VibeMcpServerEnv {
 
 impl Plugin for VibePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<AgentProviders>();
+        app.init_resource::<AgentProviders>()
+            .init_resource::<session::VibeSessionToEntity>()
+            .add_systems(
+                Update,
+                (
+                    session::track_session_id_inserts,
+                    session::track_session_id_removals,
+                )
+                    .chain(),
+            );
         let mut providers = app.world_mut().resource_mut::<AgentProviders>();
         providers.register(AgentProvider {
             id: VIBE_NEW_ID,
