@@ -168,7 +168,10 @@ async fn handle_client(
                         if let Some(input_writer) = input_writer {
                             input_writers.lock().await.insert(id, input_writer);
                         }
-                        let resp = ServiceMessage::ProcessCreated { process_id: id };
+                        let resp = ServiceMessage::ProcessCreated {
+                            process_id: id,
+                            pid: 0,
+                        };
                         let w = writer.clone();
                         let mut w = w.lock().await;
                         write_message!(&mut *w, &resp)?;

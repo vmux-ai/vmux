@@ -624,7 +624,7 @@ fn poll_service_messages(
     let mut restarted_missing_processes = Vec::new();
     for msg in service.0.drain() {
         match msg {
-            ServiceMessage::ProcessCreated { process_id } => {
+            ServiceMessage::ProcessCreated { process_id, pid: _ } => {
                 // Match the first unmatched terminal awaiting a ProcessCreated response.
                 if let Some((entity, _, _)) = (&awaiting_create)
                     .into_iter()
