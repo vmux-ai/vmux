@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Release current Cargo.toml version even if unchanged from previous commit"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -23,6 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BEFORE_SHA: ${{ github.event.before }}
+      FORCE_RELEASE: ${{ github.event.inputs.force }}
     outputs:
       should_release: ${{ steps.detect.outputs.should_release }}
       version: ${{ steps.detect.outputs.version }}
@@ -48,9 +55,13 @@ jobs:
           fi
           PREV_VERSION=$(git show "${PREV_REF}:Cargo.toml" 2>/dev/null | grep -m1 '^version' | sed 's/.*"\(.*\)".*/\1/' || true)
           if [ "$PREV_VERSION" = "$VERSION" ]; then
-            echo "Cargo.toml version unchanged ($VERSION); skipping release."
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            if [ "${FORCE_RELEASE:-false}" = "true" ]; then
+              echo "Cargo.toml version unchanged ($VERSION); forcing release via workflow_dispatch."
+            else
+              echo "Cargo.toml version unchanged ($VERSION); skipping release."
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
           TAG="v$VERSION"
           RELEASE_SHA=$(git rev-parse HEAD)
@@ -195,8 +206,8 @@ jobs:
           TARBALL="target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
           SIG=$(cat "${TARBALL}.sig")
           URL="https://github.com/vmux-ai/vmux/releases/download/v${VERSION}/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
-          DMG_PATH=$(ls target/release/Vmux_*.dmg)
-          DMG_NAME=$(basename "$DMG_PATH")
+          DMG_NAME="Vmux_${VERSION}_aarch64.dmg"
+          DMG_PATH="target/release/${DMG_NAME}"
           DMG_URL="https://github.com/vmux-ai/vmux/releases/download/v${VERSION}/${DMG_NAME}"
           DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           mkdir -p website/public
@@ -225,8 +236,8 @@ jobs:
 
       - name: Update Homebrew cask
         run: |
-          DMG_PATH=$(ls target/release/Vmux_*.dmg)
-          DMG_NAME=$(basename "$DMG_PATH")
+          DMG_NAME="Vmux_${VERSION}_aarch64.dmg"
+          DMG_PATH="target/release/${DMG_NAME}"
           DMG_SHA=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
 
           sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Casks/vmux.rb
@@ -276,7 +287,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          DMG_PATH=$(ls target/release/Vmux_*.dmg)
+          DMG_PATH="target/release/Vmux_${VERSION}_aarch64.dmg"
           ASSETS=(
             "$DMG_PATH"
             "target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz"
