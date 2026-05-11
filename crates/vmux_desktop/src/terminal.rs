@@ -251,12 +251,12 @@ fn spawn_layout_requested_content(
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for request in reader.read() {
-        match *request {
+        match request {
             LayoutSpawnRequest::Terminal { stack } => {
                 let terminal = commands
                     .spawn((
                         Terminal::new(&mut meshes, &mut webview_mt, &settings),
-                        ChildOf(stack),
+                        ChildOf(*stack),
                     ))
                     .id();
                 commands.entity(terminal).insert(CefKeyboardTarget);
@@ -264,11 +264,108 @@ fn spawn_layout_requested_content(
             LayoutSpawnRequest::ProcessesMonitor { stack } => {
                 commands.spawn((
                     ProcessesMonitor::new(&mut meshes, &mut webview_mt),
-                    ChildOf(stack),
+                    ChildOf(*stack),
                 ));
+            }
+            LayoutSpawnRequest::OpenUrl { stack, url } => {
+                spawn_url_into_stack(
+                    *stack,
+                    url,
+                    &mut commands,
+                    &mut meshes,
+                    &mut webview_mt,
+                    &settings,
+                );
             }
         }
     }
+}
+
+fn spawn_url_into_stack(
+    stack: Entity,
+    url: &str,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) {
+    if url.starts_with(vmux_terminal::event::TERMINAL_WEBVIEW_URL) {
+        let terminal = commands
+            .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
+            .id();
+        commands.entity(terminal).insert(CefKeyboardTarget);
+    } else if url.starts_with(crate::vibe::session::VIBE_WEBVIEW_URL) {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+        let path = url
+            .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
+            .unwrap_or("");
+        let result = if path.is_empty() {
+            spawn_vibe_into_stack(stack, cwd, None, commands, meshes, webview_mt, settings)
+        } else {
+            spawn_vibe_into_stack(
+                stack,
+                cwd,
+                Some(path.to_string()),
+                commands,
+                meshes,
+                webview_mt,
+                settings,
+            )
+        };
+        if let Err(e) = result {
+            bevy::log::warn!("vibe spawn failed: {e}; falling back to terminal");
+            let terminal = commands
+                .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
+                .id();
+            commands.entity(terminal).insert(CefKeyboardTarget);
+        }
+    } else if url.starts_with(vmux_process::event::PROCESSES_WEBVIEW_URL) {
+        commands.spawn((ProcessesMonitor::new(meshes, webview_mt), ChildOf(stack)));
+    } else {
+        let terminal = commands
+            .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
+            .id();
+        commands.entity(terminal).insert(CefKeyboardTarget);
+    }
+}
+
+fn spawn_vibe_into_stack(
+    stack: Entity,
+    cwd: std::path::PathBuf,
+    session_id: Option<String>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> Result<(), String> {
+    let shell_cmd = match &session_id {
+        Some(id) => crate::vibe::build_vibe_shell_command_resume(&cwd, id)?,
+        None => crate::vibe::build_vibe_shell_command_fresh(&cwd)?,
+    };
+    let terminal = commands
+        .spawn((
+            Terminal::new_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
+            ChildOf(stack),
+        ))
+        .id();
+    commands.entity(terminal).insert(CefKeyboardTarget);
+    commands
+        .entity(terminal)
+        .insert(crate::terminal::PendingTerminalInput {
+            data: crate::agent::shell_command_input(&shell_cmd),
+        });
+    let mut entity_cmd = commands.entity(terminal);
+    entity_cmd.insert(crate::vibe::session::Vibe);
+    if let Some(id) = session_id {
+        entity_cmd.insert(crate::vibe::session::SessionId(id));
+    } else {
+        entity_cmd.insert(crate::vibe::session::PendingVibeSession {
+            spawn_time: std::time::SystemTime::now(),
+            cwd,
+            attempts: 0,
+        });
+    }
+    Ok(())
 }
 
 fn service_wake_callback(app: &App) -> Option<ServiceWake> {

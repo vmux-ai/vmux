@@ -16,6 +16,9 @@ pub struct ConfirmCloseSettings {
     pub enabled: bool,
 }
 
+#[derive(Resource, Clone, Debug, Default)]
+pub struct EffectiveStartupUrl(pub String);
+
 impl Default for ConfirmCloseSettings {
     fn default() -> Self {
         Self { enabled: true }

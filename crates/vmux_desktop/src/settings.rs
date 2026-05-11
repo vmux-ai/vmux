@@ -17,8 +17,21 @@ impl Plugin for SettingsPlugin {
             Startup,
             SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
         )
+        .init_resource::<vmux_layout::settings::EffectiveStartupUrl>()
         .add_systems(Startup, load_settings.in_set(SettingsLoadSet))
-        .add_systems(Update, reload_settings_on_change);
+        .add_systems(Update, reload_settings_on_change)
+        .add_systems(Update, update_effective_startup_url);
+    }
+}
+
+fn update_effective_startup_url(
+    settings: Option<Res<AppSettings>>,
+    mut effective: ResMut<vmux_layout::settings::EffectiveStartupUrl>,
+) {
+    if let Some(settings) = settings.as_ref()
+        && (settings.is_changed() || effective.0.is_empty())
+    {
+        effective.0 = resolve_startup_url(settings);
     }
 }
 

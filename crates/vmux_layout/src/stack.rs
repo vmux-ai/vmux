@@ -186,6 +186,7 @@ fn handle_stack_commands(
     stack_q: Query<Entity, With<Stack>>,
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
+    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
 
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut spawn_requests: MessageWriter<LayoutSpawnRequest>,
@@ -244,7 +245,15 @@ fn handle_stack_commands(
                         .id();
                     new_stack_ctx.stack = Some(stack);
                     new_stack_ctx.previous_stack = active_stack;
-                    new_stack_ctx.needs_open = true;
+                    let url = effective_startup_url
+                        .as_deref()
+                        .map(|u| u.0.clone())
+                        .unwrap_or_default();
+                    if url.is_empty() {
+                        new_stack_ctx.needs_open = true;
+                    } else {
+                        spawn_requests.write(LayoutSpawnRequest::OpenUrl { stack, url });
+                    }
                 }
             }
             StackCommand::Close => {
