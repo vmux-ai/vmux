@@ -810,6 +810,7 @@ fn on_command_bar_action(
         Res<AppSettings>,
         Option<Res<AgentProviders>>,
         Option<Res<crate::terminal::pid::PidToEntity>>,
+        Option<Res<crate::vibe::session::VibeSessionToEntity>>,
     )>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut writer_params: ParamSet<(
@@ -828,6 +829,7 @@ fn on_command_bar_action(
         .as_deref()
         .map(|map| map.0.clone())
         .unwrap_or_default();
+    let vibe_to_entity = resource_params.p3().as_deref().map(|map| map.0.clone());
     let empty_stack = new_stack_ctx.stack;
     let previous_stack = new_stack_ctx.previous_stack;
     // Track whether we handle keyboard restore ourselves
@@ -914,6 +916,47 @@ fn on_command_bar_action(
                                 .id();
                             commands.entity(term_e).insert(CefKeyboardTarget);
                         }
+                    } else if url
+                        .starts_with(crate::vibe::session::VIBE_WEBVIEW_URL.trim_end_matches('/'))
+                    {
+                        let session_id = url
+                            .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string());
+                        if let Some(ref id) = session_id
+                            && let Some(map) = vibe_to_entity.as_ref()
+                            && let Some(&entity) = map.get(id)
+                        {
+                            focus_pane_entity(entity, &mut commands, &child_of_q);
+                        } else {
+                            commands.entity(stack_e).insert(PageMetadata {
+                                url: crate::vibe::session::VIBE_WEBVIEW_URL.to_string(),
+                                title: "Vibe".to_string(),
+                                ..default()
+                            });
+                            let cwd = std::env::current_dir()
+                                .unwrap_or_else(|_| std::path::PathBuf::from("/"));
+                            if let Err(e) = crate::terminal::spawn_vibe_into_stack(
+                                stack_e,
+                                cwd,
+                                session_id,
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                                &settings,
+                            ) {
+                                bevy::log::warn!(
+                                    "vibe spawn failed: {e}; falling back to terminal"
+                                );
+                                let term_e = commands
+                                    .spawn((
+                                        Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                                        ChildOf(stack_e),
+                                    ))
+                                    .id();
+                                commands.entity(term_e).insert(CefKeyboardTarget);
+                            }
+                        }
                     } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
                         commands.entity(stack_e).insert(PageMetadata {
                             url: PROCESSES_WEBVIEW_URL.to_string(),
@@ -947,7 +990,15 @@ fn on_command_bar_action(
                     // Normal mode: navigate or spawn terminal in current tab
                     let known_terminal =
                         parse_pid_from_url(&url).and_then(|p| pid_to_entity.get(&p).copied());
+                    let known_vibe = url
+                        .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
+                        .filter(|s| !s.is_empty())
+                        .and_then(|id| {
+                            vibe_to_entity.as_ref().and_then(|map| map.get(id).copied())
+                        });
                     if let Some(entity) = known_terminal {
+                        focus_pane_entity(entity, &mut commands, &child_of_q);
+                    } else if let Some(entity) = known_vibe {
                         focus_pane_entity(entity, &mut commands, &child_of_q);
                     } else if url.starts_with("vmux://terminal") {
                         if let Some(pid) = parse_pid_from_url(&url) {
@@ -956,6 +1007,49 @@ fn on_command_bar_action(
                         writer_params
                             .p0()
                             .write(AppCommand::Terminal(TerminalCommand::New));
+                    } else if url
+                        .starts_with(crate::vibe::session::VIBE_WEBVIEW_URL.trim_end_matches('/'))
+                    {
+                        let (_, active_pane_opt, _) = focused_stack(
+                            &tab_q,
+                            &all_children,
+                            &leaf_panes,
+                            &pane_ts,
+                            &pane_children,
+                            &stack_ts,
+                        );
+                        if let Some(pane_e) = active_pane_opt {
+                            let stack_e = commands
+                                .spawn((
+                                    crate::layout::stack::stack_bundle(),
+                                    LastActivatedAt::now(),
+                                    ChildOf(pane_e),
+                                ))
+                                .id();
+                            commands.entity(stack_e).insert(PageMetadata {
+                                url: crate::vibe::session::VIBE_WEBVIEW_URL.to_string(),
+                                title: "Vibe".to_string(),
+                                ..default()
+                            });
+                            let session_id = url
+                                .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
+                                .filter(|s| !s.is_empty())
+                                .map(|s| s.to_string());
+                            let cwd = std::env::current_dir()
+                                .unwrap_or_else(|_| std::path::PathBuf::from("/"));
+                            if let Err(e) = crate::terminal::spawn_vibe_into_stack(
+                                stack_e,
+                                cwd,
+                                session_id,
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                                &settings,
+                            ) {
+                                bevy::log::warn!("vibe spawn failed: {e}");
+                            }
+                            custom_keyboard_restore = true;
+                        }
                     } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
                         use crate::command::ServiceCommand;
                         writer_params

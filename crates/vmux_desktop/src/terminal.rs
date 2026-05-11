@@ -329,7 +329,7 @@ fn spawn_url_into_stack(
     }
 }
 
-fn spawn_vibe_into_stack(
+pub(crate) fn spawn_vibe_into_stack(
     stack: Entity,
     cwd: std::path::PathBuf,
     session_id: Option<String>,
