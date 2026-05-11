@@ -26,4 +26,16 @@ fn main() {
     println!("cargo::rerun-if-changed=../../.git/HEAD");
     println!("cargo::rerun-if-changed=../../.git/refs");
     println!("cargo::rerun-if-env-changed=VMUX_PROFILE");
+
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        let plist = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packaging/macos/Info.plist")
+            .canonicalize()
+            .expect("packaging/macos/Info.plist not found");
+        println!("cargo::rerun-if-changed={}", plist.display());
+        println!(
+            "cargo::rustc-link-arg-bin=vmux_desktop=-Wl,-sectcreate,__TEXT,__info_plist,{}",
+            plist.display()
+        );
+    }
 }
