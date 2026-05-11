@@ -804,7 +804,7 @@ fn poll_service_messages(
                 for (entity, handle, _) in &terminals {
                     if handle.process_id == process_id {
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
-                            break;
+                            continue;
                         }
                         let evt = TermTitleEvent { title };
                         commands.trigger(BinHostEmitEvent::from_rkyv(
