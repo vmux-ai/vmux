@@ -187,6 +187,61 @@ pub(crate) fn spawn_terminal_tab(
     terminal
 }
 
+pub(crate) fn spawn_fresh_vibe_tab(
+    pane: Entity,
+    cwd: PathBuf,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> Result<Entity, String> {
+    let shell_cmd = crate::vibe::build_vibe_shell_command_fresh(&cwd)?;
+    let terminal = spawn_terminal_tab(
+        pane,
+        Some(&cwd),
+        Some(shell_command_input(&shell_cmd)),
+        commands,
+        meshes,
+        webview_mt,
+        settings,
+    );
+    commands
+        .entity(terminal)
+        .insert(crate::vibe::session::Vibe)
+        .insert(crate::vibe::session::PendingVibeSession {
+            spawn_time: std::time::SystemTime::now(),
+            cwd,
+            attempts: 0,
+        });
+    Ok(terminal)
+}
+
+pub(crate) fn spawn_vibe_resume_tab(
+    pane: Entity,
+    cwd: PathBuf,
+    session_id: String,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> Result<Entity, String> {
+    let shell_cmd = crate::vibe::build_vibe_shell_command_resume(&cwd, &session_id)?;
+    let terminal = spawn_terminal_tab(
+        pane,
+        Some(&cwd),
+        Some(shell_command_input(&shell_cmd)),
+        commands,
+        meshes,
+        webview_mt,
+        settings,
+    );
+    commands
+        .entity(terminal)
+        .insert(crate::vibe::session::Vibe)
+        .insert(crate::vibe::session::SessionId(session_id));
+    Ok(terminal)
+}
+
 pub(crate) fn spawn_browser_tab(
     pane: Entity,
     url: &str,
@@ -271,6 +326,7 @@ fn spawn_vmux_tab(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
     pid_to_entity: Option<&crate::terminal::pid::PidToEntity>,
+    vibe_to_entity: Option<&crate::vibe::session::VibeSessionToEntity>,
     child_of_q: &Query<&ChildOf>,
 ) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| format!("invalid vmux URL '{url}': {e}"))?;
@@ -322,6 +378,34 @@ fn spawn_vmux_tab(
         "services" => {
             spawn_processes_tab(pane, commands, meshes, webview_mt);
             Ok(())
+        }
+        "vibe" => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+            let path = parsed.path().trim_start_matches('/');
+            if path.is_empty() {
+                if let Err(e) =
+                    spawn_fresh_vibe_tab(pane, cwd, commands, meshes, webview_mt, settings)
+                {
+                    bevy::log::warn!("spawn_fresh_vibe_tab failed: {e}; falling back to terminal");
+                    spawn_terminal_tab(pane, None, None, commands, meshes, webview_mt, settings);
+                }
+                Ok(())
+            } else {
+                let session_id = path.to_string();
+                if let Some(map) = vibe_to_entity
+                    && let Some(&entity) = map.0.get(&session_id)
+                {
+                    crate::terminal::pid::focus_pane_entity(entity, commands, child_of_q);
+                    return Ok(());
+                }
+                if let Err(e) = spawn_vibe_resume_tab(
+                    pane, cwd, session_id, commands, meshes, webview_mt, settings,
+                ) {
+                    bevy::log::warn!("spawn_vibe_resume_tab failed: {e}; falling back to terminal");
+                    spawn_terminal_tab(pane, None, None, commands, meshes, webview_mt, settings);
+                }
+                Ok(())
+            }
         }
         other => Err(format!("unknown vmux URL host '{other}' in '{url}'")),
     }
@@ -383,6 +467,7 @@ fn handle_agent_commands(
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     child_of_q: Query<&ChildOf>,
     pid_to_entity: Option<Res<crate::terminal::pid::PidToEntity>>,
+    vibe_to_entity: Option<Res<crate::vibe::session::VibeSessionToEntity>>,
     settings: Res<AppSettings>,
     service: Option<Res<crate::terminal::ServiceClient>>,
     mut commands: Commands,
@@ -481,6 +566,7 @@ fn handle_agent_commands(
                             &mut webview_mt,
                             &settings,
                             pid_to_entity.as_deref(),
+                            vibe_to_entity.as_deref(),
                             &child_of_q,
                         ) {
                             Ok(()) => AgentCommandResult::Ok,
@@ -574,6 +660,7 @@ fn handle_agent_commands(
                                     &mut webview_mt,
                                     &settings,
                                     pid_to_entity.as_deref(),
+                                    vibe_to_entity.as_deref(),
                                     &child_of_q,
                                 ) {
                                     Ok(()) => AgentCommandResult::Ok,

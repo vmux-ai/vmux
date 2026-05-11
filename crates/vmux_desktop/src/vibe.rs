@@ -231,6 +231,37 @@ fn build_bash_launch_command(mcp_servers: &str, vibe: &Path, cwd: &Path) -> Resu
     ))
 }
 
+fn build_bash_launch_command_resume(
+    mcp_servers: &str,
+    vibe: &Path,
+    cwd: &Path,
+    session_id: &str,
+) -> Result<String, String> {
+    Ok(format!(
+        "bash -lc {} bash {} {} {} {}",
+        shell_quote("cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" exec \"$3\" --trust --resume \"$4\"")?,
+        shell_quote_path(cwd)?,
+        shell_quote(mcp_servers)?,
+        shell_quote_path(vibe)?,
+        shell_quote(session_id)?,
+    ))
+}
+
+pub(crate) fn build_vibe_shell_command_fresh(cwd: &Path) -> Result<String, String> {
+    let vibe = find_executable("vibe").ok_or_else(|| "vibe executable not found".to_string())?;
+    let mcp = mcp_servers_env_value(cwd)?;
+    build_bash_launch_command(&mcp, &vibe, cwd)
+}
+
+pub(crate) fn build_vibe_shell_command_resume(
+    cwd: &Path,
+    session_id: &str,
+) -> Result<String, String> {
+    let vibe = find_executable("vibe").ok_or_else(|| "vibe executable not found".to_string())?;
+    let mcp = mcp_servers_env_value(cwd)?;
+    build_bash_launch_command_resume(&mcp, &vibe, cwd, session_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,6 +323,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp);
 
         assert_eq!(found, Some(exe));
+    }
+
+    #[test]
+    fn launch_command_resume_includes_session_id_and_mcp_servers() {
+        let mcp =
+            r#"[{"name":"vmux","transport":"stdio","command":"target/debug/vmux","args":["mcp"]}]"#;
+        let cmd = build_bash_launch_command_resume(
+            mcp,
+            Path::new("/Users/test/.local/bin/vibe"),
+            Path::new("/tmp/work tree"),
+            "ae724a54-c387-5359-0687-ccfc155558b6",
+        )
+        .expect("build");
+        assert!(cmd.contains("--resume"));
+        assert!(cmd.contains("ae724a54-c387-5359-0687-ccfc155558b6"));
+        assert!(cmd.contains("VIBE_MCP_SERVERS"));
+        assert!(cmd.contains("\"name\":\"vmux\""));
     }
 
     #[test]
