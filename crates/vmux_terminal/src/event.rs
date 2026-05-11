@@ -6,6 +6,7 @@ pub const TERM_MOUSE_EVENT: &str = "term_mouse";
 pub const TERM_RESIZE_EVENT: &str = "term_resize";
 
 pub const TERM_THEME_EVENT: &str = "term_theme";
+pub const TERM_TITLE_EVENT: &str = "term_title";
 pub const TERMINAL_WEBVIEW_URL: &str = "vmux://terminal/";
 
 #[derive(
@@ -278,6 +279,21 @@ pub struct TermResizeEvent {
     pub viewport_height: f32,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct TermTitleEvent {
+    pub title: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,5 +369,16 @@ mod tests {
                 set: None
             }
         );
+    }
+
+    #[test]
+    fn term_title_event_rkyv_roundtrip() {
+        let original = TermTitleEvent {
+            title: "hello-osc".to_string(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
+        let recovered =
+            rkyv::from_bytes::<TermTitleEvent, rkyv::rancor::Error>(&bytes).expect("deserialize");
+        assert_eq!(original.title, recovered.title);
     }
 }
