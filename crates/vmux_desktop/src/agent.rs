@@ -722,7 +722,7 @@ fn handle_agent_launch_requests(
             warn!("agent launch has no active pane");
             continue;
         };
-        spawn_terminal_tab(
+        let terminal = spawn_terminal_tab(
             pane,
             Some(&prepared.cwd),
             Some(shell_command_input(&prepared.command)),
@@ -731,6 +731,18 @@ fn handle_agent_launch_requests(
             &mut webview_mt,
             &settings,
         );
+        if request.provider_id == crate::vibe::VIBE_NEW_ID
+            || request.provider_id == crate::vibe::VIBE_NEW_STACK_ID
+        {
+            commands
+                .entity(terminal)
+                .insert(crate::vibe::session::Vibe)
+                .insert(crate::vibe::session::PendingVibeSession {
+                    spawn_time: std::time::SystemTime::now(),
+                    cwd: prepared.cwd.clone(),
+                    attempts: 0,
+                });
+        }
     }
 }
 

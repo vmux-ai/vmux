@@ -699,7 +699,6 @@ fn poll_service_messages(
             Without<AwaitingProcessCreated>,
         ),
     >,
-    mut meta_q: Query<&mut PageMetadata>,
     service: Option<Res<ServiceClient>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -753,9 +752,6 @@ fn poll_service_messages(
                     matched_entities.push(entity);
                     service.0.send(ClientMessage::AttachProcess { process_id });
                     apply_process_created(&mut commands, entity, process_id, pid);
-                    if let Ok(mut meta) = meta_q.get_mut(entity) {
-                        meta.title = format!("Terminal ({})", &process_id.to_string()[..8]);
-                    }
                 }
             }
             ServiceMessage::ProcessCreateFailed { reason } => {
