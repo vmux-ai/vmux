@@ -1320,6 +1320,96 @@ mod tests {
         }
     }
 
+    fn place_pane(
+        app: &mut App,
+        parent: Entity,
+        center: Vec2,
+        size: Vec2,
+    ) -> Entity {
+        use bevy::ui::{ComputedNode, UiGlobalTransform};
+        let mut node = ComputedNode::default();
+        node.size = size;
+        let id = app
+            .world_mut()
+            .spawn((
+                Pane,
+                Node::default(),
+                LastActivatedAt::now(),
+                ChildOf(parent),
+                node,
+                UiGlobalTransform::from_translation(center),
+            ))
+            .id();
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(id)));
+        id
+    }
+
+    #[test]
+    fn select_left_picks_left_neighbor_in_horizontal_split() {
+        use bevy::ui::{ComputedNode, UiGlobalTransform};
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.init_resource::<PaneHoverIntent>();
+        app.init_resource::<PendingCursorWarp>();
+        app.init_resource::<NewStackContext>();
+        app.add_systems(Update, on_pane_select.in_set(WriteAppCommands));
+
+        let _window = app.world_mut().spawn(PrimaryWindow).id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let left = place_pane(&mut app, split, Vec2::new(400.0, 450.0), Vec2::new(800.0, 900.0));
+        let right = place_pane(&mut app, split, Vec2::new(1200.0, 450.0), Vec2::new(800.0, 900.0));
+
+        // make `right` the active pane
+        app.world_mut()
+            .entity_mut(right)
+            .insert(LastActivatedAt::now());
+
+        // sanity: ensure ComputedNode is set as expected
+        assert_eq!(
+            app.world().get::<ComputedNode>(right).unwrap().size,
+            Vec2::new(800.0, 900.0)
+        );
+        assert_eq!(
+            app.world().get::<UiGlobalTransform>(right).unwrap().transform_point2(Vec2::ZERO),
+            Vec2::new(1200.0, 450.0)
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Pane(PaneCommand::SelectLeft));
+        app.update();
+
+        let new_active_left = app
+            .world()
+            .get::<LastActivatedAt>(left)
+            .map(|t| t.0)
+            .expect("left has LastActivatedAt");
+        let prev_active_right = app
+            .world()
+            .get::<LastActivatedAt>(right)
+            .map(|t| t.0)
+            .expect("right has LastActivatedAt");
+        assert!(
+            new_active_left > prev_active_right,
+            "SelectLeft should mark left as more recently activated than right"
+        );
+    }
+
     #[test]
     fn closing_last_pane_marks_window_closing() {
         let mut app = App::new();

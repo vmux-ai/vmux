@@ -304,6 +304,102 @@ mod tests {
     }
 
     #[test]
+    fn leader_h_emits_select_pane_left() {
+        use crate::command::PaneCommand;
+        let mut app = test_app();
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyG);
+        app.update();
+
+        release(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::ControlLeft);
+        clear_input_frame(&mut app);
+        press(&mut app, KeyCode::KeyH);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(commands, vec![AppCommand::Pane(PaneCommand::SelectLeft)]);
+    }
+
+    #[test]
+    fn leader_l_emits_select_pane_right() {
+        use crate::command::PaneCommand;
+        let mut app = test_app();
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyG);
+        app.update();
+
+        release(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::ControlLeft);
+        clear_input_frame(&mut app);
+        press(&mut app, KeyCode::KeyL);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(commands, vec![AppCommand::Pane(PaneCommand::SelectRight)]);
+    }
+
+    #[test]
+    fn leader_j_emits_select_pane_down() {
+        use crate::command::PaneCommand;
+        let mut app = test_app();
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyG);
+        app.update();
+
+        release(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::ControlLeft);
+        clear_input_frame(&mut app);
+        press(&mut app, KeyCode::KeyJ);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(commands, vec![AppCommand::Pane(PaneCommand::SelectDown)]);
+    }
+
+    #[test]
+    fn leader_k_emits_select_pane_up() {
+        use crate::command::PaneCommand;
+        let mut app = test_app();
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyG);
+        app.update();
+
+        release(&mut app, KeyCode::KeyG);
+        release(&mut app, KeyCode::ControlLeft);
+        clear_input_frame(&mut app);
+        press(&mut app, KeyCode::KeyK);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(commands, vec![AppCommand::Pane(PaneCommand::SelectUp)]);
+    }
+
+    #[test]
     fn leader_s_emits_space_open_command() {
         let mut app = test_app();
 
