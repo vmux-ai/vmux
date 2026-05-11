@@ -157,7 +157,7 @@ fn HeaderView(titlebar_height: f32) -> Element {
         tabs,
         can_go_back,
         can_go_forward,
-        is_zoomed,
+        is_zoomed: _,
     } = tabs_state();
     let SpacesHostEvent { spaces } = spaces_state();
     let active_row = tabs.iter().find(|t| t.is_active).cloned();
@@ -227,13 +227,6 @@ fn HeaderView(titlebar_height: f32) -> Element {
                         favicon_src,
                         favicon_error,
                         bg_color: active_bg_color.clone(),
-                    }
-                    if is_zoomed {
-                        span {
-                            class: "inline-flex h-5 items-center rounded px-1.5 text-ui-xs font-mono bg-glass-hover text-foreground",
-                            title: "Pane zoomed",
-                            "Z"
-                        }
                     }
                 }
             }
