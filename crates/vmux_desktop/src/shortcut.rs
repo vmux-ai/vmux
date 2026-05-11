@@ -282,6 +282,7 @@ mod tests {
             },
             terminal: None,
             auto_update: false,
+            startup_url: None,
         }
     }
 

@@ -36,6 +36,20 @@ pub struct AppSettings {
     pub terminal: Option<TerminalSettings>,
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub startup_url: Option<String>,
+}
+
+#[allow(dead_code)]
+pub fn resolve_startup_url(settings: &AppSettings) -> String {
+    settings.startup_url.clone().unwrap_or_else(|| {
+        if crate::vibe::vibe_available() {
+            "vmux://vibe/".to_string()
+        } else {
+            "vmux://terminal/".to_string()
+        }
+    })
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -405,4 +419,50 @@ fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
             .as_ref()
             .is_none_or(|terminal| terminal.confirm_close),
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_settings() -> AppSettings {
+        AppSettings {
+            browser: BrowserSettings {
+                startup_url: "about:blank".to_string(),
+            },
+            layout: LayoutSettings {
+                window: WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: PaneSettings {
+                    gap: 0.0,
+                    radius: 0.0,
+                },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            },
+            shortcuts: ShortcutSettings::default(),
+            terminal: None,
+            auto_update: false,
+            startup_url: None,
+        }
+    }
+
+    #[test]
+    fn resolve_startup_url_returns_user_override() {
+        let mut s = base_settings();
+        s.startup_url = Some("vmux://services/".into());
+        assert_eq!(resolve_startup_url(&s), "vmux://services/");
+    }
+
+    #[test]
+    fn resolve_startup_url_falls_back_when_unset() {
+        let s = base_settings();
+        let url = resolve_startup_url(&s);
+        assert!(url == "vmux://vibe/" || url == "vmux://terminal/");
+    }
 }
