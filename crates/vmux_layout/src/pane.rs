@@ -50,6 +50,12 @@ impl Plugin for PanePlugin {
             .init_resource::<PendingCursorWarp>()
             .add_systems(Update, on_pane_select.in_set(ReadAppCommands))
             .add_systems(Update, handle_pane_commands.in_set(ReadAppCommands))
+            .add_systems(
+                Update,
+                handle_zoom_command
+                    .in_set(ReadAppCommands)
+                    .before(handle_pane_commands),
+            )
             .add_systems(Update, poll_cursor_pane_focus)
             .add_systems(Update, click_pane_in_player_mode)
             .add_systems(Update, pane_gap_drag_resize)
@@ -96,6 +102,117 @@ pub struct Pane;
 pub struct Zoomed {
     pub leaf: Entity,
     pub hidden: Vec<Entity>,
+}
+
+fn tab_of(
+    leaf: Entity,
+    child_of_q: &Query<&ChildOf>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+) -> Option<Entity> {
+    let mut cur = leaf;
+    loop {
+        if tabs.get(cur).is_ok() {
+            return Some(cur);
+        }
+        cur = child_of_q.get(cur).ok()?.0;
+    }
+}
+
+fn collect_siblings_to_hide(
+    leaf: Entity,
+    tab: Entity,
+    child_of_q: &Query<&ChildOf>,
+    all_children: &Query<&Children>,
+    split_dir_q: &Query<&PaneSplit>,
+) -> Vec<Entity> {
+    let mut result = Vec::new();
+    let mut cur = leaf;
+    while cur != tab {
+        let Ok(parent) = child_of_q.get(cur).map(|p| p.0) else {
+            break;
+        };
+        if split_dir_q.get(parent).is_ok()
+            && let Ok(children) = all_children.get(parent)
+        {
+            for child in children.iter() {
+                if child != cur {
+                    result.push(child);
+                }
+            }
+        }
+        cur = parent;
+    }
+    result
+}
+
+fn handle_zoom_command(
+    mut reader: MessageReader<AppCommand>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_children: Query<&Children, With<Pane>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    child_of_q: Query<&ChildOf>,
+    split_dir_q: Query<&PaneSplit>,
+    zoomed_q: Query<(), With<Zoomed>>,
+    mut commands: Commands,
+) {
+    for cmd in reader.read() {
+        let AppCommand::Pane(pane_cmd) = *cmd else {
+            continue;
+        };
+        let unzoom_only = matches!(
+            pane_cmd,
+            PaneCommand::SelectLeft
+                | PaneCommand::SelectRight
+                | PaneCommand::SelectUp
+                | PaneCommand::SelectDown
+                | PaneCommand::SplitH
+                | PaneCommand::SplitV
+        );
+        if !unzoom_only && !matches!(pane_cmd, PaneCommand::Zoom) {
+            continue;
+        }
+        let (_, active_pane_opt, _) = focused_stack(
+            &tabs,
+            &all_children,
+            &leaf_panes,
+            &pane_ts,
+            &pane_children,
+            &stack_ts,
+        );
+        let Some(active) = active_pane_opt else {
+            continue;
+        };
+        let Some(tab) = tab_of(active, &child_of_q, &tabs) else {
+            continue;
+        };
+
+        if unzoom_only {
+            if zoomed_q.get(tab).is_ok() {
+                commands.entity(tab).remove::<Zoomed>();
+            }
+            continue;
+        }
+
+        if zoomed_q.get(tab).is_ok() {
+            commands.entity(tab).remove::<Zoomed>();
+        } else {
+            let hidden = collect_siblings_to_hide(
+                active,
+                tab,
+                &child_of_q,
+                &all_children,
+                &split_dir_q,
+            );
+            if !hidden.is_empty() {
+                commands
+                    .entity(tab)
+                    .insert(Zoomed { leaf: active, hidden });
+            }
+        }
+    }
 }
 
 fn sync_zoom_visibility(zoomed_q: Query<&Zoomed, Added<Zoomed>>, mut nodes: Query<&mut Node>) {
@@ -1254,6 +1371,154 @@ mod tests {
         let z = app.world().get::<Zoomed>(tab).expect("Zoomed present");
         assert_eq!(z.leaf, leaf);
         assert!(z.hidden.is_empty());
+    }
+
+    #[test]
+    fn zoom_command_inserts_zoomed_with_correct_hidden_set() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.init_resource::<PaneHoverIntent>();
+        app.init_resource::<PendingCursorWarp>();
+        app.init_resource::<NewStackContext>();
+        app.init_resource::<ConfirmCloseSettings>();
+        app.insert_resource(test_settings());
+        app.add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
+        register_zoom_hooks(&mut app);
+
+        let _window = app.world_mut().spawn(PrimaryWindow).id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let leaf_a = app
+            .world_mut()
+            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .id();
+        let leaf_b = app
+            .world_mut()
+            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .id();
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(leaf_a)));
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(leaf_b)));
+        app.world_mut()
+            .entity_mut(leaf_b)
+            .insert(LastActivatedAt::now());
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Pane(PaneCommand::Zoom));
+
+        app.update();
+
+        let z = app
+            .world()
+            .get::<Zoomed>(tab)
+            .expect("Zoomed inserted on tab");
+        assert_eq!(z.leaf, leaf_b);
+        assert_eq!(z.hidden, vec![leaf_a]);
+    }
+
+    #[test]
+    fn zoom_command_on_zoomed_tab_removes_zoomed() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.init_resource::<PaneHoverIntent>();
+        app.init_resource::<PendingCursorWarp>();
+        app.init_resource::<NewStackContext>();
+        app.init_resource::<ConfirmCloseSettings>();
+        app.insert_resource(test_settings());
+        app.add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
+        register_zoom_hooks(&mut app);
+
+        let _window = app.world_mut().spawn(PrimaryWindow).id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let leaf_a = app
+            .world_mut()
+            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .id();
+        let leaf_b = app
+            .world_mut()
+            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .id();
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(leaf_a)));
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(leaf_b)));
+        app.world_mut()
+            .entity_mut(leaf_b)
+            .insert(LastActivatedAt::now());
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Pane(PaneCommand::Zoom));
+        app.update();
+        assert!(app.world().get::<Zoomed>(tab).is_some());
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Pane(PaneCommand::Zoom));
+        app.update();
+        assert!(app.world().get::<Zoomed>(tab).is_none());
+    }
+
+    #[test]
+    fn zoom_command_on_single_pane_tab_is_noop() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.init_resource::<PaneHoverIntent>();
+        app.init_resource::<PendingCursorWarp>();
+        app.init_resource::<NewStackContext>();
+        app.init_resource::<ConfirmCloseSettings>();
+        app.insert_resource(test_settings());
+        app.add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
+        register_zoom_hooks(&mut app);
+
+        let _window = app.world_mut().spawn(PrimaryWindow).id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let only = app
+            .world_mut()
+            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(only)));
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Pane(PaneCommand::Zoom));
+        app.update();
+
+        assert!(app.world().get::<Zoomed>(tab).is_none());
     }
 
     #[test]
