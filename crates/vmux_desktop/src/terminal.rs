@@ -201,6 +201,10 @@ impl Plugin for TerminalInputPlugin {
                 Update,
                 (pid::track_pid_inserts, pid::track_pid_removals).chain(),
             )
+            .add_systems(
+                Update,
+                pid::format_terminal_url.after(pid::track_pid_inserts),
+            )
             .add_plugins(BinJsEmitEventPlugin::<TermResizeEvent>::default())
             .add_plugins(BinJsEmitEventPlugin::<TermMouseEvent>::default())
             .add_systems(
@@ -321,7 +325,7 @@ impl Terminal {
                 },
                 PageMetadata {
                     title: format!("Terminal ({})", &process_id.to_string()[..8]),
-                    url: format!("{}{}", TERMINAL_WEBVIEW_URL, process_id),
+                    url: TERMINAL_WEBVIEW_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },
@@ -375,7 +379,7 @@ impl Terminal {
                 PendingServiceAttach,
                 PageMetadata {
                     title: format!("Terminal ({})", &process_id.to_string()[..8]),
-                    url: format!("{}{}", TERMINAL_WEBVIEW_URL, process_id),
+                    url: TERMINAL_WEBVIEW_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },
@@ -1778,7 +1782,7 @@ fn on_restart_pty(
         .send(ClientMessage::AttachProcess { process_id: new_id });
 
     handle.process_id = new_id;
-    meta.url = format!("{}{}", TERMINAL_WEBVIEW_URL, new_id);
+    meta.url = TERMINAL_WEBVIEW_URL.to_string();
     meta.title = format!("Terminal ({})", &new_id.to_string()[..8]);
 }
 

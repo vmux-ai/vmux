@@ -1,5 +1,8 @@
+use crate::terminal::Terminal;
 use bevy::prelude::*;
 use std::collections::HashMap;
+use vmux_core::PageMetadata;
+use vmux_terminal::event::TERMINAL_WEBVIEW_URL;
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pid(pub u32);
@@ -26,6 +29,23 @@ pub fn track_pid_removals(
             map.0.remove(pid);
         } else {
             map.0.retain(|_, &mut e| e != entity);
+        }
+    }
+}
+
+pub fn format_terminal_url(
+    mut q: Query<
+        (Option<&Pid>, &mut PageMetadata),
+        (With<Terminal>, Or<(Changed<Pid>, Added<PageMetadata>)>),
+    >,
+) {
+    for (pid, mut meta) in &mut q {
+        let next = match pid {
+            Some(Pid(p)) => format!("{TERMINAL_WEBVIEW_URL}{p}"),
+            None => TERMINAL_WEBVIEW_URL.to_string(),
+        };
+        if meta.url != next {
+            meta.url = next;
         }
     }
 }
@@ -73,5 +93,50 @@ mod tests {
         let map = app.world().resource::<PidToEntity>();
         assert_eq!(map.0.get(&9001), Some(&e));
         assert!(!map.0.contains_key(&9000));
+    }
+
+    fn make_format_app() -> App {
+        let mut app = App::new();
+        app.add_systems(Update, format_terminal_url);
+        app
+    }
+
+    fn empty_meta() -> PageMetadata {
+        PageMetadata {
+            title: String::new(),
+            url: String::new(),
+            favicon_url: String::new(),
+            bg_color: None,
+        }
+    }
+
+    #[test]
+    fn formatter_emits_pid_url_for_terminal_with_pid() {
+        let mut app = make_format_app();
+        let e = app
+            .world_mut()
+            .spawn((Terminal, Pid(4242), empty_meta()))
+            .id();
+        app.update();
+        let url = &app.world().get::<PageMetadata>(e).unwrap().url;
+        assert_eq!(url, "vmux://terminal/4242");
+    }
+
+    #[test]
+    fn formatter_emits_placeholder_for_terminal_without_pid() {
+        let mut app = make_format_app();
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                PageMetadata {
+                    url: "stale".into(),
+                    ..empty_meta()
+                },
+            ))
+            .id();
+        app.update();
+        let url = &app.world().get::<PageMetadata>(e).unwrap().url;
+        assert_eq!(url, "vmux://terminal/");
     }
 }
