@@ -175,7 +175,7 @@ fn handle_zoom_command(
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let AppCommand::Pane(pane_cmd) = *cmd else {
+        let AppCommand::Layout(LayoutCommand::Pane(pane_cmd)) = *cmd else {
             continue;
         };
         let unzoom_only = matches!(
@@ -1421,7 +1421,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Pane(PaneCommand::SelectRight));
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectRight)));
         app.update();
 
         let new_b = app.world().get::<LastActivatedAt>(b).unwrap().0;
@@ -1505,7 +1505,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Pane(PaneCommand::SelectLeft));
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectLeft)));
         app.update();
 
         let new_a = app.world().get::<LastActivatedAt>(a).unwrap().0;
@@ -1558,6 +1558,7 @@ mod tests {
         app.world_mut()
             .entity_mut(right)
             .insert(LastActivatedAt::now());
+        std::thread::sleep(std::time::Duration::from_millis(2));
 
         // sanity: ensure ComputedNode is set as expected
         assert_eq!(
@@ -1574,7 +1575,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Pane(PaneCommand::SelectLeft));
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectLeft)));
         app.update();
 
         let new_active_left = app
@@ -1714,7 +1715,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Pane(PaneCommand::Zoom));
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
 
         app.update();
 
@@ -1782,13 +1783,13 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Pane(PaneCommand::Zoom));
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
         app.update();
         assert!(app.world().get::<Zoomed>(tab).is_some());
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Pane(PaneCommand::Zoom));
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
         app.update();
         assert!(app.world().get::<Zoomed>(tab).is_none());
     }
@@ -1820,7 +1821,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Pane(PaneCommand::Zoom));
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
         app.update();
 
         assert!(app.world().get::<Zoomed>(tab).is_none());
@@ -1913,13 +1914,13 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Pane(PaneCommand::Zoom));
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
         app.update();
         assert!(app.world().get::<Zoomed>(tab).is_some());
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Pane(PaneCommand::SplitH));
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SplitH)));
         app.update();
 
         assert!(
@@ -1984,13 +1985,13 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Pane(PaneCommand::Zoom));
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)));
         app.update();
         assert!(app.world().get::<Zoomed>(tab).is_some());
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Pane(PaneCommand::SelectLeft));
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectLeft)));
         app.update();
 
         assert!(
