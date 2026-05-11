@@ -810,7 +810,7 @@ fn on_pane_select(
         let cur_center = cur_gt.transform_point2(Vec2::ZERO);
         let cur_size = cur_node.size;
 
-        let mut best: Option<(Entity, f32)> = None;
+        let mut candidates: Vec<Entity> = Vec::new();
         for &pane in &panes {
             if pane == current {
                 continue;
@@ -844,11 +844,10 @@ fn on_pane_select(
                 continue;
             }
 
-            let dist = delta.length();
-            if best.is_none() || dist < best.unwrap().1 {
-                best = Some((pane, dist));
-            }
+            candidates.push(pane);
         }
+        let best = active_among(candidates.iter().filter_map(|&e| pane_ts.get(e).ok()))
+            .map(|e| (e, 0.0_f32));
 
         if let Some((target, _)) = best {
             hover_intent.target = None;
@@ -1329,10 +1328,7 @@ mod tests {
 
     fn place_pane(app: &mut App, parent: Entity, center: Vec2, size: Vec2) -> Entity {
         use bevy::ui::{ComputedNode, UiGlobalTransform};
-        let node = ComputedNode {
-            size,
-            ..default()
-        };
+        let node = ComputedNode { size, ..default() };
         let id = app
             .world_mut()
             .spawn((
@@ -1347,6 +1343,94 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(id)));
         id
+    }
+
+    #[test]
+    fn select_right_picks_most_recently_active_among_overlapping_neighbors() {
+        // Layout: A (left, full height), B (top-right), C (bottom-right).
+        // From A, both B and C overlap on Y. Expect: navigate to whichever was
+        // active most recently (B in this test).
+        use bevy::ui::{ComputedNode, UiGlobalTransform};
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.init_resource::<PaneHoverIntent>();
+        app.init_resource::<PendingCursorWarp>();
+        app.init_resource::<NewStackContext>();
+        app.add_systems(Update, on_pane_select.in_set(WriteAppCommands));
+
+        let _window = app.world_mut().spawn(PrimaryWindow).id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let split_v = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let a = place_pane(
+            &mut app,
+            split_v,
+            Vec2::new(399.5, 450.0),
+            Vec2::new(791.0, 892.0),
+        );
+        let split_h = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Column,
+                },
+                ChildOf(split_v),
+            ))
+            .id();
+        let b = place_pane(
+            &mut app,
+            split_h,
+            Vec2::new(1199.5, 225.0),
+            Vec2::new(793.0, 442.0),
+        );
+        let c = place_pane(
+            &mut app,
+            split_h,
+            Vec2::new(1199.5, 675.0),
+            Vec2::new(793.0, 442.0),
+        );
+
+        // Sanity: ensure ComputedNode is set for B and C
+        let _ = app.world().get::<ComputedNode>(b).unwrap();
+        let _ = app.world().get::<UiGlobalTransform>(b).unwrap();
+
+        // Activate C first, then B (B is the most recently active right-side pane).
+        app.world_mut().entity_mut(c).insert(LastActivatedAt::now());
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        app.world_mut().entity_mut(b).insert(LastActivatedAt::now());
+        // Then activate A so it's the current pane.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        app.world_mut().entity_mut(a).insert(LastActivatedAt::now());
+
+        let prev_b = app.world().get::<LastActivatedAt>(b).unwrap().0;
+        let prev_c = app.world().get::<LastActivatedAt>(c).unwrap().0;
+        assert!(prev_b > prev_c, "B should be more recently active than C");
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Pane(PaneCommand::SelectRight));
+        app.update();
+
+        let new_b = app.world().get::<LastActivatedAt>(b).unwrap().0;
+        let new_c = app.world().get::<LastActivatedAt>(c).unwrap().0;
+        assert!(
+            new_b > prev_b,
+            "B (most recently active) should be re-activated by SelectRight"
+        );
+        assert_eq!(new_c, prev_c, "C should not be re-activated");
     }
 
     #[test]
