@@ -52,6 +52,10 @@ impl Plugin for PanePlugin {
             .add_systems(Update, pane_gap_drag_resize)
             .add_systems(Update, process_pending_pane_closes)
             .add_systems(PostUpdate, sync_pane_split_gaps_to_settings)
+            .add_systems(
+                PostUpdate,
+                sync_zoom_visibility.before(bevy::ui::UiSystems::Layout),
+            )
             .add_systems(PostUpdate, warp_cursor_to_active_pane);
     }
 }
@@ -72,6 +76,16 @@ pub struct Pane;
 pub struct Zoomed {
     pub leaf: Entity,
     pub hidden: Vec<Entity>,
+}
+
+fn sync_zoom_visibility(zoomed_q: Query<&Zoomed, Added<Zoomed>>, mut nodes: Query<&mut Node>) {
+    for z in &zoomed_q {
+        for &e in &z.hidden {
+            if let Ok(mut node) = nodes.get_mut(e) {
+                node.display = Display::None;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1220,6 +1234,35 @@ mod tests {
         let z = app.world().get::<Zoomed>(tab).expect("Zoomed present");
         assert_eq!(z.leaf, leaf);
         assert!(z.hidden.is_empty());
+    }
+
+    #[test]
+    fn sync_zoom_visibility_sets_display_none_on_hidden_entities() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_systems(Update, sync_zoom_visibility);
+
+        let leaf = app.world_mut().spawn((Pane, Node::default())).id();
+        let sib_a = app.world_mut().spawn((Pane, Node::default())).id();
+        let sib_b = app.world_mut().spawn((Pane, Node::default())).id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                Zoomed {
+                    leaf,
+                    hidden: vec![sib_a, sib_b],
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(app.world().get::<Node>(sib_a).unwrap().display, Display::None);
+        assert_eq!(app.world().get::<Node>(sib_b).unwrap().display, Display::None);
+        assert_eq!(app.world().get::<Node>(leaf).unwrap().display, Display::Flex);
+
+        let _ = tab;
     }
 
     #[test]
