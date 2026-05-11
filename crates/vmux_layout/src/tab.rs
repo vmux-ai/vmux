@@ -69,12 +69,15 @@ pub fn tab_bundle() -> impl Bundle {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_new_tab(
     main: Entity,
     pw: Entity,
     name: String,
     settings: &LayoutSettings,
+    effective_startup_url: Option<&crate::settings::EffectiveStartupUrl>,
     new_stack_ctx: &mut NewStackContext,
+    spawn_requests: &mut MessageWriter<crate::LayoutSpawnRequest>,
     commands: &mut Commands,
 ) -> Entity {
     let tab_e = commands
@@ -143,8 +146,16 @@ fn spawn_new_tab(
     }
     new_stack_ctx.stack = Some(tab);
     new_stack_ctx.previous_stack = None;
-    new_stack_ctx.needs_open = true;
     new_stack_ctx.dismiss_modal = false;
+
+    let url = effective_startup_url
+        .map(|u| u.0.clone())
+        .unwrap_or_default();
+    if url.is_empty() {
+        new_stack_ctx.needs_open = true;
+    } else {
+        spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl { stack: tab, url });
+    }
 
     tab_e
 }
@@ -159,7 +170,9 @@ fn handle_tab_commands(
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
     settings: Res<LayoutSettings>,
+    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     mut new_stack_ctx: ResMut<NewStackContext>,
+    mut spawn_requests: MessageWriter<crate::LayoutSpawnRequest>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -179,7 +192,9 @@ fn handle_tab_commands(
                     *primary_window,
                     name,
                     &settings,
+                    effective_startup_url.as_deref(),
                     &mut new_stack_ctx,
+                    &mut spawn_requests,
                     &mut commands,
                 );
             }
@@ -195,7 +210,9 @@ fn handle_tab_commands(
                     &child_of_q,
                     &all_children,
                     &settings,
+                    effective_startup_url.as_deref(),
                     &mut new_stack_ctx,
+                    &mut spawn_requests,
                     &mut commands,
                 );
             }
@@ -295,7 +312,9 @@ fn close_tab_entity(
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
     settings: &LayoutSettings,
+    effective_startup_url: Option<&crate::settings::EffectiveStartupUrl>,
     new_stack_ctx: &mut NewStackContext,
+    spawn_requests: &mut MessageWriter<crate::LayoutSpawnRequest>,
     commands: &mut Commands,
 ) {
     let siblings = active_tab_siblings(target, child_of_q, all_children, tab_q);
@@ -307,7 +326,9 @@ fn close_tab_entity(
             primary_window,
             name,
             settings,
+            effective_startup_url,
             new_stack_ctx,
+            spawn_requests,
             commands,
         );
     } else if active_tab == Some(target)
@@ -441,8 +462,10 @@ fn on_spaces_command_emit(
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
     settings: Res<LayoutSettings>,
+    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut messages: ResMut<Messages<AppCommand>>,
+    mut spawn_requests: MessageWriter<crate::LayoutSpawnRequest>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
@@ -468,7 +491,9 @@ fn on_spaces_command_emit(
                 &child_of_q,
                 &all_children,
                 &settings,
+                effective_startup_url.as_deref(),
                 &mut new_stack_ctx,
+                &mut spawn_requests,
                 &mut commands,
             );
         }
