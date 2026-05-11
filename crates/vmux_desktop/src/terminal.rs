@@ -27,6 +27,8 @@ use vmux_service::{
 use vmux_terminal::event::*;
 use vmux_webview_app::UiReady;
 
+pub(crate) mod pid;
+
 /// Maximum interval between consecutive mouse-down events that count as a
 /// multi-click (double, triple).
 const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
@@ -194,6 +196,11 @@ impl Plugin for TerminalInputPlugin {
         app.init_resource::<MouseSelectionState>()
             .init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
+            .init_resource::<pid::PidToEntity>()
+            .add_systems(
+                Update,
+                (pid::track_pid_inserts, pid::track_pid_removals).chain(),
+            )
             .add_plugins(BinJsEmitEventPlugin::<TermResizeEvent>::default())
             .add_plugins(BinJsEmitEventPlugin::<TermMouseEvent>::default())
             .add_systems(
