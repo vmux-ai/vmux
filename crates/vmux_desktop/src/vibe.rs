@@ -41,6 +41,12 @@ impl Plugin for VibePlugin {
                     session::track_session_id_removals,
                 )
                     .chain(),
+            )
+            .add_systems(
+                Update,
+                session::poll_pending_vibe_sessions.run_if(
+                    bevy::time::common_conditions::on_timer(std::time::Duration::from_millis(200)),
+                ),
             );
         let mut providers = app.world_mut().resource_mut::<AgentProviders>();
         providers.register(AgentProvider {
