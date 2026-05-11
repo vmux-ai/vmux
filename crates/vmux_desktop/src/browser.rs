@@ -750,10 +750,7 @@ fn push_tabs_host_emit(
     if active_stack_opt.is_some() && rows.is_empty() {
         return;
     }
-    let is_zoomed = focus
-        .tab
-        .map(|t| zoomed_q.get(t).is_ok())
-        .unwrap_or(false);
+    let is_zoomed = focus.tab.map(|t| zoomed_q.get(t).is_ok()).unwrap_or(false);
     let payload = TabsHostEvent {
         tabs: rows,
         can_go_back,

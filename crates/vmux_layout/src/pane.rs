@@ -10,8 +10,7 @@ use crate::{
 };
 use bevy::{
     ecs::{
-        lifecycle::HookContext, message::Messages, relationship::Relationship,
-        world::DeferredWorld,
+        lifecycle::HookContext, message::Messages, relationship::Relationship, world::DeferredWorld,
     },
     input::mouse::AccumulatedMouseMotion,
     prelude::*,
@@ -85,7 +84,6 @@ fn register_zoom_hooks(app: &mut App) {
                 }
             }
         });
-
 }
 
 fn clear_zoom_on_pane_removal(
@@ -217,17 +215,13 @@ fn handle_zoom_command(
         if zoomed_q.get(tab).is_ok() {
             commands.entity(tab).remove::<Zoomed>();
         } else {
-            let hidden = collect_siblings_to_hide(
-                active,
-                tab,
-                &child_of_q,
-                &all_children,
-                &split_dir_q,
-            );
+            let hidden =
+                collect_siblings_to_hide(active, tab, &child_of_q, &all_children, &split_dir_q);
             if !hidden.is_empty() {
-                commands
-                    .entity(tab)
-                    .insert(Zoomed { leaf: active, hidden });
+                commands.entity(tab).insert(Zoomed {
+                    leaf: active,
+                    hidden,
+                });
             }
         }
     }
@@ -1421,11 +1415,21 @@ mod tests {
             .id();
         let leaf_a = app
             .world_mut()
-            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .spawn((
+                Pane,
+                Node::default(),
+                LastActivatedAt::now(),
+                ChildOf(split),
+            ))
             .id();
         let leaf_b = app
             .world_mut()
-            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .spawn((
+                Pane,
+                Node::default(),
+                LastActivatedAt::now(),
+                ChildOf(split),
+            ))
             .id();
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(leaf_a)));
@@ -1479,11 +1483,21 @@ mod tests {
             .id();
         let leaf_a = app
             .world_mut()
-            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .spawn((
+                Pane,
+                Node::default(),
+                LastActivatedAt::now(),
+                ChildOf(split),
+            ))
             .id();
         let leaf_b = app
             .world_mut()
-            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .spawn((
+                Pane,
+                Node::default(),
+                LastActivatedAt::now(),
+                ChildOf(split),
+            ))
             .id();
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(leaf_a)));
@@ -1600,11 +1614,21 @@ mod tests {
             .id();
         let leaf_a = app
             .world_mut()
-            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .spawn((
+                Pane,
+                Node::default(),
+                LastActivatedAt::now(),
+                ChildOf(split),
+            ))
             .id();
         let leaf_b = app
             .world_mut()
-            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .spawn((
+                Pane,
+                Node::default(),
+                LastActivatedAt::now(),
+                ChildOf(split),
+            ))
             .id();
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(leaf_a)));
@@ -1661,11 +1685,21 @@ mod tests {
             .id();
         let leaf_a = app
             .world_mut()
-            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .spawn((
+                Pane,
+                Node::default(),
+                LastActivatedAt::now(),
+                ChildOf(split),
+            ))
             .id();
         let leaf_b = app
             .world_mut()
-            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .spawn((
+                Pane,
+                Node::default(),
+                LastActivatedAt::now(),
+                ChildOf(split),
+            ))
             .id();
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(leaf_a)));
@@ -1751,9 +1785,18 @@ mod tests {
 
         app.update();
 
-        assert_eq!(app.world().get::<Node>(sib_a).unwrap().display, Display::None);
-        assert_eq!(app.world().get::<Node>(sib_b).unwrap().display, Display::None);
-        assert_eq!(app.world().get::<Node>(leaf).unwrap().display, Display::Flex);
+        assert_eq!(
+            app.world().get::<Node>(sib_a).unwrap().display,
+            Display::None
+        );
+        assert_eq!(
+            app.world().get::<Node>(sib_b).unwrap().display,
+            Display::None
+        );
+        assert_eq!(
+            app.world().get::<Node>(leaf).unwrap().display,
+            Display::Flex
+        );
 
         let _ = tab;
     }
