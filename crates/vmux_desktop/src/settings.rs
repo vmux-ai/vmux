@@ -56,13 +56,10 @@ pub struct AppSettings {
 
 #[allow(dead_code)]
 pub fn resolve_startup_url(settings: &AppSettings) -> String {
-    settings.startup_url.clone().unwrap_or_else(|| {
-        if crate::vibe::vibe_available() {
-            "vmux://vibe/".to_string()
-        } else {
-            "vmux://terminal/".to_string()
-        }
-    })
+    settings
+        .startup_url
+        .clone()
+        .unwrap_or_else(|| "vmux://vibe/".to_string())
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -473,9 +470,8 @@ mod tests {
     }
 
     #[test]
-    fn resolve_startup_url_falls_back_when_unset() {
+    fn resolve_startup_url_defaults_to_vibe() {
         let s = base_settings();
-        let url = resolve_startup_url(&s);
-        assert!(url == "vmux://vibe/" || url == "vmux://terminal/");
+        assert_eq!(resolve_startup_url(&s), "vmux://vibe/");
     }
 }

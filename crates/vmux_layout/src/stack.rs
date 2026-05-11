@@ -545,7 +545,7 @@ fn sync_stack_picking(
     }
 }
 
-pub fn open_command_bar_if_no_stacks(
+pub fn open_startup_url_if_no_stacks(
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -554,7 +554,9 @@ pub fn open_command_bar_if_no_stacks(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
     closing_primary: Query<(), (With<PrimaryWindow>, With<ClosingWindow>)>,
+    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     mut new_stack_ctx: ResMut<NewStackContext>,
+    mut spawn_requests: MessageWriter<crate::LayoutSpawnRequest>,
     mut commands: Commands,
 ) {
     if !closing_primary.is_empty() {
@@ -577,9 +579,17 @@ pub fn open_command_bar_if_no_stacks(
     let stack = commands
         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
-    new_stack_ctx.stack = Some(stack);
-    new_stack_ctx.previous_stack = None;
-    new_stack_ctx.needs_open = true;
+    let url = effective_startup_url
+        .as_deref()
+        .map(|u| u.0.clone())
+        .unwrap_or_default();
+    if url.is_empty() {
+        new_stack_ctx.stack = Some(stack);
+        new_stack_ctx.previous_stack = None;
+        new_stack_ctx.needs_open = true;
+    } else {
+        spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl { stack, url });
+    }
 }
 
 fn entity_tree_contains_stack(
@@ -630,6 +640,7 @@ mod tests {
         app.add_plugins(CommandPlugin);
         app.add_message::<LayoutSpawnRequest>();
         app.init_resource::<NewStackContext>();
+        app.add_message::<crate::LayoutSpawnRequest>();
         app.init_resource::<PendingCursorWarp>();
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -681,6 +692,7 @@ mod tests {
         app.add_plugins(CommandPlugin);
         app.add_message::<LayoutSpawnRequest>();
         app.init_resource::<NewStackContext>();
+        app.add_message::<crate::LayoutSpawnRequest>();
         app.init_resource::<PendingCursorWarp>();
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -735,7 +747,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<NewStackContext>();
-        app.add_systems(Update, open_command_bar_if_no_stacks);
+        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_systems(Update, open_startup_url_if_no_stacks);
 
         let old_tab = app
             .world_mut()
@@ -775,7 +788,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<NewStackContext>();
-        app.add_systems(Update, open_command_bar_if_no_stacks);
+        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_systems(Update, open_startup_url_if_no_stacks);
 
         let tab_e = app
             .world_mut()
@@ -805,7 +819,8 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<NewStackContext>();
-        app.add_systems(Update, open_command_bar_if_no_stacks);
+        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_systems(Update, open_startup_url_if_no_stacks);
 
         let tab_e = app
             .world_mut()
