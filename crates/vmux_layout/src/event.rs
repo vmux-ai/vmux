@@ -241,6 +241,8 @@ pub struct TabsHostEvent {
     pub can_go_back: bool,
     #[serde(default)]
     pub can_go_forward: bool,
+    #[serde(default)]
+    pub is_zoomed: bool,
 }
 
 #[derive(

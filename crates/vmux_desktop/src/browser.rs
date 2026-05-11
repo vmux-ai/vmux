@@ -753,6 +753,7 @@ fn push_tabs_host_emit(
         tabs: rows,
         can_go_back,
         can_go_forward,
+        is_zoomed: false,
     };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     if !should_emit_cached_payload(&ron_body, &last, ui_ready.is_changed()) {

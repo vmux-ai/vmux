@@ -157,6 +157,7 @@ fn HeaderView(titlebar_height: f32) -> Element {
         tabs,
         can_go_back,
         can_go_forward,
+        is_zoomed,
     } = tabs_state();
     let SpacesHostEvent { spaces } = spaces_state();
     let active_row = tabs.iter().find(|t| t.is_active).cloned();
