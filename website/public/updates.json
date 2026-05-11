@@ -1,10 +1,10 @@
 {
   "version": "v0.0.5",
-  "pub_date": "2026-05-10T21:58:00Z",
+  "pub_date": "2026-05-11T07:01:40Z",
   "platforms": {
     "macos-aarch64": {
       "url": "https://github.com/vmux-ai/vmux/releases/download/v0.0.5/Vmux-v0.0.5-aarch64-apple-darwin.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVUN1lFWllXRE5HT3pUN0xJUzM4OE5FUUJldnN1cHd0WGtHUUwxOGFqQ1VCSEhTRDA0L1dGL3FPYUVwdWw4V0loOFJLc3FKVXdJTEhDMUx4dTczWXl1NDk5TjgyTSttZkFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4NDUwMjgwCWZpbGU6Vm11eC12MC4wLjUtYWFyY2g2NC1hcHBsZS1kYXJ3aW4uYXBwLnRhci5negp3NWNrcmxnazllZ0VseVlwZzk1MEkvTjIzZVhnNmlXMFdEZW8ydGJhRXNQOENQNXdvaXcyVGRUNHJYRmVDVUtRYWd1b1kzMVowTVJZRjd0R2ZpVk1BQT09Cg==",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVUN1lFWllXRE5HTzV1MHk4bjR3dFpEY1JkUnJGTk9wajNCT21jWkZRb29lYmpxZHl4cXc0U0QyMitVMDkxamxnbEVOblNwQWpwSXdPTWxoTzJCdU4yblFLK1NndXA1V3dRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc4NDgyODk5CWZpbGU6Vm11eC12MC4wLjUtYWFyY2g2NC1hcHBsZS1kYXJ3aW4uYXBwLnRhci5negpTUlpwZFBLYlJkKzJTTXJMbEZaWmRlTUFaWXBJOGZSaGVoR1BZdWhMMXFuZ3J6RSswcnVEYzZWeldORjgzT1dBRGRxWWZHa004ZGFDekI2V243SmtBQT09Cg==",
       "format": "app"
     }
   },
