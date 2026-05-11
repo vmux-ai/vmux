@@ -1522,6 +1522,67 @@ mod tests {
     }
 
     #[test]
+    fn split_command_auto_unzooms_first() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CommandPlugin);
+        app.init_resource::<PaneHoverIntent>();
+        app.init_resource::<PendingCursorWarp>();
+        app.init_resource::<NewStackContext>();
+        app.init_resource::<ConfirmCloseSettings>();
+        app.insert_resource(test_settings());
+        app.add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
+        register_zoom_hooks(&mut app);
+
+        let _window = app.world_mut().spawn(PrimaryWindow).id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let leaf_a = app
+            .world_mut()
+            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .id();
+        let leaf_b = app
+            .world_mut()
+            .spawn((Pane, Node::default(), LastActivatedAt::now(), ChildOf(split)))
+            .id();
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(leaf_a)));
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(leaf_b)));
+        app.world_mut()
+            .entity_mut(leaf_b)
+            .insert(LastActivatedAt::now());
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Pane(PaneCommand::Zoom));
+        app.update();
+        assert!(app.world().get::<Zoomed>(tab).is_some());
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Pane(PaneCommand::SplitH));
+        app.update();
+
+        assert!(
+            app.world().get::<Zoomed>(tab).is_none(),
+            "split should auto-unzoom"
+        );
+    }
+
+    #[test]
     fn select_command_auto_unzooms() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
