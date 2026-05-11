@@ -65,6 +65,7 @@ impl Plugin for PanePlugin {
                 PostUpdate,
                 sync_zoom_visibility.before(bevy::ui::UiSystems::Layout),
             )
+            .add_systems(PostUpdate, clear_zoom_on_pane_removal)
             .add_systems(PostUpdate, warp_cursor_to_active_pane);
         register_zoom_hooks(app);
     }
@@ -84,6 +85,23 @@ fn register_zoom_hooks(app: &mut App) {
                 }
             }
         });
+
+}
+
+fn clear_zoom_on_pane_removal(
+    mut removed: RemovedComponents<Pane>,
+    zoomed_q: Query<(Entity, &Zoomed)>,
+    mut commands: Commands,
+) {
+    let removed_set: Vec<Entity> = removed.read().collect();
+    if removed_set.is_empty() {
+        return;
+    }
+    for (tab, z) in &zoomed_q {
+        if removed_set.contains(&z.leaf) {
+            commands.entity(tab).remove::<Zoomed>();
+        }
+    }
 }
 
 /// Signals that the cursor should be warped to the active pane once layout is computed.
@@ -1519,6 +1537,37 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<Zoomed>(tab).is_none());
+    }
+
+    #[test]
+    fn removing_zoomed_pane_clears_zoom_state() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        register_zoom_hooks(&mut app);
+        app.add_systems(PostUpdate, clear_zoom_on_pane_removal);
+
+        let leaf_a = app.world_mut().spawn((Pane, Node::default())).id();
+        let leaf_b = app.world_mut().spawn((Pane, Node::default())).id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                Zoomed {
+                    leaf: leaf_b,
+                    hidden: vec![leaf_a],
+                },
+            ))
+            .id();
+
+        app.update();
+
+        app.world_mut().despawn(leaf_b);
+        app.update();
+
+        assert!(
+            app.world().get::<Zoomed>(tab).is_none(),
+            "Zoomed should be cleared when its leaf is despawned"
+        );
     }
 
     #[test]
