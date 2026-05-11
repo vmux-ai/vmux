@@ -144,7 +144,6 @@ fn spawn_new_tab(
     if let Some(old_tab) = new_stack_ctx.stack.take() {
         commands.entity(old_tab).despawn();
     }
-    new_stack_ctx.stack = Some(tab);
     new_stack_ctx.previous_stack = None;
     new_stack_ctx.dismiss_modal = false;
 
@@ -152,6 +151,7 @@ fn spawn_new_tab(
         .map(|u| u.0.clone())
         .unwrap_or_default();
     if url.is_empty() {
+        new_stack_ctx.stack = Some(tab);
         new_stack_ctx.needs_open = true;
     } else {
         spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl { stack: tab, url });

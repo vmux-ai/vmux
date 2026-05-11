@@ -243,13 +243,13 @@ fn handle_stack_commands(
                     let stack = commands
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
-                    new_stack_ctx.stack = Some(stack);
-                    new_stack_ctx.previous_stack = active_stack;
                     let url = effective_startup_url
                         .as_deref()
                         .map(|u| u.0.clone())
                         .unwrap_or_default();
                     if url.is_empty() {
+                        new_stack_ctx.stack = Some(stack);
+                        new_stack_ctx.previous_stack = active_stack;
                         new_stack_ctx.needs_open = true;
                     } else {
                         spawn_requests.write(LayoutSpawnRequest::OpenUrl { stack, url });

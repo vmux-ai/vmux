@@ -22,7 +22,6 @@ use crate::{
 };
 use vmux_core::PageMetadata;
 use vmux_layout::event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
-use vmux_service::protocol::ProcessId;
 use vmux_space::event::SPACES_WEBVIEW_URL;
 use vmux_space::migration::migrate_legacy_session_files;
 
@@ -295,18 +294,55 @@ pub(crate) fn rebuild_space_views(
                 .url
                 .starts_with(TERMINAL_WEBVIEW_URL.trim_end_matches('/'))
             {
-                // Try to extract process UUID from URL for reattach
-                let process_id = meta
+                commands.spawn((
+                    Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                    ChildOf(entity),
+                ));
+            } else if meta
+                .url
+                .starts_with(crate::vibe::session::VIBE_WEBVIEW_URL.trim_end_matches('/'))
+            {
+                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+                let session_id = meta
                     .url
-                    .strip_prefix(TERMINAL_WEBVIEW_URL)
-                    .and_then(|uuid_str| uuid_str.parse::<uuid::Uuid>().ok())
-                    .map(ProcessId::from_uuid);
-
-                if let Some(pid) = process_id {
-                    commands.spawn((
-                        Terminal::reattach(&mut meshes, &mut webview_mt, pid),
-                        ChildOf(entity),
-                    ));
+                    .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+                let result = match &session_id {
+                    Some(id) => crate::vibe::build_vibe_shell_command_resume(&cwd, id),
+                    None => crate::vibe::build_vibe_shell_command_fresh(&cwd),
+                };
+                if let Ok(shell_cmd) = result {
+                    let term = commands
+                        .spawn((
+                            Terminal::new_with_cwd(
+                                &mut meshes,
+                                &mut webview_mt,
+                                &settings,
+                                Some(&cwd),
+                            ),
+                            ChildOf(entity),
+                        ))
+                        .id();
+                    commands
+                        .entity(term)
+                        .insert(crate::terminal::PendingTerminalInput {
+                            data: crate::agent::shell_command_input(&shell_cmd),
+                        })
+                        .insert(crate::vibe::session::Vibe);
+                    if let Some(id) = session_id {
+                        commands
+                            .entity(term)
+                            .insert(crate::vibe::session::SessionId(id));
+                    } else {
+                        commands
+                            .entity(term)
+                            .insert(crate::vibe::session::PendingVibeSession {
+                                spawn_time: std::time::SystemTime::now(),
+                                cwd,
+                                attempts: 0,
+                            });
+                    }
                 } else {
                     commands.spawn((
                         Terminal::new(&mut meshes, &mut webview_mt, &settings),

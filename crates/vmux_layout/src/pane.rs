@@ -325,10 +325,10 @@ fn handle_pane_commands(
                 let new_stack = commands
                     .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane2)))
                     .id();
-                startup.new_stack_ctx.stack = Some(new_stack);
-                startup.new_stack_ctx.previous_stack = active_stack_opt;
                 let url = startup.url();
                 if url.is_empty() {
+                    startup.new_stack_ctx.stack = Some(new_stack);
+                    startup.new_stack_ctx.previous_stack = active_stack_opt;
                     startup.new_stack_ctx.needs_open = true;
                 } else {
                     startup.requests.write(crate::LayoutSpawnRequest::OpenUrl {
@@ -376,10 +376,10 @@ fn handle_pane_commands(
                             .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
                             .id();
                         commands.entity(leaf).insert(LastActivatedAt::now());
-                        startup.new_stack_ctx.stack = Some(tab);
-                        startup.new_stack_ctx.previous_stack = None;
                         let url = startup.url();
                         if url.is_empty() {
+                            startup.new_stack_ctx.stack = Some(tab);
+                            startup.new_stack_ctx.previous_stack = None;
                             startup.new_stack_ctx.needs_open = true;
                         } else {
                             startup
