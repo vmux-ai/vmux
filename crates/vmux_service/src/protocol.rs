@@ -377,6 +377,10 @@ pub enum ServiceMessage {
         process_id: ProcessId,
         exit_code: Option<i32>,
     },
+    ProcessTitle {
+        process_id: ProcessId,
+        title: String,
+    },
     ProcessList {
         processes: Vec<ProcessInfo>,
     },
