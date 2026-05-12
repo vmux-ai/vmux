@@ -30,10 +30,14 @@ pub fn pid_alive(pid: i32) -> bool {
 
 pub fn send_signal(pid: i32, sig: i32) -> std::io::Result<()> {
     let r = unsafe { libc::kill(pid, sig) };
-    if r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+    if r == 0 {
+        return Ok(());
+    }
+    let err = std::io::Error::last_os_error();
+    if err.raw_os_error() == Some(libc::ESRCH) {
         Ok(())
     } else {
-        Err(std::io::Error::last_os_error())
+        Err(err)
     }
 }
 
