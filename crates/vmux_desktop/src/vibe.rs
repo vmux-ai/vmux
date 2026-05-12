@@ -266,6 +266,35 @@ fn build_bash_launch_command_resume(
     ))
 }
 
+#[allow(dead_code)]
+pub(crate) fn build_terminal_launch(
+    cwd: &Path,
+    session_id: Option<&str>,
+) -> Result<crate::terminal::launch::TerminalLaunch, String> {
+    let vibe = find_executable("vibe").ok_or_else(|| "vibe executable not found".to_string())?;
+    build_terminal_launch_inner(cwd, session_id, &vibe.to_string_lossy())
+}
+
+fn build_terminal_launch_inner(
+    cwd: &Path,
+    session_id: Option<&str>,
+    vibe_path: &str,
+) -> Result<crate::terminal::launch::TerminalLaunch, String> {
+    let mcp_servers = mcp_servers_env_value(cwd)?;
+    let mut args = vec!["--trust".to_string()];
+    if let Some(sid) = session_id {
+        args.push("--resume".to_string());
+        args.push(sid.to_string());
+    }
+    Ok(crate::terminal::launch::TerminalLaunch {
+        command: vibe_path.to_string(),
+        args,
+        cwd: cwd.to_string_lossy().to_string(),
+        env: vec![("VIBE_MCP_SERVERS".to_string(), mcp_servers)],
+        kind: crate::terminal::launch::TerminalKind::Vibe,
+    })
+}
+
 pub(crate) fn build_vibe_shell_command_fresh(cwd: &Path) -> Result<String, String> {
     let vibe = find_executable("vibe").ok_or_else(|| "vibe executable not found".to_string())?;
     let mcp = mcp_servers_env_value(cwd)?;
@@ -413,5 +442,40 @@ mod tests {
             providers.get(VIBE_NEW_STACK_ID).unwrap().name,
             "Vibe New Stack"
         );
+    }
+
+    #[test]
+    fn build_terminal_launch_fresh_has_trust_arg_and_mcp_env() {
+        let temp = std::env::temp_dir().join(format!("vmux-build-launch-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(temp.join("Cargo.toml"), b"[workspace]\n").unwrap();
+
+        let launch = build_terminal_launch_inner(&temp, None, "/usr/local/bin/vibe")
+            .expect("build_terminal_launch_inner should succeed for fresh launch");
+        let _ = std::fs::remove_dir_all(&temp);
+
+        assert_eq!(launch.command, "/usr/local/bin/vibe");
+        assert_eq!(launch.args, vec!["--trust".to_string()]);
+        assert!(
+            launch
+                .env
+                .iter()
+                .any(|(k, v)| k == "VIBE_MCP_SERVERS" && v.contains("\"name\":\"vmux\""))
+        );
+        assert_eq!(launch.cwd, temp.to_string_lossy());
+        assert_eq!(launch.kind, crate::terminal::launch::TerminalKind::Vibe);
+    }
+
+    #[test]
+    fn build_terminal_launch_resume_includes_session_id() {
+        let temp = std::env::temp_dir().join(format!("vmux-build-resume-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(temp.join("Cargo.toml"), b"[workspace]\n").unwrap();
+
+        let launch = build_terminal_launch_inner(&temp, Some("ae724a54"), "/usr/local/bin/vibe")
+            .expect("build_terminal_launch_inner should succeed for resume");
+        let _ = std::fs::remove_dir_all(&temp);
+
+        assert_eq!(launch.args, vec!["--trust", "--resume", "ae724a54"]);
     }
 }
