@@ -216,7 +216,6 @@ pub enum ClientMessage {
         command: AgentCommand,
     },
     Shutdown,
-    Status,
     AgentQuery {
         request_id: AgentRequestId,
         query: AgentQuery,
@@ -229,6 +228,7 @@ pub enum ClientMessage {
         request_id: AgentRequestId,
         result: AgentCommandResult,
     },
+    Status,
 }
 
 /// Vim-style visual/copy-mode action sent by the GUI to the service.
