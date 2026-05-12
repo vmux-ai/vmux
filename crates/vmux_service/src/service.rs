@@ -1,5 +1,4 @@
-use crate::{identity_path, log_path, pid_path, service_dir, socket_path, write_service_identity};
-use std::time::Instant;
+use crate::{identity_path, pid_path, service_dir, socket_path, write_service_identity};
 use tracing_subscriber::{EnvFilter, fmt};
 
 /// Daemon entry point. Initializes logging, writes pid/identity, binds the socket,
@@ -10,7 +9,7 @@ pub fn run() {
         .build()
         .expect("failed to create tokio runtime");
 
-    rt.block_on(async { run_async().await });
+    rt.block_on(run_async());
 }
 
 async fn run_async() {
@@ -27,7 +26,6 @@ async fn run_async() {
     let _ = std::fs::remove_file(&sock);
     let listener = tokio::net::UnixListener::bind(&sock).expect("failed to bind Unix socket");
 
-    let started = Instant::now();
     tracing::info!(
         target: "vmux_service::startup",
         version = env!("CARGO_PKG_VERSION"),
@@ -53,8 +51,6 @@ async fn run_async() {
     });
 
     crate::server::run_server(listener).await;
-
-    let _uptime = started.elapsed();
 }
 
 fn init_tracing() {
@@ -76,6 +72,4 @@ fn init_tracing() {
         .with_writer(writer)
         .with_target(false)
         .try_init();
-
-    let _ = log_path();
 }
