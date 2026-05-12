@@ -357,7 +357,6 @@ pub(crate) fn rebuild_space_views(
                         .insert(crate::vibe::session::PendingVibeSession {
                             spawn_time: std::time::SystemTime::now(),
                             cwd,
-                            attempts: 0,
                         });
                 }
             } else {

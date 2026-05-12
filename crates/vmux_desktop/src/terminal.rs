@@ -355,7 +355,6 @@ pub(crate) fn spawn_vibe_into_stack(
             .insert(crate::vibe::session::PendingVibeSession {
                 spawn_time: std::time::SystemTime::now(),
                 cwd,
-                attempts: 0,
             });
     }
     Ok(())
@@ -457,7 +456,6 @@ impl Terminal {
     }
 
     /// Create a terminal bundle that reattaches to an existing service-managed process.
-    #[allow(dead_code)] // Used by persistence.rs for process reconnect
     pub(crate) fn reattach(
         meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -925,7 +923,6 @@ fn poll_service_messages(
                             ec.insert(crate::vibe::session::PendingVibeSession {
                                 spawn_time: std::time::SystemTime::now(),
                                 cwd: std::path::PathBuf::from(&cwd),
-                                attempts: 0,
                             });
                         }
                     }

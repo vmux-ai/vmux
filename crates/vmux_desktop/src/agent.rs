@@ -211,7 +211,6 @@ pub(crate) fn spawn_fresh_vibe_tab(
         crate::vibe::session::PendingVibeSession {
             spawn_time: std::time::SystemTime::now(),
             cwd,
-            attempts: 0,
         },
     ));
     Ok(terminal)
@@ -739,7 +738,6 @@ fn handle_agent_launch_requests(
             crate::vibe::session::PendingVibeSession {
                 spawn_time: std::time::SystemTime::now(),
                 cwd: prepared.cwd.clone(),
-                attempts: 0,
             },
         ));
     }

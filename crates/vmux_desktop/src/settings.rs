@@ -56,11 +56,9 @@ pub struct AppSettings {
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
     #[serde(default)]
-    #[allow(dead_code)]
     pub startup_url: Option<String>,
 }
 
-#[allow(dead_code)]
 pub fn resolve_startup_url(settings: &AppSettings) -> String {
     settings
         .startup_url

@@ -12,11 +12,9 @@ pub struct Vibe;
 pub struct SessionId(pub String);
 
 #[derive(Component, Debug)]
-#[allow(dead_code)]
 pub struct PendingVibeSession {
     pub spawn_time: SystemTime,
     pub cwd: PathBuf,
-    pub attempts: u8,
 }
 
 #[derive(Resource)]
@@ -192,9 +190,6 @@ pub fn vibe_sessions_root() -> PathBuf {
         .join("logs")
         .join("session")
 }
-
-#[allow(dead_code)]
-pub const DISCOVERY_MAX_ATTEMPTS: u8 = 30;
 
 pub const VIBE_WEBVIEW_URL: &str = "vmux://vibe/";
 
