@@ -1,3 +1,4 @@
+pub mod cli;
 pub mod client;
 pub mod framing;
 #[cfg(target_os = "macos")]
