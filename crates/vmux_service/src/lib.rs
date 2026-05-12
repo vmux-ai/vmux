@@ -1,5 +1,7 @@
 pub mod client;
 pub mod framing;
+#[cfg(target_os = "macos")]
+pub mod launchd;
 pub mod process;
 pub mod protocol;
 pub mod server;
