@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/*", "patches/*"]
-exclude = ["patches/cargo-packager-0.11.8", "website"]
+exclude = ["patches/cargo-packager-0.11.8", "website", "crates/vmux_process"]
 default-members = ["crates/vmux_desktop"]
 resolver = "3"
 
@@ -66,7 +66,7 @@ codegen-units = 1
 opt-level = "z"
 codegen-units = 1
 
-[profile.release.package.vmux_process]
+[profile.release.package.vmux_service]
 opt-level = "z"
 codegen-units = 1
 

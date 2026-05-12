@@ -308,7 +308,7 @@ pub(crate) fn spawn_processes_tab(
         ))
         .id();
     commands.entity(tab).insert(PageMetadata {
-        url: vmux_process::event::PROCESSES_WEBVIEW_URL.to_string(),
+        url: vmux_service::webview::event::PROCESSES_WEBVIEW_URL.to_string(),
         title: "Background Services".to_string(),
         ..default()
     });
