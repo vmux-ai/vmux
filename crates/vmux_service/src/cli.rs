@@ -65,7 +65,8 @@ fn read_identity_short() -> Option<String> {
             for b in s.trim().bytes() {
                 hash = hash.wrapping_mul(33).wrapping_add(b as u64);
             }
-            format!("{hash:016x}")[..8].to_string()
+            let folded = (hash as u32) ^ ((hash >> 32) as u32);
+            format!("{folded:08x}")
         })
 }
 
