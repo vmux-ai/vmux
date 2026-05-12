@@ -191,25 +191,29 @@ fn copy_mode_scroll_input(
 
 impl Process {
     pub fn new(
-        shell: String,
+        id: ProcessId,
+        command: String,
+        args: Vec<String>,
         cwd: String,
         env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
     ) -> Result<Self, String> {
         let (wake_tx, _) = mpsc::unbounded_channel();
-        Self::new_with_wake(shell, cwd, env, cols, rows, wake_tx)
+        Self::new_with_wake(id, command, args, cwd, env, cols, rows, wake_tx)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_wake(
-        shell: String,
+        id: ProcessId,
+        command: String,
+        args: Vec<String>,
         cwd: String,
         env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
         wake_tx: mpsc::UnboundedSender<ProcessId>,
     ) -> Result<Self, String> {
-        let id = ProcessId::new();
         let pty_system = NativePtySystem::default();
         let pair = pty_system
             .openpty(PtySize {
@@ -220,7 +224,8 @@ impl Process {
             })
             .map_err(|e| format!("failed to open PTY: {e}"))?;
 
-        let mut cmd = CommandBuilder::new(&shell);
+        let mut cmd = CommandBuilder::new(&command);
+        cmd.args(&args);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("LANG", "en_US.UTF-8");
@@ -284,7 +289,7 @@ impl Process {
 
         Ok(Self {
             id,
-            shell,
+            shell: command,
             cwd,
             cols,
             rows,
@@ -1298,16 +1303,27 @@ impl ProcessManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_process(
         &mut self,
-        shell: String,
+        id: ProcessId,
+        command: String,
+        args: Vec<String>,
         cwd: String,
         env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
     ) -> Result<(ProcessId, u32), String> {
-        let process = Process::new_with_wake(shell, cwd, env, cols, rows, self.wake_tx.clone())?;
-        let id = process.id;
+        let process = Process::new_with_wake(
+            id,
+            command,
+            args,
+            cwd,
+            env,
+            cols,
+            rows,
+            self.wake_tx.clone(),
+        )?;
         let pid = process.pid;
         self.processes.insert(id, process);
         Ok((id, pid))
@@ -1519,7 +1535,9 @@ mod tests {
     fn pty_reader_notifies_when_output_arrives() {
         let (wake_tx, mut wake_rx) = mpsc::unbounded_channel();
         let mut process = Process::new_with_wake(
+            ProcessId::new(),
             "/bin/sh".to_string(),
+            vec![],
             String::new(),
             Vec::new(),
             80,
@@ -1551,7 +1569,9 @@ mod tests {
         let cwd = temp.to_string_lossy().into_owned();
         let (wake_tx, _) = mpsc::unbounded_channel();
         let mut process = Process::new_with_wake(
+            ProcessId::new(),
             "/bin/sh".to_string(),
+            vec![],
             cwd.clone(),
             Vec::new(),
             120,
@@ -1650,7 +1670,9 @@ mod tests {
 
         let (wake_tx, _) = mpsc::unbounded_channel();
         let mut process = Process::new_with_wake(
+            ProcessId::new(),
             "/bin/sh".to_string(),
+            vec![],
             String::new(),
             Vec::new(),
             12,
@@ -1677,8 +1699,17 @@ mod tests {
     fn create_process_returns_real_pid() {
         let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
         let mut mgr = ProcessManager::new(wake_tx);
+        let process_id = ProcessId::new();
         let (id, pid) = mgr
-            .create_process("/bin/sh".into(), String::new(), Vec::new(), 80, 24)
+            .create_process(
+                process_id,
+                "/bin/sh".into(),
+                vec![],
+                String::new(),
+                Vec::new(),
+                80,
+                24,
+            )
             .expect("spawn");
         assert!(pid > 0, "expected real pid, got {pid}");
         assert!(mgr.processes.contains_key(&id));

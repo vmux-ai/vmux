@@ -1,5 +1,5 @@
 use vmux_service::process::Process;
-use vmux_service::protocol::{CopyModeKey, ServiceMessage};
+use vmux_service::protocol::{CopyModeKey, ProcessId, ServiceMessage};
 use vmux_terminal::event::TermSelectionRange;
 
 static PTY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -30,8 +30,16 @@ fn new_process() -> TestProcess {
 fn new_process_with_size(cols: u16, rows: u16) -> TestProcess {
     let guard = PTY_TEST_LOCK.lock().expect("pty test lock");
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-    let process =
-        Process::new(shell, String::new(), Vec::new(), cols, rows).expect("spawn process");
+    let process = Process::new(
+        ProcessId::new(),
+        shell,
+        vec![],
+        String::new(),
+        Vec::new(),
+        cols,
+        rows,
+    )
+    .expect("spawn process");
 
     TestProcess {
         _guard: guard,

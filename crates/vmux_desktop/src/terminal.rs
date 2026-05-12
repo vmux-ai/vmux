@@ -571,7 +571,9 @@ fn missing_terminal_restart(
         .map(|(entity, _)| MissingTerminalRestart {
             entity,
             command: ClientMessage::CreateProcess {
-                shell: terminal_shell(settings),
+                process_id: ProcessId::new(),
+                command: terminal_shell(settings),
+                args: vec![],
                 cwd: String::new(),
                 env: Vec::new(),
                 cols: 80,
@@ -708,7 +710,9 @@ fn poll_service_messages(
     // response which will carry the real process ID.
     for (entity, _pid, pending) in &pending_create {
         service.0.send(ClientMessage::CreateProcess {
-            shell: pending.shell.clone(),
+            process_id: ProcessId::new(),
+            command: pending.shell.clone(),
+            args: vec![],
             cwd: pending.cwd.clone(),
             env: Vec::new(),
             cols: 80,
@@ -1867,7 +1871,9 @@ fn on_restart_pty(
     // Create new process
     let new_id = ProcessId::new();
     service.0.send(ClientMessage::CreateProcess {
-        shell,
+        process_id: new_id,
+        command: shell,
+        args: vec![],
         cwd: String::new(),
         env: Vec::new(),
         cols: 80,
@@ -2022,12 +2028,14 @@ mod tests {
         assert!(matches!(
             restart.command,
             ClientMessage::CreateProcess {
-                shell,
+                process_id: _,
+                command,
+                args,
                 cwd,
                 env,
                 cols: 80,
                 rows: 24
-            } if shell == default_shell() && cwd.is_empty() && env.is_empty()
+            } if command == default_shell() && args.is_empty() && cwd.is_empty() && env.is_empty()
         ));
     }
 

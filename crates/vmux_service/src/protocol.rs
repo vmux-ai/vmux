@@ -149,7 +149,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ClientMessage {
     CreateProcess {
-        shell: String,
+        process_id: ProcessId,
+        command: String,
+        args: Vec<String>,
         cwd: String,
         env: Vec<(String, String)>,
         cols: u16,

@@ -152,7 +152,9 @@ async fn handle_client(
 
         match msg {
             ClientMessage::CreateProcess {
-                shell,
+                process_id,
+                command,
+                args,
                 cwd,
                 env,
                 cols,
@@ -160,7 +162,7 @@ async fn handle_client(
             } => {
                 let created = {
                     let mut mgr = manager.lock().await;
-                    mgr.create_process(shell, cwd, env, cols, rows)
+                    mgr.create_process(process_id, command, args, cwd, env, cols, rows)
                         .map(|(id, pid)| (id, pid, mgr.input_writer(&id)))
                 };
                 match created {
