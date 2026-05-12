@@ -544,7 +544,10 @@ fn default_shell() -> String {
 
 struct MissingTerminalRestart {
     entity: Entity,
+    new_id: ProcessId,
     command: ClientMessage,
+    cwd: String,
+    is_vibe: bool,
 }
 
 fn terminal_shell(settings: &AppSettings) -> String {
@@ -557,23 +560,36 @@ fn terminal_shell(settings: &AppSettings) -> String {
 
 fn missing_terminal_restart(
     process_id: ProcessId,
-    terminals: impl IntoIterator<Item = (Entity, ProcessId)>,
-    settings: &AppSettings,
+    terminals: impl IntoIterator<
+        Item = (
+            Entity,
+            ProcessId,
+            crate::terminal::launch::TerminalLaunch,
+            bool,
+        ),
+    >,
 ) -> Option<MissingTerminalRestart> {
     terminals
         .into_iter()
-        .find(|(_, terminal_process_id)| *terminal_process_id == process_id)
-        .map(|(entity, _)| MissingTerminalRestart {
-            entity,
-            command: ClientMessage::CreateProcess {
-                process_id: ProcessId::new(),
-                command: terminal_shell(settings),
-                args: vec![],
-                cwd: String::new(),
-                env: Vec::new(),
-                cols: 80,
-                rows: 24,
-            },
+        .find(|(_, terminal_pid, _, _)| *terminal_pid == process_id)
+        .map(|(entity, _, launch, is_vibe)| {
+            let new_id = ProcessId::new();
+            let cwd = launch.cwd.clone();
+            MissingTerminalRestart {
+                entity,
+                new_id,
+                command: ClientMessage::CreateProcess {
+                    process_id: new_id,
+                    command: launch.command,
+                    args: launch.args,
+                    cwd: launch.cwd,
+                    env: launch.env,
+                    cols: 80,
+                    rows: 24,
+                },
+                cwd,
+                is_vibe,
+            }
         })
 }
 
@@ -701,6 +717,8 @@ fn poll_service_messages(
     mut local_copy_mode: ResMut<LocalCopyModeState>,
     mut mouse_state: ResMut<MouseSelectionState>,
     settings: Res<AppSettings>,
+    launches: Query<&crate::terminal::launch::TerminalLaunch>,
+    vibes: Query<(), With<crate::vibe::session::Vibe>>,
 ) {
     let Some(service) = service else { return };
 
@@ -865,18 +883,39 @@ fn poll_service_messages(
                     .insert_resource(crate::processes_monitor::ServiceProcessList { processes });
             }
             ServiceMessage::Error { message } => {
-                if let Some(process_id) = missing_process_id(&message)
-                    && !restarted_missing_processes.contains(&process_id)
+                if let Some(stale_pid) = missing_process_id(&message)
+                    && !restarted_missing_processes.contains(&stale_pid)
                 {
-                    let terminals = terminals.iter().map(|(entity, pid, _)| (entity, *pid));
-                    if let Some(restart) =
-                        missing_terminal_restart(process_id, terminals, &settings)
-                    {
-                        restarted_missing_processes.push(process_id);
+                    let candidates = terminals.iter().map(|(entity, terminal_pid, _)| {
+                        let launch = launches.get(entity).cloned().unwrap_or_else(|_| {
+                            crate::terminal::launch::TerminalLaunch {
+                                command: terminal_shell(&settings),
+                                args: vec![],
+                                cwd: String::new(),
+                                env: vec![],
+                                kind: crate::terminal::launch::TerminalKind::Plain,
+                            }
+                        });
+                        let is_vibe = vibes.contains(entity);
+                        (entity, *terminal_pid, launch, is_vibe)
+                    });
+                    if let Some(restart) = missing_terminal_restart(stale_pid, candidates) {
+                        restarted_missing_processes.push(stale_pid);
+                        let cwd = restart.cwd.clone();
+                        let is_vibe = restart.is_vibe;
+                        let new_id = restart.new_id;
+                        let entity = restart.entity;
                         service.0.send(restart.command);
-                        commands
-                            .entity(restart.entity)
-                            .insert(AwaitingProcessCreated);
+                        let mut ec = commands.entity(entity);
+                        ec.insert(new_id);
+                        ec.insert(AwaitingProcessCreated);
+                        if is_vibe {
+                            ec.insert(crate::vibe::session::PendingVibeSession {
+                                spawn_time: std::time::SystemTime::now(),
+                                cwd: std::path::PathBuf::from(&cwd),
+                                attempts: 0,
+                            });
+                        }
                     }
                 }
                 warn!("Service error: {message}");
@@ -1967,55 +2006,34 @@ fn update_local_copy_mode_for_mouse_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{
-        BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings, ShortcutSettings,
-        SideSheetSettings, WindowSettings,
-    };
     use bevy::ecs::schedule::Schedules;
 
     fn process_id(byte: u8) -> ProcessId {
         ProcessId([byte; 16])
     }
 
-    fn test_settings() -> AppSettings {
-        AppSettings {
-            browser: BrowserSettings {
-                startup_url: "about:blank".to_string(),
-            },
-            layout: LayoutSettings {
-                window: WindowSettings {
-                    padding: 0.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
-                },
-                pane: PaneSettings {
-                    gap: 0.0,
-                    radius: 0.0,
-                },
-                side_sheet: SideSheetSettings::default(),
-                focus_ring: FocusRingSettings::default(),
-            },
-            shortcuts: ShortcutSettings::default(),
-            terminal: None,
-            auto_update: false,
-            startup_url: None,
-        }
-    }
-
     #[test]
     fn missing_service_process_restarts_matching_terminal() {
         let missing = process_id(7);
         let target = Entity::from_bits(1);
+        let plain_launch = || crate::terminal::launch::TerminalLaunch {
+            command: default_shell(),
+            args: vec![],
+            cwd: String::new(),
+            env: vec![],
+            kind: crate::terminal::launch::TerminalKind::Plain,
+        };
         let restart = missing_terminal_restart(
             missing,
-            [(Entity::from_bits(2), process_id(8)), (target, missing)],
-            &test_settings(),
+            [
+                (Entity::from_bits(2), process_id(8), plain_launch(), false),
+                (target, missing, plain_launch(), false),
+            ],
         )
         .unwrap();
 
         assert_eq!(restart.entity, target);
+        assert!(!restart.is_vibe);
         assert!(matches!(
             restart.command,
             ClientMessage::CreateProcess {
