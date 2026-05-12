@@ -7,7 +7,7 @@ publish = false
 build = "build.rs"
 
 [[bin]]
-name = "vmux-service"
+name = "vmux_service"
 path = "src/main.rs"
 
 [lib]
