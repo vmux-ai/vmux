@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use serde::Serialize;
 
-use crate::agent::{AgentProvider, AgentProviders, PreparedAgentLaunch};
+use crate::agent::{AgentProvider, AgentProviders};
 
 pub(crate) mod session;
 
@@ -91,17 +91,12 @@ pub(crate) fn vibe_available() -> bool {
     find_executable("vibe").is_some()
 }
 
-fn prepare_launch(cwd: &Path) -> Result<PreparedAgentLaunch, String> {
-    Ok(PreparedAgentLaunch {
+fn prepare_launch(cwd: &Path) -> Result<crate::agent::PreparedAgentLaunch, String> {
+    let launch = build_terminal_launch(cwd, None)?;
+    Ok(crate::agent::PreparedAgentLaunch {
         cwd: cwd.to_path_buf(),
-        command: build_launch_command(cwd)?,
+        launch,
     })
-}
-
-fn build_launch_command(cwd: &Path) -> Result<String, String> {
-    let vibe = find_executable("vibe").ok_or_else(|| "vibe executable not found".to_string())?;
-    let mcp_servers = mcp_servers_env_value(cwd)?;
-    build_bash_launch_command(&mcp_servers, &vibe, cwd)
 }
 
 pub(crate) fn find_executable(command: &str) -> Option<PathBuf> {
@@ -210,63 +205,6 @@ fn vmux_sidecar_path() -> Result<PathBuf, String> {
     Ok(dir.join("vmux"))
 }
 
-fn shell_quote(value: &str) -> Result<String, String> {
-    if value.contains('\n') || value.contains('\r') {
-        return Err("cannot launch Vibe from a path containing a newline".to_string());
-    }
-    if !value.contains('\'') {
-        return Ok(format!("'{value}'"));
-    }
-    if value.contains('`') {
-        return Err(
-            "cannot launch Vibe from a path containing both single quotes and backticks"
-                .to_string(),
-        );
-    }
-    Ok(format!(
-        "\"{}\"",
-        value
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('$', "\\$")
-    ))
-}
-
-fn shell_quote_path(path: &Path) -> Result<String, String> {
-    shell_quote(&path.to_string_lossy())
-}
-
-fn build_bash_launch_command(mcp_servers: &str, vibe: &Path, cwd: &Path) -> Result<String, String> {
-    Ok(format!(
-        "bash -lc {} bash {} {} {}",
-        shell_quote(
-            "cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" \"$3\" --trust; exec \"${SHELL:-bash}\""
-        )?,
-        shell_quote_path(cwd)?,
-        shell_quote(mcp_servers)?,
-        shell_quote_path(vibe)?
-    ))
-}
-
-fn build_bash_launch_command_resume(
-    mcp_servers: &str,
-    vibe: &Path,
-    cwd: &Path,
-    session_id: &str,
-) -> Result<String, String> {
-    Ok(format!(
-        "bash -lc {} bash {} {} {} {}",
-        shell_quote(
-            "cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" \"$3\" --trust --resume \"$4\"; exec \"${SHELL:-bash}\""
-        )?,
-        shell_quote_path(cwd)?,
-        shell_quote(mcp_servers)?,
-        shell_quote_path(vibe)?,
-        shell_quote(session_id)?,
-    ))
-}
-
-#[allow(dead_code)]
 pub(crate) fn build_terminal_launch(
     cwd: &Path,
     session_id: Option<&str>,
@@ -293,23 +231,6 @@ fn build_terminal_launch_inner(
         env: vec![("VIBE_MCP_SERVERS".to_string(), mcp_servers)],
         kind: crate::terminal::launch::TerminalKind::Vibe,
     })
-}
-
-#[allow(dead_code)]
-pub(crate) fn build_vibe_shell_command_fresh(cwd: &Path) -> Result<String, String> {
-    let vibe = find_executable("vibe").ok_or_else(|| "vibe executable not found".to_string())?;
-    let mcp = mcp_servers_env_value(cwd)?;
-    build_bash_launch_command(&mcp, &vibe, cwd)
-}
-
-#[allow(dead_code)]
-pub(crate) fn build_vibe_shell_command_resume(
-    cwd: &Path,
-    session_id: &str,
-) -> Result<String, String> {
-    let vibe = find_executable("vibe").ok_or_else(|| "vibe executable not found".to_string())?;
-    let mcp = mcp_servers_env_value(cwd)?;
-    build_bash_launch_command_resume(&mcp, &vibe, cwd, session_id)
 }
 
 #[cfg(test)]
@@ -373,40 +294,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp);
 
         assert_eq!(found, Some(exe));
-    }
-
-    #[test]
-    fn launch_command_resume_includes_session_id_and_mcp_servers() {
-        let mcp =
-            r#"[{"name":"vmux","transport":"stdio","command":"target/debug/vmux","args":["mcp"]}]"#;
-        let cmd = build_bash_launch_command_resume(
-            mcp,
-            Path::new("/Users/test/.local/bin/vibe"),
-            Path::new("/tmp/work tree"),
-            "ae724a54-c387-5359-0687-ccfc155558b6",
-        )
-        .expect("build");
-        assert!(cmd.contains("--resume"));
-        assert!(cmd.contains("ae724a54-c387-5359-0687-ccfc155558b6"));
-        assert!(cmd.contains("VIBE_MCP_SERVERS"));
-        assert!(cmd.contains("\"name\":\"vmux\""));
-    }
-
-    #[test]
-    fn launch_command_cds_and_passes_mcp_servers_to_vibe() {
-        let command = build_bash_launch_command(
-            r#"[{"name":"vmux","transport":"stdio","command":"target/debug/vmux","args":["mcp"]}]"#,
-            Path::new("/Users/test/.local/bin/vibe"),
-            Path::new("/tmp/work tree"),
-        )
-        .unwrap();
-        assert!(command.contains("--trust"));
-        assert!(!command.contains("exec \"$3\""));
-        assert!(command.contains("exec \"${SHELL:-bash}\""));
-        assert!(command.contains("/tmp/work tree"));
-        assert!(command.contains("VIBE_MCP_SERVERS"));
-        assert!(command.contains("\"name\":\"vmux\""));
-        assert!(command.contains("/Users/test/.local/bin/vibe"));
     }
 
     #[test]

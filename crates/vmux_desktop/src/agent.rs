@@ -45,7 +45,7 @@ pub(crate) struct AgentProvider {
 
 pub(crate) struct PreparedAgentLaunch {
     pub(crate) cwd: PathBuf,
-    pub(crate) command: String,
+    pub(crate) launch: crate::terminal::launch::TerminalLaunch,
 }
 
 pub(crate) struct AgentCommandEntry {
@@ -724,33 +724,24 @@ fn handle_agent_launch_requests(
             warn!("agent launch has no active pane");
             continue;
         };
-        let is_vibe = request.provider_id == crate::vibe::VIBE_NEW_ID
-            || request.provider_id == crate::vibe::VIBE_NEW_STACK_ID;
-        let pending_input = if is_vibe {
-            None
-        } else {
-            Some(shell_command_input(&prepared.command))
-        };
         let terminal = spawn_terminal_tab(
             pane,
             Some(&prepared.cwd),
-            pending_input,
+            None,
             &mut commands,
             &mut meshes,
             &mut webview_mt,
             &settings,
         );
-        if is_vibe && let Ok(launch) = crate::vibe::build_terminal_launch(&prepared.cwd, None) {
-            commands.entity(terminal).insert((
-                launch,
-                crate::vibe::session::Vibe,
-                crate::vibe::session::PendingVibeSession {
-                    spawn_time: std::time::SystemTime::now(),
-                    cwd: prepared.cwd.clone(),
-                    attempts: 0,
-                },
-            ));
-        }
+        commands.entity(terminal).insert((
+            prepared.launch,
+            crate::vibe::session::Vibe,
+            crate::vibe::session::PendingVibeSession {
+                spawn_time: std::time::SystemTime::now(),
+                cwd: prepared.cwd.clone(),
+                attempts: 0,
+            },
+        ));
     }
 }
 
@@ -802,7 +793,13 @@ mod tests {
     fn fake_prepare(cwd: &std::path::Path) -> Result<PreparedAgentLaunch, String> {
         Ok(PreparedAgentLaunch {
             cwd: cwd.to_path_buf(),
-            command: "echo agent".to_string(),
+            launch: crate::terminal::launch::TerminalLaunch {
+                command: "echo".to_string(),
+                args: vec!["agent".to_string()],
+                cwd: cwd.to_string_lossy().to_string(),
+                env: vec![],
+                kind: crate::terminal::launch::TerminalKind::Vibe,
+            },
         })
     }
 
@@ -890,15 +887,17 @@ mod tests {
 
         app.update();
 
-        let mut terminals = app
-            .world_mut()
-            .query::<(&Terminal, &PendingTerminalInput, &ChildOf)>();
-        let rows = terminals
+        let mut terminals = app.world_mut().query::<(
+            &Terminal,
+            &crate::terminal::launch::TerminalLaunch,
+            &ChildOf,
+        )>();
+        let rows: Vec<_> = terminals
             .iter(app.world())
-            .map(|(_, input, child_of)| (input.data.clone(), child_of.get()))
-            .collect::<Vec<_>>();
+            .map(|(_, launch, child_of)| (launch.command.clone(), child_of.get()))
+            .collect();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].0, b"echo agent\r".to_vec());
+        assert_eq!(rows[0].0, "echo");
 
         let tab = rows[0].1;
         assert!(
