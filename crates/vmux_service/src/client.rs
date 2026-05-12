@@ -64,7 +64,7 @@ fn forward_service_message(
 fn clean_service_files(sock: &std::path::Path) {
     let _ = std::fs::remove_file(sock);
     let _ = std::fs::remove_file(crate::pid_path());
-    let _ = std::fs::remove_file(crate::service_identity_path());
+    let _ = std::fs::remove_file(crate::identity_path());
 }
 
 impl ServiceHandle {
@@ -113,8 +113,8 @@ impl ServiceHandle {
                 return false;
             }
         };
-        let service_identity_path = crate::service_identity_path();
-        let service_identity = match std::fs::read_to_string(&service_identity_path) {
+        let id_path = crate::identity_path();
+        let service_identity = match std::fs::read_to_string(&id_path) {
             Ok(identity) => identity,
             Err(_) => {
                 eprintln!("vmux-service: service identity missing, cleaning up");

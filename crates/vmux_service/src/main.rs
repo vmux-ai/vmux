@@ -1,4 +1,4 @@
-use vmux_service::{pid_path, service_dir, service_identity_path, socket_path};
+use vmux_service::{identity_path, pid_path, service_dir, socket_path};
 
 #[tokio::main]
 async fn main() {
@@ -24,7 +24,7 @@ async fn main() {
         tokio::signal::ctrl_c().await.ok();
         let _ = std::fs::remove_file(&sock_cleanup);
         let _ = std::fs::remove_file(pid_path());
-        let _ = std::fs::remove_file(service_identity_path());
+        let _ = std::fs::remove_file(identity_path());
         std::process::exit(0);
     });
 

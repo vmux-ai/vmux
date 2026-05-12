@@ -7,25 +7,48 @@ pub mod server;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+/// Profile this build was compiled for ("release", "local", or "dev").
+pub fn current_profile() -> &'static str {
+    env!("VMUX_PROFILE")
+}
+
 /// Directory for service runtime files (socket, pid, log).
 pub fn service_dir() -> PathBuf {
     let home = std::env::var_os("HOME").expect("HOME not set");
     PathBuf::from(home).join("Library/Application Support/Vmux/services")
 }
 
-/// Path to the Unix domain socket.
+/// Path to the per-profile Unix domain socket.
 pub fn socket_path() -> PathBuf {
-    service_dir().join("vmux.sock")
+    service_dir().join(format!("vmux-{}.sock", current_profile()))
 }
 
-/// Path to the PID file.
+/// Path to the per-profile PID file.
 pub fn pid_path() -> PathBuf {
-    service_dir().join("service.pid")
+    service_dir().join(format!("vmux-{}.pid", current_profile()))
 }
 
-/// Path to the service executable identity file.
-pub fn service_identity_path() -> PathBuf {
-    service_dir().join("service.identity")
+/// Path to the per-profile service executable identity file.
+pub fn identity_path() -> PathBuf {
+    service_dir().join(format!("vmux-{}.identity", current_profile()))
+}
+
+/// Path to the per-profile service log file.
+pub fn log_path() -> PathBuf {
+    service_dir().join(format!("vmux-{}.log", current_profile()))
+}
+
+/// LaunchAgent label for the given profile.
+pub fn launchd_label(profile: &str) -> String {
+    format!("ai.vmux.service.{profile}")
+}
+
+/// Path to the LaunchAgent plist for the given profile.
+pub fn plist_path(profile: &str) -> PathBuf {
+    let home = std::env::var_os("HOME").expect("HOME not set");
+    PathBuf::from(home)
+        .join("Library/LaunchAgents")
+        .join(format!("{}.plist", launchd_label(profile)))
 }
 
 /// Identity for the current executable. Changes when the binary path, size,
@@ -36,7 +59,7 @@ pub fn current_executable_identity() -> std::io::Result<String> {
 
 /// Write the current executable identity for a service process.
 pub fn write_service_identity() -> std::io::Result<()> {
-    std::fs::write(service_identity_path(), current_executable_identity()?)
+    std::fs::write(identity_path(), current_executable_identity()?)
 }
 
 pub(crate) fn executable_identity_for_path(path: &Path) -> std::io::Result<String> {
@@ -87,5 +110,47 @@ mod tests {
     fn service_identity_match_requires_exact_record() {
         assert!(service_identity_matches("a\n1\n2\n", "a\n1\n2"));
         assert!(!service_identity_matches("a\n1\n2", "a\n1\n3"));
+    }
+
+    #[test]
+    fn current_profile_is_compile_env() {
+        let p = current_profile();
+        assert!(!p.is_empty());
+        assert!(matches!(p, "release" | "local" | "dev"));
+    }
+
+    #[test]
+    fn launchd_label_includes_profile() {
+        assert_eq!(launchd_label("dev"), "ai.vmux.service.dev");
+        assert_eq!(launchd_label("release"), "ai.vmux.service.release");
+    }
+
+    #[test]
+    fn socket_path_includes_profile_suffix() {
+        let s = socket_path();
+        let name = s.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("vmux-"));
+        assert!(name.ends_with(".sock"));
+        assert!(name.contains(current_profile()));
+    }
+
+    #[test]
+    fn pid_log_identity_paths_share_profile_suffix() {
+        let suffix = format!("vmux-{}", current_profile());
+        for p in [pid_path(), identity_path(), log_path()] {
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(
+                name.starts_with(&suffix),
+                "expected {name} to start with {suffix}"
+            );
+        }
+    }
+
+    #[test]
+    fn plist_path_lives_in_user_launchagents() {
+        let p = plist_path("dev");
+        let s = p.to_string_lossy();
+        assert!(s.contains("Library/LaunchAgents"));
+        assert!(s.ends_with("ai.vmux.service.dev.plist"));
     }
 }

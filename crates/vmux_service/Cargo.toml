@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 description = "Background service hosting persistent terminal processes"
 publish = false
+build = "build.rs"
 
 [[bin]]
 name = "vmux-service"
