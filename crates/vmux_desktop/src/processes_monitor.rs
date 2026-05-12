@@ -16,7 +16,7 @@ use crate::{
         tab::Tab,
         window::WEBVIEW_MESH_DEPTH_BIAS,
     },
-    terminal::{ServiceClient, ServiceProcessHandle, Terminal},
+    terminal::{ServiceClient, Terminal},
 };
 
 /// Marker for the processes monitor webview entity.
@@ -131,7 +131,7 @@ fn broadcast_to_monitors(
     service: Option<Res<ServiceClient>>,
     monitors: Query<Entity, (With<ProcessesMonitor>, With<UiReady>)>,
     browsers: NonSend<Browsers>,
-    terminal_handles: Query<&ServiceProcessHandle, With<Terminal>>,
+    terminal_pids: Query<&ProcessId, With<Terminal>>,
     mut commands: Commands,
 ) {
     if monitors.is_empty() || !process_list.is_changed() {
@@ -141,10 +141,8 @@ fn broadcast_to_monitors(
     let connected = service.is_some();
 
     // Build attached set from local terminal handles
-    let attached_ids: std::collections::HashSet<String> = terminal_handles
-        .iter()
-        .map(|h| h.process_id.to_string())
-        .collect();
+    let attached_ids: std::collections::HashSet<String> =
+        terminal_pids.iter().map(|pid| pid.to_string()).collect();
 
     let processes: Vec<ProcessEntry> = process_list
         .processes
@@ -181,7 +179,7 @@ fn broadcast_to_monitors(
 /// Navigate to the terminal tab for the clicked process, or open a new one.
 fn on_process_navigate(
     trigger: On<BinReceive<ProcessNavigateEvent>>,
-    terminals: Query<(Entity, &ServiceProcessHandle, &ChildOf), With<Terminal>>,
+    terminals: Query<(Entity, &ProcessId, &ChildOf), With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
@@ -196,8 +194,8 @@ fn on_process_navigate(
     let pid = &trigger.event().payload.process_id;
 
     // If a tab already has this process attached, activate it
-    for (_, handle, content_child_of) in &terminals {
-        if handle.process_id.to_string() == *pid {
+    for (_, process_id, content_child_of) in &terminals {
+        if process_id.to_string() == *pid {
             let tab = content_child_of.get();
             commands.entity(tab).insert(LastActivatedAt::now());
             if let Ok(tab_child_of) = tab_parent.get(tab) {
@@ -238,7 +236,7 @@ fn on_process_kill(
     trigger: On<BinReceive<ProcessKillEvent>>,
     service: Option<Res<ServiceClient>>,
     mut process_list: ResMut<ServiceProcessList>,
-    terminals: Query<(Entity, &ServiceProcessHandle, &ChildOf), With<Terminal>>,
+    terminals: Query<(Entity, &ProcessId, &ChildOf), With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
     mut commands: Commands,
 ) {
@@ -250,9 +248,8 @@ fn on_process_kill(
         remove_processes_from_cached_list(&mut process_list, [process_id]);
         service.0.send(ClientMessage::ListProcesses);
 
-        // Close the terminal tab that owns this process
-        for (_, handle, content_child_of) in &terminals {
-            if handle.process_id == process_id {
+        for (_, terminal_pid, content_child_of) in &terminals {
+            if *terminal_pid == process_id {
                 let tab = content_child_of.get();
                 // Only despawn if it's actually a tab
                 if tab_parent.get(tab).is_ok() || commands.get_entity(tab).is_ok() {
@@ -269,7 +266,7 @@ fn on_process_kill_all(
     _trigger: On<BinReceive<ProcessKillAllEvent>>,
     service: Option<Res<ServiceClient>>,
     mut process_list: ResMut<ServiceProcessList>,
-    terminals: Query<(Entity, &ServiceProcessHandle, &ChildOf), With<Terminal>>,
+    terminals: Query<(Entity, &ProcessId, &ChildOf), With<Terminal>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };
@@ -280,9 +277,8 @@ fn on_process_kill_all(
             process_id: *process_id,
         });
 
-        // Close the terminal tab
-        for (_, handle, content_child_of) in &terminals {
-            if handle.process_id == *process_id {
+        for (_, terminal_pid, content_child_of) in &terminals {
+            if *terminal_pid == *process_id {
                 let tab = content_child_of.get();
                 commands.entity(tab).despawn();
                 break;

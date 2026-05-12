@@ -82,12 +82,6 @@ pub(crate) fn confirm_quit_dialog(count: usize) -> bool {
     matches!(result, MessageDialogResult::Ok)
 }
 
-/// Associates a terminal entity with a service-managed process.
-#[derive(Component)]
-pub(crate) struct ServiceProcessHandle {
-    pub process_id: ProcessId,
-}
-
 /// Bevy resource wrapping the service connection.
 #[derive(Resource)]
 pub(crate) struct ServiceClient(pub ServiceHandle);
@@ -415,7 +409,7 @@ impl Terminal {
                 Self,
                 Browser,
                 CloseRequiresConfirmation,
-                ServiceProcessHandle { process_id },
+                process_id,
                 PendingServiceCreate {
                     shell,
                     cwd: cwd_str,
@@ -472,7 +466,7 @@ impl Terminal {
                 Self,
                 Browser,
                 CloseRequiresConfirmation,
-                ServiceProcessHandle { process_id },
+                process_id,
                 PendingServiceAttach,
                 PageMetadata {
                     title: format!("Terminal ({})", &process_id.to_string()[..8]),
@@ -543,7 +537,7 @@ pub(crate) fn apply_process_created(
 ) {
     commands
         .entity(entity)
-        .insert(ServiceProcessHandle { process_id })
+        .insert(process_id)
         .insert(pid::Pid(process_pid))
         .remove::<AwaitingProcessCreated>();
 }
@@ -682,17 +676,14 @@ fn try_connect_service(
 
 /// Send CreateProcess / AttachProcess for newly spawned terminals.
 fn poll_service_messages(
-    pending_create: Query<(Entity, &ServiceProcessHandle, &PendingServiceCreate), With<Terminal>>,
-    pending_attach: Query<
-        (Entity, &ServiceProcessHandle),
-        (With<Terminal>, With<PendingServiceAttach>),
-    >,
+    pending_create: Query<(Entity, &ProcessId, &PendingServiceCreate), With<Terminal>>,
+    pending_attach: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingServiceAttach>)>,
     awaiting_create: Query<
-        (Entity, &ServiceProcessHandle, &ChildOf),
+        (Entity, &ProcessId, &ChildOf),
         (With<Terminal>, With<AwaitingProcessCreated>),
     >,
     terminals: Query<
-        (Entity, &ServiceProcessHandle, &ChildOf),
+        (Entity, &ProcessId, &ChildOf),
         (
             With<Terminal>,
             Without<ProcessExited>,
@@ -714,7 +705,7 @@ fn poll_service_messages(
 
     // Handle pending creates — send CreateProcess, wait for ProcessCreated
     // response which will carry the real process ID.
-    for (entity, _handle, pending) in &pending_create {
+    for (entity, _pid, pending) in &pending_create {
         service.0.send(ClientMessage::CreateProcess {
             shell: pending.shell.clone(),
             cwd: pending.cwd.clone(),
@@ -729,13 +720,13 @@ fn poll_service_messages(
     }
 
     // Handle pending attaches
-    for (entity, handle) in &pending_attach {
-        service.0.send(ClientMessage::AttachProcess {
-            process_id: handle.process_id,
-        });
-        service.0.send(ClientMessage::RequestSnapshot {
-            process_id: handle.process_id,
-        });
+    for (entity, pid) in &pending_attach {
+        service
+            .0
+            .send(ClientMessage::AttachProcess { process_id: *pid });
+        service
+            .0
+            .send(ClientMessage::RequestSnapshot { process_id: *pid });
         commands.entity(entity).remove::<PendingServiceAttach>();
     }
 
@@ -777,8 +768,8 @@ fn poll_service_messages(
                 copy_mode,
                 full,
             } => {
-                for (entity, handle, _) in &terminals {
-                    if handle.process_id == process_id {
+                for (entity, pid, _) in &terminals {
+                    if *pid == process_id {
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
                         }
@@ -801,8 +792,8 @@ fn poll_service_messages(
                 }
             }
             ServiceMessage::ProcessTitle { process_id, title } => {
-                for (entity, handle, _) in &terminals {
-                    if handle.process_id == process_id {
+                for (entity, pid, _) in &terminals {
+                    if *pid == process_id {
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
                         }
@@ -823,8 +814,8 @@ fn poll_service_messages(
                 cols,
                 rows,
             } => {
-                for (entity, handle, _) in &terminals {
-                    if handle.process_id == process_id {
+                for (entity, pid, _) in &terminals {
+                    if *pid == process_id {
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
                         }
@@ -858,8 +849,8 @@ fn poll_service_messages(
                 mode_map.modes.remove(&process_id);
                 set_local_copy_mode(&mut local_copy_mode, process_id, false);
                 mouse_state.per_process.remove(&process_id);
-                for (entity, handle, child_of) in &terminals {
-                    if handle.process_id == process_id {
+                for (entity, pid, child_of) in &terminals {
+                    if *pid == process_id {
                         commands
                             .entity(entity)
                             .insert(ProcessExited)
@@ -881,9 +872,7 @@ fn poll_service_messages(
                 if let Some(process_id) = missing_process_id(&message)
                     && !restarted_missing_processes.contains(&process_id)
                 {
-                    let terminals = terminals
-                        .iter()
-                        .map(|(entity, handle, _)| (entity, handle.process_id));
+                    let terminals = terminals.iter().map(|(entity, pid, _)| (entity, *pid));
                     if let Some(restart) =
                         missing_terminal_restart(process_id, terminals, &settings)
                     {
@@ -935,7 +924,7 @@ fn poll_service_messages(
 
 fn flush_pending_terminal_input(
     pending: Query<
-        (Entity, &ServiceProcessHandle, &PendingTerminalInput),
+        (Entity, &ProcessId, &PendingTerminalInput),
         (
             With<Terminal>,
             Without<PendingServiceCreate>,
@@ -947,9 +936,9 @@ fn flush_pending_terminal_input(
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };
-    for (entity, handle, input) in &pending {
+    for (entity, pid, input) in &pending {
         service.0.send(ClientMessage::ProcessInput {
-            process_id: handle.process_id,
+            process_id: *pid,
             data: input.data.clone(),
         });
         commands.entity(entity).remove::<PendingTerminalInput>();
@@ -997,9 +986,9 @@ fn is_non_character_key(key: KeyCode) -> bool {
 /// must not broadcast them.
 fn handle_terminal_keyboard(
     mut er: MessageReader<KeyboardInput>,
-    targeted_terminals: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
+    targeted_terminals: Query<&ProcessId, (With<Terminal>, With<CefKeyboardTarget>)>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
-    terminals: Query<(&ServiceProcessHandle, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<crate::layout::stack::FocusedStack>,
     mode: Res<crate::scene::InteractionMode>,
     input: Res<ButtonInput<KeyCode>>,
@@ -1009,12 +998,12 @@ fn handle_terminal_keyboard(
     mut local_copy_mode: ResMut<LocalCopyModeState>,
 ) {
     let target_processes = resolve_terminal_input_targets(
-        targeted_terminals.iter().map(|handle| handle.process_id),
+        targeted_terminals.iter().copied(),
         !keyboard_targets.is_empty(),
         focus.stack,
         terminals
             .iter()
-            .map(|(handle, child_of)| (child_of.get(), handle.process_id)),
+            .map(|(pid, child_of)| (child_of.get(), *pid)),
         *mode,
     );
 
@@ -1443,20 +1432,20 @@ fn logical_key_to_bytes(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
 /// Handle mouse wheel scrolling — sends scroll input to service.
 fn handle_terminal_scroll(
     mut er: MessageReader<MouseWheel>,
-    targeted_terminals: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
+    targeted_terminals: Query<&ProcessId, (With<Terminal>, With<CefKeyboardTarget>)>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
-    terminals: Query<(&ServiceProcessHandle, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<crate::layout::stack::FocusedStack>,
     mode: Res<crate::scene::InteractionMode>,
     service: Option<Res<ServiceClient>>,
 ) {
     let target_processes = resolve_terminal_input_targets(
-        targeted_terminals.iter().map(|handle| handle.process_id),
+        targeted_terminals.iter().copied(),
         !keyboard_targets.is_empty(),
         focus.stack,
         terminals
             .iter()
-            .map(|(handle, child_of)| (child_of.get(), handle.process_id)),
+            .map(|(pid, child_of)| (child_of.get(), *pid)),
         *mode,
     );
 
@@ -1702,7 +1691,7 @@ fn send_mouse_action(service: &ServiceHandle, process_id: ProcessId, action: Mou
 /// Anything else is forwarded as SGR mouse-report bytes to the PTY.
 fn on_term_mouse(
     trigger: On<BinReceive<TermMouseEvent>>,
-    q: Query<&ServiceProcessHandle, With<Terminal>>,
+    q: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
     mode_map: Res<TerminalModeMap>,
     mut state: ResMut<MouseSelectionState>,
@@ -1711,8 +1700,8 @@ fn on_term_mouse(
     let entity = trigger.event_target();
     let event = &trigger.payload;
     let Some(service) = service else { return };
-    let Ok(handle) = q.get(entity) else { return };
-    let process_id = handle.process_id;
+    let Ok(pid) = q.get(entity) else { return };
+    let process_id = *pid;
 
     let mouse_capture = mode_map
         .modes
@@ -1729,16 +1718,15 @@ fn on_term_mouse(
 /// Mark dirty when webview becomes ready so initial viewport is sent.
 fn on_term_ready(
     trigger: On<Add, UiReady>,
-    q: Query<&ServiceProcessHandle, With<Terminal>>,
+    q: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
 ) {
     let entity = trigger.event_target();
     let Some(service) = service else { return };
-    if let Ok(handle) = q.get(entity) {
-        // Request a full snapshot when webview is ready
-        service.0.send(ClientMessage::RequestSnapshot {
-            process_id: handle.process_id,
-        });
+    if let Ok(pid) = q.get(entity) {
+        service
+            .0
+            .send(ClientMessage::RequestSnapshot { process_id: *pid });
     }
 }
 
@@ -1746,7 +1734,7 @@ fn on_term_ready(
 fn on_term_resize(
     trigger: On<BinReceive<TermResizeEvent>>,
     webview_q: Query<&WebviewSize, With<Terminal>>,
-    handle_q: Query<&ServiceProcessHandle, With<Terminal>>,
+    pid_q: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
 ) {
     let entity = trigger.event_target();
@@ -1756,7 +1744,7 @@ fn on_term_resize(
     let Ok(webview_size) = webview_q.get(entity) else {
         return;
     };
-    let Ok(handle) = handle_q.get(entity) else {
+    let Ok(pid) = pid_q.get(entity) else {
         return;
     };
 
@@ -1779,7 +1767,7 @@ fn on_term_resize(
     let rows = (vh / event.char_height).floor().max(1.0) as u16;
 
     service.0.send(ClientMessage::ResizeProcess {
-        process_id: handle.process_id,
+        process_id: *pid,
         cols,
         rows,
     });
@@ -1855,21 +1843,19 @@ fn sync_terminal_theme(
 
 fn on_restart_pty(
     trigger: On<RestartPty>,
-    mut q: Query<(&mut ServiceProcessHandle, &mut PageMetadata)>,
+    mut q: Query<(&mut ProcessId, &mut PageMetadata)>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
 ) {
     let entity = trigger.event().entity;
     let Some(service) = service else { return };
-    let Ok((mut handle, mut meta)) = q.get_mut(entity) else {
+    let Ok((mut pid, mut meta)) = q.get_mut(entity) else {
         return;
     };
 
-    // Kill old process
-
-    service.0.send(ClientMessage::KillProcess {
-        process_id: handle.process_id,
-    });
+    service
+        .0
+        .send(ClientMessage::KillProcess { process_id: *pid });
 
     let shell = settings
         .terminal
@@ -1890,7 +1876,7 @@ fn on_restart_pty(
         .0
         .send(ClientMessage::AttachProcess { process_id: new_id });
 
-    handle.process_id = new_id;
+    *pid = new_id;
     meta.url = TERMINAL_WEBVIEW_URL.to_string();
     meta.title = format!("Terminal ({})", &new_id.to_string()[..8]);
 }
@@ -1899,9 +1885,9 @@ fn on_restart_pty(
 /// visual/copy mode for the currently focused terminal process.
 fn handle_terminal_copy_mode_command(
     mut er: MessageReader<AppCommand>,
-    targeted_terminals: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
+    targeted_terminals: Query<&ProcessId, (With<Terminal>, With<CefKeyboardTarget>)>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
-    terminals: Query<(&ServiceProcessHandle, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<crate::layout::stack::FocusedStack>,
     mode: Res<crate::scene::InteractionMode>,
     service: Option<Res<ServiceClient>>,
@@ -1912,12 +1898,12 @@ fn handle_terminal_copy_mode_command(
         return;
     };
     let target_processes = resolve_terminal_input_targets(
-        targeted_terminals.iter().map(|handle| handle.process_id),
+        targeted_terminals.iter().copied(),
         !keyboard_targets.is_empty(),
         focus.stack,
         terminals
             .iter()
-            .map(|(handle, child_of)| (child_of.get(), handle.process_id)),
+            .map(|(pid, child_of)| (child_of.get(), *pid)),
         *mode,
     );
     let active_process_id = target_processes.first().copied();
@@ -2407,7 +2393,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_process_created_stamps_pid_and_handle() {
+    fn apply_process_created_stamps_pid_and_process_id() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         let entity = app
@@ -2428,7 +2414,7 @@ mod tests {
         let stored_pid = app.world().get::<pid::Pid>(entity).unwrap();
         assert_eq!(stored_pid.0, pid_val);
         assert!(app.world().get::<AwaitingProcessCreated>(entity).is_none());
-        let handle = app.world().get::<ServiceProcessHandle>(entity).unwrap();
-        assert_eq!(handle.process_id, id);
+        let stored_process_id = app.world().get::<ProcessId>(entity).unwrap();
+        assert_eq!(*stored_process_id, id);
     }
 }
