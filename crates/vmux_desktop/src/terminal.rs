@@ -397,9 +397,9 @@ impl Terminal {
             .unwrap_or_default();
 
         let launch = crate::terminal::launch::TerminalLaunch {
-            command: shell.clone(),
+            command: shell,
             args: vec![],
-            cwd: cwd_str.clone(),
+            cwd: cwd_str,
             env: vec![],
             kind: crate::terminal::launch::TerminalKind::Plain,
         };
@@ -413,10 +413,7 @@ impl Terminal {
                 CloseRequiresConfirmation,
                 process_id,
                 launch,
-                PendingServiceCreate {
-                    shell,
-                    cwd: cwd_str,
-                },
+                PendingServiceCreate,
                 PageMetadata {
                     title: format!("Terminal ({})", &process_id.to_string()[..8]),
                     url: TERMINAL_WEBVIEW_URL.to_string(),
@@ -512,12 +509,8 @@ impl Terminal {
     }
 }
 
-/// Temporary component: terminal needs a CreateProcess sent to service.
 #[derive(Component)]
-struct PendingServiceCreate {
-    shell: String,
-    cwd: String,
-}
+pub(crate) struct PendingServiceCreate;
 
 /// Temporary component: terminal needs an AttachProcess sent to service.
 #[derive(Component)]
@@ -681,7 +674,10 @@ fn try_connect_service(
 
 /// Send CreateProcess / AttachProcess for newly spawned terminals.
 fn poll_service_messages(
-    pending_create: Query<(Entity, &ProcessId, &PendingServiceCreate), With<Terminal>>,
+    pending_create: Query<
+        (Entity, &ProcessId, &crate::terminal::launch::TerminalLaunch),
+        (With<Terminal>, With<PendingServiceCreate>),
+    >,
     pending_attach: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingServiceAttach>)>,
     awaiting_create: Query<
         (Entity, &ProcessId, &ChildOf),
@@ -710,13 +706,13 @@ fn poll_service_messages(
 
     // Handle pending creates — send CreateProcess, wait for ProcessCreated
     // response which will carry the real process ID.
-    for (entity, _pid, pending) in &pending_create {
+    for (entity, process_id, launch) in &pending_create {
         service.0.send(ClientMessage::CreateProcess {
-            process_id: ProcessId::new(),
-            command: pending.shell.clone(),
-            args: vec![],
-            cwd: pending.cwd.clone(),
-            env: Vec::new(),
+            process_id: *process_id,
+            command: launch.command.clone(),
+            args: launch.args.clone(),
+            cwd: launch.cwd.clone(),
+            env: launch.env.clone(),
             cols: 80,
             rows: 24,
         });
@@ -738,32 +734,25 @@ fn poll_service_messages(
     }
 
     // Drain service messages and dispatch
-    let mut matched_entities = Vec::new();
     let mut restarted_missing_processes = Vec::new();
     for msg in service.0.drain() {
         match msg {
             ServiceMessage::ProcessCreated { process_id, pid } => {
-                if let Some((entity, _, _)) = (&awaiting_create)
+                let entity = (&awaiting_create)
                     .into_iter()
-                    .find(|(e, _, _)| !matched_entities.contains(e))
-                {
-                    matched_entities.push(entity);
+                    .find(|(_, pid_c, _)| **pid_c == process_id)
+                    .map(|(e, _, _)| e);
+                if let Some(entity) = entity {
                     service.0.send(ClientMessage::AttachProcess { process_id });
                     apply_process_created(&mut commands, entity, process_id, pid);
+                } else {
+                    bevy::log::warn!(
+                        "ProcessCreated for unknown process_id {process_id}; dropping"
+                    );
                 }
             }
             ServiceMessage::ProcessCreateFailed { reason } => {
                 bevy::log::warn!("service failed to create process: {reason}");
-                if let Some((entity, _, _)) = (&awaiting_create)
-                    .into_iter()
-                    .find(|(e, _, _)| !matched_entities.contains(e))
-                {
-                    matched_entities.push(entity);
-                    commands
-                        .entity(entity)
-                        .insert(ProcessExited)
-                        .remove::<AwaitingProcessCreated>();
-                }
             }
             ServiceMessage::ViewportPatch {
                 process_id,
@@ -2401,6 +2390,96 @@ mod tests {
         }
 
         assert!(!local_copy_mode.active.contains(&process_id));
+    }
+
+    #[test]
+    fn process_created_matches_by_id_not_by_position() {
+        use crate::terminal::launch::{TerminalKind, TerminalLaunch};
+
+        let mut app = bevy::prelude::App::new();
+        let id1 = ProcessId::new();
+        let id2 = ProcessId::new();
+        let id3 = ProcessId::new();
+        let e1 = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                id1,
+                PendingServiceCreate,
+                AwaitingProcessCreated,
+                TerminalLaunch {
+                    command: "/bin/sh".into(),
+                    args: vec![],
+                    cwd: "/tmp/1".into(),
+                    env: vec![],
+                    kind: TerminalKind::Plain,
+                },
+            ))
+            .id();
+        let e2 = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                id2,
+                AwaitingProcessCreated,
+                TerminalLaunch {
+                    command: "/bin/sh".into(),
+                    args: vec![],
+                    cwd: "/tmp/2".into(),
+                    env: vec![],
+                    kind: TerminalKind::Plain,
+                },
+            ))
+            .id();
+        let e3 = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                id3,
+                AwaitingProcessCreated,
+                TerminalLaunch {
+                    command: "/bin/sh".into(),
+                    args: vec![],
+                    cwd: "/tmp/3".into(),
+                    env: vec![],
+                    kind: TerminalKind::Plain,
+                },
+            ))
+            .id();
+
+        for (process_id, pid) in [(id3, 333u32), (id1, 111), (id2, 222)] {
+            let entity = app
+                .world_mut()
+                .query_filtered::<(bevy::prelude::Entity, &ProcessId), With<AwaitingProcessCreated>>(
+                )
+                .iter(app.world())
+                .find(|(_, pid_c)| **pid_c == process_id)
+                .map(|(e, _)| e)
+                .expect("matching entity for process_id");
+            app.world_mut()
+                .run_system_cached_with(
+                    |In((entity, process_id, pid)): In<(Entity, ProcessId, u32)>,
+                     mut commands: Commands| {
+                        apply_process_created(&mut commands, entity, process_id, pid);
+                    },
+                    (entity, process_id, pid),
+                )
+                .unwrap();
+        }
+
+        let world = app.world();
+        assert_eq!(
+            world.get::<crate::terminal::pid::Pid>(e1).map(|p| p.0),
+            Some(111)
+        );
+        assert_eq!(
+            world.get::<crate::terminal::pid::Pid>(e2).map(|p| p.0),
+            Some(222)
+        );
+        assert_eq!(
+            world.get::<crate::terminal::pid::Pid>(e3).map(|p| p.0),
+            Some(333)
+        );
     }
 
     #[test]
