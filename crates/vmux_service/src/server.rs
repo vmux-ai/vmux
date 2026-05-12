@@ -52,8 +52,8 @@ pub async fn run_server(listener: UnixListener) {
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
     let pending_queries: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
     let pending_commands: PendingCommands = Arc::new(Mutex::new(HashMap::new()));
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
-    // Poll at ~60Hz for exits, and immediately when PTY output arrives.
     let poll_mgr = Arc::clone(&manager);
     let poll_input_writers = Arc::clone(&input_writers);
     tokio::spawn(async move {
@@ -86,33 +86,45 @@ pub async fn run_server(listener: UnixListener) {
     });
 
     loop {
-        let (stream, _) = match listener.accept().await {
-            Ok(conn) => conn,
-            Err(e) => {
-                tracing::error!(error = %e, "accept error");
-                continue;
+        tokio::select! {
+            accept = listener.accept() => {
+                let (stream, _) = match accept {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        tracing::error!(error = %e, "accept error");
+                        continue;
+                    }
+                };
+                let mgr = Arc::clone(&manager);
+                let input_writers = Arc::clone(&input_writers);
+                let agent_tx = agent_tx.clone();
+                let pending_queries = Arc::clone(&pending_queries);
+                let pending_commands = Arc::clone(&pending_commands);
+                let shutdown_tx = shutdown_tx.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_client(
+                        stream,
+                        mgr,
+                        input_writers,
+                        agent_tx,
+                        pending_queries,
+                        pending_commands,
+                        shutdown_tx,
+                    )
+                    .await
+                    {
+                        tracing::error!(error = %e, "client error");
+                    }
+                });
             }
-        };
-        let mgr = Arc::clone(&manager);
-        let input_writers = Arc::clone(&input_writers);
-        let agent_tx = agent_tx.clone();
-        let pending_queries = Arc::clone(&pending_queries);
-        let pending_commands = Arc::clone(&pending_commands);
-        tokio::spawn(async move {
-            if let Err(e) = handle_client(
-                stream,
-                mgr,
-                input_writers,
-                agent_tx,
-                pending_queries,
-                pending_commands,
-            )
-            .await
-            {
-                tracing::error!(error = %e, "client error");
+            _ = shutdown_rx.recv() => {
+                tracing::info!("server: drain signaled, closing listener");
+                break;
             }
-        });
+        }
     }
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 }
 
 fn drain_pending_wakes(wake_rx: &mut mpsc::UnboundedReceiver<ProcessId>) {
@@ -130,6 +142,7 @@ async fn handle_client(
     agent_tx: broadcast::Sender<ServiceMessage>,
     pending_queries: PendingQueries,
     pending_commands: PendingCommands,
+    shutdown_tx: mpsc::Sender<()>,
 ) -> std::io::Result<()> {
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -449,6 +462,7 @@ async fn handle_client(
             }
 
             ClientMessage::Shutdown => {
+                tracing::info!("shutdown requested by client; draining");
                 {
                     let mut mgr = manager.lock().await;
                     mgr.shutdown();
@@ -459,8 +473,8 @@ async fn handle_client(
                 };
                 let mut w = writer.lock().await;
                 write_message!(&mut *w, &resp)?;
-                // After responding, exit
-                std::process::exit(0);
+                shutdown_tx.send(()).await.ok();
+                break;
             }
             ClientMessage::AgentQuery { request_id, query } => {
                 if agent_tx.receiver_count() == 0 {
@@ -617,5 +631,30 @@ mod tests {
 
         let received = rx.await.expect("recv");
         assert_eq!(received, result);
+    }
+
+    #[tokio::test]
+    async fn shutdown_message_breaks_run_server() {
+        use crate::protocol::ClientMessage;
+
+        let dir = std::env::temp_dir().join(format!("vmux-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("test.sock");
+        let _ = std::fs::remove_file(&sock);
+        let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+
+        let server = tokio::spawn(super::run_server(listener));
+
+        let stream = tokio::net::UnixStream::connect(&sock).await.unwrap();
+        let (_r, mut w) = stream.into_split();
+        let bytes =
+            rkyv::to_bytes::<rkyv::rancor::Error>(&ClientMessage::Shutdown).expect("serialize");
+        crate::framing::write_raw_frame(&mut w, &bytes)
+            .await
+            .expect("write shutdown");
+
+        let res = tokio::time::timeout(std::time::Duration::from_secs(3), server).await;
+        assert!(res.is_ok(), "run_server did not exit after Shutdown");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
