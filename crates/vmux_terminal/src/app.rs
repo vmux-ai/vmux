@@ -26,7 +26,7 @@ const _TW_SAFELIST: &[&str] = &[
     "bg-ansi-8",  "bg-ansi-9",  "bg-ansi-10", "bg-ansi-11",
     "bg-ansi-12", "bg-ansi-13", "bg-ansi-14", "bg-ansi-15",
     "text-term-bg", "bg-term-fg",
-    "bg-term-bg/80", "border-ansi-1",
+    "border-ansi-1",
 ];
 
 /// ID for the outermost terminal container div.
@@ -237,7 +237,8 @@ pub fn App() -> Element {
                 let msg = service_error.read().clone();
                 (!msg.is_empty()).then(|| rsx! {
                     div {
-                        class: "absolute inset-0 z-50 flex items-center justify-center bg-term-bg/80",
+                        class: "absolute inset-0 z-50 flex items-center justify-center",
+                        style: "background: rgba(0,0,0,0.6);",
                         div {
                             class: "rounded-md border border-ansi-1 bg-term-bg px-4 py-2 text-sm text-ansi-1",
                             "{msg}"
