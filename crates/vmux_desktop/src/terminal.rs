@@ -27,6 +27,7 @@ use vmux_service::{
 use vmux_terminal::event::*;
 use vmux_webview_app::UiReady;
 
+pub(crate) mod launch;
 pub(crate) mod pid;
 
 /// Maximum interval between consecutive mouse-down events that count as a
