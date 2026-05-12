@@ -295,12 +295,14 @@ fn build_terminal_launch_inner(
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn build_vibe_shell_command_fresh(cwd: &Path) -> Result<String, String> {
     let vibe = find_executable("vibe").ok_or_else(|| "vibe executable not found".to_string())?;
     let mcp = mcp_servers_env_value(cwd)?;
     build_bash_launch_command(&mcp, &vibe, cwd)
 }
 
+#[allow(dead_code)]
 pub(crate) fn build_vibe_shell_command_resume(
     cwd: &Path,
     session_id: &str,

@@ -33,6 +33,8 @@ pub(crate) struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
+        app.register_type::<crate::terminal::launch::TerminalLaunch>()
+            .register_type::<crate::terminal::launch::TerminalKind>();
         app.insert_resource(AutoSave {
             debounce: Timer::from_seconds(0.5, TimerMode::Once),
             periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
@@ -53,7 +55,8 @@ impl Plugin for PersistencePlugin {
                 .chain()
                 .run_if(resource_exists::<SpaceViewsNeedRebuild>),
         )
-        .add_systems(Update, (mark_dirty_on_change, auto_save_system).chain());
+        .add_systems(Update, (mark_dirty_on_change, auto_save_system).chain())
+        .add_systems(Update, sync_launch_to_stack);
     }
 }
 
@@ -147,7 +150,8 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<PageMetadata>()
         .allow::<vmux_history::CreatedAt>()
         .allow::<vmux_history::LastActivatedAt>()
-        .allow::<vmux_history::Visit>();
+        .allow::<vmux_history::Visit>()
+        .allow::<crate::terminal::launch::TerminalLaunch>();
     commands.trigger_save(save);
 }
 
@@ -170,7 +174,14 @@ pub(crate) fn rebuild_space_views(
     tabs_need_view: Query<Entity, (With<Tab>, Without<Node>)>,
     splits_need_view: Query<(Entity, &PaneSplit), Without<Node>>,
     panes_need_view: Query<Entity, (With<Pane>, Without<PaneSplit>, Without<Node>)>,
-    stacks_need_view: Query<(Entity, &PageMetadata), (With<Stack>, Without<Node>)>,
+    stacks_need_view: Query<
+        (
+            Entity,
+            &PageMetadata,
+            Option<&crate::terminal::launch::TerminalLaunch>,
+        ),
+        (With<Stack>, Without<Node>),
+    >,
     pane_sizes: Query<&PaneSize>,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
@@ -253,7 +264,7 @@ pub(crate) fn rebuild_space_views(
 
     // -- Stack: add absolute-fill node + spawn Browser child --
     let mut despawned = std::collections::HashSet::new();
-    for (entity, meta) in &stacks_need_view {
+    for (entity, meta, saved_launch) in &stacks_need_view {
         // Discard empty tabs (no URL, no content) that were saved mid-session
         if meta.url.is_empty() {
             despawned.insert(entity);
@@ -294,60 +305,60 @@ pub(crate) fn rebuild_space_views(
                 .url
                 .starts_with(TERMINAL_WEBVIEW_URL.trim_end_matches('/'))
             {
-                commands.spawn((
-                    Terminal::new(&mut meshes, &mut webview_mt, &settings),
-                    ChildOf(entity),
-                ));
+                let cwd = saved_launch.map(|l| std::path::PathBuf::from(&l.cwd));
+                let term = commands
+                    .spawn((
+                        Terminal::new_with_cwd(
+                            &mut meshes,
+                            &mut webview_mt,
+                            &settings,
+                            cwd.as_deref(),
+                        ),
+                        ChildOf(entity),
+                    ))
+                    .id();
+                if let Some(launch) = saved_launch {
+                    commands.entity(term).insert(launch.clone());
+                }
             } else if meta
                 .url
                 .starts_with(crate::vibe::session::VIBE_WEBVIEW_URL.trim_end_matches('/'))
             {
-                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
                 let session_id = meta
                     .url
                     .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string());
-                let result = match &session_id {
-                    Some(id) => crate::vibe::build_vibe_shell_command_resume(&cwd, id),
-                    None => crate::vibe::build_vibe_shell_command_fresh(&cwd),
-                };
-                if let Ok(shell_cmd) = result {
-                    let term = commands
-                        .spawn((
-                            Terminal::new_with_cwd(
-                                &mut meshes,
-                                &mut webview_mt,
-                                &settings,
-                                Some(&cwd),
-                            ),
-                            ChildOf(entity),
-                        ))
-                        .id();
+                let cwd = saved_launch
+                    .map(|l| std::path::PathBuf::from(&l.cwd))
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
+                    });
+                let term = commands
+                    .spawn((
+                        Terminal::new_with_cwd(&mut meshes, &mut webview_mt, &settings, Some(&cwd)),
+                        ChildOf(entity),
+                    ))
+                    .id();
+                if let Some(launch) = saved_launch {
                     commands
                         .entity(term)
-                        .insert(crate::terminal::PendingTerminalInput {
-                            data: crate::agent::shell_command_input(&shell_cmd),
-                        })
-                        .insert(crate::vibe::session::Vibe);
-                    if let Some(id) = session_id {
-                        commands
-                            .entity(term)
-                            .insert(crate::vibe::session::SessionId(id));
-                    } else {
-                        commands
-                            .entity(term)
-                            .insert(crate::vibe::session::PendingVibeSession {
-                                spawn_time: std::time::SystemTime::now(),
-                                cwd,
-                                attempts: 0,
-                            });
-                    }
+                        .insert((launch.clone(), crate::vibe::session::Vibe));
                 } else {
-                    commands.spawn((
-                        Terminal::new(&mut meshes, &mut webview_mt, &settings),
-                        ChildOf(entity),
-                    ));
+                    commands.entity(term).insert(crate::vibe::session::Vibe);
+                }
+                if let Some(id) = session_id {
+                    commands
+                        .entity(term)
+                        .insert(crate::vibe::session::SessionId(id));
+                } else {
+                    commands
+                        .entity(term)
+                        .insert(crate::vibe::session::PendingVibeSession {
+                            spawn_time: std::time::SystemTime::now(),
+                            cwd,
+                            attempts: 0,
+                        });
                 }
             } else {
                 if meta
@@ -379,7 +390,7 @@ pub(crate) fn rebuild_space_views(
         .iter()
         .map(|(e, _)| e)
         .chain(panes_need_view.iter())
-        .chain(stacks_need_view.iter().map(|(e, _)| e))
+        .chain(stacks_need_view.iter().map(|(e, _, _)| e))
     {
         let Ok(co) = child_of_q.get(entity) else {
             continue;
@@ -408,6 +419,25 @@ pub(crate) fn rebuild_space_views(
         panes_need_view.iter().count(),
         stacks_need_view.iter().count(),
     );
+}
+
+fn sync_launch_to_stack(
+    terminals: Query<
+        (&ChildOf, &crate::terminal::launch::TerminalLaunch),
+        (
+            With<Terminal>,
+            Changed<crate::terminal::launch::TerminalLaunch>,
+        ),
+    >,
+    stacks: Query<(), With<Stack>>,
+    mut commands: Commands,
+) {
+    for (child_of, launch) in &terminals {
+        let parent = child_of.get();
+        if stacks.contains(parent) {
+            commands.entity(parent).insert(launch.clone());
+        }
+    }
 }
 
 #[cfg(test)]

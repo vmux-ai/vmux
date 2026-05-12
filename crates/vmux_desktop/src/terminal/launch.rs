@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-#[derive(Component, Debug, Clone, Reflect)]
+#[derive(Component, Debug, Clone, Reflect, serde::Serialize, serde::Deserialize)]
 #[reflect(Component)]
 pub struct TerminalLaunch {
     pub command: String,
@@ -10,7 +10,7 @@ pub struct TerminalLaunch {
     pub kind: TerminalKind,
 }
 
-#[derive(Debug, Clone, Reflect, PartialEq, Eq)]
+#[derive(Debug, Clone, Reflect, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TerminalKind {
     Plain,
     Vibe,
