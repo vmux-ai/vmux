@@ -22,5 +22,8 @@ tokio = { workspace = true }
 serde = { workspace = true }
 alacritty_terminal = { workspace = true }
 portable-pty = { workspace = true }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
 vmux_core = { path = "../vmux_core" }
 vmux_terminal = { path = "../vmux_terminal" }

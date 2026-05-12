@@ -89,7 +89,7 @@ pub async fn run_server(listener: UnixListener) {
         let (stream, _) = match listener.accept().await {
             Ok(conn) => conn,
             Err(e) => {
-                eprintln!("accept error: {e}");
+                tracing::error!(error = %e, "accept error");
                 continue;
             }
         };
@@ -109,7 +109,7 @@ pub async fn run_server(listener: UnixListener) {
             )
             .await
             {
-                eprintln!("client error: {e}");
+                tracing::error!(error = %e, "client error");
             }
         });
     }

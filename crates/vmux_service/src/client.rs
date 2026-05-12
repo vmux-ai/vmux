@@ -80,7 +80,7 @@ impl ServiceHandle {
             Ok(s) => s,
             Err(_) => {
                 // Socket exists but no PID file — stale state, clean up
-                eprintln!("vmux-service: socket exists but no PID file, cleaning up");
+                tracing::warn!("socket exists but no PID file, cleaning up");
                 clean_service_files(&sock);
                 return false;
             }
@@ -89,10 +89,7 @@ impl ServiceHandle {
             Ok(p) => p,
             Err(_) => {
                 // Invalid PID file content — clean up
-                eprintln!(
-                    "vmux-service: invalid PID file content: {:?}",
-                    pid_str.trim()
-                );
+                tracing::warn!(pid_file = ?pid_str.trim(), "invalid PID file content");
                 clean_service_files(&sock);
                 return false;
             }
@@ -100,7 +97,7 @@ impl ServiceHandle {
         // kill(pid, 0) checks if process exists without sending a signal
         if unsafe { libc::kill(pid, 0) } != 0 {
             // Process is dead — clean up stale files
-            eprintln!("vmux-service: stale service (pid {pid}) — cleaning up");
+            tracing::warn!(pid, "stale service — cleaning up");
             clean_service_files(&sock);
             return false;
         }
@@ -108,7 +105,7 @@ impl ServiceHandle {
         let current_identity = match crate::current_executable_identity() {
             Ok(identity) => identity,
             Err(e) => {
-                eprintln!("vmux-service: failed to identify current executable: {e}");
+                tracing::error!(error = %e, "failed to identify current executable");
                 clean_service_files(&sock);
                 return false;
             }
@@ -117,13 +114,13 @@ impl ServiceHandle {
         let service_identity = match std::fs::read_to_string(&id_path) {
             Ok(identity) => identity,
             Err(_) => {
-                eprintln!("vmux-service: service identity missing, cleaning up");
+                tracing::warn!("service identity missing, cleaning up");
                 clean_service_files(&sock);
                 return false;
             }
         };
         if !crate::service_identity_matches(&service_identity, &current_identity) {
-            eprintln!("vmux-service: service identity mismatch, cleaning up");
+            tracing::warn!("service identity mismatch, cleaning up");
             clean_service_files(&sock);
             return false;
         }
@@ -164,11 +161,11 @@ impl ServiceHandle {
             match rx.recv_timeout(std::time::Duration::from_secs(2)) {
                 Ok(Ok(c)) => Arc::new(c),
                 Ok(Err(e)) => {
-                    eprintln!("service connect failed: {e}");
+                    tracing::error!(error = %e, "service connect failed");
                     return None;
                 }
                 Err(_) => {
-                    eprintln!("service connect timed out");
+                    tracing::error!("service connect timed out");
                     return None;
                 }
             }
