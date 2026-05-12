@@ -71,33 +71,46 @@ pub fn uninstall(profile: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+fn current_uid() -> u32 {
+    unsafe { libc::getuid() }
+}
+
 /// `launchctl bootstrap gui/<uid> <plist>`.
 pub fn bootstrap(plist: &Path) -> std::io::Result<()> {
-    let uid = unsafe { libc::getuid() };
-    Command::new("launchctl")
+    let uid = current_uid();
+    let status = Command::new("launchctl")
         .args(["bootstrap", &format!("gui/{uid}")])
         .arg(plist)
         .status()?;
+    if !status.success() {
+        tracing::warn!(code = ?status.code(), "launchctl bootstrap exited nonzero");
+    }
     Ok(())
 }
 
 /// `launchctl bootout gui/<uid>/<label>`.
 pub fn bootout(profile: &str) -> std::io::Result<()> {
-    let uid = unsafe { libc::getuid() };
+    let uid = current_uid();
     let label = crate::launchd_label(profile);
-    Command::new("launchctl")
+    let status = Command::new("launchctl")
         .args(["bootout", &format!("gui/{uid}/{label}")])
         .status()?;
+    if !status.success() {
+        tracing::warn!(code = ?status.code(), "launchctl bootout exited nonzero");
+    }
     Ok(())
 }
 
 /// `launchctl kickstart -k gui/<uid>/<label>` -- restart cleanly.
 pub fn kickstart(profile: &str) -> std::io::Result<()> {
-    let uid = unsafe { libc::getuid() };
+    let uid = current_uid();
     let label = crate::launchd_label(profile);
-    Command::new("launchctl")
+    let status = Command::new("launchctl")
         .args(["kickstart", "-k", &format!("gui/{uid}/{label}")])
         .status()?;
+    if !status.success() {
+        tracing::warn!(code = ?status.code(), "launchctl kickstart exited nonzero");
+    }
     Ok(())
 }
 
