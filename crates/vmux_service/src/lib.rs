@@ -18,24 +18,28 @@ pub fn service_dir() -> PathBuf {
     PathBuf::from(home).join("Library/Application Support/Vmux/services")
 }
 
+fn profile_file(ext: &str) -> PathBuf {
+    service_dir().join(format!("vmux-{}.{ext}", current_profile()))
+}
+
 /// Path to the per-profile Unix domain socket.
 pub fn socket_path() -> PathBuf {
-    service_dir().join(format!("vmux-{}.sock", current_profile()))
+    profile_file("sock")
 }
 
 /// Path to the per-profile PID file.
 pub fn pid_path() -> PathBuf {
-    service_dir().join(format!("vmux-{}.pid", current_profile()))
+    profile_file("pid")
 }
 
 /// Path to the per-profile service executable identity file.
 pub fn identity_path() -> PathBuf {
-    service_dir().join(format!("vmux-{}.identity", current_profile()))
+    profile_file("identity")
 }
 
 /// Path to the per-profile service log file.
 pub fn log_path() -> PathBuf {
-    service_dir().join(format!("vmux-{}.log", current_profile()))
+    profile_file("log")
 }
 
 /// LaunchAgent label for the given profile.
