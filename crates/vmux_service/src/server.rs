@@ -56,7 +56,7 @@ pub async fn run_server(listener: UnixListener) {
 
     let poll_mgr = Arc::clone(&manager);
     let poll_input_writers = Arc::clone(&input_writers);
-    tokio::spawn(async move {
+    let poll_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -125,6 +125,8 @@ pub async fn run_server(listener: UnixListener) {
     }
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    poll_handle.abort();
+    tracing::info!("server: drain complete, exiting");
 }
 
 fn drain_pending_wakes(wake_rx: &mut mpsc::UnboundedReceiver<ProcessId>) {
