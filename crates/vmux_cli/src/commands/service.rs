@@ -29,17 +29,15 @@ pub enum ServiceAction {
 }
 
 pub fn run(args: ServiceArgs) -> std::io::Result<i32> {
-    let bin = current_service_binary()?;
     match args.action {
         ServiceAction::Status => vmux_service::cli::cmd_status(),
         ServiceAction::Start => {
             #[cfg(target_os = "macos")]
             {
-                vmux_service::cli::cmd_start(&bin)
+                vmux_service::cli::cmd_start(&current_service_binary()?)
             }
             #[cfg(not(target_os = "macos"))]
             {
-                let _ = bin;
                 not_supported()
             }
         }
@@ -56,11 +54,10 @@ pub fn run(args: ServiceArgs) -> std::io::Result<i32> {
         ServiceAction::Restart => {
             #[cfg(target_os = "macos")]
             {
-                vmux_service::cli::cmd_restart(&bin)
+                vmux_service::cli::cmd_restart(&current_service_binary()?)
             }
             #[cfg(not(target_os = "macos"))]
             {
-                let _ = bin;
                 not_supported()
             }
         }
@@ -68,11 +65,10 @@ pub fn run(args: ServiceArgs) -> std::io::Result<i32> {
         ServiceAction::Install => {
             #[cfg(target_os = "macos")]
             {
-                vmux_service::cli::cmd_install(&bin)
+                vmux_service::cli::cmd_install(&current_service_binary()?)
             }
             #[cfg(not(target_os = "macos"))]
             {
-                let _ = bin;
                 not_supported()
             }
         }
