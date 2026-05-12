@@ -120,8 +120,18 @@ impl ServiceHandle {
             }
         };
         if !crate::service_identity_matches(&service_identity, &current_identity) {
-            tracing::warn!("service identity mismatch, cleaning up");
-            clean_service_files(&sock);
+            tracing::warn!(pid, "service identity mismatch, replacing running daemon");
+            let outcome = crate::supervisor::replace_running(pid, || {
+                let stream = std::os::unix::net::UnixStream::connect(&sock)?;
+                stream.set_write_timeout(Some(std::time::Duration::from_millis(500)))?;
+                let mut stream = stream;
+                crate::write_message_blocking!(
+                    &mut stream,
+                    &crate::protocol::ClientMessage::Shutdown
+                )
+            });
+            tracing::info!(?outcome, "replaced running daemon");
+            crate::supervisor::clean_runtime_files();
             return false;
         }
         true

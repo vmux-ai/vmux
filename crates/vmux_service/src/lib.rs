@@ -4,6 +4,7 @@ pub mod process;
 pub mod protocol;
 pub mod server;
 pub mod service;
+pub mod supervisor;
 
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;

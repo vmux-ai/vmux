@@ -33,6 +33,28 @@ where
     Ok(Some(buf))
 }
 
+/// Write a length-prefixed frame to a blocking writer.
+pub fn write_raw_frame_blocking<W: std::io::Write>(
+    writer: &mut W,
+    data: &[u8],
+) -> std::io::Result<()> {
+    let len = data.len() as u32;
+    writer.write_all(&len.to_le_bytes())?;
+    writer.write_all(data)?;
+    writer.flush()?;
+    Ok(())
+}
+
+/// Serialize a message to rkyv bytes, write as a length-prefixed frame (blocking).
+#[macro_export]
+macro_rules! write_message_blocking {
+    ($writer:expr, $msg:expr) => {{
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>($msg)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        $crate::framing::write_raw_frame_blocking($writer, &bytes)
+    }};
+}
+
 /// Serialize a message to rkyv bytes, write as a length-prefixed frame.
 /// Use: `write_message(&mut writer, &my_msg).await?`
 #[macro_export]
