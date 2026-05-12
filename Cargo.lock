@@ -9107,7 +9107,6 @@ dependencies = [
  "portable-pty",
  "rkyv",
  "serde",
- "serde_json",
  "tokio",
  "uuid",
  "vmux_terminal",

@@ -18,11 +18,11 @@ run-mac: build-mac-debug
 	exec env -u CEF_PATH ./target/debug/vmux_desktop
 
 build-mac-debug: ensure-run-mac-deps ensure-codesign-deps install-debug-render-process
-	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop --features debug
+	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop -p vmux_cli --features debug
 	@$(MAKE) sign-mac-debug
 
 build: ensure-run-mac-deps
-	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop --release
+	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop -p vmux_cli --release
 
 -include .env
 export

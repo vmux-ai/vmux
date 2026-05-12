@@ -19,7 +19,6 @@ rkyv = { workspace = true }
 uuid = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 alacritty_terminal = { workspace = true }
 portable-pty = { workspace = true }
 vmux_terminal = { path = "../vmux_terminal" }
