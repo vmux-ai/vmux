@@ -636,10 +636,14 @@ fn ensure_service_started() {
         use std::os::unix::process::CommandExt;
         let log_dir = vmux_service::service_dir();
         let _ = std::fs::create_dir_all(&log_dir);
-        let stderr_cfg = std::fs::File::create(vmux_service::log_path())
-            .map(std::process::Stdio::from)
-            .unwrap_or(std::process::Stdio::null());
-        unsafe {
+        let stderr_cfg = match std::fs::File::create(vmux_service::log_path()) {
+            Ok(f) => std::process::Stdio::from(f),
+            Err(e) => {
+                tracing::warn!(error = %e, "could not create service log; stderr will be discarded");
+                std::process::Stdio::null()
+            }
+        };
+        let spawn_result = unsafe {
             std::process::Command::new(&binary)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
@@ -649,7 +653,9 @@ fn ensure_service_started() {
                     Ok(())
                 })
                 .spawn()
-                .ok();
+        };
+        if let Err(e) = spawn_result {
+            tracing::error!(error = %e, "failed to spawn vmux_service (non-macOS fallback)");
         }
     }
 }
