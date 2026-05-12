@@ -3,10 +3,18 @@ use crate::protocol::{ClientMessage, ProcessId, ServiceMessage, validate_agent_c
 use crate::{read_message, write_message};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::OnceLock;
+use std::time::Instant;
 use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio::time::MissedTickBehavior;
+
+static SERVICE_STARTED: OnceLock<Instant> = OnceLock::new();
+
+pub(crate) fn init_started_at() {
+    SERVICE_STARTED.get_or_init(Instant::now);
+}
 
 const MAX_WAKE_EVENTS_PER_TICK: usize = 1024;
 type InputWriters = Arc<Mutex<HashMap<ProcessId, PtyInputWriter>>>;
@@ -53,6 +61,8 @@ pub async fn run_server(listener: UnixListener) {
     let pending_queries: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
     let pending_commands: PendingCommands = Arc::new(Mutex::new(HashMap::new()));
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+
+    init_started_at();
 
     let poll_mgr = Arc::clone(&manager);
     let poll_input_writers = Arc::clone(&input_writers);
@@ -478,6 +488,24 @@ async fn handle_client(
                 shutdown_tx.send(()).await.ok();
                 break;
             }
+
+            ClientMessage::Status => {
+                let uptime_secs = SERVICE_STARTED
+                    .get()
+                    .map(|t| t.elapsed().as_secs())
+                    .unwrap_or(0);
+                let process_count = {
+                    let mgr = manager.lock().await;
+                    mgr.processes.len() as u32
+                };
+                let resp = ServiceMessage::StatusResponse {
+                    uptime_secs,
+                    process_count,
+                };
+                let mut w = writer.lock().await;
+                write_message!(&mut *w, &resp)?;
+            }
+
             ClientMessage::AgentQuery { request_id, query } => {
                 if agent_tx.receiver_count() == 0 {
                     let resp = ServiceMessage::Error {

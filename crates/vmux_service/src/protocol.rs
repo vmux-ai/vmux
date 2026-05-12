@@ -216,6 +216,7 @@ pub enum ClientMessage {
         command: AgentCommand,
     },
     Shutdown,
+    Status,
     AgentQuery {
         request_id: AgentRequestId,
         query: AgentQuery,
@@ -382,6 +383,10 @@ pub enum ServiceMessage {
     AgentCommandResult {
         request_id: AgentRequestId,
         result: AgentCommandResult,
+    },
+    StatusResponse {
+        uptime_secs: u64,
+        process_count: u32,
     },
 }
 
@@ -598,6 +603,23 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded, cmd);
+    }
+
+    #[test]
+    fn status_response_roundtrips() {
+        let msg = ServiceMessage::StatusResponse {
+            uptime_secs: 42,
+            process_count: 3,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
+        let decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        assert!(matches!(
+            decoded,
+            ServiceMessage::StatusResponse {
+                uptime_secs: 42,
+                process_count: 3
+            }
+        ));
     }
 
     #[test]
