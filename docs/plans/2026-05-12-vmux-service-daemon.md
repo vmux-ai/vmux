@@ -2367,6 +2367,95 @@ Use the open-new-pr skill.
 
 ---
 
+## Manual smoke instructions for human reviewer
+
+The acceptance criteria require an actual macOS GUI; they cannot be automated from CI.
+Run the following on a clean macOS workstation against a build of this branch.
+
+### Setup
+
+```sh
+launchctl bootout gui/$(id -u)/ai.vmux.service.dev 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/ai.vmux.service.dev.plist"
+rm -f "$HOME/Library/Application Support/Vmux/services/vmux-dev."*
+env -u CEF_PATH cargo build -p vmux_service -p vmux_desktop -p vmux_cli
+```
+
+### A1 — Daemon survives GUI exit
+
+```sh
+./target/debug/vmux_desktop &
+GUI=$!
+sleep 3
+launchctl print gui/$(id -u)/ai.vmux.service.dev | head -5
+kill $GUI; sleep 2
+launchctl print gui/$(id -u)/ai.vmux.service.dev | head -5   # daemon still alive
+```
+
+### A2 — launchd respawns on crash
+
+```sh
+PID=$(cat "$HOME/Library/Application Support/Vmux/services/vmux-dev.pid")
+kill -9 $PID
+sleep 2
+NEW_PID=$(cat "$HOME/Library/Application Support/Vmux/services/vmux-dev.pid")
+test "$PID" != "$NEW_PID" && echo "respawn OK ($PID -> $NEW_PID)"
+```
+
+### A3 — Identity-mismatch upgrade
+
+```sh
+touch -m target/debug/vmux_service
+./target/debug/vmux_desktop &
+sleep 4
+tail -20 "$HOME/Library/Application Support/Vmux/services/vmux-dev."*.log
+# Look for: "service identity mismatch, replacing running daemon"
+#       and "exited via Shutdown handshake"
+kill %1
+```
+
+### A4 — `vmux service status` from a fresh shell
+
+```sh
+launchctl bootout gui/$(id -u)/ai.vmux.service.dev 2>/dev/null
+rm -f "$HOME/Library/Application Support/Vmux/services/vmux-dev.pid"
+./target/debug/vmux service status   # should show pid - and processes -
+./target/debug/vmux service start
+./target/debug/vmux service status   # should show populated values
+```
+
+### A5 — No stray eprintln! / structured log
+
+```sh
+rg 'eprintln!' crates/vmux_service/src/   # expect 0 matches
+./target/debug/vmux service logs | head   # structured tracing output
+```
+
+### A6 — `vmux_process` crate deleted
+
+```sh
+ls crates/vmux_process 2>&1   # expect "No such file or directory"
+rg 'vmux_process' crates/ Cargo.toml   # expect 0 matches
+```
+
+### A7 — Connect-error overlay
+
+While GUI is running:
+
+```sh
+launchctl bootout gui/$(id -u)/ai.vmux.service.dev
+```
+
+Visually verify that a centered overlay appears in any open terminal tab saying "vmux service unavailable...". Then:
+
+```sh
+./target/debug/vmux service start
+```
+
+Visually verify the overlay clears.
+
+---
+
 ## Self-review checklist (run before requesting review)
 
 - [ ] All 7 acceptance criteria from the spec have a verifying step in Task 14.
