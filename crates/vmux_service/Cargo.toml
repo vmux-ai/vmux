@@ -21,4 +21,5 @@ tokio = { workspace = true }
 serde = { workspace = true }
 alacritty_terminal = { workspace = true }
 portable-pty = { workspace = true }
+vmux_core = { path = "../vmux_core" }
 vmux_terminal = { path = "../vmux_terminal" }

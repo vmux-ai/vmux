@@ -1,3 +1,6 @@
+pub mod process_id;
+pub use process_id::ProcessId;
+
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]

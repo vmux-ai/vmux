@@ -8976,7 +8976,9 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "moonshine-save",
+ "rkyv",
  "serde",
+ "uuid",
 ]
 
 [[package]]
@@ -9109,6 +9111,7 @@ dependencies = [
  "serde",
  "tokio",
  "uuid",
+ "vmux_core",
  "vmux_terminal",
 ]
 
