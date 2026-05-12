@@ -219,23 +219,25 @@ impl Plugin for TerminalInputPlugin {
 }
 
 fn add_terminal_update_systems(app: &mut App) -> &mut App {
-    app.add_systems(
-        Update,
-        spawn_layout_requested_content.after(crate::layout::stack::StackCommandSet),
-    )
-    .add_systems(
-        Update,
-        (
-            try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
-            poll_service_messages
-                .in_set(WriteAppCommands)
-                .in_set(ServiceMessageSet),
-            flush_pending_terminal_input,
-            handle_terminal_copy_mode_command.in_set(crate::command::ReadAppCommands),
-            sync_terminal_theme,
+    app.add_message::<ProcessExitedEvent>()
+        .add_systems(Update, respawn_shell_on_vibe_exit)
+        .add_systems(
+            Update,
+            spawn_layout_requested_content.after(crate::layout::stack::StackCommandSet),
         )
-            .chain(),
-    )
+        .add_systems(
+            Update,
+            (
+                try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
+                poll_service_messages
+                    .in_set(WriteAppCommands)
+                    .in_set(ServiceMessageSet),
+                flush_pending_terminal_input,
+                handle_terminal_copy_mode_command.in_set(crate::command::ReadAppCommands),
+                sync_terminal_theme,
+            )
+                .chain(),
+        )
 }
 
 fn spawn_layout_requested_content(
@@ -688,7 +690,14 @@ fn try_connect_service(
     }
 }
 
-/// Send CreateProcess / AttachProcess for newly spawned terminals.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PollServiceWriters<'w> {
+    app_commands: MessageWriter<'w, AppCommand>,
+    agent_commands: MessageWriter<'w, crate::agent::AgentCommandRequest>,
+    agent_queries: MessageWriter<'w, crate::agent::AgentQueryRequest>,
+    process_exited: MessageWriter<'w, ProcessExitedEvent>,
+}
+
 fn poll_service_messages(
     pending_create: Query<
         (Entity, &ProcessId, &crate::terminal::launch::TerminalLaunch),
@@ -710,9 +719,7 @@ fn poll_service_messages(
     service: Option<Res<ServiceClient>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
-    mut writer: MessageWriter<AppCommand>,
-    mut agent_writer: MessageWriter<crate::agent::AgentCommandRequest>,
-    mut agent_query_writer: MessageWriter<crate::agent::AgentQueryRequest>,
+    mut writers: PollServiceWriters,
     mut mode_map: ResMut<TerminalModeMap>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
     mut mouse_state: ResMut<MouseSelectionState>,
@@ -857,9 +864,12 @@ fn poll_service_messages(
             }
             ServiceMessage::ProcessExited {
                 process_id,
-                exit_code: _,
+                exit_code,
             } => {
-                // Drop per-process caches so they don't leak across the app lifetime.
+                writers.process_exited.write(ProcessExitedEvent {
+                    process_id,
+                    exit_code,
+                });
                 mode_map.modes.remove(&process_id);
                 set_local_copy_mode(&mut local_copy_mode, process_id, false);
                 mouse_state.per_process.remove(&process_id);
@@ -871,9 +881,11 @@ fn poll_service_messages(
                             .remove::<CloseRequiresConfirmation>();
                         let tab = child_of.get();
                         commands.entity(tab).insert(LastActivatedAt::now());
-                        writer.write(AppCommand::Layout(LayoutCommand::Stack(
-                            StackCommand::Close,
-                        )));
+                        writers
+                            .app_commands
+                            .write(AppCommand::Layout(LayoutCommand::Stack(
+                                StackCommand::Close,
+                            )));
                         break;
                     }
                 }
@@ -944,13 +956,17 @@ fn poll_service_messages(
                 request_id,
                 command,
             } => {
-                agent_writer.write(crate::agent::AgentCommandRequest {
-                    request_id,
-                    command,
-                });
+                writers
+                    .agent_commands
+                    .write(crate::agent::AgentCommandRequest {
+                        request_id,
+                        command,
+                    });
             }
             ServiceMessage::AgentQuery { request_id, query } => {
-                agent_query_writer.write(crate::agent::AgentQueryRequest { request_id, query });
+                writers
+                    .agent_queries
+                    .write(crate::agent::AgentQueryRequest { request_id, query });
             }
             _ => {}
         }
@@ -1987,6 +2003,55 @@ fn copy_mode_key_exits(key: vmux_service::protocol::CopyModeKey) -> bool {
     matches!(key, K::Copy | K::Exit)
 }
 
+#[derive(Message, Debug, Clone)]
+pub(crate) struct ProcessExitedEvent {
+    pub process_id: ProcessId,
+    #[allow(dead_code)]
+    pub exit_code: Option<i32>,
+}
+
+fn respawn_shell_on_vibe_exit_for_entity(
+    commands: &mut Commands,
+    entity: Entity,
+    shell: &str,
+    cwd: String,
+) {
+    let new_id = ProcessId::new();
+    let mut ec = commands.entity(entity);
+    ec.remove::<crate::vibe::session::Vibe>();
+    ec.remove::<crate::vibe::session::SessionId>();
+    ec.remove::<crate::vibe::session::PendingVibeSession>();
+    ec.insert(new_id);
+    ec.insert(PendingServiceCreate);
+    ec.insert(crate::terminal::launch::TerminalLaunch {
+        command: shell.to_string(),
+        args: vec![],
+        cwd,
+        env: vec![],
+        kind: crate::terminal::launch::TerminalKind::Plain,
+    });
+}
+
+pub(crate) fn respawn_shell_on_vibe_exit(
+    mut commands: Commands,
+    mut exited: MessageReader<ProcessExitedEvent>,
+    q: Query<
+        (Entity, &ProcessId, &crate::terminal::launch::TerminalLaunch),
+        With<crate::vibe::session::Vibe>,
+    >,
+    settings: Res<AppSettings>,
+) {
+    for ev in exited.read() {
+        let Some((entity, _pid, launch)) = q.iter().find(|(_, pid, _)| **pid == ev.process_id)
+        else {
+            continue;
+        };
+        let shell = terminal_shell(&settings);
+        let cwd = launch.cwd.clone();
+        respawn_shell_on_vibe_exit_for_entity(&mut commands, entity, &shell, cwd);
+    }
+}
+
 fn update_local_copy_mode_for_mouse_action(
     local_copy_mode: &mut LocalCopyModeState,
     process_id: ProcessId,
@@ -2524,5 +2589,54 @@ mod tests {
         assert!(app.world().get::<AwaitingProcessCreated>(entity).is_none());
         let stored_process_id = app.world().get::<ProcessId>(entity).unwrap();
         assert_eq!(*stored_process_id, id);
+    }
+
+    #[test]
+    fn respawn_shell_on_vibe_exit_swaps_kind_and_drops_vibe() {
+        use crate::terminal::launch::{TerminalKind, TerminalLaunch};
+
+        let mut app = bevy::prelude::App::new();
+        let original_id = ProcessId::new();
+        let entity = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                original_id,
+                crate::vibe::session::Vibe,
+                crate::vibe::session::SessionId("abc-123".into()),
+                TerminalLaunch {
+                    command: "/usr/local/bin/vibe".into(),
+                    args: vec!["--trust".into()],
+                    cwd: "/work".into(),
+                    env: vec![("VIBE_MCP_SERVERS".into(), "[]".into())],
+                    kind: TerminalKind::Vibe,
+                },
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_cached_with(
+                |In((entity, shell, cwd)): In<(Entity, String, String)>, mut commands: Commands| {
+                    respawn_shell_on_vibe_exit_for_entity(&mut commands, entity, &shell, cwd);
+                },
+                (entity, "/bin/zsh".to_string(), "/work".to_string()),
+            )
+            .unwrap();
+
+        let world = app.world();
+        assert!(world.get::<crate::vibe::session::Vibe>(entity).is_none());
+        assert!(
+            world
+                .get::<crate::vibe::session::SessionId>(entity)
+                .is_none()
+        );
+        let launch = world.get::<TerminalLaunch>(entity).unwrap();
+        assert_eq!(launch.kind, TerminalKind::Plain);
+        assert_eq!(launch.command, "/bin/zsh");
+        assert_eq!(launch.cwd, "/work");
+        assert!(launch.args.is_empty());
+        let new_id = world.get::<ProcessId>(entity).copied().unwrap();
+        assert_ne!(new_id, original_id);
+        assert!(world.get::<PendingServiceCreate>(entity).is_some());
     }
 }
