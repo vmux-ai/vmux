@@ -333,32 +333,28 @@ pub(crate) fn spawn_vibe_into_stack(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
 ) -> Result<(), String> {
-    let shell_cmd = match &session_id {
-        Some(id) => crate::vibe::build_vibe_shell_command_resume(&cwd, id)?,
-        None => crate::vibe::build_vibe_shell_command_fresh(&cwd)?,
-    };
+    let launch = crate::vibe::build_terminal_launch(&cwd, session_id.as_deref())?;
     let terminal = commands
         .spawn((
             Terminal::new_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
             ChildOf(stack),
         ))
         .id();
-    commands.entity(terminal).insert(CefKeyboardTarget);
     commands
         .entity(terminal)
-        .insert(crate::terminal::PendingTerminalInput {
-            data: crate::agent::shell_command_input(&shell_cmd),
-        });
-    let mut entity_cmd = commands.entity(terminal);
-    entity_cmd.insert(crate::vibe::session::Vibe);
+        .insert((CefKeyboardTarget, launch, crate::vibe::session::Vibe));
     if let Some(id) = session_id {
-        entity_cmd.insert(crate::vibe::session::SessionId(id));
+        commands
+            .entity(terminal)
+            .insert(crate::vibe::session::SessionId(id));
     } else {
-        entity_cmd.insert(crate::vibe::session::PendingVibeSession {
-            spawn_time: std::time::SystemTime::now(),
-            cwd,
-            attempts: 0,
-        });
+        commands
+            .entity(terminal)
+            .insert(crate::vibe::session::PendingVibeSession {
+                spawn_time: std::time::SystemTime::now(),
+                cwd,
+                attempts: 0,
+            });
     }
     Ok(())
 }
@@ -400,9 +396,14 @@ impl Terminal {
             .map(|d| d.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        // ProcessId is set to a placeholder here; the actual process is created
-        // in a startup system that sends CreateProcess to the service once the
-        // ServiceClient resource is available.
+        let launch = crate::terminal::launch::TerminalLaunch {
+            command: shell.clone(),
+            args: vec![],
+            cwd: cwd_str.clone(),
+            env: vec![],
+            kind: crate::terminal::launch::TerminalKind::Plain,
+        };
+
         let process_id = ProcessId::new();
 
         (
@@ -411,6 +412,7 @@ impl Terminal {
                 Browser,
                 CloseRequiresConfirmation,
                 process_id,
+                launch,
                 PendingServiceCreate {
                     shell,
                     cwd: cwd_str,

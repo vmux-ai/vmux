@@ -195,24 +195,25 @@ pub(crate) fn spawn_fresh_vibe_tab(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
 ) -> Result<Entity, String> {
-    let shell_cmd = crate::vibe::build_vibe_shell_command_fresh(&cwd)?;
+    let launch = crate::vibe::build_terminal_launch(&cwd, None)?;
     let terminal = spawn_terminal_tab(
         pane,
         Some(&cwd),
-        Some(shell_command_input(&shell_cmd)),
+        None,
         commands,
         meshes,
         webview_mt,
         settings,
     );
-    commands
-        .entity(terminal)
-        .insert(crate::vibe::session::Vibe)
-        .insert(crate::vibe::session::PendingVibeSession {
+    commands.entity(terminal).insert((
+        launch,
+        crate::vibe::session::Vibe,
+        crate::vibe::session::PendingVibeSession {
             spawn_time: std::time::SystemTime::now(),
             cwd,
             attempts: 0,
-        });
+        },
+    ));
     Ok(terminal)
 }
 
@@ -225,20 +226,21 @@ pub(crate) fn spawn_vibe_resume_tab(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
 ) -> Result<Entity, String> {
-    let shell_cmd = crate::vibe::build_vibe_shell_command_resume(&cwd, &session_id)?;
+    let launch = crate::vibe::build_terminal_launch(&cwd, Some(&session_id))?;
     let terminal = spawn_terminal_tab(
         pane,
         Some(&cwd),
-        Some(shell_command_input(&shell_cmd)),
+        None,
         commands,
         meshes,
         webview_mt,
         settings,
     );
-    commands
-        .entity(terminal)
-        .insert(crate::vibe::session::Vibe)
-        .insert(crate::vibe::session::SessionId(session_id));
+    commands.entity(terminal).insert((
+        launch,
+        crate::vibe::session::Vibe,
+        crate::vibe::session::SessionId(session_id),
+    ));
     Ok(terminal)
 }
 
@@ -722,26 +724,32 @@ fn handle_agent_launch_requests(
             warn!("agent launch has no active pane");
             continue;
         };
+        let is_vibe = request.provider_id == crate::vibe::VIBE_NEW_ID
+            || request.provider_id == crate::vibe::VIBE_NEW_STACK_ID;
+        let pending_input = if is_vibe {
+            None
+        } else {
+            Some(shell_command_input(&prepared.command))
+        };
         let terminal = spawn_terminal_tab(
             pane,
             Some(&prepared.cwd),
-            Some(shell_command_input(&prepared.command)),
+            pending_input,
             &mut commands,
             &mut meshes,
             &mut webview_mt,
             &settings,
         );
-        if request.provider_id == crate::vibe::VIBE_NEW_ID
-            || request.provider_id == crate::vibe::VIBE_NEW_STACK_ID
-        {
-            commands
-                .entity(terminal)
-                .insert(crate::vibe::session::Vibe)
-                .insert(crate::vibe::session::PendingVibeSession {
+        if is_vibe && let Ok(launch) = crate::vibe::build_terminal_launch(&prepared.cwd, None) {
+            commands.entity(terminal).insert((
+                launch,
+                crate::vibe::session::Vibe,
+                crate::vibe::session::PendingVibeSession {
                     spawn_time: std::time::SystemTime::now(),
                     cwd: prepared.cwd.clone(),
                     attempts: 0,
-                });
+                },
+            ));
         }
     }
 }
