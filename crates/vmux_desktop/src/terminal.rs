@@ -159,12 +159,21 @@ pub(crate) struct RestartPty {
     pub entity: Entity,
 }
 
-/// Tracks service connection retry state.
 #[derive(Resource)]
 struct ServiceConnectRetry {
-    /// Countdown: stop retrying after this many ticks.
-    remaining_attempts: u32,
     timer: Timer,
+    next_delay_ms: u64,
+    remaining_attempts: u32,
+}
+
+impl ServiceConnectRetry {
+    fn new() -> Self {
+        Self {
+            timer: Timer::from_seconds(0.05, TimerMode::Once),
+            next_delay_ms: 50,
+            remaining_attempts: 6,
+        }
+    }
 }
 
 pub(crate) struct TerminalInputPlugin;
@@ -176,15 +185,12 @@ impl Plugin for TerminalInputPlugin {
     fn build(&self, app: &mut App) {
         let service_wake = service_wake_callback(app);
         if let Some(handle) = ServiceHandle::connect_with_wake(service_wake.clone()) {
-            eprintln!("vmux: connected to existing service");
+            tracing::info!("connected to existing service");
             handle.send(ClientMessage::SubscribeAgentCommands);
             app.insert_resource(ServiceClient(handle));
         } else {
             ensure_service_started();
-            app.insert_resource(ServiceConnectRetry {
-                remaining_attempts: 60,
-                timer: Timer::from_seconds(0.05, TimerMode::Repeating),
-            });
+            app.insert_resource(ServiceConnectRetry::new());
         }
         app.insert_resource(ServiceWakeCallback(service_wake));
 
@@ -599,48 +605,55 @@ fn missing_process_id(message: &str) -> Option<ProcessId> {
         .and_then(|id| id.parse().ok())
 }
 
-/// Spawn the service subprocess if not already running.
+fn vmux_service_binary() -> std::io::Result<std::path::PathBuf> {
+    let mut p = std::env::current_exe()?;
+    p.pop();
+    p.push("vmux_service");
+    Ok(p)
+}
+
 fn ensure_service_started() {
     if ServiceHandle::service_running() {
-        eprintln!("vmux: service already running");
+        tracing::info!("service already running");
         return;
     }
-    let exe = match std::env::current_exe() {
-        Ok(e) => e,
+    let binary = match vmux_service_binary() {
+        Ok(b) => b,
         Err(e) => {
-            eprintln!("vmux: failed to get current exe: {e}");
+            tracing::error!(error = %e, "could not locate vmux_service binary");
             return;
         }
     };
-    eprintln!("vmux: starting service: {} service", exe.display());
-
-    // Redirect service stderr to a log file instead of piping.
-    // Piped stderr with nobody reading causes SIGPIPE on macOS,
-    // which can kill the service process.
-    let log_dir = vmux_service::service_dir();
-    let _ = std::fs::create_dir_all(&log_dir);
-    let stderr_cfg = match std::fs::File::create(log_dir.join("service.log")) {
-        Ok(f) => std::process::Stdio::from(f),
-        Err(_) => std::process::Stdio::null(),
-    };
-
-    match std::process::Command::new(&exe)
-        .arg("service")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(stderr_cfg)
-        .spawn()
+    #[cfg(target_os = "macos")]
     {
-        Ok(_child) => {
-            eprintln!("vmux: service subprocess spawned");
+        let profile = vmux_service::current_profile();
+        if let Err(e) = vmux_service::launchd::ensure_running(profile, &binary) {
+            tracing::error!(error = %e, "launchd ensure_running failed");
         }
-        Err(e) => {
-            eprintln!("vmux: failed to spawn service: {e}");
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use std::os::unix::process::CommandExt;
+        let log_dir = vmux_service::service_dir();
+        let _ = std::fs::create_dir_all(&log_dir);
+        let stderr_cfg = std::fs::File::create(vmux_service::log_path())
+            .map(std::process::Stdio::from)
+            .unwrap_or(std::process::Stdio::null());
+        unsafe {
+            std::process::Command::new(&binary)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(stderr_cfg)
+                .pre_exec(|| {
+                    libc::setsid();
+                    Ok(())
+                })
+                .spawn()
+                .ok();
         }
     }
 }
 
-/// Bevy system: retry connecting to service until it succeeds or we give up.
 fn try_connect_service(
     mut retry: ResMut<ServiceConnectRetry>,
     time: Res<Time>,
@@ -654,35 +667,44 @@ fn try_connect_service(
 
     retry.remaining_attempts = retry.remaining_attempts.saturating_sub(1);
 
-    // Check if socket is ready
     let sock = vmux_service::socket_path();
     if !sock.exists() {
         if retry.remaining_attempts == 0 {
-            eprintln!("vmux: service socket never appeared — giving up");
+            tracing::warn!("service socket never appeared — giving up");
             commands.remove_resource::<ServiceConnectRetry>();
+        } else {
+            retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
+            retry.timer = Timer::new(
+                std::time::Duration::from_millis(retry.next_delay_ms),
+                TimerMode::Once,
+            );
         }
         return;
     }
 
-    // Try to connect
     match ServiceHandle::connect_with_wake(wake.0.clone()) {
         Some(handle) => {
-            eprintln!("vmux: connected to service after retry");
+            tracing::info!("connected to service after retry");
             handle.send(ClientMessage::SubscribeAgentCommands);
             commands.insert_resource(ServiceClient(handle));
             commands.remove_resource::<ServiceConnectRetry>();
         }
         None => {
             if retry.remaining_attempts == 0 {
-                eprintln!("vmux: failed to connect to service after all retries");
-                // Check service log for clues
-                let log_path = vmux_service::service_dir().join("service.log");
+                tracing::error!("failed to connect to service after all retries");
+                let log_path = vmux_service::log_path();
                 if let Ok(log) = std::fs::read_to_string(&log_path)
                     && !log.is_empty()
                 {
-                    eprintln!("vmux: service log:\n{log}");
+                    tracing::error!(service_log = %log, "service log contents");
                 }
                 commands.remove_resource::<ServiceConnectRetry>();
+            } else {
+                retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
+                retry.timer = Timer::new(
+                    std::time::Duration::from_millis(retry.next_delay_ms),
+                    TimerMode::Once,
+                );
             }
         }
     }
