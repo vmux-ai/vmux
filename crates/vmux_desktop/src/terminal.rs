@@ -660,11 +660,31 @@ fn ensure_service_started() {
     }
 }
 
+fn broadcast_service_unavailable(
+    terminals: &Query<Entity, With<Terminal>>,
+    browsers: &NonSend<Browsers>,
+    commands: &mut Commands,
+    message: String,
+) {
+    let evt = ServiceUnavailableEvent { message };
+    for entity in terminals.iter() {
+        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                SERVICE_UNAVAILABLE_EVENT,
+                &evt,
+            ));
+        }
+    }
+}
+
 fn try_connect_service(
     mut retry: ResMut<ServiceConnectRetry>,
     time: Res<Time>,
     mut commands: Commands,
     wake: Res<ServiceWakeCallback>,
+    terminal_webviews: Query<Entity, With<Terminal>>,
+    browsers: NonSend<Browsers>,
 ) {
     retry.timer.tick(time.delta());
     if !retry.timer.just_finished() {
@@ -678,6 +698,12 @@ fn try_connect_service(
         if retry.remaining_attempts == 0 {
             tracing::warn!("service socket never appeared — giving up");
             commands.remove_resource::<ServiceConnectRetry>();
+            broadcast_service_unavailable(
+                &terminal_webviews,
+                &browsers,
+                &mut commands,
+                "vmux service unavailable \u{2014} run `vmux service logs` for details.".into(),
+            );
         } else {
             retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
             retry.timer = Timer::new(
@@ -694,6 +720,12 @@ fn try_connect_service(
             handle.send(ClientMessage::SubscribeAgentCommands);
             commands.insert_resource(ServiceClient(handle));
             commands.remove_resource::<ServiceConnectRetry>();
+            broadcast_service_unavailable(
+                &terminal_webviews,
+                &browsers,
+                &mut commands,
+                String::new(),
+            );
         }
         None => {
             if retry.remaining_attempts == 0 {
@@ -705,6 +737,12 @@ fn try_connect_service(
                     tracing::error!(service_log = %log, "service log contents");
                 }
                 commands.remove_resource::<ServiceConnectRetry>();
+                broadcast_service_unavailable(
+                    &terminal_webviews,
+                    &browsers,
+                    &mut commands,
+                    "vmux service unavailable \u{2014} run `vmux service logs` for details.".into(),
+                );
             } else {
                 retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
                 retry.timer = Timer::new(
