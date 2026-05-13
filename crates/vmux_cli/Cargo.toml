@@ -13,6 +13,7 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 tokio = { workspace = true }
 vmux_mcp = { path = "../vmux_mcp" }
+vmux_service = { path = "../vmux_service" }
 
 [dev-dependencies]
 assert_cmd = "2"

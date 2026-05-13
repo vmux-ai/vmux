@@ -45,7 +45,7 @@ pub(crate) struct AgentProvider {
 
 pub(crate) struct PreparedAgentLaunch {
     pub(crate) cwd: PathBuf,
-    pub(crate) command: String,
+    pub(crate) launch: crate::terminal::launch::TerminalLaunch,
 }
 
 pub(crate) struct AgentCommandEntry {
@@ -187,6 +187,62 @@ pub(crate) fn spawn_terminal_tab(
     terminal
 }
 
+pub(crate) fn spawn_fresh_vibe_tab(
+    pane: Entity,
+    cwd: PathBuf,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> Result<Entity, String> {
+    let launch = crate::vibe::build_terminal_launch(&cwd, None)?;
+    let terminal = spawn_terminal_tab(
+        pane,
+        Some(&cwd),
+        None,
+        commands,
+        meshes,
+        webview_mt,
+        settings,
+    );
+    commands.entity(terminal).insert((
+        launch,
+        crate::vibe::session::Vibe,
+        crate::vibe::session::PendingVibeSession {
+            spawn_time: std::time::SystemTime::now(),
+            cwd,
+        },
+    ));
+    Ok(terminal)
+}
+
+pub(crate) fn spawn_vibe_resume_tab(
+    pane: Entity,
+    cwd: PathBuf,
+    session_id: String,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> Result<Entity, String> {
+    let launch = crate::vibe::build_terminal_launch(&cwd, Some(&session_id))?;
+    let terminal = spawn_terminal_tab(
+        pane,
+        Some(&cwd),
+        None,
+        commands,
+        meshes,
+        webview_mt,
+        settings,
+    );
+    commands.entity(terminal).insert((
+        launch,
+        crate::vibe::session::Vibe,
+        crate::vibe::session::SessionId(session_id),
+    ));
+    Ok(terminal)
+}
+
 pub(crate) fn spawn_browser_tab(
     pane: Entity,
     url: &str,
@@ -252,7 +308,7 @@ pub(crate) fn spawn_processes_tab(
         ))
         .id();
     commands.entity(tab).insert(PageMetadata {
-        url: vmux_process::event::PROCESSES_WEBVIEW_URL.to_string(),
+        url: vmux_service::webview::event::PROCESSES_WEBVIEW_URL.to_string(),
         title: "Background Services".to_string(),
         ..default()
     });
@@ -270,12 +326,32 @@ fn spawn_vmux_tab(
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
+    pid_to_entity: Option<&crate::terminal::pid::PidToEntity>,
+    vibe_to_entity: Option<&crate::vibe::session::VibeSessionToEntity>,
+    child_of_q: &Query<&ChildOf>,
 ) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| format!("invalid vmux URL '{url}': {e}"))?;
     let host = parsed.host_str().unwrap_or("");
 
     match host {
         "terminal" => {
+            let path = parsed.path().trim_start_matches('/');
+            if !path.is_empty() {
+                match path.parse::<u32>() {
+                    Ok(pid) => {
+                        if let Some(map) = pid_to_entity
+                            && let Some(&entity) = map.0.get(&pid)
+                        {
+                            crate::terminal::pid::focus_pane_entity(entity, commands, child_of_q);
+                            return Ok(());
+                        }
+                        bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
+                    }
+                    Err(_) => {
+                        return Err(format!("malformed terminal URL '{url}'"));
+                    }
+                }
+            }
             let cwd_param = parsed
                 .query_pairs()
                 .find(|(k, _)| k == "cwd")
@@ -303,6 +379,34 @@ fn spawn_vmux_tab(
         "services" => {
             spawn_processes_tab(pane, commands, meshes, webview_mt);
             Ok(())
+        }
+        "vibe" => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+            let path = parsed.path().trim_start_matches('/');
+            if path.is_empty() {
+                if let Err(e) =
+                    spawn_fresh_vibe_tab(pane, cwd, commands, meshes, webview_mt, settings)
+                {
+                    bevy::log::warn!("spawn_fresh_vibe_tab failed: {e}; falling back to terminal");
+                    spawn_terminal_tab(pane, None, None, commands, meshes, webview_mt, settings);
+                }
+                Ok(())
+            } else {
+                let session_id = path.to_string();
+                if let Some(map) = vibe_to_entity
+                    && let Some(&entity) = map.0.get(&session_id)
+                {
+                    crate::terminal::pid::focus_pane_entity(entity, commands, child_of_q);
+                    return Ok(());
+                }
+                if let Err(e) = spawn_vibe_resume_tab(
+                    pane, cwd, session_id, commands, meshes, webview_mt, settings,
+                ) {
+                    bevy::log::warn!("spawn_vibe_resume_tab failed: {e}; falling back to terminal");
+                    spawn_terminal_tab(pane, None, None, commands, meshes, webview_mt, settings);
+                }
+                Ok(())
+            }
         }
         other => Err(format!("unknown vmux URL host '{other}' in '{url}'")),
     }
@@ -362,6 +466,9 @@ fn handle_agent_commands(
     pane_children: Query<&Children, With<Pane>>,
     tab_filter: Query<(), With<crate::layout::stack::Stack>>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
+    child_of_q: Query<&ChildOf>,
+    pid_to_entity: Option<Res<crate::terminal::pid::PidToEntity>>,
+    vibe_to_entity: Option<Res<crate::vibe::session::VibeSessionToEntity>>,
     settings: Res<AppSettings>,
     service: Option<Res<crate::terminal::ServiceClient>>,
     mut commands: Commands,
@@ -459,6 +566,9 @@ fn handle_agent_commands(
                             &mut meshes,
                             &mut webview_mt,
                             &settings,
+                            pid_to_entity.as_deref(),
+                            vibe_to_entity.as_deref(),
+                            &child_of_q,
                         ) {
                             Ok(()) => AgentCommandResult::Ok,
                             Err(message) => {
@@ -550,6 +660,9 @@ fn handle_agent_commands(
                                     &mut meshes,
                                     &mut webview_mt,
                                     &settings,
+                                    pid_to_entity.as_deref(),
+                                    vibe_to_entity.as_deref(),
+                                    &child_of_q,
                                 ) {
                                     Ok(()) => AgentCommandResult::Ok,
                                     Err(message) => AgentCommandResult::Error(format!(
@@ -610,15 +723,23 @@ fn handle_agent_launch_requests(
             warn!("agent launch has no active pane");
             continue;
         };
-        spawn_terminal_tab(
+        let terminal = spawn_terminal_tab(
             pane,
             Some(&prepared.cwd),
-            Some(shell_command_input(&prepared.command)),
+            None,
             &mut commands,
             &mut meshes,
             &mut webview_mt,
             &settings,
         );
+        commands.entity(terminal).insert((
+            prepared.launch,
+            crate::vibe::session::Vibe,
+            crate::vibe::session::PendingVibeSession {
+                spawn_time: std::time::SystemTime::now(),
+                cwd: prepared.cwd.clone(),
+            },
+        ));
     }
 }
 
@@ -653,6 +774,7 @@ mod tests {
             shortcuts: ShortcutSettings::default(),
             terminal: None,
             auto_update: false,
+            startup_url: None,
         }
     }
 
@@ -669,7 +791,13 @@ mod tests {
     fn fake_prepare(cwd: &std::path::Path) -> Result<PreparedAgentLaunch, String> {
         Ok(PreparedAgentLaunch {
             cwd: cwd.to_path_buf(),
-            command: "echo agent".to_string(),
+            launch: crate::terminal::launch::TerminalLaunch {
+                command: "echo".to_string(),
+                args: vec!["agent".to_string()],
+                cwd: cwd.to_string_lossy().to_string(),
+                env: vec![],
+                kind: crate::terminal::launch::TerminalKind::Vibe,
+            },
         })
     }
 
@@ -757,15 +885,17 @@ mod tests {
 
         app.update();
 
-        let mut terminals = app
-            .world_mut()
-            .query::<(&Terminal, &PendingTerminalInput, &ChildOf)>();
-        let rows = terminals
+        let mut terminals = app.world_mut().query::<(
+            &Terminal,
+            &crate::terminal::launch::TerminalLaunch,
+            &ChildOf,
+        )>();
+        let rows: Vec<_> = terminals
             .iter(app.world())
-            .map(|(_, input, child_of)| (input.data.clone(), child_of.get()))
-            .collect::<Vec<_>>();
+            .map(|(_, launch, child_of)| (launch.command.clone(), child_of.get()))
+            .collect();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].0, b"echo agent\r".to_vec());
+        assert_eq!(rows[0].0, "echo");
 
         let tab = rows[0].1;
         assert!(

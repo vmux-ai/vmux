@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use serde::Serialize;
 
-use crate::agent::{AgentProvider, AgentProviders, PreparedAgentLaunch};
+use crate::agent::{AgentProvider, AgentProviders};
+
+pub(crate) mod session;
 
 pub(crate) const VIBE_NEW_ID: &str = "vibe_new";
 pub(crate) const VIBE_NEW_STACK_ID: &str = "vibe_new_stack";
@@ -30,7 +32,41 @@ struct VibeMcpServerEnv {
 
 impl Plugin for VibePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<AgentProviders>();
+        app.init_resource::<AgentProviders>()
+            .init_resource::<session::VibeSessionToEntity>()
+            .init_resource::<session::VibeSessionDirty>()
+            .add_systems(Startup, session::start_vibe_session_watcher)
+            .add_systems(
+                Update,
+                (
+                    session::track_session_id_inserts,
+                    session::track_session_id_removals,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                (
+                    session::mark_vibe_session_dirty_on_change,
+                    session::mark_vibe_session_dirty_on_pending_added,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    session::discover_pending_vibe_sessions_on_change,
+                    session::detect_vibe_session_exit_on_change,
+                    session::clear_vibe_session_dirty,
+                )
+                    .chain()
+                    .after(session::mark_vibe_session_dirty_on_change)
+                    .after(session::mark_vibe_session_dirty_on_pending_added)
+                    .run_if(session::vibe_session_dirty_run_condition),
+            )
+            .add_systems(
+                Update,
+                session::format_vibe_url.after(session::track_session_id_inserts),
+            );
         let mut providers = app.world_mut().resource_mut::<AgentProviders>();
         providers.register(AgentProvider {
             id: VIBE_NEW_ID,
@@ -55,17 +91,12 @@ pub(crate) fn vibe_available() -> bool {
     find_executable("vibe").is_some()
 }
 
-fn prepare_launch(cwd: &Path) -> Result<PreparedAgentLaunch, String> {
-    Ok(PreparedAgentLaunch {
+fn prepare_launch(cwd: &Path) -> Result<crate::agent::PreparedAgentLaunch, String> {
+    let launch = build_terminal_launch(cwd, None)?;
+    Ok(crate::agent::PreparedAgentLaunch {
         cwd: cwd.to_path_buf(),
-        command: build_launch_command(cwd)?,
+        launch,
     })
-}
-
-fn build_launch_command(cwd: &Path) -> Result<String, String> {
-    let vibe = find_executable("vibe").ok_or_else(|| "vibe executable not found".to_string())?;
-    let mcp_servers = mcp_servers_env_value(cwd)?;
-    build_bash_launch_command(&mcp_servers, &vibe, cwd)
 }
 
 pub(crate) fn find_executable(command: &str) -> Option<PathBuf> {
@@ -174,40 +205,32 @@ fn vmux_sidecar_path() -> Result<PathBuf, String> {
     Ok(dir.join("vmux"))
 }
 
-fn shell_quote(value: &str) -> Result<String, String> {
-    if value.contains('\n') || value.contains('\r') {
-        return Err("cannot launch Vibe from a path containing a newline".to_string());
-    }
-    if !value.contains('\'') {
-        return Ok(format!("'{value}'"));
-    }
-    if value.contains('`') {
-        return Err(
-            "cannot launch Vibe from a path containing both single quotes and backticks"
-                .to_string(),
-        );
-    }
-    Ok(format!(
-        "\"{}\"",
-        value
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('$', "\\$")
-    ))
+pub(crate) fn build_terminal_launch(
+    cwd: &Path,
+    session_id: Option<&str>,
+) -> Result<crate::terminal::launch::TerminalLaunch, String> {
+    let vibe = find_executable("vibe").ok_or_else(|| "vibe executable not found".to_string())?;
+    build_terminal_launch_inner(cwd, session_id, &vibe.to_string_lossy())
 }
 
-fn shell_quote_path(path: &Path) -> Result<String, String> {
-    shell_quote(&path.to_string_lossy())
-}
-
-fn build_bash_launch_command(mcp_servers: &str, vibe: &Path, cwd: &Path) -> Result<String, String> {
-    Ok(format!(
-        "bash -lc {} bash {} {} {}",
-        shell_quote("cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" exec \"$3\" --trust")?,
-        shell_quote_path(cwd)?,
-        shell_quote(mcp_servers)?,
-        shell_quote_path(vibe)?
-    ))
+fn build_terminal_launch_inner(
+    cwd: &Path,
+    session_id: Option<&str>,
+    vibe_path: &str,
+) -> Result<crate::terminal::launch::TerminalLaunch, String> {
+    let mcp_servers = mcp_servers_env_value(cwd)?;
+    let mut args = vec!["--trust".to_string()];
+    if let Some(sid) = session_id {
+        args.push("--resume".to_string());
+        args.push(sid.to_string());
+    }
+    Ok(crate::terminal::launch::TerminalLaunch {
+        command: vibe_path.to_string(),
+        args,
+        cwd: cwd.to_string_lossy().to_string(),
+        env: vec![("VIBE_MCP_SERVERS".to_string(), mcp_servers)],
+        kind: crate::terminal::launch::TerminalKind::Vibe,
+    })
 }
 
 #[cfg(test)]
@@ -274,21 +297,6 @@ mod tests {
     }
 
     #[test]
-    fn launch_command_cds_and_passes_mcp_servers_to_vibe() {
-        let command = build_bash_launch_command(
-            r#"[{"name":"vmux","transport":"stdio","command":"target/debug/vmux","args":["mcp"]}]"#,
-            Path::new("/Users/test/.local/bin/vibe"),
-            Path::new("/tmp/work tree"),
-        )
-        .unwrap();
-
-        assert_eq!(
-            command,
-            "bash -lc 'cd \"$1\" && VIBE_MCP_SERVERS=\"$2\" exec \"$3\" --trust' bash '/tmp/work tree' '[{\"name\":\"vmux\",\"transport\":\"stdio\",\"command\":\"target/debug/vmux\",\"args\":[\"mcp\"]}]' '/Users/test/.local/bin/vibe'"
-        );
-    }
-
-    #[test]
     fn mcp_config_falls_back_to_cargo_run_when_sidecar_is_missing() {
         let temp = std::env::temp_dir().join(format!("vmux-vibe-cargo-{}", std::process::id()));
         let workspace = temp.join("workspace");
@@ -323,5 +331,40 @@ mod tests {
             providers.get(VIBE_NEW_STACK_ID).unwrap().name,
             "Vibe New Stack"
         );
+    }
+
+    #[test]
+    fn build_terminal_launch_fresh_has_trust_arg_and_mcp_env() {
+        let temp = std::env::temp_dir().join(format!("vmux-build-launch-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(temp.join("Cargo.toml"), b"[workspace]\n").unwrap();
+
+        let launch = build_terminal_launch_inner(&temp, None, "/usr/local/bin/vibe")
+            .expect("build_terminal_launch_inner should succeed for fresh launch");
+        let _ = std::fs::remove_dir_all(&temp);
+
+        assert_eq!(launch.command, "/usr/local/bin/vibe");
+        assert_eq!(launch.args, vec!["--trust".to_string()]);
+        assert!(
+            launch
+                .env
+                .iter()
+                .any(|(k, v)| k == "VIBE_MCP_SERVERS" && v.contains("\"name\":\"vmux\""))
+        );
+        assert_eq!(launch.cwd, temp.to_string_lossy());
+        assert_eq!(launch.kind, crate::terminal::launch::TerminalKind::Vibe);
+    }
+
+    #[test]
+    fn build_terminal_launch_resume_includes_session_id() {
+        let temp = std::env::temp_dir().join(format!("vmux-build-resume-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(temp.join("Cargo.toml"), b"[workspace]\n").unwrap();
+
+        let launch = build_terminal_launch_inner(&temp, Some("ae724a54"), "/usr/local/bin/vibe")
+            .expect("build_terminal_launch_inner should succeed for resume");
+        let _ = std::fs::remove_dir_all(&temp);
+
+        assert_eq!(launch.args, vec!["--trust", "--resume", "ae724a54"]);
     }
 }

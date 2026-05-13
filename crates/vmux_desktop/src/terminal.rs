@@ -27,6 +27,9 @@ use vmux_service::{
 use vmux_terminal::event::*;
 use vmux_webview_app::UiReady;
 
+pub(crate) mod launch;
+pub(crate) mod pid;
+
 /// Maximum interval between consecutive mouse-down events that count as a
 /// multi-click (double, triple).
 const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
@@ -78,12 +81,6 @@ pub(crate) fn confirm_quit_dialog(count: usize) -> bool {
         .set_buttons(MessageButtons::OkCancel)
         .show();
     matches!(result, MessageDialogResult::Ok)
-}
-
-/// Associates a terminal entity with a service-managed process.
-#[derive(Component)]
-pub(crate) struct ServiceProcessHandle {
-    pub process_id: ProcessId,
 }
 
 /// Bevy resource wrapping the service connection.
@@ -162,12 +159,21 @@ pub(crate) struct RestartPty {
     pub entity: Entity,
 }
 
-/// Tracks service connection retry state.
 #[derive(Resource)]
 struct ServiceConnectRetry {
-    /// Countdown: stop retrying after this many ticks.
-    remaining_attempts: u32,
     timer: Timer,
+    next_delay_ms: u64,
+    remaining_attempts: u32,
+}
+
+impl ServiceConnectRetry {
+    fn new() -> Self {
+        Self {
+            timer: Timer::from_seconds(0.05, TimerMode::Once),
+            next_delay_ms: 50,
+            remaining_attempts: 6,
+        }
+    }
 }
 
 pub(crate) struct TerminalInputPlugin;
@@ -179,21 +185,27 @@ impl Plugin for TerminalInputPlugin {
     fn build(&self, app: &mut App) {
         let service_wake = service_wake_callback(app);
         if let Some(handle) = ServiceHandle::connect_with_wake(service_wake.clone()) {
-            eprintln!("vmux: connected to existing service");
+            tracing::info!("connected to existing service");
             handle.send(ClientMessage::SubscribeAgentCommands);
             app.insert_resource(ServiceClient(handle));
         } else {
             ensure_service_started();
-            app.insert_resource(ServiceConnectRetry {
-                remaining_attempts: 60,
-                timer: Timer::from_seconds(0.05, TimerMode::Repeating),
-            });
+            app.insert_resource(ServiceConnectRetry::new());
         }
         app.insert_resource(ServiceWakeCallback(service_wake));
 
         app.init_resource::<MouseSelectionState>()
             .init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
+            .init_resource::<pid::PidToEntity>()
+            .add_systems(
+                Update,
+                (pid::track_pid_inserts, pid::track_pid_removals).chain(),
+            )
+            .add_systems(
+                Update,
+                pid::format_terminal_url.after(pid::track_pid_inserts),
+            )
             .add_plugins(BinJsEmitEventPlugin::<TermResizeEvent>::default())
             .add_plugins(BinJsEmitEventPlugin::<TermMouseEvent>::default())
             .add_systems(
@@ -213,23 +225,25 @@ impl Plugin for TerminalInputPlugin {
 }
 
 fn add_terminal_update_systems(app: &mut App) -> &mut App {
-    app.add_systems(
-        Update,
-        spawn_layout_requested_content.after(crate::layout::stack::StackCommandSet),
-    )
-    .add_systems(
-        Update,
-        (
-            try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
-            poll_service_messages
-                .in_set(WriteAppCommands)
-                .in_set(ServiceMessageSet),
-            flush_pending_terminal_input,
-            handle_terminal_copy_mode_command.in_set(crate::command::ReadAppCommands),
-            sync_terminal_theme,
+    app.add_message::<ProcessExitedEvent>()
+        .add_systems(Update, respawn_shell_on_vibe_exit)
+        .add_systems(
+            Update,
+            spawn_layout_requested_content.after(crate::layout::stack::StackCommandSet),
         )
-            .chain(),
-    )
+        .add_systems(
+            Update,
+            (
+                try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
+                poll_service_messages
+                    .in_set(WriteAppCommands)
+                    .in_set(ServiceMessageSet),
+                flush_pending_terminal_input,
+                handle_terminal_copy_mode_command.in_set(crate::command::ReadAppCommands),
+                sync_terminal_theme,
+            )
+                .chain(),
+        )
 }
 
 fn spawn_layout_requested_content(
@@ -240,12 +254,12 @@ fn spawn_layout_requested_content(
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for request in reader.read() {
-        match *request {
+        match request {
             LayoutSpawnRequest::Terminal { stack } => {
                 let terminal = commands
                     .spawn((
                         Terminal::new(&mut meshes, &mut webview_mt, &settings),
-                        ChildOf(stack),
+                        ChildOf(*stack),
                     ))
                     .id();
                 commands.entity(terminal).insert(CefKeyboardTarget);
@@ -253,11 +267,103 @@ fn spawn_layout_requested_content(
             LayoutSpawnRequest::ProcessesMonitor { stack } => {
                 commands.spawn((
                     ProcessesMonitor::new(&mut meshes, &mut webview_mt),
-                    ChildOf(stack),
+                    ChildOf(*stack),
                 ));
+            }
+            LayoutSpawnRequest::OpenUrl { stack, url } => {
+                spawn_url_into_stack(
+                    *stack,
+                    url,
+                    &mut commands,
+                    &mut meshes,
+                    &mut webview_mt,
+                    &settings,
+                );
             }
         }
     }
+}
+
+fn spawn_url_into_stack(
+    stack: Entity,
+    url: &str,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) {
+    if url.starts_with(vmux_terminal::event::TERMINAL_WEBVIEW_URL) {
+        let terminal = commands
+            .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
+            .id();
+        commands.entity(terminal).insert(CefKeyboardTarget);
+    } else if url.starts_with(crate::vibe::session::VIBE_WEBVIEW_URL) {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+        let path = url
+            .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
+            .unwrap_or("");
+        let result = if path.is_empty() {
+            spawn_vibe_into_stack(stack, cwd, None, commands, meshes, webview_mt, settings)
+        } else {
+            spawn_vibe_into_stack(
+                stack,
+                cwd,
+                Some(path.to_string()),
+                commands,
+                meshes,
+                webview_mt,
+                settings,
+            )
+        };
+        if let Err(e) = result {
+            bevy::log::warn!("vibe spawn failed: {e}; falling back to terminal");
+            let terminal = commands
+                .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
+                .id();
+            commands.entity(terminal).insert(CefKeyboardTarget);
+        }
+    } else if url.starts_with(vmux_service::webview::event::PROCESSES_WEBVIEW_URL) {
+        commands.spawn((ProcessesMonitor::new(meshes, webview_mt), ChildOf(stack)));
+    } else {
+        let terminal = commands
+            .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
+            .id();
+        commands.entity(terminal).insert(CefKeyboardTarget);
+    }
+}
+
+pub(crate) fn spawn_vibe_into_stack(
+    stack: Entity,
+    cwd: std::path::PathBuf,
+    session_id: Option<String>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> Result<(), String> {
+    let launch = crate::vibe::build_terminal_launch(&cwd, session_id.as_deref())?;
+    let terminal = commands
+        .spawn((
+            Terminal::new_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
+            ChildOf(stack),
+        ))
+        .id();
+    commands
+        .entity(terminal)
+        .insert((CefKeyboardTarget, launch, crate::vibe::session::Vibe));
+    if let Some(id) = session_id {
+        commands
+            .entity(terminal)
+            .insert(crate::vibe::session::SessionId(id));
+    } else {
+        commands
+            .entity(terminal)
+            .insert(crate::vibe::session::PendingVibeSession {
+                spawn_time: std::time::SystemTime::now(),
+                cwd,
+            });
+    }
+    Ok(())
 }
 
 fn service_wake_callback(app: &App) -> Option<ServiceWake> {
@@ -297,9 +403,14 @@ impl Terminal {
             .map(|d| d.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        // ProcessId is set to a placeholder here; the actual process is created
-        // in a startup system that sends CreateProcess to the service once the
-        // ServiceClient resource is available.
+        let launch = crate::terminal::launch::TerminalLaunch {
+            command: shell,
+            args: vec![],
+            cwd: cwd_str,
+            env: vec![],
+            kind: crate::terminal::launch::TerminalKind::Plain,
+        };
+
         let process_id = ProcessId::new();
 
         (
@@ -307,14 +418,12 @@ impl Terminal {
                 Self,
                 Browser,
                 CloseRequiresConfirmation,
-                ServiceProcessHandle { process_id },
-                PendingServiceCreate {
-                    shell,
-                    cwd: cwd_str,
-                },
+                process_id,
+                launch,
+                PendingServiceCreate,
                 PageMetadata {
                     title: format!("Terminal ({})", &process_id.to_string()[..8]),
-                    url: format!("{}{}", TERMINAL_WEBVIEW_URL, process_id),
+                    url: TERMINAL_WEBVIEW_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },
@@ -353,7 +462,6 @@ impl Terminal {
     }
 
     /// Create a terminal bundle that reattaches to an existing service-managed process.
-    #[allow(dead_code)] // Used by persistence.rs for process reconnect
     pub(crate) fn reattach(
         meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -364,11 +472,11 @@ impl Terminal {
                 Self,
                 Browser,
                 CloseRequiresConfirmation,
-                ServiceProcessHandle { process_id },
+                process_id,
                 PendingServiceAttach,
                 PageMetadata {
                     title: format!("Terminal ({})", &process_id.to_string()[..8]),
-                    url: format!("{}{}", TERMINAL_WEBVIEW_URL, process_id),
+                    url: TERMINAL_WEBVIEW_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },
@@ -407,12 +515,8 @@ impl Terminal {
     }
 }
 
-/// Temporary component: terminal needs a CreateProcess sent to service.
 #[derive(Component)]
-struct PendingServiceCreate {
-    shell: String,
-    cwd: String,
-}
+pub(crate) struct PendingServiceCreate;
 
 /// Temporary component: terminal needs an AttachProcess sent to service.
 #[derive(Component)]
@@ -427,13 +531,29 @@ pub(crate) struct PendingTerminalInput {
 #[derive(Component)]
 struct AwaitingProcessCreated;
 
+pub(crate) fn apply_process_created(
+    commands: &mut Commands,
+    entity: Entity,
+    process_id: ProcessId,
+    process_pid: u32,
+) {
+    commands
+        .entity(entity)
+        .insert(process_id)
+        .insert(pid::Pid(process_pid))
+        .remove::<AwaitingProcessCreated>();
+}
+
 fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
 }
 
 struct MissingTerminalRestart {
     entity: Entity,
+    new_id: ProcessId,
     command: ClientMessage,
+    cwd: String,
+    is_vibe: bool,
 }
 
 fn terminal_shell(settings: &AppSettings) -> String {
@@ -446,21 +566,36 @@ fn terminal_shell(settings: &AppSettings) -> String {
 
 fn missing_terminal_restart(
     process_id: ProcessId,
-    terminals: impl IntoIterator<Item = (Entity, ProcessId)>,
-    settings: &AppSettings,
+    terminals: impl IntoIterator<
+        Item = (
+            Entity,
+            ProcessId,
+            crate::terminal::launch::TerminalLaunch,
+            bool,
+        ),
+    >,
 ) -> Option<MissingTerminalRestart> {
     terminals
         .into_iter()
-        .find(|(_, terminal_process_id)| *terminal_process_id == process_id)
-        .map(|(entity, _)| MissingTerminalRestart {
-            entity,
-            command: ClientMessage::CreateProcess {
-                shell: terminal_shell(settings),
-                cwd: String::new(),
-                env: Vec::new(),
-                cols: 80,
-                rows: 24,
-            },
+        .find(|(_, terminal_pid, _, _)| *terminal_pid == process_id)
+        .map(|(entity, _, launch, is_vibe)| {
+            let new_id = ProcessId::new();
+            let cwd = launch.cwd.clone();
+            MissingTerminalRestart {
+                entity,
+                new_id,
+                command: ClientMessage::CreateProcess {
+                    process_id: new_id,
+                    command: launch.command,
+                    args: launch.args,
+                    cwd: launch.cwd,
+                    env: launch.env,
+                    cols: 80,
+                    rows: 24,
+                },
+                cwd,
+                is_vibe,
+            }
         })
 }
 
@@ -470,53 +605,79 @@ fn missing_process_id(message: &str) -> Option<ProcessId> {
         .and_then(|id| id.parse().ok())
 }
 
-/// Spawn the service subprocess if not already running.
 fn ensure_service_started() {
     if ServiceHandle::service_running() {
-        eprintln!("vmux: service already running");
+        tracing::info!("service already running");
         return;
     }
-    let exe = match std::env::current_exe() {
-        Ok(e) => e,
+    let binary = match vmux_service::daemon_binary_path() {
+        Ok(b) => b,
         Err(e) => {
-            eprintln!("vmux: failed to get current exe: {e}");
+            tracing::error!(error = %e, "could not locate vmux_service binary");
             return;
         }
     };
-    eprintln!("vmux: starting service: {} service", exe.display());
-
-    // Redirect service stderr to a log file instead of piping.
-    // Piped stderr with nobody reading causes SIGPIPE on macOS,
-    // which can kill the service process.
-    let log_dir = vmux_service::service_dir();
-    let _ = std::fs::create_dir_all(&log_dir);
-    let stderr_cfg = match std::fs::File::create(log_dir.join("service.log")) {
-        Ok(f) => std::process::Stdio::from(f),
-        Err(_) => std::process::Stdio::null(),
-    };
-
-    match std::process::Command::new(&exe)
-        .arg("service")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(stderr_cfg)
-        .spawn()
+    #[cfg(target_os = "macos")]
     {
-        Ok(_child) => {
-            eprintln!("vmux: service subprocess spawned");
+        let profile = vmux_service::current_profile();
+        if let Err(e) = vmux_service::launchd::ensure_running(profile, &binary) {
+            tracing::error!(error = %e, "launchd ensure_running failed");
         }
-        Err(e) => {
-            eprintln!("vmux: failed to spawn service: {e}");
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        use std::os::unix::process::CommandExt;
+        let log_dir = vmux_service::service_dir();
+        let _ = std::fs::create_dir_all(&log_dir);
+        let stderr_cfg = match std::fs::File::create(vmux_service::log_path()) {
+            Ok(f) => std::process::Stdio::from(f),
+            Err(e) => {
+                tracing::warn!(error = %e, "could not create service log; stderr will be discarded");
+                std::process::Stdio::null()
+            }
+        };
+        let spawn_result = unsafe {
+            std::process::Command::new(&binary)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(stderr_cfg)
+                .pre_exec(|| {
+                    libc::setsid();
+                    Ok(())
+                })
+                .spawn()
+        };
+        if let Err(e) = spawn_result {
+            tracing::error!(error = %e, "failed to spawn vmux_service (non-macOS fallback)");
         }
     }
 }
 
-/// Bevy system: retry connecting to service until it succeeds or we give up.
+fn broadcast_service_unavailable(
+    terminals: &Query<Entity, With<Terminal>>,
+    browsers: &NonSend<Browsers>,
+    commands: &mut Commands,
+    message: String,
+) {
+    let evt = ServiceUnavailableEvent { message };
+    for entity in terminals.iter() {
+        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                SERVICE_UNAVAILABLE_EVENT,
+                &evt,
+            ));
+        }
+    }
+}
+
 fn try_connect_service(
     mut retry: ResMut<ServiceConnectRetry>,
     time: Res<Time>,
     mut commands: Commands,
     wake: Res<ServiceWakeCallback>,
+    terminal_webviews: Query<Entity, With<Terminal>>,
+    browsers: NonSend<Browsers>,
 ) {
     retry.timer.tick(time.delta());
     if !retry.timer.just_finished() {
@@ -525,80 +686,115 @@ fn try_connect_service(
 
     retry.remaining_attempts = retry.remaining_attempts.saturating_sub(1);
 
-    // Check if socket is ready
     let sock = vmux_service::socket_path();
     if !sock.exists() {
         if retry.remaining_attempts == 0 {
-            eprintln!("vmux: service socket never appeared — giving up");
+            tracing::warn!("service socket never appeared — giving up");
             commands.remove_resource::<ServiceConnectRetry>();
+            broadcast_service_unavailable(
+                &terminal_webviews,
+                &browsers,
+                &mut commands,
+                "vmux service unavailable \u{2014} run `vmux service logs` for details.".into(),
+            );
+        } else {
+            retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
+            retry.timer = Timer::new(
+                std::time::Duration::from_millis(retry.next_delay_ms),
+                TimerMode::Once,
+            );
         }
         return;
     }
 
-    // Try to connect
     match ServiceHandle::connect_with_wake(wake.0.clone()) {
         Some(handle) => {
-            eprintln!("vmux: connected to service after retry");
+            tracing::info!("connected to service after retry");
             handle.send(ClientMessage::SubscribeAgentCommands);
             commands.insert_resource(ServiceClient(handle));
             commands.remove_resource::<ServiceConnectRetry>();
+            broadcast_service_unavailable(
+                &terminal_webviews,
+                &browsers,
+                &mut commands,
+                String::new(),
+            );
         }
         None => {
             if retry.remaining_attempts == 0 {
-                eprintln!("vmux: failed to connect to service after all retries");
-                // Check service log for clues
-                let log_path = vmux_service::service_dir().join("service.log");
+                tracing::error!("failed to connect to service after all retries");
+                let log_path = vmux_service::log_path();
                 if let Ok(log) = std::fs::read_to_string(&log_path)
                     && !log.is_empty()
                 {
-                    eprintln!("vmux: service log:\n{log}");
+                    tracing::error!(service_log = %log, "service log contents");
                 }
                 commands.remove_resource::<ServiceConnectRetry>();
+                broadcast_service_unavailable(
+                    &terminal_webviews,
+                    &browsers,
+                    &mut commands,
+                    "vmux service unavailable \u{2014} run `vmux service logs` for details.".into(),
+                );
+            } else {
+                retry.next_delay_ms = (retry.next_delay_ms * 2).min(1600);
+                retry.timer = Timer::new(
+                    std::time::Duration::from_millis(retry.next_delay_ms),
+                    TimerMode::Once,
+                );
             }
         }
     }
 }
 
-/// Send CreateProcess / AttachProcess for newly spawned terminals.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PollServiceWriters<'w> {
+    app_commands: MessageWriter<'w, AppCommand>,
+    agent_commands: MessageWriter<'w, crate::agent::AgentCommandRequest>,
+    agent_queries: MessageWriter<'w, crate::agent::AgentQueryRequest>,
+    process_exited: MessageWriter<'w, ProcessExitedEvent>,
+}
+
 fn poll_service_messages(
-    pending_create: Query<(Entity, &ServiceProcessHandle, &PendingServiceCreate), With<Terminal>>,
-    pending_attach: Query<
-        (Entity, &ServiceProcessHandle),
-        (With<Terminal>, With<PendingServiceAttach>),
+    pending_create: Query<
+        (Entity, &ProcessId, &crate::terminal::launch::TerminalLaunch),
+        (With<Terminal>, With<PendingServiceCreate>),
     >,
+    pending_attach: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingServiceAttach>)>,
     awaiting_create: Query<
-        (Entity, &ServiceProcessHandle, &ChildOf),
+        (Entity, &ProcessId, &ChildOf),
         (With<Terminal>, With<AwaitingProcessCreated>),
     >,
     terminals: Query<
-        (Entity, &ServiceProcessHandle, &ChildOf),
+        (Entity, &ProcessId, &ChildOf),
         (
             With<Terminal>,
             Without<ProcessExited>,
             Without<AwaitingProcessCreated>,
         ),
     >,
-    mut meta_q: Query<&mut PageMetadata>,
     service: Option<Res<ServiceClient>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
-    mut writer: MessageWriter<AppCommand>,
-    mut agent_writer: MessageWriter<crate::agent::AgentCommandRequest>,
-    mut agent_query_writer: MessageWriter<crate::agent::AgentQueryRequest>,
+    mut writers: PollServiceWriters,
     mut mode_map: ResMut<TerminalModeMap>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
     mut mouse_state: ResMut<MouseSelectionState>,
     settings: Res<AppSettings>,
+    launches: Query<&crate::terminal::launch::TerminalLaunch>,
+    vibes: Query<(), With<crate::vibe::session::Vibe>>,
 ) {
     let Some(service) = service else { return };
 
     // Handle pending creates — send CreateProcess, wait for ProcessCreated
     // response which will carry the real process ID.
-    for (entity, _handle, pending) in &pending_create {
+    for (entity, process_id, launch) in &pending_create {
         service.0.send(ClientMessage::CreateProcess {
-            shell: pending.shell.clone(),
-            cwd: pending.cwd.clone(),
-            env: Vec::new(),
+            process_id: *process_id,
+            command: launch.command.clone(),
+            args: launch.args.clone(),
+            cwd: launch.cwd.clone(),
+            env: launch.env.clone(),
             cols: 80,
             rows: 24,
         });
@@ -609,41 +805,36 @@ fn poll_service_messages(
     }
 
     // Handle pending attaches
-    for (entity, handle) in &pending_attach {
-        service.0.send(ClientMessage::AttachProcess {
-            process_id: handle.process_id,
-        });
-        service.0.send(ClientMessage::RequestSnapshot {
-            process_id: handle.process_id,
-        });
+    for (entity, pid) in &pending_attach {
+        service
+            .0
+            .send(ClientMessage::AttachProcess { process_id: *pid });
+        service
+            .0
+            .send(ClientMessage::RequestSnapshot { process_id: *pid });
         commands.entity(entity).remove::<PendingServiceAttach>();
     }
 
     // Drain service messages and dispatch
-    let mut matched_entities = Vec::new();
     let mut restarted_missing_processes = Vec::new();
     for msg in service.0.drain() {
         match msg {
-            ServiceMessage::ProcessCreated { process_id } => {
-                // Match the first unmatched terminal awaiting a ProcessCreated response.
-                if let Some((entity, _, _)) = (&awaiting_create)
+            ServiceMessage::ProcessCreated { process_id, pid } => {
+                let entity = (&awaiting_create)
                     .into_iter()
-                    .find(|(e, _, _)| !matched_entities.contains(e))
-                {
-                    matched_entities.push(entity);
-                    // Attach to receive viewport patches
+                    .find(|(_, pid_c, _)| **pid_c == process_id)
+                    .map(|(e, _, _)| e);
+                if let Some(entity) = entity {
                     service.0.send(ClientMessage::AttachProcess { process_id });
-                    // Update handle with real service-managed process ID
-                    commands
-                        .entity(entity)
-                        .insert(ServiceProcessHandle { process_id })
-                        .remove::<AwaitingProcessCreated>();
-                    // Update PageMetadata URL so persistence saves the real ID
-                    if let Ok(mut meta) = meta_q.get_mut(entity) {
-                        meta.url = format!("{}{}", TERMINAL_WEBVIEW_URL, process_id);
-                        meta.title = format!("Terminal ({})", &process_id.to_string()[..8]);
-                    }
+                    apply_process_created(&mut commands, entity, process_id, pid);
+                } else {
+                    bevy::log::warn!(
+                        "ProcessCreated for unknown process_id {process_id}; dropping"
+                    );
                 }
+            }
+            ServiceMessage::ProcessCreateFailed { reason } => {
+                bevy::log::warn!("service failed to create process: {reason}");
             }
             ServiceMessage::ViewportPatch {
                 process_id,
@@ -655,8 +846,8 @@ fn poll_service_messages(
                 copy_mode,
                 full,
             } => {
-                for (entity, handle, _) in &terminals {
-                    if handle.process_id == process_id {
+                for (entity, pid, _) in &terminals {
+                    if *pid == process_id {
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
                         }
@@ -678,6 +869,22 @@ fn poll_service_messages(
                     }
                 }
             }
+            ServiceMessage::ProcessTitle { process_id, title } => {
+                for (entity, pid, _) in &terminals {
+                    if *pid == process_id {
+                        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                            continue;
+                        }
+                        let evt = TermTitleEvent { title };
+                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                            entity,
+                            TERM_TITLE_EVENT,
+                            &evt,
+                        ));
+                        break;
+                    }
+                }
+            }
             ServiceMessage::Snapshot {
                 process_id,
                 lines,
@@ -685,8 +892,8 @@ fn poll_service_messages(
                 cols,
                 rows,
             } => {
-                for (entity, handle, _) in &terminals {
-                    if handle.process_id == process_id {
+                for (entity, pid, _) in &terminals {
+                    if *pid == process_id {
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
                         }
@@ -714,23 +921,28 @@ fn poll_service_messages(
             }
             ServiceMessage::ProcessExited {
                 process_id,
-                exit_code: _,
+                exit_code,
             } => {
-                // Drop per-process caches so they don't leak across the app lifetime.
+                writers.process_exited.write(ProcessExitedEvent {
+                    process_id,
+                    exit_code,
+                });
                 mode_map.modes.remove(&process_id);
                 set_local_copy_mode(&mut local_copy_mode, process_id, false);
                 mouse_state.per_process.remove(&process_id);
-                for (entity, handle, child_of) in &terminals {
-                    if handle.process_id == process_id {
+                for (entity, pid, child_of) in &terminals {
+                    if *pid == process_id {
                         commands
                             .entity(entity)
                             .insert(ProcessExited)
                             .remove::<CloseRequiresConfirmation>();
                         let tab = child_of.get();
                         commands.entity(tab).insert(LastActivatedAt::now());
-                        writer.write(AppCommand::Layout(LayoutCommand::Stack(
-                            StackCommand::Close,
-                        )));
+                        writers
+                            .app_commands
+                            .write(AppCommand::Layout(LayoutCommand::Stack(
+                                StackCommand::Close,
+                            )));
                         break;
                     }
                 }
@@ -740,20 +952,38 @@ fn poll_service_messages(
                     .insert_resource(crate::processes_monitor::ServiceProcessList { processes });
             }
             ServiceMessage::Error { message } => {
-                if let Some(process_id) = missing_process_id(&message)
-                    && !restarted_missing_processes.contains(&process_id)
+                if let Some(stale_pid) = missing_process_id(&message)
+                    && !restarted_missing_processes.contains(&stale_pid)
                 {
-                    let terminals = terminals
-                        .iter()
-                        .map(|(entity, handle, _)| (entity, handle.process_id));
-                    if let Some(restart) =
-                        missing_terminal_restart(process_id, terminals, &settings)
-                    {
-                        restarted_missing_processes.push(process_id);
+                    let candidates = terminals.iter().map(|(entity, terminal_pid, _)| {
+                        let launch = launches.get(entity).cloned().unwrap_or_else(|_| {
+                            crate::terminal::launch::TerminalLaunch {
+                                command: terminal_shell(&settings),
+                                args: vec![],
+                                cwd: String::new(),
+                                env: vec![],
+                                kind: crate::terminal::launch::TerminalKind::Plain,
+                            }
+                        });
+                        let is_vibe = vibes.contains(entity);
+                        (entity, *terminal_pid, launch, is_vibe)
+                    });
+                    if let Some(restart) = missing_terminal_restart(stale_pid, candidates) {
+                        restarted_missing_processes.push(stale_pid);
+                        let cwd = restart.cwd.clone();
+                        let is_vibe = restart.is_vibe;
+                        let new_id = restart.new_id;
+                        let entity = restart.entity;
                         service.0.send(restart.command);
-                        commands
-                            .entity(restart.entity)
-                            .insert(AwaitingProcessCreated);
+                        let mut ec = commands.entity(entity);
+                        ec.insert(new_id);
+                        ec.insert(AwaitingProcessCreated);
+                        if is_vibe {
+                            ec.insert(crate::vibe::session::PendingVibeSession {
+                                spawn_time: std::time::SystemTime::now(),
+                                cwd: std::path::PathBuf::from(&cwd),
+                            });
+                        }
                     }
                 }
                 warn!("Service error: {message}");
@@ -782,13 +1012,17 @@ fn poll_service_messages(
                 request_id,
                 command,
             } => {
-                agent_writer.write(crate::agent::AgentCommandRequest {
-                    request_id,
-                    command,
-                });
+                writers
+                    .agent_commands
+                    .write(crate::agent::AgentCommandRequest {
+                        request_id,
+                        command,
+                    });
             }
             ServiceMessage::AgentQuery { request_id, query } => {
-                agent_query_writer.write(crate::agent::AgentQueryRequest { request_id, query });
+                writers
+                    .agent_queries
+                    .write(crate::agent::AgentQueryRequest { request_id, query });
             }
             _ => {}
         }
@@ -797,7 +1031,7 @@ fn poll_service_messages(
 
 fn flush_pending_terminal_input(
     pending: Query<
-        (Entity, &ServiceProcessHandle, &PendingTerminalInput),
+        (Entity, &ProcessId, &PendingTerminalInput),
         (
             With<Terminal>,
             Without<PendingServiceCreate>,
@@ -809,9 +1043,9 @@ fn flush_pending_terminal_input(
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };
-    for (entity, handle, input) in &pending {
+    for (entity, pid, input) in &pending {
         service.0.send(ClientMessage::ProcessInput {
-            process_id: handle.process_id,
+            process_id: *pid,
             data: input.data.clone(),
         });
         commands.entity(entity).remove::<PendingTerminalInput>();
@@ -859,9 +1093,9 @@ fn is_non_character_key(key: KeyCode) -> bool {
 /// must not broadcast them.
 fn handle_terminal_keyboard(
     mut er: MessageReader<KeyboardInput>,
-    targeted_terminals: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
+    targeted_terminals: Query<&ProcessId, (With<Terminal>, With<CefKeyboardTarget>)>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
-    terminals: Query<(&ServiceProcessHandle, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<crate::layout::stack::FocusedStack>,
     mode: Res<crate::scene::InteractionMode>,
     input: Res<ButtonInput<KeyCode>>,
@@ -871,12 +1105,12 @@ fn handle_terminal_keyboard(
     mut local_copy_mode: ResMut<LocalCopyModeState>,
 ) {
     let target_processes = resolve_terminal_input_targets(
-        targeted_terminals.iter().map(|handle| handle.process_id),
+        targeted_terminals.iter().copied(),
         !keyboard_targets.is_empty(),
         focus.stack,
         terminals
             .iter()
-            .map(|(handle, child_of)| (child_of.get(), handle.process_id)),
+            .map(|(pid, child_of)| (child_of.get(), *pid)),
         *mode,
     );
 
@@ -1305,20 +1539,20 @@ fn logical_key_to_bytes(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
 /// Handle mouse wheel scrolling — sends scroll input to service.
 fn handle_terminal_scroll(
     mut er: MessageReader<MouseWheel>,
-    targeted_terminals: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
+    targeted_terminals: Query<&ProcessId, (With<Terminal>, With<CefKeyboardTarget>)>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
-    terminals: Query<(&ServiceProcessHandle, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<crate::layout::stack::FocusedStack>,
     mode: Res<crate::scene::InteractionMode>,
     service: Option<Res<ServiceClient>>,
 ) {
     let target_processes = resolve_terminal_input_targets(
-        targeted_terminals.iter().map(|handle| handle.process_id),
+        targeted_terminals.iter().copied(),
         !keyboard_targets.is_empty(),
         focus.stack,
         terminals
             .iter()
-            .map(|(handle, child_of)| (child_of.get(), handle.process_id)),
+            .map(|(pid, child_of)| (child_of.get(), *pid)),
         *mode,
     );
 
@@ -1564,7 +1798,7 @@ fn send_mouse_action(service: &ServiceHandle, process_id: ProcessId, action: Mou
 /// Anything else is forwarded as SGR mouse-report bytes to the PTY.
 fn on_term_mouse(
     trigger: On<BinReceive<TermMouseEvent>>,
-    q: Query<&ServiceProcessHandle, With<Terminal>>,
+    q: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
     mode_map: Res<TerminalModeMap>,
     mut state: ResMut<MouseSelectionState>,
@@ -1573,8 +1807,8 @@ fn on_term_mouse(
     let entity = trigger.event_target();
     let event = &trigger.payload;
     let Some(service) = service else { return };
-    let Ok(handle) = q.get(entity) else { return };
-    let process_id = handle.process_id;
+    let Ok(pid) = q.get(entity) else { return };
+    let process_id = *pid;
 
     let mouse_capture = mode_map
         .modes
@@ -1591,16 +1825,15 @@ fn on_term_mouse(
 /// Mark dirty when webview becomes ready so initial viewport is sent.
 fn on_term_ready(
     trigger: On<Add, UiReady>,
-    q: Query<&ServiceProcessHandle, With<Terminal>>,
+    q: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
 ) {
     let entity = trigger.event_target();
     let Some(service) = service else { return };
-    if let Ok(handle) = q.get(entity) {
-        // Request a full snapshot when webview is ready
-        service.0.send(ClientMessage::RequestSnapshot {
-            process_id: handle.process_id,
-        });
+    if let Ok(pid) = q.get(entity) {
+        service
+            .0
+            .send(ClientMessage::RequestSnapshot { process_id: *pid });
     }
 }
 
@@ -1608,7 +1841,7 @@ fn on_term_ready(
 fn on_term_resize(
     trigger: On<BinReceive<TermResizeEvent>>,
     webview_q: Query<&WebviewSize, With<Terminal>>,
-    handle_q: Query<&ServiceProcessHandle, With<Terminal>>,
+    pid_q: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
 ) {
     let entity = trigger.event_target();
@@ -1618,7 +1851,7 @@ fn on_term_resize(
     let Ok(webview_size) = webview_q.get(entity) else {
         return;
     };
-    let Ok(handle) = handle_q.get(entity) else {
+    let Ok(pid) = pid_q.get(entity) else {
         return;
     };
 
@@ -1641,7 +1874,7 @@ fn on_term_resize(
     let rows = (vh / event.char_height).floor().max(1.0) as u16;
 
     service.0.send(ClientMessage::ResizeProcess {
-        process_id: handle.process_id,
+        process_id: *pid,
         cols,
         rows,
     });
@@ -1717,21 +1950,19 @@ fn sync_terminal_theme(
 
 fn on_restart_pty(
     trigger: On<RestartPty>,
-    mut q: Query<(&mut ServiceProcessHandle, &mut PageMetadata)>,
+    mut q: Query<(&mut ProcessId, &mut PageMetadata)>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
 ) {
     let entity = trigger.event().entity;
     let Some(service) = service else { return };
-    let Ok((mut handle, mut meta)) = q.get_mut(entity) else {
+    let Ok((mut pid, mut meta)) = q.get_mut(entity) else {
         return;
     };
 
-    // Kill old process
-
-    service.0.send(ClientMessage::KillProcess {
-        process_id: handle.process_id,
-    });
+    service
+        .0
+        .send(ClientMessage::KillProcess { process_id: *pid });
 
     let shell = settings
         .terminal
@@ -1742,7 +1973,9 @@ fn on_restart_pty(
     // Create new process
     let new_id = ProcessId::new();
     service.0.send(ClientMessage::CreateProcess {
-        shell,
+        process_id: new_id,
+        command: shell,
+        args: vec![],
         cwd: String::new(),
         env: Vec::new(),
         cols: 80,
@@ -1752,8 +1985,8 @@ fn on_restart_pty(
         .0
         .send(ClientMessage::AttachProcess { process_id: new_id });
 
-    handle.process_id = new_id;
-    meta.url = format!("{}{}", TERMINAL_WEBVIEW_URL, new_id);
+    *pid = new_id;
+    meta.url = TERMINAL_WEBVIEW_URL.to_string();
     meta.title = format!("Terminal ({})", &new_id.to_string()[..8]);
 }
 
@@ -1761,9 +1994,9 @@ fn on_restart_pty(
 /// visual/copy mode for the currently focused terminal process.
 fn handle_terminal_copy_mode_command(
     mut er: MessageReader<AppCommand>,
-    targeted_terminals: Query<&ServiceProcessHandle, (With<Terminal>, With<CefKeyboardTarget>)>,
+    targeted_terminals: Query<&ProcessId, (With<Terminal>, With<CefKeyboardTarget>)>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
-    terminals: Query<(&ServiceProcessHandle, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<crate::layout::stack::FocusedStack>,
     mode: Res<crate::scene::InteractionMode>,
     service: Option<Res<ServiceClient>>,
@@ -1774,12 +2007,12 @@ fn handle_terminal_copy_mode_command(
         return;
     };
     let target_processes = resolve_terminal_input_targets(
-        targeted_terminals.iter().map(|handle| handle.process_id),
+        targeted_terminals.iter().copied(),
         !keyboard_targets.is_empty(),
         focus.stack,
         terminals
             .iter()
-            .map(|(handle, child_of)| (child_of.get(), handle.process_id)),
+            .map(|(pid, child_of)| (child_of.get(), *pid)),
         *mode,
     );
     let active_process_id = target_processes.first().copied();
@@ -1826,6 +2059,55 @@ fn copy_mode_key_exits(key: vmux_service::protocol::CopyModeKey) -> bool {
     matches!(key, K::Copy | K::Exit)
 }
 
+#[derive(Message, Debug, Clone)]
+pub(crate) struct ProcessExitedEvent {
+    pub process_id: ProcessId,
+    #[allow(dead_code)]
+    pub exit_code: Option<i32>,
+}
+
+fn respawn_shell_on_vibe_exit_for_entity(
+    commands: &mut Commands,
+    entity: Entity,
+    shell: &str,
+    cwd: String,
+) {
+    let new_id = ProcessId::new();
+    let mut ec = commands.entity(entity);
+    ec.remove::<crate::vibe::session::Vibe>();
+    ec.remove::<crate::vibe::session::SessionId>();
+    ec.remove::<crate::vibe::session::PendingVibeSession>();
+    ec.insert(new_id);
+    ec.insert(PendingServiceCreate);
+    ec.insert(crate::terminal::launch::TerminalLaunch {
+        command: shell.to_string(),
+        args: vec![],
+        cwd,
+        env: vec![],
+        kind: crate::terminal::launch::TerminalKind::Plain,
+    });
+}
+
+pub(crate) fn respawn_shell_on_vibe_exit(
+    mut commands: Commands,
+    mut exited: MessageReader<ProcessExitedEvent>,
+    q: Query<
+        (Entity, &ProcessId, &crate::terminal::launch::TerminalLaunch),
+        With<crate::vibe::session::Vibe>,
+    >,
+    settings: Res<AppSettings>,
+) {
+    for ev in exited.read() {
+        let Some((entity, _pid, launch)) = q.iter().find(|(_, pid, _)| **pid == ev.process_id)
+        else {
+            continue;
+        };
+        let shell = terminal_shell(&settings);
+        let cwd = launch.cwd.clone();
+        respawn_shell_on_vibe_exit_for_entity(&mut commands, entity, &shell, cwd);
+    }
+}
+
 fn update_local_copy_mode_for_mouse_action(
     local_copy_mode: &mut LocalCopyModeState,
     process_id: ProcessId,
@@ -1845,63 +2127,45 @@ fn update_local_copy_mode_for_mouse_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{
-        BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings, ShortcutSettings,
-        SideSheetSettings, WindowSettings,
-    };
     use bevy::ecs::schedule::Schedules;
 
     fn process_id(byte: u8) -> ProcessId {
         ProcessId([byte; 16])
     }
 
-    fn test_settings() -> AppSettings {
-        AppSettings {
-            browser: BrowserSettings {
-                startup_url: "about:blank".to_string(),
-            },
-            layout: LayoutSettings {
-                window: WindowSettings {
-                    padding: 0.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
-                },
-                pane: PaneSettings {
-                    gap: 0.0,
-                    radius: 0.0,
-                },
-                side_sheet: SideSheetSettings::default(),
-                focus_ring: FocusRingSettings::default(),
-            },
-            shortcuts: ShortcutSettings::default(),
-            terminal: None,
-            auto_update: false,
-        }
-    }
-
     #[test]
     fn missing_service_process_restarts_matching_terminal() {
         let missing = process_id(7);
         let target = Entity::from_bits(1);
+        let plain_launch = || crate::terminal::launch::TerminalLaunch {
+            command: default_shell(),
+            args: vec![],
+            cwd: String::new(),
+            env: vec![],
+            kind: crate::terminal::launch::TerminalKind::Plain,
+        };
         let restart = missing_terminal_restart(
             missing,
-            [(Entity::from_bits(2), process_id(8)), (target, missing)],
-            &test_settings(),
+            [
+                (Entity::from_bits(2), process_id(8), plain_launch(), false),
+                (target, missing, plain_launch(), false),
+            ],
         )
         .unwrap();
 
         assert_eq!(restart.entity, target);
+        assert!(!restart.is_vibe);
         assert!(matches!(
             restart.command,
             ClientMessage::CreateProcess {
-                shell,
+                process_id: _,
+                command,
+                args,
                 cwd,
                 env,
                 cols: 80,
                 rows: 24
-            } if shell == default_shell() && cwd.is_empty() && env.is_empty()
+            } if command == default_shell() && args.is_empty() && cwd.is_empty() && env.is_empty()
         ));
     }
 
@@ -2265,5 +2529,170 @@ mod tests {
         }
 
         assert!(!local_copy_mode.active.contains(&process_id));
+    }
+
+    #[test]
+    fn process_created_matches_by_id_not_by_position() {
+        use crate::terminal::launch::{TerminalKind, TerminalLaunch};
+
+        let mut app = bevy::prelude::App::new();
+        let id1 = ProcessId::new();
+        let id2 = ProcessId::new();
+        let id3 = ProcessId::new();
+        let e1 = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                id1,
+                PendingServiceCreate,
+                AwaitingProcessCreated,
+                TerminalLaunch {
+                    command: "/bin/sh".into(),
+                    args: vec![],
+                    cwd: "/tmp/1".into(),
+                    env: vec![],
+                    kind: TerminalKind::Plain,
+                },
+            ))
+            .id();
+        let e2 = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                id2,
+                AwaitingProcessCreated,
+                TerminalLaunch {
+                    command: "/bin/sh".into(),
+                    args: vec![],
+                    cwd: "/tmp/2".into(),
+                    env: vec![],
+                    kind: TerminalKind::Plain,
+                },
+            ))
+            .id();
+        let e3 = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                id3,
+                AwaitingProcessCreated,
+                TerminalLaunch {
+                    command: "/bin/sh".into(),
+                    args: vec![],
+                    cwd: "/tmp/3".into(),
+                    env: vec![],
+                    kind: TerminalKind::Plain,
+                },
+            ))
+            .id();
+
+        for (process_id, pid) in [(id3, 333u32), (id1, 111), (id2, 222)] {
+            let entity = app
+                .world_mut()
+                .query_filtered::<(bevy::prelude::Entity, &ProcessId), With<AwaitingProcessCreated>>(
+                )
+                .iter(app.world())
+                .find(|(_, pid_c)| **pid_c == process_id)
+                .map(|(e, _)| e)
+                .expect("matching entity for process_id");
+            app.world_mut()
+                .run_system_cached_with(
+                    |In((entity, process_id, pid)): In<(Entity, ProcessId, u32)>,
+                     mut commands: Commands| {
+                        apply_process_created(&mut commands, entity, process_id, pid);
+                    },
+                    (entity, process_id, pid),
+                )
+                .unwrap();
+        }
+
+        let world = app.world();
+        assert_eq!(
+            world.get::<crate::terminal::pid::Pid>(e1).map(|p| p.0),
+            Some(111)
+        );
+        assert_eq!(
+            world.get::<crate::terminal::pid::Pid>(e2).map(|p| p.0),
+            Some(222)
+        );
+        assert_eq!(
+            world.get::<crate::terminal::pid::Pid>(e3).map(|p| p.0),
+            Some(333)
+        );
+    }
+
+    #[test]
+    fn apply_process_created_stamps_pid_and_process_id() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let entity = app
+            .world_mut()
+            .spawn((Terminal, AwaitingProcessCreated))
+            .id();
+        let id = process_id(7);
+        let pid_val = 4242u32;
+        app.world_mut()
+            .run_system_cached_with(
+                |In((entity, id, pid_val)): In<(Entity, ProcessId, u32)>,
+                 mut commands: Commands| {
+                    apply_process_created(&mut commands, entity, id, pid_val);
+                },
+                (entity, id, pid_val),
+            )
+            .unwrap();
+        let stored_pid = app.world().get::<pid::Pid>(entity).unwrap();
+        assert_eq!(stored_pid.0, pid_val);
+        assert!(app.world().get::<AwaitingProcessCreated>(entity).is_none());
+        let stored_process_id = app.world().get::<ProcessId>(entity).unwrap();
+        assert_eq!(*stored_process_id, id);
+    }
+
+    #[test]
+    fn respawn_shell_on_vibe_exit_swaps_kind_and_drops_vibe() {
+        use crate::terminal::launch::{TerminalKind, TerminalLaunch};
+
+        let mut app = bevy::prelude::App::new();
+        let original_id = ProcessId::new();
+        let entity = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                original_id,
+                crate::vibe::session::Vibe,
+                crate::vibe::session::SessionId("abc-123".into()),
+                TerminalLaunch {
+                    command: "/usr/local/bin/vibe".into(),
+                    args: vec!["--trust".into()],
+                    cwd: "/work".into(),
+                    env: vec![("VIBE_MCP_SERVERS".into(), "[]".into())],
+                    kind: TerminalKind::Vibe,
+                },
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_cached_with(
+                |In((entity, shell, cwd)): In<(Entity, String, String)>, mut commands: Commands| {
+                    respawn_shell_on_vibe_exit_for_entity(&mut commands, entity, &shell, cwd);
+                },
+                (entity, "/bin/zsh".to_string(), "/work".to_string()),
+            )
+            .unwrap();
+
+        let world = app.world();
+        assert!(world.get::<crate::vibe::session::Vibe>(entity).is_none());
+        assert!(
+            world
+                .get::<crate::vibe::session::SessionId>(entity)
+                .is_none()
+        );
+        let launch = world.get::<TerminalLaunch>(entity).unwrap();
+        assert_eq!(launch.kind, TerminalKind::Plain);
+        assert_eq!(launch.command, "/bin/zsh");
+        assert_eq!(launch.cwd, "/work");
+        assert!(launch.args.is_empty());
+        let new_id = world.get::<ProcessId>(entity).copied().unwrap();
+        assert_ne!(new_id, original_id);
+        assert!(world.get::<PendingServiceCreate>(entity).is_some());
     }
 }

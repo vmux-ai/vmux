@@ -67,7 +67,7 @@ impl Plugin for WindowPlugin {
             Startup,
             (
                 spawn_glass_panes,
-                crate::stack::open_command_bar_if_no_stacks,
+                crate::stack::open_startup_url_if_no_stacks,
                 fit_window_to_screen,
             )
                 .chain()
@@ -85,7 +85,7 @@ impl Plugin for WindowPlugin {
             Update,
             (
                 maximize_window_to_screen.run_if(not(resource_exists::<ScreenMaximized>)),
-                crate::stack::open_command_bar_if_no_stacks,
+                crate::stack::open_startup_url_if_no_stacks,
             ),
         )
         .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));

@@ -6,17 +6,17 @@ use crate::{
         tab::Tab,
     },
     processes_monitor::ServiceProcessList,
-    terminal::{ServiceClient, ServiceProcessHandle, Terminal},
+    terminal::{ServiceClient, Terminal},
 };
 use bevy::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_service::protocol::{
-    AgentQuery, AgentQueryResult, ClientMessage, FocusedInfo, PaneInfo, SpaceInfo, StateSnapshot,
-    TabInfo, TerminalInfo,
+    AgentQuery, AgentQueryResult, ClientMessage, FocusedInfo, PaneInfo, ProcessId, SpaceInfo,
+    StateSnapshot, TabInfo, TerminalInfo,
 };
 
 type TerminalQuery<'world, 'state> =
-    Query<'world, 'state, (Entity, &'static ServiceProcessHandle), With<Terminal>>;
+    Query<'world, 'state, (Entity, &'static ProcessId), With<Terminal>>;
 type StackQuery<'world, 'state> =
     Query<'world, 'state, (Entity, &'static Children, Option<&'static PageMetadata>), With<Stack>>;
 type PaneQuery<'world, 'state> =
@@ -85,11 +85,8 @@ fn collect_terminals(
 ) -> Vec<TerminalInfo> {
     terminals
         .iter()
-        .map(|(entity, handle)| {
-            let info = process_list
-                .processes
-                .iter()
-                .find(|p| p.id == handle.process_id);
+        .map(|(entity, pid)| {
+            let info = process_list.processes.iter().find(|p| p.id == *pid);
             TerminalInfo {
                 id: entity.to_bits().to_string(),
                 cwd: info.map(|i| i.cwd.clone()).unwrap_or_default(),

@@ -26,6 +26,7 @@ const _TW_SAFELIST: &[&str] = &[
     "bg-ansi-8",  "bg-ansi-9",  "bg-ansi-10", "bg-ansi-11",
     "bg-ansi-12", "bg-ansi-13", "bg-ansi-14", "bg-ansi-15",
     "text-term-bg", "bg-term-fg",
+    "border-ansi-1",
 ];
 
 /// ID for the outermost terminal container div.
@@ -43,6 +44,12 @@ pub fn App() -> Element {
     let mut selection = use_signal(|| None::<TermSelectionRange>);
     let mut copy_mode = use_signal(|| false);
     let mut theme = use_signal(|| None::<TermThemeEvent>);
+    let mut service_error = use_signal(String::new);
+
+    let _err_listener = use_bin_event_listener::<ServiceUnavailableEvent, _>(
+        SERVICE_UNAVAILABLE_EVENT,
+        move |evt| service_error.set(evt.message),
+    );
 
     let _listener =
         use_bin_event_listener::<TermViewportPatch, _>(TERM_VIEWPORT_EVENT, move |patch| {
@@ -108,6 +115,15 @@ pub fn App() -> Element {
     let _theme_listener =
         use_bin_event_listener::<TermThemeEvent, _>(TERM_THEME_EVENT, move |data| {
             theme.set(Some(data));
+        });
+
+    let _title_listener =
+        use_bin_event_listener::<TermTitleEvent, _>(TERM_TITLE_EVENT, move |evt| {
+            if let Some(window) = web_sys::window()
+                && let Some(doc) = window.document()
+            {
+                doc.set_title(&evt.title);
+            }
         });
 
     // Cell dimensions (char_width, char_height), updated by resize observer.
@@ -215,6 +231,31 @@ pub fn App() -> Element {
                         }
                     }
                 }
+            }
+
+            {
+                let msg = service_error.read().clone();
+                (!msg.is_empty()).then(|| rsx! {
+                    div {
+                        class: "absolute inset-0 z-50 flex items-center justify-center",
+                        style: "background: rgba(0,0,0,0.6);",
+                        div {
+                            class: "rounded-md border border-ansi-1 bg-term-bg px-4 py-2 text-sm text-ansi-1",
+                            "{msg}"
+                        }
+                    }
+                })
+            }
+
+            {
+                let waiting = rows.read().is_empty() && service_error.read().is_empty();
+                waiting.then(|| rsx! {
+                    div {
+                        class: "absolute inset-0 z-40 flex items-center justify-center text-sm",
+                        style: "color:#888;",
+                        "Loading…"
+                    }
+                })
             }
 
             div {

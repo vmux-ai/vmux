@@ -47,7 +47,7 @@ use {
     terminal::TerminalInputPlugin,
     vibe::VibePlugin,
     vmux_layout::{LayoutChromePlugin, profile::ProfilePlugin, scene::ScenePlugin},
-    vmux_process::ProcessesPlugin,
+    vmux_service::webview::ServicesPlugin,
     vmux_terminal::TerminalPlugin,
     vmux_webview_app::WebviewAppRegistryPlugin,
 };
@@ -112,7 +112,7 @@ impl Plugin for VmuxPlugin {
             WebviewAppRegistryPlugin,
             LayoutChromePlugin,
             TerminalPlugin,
-            ProcessesPlugin,
+            ServicesPlugin,
             CommandBarInputPlugin,
         ))
         .add_plugins(SpacesPlugin)

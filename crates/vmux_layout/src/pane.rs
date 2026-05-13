@@ -433,6 +433,23 @@ pub fn first_stack_in_pane(
     children.iter().find(|&e| tab_q.contains(e))
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct PaneStartupContext<'w> {
+    effective: Option<Res<'w, crate::settings::EffectiveStartupUrl>>,
+    requests: MessageWriter<'w, crate::LayoutSpawnRequest>,
+    new_stack_ctx: ResMut<'w, NewStackContext>,
+    hover_intent: ResMut<'w, PaneHoverIntent>,
+}
+
+impl PaneStartupContext<'_> {
+    fn url(&self) -> String {
+        self.effective
+            .as_deref()
+            .map(|u| u.0.clone())
+            .unwrap_or_default()
+    }
+}
+
 fn handle_pane_commands(
     mut reader: MessageReader<AppCommand>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
@@ -447,8 +464,7 @@ fn handle_pane_commands(
     settings: Res<LayoutSettings>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     mut commands: Commands,
-    mut hover_intent: ResMut<PaneHoverIntent>,
-    mut new_stack_ctx: ResMut<NewStackContext>,
+    mut startup: PaneStartupContext,
     mut resize_q: ParamSet<(
         Query<&mut Node>,
         Query<&mut PaneSize>,
@@ -500,12 +516,20 @@ fn handle_pane_commands(
                 let new_stack = commands
                     .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane2)))
                     .id();
-                new_stack_ctx.stack = Some(new_stack);
-                new_stack_ctx.previous_stack = active_stack_opt;
-                new_stack_ctx.needs_open = true;
+                let url = startup.url();
+                if url.is_empty() {
+                    startup.new_stack_ctx.stack = Some(new_stack);
+                    startup.new_stack_ctx.previous_stack = active_stack_opt;
+                    startup.new_stack_ctx.needs_open = true;
+                } else {
+                    startup.requests.write(crate::LayoutSpawnRequest::OpenUrl {
+                        stack: new_stack,
+                        url,
+                    });
+                }
 
-                hover_intent.target = None;
-                hover_intent.last_activation = Some(Instant::now());
+                startup.hover_intent.target = None;
+                startup.hover_intent.last_activation = Some(Instant::now());
                 resize_q.p3().target = Some(pane2);
             }
             PaneCommand::Close => {
@@ -543,9 +567,16 @@ fn handle_pane_commands(
                             .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
                             .id();
                         commands.entity(leaf).insert(LastActivatedAt::now());
-                        new_stack_ctx.stack = Some(tab);
-                        new_stack_ctx.previous_stack = None;
-                        new_stack_ctx.needs_open = true;
+                        let url = startup.url();
+                        if url.is_empty() {
+                            startup.new_stack_ctx.stack = Some(tab);
+                            startup.new_stack_ctx.previous_stack = None;
+                            startup.new_stack_ctx.needs_open = true;
+                        } else {
+                            startup
+                                .requests
+                                .write(crate::LayoutSpawnRequest::OpenUrl { stack: tab, url });
+                        }
                     }
                     continue;
                 }
@@ -1603,6 +1634,7 @@ mod tests {
         app.init_resource::<PendingCursorWarp>();
         app.init_resource::<NewStackContext>();
         app.init_resource::<ConfirmCloseSettings>();
+        app.add_message::<crate::LayoutSpawnRequest>();
         app.insert_resource(test_settings());
         app.add_systems(Update, handle_pane_commands.in_set(WriteAppCommands));
 

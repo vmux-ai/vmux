@@ -28,6 +28,7 @@ moonshine-save = { workspace = true }
 ron = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+chrono = { workspace = true }
 vmux_core = { path = "../vmux_core" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
@@ -36,8 +37,8 @@ vmux_macro = { path = "../vmux_macro" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 tokio = { workspace = true }
 uuid = { workspace = true }
+tracing = "0.1"
 vmux_service = { path = "../vmux_service" }
-vmux_process = { path = "../vmux_process" }
 vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_webview_app = { path = "../vmux_webview_app" }

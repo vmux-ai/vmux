@@ -4,12 +4,6 @@ use bevy_cef::prelude::early_exit_if_subprocess;
 use vmux_desktop::VmuxPlugin;
 
 fn main() {
-    // Check for `service` subcommand before any GUI/Bevy initialization.
-    if std::env::args().nth(1).as_deref() == Some("service") {
-        run_service();
-        return;
-    }
-
     #[cfg(not(target_os = "macos"))]
     early_exit_if_subprocess();
 
@@ -64,42 +58,4 @@ extern "C" fn sigint_handler(_: libc::c_int) {
         libc::write(2, msg.as_ptr() as *const libc::c_void, msg.len());
         libc::_exit(0);
     }
-}
-
-/// Run the vmux service (persistent terminal process manager).
-/// Invoked via `vmux service` or `Vmux service`.
-fn run_service() {
-    use vmux_service::{pid_path, service_dir, service_identity_path, socket_path};
-
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .expect("failed to create tokio runtime");
-
-    rt.block_on(async {
-        let dir = service_dir();
-        std::fs::create_dir_all(&dir).expect("failed to create service dir");
-
-        let pid = std::process::id();
-        std::fs::write(pid_path(), pid.to_string()).expect("failed to write PID file");
-        vmux_service::write_service_identity().expect("failed to write service identity file");
-
-        let sock = socket_path();
-        let _ = std::fs::remove_file(&sock);
-
-        let listener = tokio::net::UnixListener::bind(&sock).expect("failed to bind Unix socket");
-
-        eprintln!("vmux-service: listening on {}", sock.display());
-
-        let sock_cleanup = sock.clone();
-        tokio::spawn(async move {
-            tokio::signal::ctrl_c().await.ok();
-            let _ = std::fs::remove_file(&sock_cleanup);
-            let _ = std::fs::remove_file(pid_path());
-            let _ = std::fs::remove_file(service_identity_path());
-            std::process::exit(0);
-        });
-
-        vmux_service::server::run_server(listener).await;
-    });
 }

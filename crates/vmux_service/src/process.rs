@@ -24,15 +24,26 @@ pub type PtyInputWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 
 #[derive(Clone)]
 struct ServiceEventProxy {
+    process_id: ProcessId,
     pty_writer: PtyInputWriter,
+    patch_tx: broadcast::Sender<ServiceMessage>,
 }
 
 impl TermEventListener for ServiceEventProxy {
     fn send_event(&self, event: TermEvent) {
-        if let TermEvent::PtyWrite(text) = event
-            && let Ok(mut writer) = self.pty_writer.lock()
-        {
-            let _ = writer.write_all(text.as_bytes());
+        match event {
+            TermEvent::PtyWrite(text) => {
+                if let Ok(mut writer) = self.pty_writer.lock() {
+                    let _ = writer.write_all(text.as_bytes());
+                }
+            }
+            TermEvent::Title(title) => {
+                let _ = self.patch_tx.send(ServiceMessage::ProcessTitle {
+                    process_id: self.process_id,
+                    title,
+                });
+            }
+            _ => {}
         }
     }
 }
@@ -180,25 +191,29 @@ fn copy_mode_scroll_input(
 
 impl Process {
     pub fn new(
-        shell: String,
+        id: ProcessId,
+        command: String,
+        args: Vec<String>,
         cwd: String,
         env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
     ) -> Result<Self, String> {
         let (wake_tx, _) = mpsc::unbounded_channel();
-        Self::new_with_wake(shell, cwd, env, cols, rows, wake_tx)
+        Self::new_with_wake(id, command, args, cwd, env, cols, rows, wake_tx)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_wake(
-        shell: String,
+        id: ProcessId,
+        command: String,
+        args: Vec<String>,
         cwd: String,
         env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
         wake_tx: mpsc::UnboundedSender<ProcessId>,
     ) -> Result<Self, String> {
-        let id = ProcessId::new();
         let pty_system = NativePtySystem::default();
         let pair = pty_system
             .openpty(PtySize {
@@ -209,7 +224,8 @@ impl Process {
             })
             .map_err(|e| format!("failed to open PTY: {e}"))?;
 
-        let mut cmd = CommandBuilder::new(&shell);
+        let mut cmd = CommandBuilder::new(&command);
+        cmd.args(&args);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("LANG", "en_US.UTF-8");
@@ -226,7 +242,9 @@ impl Process {
             .slave
             .spawn_command(cmd)
             .map_err(|e| format!("failed to spawn shell: {e}"))?;
-        let pid = child.process_id().unwrap_or(0);
+        let pid = child
+            .process_id()
+            .ok_or_else(|| "spawned PTY child has no PID".to_string())?;
         let reader = pair
             .master
             .try_clone_reader()
@@ -260,16 +278,18 @@ impl Process {
             })
             .map_err(|e| format!("failed to spawn PTY reader: {e}"))?;
 
+        let (patch_tx, _) = broadcast::channel(256);
         let event_proxy = ServiceEventProxy {
+            process_id: id,
             pty_writer: Arc::clone(&writer),
+            patch_tx: patch_tx.clone(),
         };
         let dims = PtyDimensions { cols, rows };
         let term = Term::new(TermConfig::default(), &dims, event_proxy);
-        let (patch_tx, _) = broadcast::channel(256);
 
         Ok(Self {
             id,
-            shell,
+            shell: command,
             cwd,
             cols,
             rows,
@@ -1283,18 +1303,30 @@ impl ProcessManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_process(
         &mut self,
-        shell: String,
+        id: ProcessId,
+        command: String,
+        args: Vec<String>,
         cwd: String,
         env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
-    ) -> Result<ProcessId, String> {
-        let process = Process::new_with_wake(shell, cwd, env, cols, rows, self.wake_tx.clone())?;
-        let id = process.id;
+    ) -> Result<(ProcessId, u32), String> {
+        let process = Process::new_with_wake(
+            id,
+            command,
+            args,
+            cwd,
+            env,
+            cols,
+            rows,
+            self.wake_tx.clone(),
+        )?;
+        let pid = process.pid;
         self.processes.insert(id, process);
-        Ok(id)
+        Ok((id, pid))
     }
 
     pub fn poll_all(&mut self) -> Vec<ProcessId> {
@@ -1503,7 +1535,9 @@ mod tests {
     fn pty_reader_notifies_when_output_arrives() {
         let (wake_tx, mut wake_rx) = mpsc::unbounded_channel();
         let mut process = Process::new_with_wake(
+            ProcessId::new(),
             "/bin/sh".to_string(),
+            vec![],
             String::new(),
             Vec::new(),
             80,
@@ -1535,7 +1569,9 @@ mod tests {
         let cwd = temp.to_string_lossy().into_owned();
         let (wake_tx, _) = mpsc::unbounded_channel();
         let mut process = Process::new_with_wake(
+            ProcessId::new(),
             "/bin/sh".to_string(),
+            vec![],
             cwd.clone(),
             Vec::new(),
             120,
@@ -1634,7 +1670,9 @@ mod tests {
 
         let (wake_tx, _) = mpsc::unbounded_channel();
         let mut process = Process::new_with_wake(
+            ProcessId::new(),
             "/bin/sh".to_string(),
+            vec![],
             String::new(),
             Vec::new(),
             12,
@@ -1655,5 +1693,53 @@ mod tests {
         process.kill();
 
         assert_eq!(*captured.lock().unwrap(), b"\x1b[<64;7;5M".to_vec());
+    }
+
+    #[test]
+    fn create_process_returns_real_pid() {
+        let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
+        let mut mgr = ProcessManager::new(wake_tx);
+        let process_id = ProcessId::new();
+        let (id, pid) = mgr
+            .create_process(
+                process_id,
+                "/bin/sh".into(),
+                vec![],
+                String::new(),
+                Vec::new(),
+                80,
+                24,
+            )
+            .expect("spawn");
+        assert!(pid > 0, "expected real pid, got {pid}");
+        assert!(mgr.processes.contains_key(&id));
+    }
+
+    #[test]
+    fn proxy_broadcasts_process_title_on_term_title_event() {
+        use std::io;
+
+        let (tx, mut rx) = broadcast::channel::<ServiceMessage>(8);
+        let writer: PtyInputWriter = Arc::new(Mutex::new(Box::new(io::sink())));
+        let process_id = ProcessId::new();
+        let proxy = ServiceEventProxy {
+            process_id,
+            pty_writer: writer,
+            patch_tx: tx,
+        };
+
+        proxy.send_event(TermEvent::Title("hello-osc".into()));
+
+        let msg = rx.try_recv().expect("ProcessTitle should be broadcast");
+        match msg {
+            ServiceMessage::ProcessTitle {
+                process_id: got_id,
+                title,
+            } => {
+                assert_eq!(got_id, process_id);
+                assert_eq!(title, "hello-osc");
+            }
+            other => panic!("expected ProcessTitle, got {other:?}"),
+        }
     }
 }

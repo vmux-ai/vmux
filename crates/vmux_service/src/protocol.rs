@@ -1,44 +1,6 @@
 use vmux_terminal::event::{TermCursor, TermLine, TermSelectionRange};
 
-/// Unique identifier for a service-managed terminal process.
-/// Stored as raw bytes for rkyv compatibility.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
-)]
-pub struct ProcessId(pub [u8; 16]);
-
-impl Default for ProcessId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ProcessId {
-    pub fn new() -> Self {
-        Self(*uuid::Uuid::new_v4().as_bytes())
-    }
-
-    pub fn to_uuid(&self) -> uuid::Uuid {
-        uuid::Uuid::from_bytes(self.0)
-    }
-
-    pub fn from_uuid(u: uuid::Uuid) -> Self {
-        Self(*u.as_bytes())
-    }
-}
-
-impl std::fmt::Display for ProcessId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_uuid())
-    }
-}
-
-impl std::str::FromStr for ProcessId {
-    type Err = uuid::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::from_uuid(s.parse()?))
-    }
-}
+pub use vmux_core::ProcessId;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
@@ -187,7 +149,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ClientMessage {
     CreateProcess {
-        shell: String,
+        process_id: ProcessId,
+        command: String,
+        args: Vec<String>,
         cwd: String,
         env: Vec<(String, String)>,
         cols: u16,
@@ -264,6 +228,7 @@ pub enum ClientMessage {
         request_id: AgentRequestId,
         result: AgentCommandResult,
     },
+    Status,
 }
 
 /// Vim-style visual/copy-mode action sent by the GUI to the service.
@@ -354,6 +319,10 @@ pub enum CopyModeKey {
 pub enum ServiceMessage {
     ProcessCreated {
         process_id: ProcessId,
+        pid: u32,
+    },
+    ProcessCreateFailed {
+        reason: String,
     },
     ProcessOutput {
         process_id: ProcessId,
@@ -372,6 +341,10 @@ pub enum ServiceMessage {
     ProcessExited {
         process_id: ProcessId,
         exit_code: Option<i32>,
+    },
+    ProcessTitle {
+        process_id: ProcessId,
+        title: String,
     },
     ProcessList {
         processes: Vec<ProcessInfo>,
@@ -410,6 +383,10 @@ pub enum ServiceMessage {
     AgentCommandResult {
         request_id: AgentRequestId,
         result: AgentCommandResult,
+    },
+    StatusResponse {
+        uptime_secs: u64,
+        process_count: u32,
     },
 }
 
@@ -626,5 +603,55 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded, cmd);
+    }
+
+    #[test]
+    fn status_response_roundtrips() {
+        let msg = ServiceMessage::StatusResponse {
+            uptime_secs: 42,
+            process_count: 3,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
+        let decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        assert!(matches!(
+            decoded,
+            ServiceMessage::StatusResponse {
+                uptime_secs: 42,
+                process_count: 3
+            }
+        ));
+    }
+
+    #[test]
+    fn process_created_round_trips_pid() {
+        let id = ProcessId::new();
+        let msg = ServiceMessage::ProcessCreated {
+            process_id: id,
+            pid: 12345,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
+        let decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        match decoded {
+            ServiceMessage::ProcessCreated { process_id, pid } => {
+                assert_eq!(process_id, id);
+                assert_eq!(pid, 12345);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn process_create_failed_round_trips_reason() {
+        let msg = ServiceMessage::ProcessCreateFailed {
+            reason: "missing PID after spawn".into(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
+        let decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        match decoded {
+            ServiceMessage::ProcessCreateFailed { reason } => {
+                assert_eq!(reason, "missing PID after spawn");
+            }
+            _ => panic!("wrong variant"),
+        }
     }
 }

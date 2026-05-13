@@ -33,6 +33,48 @@ where
     Ok(Some(buf))
 }
 
+/// Write a length-prefixed frame to a blocking writer.
+pub fn write_raw_frame_blocking<W: std::io::Write>(
+    writer: &mut W,
+    data: &[u8],
+) -> std::io::Result<()> {
+    let len = data.len() as u32;
+    writer.write_all(&len.to_le_bytes())?;
+    writer.write_all(data)?;
+    writer.flush()?;
+    Ok(())
+}
+
+/// Read a length-prefixed frame from a blocking reader.
+/// Returns `None` on clean EOF.
+pub fn read_raw_frame_blocking<R: std::io::Read>(
+    reader: &mut R,
+) -> std::io::Result<Option<Vec<u8>>> {
+    let mut len_buf = [0u8; 4];
+    match reader.read_exact(&mut len_buf) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(e),
+    }
+    let len = u32::from_le_bytes(len_buf) as usize;
+    if len > 64 * 1024 * 1024 {
+        return Err(std::io::Error::other("frame too large"));
+    }
+    let mut buf = vec![0u8; len];
+    reader.read_exact(&mut buf)?;
+    Ok(Some(buf))
+}
+
+/// Serialize a message to rkyv bytes, write as a length-prefixed frame (blocking).
+#[macro_export]
+macro_rules! write_message_blocking {
+    ($writer:expr, $msg:expr) => {{
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>($msg)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        $crate::framing::write_raw_frame_blocking($writer, &bytes)
+    }};
+}
+
 /// Serialize a message to rkyv bytes, write as a length-prefixed frame.
 /// Use: `write_message(&mut writer, &my_msg).await?`
 #[macro_export]
@@ -50,6 +92,22 @@ macro_rules! write_message {
 macro_rules! read_message {
     ($reader:expr, $ty:ty) => {{
         match $crate::framing::read_raw_frame($reader).await? {
+            Some(bytes) => {
+                let msg = rkyv::from_bytes::<$ty, rkyv::rancor::Error>(&bytes)
+                    .map_err(|e| std::io::Error::other(e.to_string()))?;
+                Ok::<Option<$ty>, std::io::Error>(Some(msg))
+            }
+            None => Ok(None),
+        }
+    }};
+}
+
+/// Read a length-prefixed frame (blocking), deserialize from rkyv bytes.
+/// Use: `let msg: Option<MyMsg> = read_message_blocking!(reader, MyMsg)?;`
+#[macro_export]
+macro_rules! read_message_blocking {
+    ($reader:expr, $ty:ty) => {{
+        match $crate::framing::read_raw_frame_blocking($reader)? {
             Some(bytes) => {
                 let msg = rkyv::from_bytes::<$ty, rkyv::rancor::Error>(&bytes)
                     .map_err(|e| std::io::Error::other(e.to_string()))?;

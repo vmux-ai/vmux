@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use vmux_webview_app::{WebviewAppConfig, WebviewAppRegistry};
 
-pub struct ProcessesPlugin;
+pub struct ServicesPlugin;
 
-impl Plugin for ProcessesPlugin {
+impl Plugin for ServicesPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut()
             .resource_mut::<WebviewAppRegistry>()

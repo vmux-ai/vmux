@@ -35,13 +35,16 @@ use vmux_layout::{
     Header,
     event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL},
 };
-use vmux_service::protocol::ProcessId;
 use vmux_space::event::{SPACES_WEBVIEW_URL, SpaceCommandEvent};
 
-/// Try to extract a process UUID from `vmux://terminal/{uuid}`.
-fn parse_process_id_from_url(url: &str) -> Option<ProcessId> {
+pub(crate) use crate::terminal::pid::focus_pane_entity;
+
+pub(crate) fn parse_pid_from_url(url: &str) -> Option<u32> {
     let suffix = url.strip_prefix(TERMINAL_WEBVIEW_URL)?;
-    suffix.parse::<ProcessId>().ok()
+    if suffix.is_empty() {
+        return None;
+    }
+    suffix.parse::<u32>().ok()
 }
 
 /// Deferred visibility for the command bar modal. Counts frames after Display::Flex
@@ -803,7 +806,12 @@ fn on_command_bar_action(
             Without<Modal>,
         ),
     >,
-    mut resource_params: ParamSet<(Res<AppSettings>, Option<Res<AgentProviders>>)>,
+    mut resource_params: ParamSet<(
+        Res<AppSettings>,
+        Option<Res<AgentProviders>>,
+        Option<Res<crate::terminal::pid::PidToEntity>>,
+        Option<Res<crate::vibe::session::VibeSessionToEntity>>,
+    )>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut writer_params: ParamSet<(
         MessageWriter<AppCommand>,
@@ -816,6 +824,12 @@ fn on_command_bar_action(
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
     let settings = resource_params.p0().clone();
+    let pid_to_entity = resource_params
+        .p2()
+        .as_deref()
+        .map(|map| map.0.clone())
+        .unwrap_or_default();
+    let vibe_to_entity = resource_params.p3().as_deref().map(|map| map.0.clone());
     let empty_stack = new_stack_ctx.stack;
     let previous_stack = new_stack_ctx.previous_stack;
     // Track whether we handle keyboard restore ourselves
@@ -885,27 +899,68 @@ fn on_command_bar_action(
                 if let Some(stack_e) = empty_stack {
                     // New tab mode: attach content to the empty tab
                     if url.starts_with("vmux://terminal") {
-                        let term_e = if let Some(pid) = parse_process_id_from_url(&url) {
-                            commands
-                                .spawn((
-                                    Terminal::reattach(&mut meshes, &mut webview_mt, pid),
-                                    ChildOf(stack_e),
-                                ))
-                                .id()
+                        let known =
+                            parse_pid_from_url(&url).and_then(|p| pid_to_entity.get(&p).copied());
+                        if let Some(entity) = known {
+                            focus_pane_entity(entity, &mut commands, &child_of_q);
                         } else {
+                            if let Some(pid) = parse_pid_from_url(&url) {
+                                bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
+                            }
                             commands.entity(stack_e).insert(PageMetadata {
                                 url: TERMINAL_WEBVIEW_URL.to_string(),
                                 title: "Terminal".to_string(),
                                 ..default()
                             });
-                            commands
+                            let term_e = commands
                                 .spawn((
                                     Terminal::new(&mut meshes, &mut webview_mt, &settings),
                                     ChildOf(stack_e),
                                 ))
-                                .id()
-                        };
-                        commands.entity(term_e).insert(CefKeyboardTarget);
+                                .id();
+                            commands.entity(term_e).insert(CefKeyboardTarget);
+                        }
+                    } else if url
+                        .starts_with(crate::vibe::session::VIBE_WEBVIEW_URL.trim_end_matches('/'))
+                    {
+                        let session_id = url
+                            .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string());
+                        if let Some(ref id) = session_id
+                            && let Some(map) = vibe_to_entity.as_ref()
+                            && let Some(&entity) = map.get(id)
+                        {
+                            focus_pane_entity(entity, &mut commands, &child_of_q);
+                        } else {
+                            commands.entity(stack_e).insert(PageMetadata {
+                                url: crate::vibe::session::VIBE_WEBVIEW_URL.to_string(),
+                                title: "Vibe".to_string(),
+                                ..default()
+                            });
+                            let cwd = std::env::current_dir()
+                                .unwrap_or_else(|_| std::path::PathBuf::from("/"));
+                            if let Err(e) = crate::terminal::spawn_vibe_into_stack(
+                                stack_e,
+                                cwd,
+                                session_id,
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                                &settings,
+                            ) {
+                                bevy::log::warn!(
+                                    "vibe spawn failed: {e}; falling back to terminal"
+                                );
+                                let term_e = commands
+                                    .spawn((
+                                        Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                                        ChildOf(stack_e),
+                                    ))
+                                    .id();
+                                commands.entity(term_e).insert(CefKeyboardTarget);
+                            }
+                        }
                     } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
                         commands.entity(stack_e).insert(PageMetadata {
                             url: PROCESSES_WEBVIEW_URL.to_string(),
@@ -941,8 +996,28 @@ fn on_command_bar_action(
                     custom_keyboard_restore = true;
                 } else {
                     // Normal mode: navigate or spawn terminal in current tab
-                    if let Some(pid) = parse_process_id_from_url(&url) {
-                        // Reattach to existing service-managed process in a new tab
+                    let known_terminal =
+                        parse_pid_from_url(&url).and_then(|p| pid_to_entity.get(&p).copied());
+                    let known_vibe = url
+                        .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
+                        .filter(|s| !s.is_empty())
+                        .and_then(|id| {
+                            vibe_to_entity.as_ref().and_then(|map| map.get(id).copied())
+                        });
+                    if let Some(entity) = known_terminal {
+                        focus_pane_entity(entity, &mut commands, &child_of_q);
+                    } else if let Some(entity) = known_vibe {
+                        focus_pane_entity(entity, &mut commands, &child_of_q);
+                    } else if url.starts_with("vmux://terminal") {
+                        if let Some(pid) = parse_pid_from_url(&url) {
+                            bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
+                        }
+                        writer_params
+                            .p0()
+                            .write(AppCommand::Terminal(TerminalCommand::New));
+                    } else if url
+                        .starts_with(crate::vibe::session::VIBE_WEBVIEW_URL.trim_end_matches('/'))
+                    {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
                             &all_children,
@@ -959,18 +1034,30 @@ fn on_command_bar_action(
                                     ChildOf(pane_e),
                                 ))
                                 .id();
-                            let term_e = commands
-                                .spawn((
-                                    Terminal::reattach(&mut meshes, &mut webview_mt, pid),
-                                    ChildOf(stack_e),
-                                ))
-                                .id();
-                            commands.entity(term_e).insert(CefKeyboardTarget);
+                            commands.entity(stack_e).insert(PageMetadata {
+                                url: crate::vibe::session::VIBE_WEBVIEW_URL.to_string(),
+                                title: "Vibe".to_string(),
+                                ..default()
+                            });
+                            let session_id = url
+                                .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
+                                .filter(|s| !s.is_empty())
+                                .map(|s| s.to_string());
+                            let cwd = std::env::current_dir()
+                                .unwrap_or_else(|_| std::path::PathBuf::from("/"));
+                            if let Err(e) = crate::terminal::spawn_vibe_into_stack(
+                                stack_e,
+                                cwd,
+                                session_id,
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                                &settings,
+                            ) {
+                                bevy::log::warn!("vibe spawn failed: {e}");
+                            }
+                            custom_keyboard_restore = true;
                         }
-                    } else if url.starts_with("vmux://terminal") {
-                        writer_params
-                            .p0()
-                            .write(AppCommand::Terminal(TerminalCommand::New));
                     } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
                         use crate::command::ServiceCommand;
                         writer_params
@@ -1043,46 +1130,17 @@ fn on_command_bar_action(
             }
         }
         "terminal" => {
-            // Check if value is a vmux://terminal/{id} URL — reattach
-            if let Some(pid) = parse_process_id_from_url(&evt.value) {
-                if let Some(stack_e) = empty_stack {
-                    let term_e = commands
-                        .spawn((
-                            Terminal::reattach(&mut meshes, &mut webview_mt, pid),
-                            ChildOf(stack_e),
-                        ))
-                        .id();
-                    commands.entity(term_e).insert(CefKeyboardTarget);
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.previous_stack = None;
-                    custom_keyboard_restore = true;
-                } else {
-                    let (_, active_pane_opt, _) = focused_stack(
-                        &tab_q,
-                        &all_children,
-                        &leaf_panes,
-                        &pane_ts,
-                        &pane_children,
-                        &stack_ts,
-                    );
-                    if let Some(pane_e) = active_pane_opt {
-                        let stack_e = commands
-                            .spawn((
-                                crate::layout::stack::stack_bundle(),
-                                LastActivatedAt::now(),
-                                ChildOf(pane_e),
-                            ))
-                            .id();
-                        let term_e = commands
-                            .spawn((
-                                Terminal::reattach(&mut meshes, &mut webview_mt, pid),
-                                ChildOf(stack_e),
-                            ))
-                            .id();
-                        commands.entity(term_e).insert(CefKeyboardTarget);
-                    }
-                }
+            let known_terminal =
+                parse_pid_from_url(&evt.value).and_then(|p| pid_to_entity.get(&p).copied());
+            if let Some(entity) = known_terminal {
+                focus_pane_entity(entity, &mut commands, &child_of_q);
+                new_stack_ctx.stack = None;
+                new_stack_ctx.previous_stack = None;
+                custom_keyboard_restore = true;
             } else {
+                if let Some(pid) = parse_pid_from_url(&evt.value) {
+                    bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
+                }
                 let cwd = if evt.value.is_empty() || evt.value.contains("://") {
                     None
                 } else {
@@ -1609,6 +1667,7 @@ mod tests {
             shortcuts: ShortcutSettings::default(),
             terminal: None,
             auto_update: false,
+            startup_url: None,
         }
     }
 
@@ -2408,5 +2467,30 @@ mod tests {
         assert!(app.world().get_entity(old_space).is_ok());
         assert!(app.world().get_entity(old_tab).is_ok());
         assert_eq!(app.world().resource::<NewStackContext>().stack, None);
+    }
+
+    #[test]
+    fn parse_pid_from_url_accepts_numeric() {
+        assert_eq!(parse_pid_from_url("vmux://terminal/12345"), Some(12345));
+        assert_eq!(parse_pid_from_url("vmux://terminal/0"), Some(0));
+    }
+
+    #[test]
+    fn parse_pid_from_url_rejects_uuid_form() {
+        let uuid_url = "vmux://terminal/ae724a54-c387-5359-0687-ccfc155558b6";
+        assert_eq!(parse_pid_from_url(uuid_url), None);
+    }
+
+    #[test]
+    fn parse_pid_from_url_rejects_empty_path() {
+        assert_eq!(parse_pid_from_url("vmux://terminal/"), None);
+    }
+
+    #[test]
+    fn parse_pid_from_url_rejects_overflow() {
+        assert_eq!(
+            parse_pid_from_url("vmux://terminal/99999999999999999"),
+            None
+        );
     }
 }

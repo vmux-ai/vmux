@@ -17,8 +17,27 @@ impl Plugin for SettingsPlugin {
             Startup,
             SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
         )
+        .init_resource::<vmux_layout::settings::EffectiveStartupUrl>()
         .add_systems(Startup, load_settings.in_set(SettingsLoadSet))
-        .add_systems(Update, reload_settings_on_change);
+        .add_systems(
+            Startup,
+            update_effective_startup_url
+                .after(SettingsLoadSet)
+                .before(vmux_layout::LayoutStartupSet::Post),
+        )
+        .add_systems(Update, reload_settings_on_change)
+        .add_systems(Update, update_effective_startup_url);
+    }
+}
+
+fn update_effective_startup_url(
+    settings: Option<Res<AppSettings>>,
+    mut effective: ResMut<vmux_layout::settings::EffectiveStartupUrl>,
+) {
+    if let Some(settings) = settings.as_ref()
+        && (settings.is_changed() || effective.0.is_empty())
+    {
+        effective.0 = resolve_startup_url(settings);
     }
 }
 
@@ -36,6 +55,15 @@ pub struct AppSettings {
     pub terminal: Option<TerminalSettings>,
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
+    #[serde(default)]
+    pub startup_url: Option<String>,
+}
+
+pub fn resolve_startup_url(settings: &AppSettings) -> String {
+    settings
+        .startup_url
+        .clone()
+        .unwrap_or_else(|| "vmux://vibe/".to_string())
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -405,4 +433,49 @@ fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
             .as_ref()
             .is_none_or(|terminal| terminal.confirm_close),
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_settings() -> AppSettings {
+        AppSettings {
+            browser: BrowserSettings {
+                startup_url: "about:blank".to_string(),
+            },
+            layout: LayoutSettings {
+                window: WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: PaneSettings {
+                    gap: 0.0,
+                    radius: 0.0,
+                },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            },
+            shortcuts: ShortcutSettings::default(),
+            terminal: None,
+            auto_update: false,
+            startup_url: None,
+        }
+    }
+
+    #[test]
+    fn resolve_startup_url_returns_user_override() {
+        let mut s = base_settings();
+        s.startup_url = Some("vmux://services/".into());
+        assert_eq!(resolve_startup_url(&s), "vmux://services/");
+    }
+
+    #[test]
+    fn resolve_startup_url_defaults_to_vibe() {
+        let s = base_settings();
+        assert_eq!(resolve_startup_url(&s), "vmux://vibe/");
+    }
 }
