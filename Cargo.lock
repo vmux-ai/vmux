@@ -9230,6 +9230,7 @@ dependencies = [
  "portable-pty",
  "rkyv",
  "serde",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-appender",

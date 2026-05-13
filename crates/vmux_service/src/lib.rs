@@ -11,6 +11,8 @@ pub mod framing;
 #[cfg(all(target_os = "macos", not(target_arch = "wasm32")))]
 pub mod launchd;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod legacy_plist_cleanup;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod process;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod protocol;
