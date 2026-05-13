@@ -49,13 +49,29 @@ pub fn plist_path(profile: &str) -> PathBuf {
         .join(format!("{}.plist", launchd_label(profile)))
 }
 
-/// Identity for the current executable. Changes when the binary path, size,
-/// or modification timestamp changes.
-pub fn current_executable_identity() -> std::io::Result<String> {
-    executable_identity_for_path(&std::env::current_exe()?)
+/// Path to the daemon binary, resolved as a sibling of the current executable.
+/// Used by both the daemon (where current_exe IS the daemon) and the GUI/CLI
+/// (where it points to the daemon binary alongside them) so identity checks
+/// agree on the same target file.
+pub fn daemon_binary_path() -> std::io::Result<PathBuf> {
+    let mut p = std::env::current_exe()?;
+    if p.file_name().and_then(|n| n.to_str()) == Some("vmux_service") {
+        Ok(p)
+    } else {
+        p.pop();
+        p.push("vmux_service");
+        Ok(p)
+    }
 }
 
-/// Write the current executable identity for a service process.
+/// Identity for the daemon binary. Changes when the binary path, size,
+/// or modification timestamp changes. Computed from `daemon_binary_path()`
+/// so the daemon and its clients agree on the same target.
+pub fn current_executable_identity() -> std::io::Result<String> {
+    executable_identity_for_path(&daemon_binary_path()?)
+}
+
+/// Write the daemon binary's identity into the per-profile identity file.
 pub fn write_service_identity() -> std::io::Result<()> {
     std::fs::write(identity_path(), current_executable_identity()?)
 }

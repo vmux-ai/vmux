@@ -605,19 +605,12 @@ fn missing_process_id(message: &str) -> Option<ProcessId> {
         .and_then(|id| id.parse().ok())
 }
 
-fn vmux_service_binary() -> std::io::Result<std::path::PathBuf> {
-    let mut p = std::env::current_exe()?;
-    p.pop();
-    p.push("vmux_service");
-    Ok(p)
-}
-
 fn ensure_service_started() {
     if ServiceHandle::service_running() {
         tracing::info!("service already running");
         return;
     }
-    let binary = match vmux_service_binary() {
+    let binary = match vmux_service::daemon_binary_path() {
         Ok(b) => b,
         Err(e) => {
             tracing::error!(error = %e, "could not locate vmux_service binary");

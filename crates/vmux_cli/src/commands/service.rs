@@ -92,8 +92,5 @@ fn not_supported() -> std::io::Result<i32> {
 }
 
 fn current_service_binary() -> std::io::Result<std::path::PathBuf> {
-    let mut p = std::env::current_exe()?;
-    p.pop();
-    p.push("vmux_service");
-    Ok(p)
+    vmux_service::daemon_binary_path()
 }
