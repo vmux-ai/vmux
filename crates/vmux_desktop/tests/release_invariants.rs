@@ -17,8 +17,7 @@ fn dev_target_signs_then_runs_debug_binary() {
 
     assert!(makefile.contains(".DEFAULT_GOAL := dev"));
     assert!(
-        makefile
-            .contains("dev: ensure-run-mac-deps ensure-codesign-deps install-debug-render-process")
+        makefile.contains("dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process")
     );
     assert!(makefile.contains("./scripts/sign-dev-mac.sh"));
     assert!(makefile.contains("exec env -u CEF_PATH ./target/debug/vmux_desktop"));
