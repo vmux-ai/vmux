@@ -22,7 +22,7 @@ use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     prelude::*,
     ui::{UiGlobalTransform, UiSystems},
-    window::{ClosingWindow, PrimaryWindow, WindowResized},
+    window::{PrimaryWindow, WindowResized},
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
@@ -1037,7 +1037,6 @@ fn on_side_sheet_command_emit(
     )>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     settings: Res<AppSettings>,
-    primary_window: Single<Entity, With<PrimaryWindow>>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
@@ -1102,7 +1101,9 @@ fn on_side_sheet_command_emit(
                     commands.entity(next).insert(LastActivatedAt::now());
                 }
             } else if leaf_panes.iter().count() <= 1 {
-                commands.entity(*primary_window).insert(ClosingWindow);
+                if let Ok(mut window) = close_extra.p1().single_mut() {
+                    window.visible = false;
+                }
             } else {
                 let Ok(pane_co) = child_of_q.get(target_pane) else {
                     return;
