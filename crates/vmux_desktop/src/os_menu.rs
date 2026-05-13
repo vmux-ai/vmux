@@ -71,8 +71,6 @@ fn forward_menu_events(world: &mut World) {
 }
 
 fn handle_quit_request(world: &mut World) {
-    // Cmd+Q hides the UI but keeps Vmux.app + vmux_service alive.
-    // Real quit is only available via the tray menu.
     world
         .resource_mut::<Messages<crate::background_lifecycle::LifecycleEvent>>()
         .write(crate::background_lifecycle::LifecycleEvent::HideAllWindows);

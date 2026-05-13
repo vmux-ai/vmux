@@ -37,7 +37,6 @@ fn handle_lifecycle_events(
                 }
             }
             LifecycleEvent::QuitVmux => {
-                // Live-terminal confirm dialog is added in Task A5.
                 exit.write(AppExit::Success);
             }
         }
