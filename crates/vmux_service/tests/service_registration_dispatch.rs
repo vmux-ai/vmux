@@ -12,3 +12,12 @@ fn unbundled_path_chooses_launchctl() {
     let exe = PathBuf::from("/Users/x/repo/target/debug/vmux_service");
     assert!(matches!(choose_backend(&exe), Backend::Launchctl));
 }
+
+#[test]
+fn ensure_running_calls_legacy_cleanup_for_sm_app_service_path() {
+    let source = include_str!("../src/service_registration.rs");
+    assert!(
+        source.contains("cleanup_legacy_registrations"),
+        "SmAppService branch must invoke legacy cleanup"
+    );
+}
