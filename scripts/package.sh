@@ -92,6 +92,9 @@ fi
 if [[ "$PROFILE" == "local" && -d "$VMUX_APP_BUNDLE" ]]; then
     echo "==> Injecting CEF into .app (local build)"
     CARGO_PACKAGER_FORMAT=dmg bash "$ROOT/scripts/inject-cef.sh"
+
+    echo "==> Embedding launchd plist (local build)"
+    VMUX_GIT_HASH="$SHA" "$ROOT/scripts/embed-launch-agent-plist.sh"
 fi
 
 echo "==> Packaging complete: $VMUX_APP_BUNDLE"
