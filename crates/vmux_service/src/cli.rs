@@ -1,5 +1,6 @@
 //! Implementation of `vmux service ...` subcommands.
 
+#[cfg(target_os = "macos")]
 use std::path::Path;
 use std::time::Duration;
 

@@ -91,6 +91,7 @@ fn not_supported() -> std::io::Result<i32> {
     Ok(2)
 }
 
+#[cfg(target_os = "macos")]
 fn current_service_binary() -> std::io::Result<std::path::PathBuf> {
     vmux_service::daemon_binary_path()
 }
