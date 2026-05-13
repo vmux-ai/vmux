@@ -37,8 +37,16 @@ pub fn log_path() -> PathBuf {
 }
 
 /// LaunchAgent label for the given profile.
+///
+/// `release` drops the suffix; `local` expands to the build-time git SHA so
+/// each per-SHA local install registers a distinct background service. All
+/// other profiles (including `dev`) keep the literal profile name as suffix.
 pub fn launchd_label(profile: &str) -> String {
-    format!("ai.vmux.service.{profile}")
+    match profile {
+        "release" => "ai.vmux.service".to_string(),
+        "local" => format!("ai.vmux.service.{}", env!("VMUX_GIT_HASH")),
+        _ => format!("ai.vmux.service.{profile}"),
+    }
 }
 
 /// Path to the LaunchAgent plist for the given profile.
@@ -136,7 +144,16 @@ mod tests {
     #[test]
     fn launchd_label_includes_profile() {
         assert_eq!(launchd_label("dev"), "ai.vmux.service.dev");
-        assert_eq!(launchd_label("release"), "ai.vmux.service.release");
+        assert_eq!(launchd_label("release"), "ai.vmux.service");
+        let local = launchd_label("local");
+        assert!(
+            local.starts_with("ai.vmux.service."),
+            "expected local label to start with 'ai.vmux.service.', got {local}"
+        );
+        assert_ne!(
+            local, "ai.vmux.service.local",
+            "local profile should expand to per-SHA label, not literal 'local'"
+        );
     }
 
     #[test]

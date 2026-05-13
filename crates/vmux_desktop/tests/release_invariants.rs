@@ -12,21 +12,31 @@ fn startup_does_not_mutate_chromium_safe_storage_acl() {
 }
 
 #[test]
-fn run_mac_uses_signed_debug_binary() {
+fn dev_target_signs_then_runs_debug_binary() {
     let makefile = include_str!("../../../Makefile");
 
-    assert!(makefile.contains("run-mac: build-mac-debug"));
+    assert!(makefile.contains(".DEFAULT_GOAL := dev"));
+    assert!(
+        makefile
+            .contains("dev: ensure-run-mac-deps ensure-codesign-deps install-debug-render-process")
+    );
+    assert!(makefile.contains("./scripts/sign-dev-mac.sh"));
     assert!(makefile.contains("exec env -u CEF_PATH ./target/debug/vmux_desktop"));
-    assert!(makefile.contains("sign-mac-debug"));
     assert!(makefile.contains("identity=\"$$(./scripts/ensure-local-codesign-identity.sh)\" &&"));
+    assert!(!makefile.contains("run-mac:"));
+    assert!(!makefile.contains("build-mac-debug"));
+    assert!(!makefile.contains("sign-mac-debug"));
+    assert!(!makefile.contains("package-local-mac"));
+    assert!(!makefile.contains("package-release-mac"));
 }
 
 #[test]
-fn local_package_uses_stable_bundle_name() {
+fn local_package_uses_per_sha_bundle_name() {
     let package_script = include_str!("../../../scripts/package.sh");
 
-    assert!(package_script.contains("PRODUCT_NAME=\"Vmux Local\""));
-    assert!(!package_script.contains("PRODUCT_NAME=\"Vmux ($GIT_HASH)\""));
+    assert!(package_script.contains("PRODUCT_NAME=\"Vmux ($SHA)\""));
+    assert!(package_script.contains("BUNDLE_ID=\"ai.vmux.desktop.$SHA\""));
+    assert!(!package_script.contains("PRODUCT_NAME=\"Vmux Local\""));
 }
 
 #[test]
@@ -57,19 +67,19 @@ fn local_signing_uses_stable_codesigning_identity() {
 }
 
 #[test]
-fn debug_signing_uses_default_keychain_directly() {
-    let signing_script = include_str!("../../../scripts/sign-debug-mac.sh");
+fn dev_signing_uses_default_keychain_directly() {
+    let signing_script = include_str!("../../../scripts/sign-dev-mac.sh");
 
     assert!(signing_script.contains("CODESIGN_KEYCHAIN"));
     assert!(signing_script.contains("--keychain"));
 }
 
 #[test]
-fn debug_and_local_share_main_bundle_identifier() {
-    let signing_script = include_str!("../../../scripts/sign-debug-mac.sh");
+fn dev_and_local_use_distinct_bundle_identifiers() {
+    let signing_script = include_str!("../../../scripts/sign-dev-mac.sh");
     let package_script = include_str!("../../../scripts/package.sh");
 
-    assert!(signing_script.contains("APP_IDENTIFIER=\"ai.vmux.desktop.local\""));
-    assert!(package_script.contains("BUNDLE_ID=\"ai.vmux.desktop.local\""));
-    assert!(!signing_script.contains("ai.vmux.desktop.dev."));
+    assert!(signing_script.contains("APP_IDENTIFIER=\"ai.vmux.desktop.dev\""));
+    assert!(!signing_script.contains("ai.vmux.desktop.local"));
+    assert!(package_script.contains("BUNDLE_ID=\"ai.vmux.desktop.$SHA\""));
 }

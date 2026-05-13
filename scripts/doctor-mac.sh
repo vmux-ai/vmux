@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# macOS dev environment check for `make run-mac`.
+# macOS dev environment check for `make dev`.
 # Respects NO_COLOR=1 and skips colors when stdout is not a TTY.
 
 set -euo pipefail
@@ -67,7 +67,7 @@ bad_line() {
 printf '\n'
 bar
 printf ' %s🩺  Vmux Doctor%s  %s(macOS)%s\n' "${BOLD}" "${RESET}" "${CYAN}" "${RESET}"
-printf ' %s%s\n' "${DIM}" "Checking everything you need for ${BOLD}make run-mac${RESET}${DIM}…${RESET}"
+printf ' %s%s\n' "${DIM}" "Checking everything you need for ${BOLD}make dev${RESET}${DIM}…${RESET}"
 bar
 printf '\n'
 
@@ -180,7 +180,7 @@ fi
 if security find-identity -v -p codesigning 2>/dev/null | grep -Fq "\"${VMUX_LOCAL_SIGNING_IDENTITY}\""; then
 	ok_line "local codesigning identity — ${VMUX_LOCAL_SIGNING_IDENTITY}"
 else
-	warn_line "local codesigning identity will be created on first make run-mac"
+	warn_line "local codesigning identity will be created on first make dev"
 	tip "Expected prompt: allow Keychain/codesign setup once, preferably with Touch ID"
 fi
 
@@ -200,7 +200,7 @@ printf '\n'
 
 if [[ "${fail}" -eq 0 ]]; then
 	printf ' %s🎉 All required checks passed!%s\n' "${GREEN}${BOLD}" "${RESET}"
-	printf ' %sYou are clear to run:%s %smake run-mac%s\n' "${DIM}" "${RESET}" "${BOLD}" "${RESET}"
+	printf ' %sYou are clear to run:%s %smake dev%s\n' "${DIM}" "${RESET}" "${BOLD}" "${RESET}"
 	if [[ "${warn}" -gt 0 ]]; then
 		printf '\n %s(Warning items above are optional or handled on first run.)%s\n' "${YELLOW}" "${RESET}"
 	fi

@@ -1,4 +1,6 @@
-.PHONY: run-mac run-mac-local run-doctor build-mac-debug sign-mac-debug build build-mac-local build-mac-release package-local-mac package-release-mac setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps ensure-package-deps ensure-codesign-deps run-website build-website build-website-css lint lint-fix fmt clippy test
+.PHONY: dev local release build-local build-release run-doctor build setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps ensure-package-deps ensure-codesign-deps run-website build-website build-website-css lint lint-fix fmt clippy test
+
+.DEFAULT_GOAL := dev
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 RUSTUP_BIN := $(or $(shell command -v rustup 2>/dev/null),$(HOME)/.cargo/bin/rustup)
@@ -14,12 +16,14 @@ CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 
 # Header / history / UI library `dist/` folders are built by each crate’s `build.rs` via **`dx build`** when you compile `vmux_desktop` (needs `dioxus-cli` on PATH).
 
-run-mac: build-mac-debug
-	exec env -u CEF_PATH ./target/debug/vmux_desktop
-
-build-mac-debug: ensure-run-mac-deps ensure-codesign-deps install-debug-render-process
+dev: ensure-run-mac-deps ensure-codesign-deps install-debug-render-process
 	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop -p vmux_cli -p vmux_service --features debug
-	@$(MAKE) sign-mac-debug
+	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
+	APPLE_SIGNING_IDENTITY="$$identity" \
+	APP_BINARY="target/debug/vmux_desktop" \
+	HELPER_BINARY="$(CEF_DEBUG_RENDER)" \
+	./scripts/sign-dev-mac.sh
+	exec env -u CEF_PATH ./target/debug/vmux_desktop
 
 build: ensure-run-mac-deps
 	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop -p vmux_cli -p vmux_service --release
@@ -27,31 +31,24 @@ build: ensure-run-mac-deps
 -include .env
 export
 
-run-mac-local: build-mac-local
-	open "target/release/Vmux Local.app"
-
-package-local-mac: ensure-run-mac-deps ensure-package-deps
+build-local: ensure-run-mac-deps ensure-package-deps ensure-codesign-deps
 	./scripts/package.sh local
-
-package-release-mac: ensure-run-mac-deps ensure-package-deps
-	./scripts/package.sh release
-
-build-mac-local: package-local-mac ensure-codesign-deps
 	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
+	sha="$$(git rev-parse --short HEAD)" && \
 	APPLE_SIGNING_IDENTITY="$$identity" \
 	SKIP_NOTARIZE=1 \
-	APP_BUNDLE="target/release/Vmux Local.app" \
+	APP_BUNDLE="target/release/Vmux ($$sha).app" \
 	./scripts/sign-and-notarize.sh
 
-sign-mac-debug: ensure-codesign-deps
-	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
-	APPLE_SIGNING_IDENTITY="$$identity" \
-	APP_BINARY="target/debug/vmux_desktop" \
-	HELPER_BINARY="$(CEF_DEBUG_RENDER)" \
-	./scripts/sign-debug-mac.sh
+local: build-local
+	@sha="$$(git rev-parse --short HEAD)" && \
+	open "target/release/Vmux ($$sha).app"
 
-build-mac-release:
+build-release: ensure-run-mac-deps ensure-package-deps
 	./scripts/build-mac-release.sh release
+
+release: build-release
+	open "target/release/Vmux.app"
 
 # One-time CEF download (macOS paths; pin matches bevy_cef 0.5.x)
 setup-cef:
@@ -116,7 +113,7 @@ doctor-mac:
 		BEVY_CEF_BUNDLE_APP_BIN="$(BEVY_CEF_BUNDLE_APP_BIN)" CEF_FRAMEWORK_DIR="$(CEF_FRAMEWORK_DIR)" \
 		CEF_DEBUG_RENDER="$(CEF_DEBUG_RENDER)" ./scripts/doctor-mac.sh
 
-# Non-interactive bootstrap so `make run-mac` works even after dependency bumps.
+# Non-interactive bootstrap so `make dev` works even after dependency bumps.
 ensure-run-mac-deps:
 	@echo "Checking build dependencies..."
 	@if [ ! -x "$(CARGO_BIN)" ]; then \

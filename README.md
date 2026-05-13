@@ -38,7 +38,7 @@ Requires macOS 13.0 (Ventura) or later.
 make run-doctor
 
 # Run signed debug binary
-make run-mac
+make dev
 ```
 
 See [Makefile](Makefile) for all targets.
