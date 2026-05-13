@@ -1,4 +1,4 @@
-.PHONY: dev local release build-local build-release run-doctor build setup-cef install-debug-render-process doctor-mac ensure-run-mac-deps ensure-package-deps ensure-codesign-deps run-website build-website build-website-css lint lint-fix fmt clippy test
+.PHONY: dev local release build-local build-release build setup-cef install-debug-render-process doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps run-website website build-website-css lint lint-fix test
 
 .DEFAULT_GOAL := dev
 
@@ -16,7 +16,7 @@ CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 
 # Header / history / UI library `dist/` folders are built by each crate’s `build.rs` via **`dx build`** when you compile `vmux_desktop` (needs `dioxus-cli` on PATH).
 
-dev: ensure-run-mac-deps ensure-codesign-deps install-debug-render-process
+dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process
 	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop -p vmux_cli -p vmux_service --features debug
 	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
 	APPLE_SIGNING_IDENTITY="$$identity" \
@@ -25,13 +25,13 @@ dev: ensure-run-mac-deps ensure-codesign-deps install-debug-render-process
 	./scripts/sign-dev-mac.sh
 	exec env -u CEF_PATH ./target/debug/vmux_desktop
 
-build: ensure-run-mac-deps
+build: ensure-mac-deps
 	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop -p vmux_cli -p vmux_service --release
 
 -include .env
 export
 
-build-local: ensure-run-mac-deps ensure-package-deps ensure-codesign-deps
+build-local: ensure-mac-deps ensure-package-deps ensure-codesign-deps
 	./scripts/package.sh local
 	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
 	sha="$$(git rev-parse --short HEAD)" && \
@@ -44,7 +44,7 @@ local: build-local
 	@sha="$$(git rev-parse --short HEAD)" && \
 	open "target/release/Vmux ($$sha).app"
 
-build-release: ensure-run-mac-deps ensure-package-deps
+build-release: ensure-mac-deps ensure-package-deps
 	./scripts/build-mac-release.sh release
 
 release: build-release
@@ -65,7 +65,13 @@ install-debug-render-process:
 # Get workspace packages excluding vendored patches
 PKGS = $(shell "$(CARGO_BIN)" metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | .name')
 
-lint: fmt clippy
+lint:
+	@for pkg in $(PKGS); do \
+		"$(CARGO_BIN)" fmt -p "$$pkg" -- --check || exit 1; \
+	done
+	@for pkg in $(PKGS); do \
+		env -u CEF_PATH "$(CARGO_BIN)" clippy -p "$$pkg" --all-targets -- -D warnings || exit 1; \
+	done
 
 lint-fix:
 	@for pkg in $(PKGS); do \
@@ -73,16 +79,6 @@ lint-fix:
 	done
 	@for pkg in $(PKGS); do \
 		env -u CEF_PATH "$(CARGO_BIN)" clippy -p "$$pkg" --all-targets --fix --allow-dirty --allow-staged -- -D warnings || exit 1; \
-	done
-
-fmt:
-	@for pkg in $(PKGS); do \
-		"$(CARGO_BIN)" fmt -p "$$pkg" -- --check || exit 1; \
-	done
-
-clippy:
-	@for pkg in $(PKGS); do \
-		env -u CEF_PATH "$(CARGO_BIN)" clippy -p "$$pkg" --all-targets -- -D warnings || exit 1; \
 	done
 
 test:
@@ -100,13 +96,11 @@ run-website: build-website-css
 		"$(DX_BIN)" serve --platform web; \
 	}
 
-build-website: build-website-css
+website: build-website-css
 	cd website && "$(DX_BIN)" build --platform web --release
 
-# Friendly prerequisite report (colors / emoji when terminal); README: make run-doctor
-run-doctor: doctor-mac
-
-doctor-mac:
+# Friendly prerequisite report (colors / emoji when terminal); README: make doctor
+doctor:
 	@chmod +x scripts/doctor-mac.sh
 	@CARGO_BIN="$(CARGO_BIN)" RUSTUP_BIN="$(RUSTUP_BIN)" EXPORT_CEF_BIN="$(EXPORT_CEF_BIN)" \
 		DX_BIN="$(DX_BIN)" CARGO_PACKAGER_BIN="$(CARGO_PACKAGER_BIN)" \
@@ -114,7 +108,7 @@ doctor-mac:
 		CEF_DEBUG_RENDER="$(CEF_DEBUG_RENDER)" ./scripts/doctor-mac.sh
 
 # Non-interactive bootstrap so `make dev` works even after dependency bumps.
-ensure-run-mac-deps:
+ensure-mac-deps:
 	@echo "Checking build dependencies..."
 	@if [ ! -x "$(CARGO_BIN)" ]; then \
 		echo "cargo not found at $(CARGO_BIN). Install rustup first: https://rustup.rs/"; \

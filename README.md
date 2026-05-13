@@ -18,13 +18,6 @@
 curl -fsSL https://vmux.ai/install | sh
 ```
 
-### Homebrew (macOS)
-
-```sh
-brew tap vmux-ai/vmux https://github.com/vmux-ai/vmux
-brew install --cask vmux
-```
-
 ### Download
 
 Grab the latest `.dmg` from [GitHub Releases](https://github.com/vmux-ai/vmux/releases).
@@ -35,10 +28,10 @@ Requires macOS 13.0 (Ventura) or later.
 
 ```sh
 # Check prerequisites
-make run-doctor
+make doctor
 
-# Run signed debug binary
-make dev
+# Run macOS app
+make
 ```
 
 See [Makefile](Makefile) for all targets.
