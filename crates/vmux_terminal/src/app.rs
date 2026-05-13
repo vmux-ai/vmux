@@ -247,6 +247,17 @@ pub fn App() -> Element {
                 })
             }
 
+            {
+                let waiting = rows.read().is_empty() && service_error.read().is_empty();
+                waiting.then(|| rsx! {
+                    div {
+                        class: "absolute inset-0 z-40 flex items-center justify-center text-sm",
+                        style: "color:#888;",
+                        "Loading…"
+                    }
+                })
+            }
+
             div {
                 style: "padding:{padding}px;",
                 div {
