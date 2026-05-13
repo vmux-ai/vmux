@@ -325,7 +325,12 @@ mod tests {
             .drain()
             .collect();
 
-        assert_eq!(commands, vec![AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectLeft))]);
+        assert_eq!(
+            commands,
+            vec![AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::SelectLeft
+            ))]
+        );
     }
 
     #[test]
@@ -349,7 +354,12 @@ mod tests {
             .drain()
             .collect();
 
-        assert_eq!(commands, vec![AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectRight))]);
+        assert_eq!(
+            commands,
+            vec![AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::SelectRight
+            ))]
+        );
     }
 
     #[test]
@@ -373,7 +383,12 @@ mod tests {
             .drain()
             .collect();
 
-        assert_eq!(commands, vec![AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectDown))]);
+        assert_eq!(
+            commands,
+            vec![AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::SelectDown
+            ))]
+        );
     }
 
     #[test]
@@ -397,7 +412,12 @@ mod tests {
             .drain()
             .collect();
 
-        assert_eq!(commands, vec![AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectUp))]);
+        assert_eq!(
+            commands,
+            vec![AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::SelectUp
+            ))]
+        );
     }
 
     #[test]

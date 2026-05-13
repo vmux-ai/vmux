@@ -1452,7 +1452,9 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectRight)));
+            .write(AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::SelectRight,
+            )));
         app.update();
 
         let new_b = app.world().get::<LastActivatedAt>(b).unwrap().0;
@@ -1536,7 +1538,9 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectLeft)));
+            .write(AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::SelectLeft,
+            )));
         app.update();
 
         let new_a = app.world().get::<LastActivatedAt>(a).unwrap().0;
@@ -1606,7 +1610,9 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectLeft)));
+            .write(AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::SelectLeft,
+            )));
         app.update();
 
         let new_active_left = app
@@ -2023,7 +2029,9 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SelectLeft)));
+            .write(AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::SelectLeft,
+            )));
         app.update();
 
         assert!(
