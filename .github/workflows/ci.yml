@@ -94,7 +94,7 @@ jobs:
         run: |
           if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
             command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@${{ env.CEF_VERSION }}
-            export-cef-dir "$HOME/.local/share"
+            export-cef-dir --force "$HOME/.local/share"
           fi
 
       - name: Install dioxus-cli
@@ -169,7 +169,7 @@ jobs:
         run: |
           if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
             command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@${{ env.CEF_VERSION }}
-            export-cef-dir "$HOME/.local/share"
+            export-cef-dir --force "$HOME/.local/share"
           fi
 
       - name: Install dioxus-cli
@@ -268,7 +268,7 @@ jobs:
         run: |
           if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
             command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@${{ env.CEF_VERSION }}
-            export-cef-dir "$HOME/.local/share"
+            export-cef-dir --force "$HOME/.local/share"
           fi
 
       - name: Install dioxus-cli
