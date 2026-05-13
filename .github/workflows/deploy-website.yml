@@ -18,6 +18,10 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  TAILWINDCSS_VERSION: "4.2.4"
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -39,11 +43,22 @@ jobs:
           shared-key: deploy-website
           cache-all-crates: true
 
+      - name: Cache tailwindcss
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/tailwindcss
+          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
+
+      - name: Add ~/.local/bin to PATH
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Install dioxus-cli
-        run: cargo install dioxus-cli --locked --version 0.7.4
+        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
       - name: Install Tailwind CSS
-        run: ./scripts/install-tailwindcss.sh
+        run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
 
       - name: Build Tailwind CSS
         working-directory: website

@@ -16,6 +16,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   TAILWINDCSS_VERSION: "4.2.4"
+  CEF_VERSION: "145.6.1+145.0.28"
 
 jobs:
   lint:
@@ -61,6 +62,23 @@ jobs:
           shared-key: lint
           cache-all-crates: true
 
+      - name: Cache CEF framework
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/Chromium Embedded Framework.framework
+          key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
+
+      - name: Cache tailwindcss
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/tailwindcss
+          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
+
+      - name: Add ~/.local/bin to PATH
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Compute workspace packages (excluding patches)
         id: pkgs
         run: |
@@ -74,14 +92,16 @@ jobs:
 
       - name: Install CEF framework
         run: |
-          command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@145.6.1+145.0.28
-          export-cef-dir --force "$HOME/.local/share"
+          if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
+            command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@${{ env.CEF_VERSION }}
+            export-cef-dir "$HOME/.local/share"
+          fi
 
       - name: Install dioxus-cli
         run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
       - name: Install tailwindcss
-        run: ./scripts/install-tailwindcss.sh
+        run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
 
       - name: Clippy
         run: env -u CEF_PATH cargo clippy ${{ steps.pkgs.outputs.args }} --all-targets -- -D warnings
@@ -128,16 +148,35 @@ jobs:
           shared-key: test
           cache-all-crates: true
 
+      - name: Cache CEF framework
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/Chromium Embedded Framework.framework
+          key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
+
+      - name: Cache tailwindcss
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/tailwindcss
+          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
+
+      - name: Add ~/.local/bin to PATH
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Install CEF framework
         run: |
-          command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@145.6.1+145.0.28
-          export-cef-dir --force "$HOME/.local/share"
+          if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
+            command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@${{ env.CEF_VERSION }}
+            export-cef-dir "$HOME/.local/share"
+          fi
 
       - name: Install dioxus-cli
         run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
       - name: Install tailwindcss
-        run: ./scripts/install-tailwindcss.sh
+        run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
 
       - name: Run tests
         run: env -u CEF_PATH cargo test --workspace --exclude bevy_cef_core
@@ -208,10 +247,29 @@ jobs:
           shared-key: build-mac
           cache-all-crates: true
 
+      - name: Cache CEF framework
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/Chromium Embedded Framework.framework
+          key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
+
+      - name: Cache tailwindcss
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/tailwindcss
+          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
+
+      - name: Add ~/.local/bin to PATH
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Install CEF framework
         run: |
-          command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@145.6.1+145.0.28
-          export-cef-dir --force "$HOME/.local/share"
+          if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
+            command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@${{ env.CEF_VERSION }}
+            export-cef-dir "$HOME/.local/share"
+          fi
 
       - name: Install dioxus-cli
         run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
@@ -222,10 +280,13 @@ jobs:
           command -v bevy_cef_bundle_app >/dev/null 2>&1 || cargo install bevy_cef_bundle_app
 
       - name: Install cargo-packager (patched for macOS Tahoe)
-        run: cargo install --path patches/cargo-packager-0.11.8
+        run: |
+          if ! cargo-packager --version 2>/dev/null | grep -q '0.11.8'; then
+            cargo install --path patches/cargo-packager-0.11.8
+          fi
 
       - name: Install tailwindcss
-        run: ./scripts/install-tailwindcss.sh
+        run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
 
       - name: Build, sign, notarize, and package DMG
         env:
