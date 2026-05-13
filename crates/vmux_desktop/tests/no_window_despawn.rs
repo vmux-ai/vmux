@@ -5,6 +5,10 @@ fn no_production_code_inserts_closing_window() {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let src = crate_root.join("src");
 
+    let marker = ["Closing", "Window"].concat();
+    let insert_needle = format!("insert({marker})");
+    let try_insert_needle = format!("try_insert({marker})");
+
     let mut violations = Vec::new();
     walk(&src, &mut |path, contents| {
         for (i, line) in contents.lines().enumerate() {
@@ -12,9 +16,7 @@ fn no_production_code_inserts_closing_window() {
             if trimmed.starts_with("//") {
                 continue;
             }
-            if trimmed.contains("insert(ClosingWindow)")
-                || trimmed.contains("try_insert(ClosingWindow)")
-            {
+            if trimmed.contains(&insert_needle) || trimmed.contains(&try_insert_needle) {
                 violations.push(format!("{}:{} → {}", path.display(), i + 1, trimmed));
             }
         }
