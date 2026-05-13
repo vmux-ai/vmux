@@ -3,7 +3,7 @@ use crate::settings::AppSettings;
 use crate::terminal::{self, PtyExited, Terminal};
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
-use bevy::window::{ClosingWindow, WindowCloseRequested};
+use bevy::window::WindowCloseRequested;
 use muda::{Menu, MenuEvent};
 use parking_lot::Mutex;
 use std::sync::LazyLock;
@@ -80,25 +80,18 @@ fn handle_quit_request(world: &mut World) {
 /// dialog when terminals are still running. Defers the dialog to the
 /// exclusive `show_pending_close_dialogs` system to avoid deadlocks.
 fn close_with_confirmation(
-    mut commands: Commands,
     mut closed: MessageReader<WindowCloseRequested>,
-    closing: Query<Entity, With<ClosingWindow>>,
+    mut windows: Query<&mut Window>,
     settings: Res<AppSettings>,
     live_terminals: Query<(), (With<Terminal>, Without<PtyExited>)>,
     mut pending: ResMut<PendingWindowClose>,
 ) {
-    // Despawn windows that were marked as closing on the previous frame.
-    for window in closing.iter() {
-        commands.entity(window).despawn();
-    }
-    // Process new close requests.
     for event in closed.read() {
         let should_confirm = terminal::should_confirm_close(&settings);
         if should_confirm && live_terminals.iter().count() > 0 {
-            // Defer dialog to exclusive system
             pending.window = Some(event.window);
-        } else {
-            commands.entity(event.window).try_insert(ClosingWindow);
+        } else if let Ok(mut window) = windows.get_mut(event.window) {
+            window.visible = false;
         }
     }
 }
@@ -118,8 +111,9 @@ fn process_pending_window_close(world: &mut World) {
 
     if (count == 0 || terminal::confirm_quit_dialog(count))
         && let Ok(mut entity_mut) = world.get_entity_mut(window)
+        && let Some(mut win) = entity_mut.get_mut::<Window>()
     {
-        entity_mut.insert(ClosingWindow);
+        win.visible = false;
     }
 }
 
@@ -136,6 +130,24 @@ mod tests {
         assert!(
             source.contains("HideAllWindows") || source.contains("window.visible = false"),
             "handle_quit_request must dispatch a hide action"
+        );
+    }
+
+    #[test]
+    fn window_close_request_hides_window_instead_of_despawning() {
+        let source = include_str!("os_menu.rs");
+        let despawn_marker = ["Closing", "Window"].concat();
+        let inserts = source.matches(&format!("insert({despawn_marker})")).count()
+            + source
+                .matches(&format!("try_insert({despawn_marker})"))
+                .count();
+        assert_eq!(
+            inserts, 0,
+            "WindowCloseRequested must hide the window, not insert ClosingWindow which leads to despawn"
+        );
+        assert!(
+            source.contains("window.visible = false") || source.contains(".visible = false"),
+            "expected the close handler to set window.visible = false"
         );
     }
 }
