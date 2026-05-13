@@ -7,6 +7,7 @@
 
 mod agent;
 mod agent_query;
+mod background_lifecycle;
 mod browser;
 mod clipboard;
 mod command;
@@ -127,6 +128,7 @@ impl Plugin for VmuxPlugin {
             ProfilePlugin,
             LayoutPlugin,
             updater::VmuxUpdater::builder().build().plugin(),
+            background_lifecycle::BackgroundLifecyclePlugin,
         ));
     }
 }

@@ -1,7 +1,6 @@
 use crate::command::{AppCommand, WriteAppCommands, build_native_root_menu};
 use crate::settings::AppSettings;
 use crate::terminal::{self, PtyExited, Terminal};
-use bevy::app::AppExit;
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::window::{ClosingWindow, WindowCloseRequested};
@@ -72,23 +71,11 @@ fn forward_menu_events(world: &mut World) {
 }
 
 fn handle_quit_request(world: &mut World) {
-    let should_confirm = world
-        .get_resource::<AppSettings>()
-        .and_then(|s| s.terminal.as_ref())
-        .is_none_or(|t| t.confirm_close);
-
-    if should_confirm {
-        let mut query = world.query_filtered::<(), (With<Terminal>, Without<PtyExited>)>();
-        let count = query.iter(world).count();
-
-        if count > 0 && !terminal::confirm_quit_dialog(count) {
-            return;
-        }
-    }
-
+    // Cmd+Q hides the UI but keeps Vmux.app + vmux_service alive.
+    // Real quit is only available via the tray menu.
     world
-        .resource_mut::<Messages<AppExit>>()
-        .write(AppExit::Success);
+        .resource_mut::<Messages<crate::background_lifecycle::LifecycleEvent>>()
+        .write(crate::background_lifecycle::LifecycleEvent::HideAllWindows);
 }
 
 /// Replacement for bevy's `close_when_requested` that shows a confirmation
@@ -135,5 +122,22 @@ fn process_pending_window_close(world: &mut World) {
         && let Ok(mut entity_mut) = world.get_entity_mut(window)
     {
         entity_mut.insert(ClosingWindow);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn quit_menu_event_hides_windows_not_exit() {
+        let source = include_str!("os_menu.rs");
+        let needle = ["AppExit", "::", "Success"].concat();
+        assert!(
+            !source.contains(&needle),
+            "Cmd+Q must hide windows, not exit the app — terminal state must survive"
+        );
+        assert!(
+            source.contains("HideAllWindows") || source.contains("window.visible = false"),
+            "handle_quit_request must dispatch a hide action"
+        );
     }
 }
