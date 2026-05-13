@@ -31,7 +31,7 @@ mkdir -p "$WEBVIEW_ROOT"
 copy_webview_app "layout" "vmux_layout"
 copy_webview_app "command-bar" "vmux_command"
 copy_webview_app "terminal" "vmux_terminal"
-copy_webview_app "services" "vmux_process"
+copy_webview_app "services" "vmux_service"
 copy_webview_app "history" "vmux_history"
 copy_webview_app "spaces" "vmux_space"
 
