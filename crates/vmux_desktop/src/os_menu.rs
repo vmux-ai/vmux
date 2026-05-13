@@ -65,7 +65,7 @@ fn forward_menu_events(world: &mut World) {
         } else if let Some(cmd) = AppCommand::from_menu_id(event_id.as_str()) {
             world.resource_mut::<Messages<AppCommand>>().write(cmd);
         } else {
-            warn!(len = event_id.len(), "unknown native menu item");
+            crate::tray::PENDING_TRAY_EVENTS.lock().push(event_id);
         }
     }
 }

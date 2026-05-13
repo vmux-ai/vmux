@@ -4,9 +4,7 @@ use bevy::window::Window;
 #[derive(Message, Debug, Clone, Copy)]
 pub enum LifecycleEvent {
     HideAllWindows,
-    #[allow(dead_code)]
     ShowAllWindows,
-    #[allow(dead_code)]
     QuitVmux,
 }
 

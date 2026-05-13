@@ -129,6 +129,7 @@ impl Plugin for VmuxPlugin {
             LayoutPlugin,
             updater::VmuxUpdater::builder().build().plugin(),
             background_lifecycle::BackgroundLifecyclePlugin,
+            tray::TrayPlugin,
         ));
     }
 }
