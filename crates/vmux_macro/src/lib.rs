@@ -200,7 +200,7 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     Ok(quote! {
         impl #ident {
             pub(crate) fn build_native_root_menu(menu: &mut ::muda::Menu) -> Result<(), ::muda::Error> {
-                let app_name = match env!("VMUX_PROFILE") {
+                let app_name = match env!("VMUX_BUILD_PROFILE") {
                     "release" => "Vmux".to_string(),
                     "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
                     "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),

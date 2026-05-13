@@ -73,7 +73,7 @@ Append to `crates/vmux_service/src/lib.rs` `tests` module:
 ```rust
     #[test]
     fn current_profile_is_compile_env() {
-        // Set by build.rs; default in tests is "dev" because no VMUX_PROFILE override.
+        // Set by build.rs; default in tests is "dev" because no VMUX_BUILD_PROFILE override.
         // Just assert it's non-empty and is one of the known profiles.
         let p = current_profile();
         assert!(!p.is_empty());
@@ -121,20 +121,20 @@ env -u CEF_PATH cargo test -p vmux_service --lib current_profile_is_compile_env 
 
 Expected: 5 failures with "cannot find function `current_profile`/`launchd_label`/`identity_path`/`log_path`/`plist_path` in this scope" (or similar).
 
-- [ ] **Step 3: Add `VMUX_PROFILE` to `vmux_service` build script**
+- [ ] **Step 3: Add `VMUX_BUILD_PROFILE` to `vmux_service` build script**
 
 Create `crates/vmux_service/build.rs`:
 
 ```rust
 fn main() {
-    let profile = std::env::var("VMUX_PROFILE").unwrap_or_else(|_| {
+    let profile = std::env::var("VMUX_BUILD_PROFILE").unwrap_or_else(|_| {
         match std::env::var("PROFILE").as_deref() {
             Ok("release") => "release".to_string(),
             _ => "dev".to_string(),
         }
     });
-    println!("cargo::rustc-env=VMUX_PROFILE={profile}");
-    println!("cargo::rerun-if-env-changed=VMUX_PROFILE");
+    println!("cargo::rustc-env=VMUX_BUILD_PROFILE={profile}");
+    println!("cargo::rerun-if-env-changed=VMUX_BUILD_PROFILE");
 }
 ```
 
@@ -160,7 +160,7 @@ use std::time::UNIX_EPOCH;
 
 /// Profile this build was compiled for ("release", "local", or "dev").
 pub fn current_profile() -> &'static str {
-    env!("VMUX_PROFILE")
+    env!("VMUX_BUILD_PROFILE")
 }
 
 /// Directory for service runtime files (socket, pid, log).
@@ -906,7 +906,7 @@ pub fn generate_plist(profile: &str, binary_path: &Path, log_path: &Path) -> Str
   <string>Interactive</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>VMUX_PROFILE</key>
+    <key>VMUX_BUILD_PROFILE</key>
     <string>{profile}</string>
   </dict>
   <key>StandardOutPath</key>
@@ -1004,7 +1004,7 @@ mod tests {
         assert!(xml.contains("<string>ai.vmux.service.dev</string>"));
         assert!(xml.contains("<string>/usr/local/bin/vmux_service</string>"));
         assert!(xml.contains("<string>/tmp/vmux-dev.log</string>"));
-        assert!(xml.contains("<key>VMUX_PROFILE</key>"));
+        assert!(xml.contains("<key>VMUX_BUILD_PROFILE</key>"));
         assert!(xml.contains("<string>dev</string>"));
         assert!(xml.contains("<key>RunAtLoad</key>\n  <false/>"));
         assert!(xml.contains("<key>KeepAlive</key>"));
@@ -1592,15 +1592,15 @@ Open `crates/vmux_process/build.rs` (already read in design phase). Update `crat
 use std::path::PathBuf;
 
 fn main() {
-    // VMUX_PROFILE plumbing (kept from Task 1)
-    let profile = std::env::var("VMUX_PROFILE").unwrap_or_else(|_| {
+    // VMUX_BUILD_PROFILE plumbing (kept from Task 1)
+    let profile = std::env::var("VMUX_BUILD_PROFILE").unwrap_or_else(|_| {
         match std::env::var("PROFILE").as_deref() {
             Ok("release") => "release".to_string(),
             _ => "dev".to_string(),
         }
     });
-    println!("cargo::rustc-env=VMUX_PROFILE={profile}");
-    println!("cargo::rerun-if-env-changed=VMUX_PROFILE");
+    println!("cargo::rustc-env=VMUX_BUILD_PROFILE={profile}");
+    println!("cargo::rerun-if-env-changed=VMUX_BUILD_PROFILE");
 
     // Webview build (merged from vmux_process/build.rs)
     use vmux_webview_app::build::{CefEmbeddedWebviewFinalize, WebviewAppBuilder};

@@ -13,17 +13,17 @@ fn main() {
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo::rustc-env=VMUX_GIT_HASH={hash}");
 
-    let profile = std::env::var("VMUX_PROFILE").unwrap_or_else(|_| {
+    let profile = std::env::var("VMUX_BUILD_PROFILE").unwrap_or_else(|_| {
         if std::env::var("PROFILE").unwrap_or_default() == "release" {
             "release".to_string()
         } else {
             "dev".to_string()
         }
     });
-    println!("cargo::rustc-env=VMUX_PROFILE={profile}");
+    println!("cargo::rustc-env=VMUX_BUILD_PROFILE={profile}");
     println!("cargo::rerun-if-changed=../../.git/HEAD");
     println!("cargo::rerun-if-changed=../../.git/refs");
-    println!("cargo::rerun-if-env-changed=VMUX_PROFILE");
+    println!("cargo::rerun-if-env-changed=VMUX_BUILD_PROFILE");
 
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     WebviewAppBuilder::new(manifest_dir, "vmux_layout", "vmux_layout_app")

@@ -73,7 +73,7 @@ fn primary_window_config(title: String) -> NativeWindow {
 
 impl Plugin for VmuxPlugin {
     fn build(&self, app: &mut App) {
-        let title = match env!("VMUX_PROFILE") {
+        let title = match env!("VMUX_BUILD_PROFILE") {
             "release" => "Vmux".to_string(),
             "local" => format!("Vmux ({})", env!("VMUX_GIT_HASH")),
             "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),

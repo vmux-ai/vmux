@@ -6,7 +6,7 @@ APP_BINARY="${APP_BINARY:-$ROOT/target/debug/vmux_desktop}"
 HELPER_BINARY="${HELPER_BINARY:-$HOME/.local/share/Chromium Embedded Framework.framework/Libraries/bevy_cef_debug_render_process}"
 ENTITLEMENTS="$ROOT/packaging/macos/Vmux.entitlements"
 CODESIGN_KEYCHAIN="${CODESIGN_KEYCHAIN:-$(security default-keychain -d user | awk -F'"' '/"/ { print $2; exit }')}"
-APP_IDENTIFIER="ai.vmux.desktop.local"
+APP_IDENTIFIER="ai.vmux.desktop.dev"
 
 if [[ -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then
     echo "Error: APPLE_SIGNING_IDENTITY not set." >&2
