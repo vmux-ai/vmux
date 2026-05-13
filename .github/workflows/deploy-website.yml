@@ -33,15 +33,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            website/target
-          key: website-${{ hashFiles('website/Cargo.lock') }}
-          restore-keys: website-
+          workspaces: website
+          shared-key: deploy-website
+          cache-all-crates: true
 
       - name: Install dioxus-cli
         run: cargo install dioxus-cli --locked --version 0.7.4

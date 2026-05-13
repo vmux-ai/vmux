@@ -56,25 +56,21 @@ jobs:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
 
-      - uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          shared-key: lint
+          cache-all-crates: true
+
+      - name: Compute workspace packages (excluding patches)
+        id: pkgs
+        run: |
+          ARGS=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | "-p " + .name' \
+            | tr '\n' ' ')
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
 
       - name: Check formatting
-        run: |
-          # Exclude vendored patches from formatting checks
-          PKGS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | .name')
-          for pkg in $PKGS; do
-            cargo fmt -p "$pkg" -- --check
-          done
+        run: cargo fmt ${{ steps.pkgs.outputs.args }} -- --check
 
       - name: Install CEF framework
         run: |
@@ -88,11 +84,7 @@ jobs:
         run: ./scripts/install-tailwindcss.sh
 
       - name: Clippy
-        run: |
-          PKGS=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | .name')
-          for pkg in $PKGS; do
-            env -u CEF_PATH cargo clippy -p "$pkg" --all-targets -- -D warnings
-          done
+        run: env -u CEF_PATH cargo clippy ${{ steps.pkgs.outputs.args }} --all-targets -- -D warnings
 
   test:
     name: Test
@@ -131,17 +123,10 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          shared-key: test
+          cache-all-crates: true
 
       - name: Install CEF framework
         run: |
@@ -193,17 +178,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            website/target
-          key: website-ci-${{ hashFiles('website/Cargo.lock') }}
-          restore-keys: website-ci-
+          workspaces: website
+          shared-key: website
+          cache-all-crates: true
 
       - name: Install dioxus-cli
         run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
@@ -224,17 +203,10 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            target
-          key: ${{ runner.os }}-build-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-build-
+          shared-key: build-mac
+          cache-all-crates: true
 
       - name: Install CEF framework
         run: |
