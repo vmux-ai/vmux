@@ -1,4 +1,4 @@
-.PHONY: dev local release build-local build-release build setup-cef install-debug-render-process doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps run-website website build-website-css lint lint-fix test
+.PHONY: dev local release build-local build-release build setup-cef install-debug-render-process doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test
 
 .DEFAULT_GOAL := dev
 
@@ -88,7 +88,7 @@ test:
 build-website-css:
 	cd website && tailwindcss -i tailwind.input.css -o public/style.css --minify
 
-run-website: build-website-css
+website: build-website-css
 	@cd website && { \
 		tailwindcss -i tailwind.input.css -o public/style.css --watch & \
 		WATCHER_PID=$$!; \
@@ -96,7 +96,7 @@ run-website: build-website-css
 		"$(DX_BIN)" serve --platform web; \
 	}
 
-website: build-website-css
+build-website-release: build-website-css
 	cd website && "$(DX_BIN)" build --platform web --release
 
 # Friendly prerequisite report (colors / emoji when terminal); README: make doctor
