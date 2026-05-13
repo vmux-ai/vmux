@@ -120,6 +120,8 @@ pub fn ensure_running(profile: &str, binary_path: &Path) -> std::io::Result<()> 
     let plist = crate::plist_path(profile);
     if !plist.exists() {
         install(profile, binary_path)?;
+    } else {
+        bootstrap(&plist)?;
     }
     kickstart(profile)
 }
