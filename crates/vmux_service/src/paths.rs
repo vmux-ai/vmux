@@ -3,7 +3,7 @@ use std::time::UNIX_EPOCH;
 
 /// Profile this build was compiled for ("release", "local", or "dev").
 pub fn current_profile() -> &'static str {
-    env!("VMUX_PROFILE")
+    env!("VMUX_BUILD_PROFILE")
 }
 
 /// Directory for service runtime files (socket, pid, log).

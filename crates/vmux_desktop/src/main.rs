@@ -26,7 +26,7 @@ fn main() {
          \n\
          \x1b[2mv{}{}\x1b[0m\n",
         env!("CARGO_PKG_VERSION"),
-        match env!("VMUX_PROFILE") {
+        match env!("VMUX_BUILD_PROFILE") {
             "release" => String::new(),
             "local" => format!(" ({})", env!("VMUX_GIT_HASH")),
             "dev" => format!(" dev ({})", env!("VMUX_GIT_HASH")),

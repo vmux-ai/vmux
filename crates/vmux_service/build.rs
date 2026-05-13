@@ -1,14 +1,14 @@
 use std::path::PathBuf;
 
 fn main() {
-    let profile = std::env::var("VMUX_PROFILE").unwrap_or_else(|_| {
+    let profile = std::env::var("VMUX_BUILD_PROFILE").unwrap_or_else(|_| {
         match std::env::var("PROFILE").as_deref() {
             Ok("release") => "release".to_string(),
             _ => "dev".to_string(),
         }
     });
-    println!("cargo::rustc-env=VMUX_PROFILE={profile}");
-    println!("cargo::rerun-if-env-changed=VMUX_PROFILE");
+    println!("cargo::rustc-env=VMUX_BUILD_PROFILE={profile}");
+    println!("cargo::rerun-if-env-changed=VMUX_BUILD_PROFILE");
 
     use vmux_webview_app::build::{CefEmbeddedWebviewFinalize, WebviewAppBuilder};
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());

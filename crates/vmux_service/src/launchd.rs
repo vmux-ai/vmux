@@ -30,7 +30,7 @@ pub fn generate_plist(profile: &str, binary_path: &Path, log_path: &Path) -> Str
   <string>Interactive</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>VMUX_PROFILE</key>
+    <key>VMUX_BUILD_PROFILE</key>
     <string>{profile}</string>
   </dict>
   <key>StandardOutPath</key>
@@ -141,7 +141,7 @@ mod tests {
         assert!(xml.contains("<string>ai.vmux.service.dev</string>"));
         assert!(xml.contains("<string>/usr/local/bin/vmux_service</string>"));
         assert!(xml.contains("<string>/tmp/vmux-dev.log</string>"));
-        assert!(xml.contains("<key>VMUX_PROFILE</key>"));
+        assert!(xml.contains("<key>VMUX_BUILD_PROFILE</key>"));
         assert!(xml.contains("<string>dev</string>"));
         assert!(xml.contains("<key>RunAtLoad</key>\n  <false/>"));
         assert!(xml.contains("<key>KeepAlive</key>"));

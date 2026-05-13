@@ -113,7 +113,7 @@ required-features = ["web"]
 
 ## Per-profile resources
 
-`VMUX_PROFILE` env var (already populated by `crates/vmux_desktop/build.rs` and `crates/vmux_layout/build.rs`) drives every per-profile suffix. Possible values: `release`, `local`, `dev`, plus arbitrary user-set strings.
+`VMUX_BUILD_PROFILE` env var (already populated by `crates/vmux_desktop/build.rs` and `crates/vmux_layout/build.rs`) drives every per-profile suffix. Possible values: `release`, `local`, `dev`, plus arbitrary user-set strings.
 
 | Resource | Path |
 |---|---|
@@ -127,7 +127,7 @@ required-features = ["web"]
 Helpers in `lib.rs`:
 
 ```rust
-pub fn current_profile() -> &'static str { env!("VMUX_PROFILE") }
+pub fn current_profile() -> &'static str { env!("VMUX_BUILD_PROFILE") }
 pub fn launchd_label(profile: &str) -> String { format!("ai.vmux.service.{profile}") }
 pub fn plist_path(profile: &str) -> PathBuf { /* ~/Library/LaunchAgents/<label>.plist */ }
 pub fn socket_path() -> PathBuf { service_dir().join(format!("vmux-{}.sock", current_profile())) }
@@ -154,7 +154,7 @@ pub fn log_path() -> PathBuf { service_dir().join(format!("vmux-{}.log", current
   </dict>
   <key>ProcessType</key>      <string>Interactive</string>
   <key>EnvironmentVariables</key> <dict>
-    <key>VMUX_PROFILE</key>     <string>{profile}</string>
+    <key>VMUX_BUILD_PROFILE</key>     <string>{profile}</string>
   </dict>
   <key>StandardOutPath</key>  <string>{log-path}</string>
   <key>StandardErrorPath</key><string>{log-path}</string>
