@@ -46,7 +46,7 @@ alacritty_terminal = "0.26"
 portable-pty = "0.9"
 rfd = "0.15"
 rkyv = { version = "0.8", features = ["alloc"] }
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "serde", "js"] }
 
 [profile.release.package.vmux_history]
 opt-level = "z"
