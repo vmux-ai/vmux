@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use objc2_foundation::NSString;
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
 #[derive(Debug)]
@@ -36,13 +37,15 @@ pub fn unregister_main_app() -> Result<(), SmError> {
 }
 
 pub fn register_agent(plist_name: &str) -> Result<(), SmError> {
-    let _ = plist_name;
-    Err(SmError::Other("not yet implemented".into()))
+    let ns_name = NSString::from_str(plist_name);
+    let service = unsafe { SMAppService::agentServiceWithPlistName(&ns_name) };
+    unsafe { service.registerAndReturnError() }.map_err(|e| SmError::Other(format!("{e}")))
 }
 
 pub fn unregister_agent(plist_name: &str) -> Result<(), SmError> {
-    let _ = plist_name;
-    Err(SmError::Other("not yet implemented".into()))
+    let ns_name = NSString::from_str(plist_name);
+    let service = unsafe { SMAppService::agentServiceWithPlistName(&ns_name) };
+    unsafe { service.unregisterAndReturnError() }.map_err(|e| SmError::Other(format!("{e}")))
 }
 
 #[derive(Debug)]
@@ -64,6 +67,14 @@ pub fn main_app_status() -> Status {
     }
 }
 
-pub fn agent_status(_plist_name: &str) -> Status {
-    Status::NotRegistered
+pub fn agent_status(plist_name: &str) -> Status {
+    let ns_name = NSString::from_str(plist_name);
+    let service = unsafe { SMAppService::agentServiceWithPlistName(&ns_name) };
+    match unsafe { service.status() } {
+        SMAppServiceStatus::NotRegistered => Status::NotRegistered,
+        SMAppServiceStatus::Enabled => Status::Enabled,
+        SMAppServiceStatus::RequiresApproval => Status::RequiresApproval,
+        SMAppServiceStatus::NotFound => Status::NotFound,
+        _ => Status::NotFound,
+    }
 }
