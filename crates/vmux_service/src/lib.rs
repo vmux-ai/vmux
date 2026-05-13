@@ -16,6 +16,8 @@ pub mod protocol;
 pub mod server;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod service;
+#[cfg(all(target_os = "macos", not(target_arch = "wasm32")))]
+pub mod sm_app_service;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod supervisor;
 
