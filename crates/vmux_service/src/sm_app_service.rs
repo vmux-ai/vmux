@@ -45,6 +45,7 @@ pub fn unregister_agent(plist_name: &str) -> Result<(), SmError> {
     Err(SmError::Other("not yet implemented".into()))
 }
 
+#[derive(Debug)]
 pub enum Status {
     NotRegistered,
     Enabled,
@@ -55,10 +56,11 @@ pub enum Status {
 pub fn main_app_status() -> Status {
     let service = unsafe { SMAppService::mainAppService() };
     match unsafe { service.status() } {
+        SMAppServiceStatus::NotRegistered => Status::NotRegistered,
         SMAppServiceStatus::Enabled => Status::Enabled,
         SMAppServiceStatus::RequiresApproval => Status::RequiresApproval,
         SMAppServiceStatus::NotFound => Status::NotFound,
-        _ => Status::NotRegistered,
+        _ => Status::NotFound,
     }
 }
 
