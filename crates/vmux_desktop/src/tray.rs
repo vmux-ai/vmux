@@ -68,6 +68,8 @@ fn drain_tray_events(
             events.write(LifecycleEvent::ShowAllWindows);
         } else if event_id == handle.quit_id {
             events.write(LifecycleEvent::QuitVmux);
+        } else {
+            tracing::debug!(id = %event_id, "unhandled tray menu event id");
         }
     }
 }
