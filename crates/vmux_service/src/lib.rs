@@ -1,6 +1,8 @@
 pub mod webview;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod bundle;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod cli;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod client;
