@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use objc2_service_management::{SMAppService, SMAppServiceStatus};
+
 #[derive(Debug)]
 pub enum SmError {
     NotEnabled,
@@ -24,11 +26,13 @@ impl fmt::Display for SmError {
 impl std::error::Error for SmError {}
 
 pub fn register_main_app() -> Result<(), SmError> {
-    Err(SmError::Other("not yet implemented".into()))
+    let service = unsafe { SMAppService::mainAppService() };
+    unsafe { service.registerAndReturnError() }.map_err(|e| SmError::Other(format!("{}", e)))
 }
 
 pub fn unregister_main_app() -> Result<(), SmError> {
-    Err(SmError::Other("not yet implemented".into()))
+    let service = unsafe { SMAppService::mainAppService() };
+    unsafe { service.unregisterAndReturnError() }.map_err(|e| SmError::Other(format!("{}", e)))
 }
 
 pub fn register_agent(plist_name: &str) -> Result<(), SmError> {
@@ -49,7 +53,13 @@ pub enum Status {
 }
 
 pub fn main_app_status() -> Status {
-    Status::NotRegistered
+    let service = unsafe { SMAppService::mainAppService() };
+    match unsafe { service.status() } {
+        SMAppServiceStatus::Enabled => Status::Enabled,
+        SMAppServiceStatus::RequiresApproval => Status::RequiresApproval,
+        SMAppServiceStatus::NotFound => Status::NotFound,
+        _ => Status::NotRegistered,
+    }
 }
 
 pub fn agent_status(_plist_name: &str) -> Status {
