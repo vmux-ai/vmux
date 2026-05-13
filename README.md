@@ -18,10 +18,6 @@
 curl -fsSL https://vmux.ai/install | sh
 ```
 
-### Download
-
-Grab the latest `.dmg` from [GitHub Releases](https://github.com/vmux-ai/vmux/releases).
-
 Requires macOS 13.0 (Ventura) or later.
 
 ## Development
