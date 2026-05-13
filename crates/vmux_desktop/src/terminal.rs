@@ -620,8 +620,8 @@ fn ensure_service_started() {
     #[cfg(target_os = "macos")]
     {
         let profile = vmux_service::current_profile();
-        if let Err(e) = vmux_service::launchd::ensure_running(profile, &binary) {
-            tracing::error!(error = %e, "launchd ensure_running failed");
+        if let Err(e) = vmux_service::service_registration::ensure_running(profile, &binary) {
+            tracing::error!(error = ?e, "service registration failed");
         }
     }
     #[cfg(not(target_os = "macos"))]
