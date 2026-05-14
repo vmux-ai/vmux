@@ -1,4 +1,4 @@
-.PHONY: dev local release build-local build-release build setup-cef install-debug-render-process doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test
+.PHONY: dev local release build-local build-release build setup-cef install-debug-render-process doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks
 
 .DEFAULT_GOAL := dev
 
@@ -153,3 +153,6 @@ ensure-codesign-deps:
 		echo "codesign not found. Install Xcode Command Line Tools first."; \
 		exit 1; \
 	fi
+
+setup-hooks:
+	./scripts/setup-hooks.sh
