@@ -189,6 +189,7 @@ pub(crate) fn rebuild_space_views(
     browser_q: Query<(), With<Browser>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     settings: Res<AppSettings>,
+    strategies: Res<vmux_agent::strategy::AgentStrategies>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -320,44 +321,29 @@ pub(crate) fn rebuild_space_views(
                 if let Some(launch) = saved_launch {
                     commands.entity(term).insert(launch.clone());
                 }
-            } else if meta
-                .url
-                .starts_with(crate::vibe::session::VIBE_WEBVIEW_URL.trim_end_matches('/'))
+            } else if let Some(kind) = vmux_agent::AgentKind::all()
+                .into_iter()
+                .find(|k| meta.url.starts_with(k.url_scheme()))
             {
-                let session_id = meta
-                    .url
-                    .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string());
+                let id_part = meta.url.strip_prefix(kind.url_scheme()).unwrap_or("");
+                let session_id = (!id_part.is_empty()).then(|| id_part.to_string());
                 let cwd = saved_launch
                     .map(|l| std::path::PathBuf::from(&l.cwd))
                     .unwrap_or_else(|| {
                         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
                     });
-                let term = commands
-                    .spawn((
-                        Terminal::new_with_cwd(&mut meshes, &mut webview_mt, &settings, Some(&cwd)),
-                        ChildOf(entity),
-                    ))
-                    .id();
-                if let Some(launch) = saved_launch {
-                    commands
-                        .entity(term)
-                        .insert((launch.clone(), crate::vibe::session::Vibe));
-                } else {
-                    commands.entity(term).insert(crate::vibe::session::Vibe);
-                }
-                if let Some(id) = session_id {
-                    commands
-                        .entity(term)
-                        .insert(crate::vibe::session::SessionId(id));
-                } else {
-                    commands
-                        .entity(term)
-                        .insert(crate::vibe::session::PendingVibeSession {
-                            spawn_time: std::time::SystemTime::now(),
-                            cwd,
-                        });
+                if let Err(e) = crate::terminal::spawn_agent_into_stack(
+                    kind,
+                    entity,
+                    cwd,
+                    session_id,
+                    &strategies,
+                    &mut commands,
+                    &mut meshes,
+                    &mut webview_mt,
+                    &settings,
+                ) {
+                    bevy::log::warn!("restore agent tab failed: {e}");
                 }
             } else {
                 if meta
@@ -517,6 +503,7 @@ mod tests {
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.init_resource::<vmux_agent::strategy::AgentStrategies>();
         app.add_systems(Update, rebuild_space_views);
 
         let main = app.world_mut().spawn(Main).id();
@@ -566,6 +553,7 @@ mod tests {
         });
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.init_resource::<vmux_agent::strategy::AgentStrategies>();
         app.add_plugins(PersistencePlugin);
 
         let main = app.world_mut().spawn(Main).id();
