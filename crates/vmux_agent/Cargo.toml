@@ -1,0 +1,17 @@
+[package]
+name = "vmux_agent"
+description = "Agent CLI strategies (vibe, claude, codex) and shared session ECS abstractions"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bevy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+notify = { workspace = true }
+vmux_core = { path = "../vmux_core" }
