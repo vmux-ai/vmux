@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::{Mutex, mpsc};
 use std::time::SystemTime;
 
 use bevy::prelude::*;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::PageMetadata;
 
 use crate::AgentKind;
@@ -263,6 +265,58 @@ mod tracking_tests {
         app.update();
         let map = app.world().resource::<AgentSessionToEntity>();
         assert!(!map.0.contains_key(&(AgentKind::Vibe, "v1".into())));
+    }
+}
+
+#[derive(Resource)]
+pub struct AgentSessionWatchers {
+    receivers: Vec<Mutex<mpsc::Receiver<()>>>,
+    _watchers: Vec<RecommendedWatcher>,
+}
+
+pub fn start_agent_session_watchers(mut commands: Commands, strategies: Res<AgentStrategies>) {
+    let mut receivers = Vec::new();
+    let mut watchers = Vec::new();
+    for (_kind, strategy) in strategies.iter() {
+        let root = strategy.sessions_root();
+        if std::fs::create_dir_all(&root).is_err() {
+            continue;
+        }
+        let (tx, rx) = mpsc::channel();
+        let watcher =
+            notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+                if let Ok(event) = res
+                    && (event.kind.is_create() || event.kind.is_modify())
+                {
+                    let _ = tx.send(());
+                }
+            });
+        let Ok(mut watcher) = watcher else { continue };
+        if watcher.watch(&root, RecursiveMode::Recursive).is_err() {
+            continue;
+        }
+        watchers.push(watcher);
+        receivers.push(Mutex::new(rx));
+    }
+    if receivers.is_empty() {
+        return;
+    }
+    commands.insert_resource(AgentSessionWatchers {
+        receivers,
+        _watchers: watchers,
+    });
+}
+
+pub fn mark_dirty_on_fs_change(
+    watchers: Option<Res<AgentSessionWatchers>>,
+    mut dirty: ResMut<AgentSessionDirty>,
+) {
+    let Some(watchers) = watchers else { return };
+    for rx in &watchers.receivers {
+        let Ok(rx) = rx.lock() else { continue };
+        while rx.try_recv().is_ok() {
+            dirty.0 = true;
+        }
     }
 }
 
