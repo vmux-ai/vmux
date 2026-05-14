@@ -105,7 +105,22 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Re-run guard — exit if release already published with all assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --json isDraft,assets >/tmp/r.json 2>/dev/null; then
+            is_draft=$(jq -r .isDraft /tmp/r.json)
+            asset_count=$(jq '.assets | length' /tmp/r.json)
+            if [ "$is_draft" = "false" ] && [ "$asset_count" -ge 4 ]; then
+              echo "Release $TAG already published with $asset_count assets; nothing to do."
+              echo "ALREADY_DONE=1" >> "$GITHUB_ENV"
+            fi
+          fi
+
       - name: Validate release secrets
+        if: env.ALREADY_DONE != '1'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -137,45 +152,54 @@ jobs:
           exit "$missing"
 
       - name: Install Rust toolchain
+        if: env.ALREADY_DONE != '1'
         uses: dtolnay/rust-toolchain@1.95.0
         with:
           targets: wasm32-unknown-unknown
 
-      - uses: Swatinem/rust-cache@v2
+      - if: env.ALREADY_DONE != '1'
+        uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-macos
           cache-all-crates: true
 
       - name: Cache cargo binaries
+        if: env.ALREADY_DONE != '1'
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin
           key: cargo-bin-${{ runner.os }}-dx0.7.4-cp0.11.8-cef${{ env.CEF_VERSION }}
 
       - name: Cache CEF framework
+        if: env.ALREADY_DONE != '1'
         uses: actions/cache@v4
         with:
           path: ~/.local/share/Chromium Embedded Framework.framework
           key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
 
       - name: Cache tailwindcss
+        if: env.ALREADY_DONE != '1'
         uses: actions/cache@v4
         with:
           path: ~/.local/bin/tailwindcss
           key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
 
       - name: Add ~/.local/bin to PATH
+        if: env.ALREADY_DONE != '1'
         run: |
           mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install dioxus-cli
+        if: env.ALREADY_DONE != '1'
         run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
       - name: Install tailwindcss
+        if: env.ALREADY_DONE != '1'
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
 
       - name: Install CEF framework
+        if: env.ALREADY_DONE != '1'
         run: |
           if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
             command -v export-cef-dir >/dev/null 2>&1 || cargo install export-cef-dir@${{ env.CEF_VERSION }}
@@ -183,17 +207,20 @@ jobs:
           fi
 
       - name: Install bevy_cef tools
+        if: env.ALREADY_DONE != '1'
         run: |
           command -v bevy_cef_render_process >/dev/null 2>&1 || cargo install bevy_cef_render_process
           command -v bevy_cef_bundle_app >/dev/null 2>&1 || cargo install bevy_cef_bundle_app
 
       - name: Install cargo-packager (patched for macOS Tahoe)
+        if: env.ALREADY_DONE != '1'
         run: |
           if ! cargo-packager --version 2>/dev/null | grep -q '0.11.8'; then
             cargo install --path patches/cargo-packager-0.11.8
           fi
 
       - name: Build, sign, notarize, and package DMG
+        if: env.ALREADY_DONE != '1'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -205,16 +232,19 @@ jobs:
         run: ./scripts/build-mac-release.sh
 
       - name: Create binary tarball
+        if: env.ALREADY_DONE != '1'
         run: |
           cd target/release/Vmux.app/Contents/MacOS
           tar czf "$GITHUB_WORKSPACE/target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz" Vmux
 
       - name: Create app bundle tarball
+        if: env.ALREADY_DONE != '1'
         run: |
           cd target/release
           tar czf "Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz" Vmux.app
 
       - name: Sign update artifact (minisign)
+        if: env.ALREADY_DONE != '1'
         env:
           VMUX_UPDATE_PRIVATE_KEY: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY }}
           VMUX_UPDATE_PRIVATE_KEY_PASSWORD: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY_PASSWORD }}
@@ -225,6 +255,7 @@ jobs:
             --password "${VMUX_UPDATE_PRIVATE_KEY_PASSWORD}"
 
       - name: Generate update manifest
+        if: env.ALREADY_DONE != '1'
         run: |
           TARBALL="target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
           SIG=$(cat "${TARBALL}.sig")
@@ -255,9 +286,11 @@ jobs:
           EOF
 
       - name: Capture release SHA
+        if: env.ALREADY_DONE != '1'
         run: echo "RELEASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
       - name: Update Homebrew cask
+        if: env.ALREADY_DONE != '1'
         run: |
           DMG_NAME="Vmux_${VERSION}_aarch64.dmg"
           DMG_PATH="target/release/${DMG_NAME}"
@@ -267,52 +300,15 @@ jobs:
           sed -i '' "s/sha256 \".*\"/sha256 \"${DMG_SHA}\"/" Casks/vmux.rb
           sed -i '' "s|^  url \".*\"|  url \"https://github.com/vmux-ai/vmux/releases/download/v${VERSION}/${DMG_NAME}\"|" Casks/vmux.rb
 
-      - name: Commit cask + manifest to main
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/vmux.rb website/public/updates.json
-          if git diff --cached --quiet; then
-            echo "Nothing to commit"
-            exit 0
-          fi
-          git commit -m "chore(release): update cask and update manifest to ${VERSION}"
-          git pull --rebase origin main
-          git push origin HEAD:main
-
-      - name: Create and push tag
-        run: |
-          remote_tag_sha=$(git ls-remote --tags origin "refs/tags/$TAG^{}" | awk '{print $1}')
-          if [ -z "$remote_tag_sha" ]; then
-            remote_tag_sha=$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')
-          fi
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            TAG_SHA=$(git rev-parse "$TAG^{commit}")
-            if [ "$TAG_SHA" != "$RELEASE_SHA" ]; then
-              echo "::error::Tag $TAG points at $TAG_SHA, expected $RELEASE_SHA"
-              exit 1
-            fi
-            echo "Tag $TAG already points at $RELEASE_SHA"
-          elif [ -z "$remote_tag_sha" ]; then
-            git tag -a "$TAG" "$RELEASE_SHA" -m "Vmux $TAG"
-          fi
-          if [ -n "$remote_tag_sha" ]; then
-            if [ "$remote_tag_sha" != "$RELEASE_SHA" ]; then
-              echo "::error::Tag $TAG on origin points at $remote_tag_sha, expected $RELEASE_SHA"
-              exit 1
-            fi
-            echo "Tag $TAG already exists on origin at $RELEASE_SHA"
-          else
-            git push origin "$TAG"
-          fi
-
-      - name: Create GitHub Release
+      - name: Create or update draft release with assets
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: env.ALREADY_DONE != '1'
         run: |
-          DMG_PATH="target/release/Vmux_${VERSION}_aarch64.dmg"
+          set -euo pipefail
+          DMG="target/release/Vmux_${VERSION}_aarch64.dmg"
           ASSETS=(
-            "$DMG_PATH"
+            "$DMG"
             "target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz"
             "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
             "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz.sig"
@@ -321,12 +317,53 @@ jobs:
             gh release upload "$TAG" "${ASSETS[@]}" --clobber
           else
             gh release create "$TAG" \
+              --draft \
+              --target "$RELEASE_SHA" \
               --title "Vmux $TAG" \
               --generate-notes \
               "${ASSETS[@]}"
           fi
 
+      - name: Commit cask + manifest to main
+        if: env.ALREADY_DONE != '1'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/vmux.rb website/public/updates.json
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore(release): update cask and update manifest to ${VERSION}"
+          for i in 1 2 3; do
+            git pull --rebase origin main && break || sleep 5
+          done
+          git push origin HEAD:main
+
+      - name: Re-target tag to current main HEAD
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: env.ALREADY_DONE != '1'
+        run: |
+          set -euo pipefail
+          NEW_HEAD=$(git rev-parse HEAD)
+          if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" \
+              -f sha="$NEW_HEAD" -F force=true
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${TAG}" -f sha="$NEW_HEAD"
+          fi
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: env.ALREADY_DONE != '1'
+        run: gh release edit "$TAG" --draft=false
+
       - name: Dispatch website deploy
         env:
           GH_TOKEN: ${{ github.token }}
+        if: env.ALREADY_DONE != '1'
         run: gh workflow run deploy-website.yml --ref main
