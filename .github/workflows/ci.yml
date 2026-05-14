@@ -62,6 +62,12 @@ jobs:
           shared-key: lint
           cache-all-crates: true
 
+      - name: Cache cargo binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+
       - name: Cache CEF framework
         uses: actions/cache@v4
         with:
@@ -148,6 +154,12 @@ jobs:
           shared-key: test
           cache-all-crates: true
 
+      - name: Cache cargo binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+
       - name: Cache CEF framework
         uses: actions/cache@v4
         with:
@@ -223,6 +235,12 @@ jobs:
           shared-key: website
           cache-all-crates: true
 
+      - name: Cache cargo binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
+
       - name: Install dioxus-cli
         run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
 
@@ -246,6 +264,12 @@ jobs:
         with:
           shared-key: build-mac
           cache-all-crates: true
+
+      - name: Cache cargo binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml') }}
 
       - name: Cache CEF framework
         uses: actions/cache@v4
