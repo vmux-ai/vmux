@@ -110,6 +110,45 @@ pub(crate) struct AgentLaunchRequested {
     pub(crate) cwd: PathBuf,
 }
 
+fn vibe_available() -> bool {
+    vmux_agent::exec::find_executable("vibe").is_some()
+}
+
+fn claude_available() -> bool {
+    vmux_agent::exec::find_executable("claude").is_some()
+}
+
+fn codex_available() -> bool {
+    vmux_agent::exec::find_executable("codex").is_some()
+}
+
+fn vibe_prepare(cwd: &Path) -> Result<PreparedAgentLaunch, String> {
+    prepare_for_kind(AgentKind::Vibe, cwd)
+}
+
+fn claude_prepare(cwd: &Path) -> Result<PreparedAgentLaunch, String> {
+    prepare_for_kind(AgentKind::Claude, cwd)
+}
+
+fn codex_prepare(cwd: &Path) -> Result<PreparedAgentLaunch, String> {
+    prepare_for_kind(AgentKind::Codex, cwd)
+}
+
+fn prepare_for_kind(kind: AgentKind, cwd: &Path) -> Result<PreparedAgentLaunch, String> {
+    use vmux_agent::claude::ClaudeStrategy;
+    use vmux_agent::codex::CodexStrategy;
+    use vmux_agent::vibe::VibeStrategy;
+    let mut strategies = AgentStrategies::default();
+    strategies.register(Box::new(VibeStrategy));
+    strategies.register(Box::new(ClaudeStrategy));
+    strategies.register(Box::new(CodexStrategy));
+    let launch = build_agent_launch(kind, cwd, None, &strategies)?;
+    Ok(PreparedAgentLaunch {
+        cwd: cwd.to_path_buf(),
+        launch,
+    })
+}
+
 pub(crate) struct AgentPlugin;
 
 impl Plugin for AgentPlugin {
@@ -131,6 +170,61 @@ impl Plugin for AgentPlugin {
                     .in_set(WriteAppCommands)
                     .after(ServiceMessageSet),
             );
+
+        let mut providers = app.world_mut().resource_mut::<AgentProviders>();
+        for (id, name, exe, available, prepare) in [
+            (
+                "vibe_new",
+                "Vibe New",
+                "vibe",
+                vibe_available as fn() -> bool,
+                vibe_prepare as fn(&Path) -> Result<PreparedAgentLaunch, String>,
+            ),
+            (
+                "vibe_new_stack",
+                "Vibe New Stack",
+                "vibe",
+                vibe_available,
+                vibe_prepare,
+            ),
+            (
+                "claude_new",
+                "Claude New",
+                "claude",
+                claude_available,
+                claude_prepare,
+            ),
+            (
+                "claude_new_stack",
+                "Claude New Stack",
+                "claude",
+                claude_available,
+                claude_prepare,
+            ),
+            (
+                "codex_new",
+                "Codex New",
+                "codex",
+                codex_available,
+                codex_prepare,
+            ),
+            (
+                "codex_new_stack",
+                "Codex New Stack",
+                "codex",
+                codex_available,
+                codex_prepare,
+            ),
+        ] {
+            providers.register(AgentProvider {
+                id,
+                name,
+                shortcut: "",
+                executable: exe,
+                available,
+                prepare,
+            });
+        }
     }
 }
 
@@ -1527,5 +1621,24 @@ mod tests {
             urls.contains(&"https://example.com".to_string()),
             "browser entity with the URL should exist; found {urls:?}"
         );
+    }
+
+    #[test]
+    fn agent_plugin_registers_all_six_provider_entries() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        let providers = app.world().resource::<AgentProviders>();
+        for id in [
+            "vibe_new",
+            "vibe_new_stack",
+            "claude_new",
+            "claude_new_stack",
+            "codex_new",
+            "codex_new_stack",
+        ] {
+            assert!(providers.contains(id), "missing provider: {id}");
+        }
     }
 }
