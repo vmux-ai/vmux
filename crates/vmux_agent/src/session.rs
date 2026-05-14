@@ -8,6 +8,11 @@ use vmux_core::PageMetadata;
 use crate::AgentKind;
 use crate::strategy::AgentStrategies;
 
+#[derive(Message, Debug, Clone, Copy)]
+pub struct AgentSessionExited {
+    pub entity: Entity,
+}
+
 #[derive(Component, Debug, Clone)]
 pub struct AgentSession {
     pub kind: AgentKind,
@@ -261,6 +266,28 @@ mod tracking_tests {
     }
 }
 
+pub fn detect_file_end_time_exit(
+    mut commands: Commands,
+    mut exited_writer: MessageWriter<AgentSessionExited>,
+    strategies: Res<AgentStrategies>,
+    sessioned: Query<(Entity, &AgentSession, &SessionId)>,
+) {
+    for (entity, agent, sid) in &sessioned {
+        let Some(strategy) = strategies.get(agent.kind) else {
+            continue;
+        };
+        if !strategy.detect_end_time(&sid.0) {
+            continue;
+        }
+        commands
+            .entity(entity)
+            .remove::<AgentSession>()
+            .remove::<SessionId>()
+            .remove::<PendingAgentSession>();
+        exited_writer.write(AgentSessionExited { entity });
+    }
+}
+
 #[cfg(test)]
 mod discovery_tests {
     use super::*;
@@ -283,6 +310,62 @@ mod discovery_tests {
         let entity = app.world_mut().spawn(pending).id();
         app.update();
         assert!(app.world().get::<PendingAgentSession>(entity).is_some());
+        assert!(app.world().get::<SessionId>(entity).is_none());
+    }
+}
+
+#[cfg(test)]
+mod exit_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn detect_file_end_time_exit_strips_components_when_strategy_says_ended() {
+        struct EndedStrategy;
+        impl crate::strategy::AgentStrategy for EndedStrategy {
+            fn kind(&self) -> AgentKind {
+                AgentKind::Vibe
+            }
+            fn sessions_root(&self) -> PathBuf {
+                PathBuf::from("/tmp/none")
+            }
+            fn build_args(&self, _: &crate::McpServerConfig, _: Option<&str>) -> Vec<String> {
+                vec![]
+            }
+            fn build_env(&self, _: &crate::McpServerConfig) -> Vec<(String, String)> {
+                vec![]
+            }
+            fn discover_session(
+                &self,
+                _: &Path,
+                _: SystemTime,
+                _: &HashSet<String>,
+            ) -> Option<String> {
+                None
+            }
+            fn detect_end_time(&self, _: &str) -> bool {
+                true
+            }
+        }
+
+        let mut app = App::new();
+        let mut strategies = AgentStrategies::default();
+        strategies.register(Box::new(EndedStrategy));
+        app.insert_resource(strategies);
+        app.add_message::<AgentSessionExited>();
+        app.add_systems(Update, detect_file_end_time_exit);
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                SessionId("x".into()),
+            ))
+            .id();
+        app.update();
+        assert!(app.world().get::<AgentSession>(entity).is_none());
         assert!(app.world().get::<SessionId>(entity).is_none());
     }
 }

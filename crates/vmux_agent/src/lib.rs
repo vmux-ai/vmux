@@ -9,3 +9,4 @@ pub mod vibe;
 
 pub use kind::AgentKind;
 pub use mcp::McpServerConfig;
+pub use session::AgentSessionExited;
