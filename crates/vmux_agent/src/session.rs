@@ -133,3 +133,75 @@ mod url_tests {
         assert_eq!(url, "vmux://vibe/");
     }
 }
+
+pub fn track_session_id_inserts(
+    mut map: ResMut<AgentSessionToEntity>,
+    inserted: Query<(Entity, &SessionId, &AgentSession), Added<SessionId>>,
+) {
+    for (entity, SessionId(id), agent) in &inserted {
+        map.0.insert((agent.kind, id.clone()), entity);
+    }
+}
+
+pub fn track_session_id_removals(
+    mut map: ResMut<AgentSessionToEntity>,
+    mut removed: RemovedComponents<SessionId>,
+) {
+    for entity in removed.read() {
+        map.0.retain(|_, &mut e| e != entity);
+    }
+}
+
+#[cfg(test)]
+mod tracking_tests {
+    use super::*;
+
+    fn make_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<AgentSessionToEntity>();
+        app.add_systems(
+            Update,
+            (track_session_id_inserts, track_session_id_removals).chain(),
+        );
+        app
+    }
+
+    #[test]
+    fn insert_populates_map_only_for_agent_session_entities() {
+        let mut app = make_app();
+        let with = app
+            .world_mut()
+            .spawn((
+                AgentSession {
+                    kind: AgentKind::Codex,
+                },
+                SessionId("c1".into()),
+            ))
+            .id();
+        let without = app.world_mut().spawn(SessionId("nope".into())).id();
+        app.update();
+        let map = app.world().resource::<AgentSessionToEntity>();
+        assert_eq!(map.0.get(&(AgentKind::Codex, "c1".into())), Some(&with));
+        assert!(!map.0.contains_key(&(AgentKind::Codex, "nope".into())));
+        let _ = without;
+    }
+
+    #[test]
+    fn entity_despawn_removes_session_from_map() {
+        let mut app = make_app();
+        let e = app
+            .world_mut()
+            .spawn((
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                SessionId("v1".into()),
+            ))
+            .id();
+        app.update();
+        app.world_mut().despawn(e);
+        app.update();
+        let map = app.world().resource::<AgentSessionToEntity>();
+        assert!(!map.0.contains_key(&(AgentKind::Vibe, "v1".into())));
+    }
+}
