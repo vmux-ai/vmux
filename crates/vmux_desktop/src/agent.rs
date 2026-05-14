@@ -192,7 +192,6 @@ pub(crate) fn spawn_terminal_tab(
     terminal
 }
 
-#[allow(dead_code)]
 pub(crate) fn build_agent_launch(
     kind: AgentKind,
     cwd: &Path,
@@ -217,7 +216,6 @@ pub(crate) fn build_agent_launch(
     })
 }
 
-#[allow(dead_code)]
 pub(crate) fn spawn_fresh_agent_tab(
     kind: AgentKind,
     pane: Entity,
@@ -250,7 +248,6 @@ pub(crate) fn spawn_fresh_agent_tab(
     Ok(terminal)
 }
 
-#[allow(dead_code)]
 pub(crate) fn spawn_agent_resume_tab(
     kind: AgentKind,
     pane: Entity,
@@ -278,6 +275,7 @@ pub(crate) fn spawn_agent_resume_tab(
     Ok(terminal)
 }
 
+#[allow(dead_code)]
 pub(crate) fn spawn_fresh_vibe_tab(
     pane: Entity,
     cwd: PathBuf,
@@ -307,6 +305,7 @@ pub(crate) fn spawn_fresh_vibe_tab(
     Ok(terminal)
 }
 
+#[allow(dead_code)]
 pub(crate) fn spawn_vibe_resume_tab(
     pane: Entity,
     cwd: PathBuf,
@@ -418,7 +417,8 @@ fn spawn_vmux_tab(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
     pid_to_entity: Option<&crate::terminal::pid::PidToEntity>,
-    vibe_to_entity: Option<&crate::vibe::session::VibeSessionToEntity>,
+    agent_to_entity: Option<&vmux_agent::session::AgentSessionToEntity>,
+    strategies: &AgentStrategies,
     child_of_q: &Query<&ChildOf>,
 ) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| format!("invalid vmux URL '{url}': {e}"))?;
@@ -471,29 +471,34 @@ fn spawn_vmux_tab(
             spawn_processes_tab(pane, commands, meshes, webview_mt);
             Ok(())
         }
-        "vibe" => {
+        "vibe" | "claude" | "codex" => {
+            let kind = AgentKind::from_host(host).expect("matched above");
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
             let path = parsed.path().trim_start_matches('/');
             if path.is_empty() {
-                if let Err(e) =
-                    spawn_fresh_vibe_tab(pane, cwd, commands, meshes, webview_mt, settings)
-                {
-                    bevy::log::warn!("spawn_fresh_vibe_tab failed: {e}; falling back to terminal");
+                if let Err(e) = spawn_fresh_agent_tab(
+                    kind, pane, cwd, strategies, commands, meshes, webview_mt, settings,
+                ) {
+                    bevy::log::warn!(
+                        "spawn_fresh_agent_tab({kind:?}) failed: {e}; falling back to terminal"
+                    );
                     spawn_terminal_tab(pane, None, None, commands, meshes, webview_mt, settings);
                 }
                 Ok(())
             } else {
                 let session_id = path.to_string();
-                if let Some(map) = vibe_to_entity
-                    && let Some(&entity) = map.0.get(&session_id)
+                if let Some(map) = agent_to_entity
+                    && let Some(&entity) = map.0.get(&(kind, session_id.clone()))
                 {
                     crate::terminal::pid::focus_pane_entity(entity, commands, child_of_q);
                     return Ok(());
                 }
-                if let Err(e) = spawn_vibe_resume_tab(
-                    pane, cwd, session_id, commands, meshes, webview_mt, settings,
+                if let Err(e) = spawn_agent_resume_tab(
+                    kind, pane, cwd, session_id, strategies, commands, meshes, webview_mt, settings,
                 ) {
-                    bevy::log::warn!("spawn_vibe_resume_tab failed: {e}; falling back to terminal");
+                    bevy::log::warn!(
+                        "spawn_agent_resume_tab({kind:?}) failed: {e}; falling back to terminal"
+                    );
                     spawn_terminal_tab(pane, None, None, commands, meshes, webview_mt, settings);
                 }
                 Ok(())
@@ -548,6 +553,12 @@ fn parse_terminal_target(
     terminals.iter().any(|(e, _)| e == entity).then_some(entity)
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct SpawnAssets<'w> {
+    meshes: ResMut<'w, Assets<Mesh>>,
+    webview_mt: ResMut<'w, Assets<WebviewExtendStandardMaterial>>,
+}
+
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
@@ -559,12 +570,12 @@ fn handle_agent_commands(
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     child_of_q: Query<&ChildOf>,
     pid_to_entity: Option<Res<crate::terminal::pid::PidToEntity>>,
-    vibe_to_entity: Option<Res<crate::vibe::session::VibeSessionToEntity>>,
+    agent_to_entity: Option<Res<vmux_agent::session::AgentSessionToEntity>>,
+    strategies: Res<AgentStrategies>,
     settings: Res<AppSettings>,
     service: Option<Res<crate::terminal::ServiceClient>>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut assets: SpawnAssets,
 ) {
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
 
@@ -587,8 +598,8 @@ fn handle_agent_commands(
                                 cwd_path.as_deref(),
                                 None,
                                 &mut commands,
-                                &mut meshes,
-                                &mut webview_mt,
+                                &mut assets.meshes,
+                                &mut assets.webview_mt,
                                 &settings,
                             );
                             AgentCommandResult::Ok
@@ -616,8 +627,8 @@ fn handle_agent_commands(
                                 cwd_path.as_deref(),
                                 Some(input),
                                 &mut commands,
-                                &mut meshes,
-                                &mut webview_mt,
+                                &mut assets.meshes,
+                                &mut assets.webview_mt,
                                 &settings,
                             );
                             AgentCommandResult::Ok
@@ -654,11 +665,12 @@ fn handle_agent_commands(
                             url,
                             pane_entity,
                             &mut commands,
-                            &mut meshes,
-                            &mut webview_mt,
+                            &mut assets.meshes,
+                            &mut assets.webview_mt,
                             &settings,
                             pid_to_entity.as_deref(),
-                            vibe_to_entity.as_deref(),
+                            agent_to_entity.as_deref(),
+                            &strategies,
                             &child_of_q,
                         ) {
                             Ok(()) => AgentCommandResult::Ok,
@@ -673,7 +685,13 @@ fn handle_agent_commands(
                     }
                 } else if let Some(s) = pane.as_deref() {
                     if let Some(target) = parse_pane_target(s, &panes) {
-                        spawn_browser_tab(target, url, &mut commands, &mut meshes, &mut webview_mt);
+                        spawn_browser_tab(
+                            target,
+                            url,
+                            &mut commands,
+                            &mut assets.meshes,
+                            &mut assets.webview_mt,
+                        );
                         AgentCommandResult::Ok
                     } else {
                         AgentCommandResult::Error(format!(
@@ -689,7 +707,13 @@ fn handle_agent_commands(
                     });
                     AgentCommandResult::Ok
                 } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
-                    spawn_browser_tab(pane, url, &mut commands, &mut meshes, &mut webview_mt);
+                    spawn_browser_tab(
+                        pane,
+                        url,
+                        &mut commands,
+                        &mut assets.meshes,
+                        &mut assets.webview_mt,
+                    );
                     AgentCommandResult::Ok
                 } else {
                     AgentCommandResult::Error("browser_navigate: no focused pane".to_string())
@@ -748,11 +772,12 @@ fn handle_agent_commands(
                                     url,
                                     pane2,
                                     &mut commands,
-                                    &mut meshes,
-                                    &mut webview_mt,
+                                    &mut assets.meshes,
+                                    &mut assets.webview_mt,
                                     &settings,
                                     pid_to_entity.as_deref(),
-                                    vibe_to_entity.as_deref(),
+                                    agent_to_entity.as_deref(),
+                                    &strategies,
                                     &child_of_q,
                                 ) {
                                     Ok(()) => AgentCommandResult::Ok,
@@ -765,8 +790,8 @@ fn handle_agent_commands(
                                     pane2,
                                     url,
                                     &mut commands,
-                                    &mut meshes,
-                                    &mut webview_mt,
+                                    &mut assets.meshes,
+                                    &mut assets.webview_mt,
                                 );
                                 AgentCommandResult::Ok
                             }
@@ -793,7 +818,11 @@ pub(crate) fn detect_agent_session_process_exit(
     mut commands: Commands,
     mut writer: MessageWriter<vmux_agent::AgentSessionExited>,
     mut q: Query<
-        (Entity, Option<&crate::terminal::pid::Pid>, &mut PageMetadata),
+        (
+            Entity,
+            Option<&crate::terminal::pid::Pid>,
+            &mut PageMetadata,
+        ),
         (With<AgentSession>, With<ProcessExited>),
     >,
 ) {
@@ -932,6 +961,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -977,6 +1007,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1034,6 +1065,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1077,6 +1109,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1132,6 +1165,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1174,6 +1208,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1205,6 +1240,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1240,6 +1276,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1276,6 +1313,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1309,6 +1347,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1342,6 +1381,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1381,6 +1421,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1415,6 +1456,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1462,6 +1504,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1504,6 +1547,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
