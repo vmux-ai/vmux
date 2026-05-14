@@ -9068,6 +9068,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vmux_agent"
+version = "0.0.7"
+dependencies = [
+ "bevy",
+ "chrono",
+ "notify 6.1.1",
+ "serde",
+ "serde_json",
+ "vmux_core",
+]
+
+[[package]]
 name = "vmux_cli"
 version = "0.0.8"
 dependencies = [
