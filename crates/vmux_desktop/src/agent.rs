@@ -16,6 +16,9 @@ use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::{CefKeyboardTarget, RequestNavigate, WebviewExtendStandardMaterial};
 
 use crate::browser::Browser;
+use vmux_agent::session::{AgentSession, PendingAgentSession, SessionId};
+use vmux_agent::strategy::AgentStrategies;
+use vmux_agent::{AgentKind, mcp};
 use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
 use vmux_layout::event::TERMINAL_WEBVIEW_URL;
@@ -185,6 +188,92 @@ pub(crate) fn spawn_terminal_tab(
             .insert(PendingTerminalInput { data });
     }
     terminal
+}
+
+#[allow(dead_code)]
+pub(crate) fn build_agent_launch(
+    kind: AgentKind,
+    cwd: &Path,
+    session_id: Option<&str>,
+    strategies: &AgentStrategies,
+) -> Result<crate::terminal::launch::TerminalLaunch, String> {
+    let strategy = strategies
+        .get(kind)
+        .ok_or_else(|| format!("strategy not registered for {:?}", kind))?;
+    let exe_name = kind.executable();
+    let exe_path = vmux_agent::exec::find_executable(exe_name)
+        .ok_or_else(|| format!("{exe_name} executable not found"))?;
+    let mcp_cfg = mcp::resolve(cwd)?;
+    let args = strategy.build_args(&mcp_cfg, session_id);
+    let env = strategy.build_env(&mcp_cfg);
+    Ok(crate::terminal::launch::TerminalLaunch {
+        command: exe_path.to_string_lossy().to_string(),
+        args,
+        cwd: cwd.to_string_lossy().to_string(),
+        env,
+        kind: kind.into(),
+    })
+}
+
+#[allow(dead_code)]
+pub(crate) fn spawn_fresh_agent_tab(
+    kind: AgentKind,
+    pane: Entity,
+    cwd: PathBuf,
+    strategies: &AgentStrategies,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> Result<Entity, String> {
+    let launch = build_agent_launch(kind, &cwd, None, strategies)?;
+    let terminal = spawn_terminal_tab(
+        pane,
+        Some(&cwd),
+        None,
+        commands,
+        meshes,
+        webview_mt,
+        settings,
+    );
+    commands.entity(terminal).insert((
+        launch,
+        AgentSession { kind },
+        PendingAgentSession {
+            kind,
+            spawn_time: std::time::SystemTime::now(),
+            cwd,
+        },
+    ));
+    Ok(terminal)
+}
+
+#[allow(dead_code)]
+pub(crate) fn spawn_agent_resume_tab(
+    kind: AgentKind,
+    pane: Entity,
+    cwd: PathBuf,
+    session_id: String,
+    strategies: &AgentStrategies,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> Result<Entity, String> {
+    let launch = build_agent_launch(kind, &cwd, Some(&session_id), strategies)?;
+    let terminal = spawn_terminal_tab(
+        pane,
+        Some(&cwd),
+        None,
+        commands,
+        meshes,
+        webview_mt,
+        settings,
+    );
+    commands
+        .entity(terminal)
+        .insert((launch, AgentSession { kind }, SessionId(session_id)));
+    Ok(terminal)
 }
 
 pub(crate) fn spawn_fresh_vibe_tab(
