@@ -810,7 +810,8 @@ fn on_command_bar_action(
         Res<AppSettings>,
         Option<Res<AgentProviders>>,
         Option<Res<crate::terminal::pid::PidToEntity>>,
-        Option<Res<crate::vibe::session::VibeSessionToEntity>>,
+        Option<Res<vmux_agent::session::AgentSessionToEntity>>,
+        Option<Res<vmux_agent::strategy::AgentStrategies>>,
     )>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut writer_params: ParamSet<(
@@ -829,7 +830,7 @@ fn on_command_bar_action(
         .as_deref()
         .map(|map| map.0.clone())
         .unwrap_or_default();
-    let vibe_to_entity = resource_params.p3().as_deref().map(|map| map.0.clone());
+    let agent_to_entity = resource_params.p3().as_deref().map(|map| map.0.clone());
     let empty_stack = new_stack_ctx.stack;
     let previous_stack = new_stack_ctx.previous_stack;
     // Track whether we handle keyboard restore ourselves
@@ -920,45 +921,59 @@ fn on_command_bar_action(
                                 .id();
                             commands.entity(term_e).insert(CefKeyboardTarget);
                         }
-                    } else if url
-                        .starts_with(crate::vibe::session::VIBE_WEBVIEW_URL.trim_end_matches('/'))
+                    } else if let Some(kind) = vmux_agent::AgentKind::all()
+                        .into_iter()
+                        .find(|k| url.starts_with(k.url_scheme().trim_end_matches('/')))
                     {
-                        let session_id = url
-                            .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
+                        let scheme = kind.url_scheme();
+                        let id_part = url
+                            .strip_prefix(scheme)
                             .filter(|s| !s.is_empty())
                             .map(|s| s.to_string());
-                        if let Some(ref id) = session_id
-                            && let Some(map) = vibe_to_entity.as_ref()
-                            && let Some(&entity) = map.get(id)
+                        let title = match kind {
+                            vmux_agent::AgentKind::Vibe => "Vibe",
+                            vmux_agent::AgentKind::Claude => "Claude",
+                            vmux_agent::AgentKind::Codex => "Codex",
+                        };
+                        if let Some(ref id) = id_part
+                            && let Some(map) = agent_to_entity.as_ref()
+                            && let Some(&entity) = map.get(&(kind, id.clone()))
                         {
                             focus_pane_entity(entity, &mut commands, &child_of_q);
                         } else {
                             commands.entity(stack_e).insert(PageMetadata {
-                                url: crate::vibe::session::VIBE_WEBVIEW_URL.to_string(),
-                                title: "Vibe".to_string(),
+                                url: scheme.to_string(),
+                                title: title.to_string(),
                                 ..default()
                             });
                             let cwd = std::env::current_dir()
                                 .unwrap_or_else(|_| std::path::PathBuf::from("/"));
-                            if let Err(e) = crate::terminal::spawn_vibe_into_stack(
-                                stack_e,
-                                cwd,
-                                session_id,
-                                &mut commands,
-                                &mut meshes,
-                                &mut webview_mt,
-                                &settings,
-                            ) {
-                                bevy::log::warn!(
-                                    "vibe spawn failed: {e}; falling back to terminal"
-                                );
-                                let term_e = commands
-                                    .spawn((
-                                        Terminal::new(&mut meshes, &mut webview_mt, &settings),
-                                        ChildOf(stack_e),
-                                    ))
-                                    .id();
-                                commands.entity(term_e).insert(CefKeyboardTarget);
+                            let strategies_ref = resource_params.p4();
+                            if let Some(strategies) = strategies_ref.as_deref() {
+                                if let Err(e) = crate::terminal::spawn_agent_into_stack(
+                                    kind,
+                                    stack_e,
+                                    cwd,
+                                    id_part,
+                                    strategies,
+                                    &mut commands,
+                                    &mut meshes,
+                                    &mut webview_mt,
+                                    &settings,
+                                ) {
+                                    bevy::log::warn!(
+                                        "agent spawn ({kind:?}) failed: {e}; falling back to terminal"
+                                    );
+                                    let term_e = commands
+                                        .spawn((
+                                            Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                                            ChildOf(stack_e),
+                                        ))
+                                        .id();
+                                    commands.entity(term_e).insert(CefKeyboardTarget);
+                                }
+                            } else {
+                                bevy::log::warn!("agent strategies not registered; skipping spawn");
                             }
                         }
                     } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
@@ -998,15 +1013,15 @@ fn on_command_bar_action(
                     // Normal mode: navigate or spawn terminal in current tab
                     let known_terminal =
                         parse_pid_from_url(&url).and_then(|p| pid_to_entity.get(&p).copied());
-                    let known_vibe = url
-                        .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
-                        .filter(|s| !s.is_empty())
-                        .and_then(|id| {
-                            vibe_to_entity.as_ref().and_then(|map| map.get(id).copied())
-                        });
+                    let known_agent = vmux_agent::AgentKind::all().into_iter().find_map(|k| {
+                        let id = url.strip_prefix(k.url_scheme()).filter(|s| !s.is_empty())?;
+                        agent_to_entity
+                            .as_ref()
+                            .and_then(|map| map.get(&(k, id.to_string())).copied())
+                    });
                     if let Some(entity) = known_terminal {
                         focus_pane_entity(entity, &mut commands, &child_of_q);
-                    } else if let Some(entity) = known_vibe {
+                    } else if let Some(entity) = known_agent {
                         focus_pane_entity(entity, &mut commands, &child_of_q);
                     } else if url.starts_with("vmux://terminal") {
                         if let Some(pid) = parse_pid_from_url(&url) {
@@ -1015,8 +1030,9 @@ fn on_command_bar_action(
                         writer_params
                             .p0()
                             .write(AppCommand::Terminal(TerminalCommand::New));
-                    } else if url
-                        .starts_with(crate::vibe::session::VIBE_WEBVIEW_URL.trim_end_matches('/'))
+                    } else if let Some(kind) = vmux_agent::AgentKind::all()
+                        .into_iter()
+                        .find(|k| url.starts_with(k.url_scheme().trim_end_matches('/')))
                     {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
@@ -1027,6 +1043,12 @@ fn on_command_bar_action(
                             &stack_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
+                            let scheme = kind.url_scheme();
+                            let title = match kind {
+                                vmux_agent::AgentKind::Vibe => "Vibe",
+                                vmux_agent::AgentKind::Claude => "Claude",
+                                vmux_agent::AgentKind::Codex => "Codex",
+                            };
                             let stack_e = commands
                                 .spawn((
                                     crate::layout::stack::stack_bundle(),
@@ -1035,26 +1057,33 @@ fn on_command_bar_action(
                                 ))
                                 .id();
                             commands.entity(stack_e).insert(PageMetadata {
-                                url: crate::vibe::session::VIBE_WEBVIEW_URL.to_string(),
-                                title: "Vibe".to_string(),
+                                url: scheme.to_string(),
+                                title: title.to_string(),
                                 ..default()
                             });
                             let session_id = url
-                                .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
+                                .strip_prefix(scheme)
                                 .filter(|s| !s.is_empty())
                                 .map(|s| s.to_string());
                             let cwd = std::env::current_dir()
                                 .unwrap_or_else(|_| std::path::PathBuf::from("/"));
-                            if let Err(e) = crate::terminal::spawn_vibe_into_stack(
-                                stack_e,
-                                cwd,
-                                session_id,
-                                &mut commands,
-                                &mut meshes,
-                                &mut webview_mt,
-                                &settings,
-                            ) {
-                                bevy::log::warn!("vibe spawn failed: {e}");
+                            let strategies_ref = resource_params.p4();
+                            if let Some(strategies) = strategies_ref.as_deref() {
+                                if let Err(e) = crate::terminal::spawn_agent_into_stack(
+                                    kind,
+                                    stack_e,
+                                    cwd,
+                                    session_id,
+                                    strategies,
+                                    &mut commands,
+                                    &mut meshes,
+                                    &mut webview_mt,
+                                    &settings,
+                                ) {
+                                    bevy::log::warn!("agent spawn ({kind:?}) failed: {e}");
+                                }
+                            } else {
+                                bevy::log::warn!("agent strategies not registered; skipping spawn");
                             }
                             custom_keyboard_restore = true;
                         }
