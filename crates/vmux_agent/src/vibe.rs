@@ -26,7 +26,7 @@ impl AgentStrategy for VibeStrategy {
     }
 
     fn build_args(&self, _mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
-        let mut args = vec!["--trust".to_string()];
+        let mut args = Vec::new();
         if let Some(sid) = session_id {
             args.push("--resume".to_string());
             args.push(sid.to_string());
