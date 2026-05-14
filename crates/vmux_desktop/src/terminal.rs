@@ -249,6 +249,7 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
 fn spawn_layout_requested_content(
     mut reader: MessageReader<LayoutSpawnRequest>,
     settings: Res<AppSettings>,
+    strategies: Option<Res<vmux_agent::strategy::AgentStrategies>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -274,6 +275,7 @@ fn spawn_layout_requested_content(
                 spawn_url_into_stack(
                     *stack,
                     url,
+                    strategies.as_deref(),
                     &mut commands,
                     &mut meshes,
                     &mut webview_mt,
@@ -287,6 +289,7 @@ fn spawn_layout_requested_content(
 fn spawn_url_into_stack(
     stack: Entity,
     url: &str,
+    strategies: Option<&vmux_agent::strategy::AgentStrategies>,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -297,6 +300,33 @@ fn spawn_url_into_stack(
             .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
             .id();
         commands.entity(terminal).insert(CefKeyboardTarget);
+    } else if let Some(kind) = vmux_agent::AgentKind::all()
+        .into_iter()
+        .find(|k| url.starts_with(k.url_scheme()))
+    {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+        let id_part = url.strip_prefix(kind.url_scheme()).unwrap_or("");
+        let session_id = (!id_part.is_empty()).then(|| id_part.to_string());
+        let strats = match strategies {
+            Some(s) => s,
+            None => {
+                bevy::log::warn!("agent strategies not registered; falling back to terminal");
+                let terminal = commands
+                    .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
+                    .id();
+                commands.entity(terminal).insert(CefKeyboardTarget);
+                return;
+            }
+        };
+        if let Err(e) = spawn_agent_into_stack(
+            kind, stack, cwd, session_id, strats, commands, meshes, webview_mt, settings,
+        ) {
+            bevy::log::warn!("agent spawn ({kind:?}) failed: {e}; falling back to terminal");
+            let terminal = commands
+                .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
+                .id();
+            commands.entity(terminal).insert(CefKeyboardTarget);
+        }
     } else if url.starts_with(crate::vibe::session::VIBE_WEBVIEW_URL) {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
         let path = url
@@ -330,6 +360,44 @@ fn spawn_url_into_stack(
             .id();
         commands.entity(terminal).insert(CefKeyboardTarget);
     }
+}
+
+pub(crate) fn spawn_agent_into_stack(
+    kind: vmux_agent::AgentKind,
+    stack: Entity,
+    cwd: std::path::PathBuf,
+    session_id: Option<String>,
+    strategies: &vmux_agent::strategy::AgentStrategies,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> Result<(), String> {
+    let launch = crate::agent::build_agent_launch(kind, &cwd, session_id.as_deref(), strategies)?;
+    let terminal = commands
+        .spawn((
+            Terminal::new_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
+            ChildOf(stack),
+        ))
+        .id();
+    commands.entity(terminal).insert(CefKeyboardTarget);
+    commands
+        .entity(terminal)
+        .insert((launch, vmux_agent::session::AgentSession { kind }));
+    if let Some(id) = session_id {
+        commands
+            .entity(terminal)
+            .insert(vmux_agent::session::SessionId(id));
+    } else {
+        commands
+            .entity(terminal)
+            .insert(vmux_agent::session::PendingAgentSession {
+                kind,
+                spawn_time: std::time::SystemTime::now(),
+                cwd,
+            });
+    }
+    Ok(())
 }
 
 pub(crate) fn spawn_vibe_into_stack(
