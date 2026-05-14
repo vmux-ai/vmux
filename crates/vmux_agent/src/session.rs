@@ -3,8 +3,10 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use bevy::prelude::*;
+use vmux_core::PageMetadata;
 
 use crate::AgentKind;
+use crate::strategy::AgentStrategies;
 
 #[derive(Component, Debug, Clone)]
 pub struct AgentSession {
@@ -27,6 +29,29 @@ pub struct AgentSessionToEntity(pub HashMap<(AgentKind, String), Entity>);
 #[derive(Resource, Default, Debug)]
 pub struct AgentSessionDirty(pub bool);
 
+#[allow(clippy::type_complexity)]
+pub fn format_agent_url(
+    strategies: Res<AgentStrategies>,
+    mut q: Query<
+        (Option<&SessionId>, &AgentSession, &mut PageMetadata),
+        Or<(Changed<SessionId>, Added<AgentSession>, Added<PageMetadata>)>,
+    >,
+) {
+    for (sid, agent, mut meta) in &mut q {
+        let Some(strategy) = strategies.get(agent.kind) else {
+            continue;
+        };
+        let scheme = strategy.kind().url_scheme();
+        let next = match sid {
+            Some(SessionId(id)) => format!("{scheme}{id}"),
+            None => scheme.to_string(),
+        };
+        if meta.url != next {
+            meta.url = next;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -46,5 +71,65 @@ mod tests {
         };
         assert_eq!(pending.kind, AgentKind::Claude);
         assert_eq!(pending.cwd, PathBuf::from("/tmp/x"));
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::*;
+    use crate::vibe::VibeStrategy;
+
+    fn empty_meta() -> PageMetadata {
+        PageMetadata {
+            title: String::new(),
+            url: String::new(),
+            favicon_url: String::new(),
+            bg_color: None,
+        }
+    }
+
+    #[test]
+    fn format_agent_url_emits_scheme_with_session_id() {
+        let mut app = App::new();
+        let mut strategies = AgentStrategies::default();
+        strategies.register(Box::new(VibeStrategy));
+        app.insert_resource(strategies);
+        app.add_systems(Update, format_agent_url);
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                SessionId("abc".into()),
+                empty_meta(),
+            ))
+            .id();
+        app.update();
+        let url = &app.world().get::<PageMetadata>(entity).unwrap().url;
+        assert_eq!(url, "vmux://vibe/abc");
+    }
+
+    #[test]
+    fn format_agent_url_emits_scheme_only_when_no_session_id() {
+        let mut app = App::new();
+        let mut strategies = AgentStrategies::default();
+        strategies.register(Box::new(VibeStrategy));
+        app.insert_resource(strategies);
+        app.add_systems(Update, format_agent_url);
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                empty_meta(),
+            ))
+            .id();
+        app.update();
+        let url = &app.world().get::<PageMetadata>(entity).unwrap().url;
+        assert_eq!(url, "vmux://vibe/");
     }
 }
