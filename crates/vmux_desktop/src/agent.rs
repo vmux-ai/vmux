@@ -1624,6 +1624,110 @@ mod tests {
     }
 
     #[test]
+    fn browser_navigate_with_claude_url_does_not_spawn_standalone_browser() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
+        app.insert_resource(FocusedStack::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::BrowserNavigate {
+                    url: "vmux://claude/".into(),
+                    pane: None,
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let standalone_browser_count = world
+            .query_filtered::<&Browser, Without<Terminal>>()
+            .iter(world)
+            .count();
+        assert_eq!(
+            standalone_browser_count, 0,
+            "claude URL should never spawn a standalone browser tab"
+        );
+    }
+
+    #[test]
+    fn browser_navigate_with_codex_url_does_not_spawn_standalone_browser() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(AgentPlugin);
+        app.init_resource::<AgentStrategies>();
+        app.insert_resource(FocusedStack::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::BrowserNavigate {
+                    url: "vmux://codex/".into(),
+                    pane: None,
+                },
+            });
+
+        app.update();
+
+        let world = app.world_mut();
+        let standalone_browser_count = world
+            .query_filtered::<&Browser, Without<Terminal>>()
+            .iter(world)
+            .count();
+        assert_eq!(
+            standalone_browser_count, 0,
+            "codex URL should never spawn a standalone browser tab"
+        );
+    }
+
+    #[test]
+    fn deep_link_focuses_existing_claude_tab() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<vmux_agent::session::AgentSessionToEntity>();
+        app.add_systems(Update, vmux_agent::session::track_session_id_inserts);
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                AgentSession {
+                    kind: AgentKind::Claude,
+                },
+                SessionId("dl-1".into()),
+            ))
+            .id();
+
+        app.update();
+
+        let map = app
+            .world()
+            .resource::<vmux_agent::session::AgentSessionToEntity>();
+        assert_eq!(
+            map.0.get(&(AgentKind::Claude, "dl-1".into())),
+            Some(&entity)
+        );
+    }
+
+    #[test]
     fn agent_plugin_registers_all_six_provider_entries() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
