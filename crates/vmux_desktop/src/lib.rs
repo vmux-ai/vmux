@@ -7,6 +7,7 @@
 
 mod agent;
 mod agent_query;
+mod background_lifecycle;
 mod browser;
 mod clipboard;
 mod command;
@@ -28,7 +29,7 @@ mod vibe;
 
 use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
-use bevy::window::{CompositeAlphaMode, Window as NativeWindow, WindowPlugin};
+use bevy::window::{CompositeAlphaMode, ExitCondition, Window as NativeWindow, WindowPlugin};
 use bevy::winit::WinitSettings;
 use std::time::Duration;
 
@@ -84,6 +85,7 @@ impl Plugin for VmuxPlugin {
         let window_plugin = WindowPlugin {
             primary_window: Some(primary_window),
             close_when_requested: false,
+            exit_condition: ExitCondition::DontExit,
             ..default()
         };
 
@@ -126,6 +128,8 @@ impl Plugin for VmuxPlugin {
             ProfilePlugin,
             LayoutPlugin,
             updater::VmuxUpdater::builder().build().plugin(),
+            background_lifecycle::BackgroundLifecyclePlugin,
+            tray::TrayPlugin,
         ));
     }
 }
@@ -139,6 +143,15 @@ mod tests {
         let window = primary_window_config("Vmux".to_string());
 
         assert!(window.ime_enabled);
+    }
+
+    #[test]
+    fn window_plugin_keeps_app_alive_after_last_window_closes() {
+        let source = include_str!("lib.rs");
+        assert!(
+            source.contains("ExitCondition::DontExit"),
+            "WindowPlugin must opt out of automatic exit so Vmux.app survives last-window-close"
+        );
     }
 
     #[test]

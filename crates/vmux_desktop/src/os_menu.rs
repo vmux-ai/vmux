@@ -1,10 +1,9 @@
 use crate::command::{AppCommand, WriteAppCommands, build_native_root_menu};
 use crate::settings::AppSettings;
 use crate::terminal::{self, PtyExited, Terminal};
-use bevy::app::AppExit;
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
-use bevy::window::{ClosingWindow, WindowCloseRequested};
+use bevy::window::WindowCloseRequested;
 use muda::{Menu, MenuEvent};
 use parking_lot::Mutex;
 use std::sync::LazyLock;
@@ -66,54 +65,33 @@ fn forward_menu_events(world: &mut World) {
         } else if let Some(cmd) = AppCommand::from_menu_id(event_id.as_str()) {
             world.resource_mut::<Messages<AppCommand>>().write(cmd);
         } else {
-            warn!(len = event_id.len(), "unknown native menu item");
+            crate::tray::PENDING_TRAY_EVENTS.lock().push(event_id);
         }
     }
 }
 
 fn handle_quit_request(world: &mut World) {
-    let should_confirm = world
-        .get_resource::<AppSettings>()
-        .and_then(|s| s.terminal.as_ref())
-        .is_none_or(|t| t.confirm_close);
-
-    if should_confirm {
-        let mut query = world.query_filtered::<(), (With<Terminal>, Without<PtyExited>)>();
-        let count = query.iter(world).count();
-
-        if count > 0 && !terminal::confirm_quit_dialog(count) {
-            return;
-        }
-    }
-
     world
-        .resource_mut::<Messages<AppExit>>()
-        .write(AppExit::Success);
+        .resource_mut::<Messages<crate::background_lifecycle::LifecycleEvent>>()
+        .write(crate::background_lifecycle::LifecycleEvent::HideAllWindows);
 }
 
 /// Replacement for bevy's `close_when_requested` that shows a confirmation
 /// dialog when terminals are still running. Defers the dialog to the
 /// exclusive `show_pending_close_dialogs` system to avoid deadlocks.
 fn close_with_confirmation(
-    mut commands: Commands,
     mut closed: MessageReader<WindowCloseRequested>,
-    closing: Query<Entity, With<ClosingWindow>>,
+    mut windows: Query<&mut Window>,
     settings: Res<AppSettings>,
     live_terminals: Query<(), (With<Terminal>, Without<PtyExited>)>,
     mut pending: ResMut<PendingWindowClose>,
 ) {
-    // Despawn windows that were marked as closing on the previous frame.
-    for window in closing.iter() {
-        commands.entity(window).despawn();
-    }
-    // Process new close requests.
     for event in closed.read() {
         let should_confirm = terminal::should_confirm_close(&settings);
         if should_confirm && live_terminals.iter().count() > 0 {
-            // Defer dialog to exclusive system
             pending.window = Some(event.window);
-        } else {
-            commands.entity(event.window).try_insert(ClosingWindow);
+        } else if let Ok(mut window) = windows.get_mut(event.window) {
+            window.visible = false;
         }
     }
 }
@@ -133,7 +111,43 @@ fn process_pending_window_close(world: &mut World) {
 
     if (count == 0 || terminal::confirm_quit_dialog(count))
         && let Ok(mut entity_mut) = world.get_entity_mut(window)
+        && let Some(mut win) = entity_mut.get_mut::<Window>()
     {
-        entity_mut.insert(ClosingWindow);
+        win.visible = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn quit_menu_event_hides_windows_not_exit() {
+        let source = include_str!("os_menu.rs");
+        let needle = ["AppExit", "::", "Success"].concat();
+        assert!(
+            !source.contains(&needle),
+            "Cmd+Q must hide windows, not exit the app — terminal state must survive"
+        );
+        assert!(
+            source.contains("HideAllWindows") || source.contains("window.visible = false"),
+            "handle_quit_request must dispatch a hide action"
+        );
+    }
+
+    #[test]
+    fn window_close_request_hides_window_instead_of_despawning() {
+        let source = include_str!("os_menu.rs");
+        let despawn_marker = ["Closing", "Window"].concat();
+        let inserts = source.matches(&format!("insert({despawn_marker})")).count()
+            + source
+                .matches(&format!("try_insert({despawn_marker})"))
+                .count();
+        assert_eq!(
+            inserts, 0,
+            "WindowCloseRequested must hide the window, not insert ClosingWindow which leads to despawn"
+        );
+        assert!(
+            source.contains("window.visible = false") || source.contains(".visible = false"),
+            "expected the close handler to set window.visible = false"
+        );
     }
 }

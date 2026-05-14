@@ -14,6 +14,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 "$ROOT/scripts/inject-cef.sh"
 
 if [[ "${CARGO_PACKAGER_FORMAT:-}" == "dmg" ]]; then
+    VMUX_APP_BUNDLE="${VMUX_APP_BUNDLE:-$ROOT/target/release/Vmux.app}" \
+        "$ROOT/scripts/embed-launch-agent-plist.sh"
     APP_BUNDLE="${VMUX_APP_BUNDLE:-$ROOT/target/release/Vmux.app}" \
         "$ROOT/scripts/sign-and-notarize.sh"
 fi

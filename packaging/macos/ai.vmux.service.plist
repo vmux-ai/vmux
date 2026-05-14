@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.vmux.service</string>
+  <key>BundleProgram</key>
+  <string>Contents/MacOS/vmux_service</string>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>Crashed</key>
+    <true/>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>VMUX_BUILD_PROFILE</key>
+    <string>{{PROFILE}}</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/tmp/vmux-service.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/vmux-service.log</string>
+</dict>
+</plist>
