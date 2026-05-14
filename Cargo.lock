@@ -9148,6 +9148,7 @@ dependencies = [
  "tray-icon",
  "url",
  "uuid",
+ "vmux_agent",
  "vmux_command",
  "vmux_core",
  "vmux_history",
