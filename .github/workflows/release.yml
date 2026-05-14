@@ -313,7 +313,12 @@ jobs:
             "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
             "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz.sig"
           )
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if gh release view "$TAG" --json isDraft >/tmp/r.json 2>/dev/null; then
+            is_draft=$(jq -r .isDraft /tmp/r.json)
+            if [ "$is_draft" != "true" ]; then
+              echo "::error::Release $TAG already published but missing assets — refusing to upload to a public release. Inspect manually."
+              exit 1
+            fi
             gh release upload "$TAG" "${ASSETS[@]}" --clobber
           else
             gh release create "$TAG" \
@@ -337,7 +342,14 @@ jobs:
           fi
           git commit -m "chore(release): update cask and update manifest to ${VERSION}"
           for i in 1 2 3; do
-            git pull --rebase origin main && break || sleep 5
+            if git pull --rebase origin main; then
+              break
+            fi
+            if [ "$i" -eq 3 ]; then
+              echo "::error::Failed to rebase onto main after 3 attempts"
+              exit 1
+            fi
+            sleep 5
           done
           git push origin HEAD:main
 
