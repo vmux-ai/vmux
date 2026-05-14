@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -134,6 +134,61 @@ mod url_tests {
     }
 }
 
+pub const PENDING_DISCOVERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+pub fn mark_dirty_on_pending_added(
+    added_pending: Query<(), Added<PendingAgentSession>>,
+    added_session: Query<(), Added<SessionId>>,
+    mut dirty: ResMut<AgentSessionDirty>,
+) {
+    if !added_pending.is_empty() || !added_session.is_empty() {
+        dirty.0 = true;
+    }
+}
+
+pub fn agent_session_dirty_run_condition(dirty: Res<AgentSessionDirty>) -> bool {
+    dirty.0
+}
+
+pub fn clear_agent_session_dirty(mut dirty: ResMut<AgentSessionDirty>) {
+    dirty.0 = false;
+}
+
+pub fn discover_pending_agent_sessions(
+    mut commands: Commands,
+    strategies: Res<AgentStrategies>,
+    map: Res<AgentSessionToEntity>,
+    q: Query<(Entity, &PendingAgentSession)>,
+) {
+    let now = std::time::SystemTime::now();
+    for (entity, pending) in &q {
+        let Some(strategy) = strategies.get(pending.kind) else {
+            continue;
+        };
+        let claimed: HashSet<String> = map
+            .0
+            .iter()
+            .filter_map(|((k, id), _)| {
+                if *k == pending.kind {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if let Some(id) = strategy.discover_session(&pending.cwd, pending.spawn_time, &claimed) {
+            commands
+                .entity(entity)
+                .insert(SessionId(id))
+                .remove::<PendingAgentSession>();
+            continue;
+        }
+        if now.duration_since(pending.spawn_time).unwrap_or_default() >= PENDING_DISCOVERY_TIMEOUT {
+            commands.entity(entity).remove::<PendingAgentSession>();
+        }
+    }
+}
+
 pub fn track_session_id_inserts(
     mut map: ResMut<AgentSessionToEntity>,
     inserted: Query<(Entity, &SessionId, &AgentSession), Added<SessionId>>,
@@ -203,5 +258,31 @@ mod tracking_tests {
         app.update();
         let map = app.world().resource::<AgentSessionToEntity>();
         assert!(!map.0.contains_key(&(AgentKind::Vibe, "v1".into())));
+    }
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+    use crate::vibe::VibeStrategy;
+
+    #[test]
+    fn pending_with_no_match_within_timeout_keeps_pending() {
+        let mut app = App::new();
+        let mut strategies = AgentStrategies::default();
+        strategies.register(Box::new(VibeStrategy));
+        app.insert_resource(strategies);
+        app.init_resource::<AgentSessionToEntity>();
+        app.add_systems(Update, discover_pending_agent_sessions);
+
+        let pending = PendingAgentSession {
+            kind: AgentKind::Vibe,
+            spawn_time: std::time::SystemTime::now(),
+            cwd: PathBuf::from("/this/path/does/not/exist"),
+        };
+        let entity = app.world_mut().spawn(pending).id();
+        app.update();
+        assert!(app.world().get::<PendingAgentSession>(entity).is_some());
+        assert!(app.world().get::<SessionId>(entity).is_none());
     }
 }
