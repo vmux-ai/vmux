@@ -1,0 +1,226 @@
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+use serde_json::{Map, Value};
+
+use crate::strategy::AgentStrategy;
+use crate::{AgentKind, McpServerConfig};
+
+pub struct ClaudeStrategy;
+
+impl AgentStrategy for ClaudeStrategy {
+    fn kind(&self) -> AgentKind {
+        AgentKind::Claude
+    }
+
+    fn sessions_root(&self) -> PathBuf {
+        let home = std::env::var("HOME").unwrap_or_default();
+        PathBuf::from(home).join(".claude").join("projects")
+    }
+
+    fn build_args(&self, mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
+        let mut args = vec![
+            "--permission-mode".to_string(),
+            "bypassPermissions".to_string(),
+            "--mcp-config".to_string(),
+            build_mcp_config_json(mcp),
+            "--strict-mcp-config".to_string(),
+        ];
+        if let Some(sid) = session_id {
+            args.push("--resume".to_string());
+            args.push(sid.to_string());
+        }
+        args
+    }
+
+    fn build_env(&self, _mcp: &McpServerConfig) -> Vec<(String, String)> {
+        vec![]
+    }
+
+    fn discover_session(
+        &self,
+        cwd: &Path,
+        spawn_time: SystemTime,
+        claimed: &HashSet<String>,
+    ) -> Option<String> {
+        let dir = self.sessions_root().join(project_dir_name(cwd));
+        discover_claude_session_id(&dir, spawn_time, claimed)
+    }
+
+    fn detect_end_time(&self, _session_id: &str) -> bool {
+        false
+    }
+}
+
+pub(crate) fn project_dir_name(cwd: &Path) -> String {
+    let s = cwd.to_string_lossy();
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn build_mcp_config_json(mcp: &McpServerConfig) -> String {
+    let mut server = Map::new();
+    server.insert("command".into(), Value::String(mcp.command.clone()));
+    server.insert(
+        "args".into(),
+        Value::Array(mcp.args.iter().map(|s| Value::String(s.clone())).collect()),
+    );
+    if let Some(cwd) = &mcp.cwd {
+        server.insert("cwd".into(), Value::String(cwd.to_string_lossy().into()));
+    }
+    let mut servers = Map::new();
+    servers.insert("vmux".into(), Value::Object(server));
+    let mut root = Map::new();
+    root.insert("mcpServers".into(), Value::Object(servers));
+    serde_json::to_string(&Value::Object(root)).unwrap_or_else(|_| "{}".into())
+}
+
+pub(crate) fn discover_claude_session_id(
+    project_dir: &Path,
+    spawn_time: SystemTime,
+    claimed: &HashSet<String>,
+) -> Option<String> {
+    let entries = std::fs::read_dir(project_dir).ok()?;
+    let mut best: Option<(SystemTime, String)> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if claimed.contains(stem) {
+            continue;
+        }
+        let Ok(meta) = std::fs::metadata(&path) else {
+            continue;
+        };
+        let Ok(created) = meta.created().or_else(|_| meta.modified()) else {
+            continue;
+        };
+        if created < spawn_time {
+            continue;
+        }
+        match &best {
+            None => best = Some((created, stem.to_string())),
+            Some((cur, _)) if created < *cur => best = Some((created, stem.to_string())),
+            _ => {}
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn unique_tmp(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let pid = std::process::id();
+        let dir = std::env::temp_dir().join(format!("vmux-agent-{label}-{pid}-{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn project_dir_name_replaces_slashes_and_dots_with_dashes() {
+        assert_eq!(
+            project_dir_name(Path::new("/Users/junichi.sugiura/.config/nvim")),
+            "-Users-junichi-sugiura--config-nvim"
+        );
+        assert_eq!(project_dir_name(Path::new("/tmp/a")), "-tmp-a");
+    }
+
+    #[test]
+    fn discover_picks_jsonl_under_project_dir_after_spawn_time() {
+        let tmp = unique_tmp("claude-discover");
+        let dir = tmp.join("project");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("session-old.jsonl"), b"x").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        let spawn = SystemTime::now();
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(dir.join("session-new.jsonl"), b"x").unwrap();
+
+        let claimed = HashSet::new();
+        let id = discover_claude_session_id(&dir, spawn, &claimed);
+        assert_eq!(id.as_deref(), Some("session-new"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn discover_skips_claimed() {
+        let tmp = unique_tmp("claude-claimed");
+        let dir = tmp.join("project");
+        std::fs::create_dir_all(&dir).unwrap();
+        let spawn = SystemTime::now();
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(dir.join("session-a.jsonl"), b"x").unwrap();
+        std::fs::write(dir.join("session-b.jsonl"), b"x").unwrap();
+
+        let mut claimed = HashSet::new();
+        claimed.insert("session-a".to_string());
+        let id = discover_claude_session_id(&dir, spawn, &claimed);
+        assert_eq!(id.as_deref(), Some("session-b"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn build_args_includes_mcp_config_and_strict() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into()],
+            cwd: None,
+        };
+        let args = ClaudeStrategy.build_args(&mcp, None);
+        assert!(args.iter().any(|a| a == "--strict-mcp-config"));
+        assert!(args.iter().any(|a| a == "--mcp-config"));
+        assert!(args.iter().any(|a| a == "--permission-mode"));
+        assert!(args.iter().any(|a| a == "bypassPermissions"));
+    }
+
+    #[test]
+    fn build_args_resume_appends_resume_flag() {
+        let mcp = McpServerConfig {
+            command: "x".into(),
+            args: vec![],
+            cwd: None,
+        };
+        let args = ClaudeStrategy.build_args(&mcp, Some("abc-123"));
+        let resume_idx = args.iter().position(|a| a == "--resume").unwrap();
+        assert_eq!(args[resume_idx + 1], "abc-123");
+    }
+
+    #[test]
+    fn detect_end_time_always_false() {
+        assert!(!ClaudeStrategy.detect_end_time("anything"));
+    }
+
+    #[test]
+    fn build_mcp_config_json_includes_vmux_server_with_command_and_args() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into()],
+            cwd: Some(PathBuf::from("/work")),
+        };
+        let json = build_mcp_config_json(&mcp);
+        assert!(json.contains("\"command\":\"/bin/vmux\""));
+        assert!(json.contains("\"args\":[\"mcp\"]"));
+        assert!(json.contains("\"cwd\":\"/work\""));
+        assert!(json.contains("\"vmux\""));
+        assert!(json.contains("\"mcpServers\""));
+    }
+}
