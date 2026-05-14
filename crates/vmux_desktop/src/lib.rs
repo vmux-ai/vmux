@@ -25,8 +25,6 @@ mod terminal;
 mod themes;
 mod tray;
 pub mod updater;
-mod vibe;
-
 use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
 use bevy::window::{CompositeAlphaMode, ExitCondition, Window as NativeWindow, WindowPlugin};
@@ -46,7 +44,6 @@ use {
     shortcut::ShortcutPlugin,
     spaces::SpacesPlugin,
     terminal::TerminalInputPlugin,
-    vibe::VibePlugin,
     vmux_layout::{LayoutChromePlugin, profile::ProfilePlugin, scene::ScenePlugin},
     vmux_service::webview::ServicesPlugin,
     vmux_terminal::TerminalPlugin,
@@ -122,7 +119,7 @@ impl Plugin for VmuxPlugin {
         .add_plugins((
             TerminalInputPlugin,
             AgentPlugin,
-            VibePlugin,
+            vmux_agent::AgentSessionPlugin,
             ProcessesMonitorPlugin,
             PersistencePlugin,
             ProfilePlugin,

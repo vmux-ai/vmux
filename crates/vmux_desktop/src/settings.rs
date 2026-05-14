@@ -63,7 +63,7 @@ pub fn resolve_startup_url(settings: &AppSettings) -> String {
     settings
         .startup_url
         .clone()
-        .unwrap_or_else(|| "vmux://vibe/".to_string())
+        .unwrap_or_else(|| vmux_agent::AgentKind::Vibe.url_scheme().to_string())
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -327,31 +327,6 @@ fn spawn_url_into_stack(
                 .id();
             commands.entity(terminal).insert(CefKeyboardTarget);
         }
-    } else if url.starts_with(crate::vibe::session::VIBE_WEBVIEW_URL) {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
-        let path = url
-            .strip_prefix(crate::vibe::session::VIBE_WEBVIEW_URL)
-            .unwrap_or("");
-        let result = if path.is_empty() {
-            spawn_vibe_into_stack(stack, cwd, None, commands, meshes, webview_mt, settings)
-        } else {
-            spawn_vibe_into_stack(
-                stack,
-                cwd,
-                Some(path.to_string()),
-                commands,
-                meshes,
-                webview_mt,
-                settings,
-            )
-        };
-        if let Err(e) = result {
-            bevy::log::warn!("vibe spawn failed: {e}; falling back to terminal");
-            let terminal = commands
-                .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
-                .id();
-            commands.entity(terminal).insert(CefKeyboardTarget);
-        }
     } else if url.starts_with(vmux_service::webview::event::PROCESSES_WEBVIEW_URL) {
         commands.spawn((ProcessesMonitor::new(meshes, webview_mt), ChildOf(stack)));
     } else {
@@ -393,40 +368,6 @@ pub(crate) fn spawn_agent_into_stack(
             .entity(terminal)
             .insert(vmux_agent::session::PendingAgentSession {
                 kind,
-                spawn_time: std::time::SystemTime::now(),
-                cwd,
-            });
-    }
-    Ok(())
-}
-
-pub(crate) fn spawn_vibe_into_stack(
-    stack: Entity,
-    cwd: std::path::PathBuf,
-    session_id: Option<String>,
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) -> Result<(), String> {
-    let launch = crate::vibe::build_terminal_launch(&cwd, session_id.as_deref())?;
-    let terminal = commands
-        .spawn((
-            Terminal::new_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
-            ChildOf(stack),
-        ))
-        .id();
-    commands
-        .entity(terminal)
-        .insert((CefKeyboardTarget, launch, crate::vibe::session::Vibe));
-    if let Some(id) = session_id {
-        commands
-            .entity(terminal)
-            .insert(crate::vibe::session::SessionId(id));
-    } else {
-        commands
-            .entity(terminal)
-            .insert(crate::vibe::session::PendingVibeSession {
                 spawn_time: std::time::SystemTime::now(),
                 cwd,
             });
@@ -621,7 +562,7 @@ struct MissingTerminalRestart {
     new_id: ProcessId,
     command: ClientMessage,
     cwd: String,
-    is_vibe: bool,
+    agent_kind: Option<vmux_agent::AgentKind>,
 }
 
 fn terminal_shell(settings: &AppSettings) -> String {
@@ -639,14 +580,14 @@ fn missing_terminal_restart(
             Entity,
             ProcessId,
             crate::terminal::launch::TerminalLaunch,
-            bool,
+            Option<vmux_agent::AgentKind>,
         ),
     >,
 ) -> Option<MissingTerminalRestart> {
     terminals
         .into_iter()
         .find(|(_, terminal_pid, _, _)| *terminal_pid == process_id)
-        .map(|(entity, _, launch, is_vibe)| {
+        .map(|(entity, _, launch, agent_kind)| {
             let new_id = ProcessId::new();
             let cwd = launch.cwd.clone();
             MissingTerminalRestart {
@@ -662,7 +603,7 @@ fn missing_terminal_restart(
                     rows: 24,
                 },
                 cwd,
-                is_vibe,
+                agent_kind,
             }
         })
 }
@@ -850,7 +791,7 @@ fn poll_service_messages(
     mut mouse_state: ResMut<MouseSelectionState>,
     settings: Res<AppSettings>,
     launches: Query<&crate::terminal::launch::TerminalLaunch>,
-    vibes: Query<(), With<crate::vibe::session::Vibe>>,
+    agent_sessions: Query<&vmux_agent::session::AgentSession>,
 ) {
     let Some(service) = service else { return };
 
@@ -1033,21 +974,22 @@ fn poll_service_messages(
                                 kind: crate::terminal::launch::TerminalKind::Plain,
                             }
                         });
-                        let is_vibe = vibes.contains(entity);
-                        (entity, *terminal_pid, launch, is_vibe)
+                        let agent_kind = agent_sessions.get(entity).ok().map(|s| s.kind);
+                        (entity, *terminal_pid, launch, agent_kind)
                     });
                     if let Some(restart) = missing_terminal_restart(stale_pid, candidates) {
                         restarted_missing_processes.push(stale_pid);
                         let cwd = restart.cwd.clone();
-                        let is_vibe = restart.is_vibe;
+                        let agent_kind = restart.agent_kind;
                         let new_id = restart.new_id;
                         let entity = restart.entity;
                         service.0.send(restart.command);
                         let mut ec = commands.entity(entity);
                         ec.insert(new_id);
                         ec.insert(AwaitingProcessCreated);
-                        if is_vibe {
-                            ec.insert(crate::vibe::session::PendingVibeSession {
+                        if let Some(kind) = agent_kind {
+                            ec.insert(vmux_agent::session::PendingAgentSession {
+                                kind,
                                 spawn_time: std::time::SystemTime::now(),
                                 cwd: std::path::PathBuf::from(&cwd),
                             });
@@ -2134,7 +2076,7 @@ pub(crate) struct ProcessExitedEvent {
     pub exit_code: Option<i32>,
 }
 
-fn respawn_shell_on_vibe_exit_for_entity(
+fn respawn_shell_on_agent_exit_for_entity(
     commands: &mut Commands,
     entity: Entity,
     shell: &str,
@@ -2142,9 +2084,9 @@ fn respawn_shell_on_vibe_exit_for_entity(
 ) {
     let new_id = ProcessId::new();
     let mut ec = commands.entity(entity);
-    ec.remove::<crate::vibe::session::Vibe>();
-    ec.remove::<crate::vibe::session::SessionId>();
-    ec.remove::<crate::vibe::session::PendingVibeSession>();
+    ec.remove::<vmux_agent::session::AgentSession>();
+    ec.remove::<vmux_agent::session::SessionId>();
+    ec.remove::<vmux_agent::session::PendingAgentSession>();
     ec.insert(new_id);
     ec.insert(PendingServiceCreate);
     ec.insert(crate::terminal::launch::TerminalLaunch {
@@ -2161,7 +2103,7 @@ pub(crate) fn respawn_shell_on_vibe_exit(
     mut exited: MessageReader<ProcessExitedEvent>,
     q: Query<
         (Entity, &ProcessId, &crate::terminal::launch::TerminalLaunch),
-        With<crate::vibe::session::Vibe>,
+        With<vmux_agent::session::AgentSession>,
     >,
     settings: Res<AppSettings>,
 ) {
@@ -2172,7 +2114,7 @@ pub(crate) fn respawn_shell_on_vibe_exit(
         };
         let shell = terminal_shell(&settings);
         let cwd = launch.cwd.clone();
-        respawn_shell_on_vibe_exit_for_entity(&mut commands, entity, &shell, cwd);
+        respawn_shell_on_agent_exit_for_entity(&mut commands, entity, &shell, cwd);
     }
 }
 
@@ -2215,14 +2157,14 @@ mod tests {
         let restart = missing_terminal_restart(
             missing,
             [
-                (Entity::from_bits(2), process_id(8), plain_launch(), false),
-                (target, missing, plain_launch(), false),
+                (Entity::from_bits(2), process_id(8), plain_launch(), None),
+                (target, missing, plain_launch(), None),
             ],
         )
         .unwrap();
 
         assert_eq!(restart.entity, target);
-        assert!(!restart.is_vibe);
+        assert!(restart.agent_kind.is_none());
         assert!(matches!(
             restart.command,
             ClientMessage::CreateProcess {
@@ -2716,7 +2658,7 @@ mod tests {
     }
 
     #[test]
-    fn respawn_shell_on_vibe_exit_swaps_kind_and_drops_vibe() {
+    fn respawn_shell_on_agent_exit_swaps_kind_and_drops_agent() {
         use crate::terminal::launch::{TerminalKind, TerminalLaunch};
 
         let mut app = bevy::prelude::App::new();
@@ -2726,8 +2668,10 @@ mod tests {
             .spawn((
                 Terminal,
                 original_id,
-                crate::vibe::session::Vibe,
-                crate::vibe::session::SessionId("abc-123".into()),
+                vmux_agent::session::AgentSession {
+                    kind: vmux_agent::AgentKind::Vibe,
+                },
+                vmux_agent::session::SessionId("abc-123".into()),
                 TerminalLaunch {
                     command: "/usr/local/bin/vibe".into(),
                     args: vec!["--trust".into()],
@@ -2741,17 +2685,21 @@ mod tests {
         app.world_mut()
             .run_system_cached_with(
                 |In((entity, shell, cwd)): In<(Entity, String, String)>, mut commands: Commands| {
-                    respawn_shell_on_vibe_exit_for_entity(&mut commands, entity, &shell, cwd);
+                    respawn_shell_on_agent_exit_for_entity(&mut commands, entity, &shell, cwd);
                 },
                 (entity, "/bin/zsh".to_string(), "/work".to_string()),
             )
             .unwrap();
 
         let world = app.world();
-        assert!(world.get::<crate::vibe::session::Vibe>(entity).is_none());
         assert!(
             world
-                .get::<crate::vibe::session::SessionId>(entity)
+                .get::<vmux_agent::session::AgentSession>(entity)
+                .is_none()
+        );
+        assert!(
+            world
+                .get::<vmux_agent::session::SessionId>(entity)
                 .is_none()
         );
         let launch = world.get::<TerminalLaunch>(entity).unwrap();

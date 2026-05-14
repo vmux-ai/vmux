@@ -50,7 +50,7 @@ pub fn format_terminal_url(
         (Option<&Pid>, &mut PageMetadata),
         (
             With<Terminal>,
-            Without<crate::vibe::session::Vibe>,
+            Without<vmux_agent::session::AgentSession>,
             Or<(Changed<Pid>, Added<PageMetadata>)>,
         ),
     >,
