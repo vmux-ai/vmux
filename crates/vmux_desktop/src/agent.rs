@@ -116,12 +116,14 @@ impl Plugin for AgentPlugin {
             .add_message::<AgentCommandRequest>()
             .add_message::<AgentQueryRequest>()
             .add_message::<AgentLaunchRequested>()
+            .add_message::<vmux_agent::AgentSessionExited>()
             .add_systems(
                 Update,
                 (
                     handle_agent_launch_requests,
                     handle_agent_commands,
                     crate::agent_query::handle_agent_queries,
+                    detect_agent_session_process_exit,
                 )
                     .chain()
                     .in_set(WriteAppCommands)
@@ -783,6 +785,34 @@ fn handle_agent_commands(
                 result,
             });
         }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+pub(crate) fn detect_agent_session_process_exit(
+    mut commands: Commands,
+    mut writer: MessageWriter<vmux_agent::AgentSessionExited>,
+    mut q: Query<
+        (Entity, Option<&crate::terminal::pid::Pid>, &mut PageMetadata),
+        (With<AgentSession>, With<ProcessExited>),
+    >,
+) {
+    for (entity, pid, mut meta) in &mut q {
+        commands
+            .entity(entity)
+            .remove::<AgentSession>()
+            .remove::<SessionId>()
+            .remove::<PendingAgentSession>();
+        let next = match pid {
+            Some(crate::terminal::pid::Pid(p)) => {
+                format!("{}{p}", vmux_terminal::event::TERMINAL_WEBVIEW_URL)
+            }
+            None => vmux_terminal::event::TERMINAL_WEBVIEW_URL.to_string(),
+        };
+        if meta.url != next {
+            meta.url = next;
+        }
+        writer.write(vmux_agent::AgentSessionExited { entity });
     }
 }
 
