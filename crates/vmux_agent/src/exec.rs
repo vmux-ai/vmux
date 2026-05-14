@@ -1,5 +1,9 @@
 use std::path::{Path, PathBuf};
 
+pub fn is_executable_path(path: &Path) -> bool {
+    is_executable(path)
+}
+
 pub fn find_executable(command: &str) -> Option<PathBuf> {
     let from_path = std::env::var_os("PATH")
         .and_then(|path| path.into_string().ok())
