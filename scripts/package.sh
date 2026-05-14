@@ -88,13 +88,17 @@ fi
 
 # inject-cef only meaningfully runs in the dmg-format pass (the .app
 # doesn't exist during the app-format pass). For local app-only builds,
-# run it manually here so the freshly-built .app gets CEF + webview assets.
+# run it manually here so the freshly-built .app gets CEF + webview assets,
+# then sign + notarize using the same identity as a release build.
 if [[ "$PROFILE" == "local" && -d "$VMUX_APP_BUNDLE" ]]; then
     echo "==> Injecting CEF into .app (local build)"
     CARGO_PACKAGER_FORMAT=dmg bash "$ROOT/scripts/inject-cef.sh"
 
     echo "==> Embedding launchd plist (local build)"
     VMUX_GIT_HASH="$SHA" "$ROOT/scripts/embed-launch-agent-plist.sh"
+
+    echo "==> Signing + notarizing local build"
+    APP_BUNDLE="$VMUX_APP_BUNDLE" "$ROOT/scripts/sign-and-notarize.sh"
 fi
 
 echo "==> Packaging complete: $VMUX_APP_BUNDLE"

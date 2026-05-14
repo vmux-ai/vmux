@@ -31,14 +31,8 @@ build: ensure-mac-deps
 -include .env
 export
 
-build-local: ensure-mac-deps ensure-package-deps ensure-codesign-deps
-	./scripts/package.sh local
-	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
-	sha="$$(git rev-parse --short HEAD)" && \
-	APPLE_SIGNING_IDENTITY="$$identity" \
-	SKIP_NOTARIZE=1 \
-	APP_BUNDLE="target/release/Vmux ($$sha).app" \
-	./scripts/sign-and-notarize.sh
+build-local: ensure-mac-deps ensure-package-deps
+	./scripts/build-mac-release.sh local
 
 local: build-local
 	@sha="$$(git rev-parse --short HEAD)" && \
