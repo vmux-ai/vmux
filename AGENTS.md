@@ -12,40 +12,17 @@ Use superpower. Invoke relevant skills BEFORE any response or action. Even a 1% 
 
 NEVER commit or push without running fmt + clippy + test on the **changed crates only** (not the whole workspace) and confirming they pass.
 
+The `scripts/changed-crates.sh` script computes the set: crates whose files changed, plus crates whose tests `include_str!` from changed paths.
+
 ```bash
-# Compute the set of crates touched vs the base branch (defaults to main).
-# Excludes vendored `patches/`. Run from the workspace root.
-BASE="${BASE:-main}"
-ROOT="$(git rev-parse --show-toplevel)"
-CHANGED_PKGS=$(
-  cargo metadata --no-deps --format-version 1 \
-  | jq -r '.packages[]
-      | select(.manifest_path | test("patches") | not)
-      | "\(.name)\t\(.manifest_path | sub("/Cargo\\.toml$"; ""))"' \
-  | while IFS=$'\t' read -r name dir; do
-      rel="${dir#"$ROOT"/}"
-      [ -z "$rel" ] && rel="."
-      if ! git diff --quiet "$BASE" -- "$rel"; then
-        echo "$name"
-      fi
-    done
-)
+PKGS=$(BASE=origin/main ./scripts/changed-crates.sh)
 
-# 1. Format check
-for pkg in $CHANGED_PKGS; do
-  cargo fmt -p "$pkg" -- --check
-done
-
-# 2. Clippy
-for pkg in $CHANGED_PKGS; do
-  env -u CEF_PATH cargo clippy -p "$pkg" --all-targets -- -D warnings
-done
-
-# 3. Tests
-for pkg in $CHANGED_PKGS; do
-  env -u CEF_PATH cargo test -p "$pkg"
-done
+for pkg in $PKGS; do cargo fmt -p "$pkg" -- --check; done
+for pkg in $PKGS; do env -u CEF_PATH cargo clippy -p "$pkg" --all-targets -- -D warnings; done
+for pkg in $PKGS; do env -u CEF_PATH cargo test -p "$pkg"; done
 ```
+
+Run `make setup-hooks` once to install the pre-push hook that runs these checks automatically.
 
 If a change ripples into a downstream crate that is NOT in the changed set, lint/test that crate too.
 
@@ -100,7 +77,7 @@ Always prefer `git rebase` over `git merge` when updating branches. Use `git pus
 
 **Mandatory**: Run fmt + clippy + test on the **changed crates only** before every `git push` or PR creation. Do not push or open a PR if any check fails. Fix all errors first.
 
-Use the `Pre-commit Checks` snippet above to compute the changed-crate set and run the three loops. The repo-wide `make lint` / `make test` targets still exist (they iterate every workspace package) but are slow and intended for periodic full sweeps, not per-push validation.
+Use `scripts/changed-crates.sh` (see Pre-commit Checks above) to compute the changed-crate set and run the three loops. The repo-wide `make lint` / `make test` targets still exist (they iterate every workspace package) but are slow and intended for periodic full sweeps, not per-push validation.
 
 ```sh
 make lint-fix  # auto-fix on every workspace package: runs fmt + clippy --fix

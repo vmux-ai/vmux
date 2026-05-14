@@ -104,7 +104,9 @@ jobs:
           fi
 
       - name: Install dioxus-cli
-        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
+        uses: taiki-e/install-action@v2
+        with:
+          tool: dioxus-cli@0.7.4
 
       - name: Install tailwindcss
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
@@ -185,7 +187,9 @@ jobs:
           fi
 
       - name: Install dioxus-cli
-        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
+        uses: taiki-e/install-action@v2
+        with:
+          tool: dioxus-cli@0.7.4
 
       - name: Install tailwindcss
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
@@ -242,7 +246,9 @@ jobs:
           key: cargo-bin-${{ runner.os }}-dx0.7.4
 
       - name: Install dioxus-cli
-        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
+        uses: taiki-e/install-action@v2
+        with:
+          tool: dioxus-cli@0.7.4
 
       - name: Build website
         working-directory: website
@@ -296,7 +302,9 @@ jobs:
           fi
 
       - name: Install dioxus-cli
-        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
+        uses: taiki-e/install-action@v2
+        with:
+          tool: dioxus-cli@0.7.4
 
       - name: Install bevy_cef tools
         run: |
