@@ -63,6 +63,7 @@ pub(crate) struct AgentProviders {
 }
 
 impl AgentProviders {
+    #[allow(dead_code)]
     pub(crate) fn register(&mut self, provider: AgentProvider) {
         self.providers.insert(provider.id, provider);
     }
@@ -72,6 +73,7 @@ impl AgentProviders {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn get(&self, id: &str) -> Option<&AgentProvider> {
         self.providers.get(id)
     }
@@ -272,64 +274,6 @@ pub(crate) fn spawn_agent_resume_tab(
     commands
         .entity(terminal)
         .insert((launch, AgentSession { kind }, SessionId(session_id)));
-    Ok(terminal)
-}
-
-#[allow(dead_code)]
-pub(crate) fn spawn_fresh_vibe_tab(
-    pane: Entity,
-    cwd: PathBuf,
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) -> Result<Entity, String> {
-    let launch = crate::vibe::build_terminal_launch(&cwd, None)?;
-    let terminal = spawn_terminal_tab(
-        pane,
-        Some(&cwd),
-        None,
-        commands,
-        meshes,
-        webview_mt,
-        settings,
-    );
-    commands.entity(terminal).insert((
-        launch,
-        crate::vibe::session::Vibe,
-        crate::vibe::session::PendingVibeSession {
-            spawn_time: std::time::SystemTime::now(),
-            cwd,
-        },
-    ));
-    Ok(terminal)
-}
-
-#[allow(dead_code)]
-pub(crate) fn spawn_vibe_resume_tab(
-    pane: Entity,
-    cwd: PathBuf,
-    session_id: String,
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) -> Result<Entity, String> {
-    let launch = crate::vibe::build_terminal_launch(&cwd, Some(&session_id))?;
-    let terminal = spawn_terminal_tab(
-        pane,
-        Some(&cwd),
-        None,
-        commands,
-        meshes,
-        webview_mt,
-        settings,
-    );
-    commands.entity(terminal).insert((
-        launch,
-        crate::vibe::session::Vibe,
-        crate::vibe::session::SessionId(session_id),
-    ));
     Ok(terminal)
 }
 
@@ -882,8 +826,11 @@ fn handle_agent_launch_requests(
         );
         commands.entity(terminal).insert((
             prepared.launch,
-            crate::vibe::session::Vibe,
-            crate::vibe::session::PendingVibeSession {
+            AgentSession {
+                kind: AgentKind::Vibe,
+            },
+            PendingAgentSession {
+                kind: AgentKind::Vibe,
                 spawn_time: std::time::SystemTime::now(),
                 cwd: prepared.cwd.clone(),
             },
