@@ -20,13 +20,7 @@ impl AgentStrategy for ClaudeStrategy {
     }
 
     fn build_args(&self, mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
-        let mut args = vec![
-            "--permission-mode".to_string(),
-            "bypassPermissions".to_string(),
-            "--mcp-config".to_string(),
-            build_mcp_config_json(mcp),
-            "--strict-mcp-config".to_string(),
-        ];
+        let mut args = vec!["--mcp-config".to_string(), build_mcp_config_json(mcp)];
         if let Some(sid) = session_id {
             args.push("--resume".to_string());
             args.push(sid.to_string());
@@ -179,17 +173,17 @@ mod tests {
     }
 
     #[test]
-    fn build_args_includes_mcp_config_and_strict() {
+    fn build_args_includes_mcp_config() {
         let mcp = McpServerConfig {
             command: "/bin/vmux".into(),
             args: vec!["mcp".into()],
             cwd: None,
         };
         let args = ClaudeStrategy.build_args(&mcp, None);
-        assert!(args.iter().any(|a| a == "--strict-mcp-config"));
         assert!(args.iter().any(|a| a == "--mcp-config"));
-        assert!(args.iter().any(|a| a == "--permission-mode"));
-        assert!(args.iter().any(|a| a == "bypassPermissions"));
+        assert!(!args.iter().any(|a| a == "--strict-mcp-config"));
+        assert!(!args.iter().any(|a| a == "--permission-mode"));
+        assert!(!args.iter().any(|a| a == "bypassPermissions"));
     }
 
     #[test]

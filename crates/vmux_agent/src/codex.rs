@@ -19,10 +19,6 @@ impl AgentStrategy for CodexStrategy {
 
     fn build_args(&self, mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
         let mut args: Vec<String> = vec![
-            "-s".into(),
-            "workspace-write".into(),
-            "-a".into(),
-            "never".into(),
             "-c".into(),
             format!("mcp_servers.vmux.command={}", quote_toml(&mcp.command)),
             "-c".into(),
@@ -203,11 +199,8 @@ mod tests {
             cwd: None,
         };
         let args = CodexStrategy.build_args(&mcp, None);
-        assert!(
-            args.windows(2)
-                .any(|w| w[0] == "-s" && w[1] == "workspace-write")
-        );
-        assert!(args.windows(2).any(|w| w[0] == "-a" && w[1] == "never"));
+        assert!(!args.iter().any(|a| a == "-s"));
+        assert!(!args.iter().any(|a| a == "-a"));
         assert!(
             args.iter()
                 .any(|a| a == "mcp_servers.vmux.command=\"/bin/vmux\"")

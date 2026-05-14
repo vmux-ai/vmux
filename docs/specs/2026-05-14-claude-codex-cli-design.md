@@ -12,7 +12,7 @@ Add full-parity support for the **Claude Code** and **Codex** CLIs alongside the
 2. Be deep-linkable via `vmux://claude/[id]` and `vmux://codex/[id]` URLs (mirror `vmux://vibe/[id]`).
 3. Discover its session id from the CLI's on-disk session log after launch and update the tab URL live.
 4. Inject the vmux MCP server so the agent can call back into vmux (open panes, run shells, navigate browsers).
-5. Run with vibe-equivalent trust defaults (no permission prompts inside cwd).
+5. Inject only the vmux MCP server config; trust / permission / sandbox settings stay under the user's own per-CLI config file.
 6. Revert the tab to `vmux://terminal/<pid>` when the agent process exits.
 
 Vibe behavior is preserved exactly — same args, same session-discovery, same exit-detection.
@@ -143,7 +143,7 @@ One `notify::RecommendedWatcher` per strategy. Created in `AgentSessionPlugin::b
 - **Executable**: `vibe`
 - **URL scheme**: `vmux://vibe/`
 - **Sessions root**: `$VIBE_HOME/logs/session/` or `~/.vibe/logs/session/`
-- **Args**: `["--trust"]` + optional `["--resume", <id>]`
+- **Args**: `[]` + optional `["--resume", <id>]`
 - **Env**: `VIBE_MCP_SERVERS` = JSON array `[{name:"vmux", transport:"stdio", command, args, cwd?}]`
 - **Discovery**: read `*/meta.json`, parse `{session_id, start_time, environment.working_directory}`. Match by normalized cwd, `start_time ≥ spawn_time`, skip claimed, return earliest.
 - **End-time detection**: parse `meta.json`, return true if `end_time` field present.
@@ -155,9 +155,7 @@ One `notify::RecommendedWatcher` per strategy. Created in `AgentSessionPlugin::b
 - **Sessions root**: `~/.claude/projects/`
 - **Args**:
   ```
-  ["--permission-mode", "bypassPermissions",
-   "--mcp-config", <json>,
-   "--strict-mcp-config"]
+  ["--mcp-config", <json>]
   + sid.map(|id| ["--resume", id]).unwrap_or_default()
   ```
   where `<json>` is `{"mcpServers":{"vmux":{"command":<cmd>,"args":<args>,"cwd":<cwd?>}}}` (single object literal passed inline; `--mcp-config` accepts JSON strings).
@@ -177,9 +175,7 @@ One `notify::RecommendedWatcher` per strategy. Created in `AgentSessionPlugin::b
 - **Sessions root**: `~/.codex/sessions/` (nested `YYYY/MM/DD/`)
 - **Args** (fresh):
   ```
-  ["-s", "workspace-write",
-   "-a", "never",
-   "-c", format!("mcp_servers.vmux.command={}", quote_toml(&mcp.command)),
+  ["-c", format!("mcp_servers.vmux.command={}", quote_toml(&mcp.command)),
    "-c", format!("mcp_servers.vmux.args={}",    toml_array(&mcp.args))]
   + mcp.cwd.map(|c| ["-c", format!("mcp_servers.vmux.cwd={}", quote_toml(c))]).unwrap_or_default()
   ```
@@ -358,7 +354,7 @@ All `VIBE_WEBVIEW_URL` constant references become `AgentKind::Vibe.url_scheme()`
 | `vibe::tests` | `detect_end_time_returns_true_when_meta_has_end_time` | new |
 | `claude::tests` | `discover_picks_jsonl_under_encoded_cwd_dir` | fixture: temp `~/.claude/projects/-tmp-foo/<uuid>.jsonl` |
 | `claude::tests` | `discover_skips_files_older_than_spawn_time` | fixture |
-| `claude::tests` | `build_args_includes_mcp_config_and_strict` | pure |
+| `claude::tests` | `build_args_includes_mcp_config` | pure |
 | `claude::tests` | `build_args_resume_appends_resume_flag` | pure |
 | `claude::tests` | `detect_end_time_always_false` | pure |
 | `codex::tests` | `discover_walks_yyyy_mm_dd_dirs` | fixture |
