@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, mpsc};
 use vmux_layout::settings::ConfirmCloseSettings;
 pub use vmux_layout::settings::LayoutSettings;
@@ -44,7 +44,7 @@ fn update_effective_startup_url(
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SettingsLoadSet;
 
-#[derive(Clone, Debug, Deserialize, Resource)]
+#[derive(Clone, Debug, Deserialize, Serialize, Resource)]
 pub struct AppSettings {
     #[allow(dead_code)]
     pub browser: BrowserSettings,
@@ -66,7 +66,7 @@ pub fn resolve_startup_url(settings: &AppSettings) -> String {
         .unwrap_or_else(|| vmux_agent::AgentKind::Vibe.url_scheme().to_string())
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ShortcutSettings {
     #[serde(default = "default_leader")]
     pub leader: KeyComboDef,
@@ -104,13 +104,13 @@ fn default_auto_update() -> bool {
     true
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ShortcutEntry {
     pub command: String,
     pub binding: ShortcutDef,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum ShortcutDef {
     Direct(KeyComboDef),
     Chord(KeyComboDef, KeyComboDef),
@@ -155,7 +155,7 @@ impl ShortcutDef {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct KeyComboDef {
     pub key: String,
     #[serde(default)]
@@ -183,13 +183,13 @@ impl KeyComboDef {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BrowserSettings {
     #[allow(dead_code)]
     pub startup_url: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TerminalSettings {
     // Legacy fields for backward compatibility
     #[serde(default)]
@@ -215,7 +215,7 @@ fn default_theme_name() -> String {
     "default".to_string()
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TerminalTheme {
     pub name: String,
     #[serde(default = "default_color_scheme")]
@@ -477,5 +477,22 @@ mod tests {
     fn resolve_startup_url_defaults_to_vibe() {
         let s = base_settings();
         assert_eq!(resolve_startup_url(&s), "vmux://vibe/");
+    }
+
+    #[test]
+    fn app_settings_roundtrips_through_json() {
+        let original = base_settings();
+        let value = serde_json::to_value(&original).expect("serialize");
+        let recovered: AppSettings = serde_json::from_value(value).expect("deserialize");
+        assert_eq!(
+            recovered.layout.window.padding,
+            original.layout.window.padding
+        );
+        assert_eq!(recovered.layout.pane.gap, original.layout.pane.gap);
+        assert_eq!(
+            recovered.shortcuts.chord_timeout_ms,
+            original.shortcuts.chord_timeout_ms
+        );
+        assert_eq!(recovered.auto_update, original.auto_update);
     }
 }

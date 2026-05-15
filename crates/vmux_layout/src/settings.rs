@@ -1,7 +1,7 @@
 use bevy::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Deserialize, Resource)]
+#[derive(Clone, Debug, Deserialize, Serialize, Resource)]
 pub struct LayoutSettings {
     pub window: WindowSettings,
     pub pane: PaneSettings,
@@ -25,7 +25,7 @@ impl Default for ConfirmCloseSettings {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SideSheetSettings {
     #[serde(default = "default_side_sheet_width")]
     pub width: f32,
@@ -43,7 +43,7 @@ fn default_side_sheet_width() -> f32 {
     280.0
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WindowSettings {
     pub padding: f32,
     #[serde(default)]
@@ -74,7 +74,7 @@ impl WindowSettings {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FocusRingColor {
     pub r: f32,
     pub g: f32,
@@ -91,7 +91,7 @@ impl Default for FocusRingColor {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FocusRingGlow {
     #[serde(default = "default_outline_glow_spread")]
     pub spread: f32,
@@ -108,7 +108,7 @@ impl Default for FocusRingGlow {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FocusRingGradient {
     #[serde(default = "default_outline_gradient_enabled")]
     pub enabled: bool,
@@ -131,7 +131,7 @@ impl Default for FocusRingGradient {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FocusRingSettings {
     #[serde(default = "default_focus_ring_width")]
     pub width: f32,
@@ -190,7 +190,7 @@ fn default_outline_gradient_accent() -> FocusRingColor {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PaneSettings {
     pub gap: f32,
     pub radius: f32,
