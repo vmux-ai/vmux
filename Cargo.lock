@@ -9259,6 +9259,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_settings"
+version = "0.0.8"
+dependencies = [
+ "dioxus",
+ "rkyv",
+ "serde",
+ "tempfile",
+ "vmux_ui",
+ "vmux_webview_app",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "vmux_space"
 version = "0.0.9"
 dependencies = [
