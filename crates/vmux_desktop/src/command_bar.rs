@@ -122,17 +122,17 @@ pub struct CommandBarEntry {
     pub shortcut: &'static str,
 }
 
-pub const GUI_AGENT_ENTRIES: [(&str, &str); 3] = [
-    ("vibe_new_gui", "New Vibe chat (GUI)"),
-    ("claude_new_gui", "New Claude chat (GUI)"),
-    ("codex_new_gui", "New Codex chat (GUI)"),
+pub const APP_AGENT_ENTRIES: [(&str, &str); 3] = [
+    ("vibe_new_app", "New Vibe chat (App)"),
+    ("claude_new_app", "New Claude chat (App)"),
+    ("codex_new_app", "New Codex chat (App)"),
 ];
 
-pub fn gui_agent_kind(id: &str) -> Option<vmux_agent::AgentKind> {
+pub fn app_agent_kind(id: &str) -> Option<vmux_agent::AgentKind> {
     match id {
-        "vibe_new_gui" => Some(vmux_agent::AgentKind::Vibe),
-        "claude_new_gui" => Some(vmux_agent::AgentKind::Claude),
-        "codex_new_gui" => Some(vmux_agent::AgentKind::Codex),
+        "vibe_new_app" => Some(vmux_agent::AgentKind::Vibe),
+        "claude_new_app" => Some(vmux_agent::AgentKind::Claude),
+        "codex_new_app" => Some(vmux_agent::AgentKind::Codex),
         _ => None,
     }
 }
@@ -147,7 +147,7 @@ pub fn command_list(agent_entries: Vec<AgentCommandEntry>) -> Vec<CommandBarEntr
         name: entry.name,
         shortcut: entry.shortcut,
     }));
-    entries.extend(GUI_AGENT_ENTRIES.iter().map(|(id, name)| CommandBarEntry {
+    entries.extend(APP_AGENT_ENTRIES.iter().map(|(id, name)| CommandBarEntry {
         id,
         name,
         shortcut: "",
@@ -957,11 +957,11 @@ fn on_command_bar_action(
                                 .id();
                             commands.entity(term_e).insert(CefKeyboardTarget);
                         }
-                    } else if let Some((kind, sid_opt)) = crate::agent::parse_gui_agent_url(&url) {
+                    } else if let Some((kind, sid_opt)) = crate::agent::parse_app_agent_url(&url) {
                         let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                         let final_url =
-                            format!("{}{}", kind.url_prefix(vmux_agent::AgentVariant::Gui), sid);
-                        crate::agent::attach_gui_agent_to_stack(
+                            format!("{}{}", kind.url_prefix(vmux_agent::AgentVariant::App), sid);
+                        crate::agent::attach_app_agent_to_stack(
                             stack_e,
                             kind,
                             &sid,
@@ -1090,7 +1090,7 @@ fn on_command_bar_action(
                         writer_params
                             .p0()
                             .write(AppCommand::Terminal(TerminalCommand::New));
-                    } else if let Some((kind, sid_opt)) = crate::agent::parse_gui_agent_url(&url) {
+                    } else if let Some((kind, sid_opt)) = crate::agent::parse_app_agent_url(&url) {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
                             &all_children,
@@ -1103,10 +1103,10 @@ fn on_command_bar_action(
                             let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                             let final_url = format!(
                                 "{}{}",
-                                kind.url_prefix(vmux_agent::AgentVariant::Gui),
+                                kind.url_prefix(vmux_agent::AgentVariant::App),
                                 sid
                             );
-                            crate::agent::spawn_gui_agent_tab(
+                            crate::agent::spawn_app_agent_tab(
                                 kind,
                                 pane_e,
                                 &sid,
@@ -1388,11 +1388,11 @@ fn on_command_bar_action(
             } // end reattach else
         }
         "command" => {
-            if let Some(kind) = gui_agent_kind(&evt.value) {
+            if let Some(kind) = app_agent_kind(&evt.value) {
                 let sid = uuid::Uuid::new_v4().to_string();
-                let url = format!("{}{}", kind.url_prefix(vmux_agent::AgentVariant::Gui), sid);
+                let url = format!("{}{}", kind.url_prefix(vmux_agent::AgentVariant::App), sid);
                 if let Some(stack_e) = empty_stack {
-                    crate::agent::attach_gui_agent_to_stack(
+                    crate::agent::attach_app_agent_to_stack(
                         stack_e,
                         kind,
                         &sid,
@@ -1418,7 +1418,7 @@ fn on_command_bar_action(
                         &stack_ts,
                     );
                     if let Some(pane_e) = active_pane_opt {
-                        crate::agent::spawn_gui_agent_tab(
+                        crate::agent::spawn_app_agent_tab(
                             kind,
                             pane_e,
                             &sid,

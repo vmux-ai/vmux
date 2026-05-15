@@ -45,7 +45,7 @@ impl AgentKind {
 
     pub fn url_prefix(self, variant: AgentVariant) -> String {
         match variant {
-            AgentVariant::Gui => format!("vmux://agent/{}/", self.as_url_segment()),
+            AgentVariant::App => format!("vmux://agent/{}/", self.as_url_segment()),
             AgentVariant::Cli => format!("vmux://agent/{}/cli/", self.as_url_segment()),
         }
     }
@@ -70,7 +70,7 @@ impl AgentUrl {
         let after_kind = segs.next()?;
         let (variant, sid) = match AgentVariant::from_url_segment(Some(after_kind)) {
             Some(AgentVariant::Cli) => (AgentVariant::Cli, segs.next()?.to_string()),
-            _ => (AgentVariant::Gui, after_kind.to_string()),
+            _ => (AgentVariant::App, after_kind.to_string()),
         };
         if segs.next().is_some() {
             return None;
@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn url_prefix_returns_nested_form() {
         assert_eq!(
-            AgentKind::Vibe.url_prefix(AgentVariant::Gui),
+            AgentKind::Vibe.url_prefix(AgentVariant::App),
             "vmux://agent/vibe/"
         );
         assert_eq!(
@@ -118,10 +118,10 @@ mod tests {
     }
 
     #[test]
-    fn nested_gui_url_parses() {
+    fn nested_app_url_parses() {
         let parsed = AgentUrl::parse("vmux://agent/vibe/abc-123").unwrap();
         assert_eq!(parsed.kind, AgentKind::Vibe);
-        assert_eq!(parsed.variant, AgentVariant::Gui);
+        assert_eq!(parsed.variant, AgentVariant::App);
         assert_eq!(parsed.sid, "abc-123");
     }
 
@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn trailing_garbage_after_gui_sid_rejected() {
+    fn trailing_garbage_after_app_sid_rejected() {
         assert_eq!(AgentUrl::parse("vmux://agent/vibe/abc/extra"), None);
     }
 

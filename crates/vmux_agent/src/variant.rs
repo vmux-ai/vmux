@@ -10,21 +10,21 @@
     bevy::prelude::Reflect,
 )]
 pub enum AgentVariant {
-    Gui,
+    App,
     Cli,
 }
 
 impl AgentVariant {
     pub fn as_url_segment(self) -> Option<&'static str> {
         match self {
-            AgentVariant::Gui => None,
+            AgentVariant::App => None,
             AgentVariant::Cli => Some("cli"),
         }
     }
 
     pub fn from_url_segment(segment: Option<&str>) -> Option<Self> {
         match segment {
-            None | Some("") => Some(AgentVariant::Gui),
+            None | Some("") => Some(AgentVariant::App),
             Some("cli") => Some(AgentVariant::Cli),
             _ => None,
         }
@@ -37,20 +37,20 @@ mod tests {
 
     #[test]
     fn url_segment_round_trips() {
-        for v in [AgentVariant::Gui, AgentVariant::Cli] {
+        for v in [AgentVariant::App, AgentVariant::Cli] {
             assert_eq!(AgentVariant::from_url_segment(v.as_url_segment()), Some(v));
         }
     }
 
     #[test]
-    fn empty_segment_resolves_to_gui() {
+    fn empty_segment_resolves_to_app() {
         assert_eq!(
             AgentVariant::from_url_segment(Some("")),
-            Some(AgentVariant::Gui)
+            Some(AgentVariant::App)
         );
         assert_eq!(
             AgentVariant::from_url_segment(None),
-            Some(AgentVariant::Gui)
+            Some(AgentVariant::App)
         );
     }
 

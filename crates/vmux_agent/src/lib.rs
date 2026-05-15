@@ -1,3 +1,5 @@
+pub mod app;
+pub mod app_plugin;
 pub mod claude;
 pub mod cli_trait;
 pub mod codex;
@@ -5,8 +7,6 @@ pub mod components;
 pub mod echo;
 pub mod events;
 pub mod exec;
-pub mod gui;
-pub mod gui_plugin;
 pub mod kind;
 pub mod mcp;
 pub mod message;
@@ -24,15 +24,15 @@ pub mod systems {
 pub mod variant;
 pub mod vibe;
 
+pub use app::AppAgentStrategy;
+pub use app_plugin::AppAgentPlugin;
 pub use cli_trait::CliAgentStrategy;
 pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};
-pub use echo::{EchoGuiStrategy, synthetic_echo_stream};
+pub use echo::{EchoAppStrategy, synthetic_echo_stream};
 pub use events::{
     AgentApprovalReply, AgentApprovalRequest, AgentDelta, AgentInput, AgentToolStatus,
     ApprovalDecision, ToolStatus,
 };
-pub use gui::GuiAgentStrategy;
-pub use gui_plugin::GuiAgentPlugin;
 pub use kind::AgentKind;
 pub use kind::AgentUrl;
 pub use mcp::McpServerConfig;

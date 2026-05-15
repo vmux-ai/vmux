@@ -2,7 +2,7 @@ use crate::message::Message;
 use crate::strategy::AgentStrategy;
 use crate::stream::{StreamEvent, ToolDef};
 
-pub trait GuiAgentStrategy: AgentStrategy {
+pub trait AppAgentStrategy: AgentStrategy {
     fn models(&self) -> &'static [&'static str];
     fn default_model(&self) -> &'static str;
     fn endpoint(&self) -> &'static str;

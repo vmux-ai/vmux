@@ -410,7 +410,7 @@ pub(crate) fn spawn_browser_tab(
     tab
 }
 
-pub(crate) fn spawn_gui_agent_tab(
+pub(crate) fn spawn_app_agent_tab(
     kind: AgentKind,
     pane: Entity,
     sid: &str,
@@ -426,11 +426,11 @@ pub(crate) fn spawn_gui_agent_tab(
             ChildOf(pane),
         ))
         .id();
-    attach_gui_agent_to_stack(tab, kind, sid, url, commands, meshes, webview_mt);
+    attach_app_agent_to_stack(tab, kind, sid, url, commands, meshes, webview_mt);
     tab
 }
 
-pub(crate) fn attach_gui_agent_to_stack(
+pub(crate) fn attach_app_agent_to_stack(
     stack: Entity,
     kind: AgentKind,
     sid: &str,
@@ -441,13 +441,13 @@ pub(crate) fn attach_gui_agent_to_stack(
 ) {
     commands.entity(stack).insert(PageMetadata {
         url: url.to_string(),
-        title: format!("GUI Agent ({:?})", kind),
+        title: format!("App Agent ({:?})", kind),
         ..default()
     });
     commands.entity(stack).insert((
         vmux_agent::components::AgentSession {
             kind,
-            variant: AgentVariant::Gui,
+            variant: AgentVariant::App,
             sid: sid.to_string(),
             provider: kind.as_url_segment().to_string(),
             model: "echo-stub".to_string(),
@@ -456,22 +456,22 @@ pub(crate) fn attach_gui_agent_to_stack(
         vmux_agent::AgentApprovalPolicy::default(),
         vmux_agent::AgentRunState::default(),
     ));
-    let placeholder = gui_agent_placeholder_url(kind, sid);
+    let placeholder = app_agent_placeholder_url(kind, sid);
     commands.spawn((
         crate::browser::Browser::new(meshes, webview_mt, &placeholder),
         ChildOf(stack),
     ));
 }
 
-pub(crate) fn gui_agent_placeholder_url(kind: AgentKind, sid: &str) -> String {
+pub(crate) fn app_agent_placeholder_url(kind: AgentKind, sid: &str) -> String {
     format!(
-        "data:text/html;charset=utf-8,<!doctype html><html><head><meta charset='utf-8'><title>GUI Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>GUI Agent ({kind:?})</h1><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the GUI agent design.</p></div></body></html>"
+        "data:text/html;charset=utf-8,<!doctype html><html><head><meta charset='utf-8'><title>App Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>App Agent ({kind:?})</h1><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the App agent design.</p></div></body></html>"
     )
 }
 
-pub(crate) fn parse_gui_agent_url(url: &str) -> Option<(AgentKind, Option<String>)> {
+pub(crate) fn parse_app_agent_url(url: &str) -> Option<(AgentKind, Option<String>)> {
     for kind in AgentKind::all() {
-        let prefix = kind.url_prefix(AgentVariant::Gui);
+        let prefix = kind.url_prefix(AgentVariant::App);
         let bare = prefix.trim_end_matches('/');
         if url == bare {
             return Some((kind, None));
@@ -492,40 +492,40 @@ pub(crate) fn parse_gui_agent_url(url: &str) -> Option<(AgentKind, Option<String
 }
 
 #[cfg(test)]
-mod gui_agent_url_tests {
+mod app_agent_url_tests {
     use super::*;
 
     #[test]
-    fn parse_gui_agent_url_recognises_bare_kind() {
-        let (kind, sid) = parse_gui_agent_url("vmux://agent/vibe").unwrap();
+    fn parse_app_agent_url_recognises_bare_kind() {
+        let (kind, sid) = parse_app_agent_url("vmux://agent/vibe").unwrap();
         assert_eq!(kind, AgentKind::Vibe);
         assert!(sid.is_none());
     }
 
     #[test]
-    fn parse_gui_agent_url_recognises_kind_with_slash() {
-        let (kind, sid) = parse_gui_agent_url("vmux://agent/claude/").unwrap();
+    fn parse_app_agent_url_recognises_kind_with_slash() {
+        let (kind, sid) = parse_app_agent_url("vmux://agent/claude/").unwrap();
         assert_eq!(kind, AgentKind::Claude);
         assert!(sid.is_none());
     }
 
     #[test]
-    fn parse_gui_agent_url_recognises_kind_with_sid() {
-        let (kind, sid) = parse_gui_agent_url("vmux://agent/codex/abc-123").unwrap();
+    fn parse_app_agent_url_recognises_kind_with_sid() {
+        let (kind, sid) = parse_app_agent_url("vmux://agent/codex/abc-123").unwrap();
         assert_eq!(kind, AgentKind::Codex);
         assert_eq!(sid.as_deref(), Some("abc-123"));
     }
 
     #[test]
-    fn parse_gui_agent_url_rejects_cli_form() {
-        assert!(parse_gui_agent_url("vmux://agent/vibe/cli/abc").is_none());
-        assert!(parse_gui_agent_url("vmux://agent/vibe/cli/").is_none());
+    fn parse_app_agent_url_rejects_cli_form() {
+        assert!(parse_app_agent_url("vmux://agent/vibe/cli/abc").is_none());
+        assert!(parse_app_agent_url("vmux://agent/vibe/cli/").is_none());
     }
 
     #[test]
-    fn parse_gui_agent_url_rejects_unknown_kind() {
-        assert!(parse_gui_agent_url("vmux://agent/nope/abc").is_none());
-        assert!(parse_gui_agent_url("https://google.com").is_none());
+    fn parse_app_agent_url_rejects_unknown_kind() {
+        assert!(parse_app_agent_url("vmux://agent/nope/abc").is_none());
+        assert!(parse_app_agent_url("https://google.com").is_none());
     }
 }
 
@@ -653,16 +653,16 @@ fn spawn_vmux_tab(
                 if segs.get(1) == Some(&"cli") {
                     AgentVariant::Cli
                 } else {
-                    AgentVariant::Gui
+                    AgentVariant::App
                 }
             });
 
-            if variant == AgentVariant::Gui {
+            if variant == AgentVariant::App {
                 let sid = agent_url
                     .as_ref()
                     .map(|a| a.sid.clone())
                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                spawn_gui_agent_tab(kind, pane, &sid, url, commands, meshes, webview_mt);
+                spawn_app_agent_tab(kind, pane, &sid, url, commands, meshes, webview_mt);
                 return Ok(());
             }
 

@@ -1,21 +1,21 @@
-use crate::gui::GuiAgentStrategy;
+use crate::app::AppAgentStrategy;
 use crate::message::Message;
 use crate::strategy::AgentStrategy;
 use crate::stream::{StopReason, StreamEvent, ToolDef};
 use crate::{AgentKind, AgentVariant};
 
-pub struct EchoGuiStrategy;
+pub struct EchoAppStrategy;
 
-impl AgentStrategy for EchoGuiStrategy {
+impl AgentStrategy for EchoAppStrategy {
     fn kind(&self) -> AgentKind {
         AgentKind::Vibe
     }
     fn variant(&self) -> AgentVariant {
-        AgentVariant::Gui
+        AgentVariant::App
     }
 }
 
-impl GuiAgentStrategy for EchoGuiStrategy {
+impl AppAgentStrategy for EchoAppStrategy {
     fn models(&self) -> &'static [&'static str] {
         &["echo-stub"]
     }

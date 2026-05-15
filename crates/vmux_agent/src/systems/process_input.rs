@@ -66,7 +66,7 @@ mod tests {
             .spawn((
                 AgentSession {
                     kind: AgentKind::Vibe,
-                    variant: AgentVariant::Gui,
+                    variant: AgentVariant::App,
                     sid: "test".into(),
                     provider: "vibe".into(),
                     model: "echo-stub".into(),

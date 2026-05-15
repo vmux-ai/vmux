@@ -2,13 +2,13 @@ use bevy::prelude::*;
 use vmux_agent::message::Message;
 use vmux_agent::{
     AgentApprovalPolicy, AgentKind, AgentMessages, AgentRunState, AgentSession, AgentVariant,
-    AssistantBlock, GuiAgentPlugin, PendingUserInput,
+    AppAgentPlugin, AssistantBlock, PendingUserInput,
 };
 
 fn make_app() -> App {
     let mut app = App::new();
     app.add_plugins(bevy::app::TaskPoolPlugin::default());
-    app.add_plugins(GuiAgentPlugin);
+    app.add_plugins(AppAgentPlugin);
     app
 }
 
@@ -20,7 +20,7 @@ fn echo_session_streams_to_assistant_message() {
         .spawn((
             AgentSession {
                 kind: AgentKind::Vibe,
-                variant: AgentVariant::Gui,
+                variant: AgentVariant::App,
                 sid: "smoke".into(),
                 provider: "vibe".into(),
                 model: "echo-stub".into(),
