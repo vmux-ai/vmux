@@ -277,10 +277,7 @@ pub struct AgentSessionWatchers {
 pub fn start_agent_session_watchers(mut commands: Commands, strategies: Res<AgentStrategies>) {
     let mut receivers = Vec::new();
     let mut watchers = Vec::new();
-    for (_, boxed) in strategies.iter() {
-        let Some(strategy) = boxed.as_cli() else {
-            continue;
-        };
+    for strategy in strategies.cli_strategies() {
         let root = strategy.sessions_root();
         if std::fs::create_dir_all(&root).is_err() {
             continue;

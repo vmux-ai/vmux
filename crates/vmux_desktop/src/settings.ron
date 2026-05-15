@@ -74,4 +74,12 @@
         ],
     )),
     auto_update: true,
+    agent: (
+        app_providers: [
+            (provider: "stub", kind: "vibe", models: ["echo"]),
+            (provider: "anthropic", kind: "claude", models: ["claude-opus-4.7", "claude-sonnet-4.6"]),
+            (provider: "openai", kind: "codex", models: ["gpt-5.5"]),
+            (provider: "mistral", kind: "vibe", models: ["devstral-medium-3.5"]),
+        ],
+    ),
 )

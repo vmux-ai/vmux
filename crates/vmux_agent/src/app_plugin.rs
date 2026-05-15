@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 
 use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession};
-use crate::echo::EchoAppStrategy;
 use crate::strategy::AgentStrategies;
 use crate::systems::{approval, dispatch_tool, drain_stream, process_input};
 
@@ -25,8 +24,6 @@ impl Plugin for AppAgentPlugin {
         if app.world().get_resource::<AgentStrategies>().is_none() {
             app.insert_resource(AgentStrategies::default());
         }
-        let mut strategies = app.world_mut().resource_mut::<AgentStrategies>();
-        strategies.register_app(Box::new(EchoAppStrategy));
     }
 }
 

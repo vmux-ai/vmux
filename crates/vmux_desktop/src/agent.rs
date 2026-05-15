@@ -1166,6 +1166,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
+            agent: crate::settings::AgentSettings::default(),
         }
     }
 

@@ -4,11 +4,25 @@ use crate::strategy::AgentStrategy;
 use crate::stream::{StopReason, StreamEvent, ToolDef};
 use crate::{AgentKind, AgentVariant};
 
-pub struct EchoAppStrategy;
+pub struct EchoAppStrategy {
+    provider: String,
+    model: String,
+    kind: AgentKind,
+}
+
+impl EchoAppStrategy {
+    pub fn new(provider: impl Into<String>, model: impl Into<String>, kind: AgentKind) -> Self {
+        Self {
+            provider: provider.into(),
+            model: model.into(),
+            kind,
+        }
+    }
+}
 
 impl AgentStrategy for EchoAppStrategy {
     fn kind(&self) -> AgentKind {
-        AgentKind::Vibe
+        self.kind
     }
     fn variant(&self) -> AgentVariant {
         AgentVariant::App
@@ -16,19 +30,13 @@ impl AgentStrategy for EchoAppStrategy {
 }
 
 impl AppAgentStrategy for EchoAppStrategy {
-    fn provider(&self) -> &'static str {
-        "stub"
+    fn provider(&self) -> &str {
+        &self.provider
     }
-    fn model(&self) -> &'static str {
-        "echo"
+    fn model(&self) -> &str {
+        &self.model
     }
-    fn models(&self) -> &'static [&'static str] {
-        &["echo"]
-    }
-    fn default_model(&self) -> &'static str {
-        "echo"
-    }
-    fn endpoint(&self) -> &'static str {
+    fn endpoint(&self) -> &str {
         "stub://echo"
     }
 

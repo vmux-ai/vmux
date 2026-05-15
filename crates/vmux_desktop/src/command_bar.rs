@@ -117,35 +117,54 @@ impl Plugin for CommandBarInputPlugin {
 }
 
 pub struct CommandBarEntry {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub shortcut: &'static str,
+    pub id: String,
+    pub name: String,
+    pub shortcut: String,
 }
 
-pub const APP_AGENT_ENTRIES: [(&str, &str); 1] =
-    [("app_stub_echo_new", "New stub/echo chat (App)")];
+pub struct AppAgentEntry {
+    pub id: String,
+    pub name: String,
+    #[allow(dead_code)]
+    pub provider: String,
+    #[allow(dead_code)]
+    pub model: String,
+}
 
-pub fn app_agent_provider_model(id: &str) -> Option<(&'static str, &'static str)> {
-    match id {
-        "app_stub_echo_new" => Some(("stub", "echo")),
-        _ => None,
+pub fn app_agent_id(provider: &str, model: &str) -> String {
+    format!("app_{provider}_{model}_new")
+}
+
+pub fn parse_app_agent_id(id: &str) -> Option<(String, String)> {
+    let body = id.strip_prefix("app_")?.strip_suffix("_new")?;
+    let parts: Vec<&str> = body.splitn(2, '_').collect();
+    if parts.len() != 2 {
+        return None;
     }
+    Some((parts[0].to_string(), parts[1].to_string()))
 }
 
-pub fn command_list(agent_entries: Vec<AgentCommandEntry>) -> Vec<CommandBarEntry> {
+pub fn command_list(
+    cli_agent_entries: Vec<AgentCommandEntry>,
+    app_agent_entries: Vec<AppAgentEntry>,
+) -> Vec<CommandBarEntry> {
     let mut entries: Vec<CommandBarEntry> = AppCommand::command_bar_entries()
         .into_iter()
-        .map(|(id, name, shortcut)| CommandBarEntry { id, name, shortcut })
+        .map(|(id, name, shortcut)| CommandBarEntry {
+            id: id.to_string(),
+            name: name.to_string(),
+            shortcut: shortcut.to_string(),
+        })
         .collect();
-    entries.extend(agent_entries.into_iter().map(|entry| CommandBarEntry {
+    entries.extend(cli_agent_entries.into_iter().map(|entry| CommandBarEntry {
+        id: entry.id.to_string(),
+        name: entry.name.to_string(),
+        shortcut: entry.shortcut.to_string(),
+    }));
+    entries.extend(app_agent_entries.into_iter().map(|entry| CommandBarEntry {
         id: entry.id,
         name: entry.name,
-        shortcut: entry.shortcut,
-    }));
-    entries.extend(APP_AGENT_ENTRIES.iter().map(|(id, name)| CommandBarEntry {
-        id,
-        name,
-        shortcut: "",
+        shortcut: String::new(),
     }));
     entries
 }
@@ -388,6 +407,7 @@ fn handle_open_command_bar(
         Res<ActiveSpace>,
         Option<Res<AgentProviders>>,
         ResMut<NewStackContext>,
+        Option<Res<vmux_agent::strategy::AgentStrategies>>,
     )>,
     mut commands: Commands,
 ) {
@@ -397,6 +417,20 @@ fn handle_open_command_bar(
     let agent_entries = space_params
         .p1()
         .map(|providers| providers.command_entries())
+        .unwrap_or_default();
+    let app_agent_entries = space_params
+        .p3()
+        .map(|strategies| {
+            strategies
+                .app_strategies()
+                .map(|s| AppAgentEntry {
+                    id: app_agent_id(s.provider(), s.model()),
+                    name: format!("New {}/{} chat (App)", s.provider(), s.model()),
+                    provider: s.provider().to_string(),
+                    model: s.model().to_string(),
+                })
+                .collect()
+        })
         .unwrap_or_default();
     let mut new_stack_ctx = space_params.p2();
 
@@ -625,12 +659,12 @@ fn handle_open_command_bar(
     }
 
     // Build command list
-    let bar_commands: Vec<CommandBarCommandEntry> = command_list(agent_entries)
+    let bar_commands: Vec<CommandBarCommandEntry> = command_list(agent_entries, app_agent_entries)
         .into_iter()
         .map(|e| CommandBarCommandEntry {
-            id: e.id.into(),
-            name: e.name.into(),
-            shortcut: e.shortcut.into(),
+            id: e.id,
+            name: e.name,
+            shortcut: e.shortcut,
         })
         .collect();
 
@@ -1396,7 +1430,7 @@ fn on_command_bar_action(
             } // end reattach else
         }
         "command" => {
-            if let Some((provider, model)) = app_agent_provider_model(&evt.value) {
+            if let Some((provider, model)) = parse_app_agent_id(&evt.value) {
                 let sid = uuid::Uuid::new_v4().to_string();
                 let strategies_ref = resource_params.p4();
                 let strategies = strategies_ref.as_deref();
@@ -1404,8 +1438,8 @@ fn on_command_bar_action(
                     if let Some(stack_e) = empty_stack {
                         let _ = crate::agent::attach_app_agent_to_stack(
                             stack_e,
-                            provider,
-                            model,
+                            &provider,
+                            &model,
                             &sid,
                             &mut commands,
                             &mut meshes,
@@ -1430,8 +1464,8 @@ fn on_command_bar_action(
                         );
                         if let Some(pane_e) = active_pane_opt {
                             if crate::agent::spawn_app_agent_tab(
-                                provider,
-                                model,
+                                &provider,
+                                &model,
                                 pane_e,
                                 &sid,
                                 &mut commands,
@@ -1899,6 +1933,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
+            agent: crate::settings::AgentSettings::default(),
         }
     }
 

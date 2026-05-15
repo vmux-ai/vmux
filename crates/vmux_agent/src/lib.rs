@@ -40,6 +40,5 @@ pub use message::{AssistantBlock, Message};
 pub use plugin::AgentSessionPlugin;
 pub use run_state::{AgentRunState, ToolDispatchOutput};
 pub use session::AgentSessionExited;
-pub use strategy::BoxedStrategy;
 pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use variant::AgentVariant;

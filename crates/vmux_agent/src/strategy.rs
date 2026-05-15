@@ -2,78 +2,37 @@ use std::collections::HashMap;
 
 use bevy::prelude::Resource;
 
+use crate::AgentKind;
+use crate::AgentVariant;
 use crate::app::AppAgentStrategy;
 use crate::cli_trait::CliAgentStrategy;
-use crate::{AgentKind, AgentVariant};
 
 pub trait AgentStrategy: Send + Sync + 'static {
     fn kind(&self) -> AgentKind;
     fn variant(&self) -> AgentVariant;
 }
 
-pub enum BoxedStrategy {
-    Cli(Box<dyn CliAgentStrategy>),
-    App(Box<dyn AppAgentStrategy>),
-}
-
-impl BoxedStrategy {
-    pub fn kind(&self) -> AgentKind {
-        match self {
-            BoxedStrategy::Cli(s) => s.kind(),
-            BoxedStrategy::App(s) => s.kind(),
-        }
-    }
-
-    pub fn variant(&self) -> AgentVariant {
-        match self {
-            BoxedStrategy::Cli(s) => s.variant(),
-            BoxedStrategy::App(s) => s.variant(),
-        }
-    }
-
-    pub fn as_cli(&self) -> Option<&dyn CliAgentStrategy> {
-        match self {
-            BoxedStrategy::Cli(s) => Some(s.as_ref()),
-            BoxedStrategy::App(_) => None,
-        }
-    }
-
-    pub fn as_app(&self) -> Option<&dyn AppAgentStrategy> {
-        match self {
-            BoxedStrategy::App(s) => Some(s.as_ref()),
-            BoxedStrategy::Cli(_) => None,
-        }
-    }
-}
-
 #[derive(Resource, Default)]
 pub struct AgentStrategies {
-    inner: HashMap<(AgentKind, AgentVariant), BoxedStrategy>,
+    cli: HashMap<AgentKind, Box<dyn CliAgentStrategy>>,
+    app: HashMap<(String, String), Box<dyn AppAgentStrategy>>,
 }
 
 impl AgentStrategies {
     pub fn register_cli(&mut self, strategy: Box<dyn CliAgentStrategy>) {
-        let key = (strategy.kind(), strategy.variant());
-        self.inner.insert(key, BoxedStrategy::Cli(strategy));
-    }
-
-    pub fn get(&self, kind: AgentKind, variant: AgentVariant) -> Option<&BoxedStrategy> {
-        self.inner.get(&(kind, variant))
+        self.cli.insert(strategy.kind(), strategy);
     }
 
     pub fn get_cli(&self, kind: AgentKind) -> Option<&dyn CliAgentStrategy> {
-        self.get(kind, AgentVariant::Cli)
-            .and_then(BoxedStrategy::as_cli)
+        self.cli.get(&kind).map(|b| b.as_ref())
     }
 
     pub fn register_app(&mut self, strategy: Box<dyn AppAgentStrategy>) {
-        let key = (strategy.kind(), strategy.variant());
-        self.inner.insert(key, BoxedStrategy::App(strategy));
-    }
-
-    pub fn get_app(&self, kind: AgentKind) -> Option<&dyn AppAgentStrategy> {
-        self.get(kind, AgentVariant::App)
-            .and_then(BoxedStrategy::as_app)
+        let key = (
+            strategy.provider().to_string(),
+            strategy.model().to_string(),
+        );
+        self.app.insert(key, strategy);
     }
 
     pub fn get_app_by_provider_model(
@@ -81,22 +40,17 @@ impl AgentStrategies {
         provider: &str,
         model: &str,
     ) -> Option<&dyn AppAgentStrategy> {
-        self.iter().find_map(|(_, boxed)| {
-            let app = boxed.as_app()?;
-            if app.provider() == provider && app.model() == model {
-                Some(app)
-            } else {
-                None
-            }
-        })
+        self.app
+            .get(&(provider.to_string(), model.to_string()))
+            .map(|b| b.as_ref())
     }
 
     pub fn app_strategies(&self) -> impl Iterator<Item = &dyn AppAgentStrategy> {
-        self.iter().filter_map(|(_, boxed)| boxed.as_app())
+        self.app.values().map(|b| b.as_ref())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&(AgentKind, AgentVariant), &BoxedStrategy)> {
-        self.inner.iter()
+    pub fn cli_strategies(&self) -> impl Iterator<Item = &dyn CliAgentStrategy> {
+        self.cli.values().map(|b| b.as_ref())
     }
 }
 
@@ -137,25 +91,19 @@ mod tests {
     }
 
     #[test]
-    fn register_and_lookup_by_kind() {
+    fn register_cli_and_lookup_by_kind() {
         let mut s = AgentStrategies::default();
         s.register_cli(Box::new(StubStrategy));
-        assert!(s.get(AgentKind::Claude, AgentVariant::Cli).is_some());
-        assert!(s.get(AgentKind::Vibe, AgentVariant::Cli).is_none());
-    }
-
-    #[test]
-    fn registers_cli_for_kind_with_variant() {
-        let mut s = AgentStrategies::default();
-        s.register_cli(Box::new(StubStrategy));
-        assert!(s.get(AgentKind::Claude, AgentVariant::Cli).is_some());
-        assert!(s.get(AgentKind::Claude, AgentVariant::App).is_none());
         assert!(s.get_cli(AgentKind::Claude).is_some());
+        assert!(s.get_cli(AgentKind::Vibe).is_none());
     }
 
     #[test]
-    fn registers_cli_and_app_independently_for_same_kind() {
-        struct StubApp;
+    fn register_app_lookup_by_provider_model() {
+        struct StubApp {
+            provider: String,
+            model: String,
+        }
         impl AgentStrategy for StubApp {
             fn kind(&self) -> AgentKind {
                 AgentKind::Vibe
@@ -165,19 +113,13 @@ mod tests {
             }
         }
         impl crate::app::AppAgentStrategy for StubApp {
-            fn provider(&self) -> &'static str {
-                "stub"
+            fn provider(&self) -> &str {
+                &self.provider
             }
-            fn model(&self) -> &'static str {
-                "stub"
+            fn model(&self) -> &str {
+                &self.model
             }
-            fn models(&self) -> &'static [&'static str] {
-                &[]
-            }
-            fn default_model(&self) -> &'static str {
-                ""
-            }
-            fn endpoint(&self) -> &'static str {
+            fn endpoint(&self) -> &str {
                 "stub://"
             }
             fn build_request(
@@ -197,45 +139,66 @@ mod tests {
             }
         }
 
-        struct StubCli;
-        impl AgentStrategy for StubCli {
+        let mut s = AgentStrategies::default();
+        s.register_app(Box::new(StubApp {
+            provider: "openai".into(),
+            model: "gpt-5.5".into(),
+        }));
+        s.register_app(Box::new(StubApp {
+            provider: "anthropic".into(),
+            model: "claude-opus-4.7".into(),
+        }));
+
+        assert!(s.get_app_by_provider_model("openai", "gpt-5.5").is_some());
+        assert!(
+            s.get_app_by_provider_model("anthropic", "claude-opus-4.7")
+                .is_some()
+        );
+        assert!(s.get_app_by_provider_model("nope", "nope").is_none());
+        assert_eq!(s.app_strategies().count(), 2);
+    }
+
+    #[test]
+    fn cli_and_app_coexist() {
+        struct App;
+        impl AgentStrategy for App {
             fn kind(&self) -> AgentKind {
                 AgentKind::Vibe
             }
             fn variant(&self) -> AgentVariant {
-                AgentVariant::Cli
+                AgentVariant::App
             }
         }
-        impl CliAgentStrategy for StubCli {
-            fn sessions_root(&self) -> PathBuf {
-                PathBuf::from("/tmp/none")
+        impl crate::app::AppAgentStrategy for App {
+            fn provider(&self) -> &str {
+                "p"
             }
-            fn build_args(&self, _: &McpServerConfig, _: Option<&str>) -> Vec<String> {
-                vec![]
+            fn model(&self) -> &str {
+                "m"
             }
-            fn build_env(&self, _: &McpServerConfig) -> Vec<(String, String)> {
-                vec![]
+            fn endpoint(&self) -> &str {
+                "stub://"
             }
-            fn discover_session(
+            fn build_request(
                 &self,
-                _: &Path,
-                _: SystemTime,
-                _: &HashSet<String>,
-            ) -> Option<String> {
+                _: &str,
+                _: &[crate::message::Message],
+                _: &[crate::stream::ToolDef],
+                _: &str,
+            ) -> reqwest::Request {
+                reqwest::Client::new()
+                    .get("http://localhost/")
+                    .build()
+                    .unwrap()
+            }
+            fn parse_sse_event(&self, _: &str) -> Option<crate::stream::StreamEvent> {
                 None
             }
-            fn detect_end_time(&self, _: &str) -> bool {
-                false
-            }
         }
-
         let mut s = AgentStrategies::default();
-        s.register_cli(Box::new(StubCli));
-        s.register_app(Box::new(StubApp));
-
-        assert!(s.get(AgentKind::Vibe, AgentVariant::Cli).is_some());
-        assert!(s.get(AgentKind::Vibe, AgentVariant::App).is_some());
-        assert!(s.get_cli(AgentKind::Vibe).is_some());
-        assert!(s.get_app(AgentKind::Vibe).is_some());
+        s.register_cli(Box::new(StubStrategy));
+        s.register_app(Box::new(App));
+        assert!(s.get_cli(AgentKind::Claude).is_some());
+        assert!(s.get_app_by_provider_model("p", "m").is_some());
     }
 }
