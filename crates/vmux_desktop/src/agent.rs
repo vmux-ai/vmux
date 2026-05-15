@@ -169,6 +169,7 @@ impl Plugin for AgentPlugin {
             .add_message::<AgentQueryRequest>()
             .add_message::<AgentLaunchRequested>()
             .add_message::<vmux_agent::AgentSessionExited>()
+            .add_message::<crate::settings::SettingsWriteRequest>()
             .add_systems(
                 Update,
                 (
@@ -609,6 +610,12 @@ struct SpawnAssets<'w> {
     webview_mt: ResMut<'w, Assets<WebviewExtendStandardMaterial>>,
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct SettingsParams<'w> {
+    settings: ResMut<'w, AppSettings>,
+    writes: MessageWriter<'w, crate::settings::SettingsWriteRequest>,
+}
+
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
@@ -622,7 +629,7 @@ fn handle_agent_commands(
     pid_to_entity: Option<Res<crate::terminal::pid::PidToEntity>>,
     agent_to_entity: Option<Res<vmux_agent::session::AgentSessionToEntity>>,
     strategies: Res<AgentStrategies>,
-    settings: Res<AppSettings>,
+    mut sp: SettingsParams,
     service: Option<Res<crate::terminal::ServiceClient>>,
     mut commands: Commands,
     mut assets: SpawnAssets,
@@ -650,7 +657,7 @@ fn handle_agent_commands(
                                 &mut commands,
                                 &mut assets.meshes,
                                 &mut assets.webview_mt,
-                                &settings,
+                                &sp.settings,
                             );
                             AgentCommandResult::Ok
                         }
@@ -679,7 +686,7 @@ fn handle_agent_commands(
                                 &mut commands,
                                 &mut assets.meshes,
                                 &mut assets.webview_mt,
-                                &settings,
+                                &sp.settings,
                             );
                             AgentCommandResult::Ok
                         }
@@ -717,7 +724,7 @@ fn handle_agent_commands(
                             &mut commands,
                             &mut assets.meshes,
                             &mut assets.webview_mt,
-                            &settings,
+                            &sp.settings,
                             pid_to_entity.as_deref(),
                             agent_to_entity.as_deref(),
                             &strategies,
@@ -794,6 +801,25 @@ fn handle_agent_commands(
                     }
                 }
             }
+            ServiceAgentCommand::UpdateSettings { path, value_json } => {
+                match serde_json::from_str::<serde_json::Value>(value_json) {
+                    Ok(value) => match crate::settings::apply_settings_update(
+                        sp.settings.as_mut(),
+                        path,
+                        value,
+                    ) {
+                        Ok(ron_bytes) => {
+                            sp.writes
+                                .write(crate::settings::SettingsWriteRequest { ron_bytes });
+                            AgentCommandResult::Ok
+                        }
+                        Err(message) => AgentCommandResult::Error(message),
+                    },
+                    Err(e) => AgentCommandResult::Error(format!(
+                        "update_settings: invalid JSON value: {e}"
+                    )),
+                }
+            }
             ServiceAgentCommand::SplitAndNavigate { direction, url } => {
                 let split_dir_result = match direction.as_str() {
                     "right" => Ok(vmux_layout::pane::PaneSplitDirection::Row),
@@ -814,7 +840,7 @@ fn handle_agent_commands(
                                 &mut commands,
                                 active_pane,
                                 split_dir,
-                                &settings.layout.pane,
+                                &sp.settings.layout.pane,
                                 &existing_tabs,
                             );
                             if url.starts_with("vmux://") {
@@ -824,7 +850,7 @@ fn handle_agent_commands(
                                     &mut commands,
                                     &mut assets.meshes,
                                     &mut assets.webview_mt,
-                                    &settings,
+                                    &sp.settings,
                                     pid_to_entity.as_deref(),
                                     agent_to_entity.as_deref(),
                                     &strategies,
@@ -1757,5 +1783,19 @@ mod tests {
         ] {
             assert!(providers.contains(id), "missing provider: {id}");
         }
+    }
+
+    #[test]
+    fn update_settings_via_apply_mutates_resource_and_returns_ron() {
+        let mut settings = test_settings();
+        assert!(!settings.auto_update);
+        let ron_bytes = crate::settings::apply_settings_update(
+            &mut settings,
+            "auto_update",
+            serde_json::json!(true),
+        )
+        .expect("apply ok");
+        assert!(settings.auto_update);
+        assert!(ron_bytes.contains("auto_update"));
     }
 }

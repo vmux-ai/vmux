@@ -448,7 +448,6 @@ fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
     });
 }
 
-#[allow(dead_code)]
 pub(crate) fn apply_settings_update(
     settings: &mut AppSettings,
     path: &str,
@@ -465,12 +464,10 @@ pub(crate) fn apply_settings_update(
     Ok(ron_bytes)
 }
 
-#[allow(dead_code)]
 pub(crate) fn serialize_settings_to_json(settings: &AppSettings) -> String {
     serde_json::to_string(settings).unwrap_or_else(|_| "{}".to_string())
 }
 
-#[allow(dead_code)]
 pub(crate) fn set_at_path(
     root: &mut serde_json::Value,
     path: &str,
@@ -494,14 +491,12 @@ pub(crate) fn set_at_path(
     set_leaf(cursor, last, &walked, value)
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 enum PathSegment {
     Field(String),
     Index(usize),
 }
 
-#[allow(dead_code)]
 fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, String> {
     let mut out = Vec::new();
     for raw in path.split('.') {
@@ -539,7 +534,6 @@ fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, String> {
     Ok(out)
 }
 
-#[allow(dead_code)]
 fn append_segment(walked: &mut String, segment: &PathSegment) {
     match segment {
         PathSegment::Field(name) => {
@@ -554,7 +548,6 @@ fn append_segment(walked: &mut String, segment: &PathSegment) {
     }
 }
 
-#[allow(dead_code)]
 fn descend<'a>(
     cursor: &'a mut serde_json::Value,
     segment: &PathSegment,
@@ -570,7 +563,6 @@ fn descend<'a>(
     }
 }
 
-#[allow(dead_code)]
 fn set_leaf(
     cursor: &mut serde_json::Value,
     segment: &PathSegment,
