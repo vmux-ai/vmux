@@ -77,18 +77,6 @@
     agent: (
         app_providers: [
             (provider: "stub", kind: "vibe", models: ["echo"]),
-            (provider: "anthropic", kind: "claude", models: [
-                "claude-opus-4.7",
-                "claude-opus-4.6",
-                "claude-sonnet-4.6",
-                "claude-haiku-4.5",
-            ]),
-            (provider: "mistral", kind: "vibe", models: [
-                "mistral-medium-3.5",
-                "devstral-small",
-            ]),
-            (provider: "llamacpp", kind: "vibe", models: ["devstral-local"]),
-            (provider: "openai", kind: "codex", models: ["gpt-5.5"]),
         ],
     ),
 )
