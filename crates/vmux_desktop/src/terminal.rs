@@ -220,8 +220,24 @@ impl Plugin for TerminalInputPlugin {
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
             .add_observer(on_term_mouse)
-            .add_observer(on_restart_pty);
+            .add_observer(on_restart_pty)
+            .add_observer(on_terminal_removed);
     }
+}
+
+fn on_terminal_removed(
+    trigger: On<Remove, ProcessId>,
+    service: Option<Res<ServiceClient>>,
+    pids: Query<&ProcessId>,
+) {
+    let Some(service) = service else { return };
+    let entity = trigger.event_target();
+    let Ok(process_id) = pids.get(entity) else {
+        return;
+    };
+    service.0.send(ClientMessage::KillProcess {
+        process_id: *process_id,
+    });
 }
 
 fn add_terminal_update_systems(app: &mut App) -> &mut App {
