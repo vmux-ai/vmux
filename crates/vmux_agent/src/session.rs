@@ -8,7 +8,6 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::PageMetadata;
 
 use crate::AgentKind;
-use crate::AgentVariant;
 use crate::strategy::AgentStrategies;
 
 #[derive(Message, Debug, Clone, Copy)]

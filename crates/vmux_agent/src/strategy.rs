@@ -250,6 +250,12 @@ mod tests {
             }
         }
         impl crate::app::AppAgentStrategy for StubApp {
+            fn provider(&self) -> &'static str {
+                "stub"
+            }
+            fn model(&self) -> &'static str {
+                "stub"
+            }
             fn models(&self) -> &'static [&'static str] {
                 &[]
             }
