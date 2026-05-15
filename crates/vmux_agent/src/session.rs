@@ -183,19 +183,7 @@ pub fn discover_pending_agent_sessions(
                 }
             })
             .collect();
-        let result = strategy.discover_session(&pending.cwd, pending.spawn_time, &claimed);
-        bevy::log::info!(
-            "agent discover: kind={:?} cwd={} spawn_time={} -> {:?}",
-            pending.kind,
-            pending.cwd.display(),
-            pending
-                .spawn_time
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0),
-            result
-        );
-        if let Some(id) = result {
+        if let Some(id) = strategy.discover_session(&pending.cwd, pending.spawn_time, &claimed) {
             commands
                 .entity(entity)
                 .insert(SessionId(id))
@@ -203,11 +191,6 @@ pub fn discover_pending_agent_sessions(
             continue;
         }
         if now.duration_since(pending.spawn_time).unwrap_or_default() >= PENDING_DISCOVERY_TIMEOUT {
-            bevy::log::warn!(
-                "agent discover: timeout for kind={:?} cwd={}",
-                pending.kind,
-                pending.cwd.display()
-            );
             commands.entity(entity).remove::<PendingAgentSession>();
         }
     }
@@ -297,7 +280,6 @@ pub fn start_agent_session_watchers(mut commands: Commands, strategies: Res<Agen
     for (_kind, strategy) in strategies.iter() {
         let root = strategy.sessions_root();
         if std::fs::create_dir_all(&root).is_err() {
-            bevy::log::warn!("agent watcher: failed to create dir {}", root.display());
             continue;
         }
         let (tx, rx) = mpsc::channel();
@@ -309,26 +291,13 @@ pub fn start_agent_session_watchers(mut commands: Commands, strategies: Res<Agen
                     let _ = tx.send(());
                 }
             });
-        let Ok(mut watcher) = watcher else {
-            bevy::log::warn!("agent watcher: notify init failed for {}", root.display());
-            continue;
-        };
-        if let Err(e) = watcher.watch(&root, RecursiveMode::Recursive) {
-            bevy::log::warn!("agent watcher: watch({}) failed: {e}", root.display());
+        let Ok(mut watcher) = watcher else { continue };
+        if watcher.watch(&root, RecursiveMode::Recursive).is_err() {
             continue;
         }
-        bevy::log::info!("agent watcher: watching {}", root.display());
         watchers.push(watcher);
         receivers.push(Mutex::new(rx));
     }
-    bevy::log::info!(
-        "agent watchers started: {} roots: {:?}",
-        receivers.len(),
-        strategies
-            .iter()
-            .map(|(k, s)| (k, s.sessions_root()))
-            .collect::<Vec<_>>()
-    );
     if receivers.is_empty() {
         return;
     }
@@ -343,16 +312,11 @@ pub fn mark_dirty_on_fs_change(
     mut dirty: ResMut<AgentSessionDirty>,
 ) {
     let Some(watchers) = watchers else { return };
-    let mut count = 0usize;
     for rx in &watchers.receivers {
         let Ok(rx) = rx.lock() else { continue };
         while rx.try_recv().is_ok() {
-            count += 1;
             dirty.0 = true;
         }
-    }
-    if count > 0 {
-        bevy::log::info!("agent watcher: dirty (drained {count} fs events)");
     }
 }
 
