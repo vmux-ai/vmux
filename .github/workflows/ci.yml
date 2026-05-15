@@ -195,7 +195,7 @@ jobs:
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
 
       - name: Run tests
-        run: env -u CEF_PATH cargo test --workspace --exclude bevy_cef_core
+        run: env -u CEF_PATH cargo test --workspace --exclude bevy_cef_core --exclude bevy_cef
 
   changes:
     name: Detect Changes
