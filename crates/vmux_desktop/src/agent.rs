@@ -471,34 +471,13 @@ pub(crate) fn gui_agent_placeholder_url(kind: AgentKind, sid: &str) -> String {
 
 pub(crate) fn parse_gui_agent_url(url: &str) -> Option<(AgentKind, Option<String>)> {
     for kind in AgentKind::all() {
-        let canonical = kind.url_prefix(AgentVariant::Gui);
-        let canonical_bare = canonical.trim_end_matches('/');
-        if url == canonical_bare {
+        let prefix = kind.url_prefix(AgentVariant::Gui);
+        let bare = prefix.trim_end_matches('/');
+        if url == bare {
             return Some((kind, None));
         }
-        if let Some(rest) = url.strip_prefix(&canonical) {
-            if rest.contains('/') {
-                return None;
-            }
-            let sid = if rest.is_empty() {
-                None
-            } else {
-                Some(rest.to_string())
-            };
-            return Some((kind, sid));
-        }
-    }
-    for kind in AgentKind::all() {
-        let alias = format!("vmux://agent/{}/", kind.as_url_segment());
-        let alias_bare = alias.trim_end_matches('/');
-        if url == alias_bare {
-            return Some((kind, None));
-        }
-        if let Some(rest) = url.strip_prefix(&alias) {
-            if rest.starts_with("cli/") || rest == "cli" {
-                return None;
-            }
-            if rest.contains('/') {
+        if let Some(rest) = url.strip_prefix(&prefix) {
+            if rest.starts_with("cli/") || rest.starts_with("cli") && rest == "cli" {
                 return None;
             }
             let sid = if rest.is_empty() {
@@ -517,38 +496,24 @@ mod gui_agent_url_tests {
     use super::*;
 
     #[test]
-    fn parse_gui_agent_url_canonical_bare() {
-        let (kind, sid) = parse_gui_agent_url("vmux://vibe").unwrap();
-        assert_eq!(kind, AgentKind::Vibe);
-        assert!(sid.is_none());
-    }
-
-    #[test]
-    fn parse_gui_agent_url_canonical_with_slash() {
-        let (kind, sid) = parse_gui_agent_url("vmux://claude/").unwrap();
-        assert_eq!(kind, AgentKind::Claude);
-        assert!(sid.is_none());
-    }
-
-    #[test]
-    fn parse_gui_agent_url_canonical_with_sid() {
-        let (kind, sid) = parse_gui_agent_url("vmux://codex/abc-123").unwrap();
-        assert_eq!(kind, AgentKind::Codex);
-        assert_eq!(sid.as_deref(), Some("abc-123"));
-    }
-
-    #[test]
-    fn parse_gui_agent_url_alias_bare() {
+    fn parse_gui_agent_url_recognises_bare_kind() {
         let (kind, sid) = parse_gui_agent_url("vmux://agent/vibe").unwrap();
         assert_eq!(kind, AgentKind::Vibe);
         assert!(sid.is_none());
     }
 
     #[test]
-    fn parse_gui_agent_url_alias_with_sid() {
-        let (kind, sid) = parse_gui_agent_url("vmux://agent/codex/abc").unwrap();
+    fn parse_gui_agent_url_recognises_kind_with_slash() {
+        let (kind, sid) = parse_gui_agent_url("vmux://agent/claude/").unwrap();
+        assert_eq!(kind, AgentKind::Claude);
+        assert!(sid.is_none());
+    }
+
+    #[test]
+    fn parse_gui_agent_url_recognises_kind_with_sid() {
+        let (kind, sid) = parse_gui_agent_url("vmux://agent/codex/abc-123").unwrap();
         assert_eq!(kind, AgentKind::Codex);
-        assert_eq!(sid.as_deref(), Some("abc"));
+        assert_eq!(sid.as_deref(), Some("abc-123"));
     }
 
     #[test]
@@ -560,7 +525,6 @@ mod gui_agent_url_tests {
     #[test]
     fn parse_gui_agent_url_rejects_unknown_kind() {
         assert!(parse_gui_agent_url("vmux://agent/nope/abc").is_none());
-        assert!(parse_gui_agent_url("vmux://nope/abc").is_none());
         assert!(parse_gui_agent_url("https://google.com").is_none());
     }
 }
