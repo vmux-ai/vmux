@@ -1,3 +1,5 @@
+use crate::AgentVariant;
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum AgentKind {
     Vibe,
@@ -14,20 +16,27 @@ impl AgentKind {
         }
     }
 
-    pub fn url_scheme(self) -> &'static str {
+    pub fn as_url_segment(self) -> &'static str {
         match self {
-            AgentKind::Vibe => "vmux://vibe/",
-            AgentKind::Claude => "vmux://claude/",
-            AgentKind::Codex => "vmux://codex/",
+            AgentKind::Vibe => "vibe",
+            AgentKind::Claude => "claude",
+            AgentKind::Codex => "codex",
         }
     }
 
-    pub fn from_host(host: &str) -> Option<Self> {
-        match host {
+    pub fn from_url_segment(segment: &str) -> Option<Self> {
+        match segment {
             "vibe" => Some(AgentKind::Vibe),
             "claude" => Some(AgentKind::Claude),
             "codex" => Some(AgentKind::Codex),
             _ => None,
+        }
+    }
+
+    pub fn url_prefix(self, variant: AgentVariant) -> String {
+        match variant {
+            AgentVariant::Gui => format!("vmux://agent/{}/", self.as_url_segment()),
+            AgentVariant::Cli => format!("vmux://agent/{}/cli/", self.as_url_segment()),
         }
     }
 
@@ -36,16 +45,42 @@ impl AgentKind {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentUrl {
+    pub kind: AgentKind,
+    pub variant: AgentVariant,
+    pub sid: String,
+}
+
+impl AgentUrl {
+    pub fn parse(url: &str) -> Option<Self> {
+        let body = url.strip_prefix("vmux://agent/")?;
+        let mut segs = body.split('/').filter(|s| !s.is_empty());
+        let kind = AgentKind::from_url_segment(segs.next()?)?;
+        let next = segs.next()?;
+        if next == "cli" {
+            let sid = segs.next()?.to_string();
+            Some(AgentUrl { kind, variant: AgentVariant::Cli, sid })
+        } else {
+            Some(AgentUrl { kind, variant: AgentVariant::Gui, sid: next.to_string() })
+        }
+    }
+
+    pub fn format(&self) -> String {
+        format!("{}{}", self.kind.url_prefix(self.variant), self.sid)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn from_host_recognizes_known_schemes() {
-        assert_eq!(AgentKind::from_host("vibe"), Some(AgentKind::Vibe));
-        assert_eq!(AgentKind::from_host("claude"), Some(AgentKind::Claude));
-        assert_eq!(AgentKind::from_host("codex"), Some(AgentKind::Codex));
-        assert_eq!(AgentKind::from_host("nope"), None);
+    fn from_url_segment_recognizes_known_kinds() {
+        assert_eq!(AgentKind::from_url_segment("vibe"), Some(AgentKind::Vibe));
+        assert_eq!(AgentKind::from_url_segment("claude"), Some(AgentKind::Claude));
+        assert_eq!(AgentKind::from_url_segment("codex"), Some(AgentKind::Codex));
+        assert_eq!(AgentKind::from_url_segment("nope"), None);
     }
 
     #[test]
@@ -56,9 +91,40 @@ mod tests {
     }
 
     #[test]
-    fn url_scheme_returns_vmux_prefix_with_trailing_slash() {
-        assert_eq!(AgentKind::Vibe.url_scheme(), "vmux://vibe/");
-        assert_eq!(AgentKind::Claude.url_scheme(), "vmux://claude/");
-        assert_eq!(AgentKind::Codex.url_scheme(), "vmux://codex/");
+    fn url_prefix_returns_nested_form() {
+        assert_eq!(AgentKind::Vibe.url_prefix(AgentVariant::Gui), "vmux://agent/vibe/");
+        assert_eq!(AgentKind::Claude.url_prefix(AgentVariant::Cli), "vmux://agent/claude/cli/");
+    }
+
+    #[test]
+    fn nested_gui_url_parses() {
+        let parsed = AgentUrl::parse("vmux://agent/vibe/abc-123").unwrap();
+        assert_eq!(parsed.kind, AgentKind::Vibe);
+        assert_eq!(parsed.variant, AgentVariant::Gui);
+        assert_eq!(parsed.sid, "abc-123");
+    }
+
+    #[test]
+    fn nested_cli_url_parses() {
+        let parsed = AgentUrl::parse("vmux://agent/claude/cli/abc-123").unwrap();
+        assert_eq!(parsed.kind, AgentKind::Claude);
+        assert_eq!(parsed.variant, AgentVariant::Cli);
+        assert_eq!(parsed.sid, "abc-123");
+    }
+
+    #[test]
+    fn unknown_kind_returns_none() {
+        assert!(AgentUrl::parse("vmux://agent/nope/abc").is_none());
+    }
+
+    #[test]
+    fn url_format_round_trips() {
+        let u = AgentUrl {
+            kind: AgentKind::Codex,
+            variant: AgentVariant::Cli,
+            sid: "xyz".into(),
+        };
+        assert_eq!(u.format(), "vmux://agent/codex/cli/xyz");
+        assert_eq!(AgentUrl::parse(&u.format()), Some(u));
     }
 }
