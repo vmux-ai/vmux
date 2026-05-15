@@ -939,11 +939,11 @@ fn on_command_bar_action(
                         }
                     } else if let Some(kind) = vmux_agent::AgentKind::all()
                         .into_iter()
-                        .find(|k| url.starts_with(k.url_scheme().trim_end_matches('/')))
+                        .find(|k| url.starts_with(k.url_prefix(vmux_agent::AgentVariant::Cli).trim_end_matches('/')))
                     {
-                        let scheme = kind.url_scheme();
+                        let prefix = kind.url_prefix(vmux_agent::AgentVariant::Cli);
                         let id_part = url
-                            .strip_prefix(scheme)
+                            .strip_prefix(&prefix)
                             .filter(|s| !s.is_empty())
                             .map(|s| s.to_string());
                         let title = match kind {
@@ -958,7 +958,7 @@ fn on_command_bar_action(
                             focus_pane_entity(entity, &mut commands, &child_of_q);
                         } else {
                             commands.entity(stack_e).insert(PageMetadata {
-                                url: scheme.to_string(),
+                                url: prefix.clone(),
                                 title: title.to_string(),
                                 ..default()
                             });
@@ -1037,7 +1037,7 @@ fn on_command_bar_action(
                     let known_terminal =
                         parse_pid_from_url(&url).and_then(|p| pid_to_entity.get(&p).copied());
                     let known_agent = vmux_agent::AgentKind::all().into_iter().find_map(|k| {
-                        let id = url.strip_prefix(k.url_scheme()).filter(|s| !s.is_empty())?;
+                        let id = url.strip_prefix(&k.url_prefix(vmux_agent::AgentVariant::Cli)).filter(|s| !s.is_empty())?;
                         agent_to_entity
                             .as_ref()
                             .and_then(|map| map.get(&(k, id.to_string())).copied())
@@ -1055,7 +1055,7 @@ fn on_command_bar_action(
                             .write(AppCommand::Terminal(TerminalCommand::New));
                     } else if let Some(kind) = vmux_agent::AgentKind::all()
                         .into_iter()
-                        .find(|k| url.starts_with(k.url_scheme().trim_end_matches('/')))
+                        .find(|k| url.starts_with(k.url_prefix(vmux_agent::AgentVariant::Cli).trim_end_matches('/')))
                     {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
@@ -1066,7 +1066,7 @@ fn on_command_bar_action(
                             &stack_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
-                            let scheme = kind.url_scheme();
+                            let prefix = kind.url_prefix(vmux_agent::AgentVariant::Cli);
                             let title = match kind {
                                 vmux_agent::AgentKind::Vibe => "Vibe",
                                 vmux_agent::AgentKind::Claude => "Claude",
@@ -1080,12 +1080,12 @@ fn on_command_bar_action(
                                 ))
                                 .id();
                             commands.entity(stack_e).insert(PageMetadata {
-                                url: scheme.to_string(),
+                                url: prefix.clone(),
                                 title: title.to_string(),
                                 ..default()
                             });
                             let session_id = url
-                                .strip_prefix(scheme)
+                                .strip_prefix(&prefix)
                                 .filter(|s| !s.is_empty())
                                 .map(|s| s.to_string());
                             let cwd = std::env::current_dir()

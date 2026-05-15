@@ -522,37 +522,46 @@ fn spawn_vmux_tab(
             spawn_processes_tab(pane, commands, meshes, webview_mt);
             Ok(())
         }
-        "vibe" | "claude" | "codex" => {
-            let kind = AgentKind::from_host(host).expect("matched above");
-            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+        "agent" => {
             let path = parsed.path().trim_start_matches('/');
-            if path.is_empty() {
-                if let Err(e) = spawn_fresh_agent_tab(
-                    kind, pane, cwd, strategies, commands, meshes, webview_mt, settings,
-                ) {
-                    bevy::log::warn!(
-                        "spawn_fresh_agent_tab({kind:?}) failed: {e}; falling back to terminal"
-                    );
-                    spawn_terminal_tab(pane, None, None, commands, meshes, webview_mt, settings);
+            let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+            let kind = segs
+                .first()
+                .and_then(|s| AgentKind::from_url_segment(s))
+                .ok_or_else(|| format!("unknown agent kind in '{url}'"))?;
+            let sid = vmux_agent::AgentUrl::parse(url).map(|a| a.sid);
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+            match sid.as_deref() {
+                None | Some("") => {
+                    if let Err(e) = spawn_fresh_agent_tab(
+                        kind, pane, cwd, strategies, commands, meshes, webview_mt, settings,
+                    ) {
+                        bevy::log::warn!(
+                            "spawn_fresh_agent_tab({kind:?}) failed: {e}; falling back to terminal"
+                        );
+                        spawn_terminal_tab(pane, None, None, commands, meshes, webview_mt, settings);
+                    }
+                    Ok(())
                 }
-                Ok(())
-            } else {
-                let session_id = path.to_string();
-                if let Some(map) = agent_to_entity
-                    && let Some(&entity) = map.0.get(&(kind, session_id.clone()))
-                {
-                    crate::terminal::pid::focus_pane_entity(entity, commands, child_of_q);
-                    return Ok(());
+                Some(session_id) => {
+                    let session_id = session_id.to_string();
+                    if let Some(map) = agent_to_entity
+                        && let Some(&entity) = map.0.get(&(kind, session_id.clone()))
+                    {
+                        crate::terminal::pid::focus_pane_entity(entity, commands, child_of_q);
+                        return Ok(());
+                    }
+                    if let Err(e) = spawn_agent_resume_tab(
+                        kind, pane, cwd, session_id, strategies, commands, meshes, webview_mt,
+                        settings,
+                    ) {
+                        bevy::log::warn!(
+                            "spawn_agent_resume_tab({kind:?}) failed: {e}; falling back to terminal"
+                        );
+                        spawn_terminal_tab(pane, None, None, commands, meshes, webview_mt, settings);
+                    }
+                    Ok(())
                 }
-                if let Err(e) = spawn_agent_resume_tab(
-                    kind, pane, cwd, session_id, strategies, commands, meshes, webview_mt, settings,
-                ) {
-                    bevy::log::warn!(
-                        "spawn_agent_resume_tab({kind:?}) failed: {e}; falling back to terminal"
-                    );
-                    spawn_terminal_tab(pane, None, None, commands, meshes, webview_mt, settings);
-                }
-                Ok(())
             }
         }
         other => Err(format!("unknown vmux URL host '{other}' in '{url}'")),
@@ -1682,7 +1691,7 @@ mod tests {
             .write(AgentCommandRequest {
                 request_id: AgentRequestId::new(),
                 command: ServiceAgentCommand::BrowserNavigate {
-                    url: "vmux://claude/".into(),
+                    url: "vmux://agent/claude/cli/".into(),
                     pane: None,
                 },
             });
@@ -1720,7 +1729,7 @@ mod tests {
             .write(AgentCommandRequest {
                 request_id: AgentRequestId::new(),
                 command: ServiceAgentCommand::BrowserNavigate {
-                    url: "vmux://codex/".into(),
+                    url: "vmux://agent/codex/cli/".into(),
                     pane: None,
                 },
             });

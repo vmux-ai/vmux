@@ -302,10 +302,10 @@ fn spawn_url_into_stack(
         commands.entity(terminal).insert(CefKeyboardTarget);
     } else if let Some(kind) = vmux_agent::AgentKind::all()
         .into_iter()
-        .find(|k| url.starts_with(k.url_scheme()))
+        .find(|k| url.starts_with(&k.url_prefix(vmux_agent::AgentVariant::Cli)))
     {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
-        let id_part = url.strip_prefix(kind.url_scheme()).unwrap_or("");
+        let id_part = url.strip_prefix(&kind.url_prefix(vmux_agent::AgentVariant::Cli)).unwrap_or("");
         let session_id = (!id_part.is_empty()).then(|| id_part.to_string());
         let strats = match strategies {
             Some(s) => s,

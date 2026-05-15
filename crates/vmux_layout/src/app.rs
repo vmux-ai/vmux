@@ -59,13 +59,13 @@ fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
 }
 
 fn agent_host(url: &str) -> Option<&'static str> {
-    if url.starts_with("vmux://vibe/") {
+    if url.starts_with("vmux://agent/vibe/cli/") {
         return Some("chat.mistral.ai");
     }
-    if url.starts_with("vmux://claude/") {
+    if url.starts_with("vmux://agent/claude/cli/") {
         return Some("claude.ai");
     }
-    if url.starts_with("vmux://codex/") {
+    if url.starts_with("vmux://agent/codex/cli/") {
         return Some("chatgpt.com");
     }
     None
