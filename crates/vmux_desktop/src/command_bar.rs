@@ -1254,7 +1254,7 @@ fn on_command_bar_action(
                 .p1()
                 .is_some_and(|providers| providers.contains(&evt.value))
             {
-                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+                let cwd = crate::agent::default_space_dir();
                 if let Some(mut agent_launches) = writer_params.p1() {
                     agent_launches.write(AgentLaunchRequested {
                         provider_id: evt.value.clone(),
