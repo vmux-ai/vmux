@@ -4,7 +4,7 @@ use bevy::prelude::Resource;
 
 use crate::{AgentKind, AgentVariant};
 
-use super::cli_trait::CliAgentStrategy;
+use crate::cli_trait::CliAgentStrategy;
 
 pub trait AgentStrategy: Send + Sync + 'static {
     fn kind(&self) -> AgentKind;
