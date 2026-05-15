@@ -130,6 +130,201 @@ git commit -m "feat(vmux_agent): add AgentVariant enum"
 
 ---
 
+## Task 1a: Migrate `kind.rs` to nested URL scheme
+
+> **Why this task:** Step 1 in the spec (URL migration) was never landed on `main` — `kind.rs` still emits the flat `vmux://<kind>/` form. We fold the migration into this PR per the user decision. Must run after Task 1 because the URL format encodes `AgentVariant`.
+
+**Files:**
+- Modify: `crates/vmux_agent/src/kind.rs`
+- Modify: `crates/vmux_agent/src/session.rs` (test fixtures use the URL)
+
+- [ ] **Step 1: Replace flat URL emission with nested form + variant parsing**
+
+Update `crates/vmux_agent/src/kind.rs`:
+
+```rust
+use crate::AgentVariant;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AgentKind {
+    Vibe,
+    Claude,
+    Codex,
+}
+
+impl AgentKind {
+    pub fn executable(self) -> &'static str {
+        match self {
+            AgentKind::Vibe => "vibe",
+            AgentKind::Claude => "claude",
+            AgentKind::Codex => "codex",
+        }
+    }
+
+    pub fn as_url_segment(self) -> &'static str {
+        match self {
+            AgentKind::Vibe => "vibe",
+            AgentKind::Claude => "claude",
+            AgentKind::Codex => "codex",
+        }
+    }
+
+    pub fn from_url_segment(segment: &str) -> Option<Self> {
+        match segment {
+            "vibe" => Some(AgentKind::Vibe),
+            "claude" => Some(AgentKind::Claude),
+            "codex" => Some(AgentKind::Codex),
+            _ => None,
+        }
+    }
+
+    pub fn url_prefix(self, variant: AgentVariant) -> String {
+        match variant {
+            AgentVariant::Gui => format!("vmux://agent/{}/", self.as_url_segment()),
+            AgentVariant::Cli => format!("vmux://agent/{}/cli/", self.as_url_segment()),
+        }
+    }
+
+    pub fn all() -> [AgentKind; 3] {
+        [AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex]
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentUrl {
+    pub kind: AgentKind,
+    pub variant: AgentVariant,
+    pub sid: String,
+}
+
+impl AgentUrl {
+    pub fn parse(url: &str) -> Option<Self> {
+        let body = url.strip_prefix("vmux://agent/")?;
+        let mut segs = body.split('/').filter(|s| !s.is_empty());
+        let kind = AgentKind::from_url_segment(segs.next()?)?;
+        let next = segs.next()?;
+        if next == "cli" {
+            let sid = segs.next()?.to_string();
+            Some(AgentUrl { kind, variant: AgentVariant::Cli, sid })
+        } else {
+            Some(AgentUrl { kind, variant: AgentVariant::Gui, sid: next.to_string() })
+        }
+    }
+
+    pub fn format(&self) -> String {
+        format!("{}{}", self.kind.url_prefix(self.variant), self.sid)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_gui_url_parses() {
+        let parsed = AgentUrl::parse("vmux://agent/vibe/abc-123").unwrap();
+        assert_eq!(parsed.kind, AgentKind::Vibe);
+        assert_eq!(parsed.variant, AgentVariant::Gui);
+        assert_eq!(parsed.sid, "abc-123");
+    }
+
+    #[test]
+    fn nested_cli_url_parses() {
+        let parsed = AgentUrl::parse("vmux://agent/claude/cli/abc-123").unwrap();
+        assert_eq!(parsed.kind, AgentKind::Claude);
+        assert_eq!(parsed.variant, AgentVariant::Cli);
+        assert_eq!(parsed.sid, "abc-123");
+    }
+
+    #[test]
+    fn unknown_kind_returns_none() {
+        assert!(AgentUrl::parse("vmux://agent/nope/abc").is_none());
+    }
+
+    #[test]
+    fn url_format_round_trips() {
+        let u = AgentUrl {
+            kind: AgentKind::Codex,
+            variant: AgentVariant::Cli,
+            sid: "xyz".into(),
+        };
+        assert_eq!(u.format(), "vmux://agent/codex/cli/xyz");
+        assert_eq!(AgentUrl::parse(&u.format()), Some(u));
+    }
+
+    #[test]
+    fn url_prefix_returns_nested_form() {
+        assert_eq!(AgentKind::Vibe.url_prefix(AgentVariant::Gui), "vmux://agent/vibe/");
+        assert_eq!(AgentKind::Claude.url_prefix(AgentVariant::Cli), "vmux://agent/claude/cli/");
+    }
+}
+```
+
+The previous `url_scheme()` and `from_host()` methods are removed — every caller must migrate to the new API.
+
+- [ ] **Step 2: Update session.rs URL-format tests**
+
+In `crates/vmux_agent/src/session.rs`, the existing tests at lines ~118 and ~140 hardcode the old flat URL. Update them to use the new nested form (`vmux://agent/vibe/abc`, `vmux://agent/vibe/cli/`). The non-test code in this file calls whatever helper the existing implementation uses — update those calls to use `AgentKind::url_prefix(AgentVariant::Cli)` (CLI sessions are the only ones the existing code emits).
+
+- [ ] **Step 3: Run tests**
+
+```
+env -u CEF_PATH cargo test -p vmux_agent kind::tests
+env -u CEF_PATH cargo test -p vmux_agent session
+```
+Expected: all pass.
+
+- [ ] **Step 4: Commit**
+
+```
+git add crates/vmux_agent/src/kind.rs crates/vmux_agent/src/session.rs
+git commit -m "refactor(vmux_agent): nested URL scheme vmux://agent/<kind>/[cli/]<sid>"
+```
+
+---
+
+## Task 1b: Update URL callers in vmux_desktop and vmux_layout
+
+**Files:**
+- Modify: `crates/vmux_desktop/src/settings.rs` (test at line 479)
+- Modify: `crates/vmux_desktop/src/agent.rs` (lines 1659, 1697)
+- Modify: `crates/vmux_layout/src/app.rs` (URL prefix matches around lines 62, 65, 68)
+- Modify: any other call sites surfaced by `cargo build` errors
+
+- [ ] **Step 1: Update each literal URL**
+
+Replace every literal:
+- `"vmux://vibe/"` → `"vmux://agent/vibe/cli/"`
+- `"vmux://claude/"` → `"vmux://agent/claude/cli/"`
+- `"vmux://codex/"` → `"vmux://agent/codex/cli/"`
+
+Rationale: every existing call site refers to the CLI wrapper (which is all that exists today). GUI variant URLs are minted by Task 18's command-bar action.
+
+In `crates/vmux_layout/src/app.rs`, also update the `starts_with` checks to match the new nested prefix.
+
+- [ ] **Step 2: Build to surface any missed call sites**
+
+```
+env -u CEF_PATH cargo build -p vmux_desktop -p vmux_layout
+```
+Expected: clean build. If new compile errors mention removed `url_scheme()` or `from_host()`, update those callers too.
+
+- [ ] **Step 3: Run tests**
+
+```
+env -u CEF_PATH cargo test -p vmux_desktop -p vmux_layout
+```
+Expected: all pass.
+
+- [ ] **Step 4: Commit**
+
+```
+git add crates/vmux_desktop/src/settings.rs crates/vmux_desktop/src/agent.rs crates/vmux_layout/src/app.rs
+git commit -m "refactor(vmux_desktop,vmux_layout): migrate URL callers to nested scheme"
+```
+
+---
+
 ## Task 2: Split AgentStrategy into core + CliAgentStrategy sub-trait
 
 **Files:**
@@ -1542,10 +1737,12 @@ git commit -m "feat(vmux_agent): GuiAgentPlugin wiring"
 
 ## Task 16: URL routing for GUI variant
 
+> **Already covered by Task 1a — skip.** Task 1a's `AgentUrl::parse` already handles both `vmux://agent/<kind>/<sid>` (Gui) and `vmux://agent/<kind>/cli/<sid>` (Cli). Mark this task complete and move to Task 17.
+
 **Files:**
 - Modify: `crates/vmux_agent/src/kind.rs` (or whichever module owns URL parsing post-step-1)
 
-- [ ] **Step 1: Add URL parsing test**
+- [ ] **Step 1: Add URL parsing test (legacy — covered by Task 1a)**
 
 In the appropriate URL-routing test module:
 
