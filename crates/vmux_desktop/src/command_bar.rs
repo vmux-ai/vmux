@@ -957,6 +957,19 @@ fn on_command_bar_action(
                                 .id();
                             commands.entity(term_e).insert(CefKeyboardTarget);
                         }
+                    } else if let Some((kind, sid_opt)) = crate::agent::parse_gui_agent_url(&url) {
+                        let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                        let final_url =
+                            format!("{}{}", kind.url_prefix(vmux_agent::AgentVariant::Gui), sid);
+                        crate::agent::attach_gui_agent_to_stack(
+                            stack_e,
+                            kind,
+                            &sid,
+                            &final_url,
+                            &mut commands,
+                            &mut meshes,
+                            &mut webview_mt,
+                        );
                     } else if let Some(kind) = vmux_agent::AgentKind::all().into_iter().find(|k| {
                         url.starts_with(
                             k.url_prefix(vmux_agent::AgentVariant::Cli)
@@ -1077,6 +1090,33 @@ fn on_command_bar_action(
                         writer_params
                             .p0()
                             .write(AppCommand::Terminal(TerminalCommand::New));
+                    } else if let Some((kind, sid_opt)) = crate::agent::parse_gui_agent_url(&url) {
+                        let (_, active_pane_opt, _) = focused_stack(
+                            &tab_q,
+                            &all_children,
+                            &leaf_panes,
+                            &pane_ts,
+                            &pane_children,
+                            &stack_ts,
+                        );
+                        if let Some(pane_e) = active_pane_opt {
+                            let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                            let final_url = format!(
+                                "{}{}",
+                                kind.url_prefix(vmux_agent::AgentVariant::Gui),
+                                sid
+                            );
+                            crate::agent::spawn_gui_agent_tab(
+                                kind,
+                                pane_e,
+                                &sid,
+                                &final_url,
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                            );
+                            custom_keyboard_restore = true;
+                        }
                     } else if let Some(kind) = vmux_agent::AgentKind::all().into_iter().find(|k| {
                         url.starts_with(
                             k.url_prefix(vmux_agent::AgentVariant::Cli)
@@ -1352,23 +1392,15 @@ fn on_command_bar_action(
                 let sid = uuid::Uuid::new_v4().to_string();
                 let url = format!("{}{}", kind.url_prefix(vmux_agent::AgentVariant::Gui), sid);
                 if let Some(stack_e) = empty_stack {
-                    commands.entity(stack_e).insert(PageMetadata {
-                        url: url.to_string(),
-                        title: format!("GUI Agent ({kind:?})"),
-                        ..default()
-                    });
-                    commands.entity(stack_e).insert((
-                        vmux_agent::components::AgentSession {
-                            kind,
-                            variant: vmux_agent::AgentVariant::Gui,
-                            sid: sid.clone(),
-                            provider: kind.as_url_segment().to_string(),
-                            model: "echo-stub".to_string(),
-                        },
-                        vmux_agent::AgentMessages::default(),
-                        vmux_agent::AgentApprovalPolicy::default(),
-                        vmux_agent::AgentRunState::default(),
-                    ));
+                    crate::agent::attach_gui_agent_to_stack(
+                        stack_e,
+                        kind,
+                        &sid,
+                        &url,
+                        &mut commands,
+                        &mut meshes,
+                        &mut webview_mt,
+                    );
                     commands.entity(stack_e).insert(LastActivatedAt::now());
                     if let Ok(parent) = child_of_q.get(stack_e) {
                         commands.entity(parent.0).insert(LastActivatedAt::now());

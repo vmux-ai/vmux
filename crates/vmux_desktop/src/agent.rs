@@ -426,12 +426,25 @@ pub(crate) fn spawn_gui_agent_tab(
             ChildOf(pane),
         ))
         .id();
-    commands.entity(tab).insert(PageMetadata {
+    attach_gui_agent_to_stack(tab, kind, sid, url, commands, meshes, webview_mt);
+    tab
+}
+
+pub(crate) fn attach_gui_agent_to_stack(
+    stack: Entity,
+    kind: AgentKind,
+    sid: &str,
+    url: &str,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    commands.entity(stack).insert(PageMetadata {
         url: url.to_string(),
         title: format!("GUI Agent ({:?})", kind),
         ..default()
     });
-    commands.entity(tab).insert((
+    commands.entity(stack).insert((
         vmux_agent::components::AgentSession {
             kind,
             variant: AgentVariant::Gui,
@@ -443,14 +456,77 @@ pub(crate) fn spawn_gui_agent_tab(
         vmux_agent::AgentApprovalPolicy::default(),
         vmux_agent::AgentRunState::default(),
     ));
-    let placeholder = format!(
-        "data:text/html;charset=utf-8,<!doctype html><html><head><meta charset='utf-8'><title>GUI Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>GUI Agent ({kind:?})</h1><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the GUI agent design.</p></div></body></html>"
-    );
+    let placeholder = gui_agent_placeholder_url(kind, sid);
     commands.spawn((
         crate::browser::Browser::new(meshes, webview_mt, &placeholder),
-        ChildOf(tab),
+        ChildOf(stack),
     ));
-    tab
+}
+
+pub(crate) fn gui_agent_placeholder_url(kind: AgentKind, sid: &str) -> String {
+    format!(
+        "data:text/html;charset=utf-8,<!doctype html><html><head><meta charset='utf-8'><title>GUI Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>GUI Agent ({kind:?})</h1><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the GUI agent design.</p></div></body></html>"
+    )
+}
+
+pub(crate) fn parse_gui_agent_url(url: &str) -> Option<(AgentKind, Option<String>)> {
+    for kind in AgentKind::all() {
+        let prefix = kind.url_prefix(AgentVariant::Gui);
+        let bare = prefix.trim_end_matches('/');
+        if url == bare {
+            return Some((kind, None));
+        }
+        if let Some(rest) = url.strip_prefix(&prefix) {
+            if rest.starts_with("cli/") || rest.starts_with("cli") && rest == "cli" {
+                return None;
+            }
+            let sid = if rest.is_empty() {
+                None
+            } else {
+                Some(rest.to_string())
+            };
+            return Some((kind, sid));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod gui_agent_url_tests {
+    use super::*;
+
+    #[test]
+    fn parse_gui_agent_url_recognises_bare_kind() {
+        let (kind, sid) = parse_gui_agent_url("vmux://agent/vibe").unwrap();
+        assert_eq!(kind, AgentKind::Vibe);
+        assert!(sid.is_none());
+    }
+
+    #[test]
+    fn parse_gui_agent_url_recognises_kind_with_slash() {
+        let (kind, sid) = parse_gui_agent_url("vmux://agent/claude/").unwrap();
+        assert_eq!(kind, AgentKind::Claude);
+        assert!(sid.is_none());
+    }
+
+    #[test]
+    fn parse_gui_agent_url_recognises_kind_with_sid() {
+        let (kind, sid) = parse_gui_agent_url("vmux://agent/codex/abc-123").unwrap();
+        assert_eq!(kind, AgentKind::Codex);
+        assert_eq!(sid.as_deref(), Some("abc-123"));
+    }
+
+    #[test]
+    fn parse_gui_agent_url_rejects_cli_form() {
+        assert!(parse_gui_agent_url("vmux://agent/vibe/cli/abc").is_none());
+        assert!(parse_gui_agent_url("vmux://agent/vibe/cli/").is_none());
+    }
+
+    #[test]
+    fn parse_gui_agent_url_rejects_unknown_kind() {
+        assert!(parse_gui_agent_url("vmux://agent/nope/abc").is_none());
+        assert!(parse_gui_agent_url("https://google.com").is_none());
+    }
 }
 
 pub(crate) fn spawn_sessions_tab(
