@@ -15,6 +15,7 @@ pub mod session;
 pub mod strategy;
 pub mod stream;
 pub mod systems {
+    pub mod drain_stream;
     pub mod process_input;
 }
 pub mod variant;
