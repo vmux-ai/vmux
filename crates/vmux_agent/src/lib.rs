@@ -7,8 +7,6 @@ pub mod components;
 pub mod echo;
 pub mod events;
 pub mod exec;
-pub mod gui;
-pub mod gui_plugin;
 pub mod kind;
 pub mod mcp;
 pub mod message;
