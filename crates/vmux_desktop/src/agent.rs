@@ -416,6 +416,8 @@ pub(crate) fn spawn_gui_agent_tab(
     sid: &str,
     url: &str,
     commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> Entity {
     let tab = commands
         .spawn((
@@ -440,6 +442,13 @@ pub(crate) fn spawn_gui_agent_tab(
         vmux_agent::AgentMessages::default(),
         vmux_agent::AgentApprovalPolicy::default(),
         vmux_agent::AgentRunState::default(),
+    ));
+    let placeholder = format!(
+        "data:text/html;charset=utf-8,<!doctype html><html><head><meta charset='utf-8'><title>GUI Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>GUI Agent ({kind:?})</h1><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the GUI agent design.</p></div></body></html>"
+    );
+    commands.spawn((
+        crate::browser::Browser::new(meshes, webview_mt, &placeholder),
+        ChildOf(tab),
     ));
     tab
 }
@@ -577,7 +586,7 @@ fn spawn_vmux_tab(
                     .as_ref()
                     .map(|a| a.sid.clone())
                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                spawn_gui_agent_tab(kind, pane, &sid, url, commands);
+                spawn_gui_agent_tab(kind, pane, &sid, url, commands, meshes, webview_mt);
                 return Ok(());
             }
 

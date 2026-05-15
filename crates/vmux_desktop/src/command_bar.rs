@@ -1386,7 +1386,15 @@ fn on_command_bar_action(
                         &stack_ts,
                     );
                     if let Some(pane_e) = active_pane_opt {
-                        crate::agent::spawn_gui_agent_tab(kind, pane_e, &sid, &url, &mut commands);
+                        crate::agent::spawn_gui_agent_tab(
+                            kind,
+                            pane_e,
+                            &sid,
+                            &url,
+                            &mut commands,
+                            &mut meshes,
+                            &mut webview_mt,
+                        );
                         custom_keyboard_restore = true;
                     }
                 }
