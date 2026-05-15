@@ -18,7 +18,7 @@ use bevy_cef::prelude::{CefKeyboardTarget, RequestNavigate, WebviewExtendStandar
 use crate::browser::Browser;
 use vmux_agent::session::{AgentSession, PendingAgentSession, SessionId};
 use vmux_agent::strategy::AgentStrategies;
-use vmux_agent::{AgentKind, mcp};
+use vmux_agent::{AgentKind, AgentVariant, mcp};
 use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
 use vmux_layout::event::TERMINAL_WEBVIEW_URL;
@@ -410,6 +410,40 @@ pub(crate) fn spawn_browser_tab(
     tab
 }
 
+pub(crate) fn spawn_gui_agent_tab(
+    kind: AgentKind,
+    pane: Entity,
+    sid: &str,
+    url: &str,
+    commands: &mut Commands,
+) -> Entity {
+    let tab = commands
+        .spawn((
+            crate::layout::stack::stack_bundle(),
+            LastActivatedAt::now(),
+            ChildOf(pane),
+        ))
+        .id();
+    commands.entity(tab).insert(PageMetadata {
+        url: url.to_string(),
+        title: format!("GUI Agent ({:?})", kind),
+        ..default()
+    });
+    commands.entity(tab).insert((
+        vmux_agent::components::AgentSession {
+            kind,
+            variant: AgentVariant::Gui,
+            sid: sid.to_string(),
+            provider: kind.as_url_segment().to_string(),
+            model: "echo-stub".to_string(),
+        },
+        vmux_agent::AgentMessages::default(),
+        vmux_agent::AgentApprovalPolicy::default(),
+        vmux_agent::AgentRunState::default(),
+    ));
+    tab
+}
+
 pub(crate) fn spawn_sessions_tab(
     pane: Entity,
     commands: &mut Commands,
@@ -529,7 +563,25 @@ fn spawn_vmux_tab(
                 .first()
                 .and_then(|s| AgentKind::from_url_segment(s))
                 .ok_or_else(|| format!("unknown agent kind in '{url}'"))?;
-            let sid = vmux_agent::AgentUrl::parse(url).map(|a| a.sid);
+            let agent_url = vmux_agent::AgentUrl::parse(url);
+            let variant = agent_url.as_ref().map(|a| a.variant).unwrap_or_else(|| {
+                if segs.get(1) == Some(&"cli") {
+                    AgentVariant::Cli
+                } else {
+                    AgentVariant::Gui
+                }
+            });
+
+            if variant == AgentVariant::Gui {
+                let sid = agent_url
+                    .as_ref()
+                    .map(|a| a.sid.clone())
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                spawn_gui_agent_tab(kind, pane, &sid, url, commands);
+                return Ok(());
+            }
+
+            let sid = agent_url.map(|a| a.sid);
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
             match sid.as_deref() {
                 None | Some("") => {

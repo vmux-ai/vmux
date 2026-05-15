@@ -59,14 +59,17 @@ fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
 }
 
 fn agent_host(url: &str) -> Option<&'static str> {
-    if url.starts_with("vmux://agent/vibe/cli/") {
-        return Some("chat.mistral.ai");
-    }
-    if url.starts_with("vmux://agent/claude/cli/") {
-        return Some("claude.ai");
-    }
-    if url.starts_with("vmux://agent/codex/cli/") {
-        return Some("chatgpt.com");
+    const AGENTS: &[(&str, &str)] = &[
+        ("vibe", "chat.mistral.ai"),
+        ("claude", "claude.ai"),
+        ("codex", "chatgpt.com"),
+    ];
+    for &(kind, host) in AGENTS {
+        if url.starts_with(&format!("vmux://agent/{kind}/cli/"))
+            || url.starts_with(&format!("vmux://agent/{kind}/"))
+        {
+            return Some(host);
+        }
     }
     None
 }
