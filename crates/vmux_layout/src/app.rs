@@ -58,9 +58,27 @@ fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
         .filter(|h| !h.is_empty())
 }
 
+fn agent_host(url: &str) -> Option<&'static str> {
+    if url.starts_with("vmux://vibe/") {
+        return Some("chat.mistral.ai");
+    }
+    if url.starts_with("vmux://claude/") {
+        return Some("claude.ai");
+    }
+    if url.starts_with("vmux://codex/") {
+        return Some("chatgpt.com");
+    }
+    None
+}
+
 fn favicon_src_for_tab(tab: &TabRow) -> Option<String> {
     if !tab.favicon_url.is_empty() {
         return Some(tab.favicon_url.clone());
+    }
+    if let Some(host) = agent_host(&tab.url) {
+        return Some(format!(
+            "https://www.google.com/s2/favicons?domain={host}&sz=32"
+        ));
     }
     host_for_favicon_fallback(&tab.url)
         .map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=32"))
@@ -69,6 +87,11 @@ fn favicon_src_for_tab(tab: &TabRow) -> Option<String> {
 fn favicon_src(tab: &TabNode) -> Option<String> {
     if !tab.favicon_url.is_empty() {
         return Some(tab.favicon_url.clone());
+    }
+    if let Some(host) = agent_host(&tab.url) {
+        return Some(format!(
+            "https://www.google.com/s2/favicons?domain={host}&sz=32"
+        ));
     }
     host_for_favicon_fallback(&tab.url)
         .map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=32"))
