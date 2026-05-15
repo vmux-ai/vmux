@@ -14,6 +14,7 @@ use crate::{
     },
     processes_monitor::ProcessesMonitor,
     settings::AppSettings,
+    settings_view::SettingsView,
     spaces::{ActiveSpace, SpacesView},
     terminal::Terminal,
 };
@@ -35,6 +36,7 @@ use vmux_layout::{
     Header,
     event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL},
 };
+use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::{SPACES_WEBVIEW_URL, SpaceCommandEvent};
 
 pub(crate) use crate::terminal::pid::focus_pane_entity;
@@ -742,6 +744,20 @@ fn attach_spaces_page_to_tab(
     commands.spawn((SpacesView::new(meshes, webview_mt), ChildOf(tab)));
 }
 
+fn attach_settings_page_to_tab(
+    tab: Entity,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    commands.entity(tab).insert(PageMetadata {
+        url: SETTINGS_WEBVIEW_URL.to_string(),
+        title: "Settings".to_string(),
+        ..default()
+    });
+    commands.spawn((SettingsView::new(meshes, webview_mt), ChildOf(tab)));
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn_spaces_page_layout_from_command_bar(
     main: Option<Entity>,
@@ -993,6 +1009,13 @@ fn on_command_bar_action(
                             &mut meshes,
                             &mut webview_mt,
                         );
+                    } else if url.starts_with(SETTINGS_WEBVIEW_URL.trim_end_matches('/')) {
+                        attach_settings_page_to_tab(
+                            stack_e,
+                            &mut commands,
+                            &mut meshes,
+                            &mut webview_mt,
+                        );
                     } else {
                         let browser_e = commands
                             .spawn((
@@ -1132,6 +1155,31 @@ fn on_command_bar_action(
                             ) {
                                 custom_keyboard_restore = true;
                             }
+                        }
+                    } else if url.starts_with(SETTINGS_WEBVIEW_URL.trim_end_matches('/')) {
+                        let (_, active_pane_opt, _) = focused_stack(
+                            &tab_q,
+                            &all_children,
+                            &leaf_panes,
+                            &pane_ts,
+                            &pane_children,
+                            &stack_ts,
+                        );
+                        if let Some(pane_e) = active_pane_opt {
+                            let stack_e = commands
+                                .spawn((
+                                    crate::layout::stack::stack_bundle(),
+                                    LastActivatedAt::now(),
+                                    ChildOf(pane_e),
+                                ))
+                                .id();
+                            attach_settings_page_to_tab(
+                                stack_e,
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                            );
+                            custom_keyboard_restore = true;
                         }
                     } else {
                         let (_, _, active_stack) = focused_stack(

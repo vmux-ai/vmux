@@ -19,6 +19,7 @@ mod processes_monitor;
 pub mod profile;
 mod scene;
 mod settings;
+mod settings_view;
 pub(crate) mod shortcut;
 mod spaces;
 mod terminal;
@@ -115,6 +116,7 @@ impl Plugin for VmuxPlugin {
             CommandBarInputPlugin,
         ))
         .add_plugins(SpacesPlugin)
+        .add_plugins(settings_view::SettingsViewPlugin)
         .add_plugins(BrowserPlugin)
         .add_plugins((
             TerminalInputPlugin,
