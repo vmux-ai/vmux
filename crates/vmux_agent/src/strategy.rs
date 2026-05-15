@@ -6,46 +6,10 @@ use crate::AgentKind;
 use crate::AgentVariant;
 use crate::app::AppAgentStrategy;
 use crate::cli_trait::CliAgentStrategy;
-use crate::{AgentKind, AgentVariant};
 
 pub trait AgentStrategy: Send + Sync + 'static {
     fn kind(&self) -> AgentKind;
     fn variant(&self) -> AgentVariant;
-}
-
-pub enum BoxedStrategy {
-    Cli(Box<dyn CliAgentStrategy>),
-    App(Box<dyn AppAgentStrategy>),
-}
-
-impl BoxedStrategy {
-    pub fn kind(&self) -> AgentKind {
-        match self {
-            BoxedStrategy::Cli(s) => s.kind(),
-            BoxedStrategy::App(s) => s.kind(),
-        }
-    }
-
-    pub fn variant(&self) -> AgentVariant {
-        match self {
-            BoxedStrategy::Cli(s) => s.variant(),
-            BoxedStrategy::App(s) => s.variant(),
-        }
-    }
-
-    pub fn as_cli(&self) -> Option<&dyn CliAgentStrategy> {
-        match self {
-            BoxedStrategy::Cli(s) => Some(s.as_ref()),
-            BoxedStrategy::App(_) => None,
-        }
-    }
-
-    pub fn as_app(&self) -> Option<&dyn AppAgentStrategy> {
-        match self {
-            BoxedStrategy::App(s) => Some(s.as_ref()),
-            BoxedStrategy::Cli(_) => None,
-        }
-    }
 }
 
 #[derive(Resource, Default)]
@@ -239,8 +203,11 @@ mod tests {
     }
 
     #[test]
-    fn registers_cli_and_app_independently_for_same_kind() {
-        struct StubApp;
+    fn register_app_lookup_by_provider_model() {
+        struct StubApp {
+            provider: String,
+            model: String,
+        }
         impl AgentStrategy for StubApp {
             fn kind(&self) -> AgentKind {
                 AgentKind::Vibe
@@ -250,19 +217,13 @@ mod tests {
             }
         }
         impl crate::app::AppAgentStrategy for StubApp {
-            fn provider(&self) -> &'static str {
-                "stub"
+            fn provider(&self) -> &str {
+                &self.provider
             }
-            fn model(&self) -> &'static str {
-                "stub"
+            fn model(&self) -> &str {
+                &self.model
             }
-            fn models(&self) -> &'static [&'static str] {
-                &[]
-            }
-            fn default_model(&self) -> &'static str {
-                ""
-            }
-            fn endpoint(&self) -> &'static str {
+            fn endpoint(&self) -> &str {
                 "stub://"
             }
             fn build_request(
@@ -282,45 +243,66 @@ mod tests {
             }
         }
 
-        struct StubCli;
-        impl AgentStrategy for StubCli {
+        let mut s = AgentStrategies::default();
+        s.register_app(Box::new(StubApp {
+            provider: "openai".into(),
+            model: "gpt-5.5".into(),
+        }));
+        s.register_app(Box::new(StubApp {
+            provider: "anthropic".into(),
+            model: "claude-opus-4.7".into(),
+        }));
+
+        assert!(s.get_app_by_provider_model("openai", "gpt-5.5").is_some());
+        assert!(
+            s.get_app_by_provider_model("anthropic", "claude-opus-4.7")
+                .is_some()
+        );
+        assert!(s.get_app_by_provider_model("nope", "nope").is_none());
+        assert_eq!(s.app_strategies().count(), 2);
+    }
+
+    #[test]
+    fn cli_and_app_coexist() {
+        struct App;
+        impl AgentStrategy for App {
             fn kind(&self) -> AgentKind {
                 AgentKind::Vibe
             }
             fn variant(&self) -> AgentVariant {
-                AgentVariant::Cli
+                AgentVariant::App
             }
         }
-        impl CliAgentStrategy for StubCli {
-            fn sessions_root(&self) -> PathBuf {
-                PathBuf::from("/tmp/none")
+        impl crate::app::AppAgentStrategy for App {
+            fn provider(&self) -> &str {
+                "p"
             }
-            fn build_args(&self, _: &McpServerConfig, _: Option<&str>) -> Vec<String> {
-                vec![]
+            fn model(&self) -> &str {
+                "m"
             }
-            fn build_env(&self, _: &McpServerConfig) -> Vec<(String, String)> {
-                vec![]
+            fn endpoint(&self) -> &str {
+                "stub://"
             }
-            fn discover_session(
+            fn build_request(
                 &self,
-                _: &Path,
-                _: SystemTime,
-                _: &HashSet<String>,
-            ) -> Option<String> {
+                _: &str,
+                _: &[crate::message::Message],
+                _: &[crate::stream::ToolDef],
+                _: &str,
+            ) -> reqwest::Request {
+                reqwest::Client::new()
+                    .get("http://localhost/")
+                    .build()
+                    .unwrap()
+            }
+            fn parse_sse_event(&self, _: &str) -> Option<crate::stream::StreamEvent> {
                 None
             }
-            fn detect_end_time(&self, _: &str) -> bool {
-                false
-            }
         }
-
         let mut s = AgentStrategies::default();
-        s.register_cli(Box::new(StubCli));
-        s.register_app(Box::new(StubApp));
-
-        assert!(s.get(AgentKind::Vibe, AgentVariant::Cli).is_some());
-        assert!(s.get(AgentKind::Vibe, AgentVariant::App).is_some());
-        assert!(s.get_cli(AgentKind::Vibe).is_some());
-        assert!(s.get_app(AgentKind::Vibe).is_some());
+        s.register_cli(Box::new(StubStrategy));
+        s.register_app(Box::new(App));
+        assert!(s.get_cli(AgentKind::Claude).is_some());
+        assert!(s.get_app_by_provider_model("p", "m").is_some());
     }
 }
