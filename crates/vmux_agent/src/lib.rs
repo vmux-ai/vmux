@@ -6,6 +6,7 @@ pub mod echo;
 pub mod events;
 pub mod exec;
 pub mod gui;
+pub mod gui_plugin;
 pub mod kind;
 pub mod mcp;
 pub mod message;
@@ -31,6 +32,7 @@ pub use events::{
     ApprovalDecision, ToolStatus,
 };
 pub use gui::GuiAgentStrategy;
+pub use gui_plugin::GuiAgentPlugin;
 pub use kind::AgentKind;
 pub use kind::AgentUrl;
 pub use mcp::McpServerConfig;

@@ -121,6 +121,7 @@ impl Plugin for VmuxPlugin {
             TerminalInputPlugin,
             AgentPlugin,
             vmux_agent::AgentSessionPlugin,
+            vmux_agent::GuiAgentPlugin,
             ProcessesMonitorPlugin,
             PersistencePlugin,
             ProfilePlugin,
