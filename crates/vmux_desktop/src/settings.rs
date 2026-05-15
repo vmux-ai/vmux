@@ -436,6 +436,28 @@ fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
 }
 
 #[allow(dead_code)]
+pub(crate) fn apply_settings_update(
+    settings: &mut AppSettings,
+    path: &str,
+    value: serde_json::Value,
+) -> Result<String, String> {
+    let mut value_json =
+        serde_json::to_value(&*settings).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    set_at_path(&mut value_json, path, value)?;
+    let new_settings: AppSettings = serde_json::from_value(value_json)
+        .map_err(|e| format!("invalid value for path '{path}': {e}"))?;
+    let ron_bytes = ron::ser::to_string_pretty(&new_settings, ron::ser::PrettyConfig::default())
+        .map_err(|e| format!("RON serialize failed: {e}"))?;
+    *settings = new_settings;
+    Ok(ron_bytes)
+}
+
+#[allow(dead_code)]
+pub(crate) fn serialize_settings_to_json(settings: &AppSettings) -> String {
+    serde_json::to_string(settings).unwrap_or_else(|_| "{}".to_string())
+}
+
+#[allow(dead_code)]
 pub(crate) fn set_at_path(
     root: &mut serde_json::Value,
     path: &str,
@@ -459,12 +481,14 @@ pub(crate) fn set_at_path(
     set_leaf(cursor, last, &walked, value)
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 enum PathSegment {
     Field(String),
     Index(usize),
 }
 
+#[allow(dead_code)]
 fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, String> {
     let mut out = Vec::new();
     for raw in path.split('.') {
@@ -502,6 +526,7 @@ fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, String> {
     Ok(out)
 }
 
+#[allow(dead_code)]
 fn append_segment(walked: &mut String, segment: &PathSegment) {
     match segment {
         PathSegment::Field(name) => {
@@ -516,6 +541,7 @@ fn append_segment(walked: &mut String, segment: &PathSegment) {
     }
 }
 
+#[allow(dead_code)]
 fn descend<'a>(
     cursor: &'a mut serde_json::Value,
     segment: &PathSegment,
@@ -531,6 +557,7 @@ fn descend<'a>(
     }
 }
 
+#[allow(dead_code)]
 fn set_leaf(
     cursor: &mut serde_json::Value,
     segment: &PathSegment,
@@ -675,5 +702,45 @@ mod tests {
     fn set_at_path_empty_path_errors() {
         let mut root = serde_json::json!({});
         assert!(set_at_path(&mut root, "", serde_json::json!(1)).is_err());
+    }
+
+    #[test]
+    fn apply_settings_update_changes_pane_gap_and_returns_ron() {
+        let mut settings = base_settings();
+        let ron_bytes =
+            apply_settings_update(&mut settings, "layout.pane.gap", serde_json::json!(16.0))
+                .expect("apply ok");
+        assert_eq!(settings.layout.pane.gap, 16.0);
+        assert!(ron_bytes.contains("gap"));
+        assert!(ron_bytes.contains("16"));
+        let reparsed: AppSettings = ron::de::from_str(&ron_bytes).expect("RON parses");
+        assert_eq!(reparsed.layout.pane.gap, 16.0);
+    }
+
+    #[test]
+    fn apply_settings_update_changes_top_level_bool() {
+        let mut settings = base_settings();
+        apply_settings_update(&mut settings, "auto_update", serde_json::json!(true)).unwrap();
+        assert!(settings.auto_update);
+    }
+
+    #[test]
+    fn apply_settings_update_unknown_path_errors_without_mutating() {
+        let mut settings = base_settings();
+        let original_gap = settings.layout.pane.gap;
+        let err =
+            apply_settings_update(&mut settings, "layout.nope", serde_json::json!(1)).unwrap_err();
+        assert!(err.contains("layout.nope"));
+        assert_eq!(settings.layout.pane.gap, original_gap);
+    }
+
+    #[test]
+    fn apply_settings_update_type_mismatch_errors_without_mutating() {
+        let mut settings = base_settings();
+        let original_auto = settings.auto_update;
+        let err = apply_settings_update(&mut settings, "auto_update", serde_json::json!("yes"))
+            .unwrap_err();
+        assert!(!err.is_empty());
+        assert_eq!(settings.auto_update, original_auto);
     }
 }
