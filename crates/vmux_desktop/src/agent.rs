@@ -47,6 +47,7 @@ pub(crate) struct AgentProvider {
 }
 
 pub(crate) struct PreparedAgentLaunch {
+    pub(crate) kind: AgentKind,
     pub(crate) cwd: PathBuf,
     pub(crate) launch: crate::terminal::launch::TerminalLaunch,
 }
@@ -144,6 +145,7 @@ fn prepare_for_kind(kind: AgentKind, cwd: &Path) -> Result<PreparedAgentLaunch, 
     strategies.register(Box::new(CodexStrategy));
     let launch = build_agent_launch(kind, cwd, None, &strategies)?;
     Ok(PreparedAgentLaunch {
+        kind,
         cwd: cwd.to_path_buf(),
         launch,
     })
@@ -921,10 +923,10 @@ fn handle_agent_launch_requests(
         commands.entity(terminal).insert((
             prepared.launch,
             AgentSession {
-                kind: AgentKind::Vibe,
+                kind: prepared.kind,
             },
             PendingAgentSession {
-                kind: AgentKind::Vibe,
+                kind: prepared.kind,
                 spawn_time: std::time::SystemTime::now(),
                 cwd: prepared.cwd.clone(),
             },
@@ -979,6 +981,7 @@ mod tests {
 
     fn fake_prepare(cwd: &std::path::Path) -> Result<PreparedAgentLaunch, String> {
         Ok(PreparedAgentLaunch {
+            kind: AgentKind::Vibe,
             cwd: cwd.to_path_buf(),
             launch: crate::terminal::launch::TerminalLaunch {
                 command: "echo".to_string(),
