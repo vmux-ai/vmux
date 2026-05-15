@@ -168,13 +168,69 @@ Bridge: rkyv events host↔wasm via `BinJsEmitEventPlugin` (already wired). New 
 
 ## Auth
 
-`vmux_agent::keys` module wraps `keyring::Entry`:
+**Storage** — macOS Keychain via the `keyring` crate.
 
 - `service = "ai.vmux.agent"`, `account = "anthropic" | "mistral" | "openai"`
-- Settings page (separate `vmux://settings/keys` page) with paste field per provider, Save → keychain, Test button (1-token completion to verify).
-- On chat start, GUI strategy loads key; if missing, opens settings before first turn.
+- Accessibility flag `KSecAttrAccessibleWhenUnlockedThisDeviceOnly` — the user gets a Touch ID prompt the first time vmux reads a key after machine restart, no prompt for subsequent reads in the session
+- Keys never get logged, never get written to `moonshine-save` snapshots, never appear unmasked in the UI after save
 
-No env-var fallback in v1 (keep one path; add later if requested).
+**Inline first-time prompt** — in the agent pane itself, not a settings detour.
+
+When a user opens `vmux://agent/<provider>/<sid>` and the keychain entry for that provider is missing, the chat pane renders a setup card instead of the input box:
+
+```
+┌─ New chat — Claude ─────────────────────────┐
+│                                              │
+│  Set up your Anthropic API key to continue   │
+│                                              │
+│  ┌──────────────────────────────────────┐    │
+│  │ sk-ant-...                           │    │
+│  └──────────────────────────────────────┘    │
+│  [Save]   [Get an API key ↗]                 │
+│                                              │
+│  Stored in macOS Keychain, never in vmux's   │
+│  saved state.                                │
+└──────────────────────────────────────────────┘
+```
+
+- Paste → Save → vmux runs a 1-token probe (`max_tokens: 1` request with a stub prompt) to verify
+- On success the card disappears and the normal input box appears
+- On failure the card stays and shows the error (invalid key, rate limit, network)
+
+**Settings page** at `vmux://settings/keys` for management outside the per-pane flow:
+
+```
+┌─ API keys ────────────────────────────────────┐
+│                                                │
+│  Anthropic    ● configured     [Edit] [Test]  │
+│  Mistral      ○ not set        [Add]          │
+│  OpenAI       ● configured     [Edit] [Test]  │
+│                                                │
+└────────────────────────────────────────────────┘
+```
+
+- Configured rows display only the last 5 chars: `sk-ant-···abc12`
+- Edit replaces the stored key; Test re-runs the probe; Remove deletes the keychain entry
+- Each row links to the provider's API-key console:
+  - Anthropic — `https://console.anthropic.com/settings/keys`
+  - Mistral — `https://console.mistral.ai/api-keys`
+  - OpenAI — `https://platform.openai.com/api-keys`
+
+**Module shape:**
+
+```rust
+// crates/vmux_agent/src/keys.rs
+pub struct ApiKeys;
+
+impl ApiKeys {
+    pub fn get(provider: ProviderId) -> Result<Option<String>, KeyringError> { ... }
+    pub fn set(provider: ProviderId, key: &str) -> Result<(), KeyringError> { ... }
+    pub fn remove(provider: ProviderId) -> Result<(), KeyringError> { ... }
+    pub async fn probe(provider: ProviderId, key: &str) -> Result<(), ProbeError> { ... }
+}
+```
+
+No env-var fallback in v1 (single source of truth — add later if requested).
 
 ## Tool annotations
 
