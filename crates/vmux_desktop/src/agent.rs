@@ -105,6 +105,15 @@ impl AgentProviders {
     }
 }
 
+pub(crate) fn default_space_dir() -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"));
+    let dir = home.join(".vmux").join("default").join("space");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
 #[derive(Message)]
 pub(crate) struct AgentLaunchRequested {
     pub(crate) provider_id: String,
