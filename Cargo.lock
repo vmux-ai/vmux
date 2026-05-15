@@ -9074,6 +9074,7 @@ dependencies = [
  "bevy",
  "chrono",
  "notify 6.1.1",
+ "reqwest",
  "serde",
  "serde_json",
  "vmux_core",

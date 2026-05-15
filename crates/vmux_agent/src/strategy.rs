@@ -145,7 +145,32 @@ mod tests {
                 AgentVariant::Gui
             }
         }
-        impl crate::gui::GuiAgentStrategy for StubGui {}
+        impl crate::gui::GuiAgentStrategy for StubGui {
+            fn models(&self) -> &'static [&'static str] {
+                &[]
+            }
+            fn default_model(&self) -> &'static str {
+                ""
+            }
+            fn endpoint(&self) -> &'static str {
+                "stub://"
+            }
+            fn build_request(
+                &self,
+                _: &str,
+                _: &[crate::message::Message],
+                _: &[crate::stream::ToolDef],
+                _: &str,
+            ) -> reqwest::Request {
+                reqwest::Client::new()
+                    .get("http://localhost/")
+                    .build()
+                    .unwrap()
+            }
+            fn parse_sse_event(&self, _: &str) -> Option<crate::stream::StreamEvent> {
+                None
+            }
+        }
 
         struct StubCli;
         impl AgentStrategy for StubCli {
