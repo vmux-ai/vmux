@@ -120,9 +120,8 @@ pub fn bootout(profile: &str) -> std::io::Result<()> {
 }
 
 /// `launchctl kickstart -k gui/<uid>/<label>` -- restart cleanly.
-pub fn kickstart(profile: &str) -> std::io::Result<()> {
+pub fn kickstart(label: &str) -> std::io::Result<()> {
     let uid = current_uid();
-    let label = crate::launchd_label(profile);
     let status = Command::new("launchctl")
         .args(["kickstart", "-k", &format!("gui/{uid}/{label}")])
         .status()?;
@@ -143,7 +142,7 @@ pub fn ensure_running(profile: &str, binary_path: &Path) -> std::io::Result<()> 
         let _ = bootout(profile);
     }
     bootstrap(&plist)?;
-    kickstart(profile)
+    kickstart(&crate::launchd_label(profile))
 }
 
 #[cfg(test)]

@@ -35,3 +35,7 @@ pub fn is_bundled() -> bool {
 
 /// Plist filename of the embedded launchd agent (matches packaging/macos/ai.vmux.service.plist).
 pub const EMBEDDED_AGENT_PLIST: &str = "ai.vmux.service.plist";
+
+/// launchd label of the embedded agent (matches the <Label> in
+/// packaging/macos/ai.vmux.service.plist).
+pub const EMBEDDED_AGENT_LABEL: &str = "ai.vmux.service";
