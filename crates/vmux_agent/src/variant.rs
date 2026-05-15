@@ -34,8 +34,14 @@ mod tests {
 
     #[test]
     fn empty_segment_resolves_to_gui() {
-        assert_eq!(AgentVariant::from_url_segment(Some("")), Some(AgentVariant::Gui));
-        assert_eq!(AgentVariant::from_url_segment(None), Some(AgentVariant::Gui));
+        assert_eq!(
+            AgentVariant::from_url_segment(Some("")),
+            Some(AgentVariant::Gui)
+        );
+        assert_eq!(
+            AgentVariant::from_url_segment(None),
+            Some(AgentVariant::Gui)
+        );
     }
 
     #[test]

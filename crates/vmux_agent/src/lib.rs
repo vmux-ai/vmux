@@ -11,7 +11,7 @@ pub mod vibe;
 
 pub use kind::AgentKind;
 pub use kind::AgentUrl;
-pub use variant::AgentVariant;
 pub use mcp::McpServerConfig;
 pub use plugin::AgentSessionPlugin;
 pub use session::AgentSessionExited;
+pub use variant::AgentVariant;

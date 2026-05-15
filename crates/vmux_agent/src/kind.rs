@@ -57,13 +57,15 @@ impl AgentUrl {
         let body = url.strip_prefix("vmux://agent/")?;
         let mut segs = body.split('/').filter(|s| !s.is_empty());
         let kind = AgentKind::from_url_segment(segs.next()?)?;
-        let next = segs.next()?;
-        if next == "cli" {
-            let sid = segs.next()?.to_string();
-            Some(AgentUrl { kind, variant: AgentVariant::Cli, sid })
-        } else {
-            Some(AgentUrl { kind, variant: AgentVariant::Gui, sid: next.to_string() })
+        let after_kind = segs.next()?;
+        let (variant, sid) = match AgentVariant::from_url_segment(Some(after_kind)) {
+            Some(AgentVariant::Cli) => (AgentVariant::Cli, segs.next()?.to_string()),
+            _ => (AgentVariant::Gui, after_kind.to_string()),
+        };
+        if segs.next().is_some() {
+            return None;
         }
+        Some(AgentUrl { kind, variant, sid })
     }
 
     pub fn format(&self) -> String {
@@ -78,7 +80,10 @@ mod tests {
     #[test]
     fn from_url_segment_recognizes_known_kinds() {
         assert_eq!(AgentKind::from_url_segment("vibe"), Some(AgentKind::Vibe));
-        assert_eq!(AgentKind::from_url_segment("claude"), Some(AgentKind::Claude));
+        assert_eq!(
+            AgentKind::from_url_segment("claude"),
+            Some(AgentKind::Claude)
+        );
         assert_eq!(AgentKind::from_url_segment("codex"), Some(AgentKind::Codex));
         assert_eq!(AgentKind::from_url_segment("nope"), None);
     }
@@ -92,8 +97,14 @@ mod tests {
 
     #[test]
     fn url_prefix_returns_nested_form() {
-        assert_eq!(AgentKind::Vibe.url_prefix(AgentVariant::Gui), "vmux://agent/vibe/");
-        assert_eq!(AgentKind::Claude.url_prefix(AgentVariant::Cli), "vmux://agent/claude/cli/");
+        assert_eq!(
+            AgentKind::Vibe.url_prefix(AgentVariant::Gui),
+            "vmux://agent/vibe/"
+        );
+        assert_eq!(
+            AgentKind::Claude.url_prefix(AgentVariant::Cli),
+            "vmux://agent/claude/cli/"
+        );
     }
 
     #[test]
@@ -126,5 +137,21 @@ mod tests {
         };
         assert_eq!(u.format(), "vmux://agent/codex/cli/xyz");
         assert_eq!(AgentUrl::parse(&u.format()), Some(u));
+    }
+
+    #[test]
+    fn trailing_garbage_after_gui_sid_rejected() {
+        assert_eq!(AgentUrl::parse("vmux://agent/vibe/abc/extra"), None);
+    }
+
+    #[test]
+    fn trailing_garbage_after_cli_sid_rejected() {
+        assert_eq!(AgentUrl::parse("vmux://agent/vibe/cli/abc/extra"), None);
+    }
+
+    #[test]
+    fn prefix_only_url_rejected() {
+        assert_eq!(AgentUrl::parse("vmux://agent/vibe/"), None);
+        assert_eq!(AgentUrl::parse("vmux://agent/vibe/cli/"), None);
     }
 }
