@@ -1,3 +1,4 @@
+use bevy::ecs::message::MessageReader;
 use bevy::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
@@ -13,20 +14,25 @@ pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
-        app.configure_sets(
-            Startup,
-            SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
-        )
-        .init_resource::<vmux_layout::settings::EffectiveStartupUrl>()
-        .add_systems(Startup, load_settings.in_set(SettingsLoadSet))
-        .add_systems(
-            Startup,
-            update_effective_startup_url
-                .after(SettingsLoadSet)
-                .before(vmux_layout::LayoutStartupSet::Post),
-        )
-        .add_systems(Update, reload_settings_on_change)
-        .add_systems(Update, update_effective_startup_url);
+        app.init_resource::<LastSelfWriteHash>()
+            .add_message::<SettingsWriteRequest>()
+            .configure_sets(
+                Startup,
+                SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
+            )
+            .init_resource::<vmux_layout::settings::EffectiveStartupUrl>()
+            .add_systems(Startup, load_settings.in_set(SettingsLoadSet))
+            .add_systems(
+                Startup,
+                update_effective_startup_url
+                    .after(SettingsLoadSet)
+                    .before(vmux_layout::LayoutStartupSet::Post),
+            )
+            .add_systems(
+                Update,
+                (persist_settings_to_disk, reload_settings_on_change).chain(),
+            )
+            .add_systems(Update, update_effective_startup_url);
     }
 }
 
@@ -386,10 +392,10 @@ fn reload_settings_on_change(
     mut settings: ResMut<AppSettings>,
     mut layout_settings: ResMut<LayoutSettings>,
     mut confirm_close: ResMut<ConfirmCloseSettings>,
+    last_hash: Res<LastSelfWriteHash>,
 ) {
     let Some(watcher) = watcher else { return };
 
-    // Drain all pending notifications
     let rx = watcher.rx.lock().unwrap();
     let mut changed = false;
     while rx.try_recv().is_ok() {
@@ -401,20 +407,27 @@ fn reload_settings_on_change(
     }
 
     match std::fs::read_to_string(&watcher.path) {
-        Ok(text) => match ron::de::from_str::<AppSettings>(&text) {
-            Ok(new_settings) => {
-                bevy::log::info!("Settings reloaded from {}", watcher.path.display());
-                *layout_settings = new_settings.layout.clone();
-                confirm_close.enabled = new_settings
-                    .terminal
-                    .as_ref()
-                    .is_none_or(|terminal| terminal.confirm_close);
-                *settings = new_settings;
+        Ok(text) => {
+            let current_hash = settings_content_hash(text.as_bytes());
+            if last_hash.0 == Some(current_hash) {
+                bevy::log::debug!("settings: skipping reload (matches last self-write)");
+                return;
             }
-            Err(e) => {
-                bevy::log::warn!("Settings reload failed (parse error): {e}");
+            match ron::de::from_str::<AppSettings>(&text) {
+                Ok(new_settings) => {
+                    bevy::log::info!("Settings reloaded from {}", watcher.path.display());
+                    *layout_settings = new_settings.layout.clone();
+                    confirm_close.enabled = new_settings
+                        .terminal
+                        .as_ref()
+                        .is_none_or(|terminal| terminal.confirm_close);
+                    *settings = new_settings;
+                }
+                Err(e) => {
+                    bevy::log::warn!("Settings reload failed (parse error): {e}");
+                }
             }
-        },
+        }
         Err(e) => {
             bevy::log::warn!("Settings reload failed (read error): {e}");
         }
@@ -588,6 +601,59 @@ fn set_leaf(
     }
 }
 
+#[derive(Resource, Default, Debug)]
+pub struct LastSelfWriteHash(pub Option<u64>);
+
+#[derive(Message, Debug, Clone)]
+pub struct SettingsWriteRequest {
+    pub ron_bytes: String,
+}
+
+fn settings_content_hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn persist_settings_to_disk(
+    mut reader: MessageReader<SettingsWriteRequest>,
+    watcher: Option<Res<SettingsWatcher>>,
+    mut last_hash: ResMut<LastSelfWriteHash>,
+) {
+    for request in reader.read() {
+        let Some(watcher) = watcher.as_deref() else {
+            bevy::log::warn!("settings: no watcher path; cannot persist");
+            continue;
+        };
+        let bytes = request.ron_bytes.as_bytes();
+        let hash = settings_content_hash(bytes);
+        last_hash.0 = Some(hash);
+        if let Err(e) = atomic_write(&watcher.path, bytes) {
+            bevy::log::warn!(
+                "settings: failed to persist {}: {e}",
+                watcher.path.display()
+            );
+        }
+    }
+}
+
+fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "settings path has no parent",
+        )
+    })?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    use std::io::Write;
+    tmp.write_all(bytes)?;
+    tmp.flush()?;
+    tmp.persist(path)
+        .map_err(|e| std::io::Error::other(format!("persist failed: {e}")))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -742,5 +808,14 @@ mod tests {
             .unwrap_err();
         assert!(!err.is_empty());
         assert_eq!(settings.auto_update, original_auto);
+    }
+
+    #[test]
+    fn content_hash_is_deterministic() {
+        let h1 = settings_content_hash(b"hello");
+        let h2 = settings_content_hash(b"hello");
+        let h3 = settings_content_hash(b"world");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, h3);
     }
 }
