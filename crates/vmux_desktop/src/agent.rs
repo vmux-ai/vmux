@@ -313,7 +313,8 @@ pub(crate) fn build_agent_launch(
         .ok_or_else(|| format!("{exe_name} executable not found"))?;
     let mcp_cfg = mcp::resolve(cwd)?;
     let args = strategy.build_args(&mcp_cfg, session_id);
-    let env = strategy.build_env(&mcp_cfg);
+    let mut env: Vec<(String, String)> = std::env::vars().collect();
+    env.extend(strategy.build_env(&mcp_cfg));
     Ok(crate::terminal::launch::TerminalLaunch {
         command: exe_path.to_string_lossy().to_string(),
         args,
