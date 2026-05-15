@@ -1208,7 +1208,7 @@ fn on_command_bar_action(
                             custom_keyboard_restore = true;
                         }
                     } else {
-                        let (_, _, active_stack) = focused_stack(
+                        let (_, active_pane_opt, active_stack) = focused_stack(
                             &tab_q,
                             &all_children,
                             &leaf_panes,
@@ -1216,6 +1216,7 @@ fn on_command_bar_action(
                             &pane_children,
                             &stack_ts,
                         );
+                        let mut updated_existing = false;
                         if let Some(tab) = active_stack {
                             for browser_e in &content_browsers {
                                 let is_child = child_of_q
@@ -1225,8 +1226,31 @@ fn on_command_bar_action(
                                     .unwrap_or(false);
                                 if is_child {
                                     commands.entity(browser_e).insert(WebviewSource::new(&url));
+                                    updated_existing = true;
                                 }
                             }
+                        }
+                        if !updated_existing && let Some(pane_e) = active_pane_opt {
+                            let stack_e = commands
+                                .spawn((
+                                    crate::layout::stack::stack_bundle(),
+                                    LastActivatedAt::now(),
+                                    ChildOf(pane_e),
+                                ))
+                                .id();
+                            commands.entity(stack_e).insert(PageMetadata {
+                                url: url.clone(),
+                                title: url.clone(),
+                                ..default()
+                            });
+                            let browser_e = commands
+                                .spawn((
+                                    Browser::new(&mut meshes, &mut webview_mt, &url),
+                                    ChildOf(stack_e),
+                                ))
+                                .id();
+                            commands.entity(browser_e).insert(CefKeyboardTarget);
+                            custom_keyboard_restore = true;
                         }
                     }
                 }
