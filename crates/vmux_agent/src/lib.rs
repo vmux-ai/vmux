@@ -2,6 +2,7 @@ pub mod claude;
 pub mod cli_trait;
 pub mod codex;
 pub mod exec;
+pub mod gui;
 pub mod kind;
 pub mod mcp;
 pub mod plugin;
@@ -11,6 +12,7 @@ pub mod variant;
 pub mod vibe;
 
 pub use cli_trait::CliAgentStrategy;
+pub use gui::GuiAgentStrategy;
 pub use kind::AgentKind;
 pub use kind::AgentUrl;
 pub use mcp::McpServerConfig;
