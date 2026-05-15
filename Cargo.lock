@@ -9073,6 +9073,7 @@ version = "0.0.9"
 dependencies = [
  "bevy",
  "chrono",
+ "crossbeam-channel",
  "notify 6.1.1",
  "reqwest",
  "serde",

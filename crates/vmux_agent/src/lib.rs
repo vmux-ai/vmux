@@ -14,6 +14,9 @@ pub mod run_state;
 pub mod session;
 pub mod strategy;
 pub mod stream;
+pub mod systems {
+    pub mod process_input;
+}
 pub mod variant;
 pub mod vibe;
 
