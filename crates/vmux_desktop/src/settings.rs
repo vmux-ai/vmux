@@ -435,6 +435,132 @@ fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
     });
 }
 
+#[allow(dead_code)]
+pub(crate) fn set_at_path(
+    root: &mut serde_json::Value,
+    path: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("empty settings path".to_string());
+    }
+    let segments = parse_path_segments(path)?;
+    let (last, parents) = segments
+        .split_last()
+        .ok_or_else(|| "empty settings path".to_string())?;
+
+    let mut cursor = root;
+    let mut walked = String::new();
+    for segment in parents {
+        append_segment(&mut walked, segment);
+        cursor = descend(cursor, segment, &walked)?;
+    }
+    append_segment(&mut walked, last);
+    set_leaf(cursor, last, &walked, value)
+}
+
+#[derive(Debug)]
+enum PathSegment {
+    Field(String),
+    Index(usize),
+}
+
+fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, String> {
+    let mut out = Vec::new();
+    for raw in path.split('.') {
+        if raw.is_empty() {
+            return Err(format!("empty segment in path: {path}"));
+        }
+        let mut chars = raw.chars();
+        let mut name = String::new();
+        for ch in chars.by_ref() {
+            if ch == '[' {
+                break;
+            }
+            name.push(ch);
+        }
+        if name.is_empty() {
+            return Err(format!("missing field name before '[' in {raw}"));
+        }
+        out.push(PathSegment::Field(name));
+        let mut tail: String = chars.collect();
+        while !tail.is_empty() {
+            let close = tail
+                .find(']')
+                .ok_or_else(|| format!("unclosed '[' in {raw}"))?;
+            let idx_str = &tail[..close];
+            let idx: usize = idx_str
+                .parse()
+                .map_err(|_| format!("non-integer index '[{idx_str}]' in {raw}"))?;
+            out.push(PathSegment::Index(idx));
+            tail = tail[close + 1..].to_string();
+            if !tail.is_empty() && !tail.starts_with('[') {
+                return Err(format!("unexpected text after ']' in {raw}: {tail}"));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn append_segment(walked: &mut String, segment: &PathSegment) {
+    match segment {
+        PathSegment::Field(name) => {
+            if !walked.is_empty() {
+                walked.push('.');
+            }
+            walked.push_str(name);
+        }
+        PathSegment::Index(i) => {
+            walked.push_str(&format!("[{i}]"));
+        }
+    }
+}
+
+fn descend<'a>(
+    cursor: &'a mut serde_json::Value,
+    segment: &PathSegment,
+    walked: &str,
+) -> Result<&'a mut serde_json::Value, String> {
+    match segment {
+        PathSegment::Field(name) => cursor
+            .get_mut(name.as_str())
+            .ok_or_else(|| format!("unknown setting path: {walked}")),
+        PathSegment::Index(i) => cursor
+            .get_mut(*i)
+            .ok_or_else(|| format!("unknown setting path: {walked}")),
+    }
+}
+
+fn set_leaf(
+    cursor: &mut serde_json::Value,
+    segment: &PathSegment,
+    walked: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    match segment {
+        PathSegment::Field(name) => {
+            let map = cursor
+                .as_object_mut()
+                .ok_or_else(|| format!("cannot index field on non-object at {walked}"))?;
+            if !map.contains_key(name) {
+                return Err(format!("unknown setting path: {walked}"));
+            }
+            map.insert(name.clone(), value);
+            Ok(())
+        }
+        PathSegment::Index(i) => {
+            let arr = cursor
+                .as_array_mut()
+                .ok_or_else(|| format!("cannot index by [{i}] on non-array at {walked}"))?;
+            if *i >= arr.len() {
+                return Err(format!("unknown setting path: {walked}"));
+            }
+            arr[*i] = value;
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,5 +620,60 @@ mod tests {
             original.shortcuts.chord_timeout_ms
         );
         assert_eq!(recovered.auto_update, original.auto_update);
+    }
+
+    #[test]
+    fn set_at_path_replaces_nested_object_value() {
+        let mut root = serde_json::json!({"layout": {"pane": {"gap": 8.0}}});
+        set_at_path(&mut root, "layout.pane.gap", serde_json::json!(12.0)).unwrap();
+        assert_eq!(root["layout"]["pane"]["gap"], serde_json::json!(12.0));
+    }
+
+    #[test]
+    fn set_at_path_replaces_array_element_field() {
+        let mut root = serde_json::json!({
+            "terminal": {"themes": [{"name": "default", "font_size": 14.0}]}
+        });
+        set_at_path(
+            &mut root,
+            "terminal.themes[0].font_size",
+            serde_json::json!(16.0),
+        )
+        .unwrap();
+        assert_eq!(
+            root["terminal"]["themes"][0]["font_size"],
+            serde_json::json!(16.0)
+        );
+    }
+
+    #[test]
+    fn set_at_path_top_level_leaf() {
+        let mut root = serde_json::json!({"auto_update": true});
+        set_at_path(&mut root, "auto_update", serde_json::json!(false)).unwrap();
+        assert_eq!(root["auto_update"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn set_at_path_unknown_key_errors() {
+        let mut root = serde_json::json!({"layout": {}});
+        let err = set_at_path(&mut root, "layout.nope", serde_json::json!(1)).unwrap_err();
+        assert!(
+            err.contains("layout.nope"),
+            "error must mention path: {err}"
+        );
+    }
+
+    #[test]
+    fn set_at_path_array_out_of_bounds_errors() {
+        let mut root = serde_json::json!({"themes": [{"font_size": 14.0}]});
+        let err =
+            set_at_path(&mut root, "themes[5].font_size", serde_json::json!(16.0)).unwrap_err();
+        assert!(err.contains("themes[5]"), "error must mention path: {err}");
+    }
+
+    #[test]
+    fn set_at_path_empty_path_errors() {
+        let mut root = serde_json::json!({});
+        assert!(set_at_path(&mut root, "", serde_json::json!(1)).is_err());
     }
 }
