@@ -6,6 +6,7 @@ use crate::AgentKind;
 use crate::AgentVariant;
 use crate::app::AppAgentStrategy;
 use crate::cli_trait::CliAgentStrategy;
+use crate::gui::GuiAgentStrategy;
 use crate::{AgentKind, AgentVariant};
 
 pub trait AgentStrategy: Send + Sync + 'static {
@@ -15,24 +16,35 @@ pub trait AgentStrategy: Send + Sync + 'static {
 
 pub enum BoxedStrategy {
     Cli(Box<dyn CliAgentStrategy>),
+    Gui(Box<dyn GuiAgentStrategy>),
 }
 
 impl BoxedStrategy {
     pub fn kind(&self) -> AgentKind {
         match self {
             BoxedStrategy::Cli(s) => s.kind(),
+            BoxedStrategy::Gui(s) => s.kind(),
         }
     }
 
     pub fn variant(&self) -> AgentVariant {
         match self {
             BoxedStrategy::Cli(s) => s.variant(),
+            BoxedStrategy::Gui(s) => s.variant(),
         }
     }
 
     pub fn as_cli(&self) -> Option<&dyn CliAgentStrategy> {
         match self {
             BoxedStrategy::Cli(s) => Some(s.as_ref()),
+            BoxedStrategy::Gui(_) => None,
+        }
+    }
+
+    pub fn as_gui(&self) -> Option<&dyn GuiAgentStrategy> {
+        match self {
+            BoxedStrategy::Gui(s) => Some(s.as_ref()),
+            BoxedStrategy::Cli(_) => None,
         }
     }
 }
@@ -225,5 +237,60 @@ mod tests {
         s.register_app(Box::new(App));
         assert!(s.get_cli(AgentKind::Claude).is_some());
         assert!(s.get_app_by_provider_model("p", "m").is_some());
+    }
+
+    #[test]
+    fn registers_cli_and_gui_independently_for_same_kind() {
+        struct StubGui;
+        impl AgentStrategy for StubGui {
+            fn kind(&self) -> AgentKind {
+                AgentKind::Vibe
+            }
+            fn variant(&self) -> AgentVariant {
+                AgentVariant::Gui
+            }
+        }
+        impl crate::gui::GuiAgentStrategy for StubGui {}
+
+        struct StubCli;
+        impl AgentStrategy for StubCli {
+            fn kind(&self) -> AgentKind {
+                AgentKind::Vibe
+            }
+            fn variant(&self) -> AgentVariant {
+                AgentVariant::Cli
+            }
+        }
+        impl CliAgentStrategy for StubCli {
+            fn sessions_root(&self) -> PathBuf {
+                PathBuf::from("/tmp/none")
+            }
+            fn build_args(&self, _: &McpServerConfig, _: Option<&str>) -> Vec<String> {
+                vec![]
+            }
+            fn build_env(&self, _: &McpServerConfig) -> Vec<(String, String)> {
+                vec![]
+            }
+            fn discover_session(
+                &self,
+                _: &Path,
+                _: SystemTime,
+                _: &HashSet<String>,
+            ) -> Option<String> {
+                None
+            }
+            fn detect_end_time(&self, _: &str) -> bool {
+                false
+            }
+        }
+
+        let mut s = AgentStrategies::default();
+        s.register_cli(Box::new(StubCli));
+        s.register_gui(Box::new(StubGui));
+
+        assert!(s.get(AgentKind::Vibe, AgentVariant::Cli).is_some());
+        assert!(s.get(AgentKind::Vibe, AgentVariant::Gui).is_some());
+        assert!(s.get_cli(AgentKind::Vibe).is_some());
+        assert!(s.get_gui(AgentKind::Vibe).is_some());
     }
 }
