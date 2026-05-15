@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarOpenEvent, CommandBarReadyEvent,
     CommandBarRenderedEvent, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
-    PathEntry, command_bar_open_should_ack, command_bar_open_should_reset_input,
+    PathEntry, command_bar_open_should_ack, command_bar_open_should_reset_input, looks_like_url,
 };
 use vmux_command::keyboard::{
     CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code,
@@ -459,6 +459,8 @@ pub fn App() -> Element {
                                                 }
                                             } else if url.is_empty() {
                                                 span { class: "text-base text-foreground", "Search" }
+                                            } else if looks_like_url(url) {
+                                                span { class: "min-w-0 break-all text-base text-foreground", "Open \"{url}\"" }
                                             } else {
                                                 span { class: "min-w-0 break-all text-base text-foreground", "Search \"{url}\"" }
                                             }
