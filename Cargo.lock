@@ -9069,7 +9069,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vmux_agent"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "bevy",
  "chrono",
@@ -9081,7 +9081,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_cli"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -9093,7 +9093,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_command"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "bevy",
  "bevy_ecs",
@@ -9112,7 +9112,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_core"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "bevy",
  "bevy_ecs",
@@ -9125,7 +9125,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_desktop"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "bevy",
  "bevy_cef",
@@ -9163,7 +9163,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_history"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "bevy",
  "bevy_cef",
@@ -9182,7 +9182,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_layout"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "bevy",
  "bevy_asset",
@@ -9210,7 +9210,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_macro"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9219,7 +9219,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_mcp"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -9231,7 +9231,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_service"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "alacritty_terminal",
  "bevy",
@@ -9259,7 +9259,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_space"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "dioxus",
  "rkyv",
@@ -9273,7 +9273,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_terminal"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "bevy",
  "bevy_cef",
@@ -9290,7 +9290,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_ui"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "dioxus",
  "dioxus-primitives",
@@ -9307,7 +9307,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_webview_app"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "bevy",
  "bevy_cef",
