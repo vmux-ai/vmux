@@ -1,4 +1,14 @@
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    bevy::prelude::Reflect,
+)]
 pub enum AgentVariant {
     Gui,
     Cli,

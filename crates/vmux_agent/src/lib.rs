@@ -1,6 +1,7 @@
 pub mod claude;
 pub mod cli_trait;
 pub mod codex;
+pub mod components;
 pub mod exec;
 pub mod gui;
 pub mod kind;
@@ -14,6 +15,7 @@ pub mod variant;
 pub mod vibe;
 
 pub use cli_trait::CliAgentStrategy;
+pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};
 pub use gui::GuiAgentStrategy;
 pub use kind::AgentKind;
 pub use kind::AgentUrl;

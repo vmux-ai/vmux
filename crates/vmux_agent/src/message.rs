@@ -1,6 +1,7 @@
+use bevy::prelude::Reflect;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect)]
 pub enum Message {
     User {
         text: String,
@@ -15,12 +16,13 @@ pub enum Message {
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Reflect)]
 pub enum AssistantBlock {
     Text(String),
     ToolUse {
         call_id: String,
         name: String,
+        #[reflect(ignore)]
         args: serde_json::Value,
     },
 }
