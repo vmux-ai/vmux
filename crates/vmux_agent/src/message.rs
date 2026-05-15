@@ -22,8 +22,7 @@ pub enum AssistantBlock {
     ToolUse {
         call_id: String,
         name: String,
-        #[reflect(ignore)]
-        args: serde_json::Value,
+        args: String,
     },
 }
 
@@ -47,7 +46,7 @@ mod tests {
                 AssistantBlock::ToolUse {
                     call_id: "abc".into(),
                     name: "list_spaces".into(),
-                    args: serde_json::json!({}),
+                    args: "{}".to_string(),
                 },
             ],
         };
