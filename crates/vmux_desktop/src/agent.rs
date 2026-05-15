@@ -149,9 +149,9 @@ fn prepare_for_kind(kind: AgentKind, cwd: &Path) -> Result<PreparedAgentLaunch, 
     use vmux_agent::codex::CodexStrategy;
     use vmux_agent::vibe::VibeStrategy;
     let mut strategies = AgentStrategies::default();
-    strategies.register(Box::new(VibeStrategy));
-    strategies.register(Box::new(ClaudeStrategy));
-    strategies.register(Box::new(CodexStrategy));
+    strategies.register_cli(Box::new(VibeStrategy));
+    strategies.register_cli(Box::new(ClaudeStrategy));
+    strategies.register_cli(Box::new(CodexStrategy));
     let launch = build_agent_launch(kind, cwd, None, &strategies)?;
     Ok(PreparedAgentLaunch {
         kind,
@@ -307,8 +307,8 @@ pub(crate) fn build_agent_launch(
     strategies: &AgentStrategies,
 ) -> Result<crate::terminal::launch::TerminalLaunch, String> {
     let strategy = strategies
-        .get(kind)
-        .ok_or_else(|| format!("strategy not registered for {:?}", kind))?;
+        .get_cli(kind)
+        .ok_or_else(|| format!("CLI strategy not registered for {:?}", kind))?;
     let exe_name = kind.executable();
     let exe_path = vmux_agent::exec::find_executable(exe_name)
         .ok_or_else(|| format!("{exe_name} executable not found"))?;
@@ -539,7 +539,9 @@ fn spawn_vmux_tab(
                         bevy::log::warn!(
                             "spawn_fresh_agent_tab({kind:?}) failed: {e}; falling back to terminal"
                         );
-                        spawn_terminal_tab(pane, None, None, commands, meshes, webview_mt, settings);
+                        spawn_terminal_tab(
+                            pane, None, None, commands, meshes, webview_mt, settings,
+                        );
                     }
                     Ok(())
                 }
@@ -558,7 +560,9 @@ fn spawn_vmux_tab(
                         bevy::log::warn!(
                             "spawn_agent_resume_tab({kind:?}) failed: {e}; falling back to terminal"
                         );
-                        spawn_terminal_tab(pane, None, None, commands, meshes, webview_mt, settings);
+                        spawn_terminal_tab(
+                            pane, None, None, commands, meshes, webview_mt, settings,
+                        );
                     }
                     Ok(())
                 }

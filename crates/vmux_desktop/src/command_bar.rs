@@ -937,10 +937,12 @@ fn on_command_bar_action(
                                 .id();
                             commands.entity(term_e).insert(CefKeyboardTarget);
                         }
-                    } else if let Some(kind) = vmux_agent::AgentKind::all()
-                        .into_iter()
-                        .find(|k| url.starts_with(k.url_prefix(vmux_agent::AgentVariant::Cli).trim_end_matches('/')))
-                    {
+                    } else if let Some(kind) = vmux_agent::AgentKind::all().into_iter().find(|k| {
+                        url.starts_with(
+                            k.url_prefix(vmux_agent::AgentVariant::Cli)
+                                .trim_end_matches('/'),
+                        )
+                    }) {
                         let prefix = kind.url_prefix(vmux_agent::AgentVariant::Cli);
                         let id_part = url
                             .strip_prefix(&prefix)
@@ -1037,7 +1039,9 @@ fn on_command_bar_action(
                     let known_terminal =
                         parse_pid_from_url(&url).and_then(|p| pid_to_entity.get(&p).copied());
                     let known_agent = vmux_agent::AgentKind::all().into_iter().find_map(|k| {
-                        let id = url.strip_prefix(&k.url_prefix(vmux_agent::AgentVariant::Cli)).filter(|s| !s.is_empty())?;
+                        let id = url
+                            .strip_prefix(&k.url_prefix(vmux_agent::AgentVariant::Cli))
+                            .filter(|s| !s.is_empty())?;
                         agent_to_entity
                             .as_ref()
                             .and_then(|map| map.get(&(k, id.to_string())).copied())
@@ -1053,10 +1057,12 @@ fn on_command_bar_action(
                         writer_params
                             .p0()
                             .write(AppCommand::Terminal(TerminalCommand::New));
-                    } else if let Some(kind) = vmux_agent::AgentKind::all()
-                        .into_iter()
-                        .find(|k| url.starts_with(k.url_prefix(vmux_agent::AgentVariant::Cli).trim_end_matches('/')))
-                    {
+                    } else if let Some(kind) = vmux_agent::AgentKind::all().into_iter().find(|k| {
+                        url.starts_with(
+                            k.url_prefix(vmux_agent::AgentVariant::Cli)
+                                .trim_end_matches('/'),
+                        )
+                    }) {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
                             &all_children,

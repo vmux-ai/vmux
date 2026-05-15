@@ -46,7 +46,7 @@ pub fn format_agent_url(
     >,
 ) {
     for (sid, agent, mut meta) in &mut q {
-        let Some(strategy) = strategies.get(agent.kind) else {
+        let Some(strategy) = strategies.get_cli(agent.kind) else {
             continue;
         };
         let prefix = strategy.kind().url_prefix(AgentVariant::Cli);
@@ -100,7 +100,7 @@ mod url_tests {
     fn format_agent_url_emits_scheme_with_session_id() {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
-        strategies.register(Box::new(VibeStrategy));
+        strategies.register_cli(Box::new(VibeStrategy));
         app.insert_resource(strategies);
         app.add_systems(Update, format_agent_url);
 
@@ -123,7 +123,7 @@ mod url_tests {
     fn format_agent_url_emits_scheme_only_when_no_session_id() {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
-        strategies.register(Box::new(VibeStrategy));
+        strategies.register_cli(Box::new(VibeStrategy));
         app.insert_resource(strategies);
         app.add_systems(Update, format_agent_url);
 
@@ -170,7 +170,7 @@ pub fn discover_pending_agent_sessions(
 ) {
     let now = std::time::SystemTime::now();
     for (entity, pending) in &q {
-        let Some(strategy) = strategies.get(pending.kind) else {
+        let Some(strategy) = strategies.get_cli(pending.kind) else {
             continue;
         };
         let claimed: HashSet<String> = map
@@ -278,7 +278,10 @@ pub struct AgentSessionWatchers {
 pub fn start_agent_session_watchers(mut commands: Commands, strategies: Res<AgentStrategies>) {
     let mut receivers = Vec::new();
     let mut watchers = Vec::new();
-    for (_kind, strategy) in strategies.iter() {
+    for (_, boxed) in strategies.iter() {
+        let Some(strategy) = boxed.as_cli() else {
+            continue;
+        };
         let root = strategy.sessions_root();
         if std::fs::create_dir_all(&root).is_err() {
             continue;
@@ -328,7 +331,7 @@ pub fn detect_file_end_time_exit(
     sessioned: Query<(Entity, &AgentSession, &SessionId)>,
 ) {
     for (entity, agent, sid) in &sessioned {
-        let Some(strategy) = strategies.get(agent.kind) else {
+        let Some(strategy) = strategies.get_cli(agent.kind) else {
             continue;
         };
         if !strategy.detect_end_time(&sid.0) {
@@ -352,7 +355,7 @@ mod discovery_tests {
     fn pending_with_no_match_within_timeout_keeps_pending() {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
-        strategies.register(Box::new(VibeStrategy));
+        strategies.register_cli(Box::new(VibeStrategy));
         app.insert_resource(strategies);
         app.init_resource::<AgentSessionToEntity>();
         app.add_systems(Update, discover_pending_agent_sessions);
@@ -410,7 +413,7 @@ mod exit_tests {
 
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
-        strategies.register(Box::new(EndedStrategy));
+        strategies.register_cli(Box::new(EndedStrategy));
         app.insert_resource(strategies);
         app.add_message::<AgentSessionExited>();
         app.add_systems(Update, detect_file_end_time_exit);
