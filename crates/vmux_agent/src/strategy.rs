@@ -6,10 +6,35 @@ use crate::AgentKind;
 use crate::AgentVariant;
 use crate::app::AppAgentStrategy;
 use crate::cli_trait::CliAgentStrategy;
+use crate::{AgentKind, AgentVariant};
 
 pub trait AgentStrategy: Send + Sync + 'static {
     fn kind(&self) -> AgentKind;
     fn variant(&self) -> AgentVariant;
+}
+
+pub enum BoxedStrategy {
+    Cli(Box<dyn CliAgentStrategy>),
+}
+
+impl BoxedStrategy {
+    pub fn kind(&self) -> AgentKind {
+        match self {
+            BoxedStrategy::Cli(s) => s.kind(),
+        }
+    }
+
+    pub fn variant(&self) -> AgentVariant {
+        match self {
+            BoxedStrategy::Cli(s) => s.variant(),
+        }
+    }
+
+    pub fn as_cli(&self) -> Option<&dyn CliAgentStrategy> {
+        match self {
+            BoxedStrategy::Cli(s) => Some(s.as_ref()),
+        }
+    }
 }
 
 #[derive(Resource, Default)]
