@@ -411,14 +411,15 @@ pub(crate) fn spawn_browser_tab(
 }
 
 pub(crate) fn spawn_app_agent_tab(
-    kind: AgentKind,
+    provider: &str,
+    model: &str,
     pane: Entity,
     sid: &str,
-    url: &str,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-) -> Entity {
+    strategies: &AgentStrategies,
+) -> Option<Entity> {
     let tab = commands
         .spawn((
             crate::layout::stack::stack_bundle(),
@@ -426,22 +427,28 @@ pub(crate) fn spawn_app_agent_tab(
             ChildOf(pane),
         ))
         .id();
-    attach_app_agent_to_stack(tab, kind, sid, url, commands, meshes, webview_mt);
-    tab
+    attach_app_agent_to_stack(
+        tab, provider, model, sid, commands, meshes, webview_mt, strategies,
+    )?;
+    Some(tab)
 }
 
 pub(crate) fn attach_app_agent_to_stack(
     stack: Entity,
-    kind: AgentKind,
+    provider: &str,
+    model: &str,
     sid: &str,
-    url: &str,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-) {
+    strategies: &AgentStrategies,
+) -> Option<()> {
+    let strategy = strategies.get_app_by_provider_model(provider, model)?;
+    let kind = strategy.kind();
+    let url = format!("{}{sid}", vmux_agent::kind::app_url_prefix(provider, model));
     commands.entity(stack).insert(PageMetadata {
-        url: url.to_string(),
-        title: format!("App Agent ({:?})", kind),
+        url: url.clone(),
+        title: format!("{provider}/{model}"),
         ..default()
     });
     commands.entity(stack).insert((
@@ -449,46 +456,39 @@ pub(crate) fn attach_app_agent_to_stack(
             kind,
             variant: AgentVariant::App,
             sid: sid.to_string(),
-            provider: kind.as_url_segment().to_string(),
-            model: "echo-stub".to_string(),
+            provider: provider.to_string(),
+            model: model.to_string(),
         },
         vmux_agent::AgentMessages::default(),
         vmux_agent::AgentApprovalPolicy::default(),
         vmux_agent::AgentRunState::default(),
     ));
-    let placeholder = app_agent_placeholder_url(kind, sid);
+    let placeholder = app_agent_placeholder_url(provider, model, sid);
     commands.spawn((
         crate::browser::Browser::new(meshes, webview_mt, &placeholder),
         ChildOf(stack),
     ));
+    Some(())
 }
 
-pub(crate) fn app_agent_placeholder_url(kind: AgentKind, sid: &str) -> String {
+pub(crate) fn app_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> String {
     format!(
-        "data:text/html;charset=utf-8,<!doctype html><html><head><meta charset='utf-8'><title>App Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>App Agent ({kind:?})</h1><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the App agent design.</p></div></body></html>"
+        "data:text/html;charset=utf-8,<!doctype html><html><head><meta charset='utf-8'><title>App Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>App Agent</h1><p><code>{provider}</code> / <code>{model}</code></p><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the App agent design.</p></div></body></html>"
     )
 }
 
-pub(crate) fn parse_app_agent_url(url: &str) -> Option<(AgentKind, Option<String>)> {
-    for kind in AgentKind::all() {
-        let prefix = kind.url_prefix(AgentVariant::App);
-        let bare = prefix.trim_end_matches('/');
-        if url == bare {
-            return Some((kind, None));
-        }
-        if let Some(rest) = url.strip_prefix(&prefix) {
-            if rest.starts_with("cli/") || rest.starts_with("cli") && rest == "cli" {
-                return None;
-            }
-            let sid = if rest.is_empty() {
-                None
-            } else {
-                Some(rest.to_string())
-            };
-            return Some((kind, sid));
-        }
+pub(crate) fn parse_app_agent_url(url: &str) -> Option<(String, String, Option<String>)> {
+    let body = url.strip_prefix("vmux://agent/")?;
+    let segs: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
+    match segs.as_slice() {
+        [provider, model] => Some(((*provider).to_string(), (*model).to_string(), None)),
+        [provider, model, sid] => Some((
+            (*provider).to_string(),
+            (*model).to_string(),
+            Some((*sid).to_string()),
+        )),
+        _ => None,
     }
-    None
 }
 
 #[cfg(test)]
@@ -496,35 +496,34 @@ mod app_agent_url_tests {
     use super::*;
 
     #[test]
-    fn parse_app_agent_url_recognises_bare_kind() {
-        let (kind, sid) = parse_app_agent_url("vmux://agent/vibe").unwrap();
-        assert_eq!(kind, AgentKind::Vibe);
+    fn parse_app_agent_url_provider_model_only() {
+        let (provider, model, sid) = parse_app_agent_url("vmux://agent/openai/gpt-5.5").unwrap();
+        assert_eq!(provider, "openai");
+        assert_eq!(model, "gpt-5.5");
         assert!(sid.is_none());
     }
 
     #[test]
-    fn parse_app_agent_url_recognises_kind_with_slash() {
-        let (kind, sid) = parse_app_agent_url("vmux://agent/claude/").unwrap();
-        assert_eq!(kind, AgentKind::Claude);
-        assert!(sid.is_none());
+    fn parse_app_agent_url_with_sid() {
+        let (provider, model, sid) =
+            parse_app_agent_url("vmux://agent/anthropic/claude-opus-4.7/xHigh").unwrap();
+        assert_eq!(provider, "anthropic");
+        assert_eq!(model, "claude-opus-4.7");
+        assert_eq!(sid.as_deref(), Some("xHigh"));
     }
 
     #[test]
-    fn parse_app_agent_url_recognises_kind_with_sid() {
-        let (kind, sid) = parse_app_agent_url("vmux://agent/codex/abc-123").unwrap();
-        assert_eq!(kind, AgentKind::Codex);
-        assert_eq!(sid.as_deref(), Some("abc-123"));
+    fn parse_app_agent_url_rejects_single_segment() {
+        assert!(parse_app_agent_url("vmux://agent/vibe").is_none());
     }
 
     #[test]
-    fn parse_app_agent_url_rejects_cli_form() {
-        assert!(parse_app_agent_url("vmux://agent/vibe/cli/abc").is_none());
-        assert!(parse_app_agent_url("vmux://agent/vibe/cli/").is_none());
+    fn parse_app_agent_url_rejects_too_many_segments() {
+        assert!(parse_app_agent_url("vmux://agent/openai/gpt/sid/extra").is_none());
     }
 
     #[test]
-    fn parse_app_agent_url_rejects_unknown_kind() {
-        assert!(parse_app_agent_url("vmux://agent/nope/abc").is_none());
+    fn parse_app_agent_url_rejects_non_agent_host() {
         assert!(parse_app_agent_url("https://google.com").is_none());
     }
 }
@@ -644,55 +643,35 @@ fn spawn_vmux_tab(
         "agent" => {
             let path = parsed.path().trim_start_matches('/');
             let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-            let kind = segs
-                .first()
-                .and_then(|s| AgentKind::from_url_segment(s))
-                .ok_or_else(|| format!("unknown agent kind in '{url}'"))?;
             let agent_url = vmux_agent::AgentUrl::parse(url);
-            let variant = agent_url.as_ref().map(|a| a.variant).unwrap_or_else(|| {
-                if segs.get(1) == Some(&"cli") {
-                    AgentVariant::Cli
-                } else {
-                    AgentVariant::App
-                }
-            });
-
-            if variant == AgentVariant::App {
-                let sid = agent_url
-                    .as_ref()
-                    .map(|a| a.sid.clone())
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                spawn_app_agent_tab(kind, pane, &sid, url, commands, meshes, webview_mt);
-                return Ok(());
-            }
-
-            let sid = agent_url.map(|a| a.sid);
-            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
-            match sid.as_deref() {
-                None | Some("") => {
-                    if let Err(e) = spawn_fresh_agent_tab(
-                        kind, pane, cwd, strategies, commands, meshes, webview_mt, settings,
-                    ) {
-                        bevy::log::warn!(
-                            "spawn_fresh_agent_tab({kind:?}) failed: {e}; falling back to terminal"
-                        );
-                        spawn_terminal_tab(
-                            pane, None, None, commands, meshes, webview_mt, settings,
-                        );
+            match agent_url {
+                Some(vmux_agent::AgentUrl::App {
+                    provider,
+                    model,
+                    sid,
+                }) => {
+                    if spawn_app_agent_tab(
+                        &provider, &model, pane, &sid, commands, meshes, webview_mt, strategies,
+                    )
+                    .is_none()
+                    {
+                        return Err(format!(
+                            "no App agent strategy registered for {provider}/{model}"
+                        ));
                     }
                     Ok(())
                 }
-                Some(session_id) => {
-                    let session_id = session_id.to_string();
+                Some(vmux_agent::AgentUrl::Cli { kind, sid }) => {
+                    let cwd =
+                        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
                     if let Some(map) = agent_to_entity
-                        && let Some(&entity) = map.0.get(&(kind, session_id.clone()))
+                        && let Some(&entity) = map.0.get(&(kind, sid.clone()))
                     {
                         crate::terminal::pid::focus_pane_entity(entity, commands, child_of_q);
                         return Ok(());
                     }
                     if let Err(e) = spawn_agent_resume_tab(
-                        kind, pane, cwd, session_id, strategies, commands, meshes, webview_mt,
-                        settings,
+                        kind, pane, cwd, sid, strategies, commands, meshes, webview_mt, settings,
                     ) {
                         bevy::log::warn!(
                             "spawn_agent_resume_tab({kind:?}) failed: {e}; falling back to terminal"
@@ -702,6 +681,41 @@ fn spawn_vmux_tab(
                         );
                     }
                     Ok(())
+                }
+                None => {
+                    if segs.len() == 1
+                        && let Some(kind) = AgentKind::from_url_segment(segs[0])
+                    {
+                        let cwd = std::env::current_dir()
+                            .unwrap_or_else(|_| std::path::PathBuf::from("/"));
+                        if let Err(e) = spawn_fresh_agent_tab(
+                            kind, pane, cwd, strategies, commands, meshes, webview_mt, settings,
+                        ) {
+                            bevy::log::warn!(
+                                "spawn_fresh_agent_tab({kind:?}) failed: {e}; falling back to terminal"
+                            );
+                            spawn_terminal_tab(
+                                pane, None, None, commands, meshes, webview_mt, settings,
+                            );
+                        }
+                        return Ok(());
+                    }
+                    if segs.len() == 2 {
+                        let provider = segs[0];
+                        let model = segs[1];
+                        let sid = uuid::Uuid::new_v4().to_string();
+                        if spawn_app_agent_tab(
+                            provider, model, pane, &sid, commands, meshes, webview_mt, strategies,
+                        )
+                        .is_none()
+                        {
+                            return Err(format!(
+                                "no App agent strategy registered for {provider}/{model}"
+                            ));
+                        }
+                        return Ok(());
+                    }
+                    Err(format!("malformed agent URL '{url}'"))
                 }
             }
         }

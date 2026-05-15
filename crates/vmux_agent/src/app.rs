@@ -3,6 +3,8 @@ use crate::strategy::AgentStrategy;
 use crate::stream::{StreamEvent, ToolDef};
 
 pub trait AppAgentStrategy: AgentStrategy {
+    fn provider(&self) -> &'static str;
+    fn model(&self) -> &'static str;
     fn models(&self) -> &'static [&'static str];
     fn default_model(&self) -> &'static str;
     fn endpoint(&self) -> &'static str;

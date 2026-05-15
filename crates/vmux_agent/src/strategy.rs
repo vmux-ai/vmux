@@ -76,6 +76,25 @@ impl AgentStrategies {
             .and_then(BoxedStrategy::as_app)
     }
 
+    pub fn get_app_by_provider_model(
+        &self,
+        provider: &str,
+        model: &str,
+    ) -> Option<&dyn AppAgentStrategy> {
+        self.iter().find_map(|(_, boxed)| {
+            let app = boxed.as_app()?;
+            if app.provider() == provider && app.model() == model {
+                Some(app)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn app_strategies(&self) -> impl Iterator<Item = &dyn AppAgentStrategy> {
+        self.iter().filter_map(|(_, boxed)| boxed.as_app())
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&(AgentKind, AgentVariant), &BoxedStrategy)> {
         self.inner.iter()
     }
@@ -146,6 +165,12 @@ mod tests {
             }
         }
         impl crate::app::AppAgentStrategy for StubApp {
+            fn provider(&self) -> &'static str {
+                "stub"
+            }
+            fn model(&self) -> &'static str {
+                "stub"
+            }
             fn models(&self) -> &'static [&'static str] {
                 &[]
             }

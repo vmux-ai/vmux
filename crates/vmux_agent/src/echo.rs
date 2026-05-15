@@ -16,11 +16,17 @@ impl AgentStrategy for EchoAppStrategy {
 }
 
 impl AppAgentStrategy for EchoAppStrategy {
+    fn provider(&self) -> &'static str {
+        "stub"
+    }
+    fn model(&self) -> &'static str {
+        "echo"
+    }
     fn models(&self) -> &'static [&'static str] {
-        &["echo-stub"]
+        &["echo"]
     }
     fn default_model(&self) -> &'static str {
-        "echo-stub"
+        "echo"
     }
     fn endpoint(&self) -> &'static str {
         "stub://echo"

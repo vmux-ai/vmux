@@ -69,7 +69,7 @@ pub fn resolve_startup_url(settings: &AppSettings) -> String {
     settings
         .startup_url
         .clone()
-        .unwrap_or_else(|| vmux_agent::AgentKind::Vibe.url_prefix(vmux_agent::AgentVariant::Cli))
+        .unwrap_or_else(|| vmux_agent::AgentKind::Vibe.cli_url_prefix())
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -687,7 +687,7 @@ mod tests {
     #[test]
     fn resolve_startup_url_defaults_to_vibe() {
         let s = base_settings();
-        assert_eq!(resolve_startup_url(&s), "vmux://agent/vibe/cli/");
+        assert_eq!(resolve_startup_url(&s), "vmux://agent/vibe/");
     }
 
     #[test]

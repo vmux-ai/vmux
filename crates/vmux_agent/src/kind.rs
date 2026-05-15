@@ -43,11 +43,8 @@ impl AgentKind {
         }
     }
 
-    pub fn url_prefix(self, variant: AgentVariant) -> String {
-        match variant {
-            AgentVariant::App => format!("vmux://agent/{}/", self.as_url_segment()),
-            AgentVariant::Cli => format!("vmux://agent/{}/cli/", self.as_url_segment()),
-        }
+    pub fn cli_url_prefix(self) -> String {
+        format!("vmux://agent/{}/", self.as_url_segment())
     }
 
     pub fn all() -> [AgentKind; 3] {
@@ -55,31 +52,67 @@ impl AgentKind {
     }
 }
 
+pub fn app_url_prefix(provider: &str, model: &str) -> String {
+    format!("vmux://agent/{provider}/{model}/")
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AgentUrl {
-    pub kind: AgentKind,
-    pub variant: AgentVariant,
-    pub sid: String,
+pub enum AgentUrl {
+    Cli {
+        kind: AgentKind,
+        sid: String,
+    },
+    App {
+        provider: String,
+        model: String,
+        sid: String,
+    },
 }
 
 impl AgentUrl {
     pub fn parse(url: &str) -> Option<Self> {
         let body = url.strip_prefix("vmux://agent/")?;
-        let mut segs = body.split('/').filter(|s| !s.is_empty());
-        let kind = AgentKind::from_url_segment(segs.next()?)?;
-        let after_kind = segs.next()?;
-        let (variant, sid) = match AgentVariant::from_url_segment(Some(after_kind)) {
-            Some(AgentVariant::Cli) => (AgentVariant::Cli, segs.next()?.to_string()),
-            _ => (AgentVariant::App, after_kind.to_string()),
-        };
-        if segs.next().is_some() {
-            return None;
+        let segs: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
+        match segs.as_slice() {
+            [kind_seg, sid] => {
+                let kind = AgentKind::from_url_segment(kind_seg)?;
+                Some(AgentUrl::Cli {
+                    kind,
+                    sid: (*sid).to_string(),
+                })
+            }
+            [provider, model, sid] => Some(AgentUrl::App {
+                provider: (*provider).to_string(),
+                model: (*model).to_string(),
+                sid: (*sid).to_string(),
+            }),
+            _ => None,
         }
-        Some(AgentUrl { kind, variant, sid })
+    }
+
+    pub fn variant(&self) -> AgentVariant {
+        match self {
+            AgentUrl::Cli { .. } => AgentVariant::Cli,
+            AgentUrl::App { .. } => AgentVariant::App,
+        }
+    }
+
+    pub fn sid(&self) -> &str {
+        match self {
+            AgentUrl::Cli { sid, .. } => sid,
+            AgentUrl::App { sid, .. } => sid,
+        }
     }
 
     pub fn format(&self) -> String {
-        format!("{}{}", self.kind.url_prefix(self.variant), self.sid)
+        match self {
+            AgentUrl::Cli { kind, sid } => format!("{}{sid}", kind.cli_url_prefix()),
+            AgentUrl::App {
+                provider,
+                model,
+                sid,
+            } => format!("{}{sid}", app_url_prefix(provider, model)),
+        }
     }
 }
 
@@ -106,62 +139,94 @@ mod tests {
     }
 
     #[test]
-    fn url_prefix_returns_nested_form() {
+    fn cli_url_prefix_returns_three_segment_form() {
+        assert_eq!(AgentKind::Vibe.cli_url_prefix(), "vmux://agent/vibe/");
+        assert_eq!(AgentKind::Claude.cli_url_prefix(), "vmux://agent/claude/");
+    }
+
+    #[test]
+    fn app_url_prefix_returns_four_segment_form() {
         assert_eq!(
-            AgentKind::Vibe.url_prefix(AgentVariant::App),
-            "vmux://agent/vibe/"
-        );
-        assert_eq!(
-            AgentKind::Claude.url_prefix(AgentVariant::Cli),
-            "vmux://agent/claude/cli/"
+            app_url_prefix("openai", "gpt-5.5"),
+            "vmux://agent/openai/gpt-5.5/"
         );
     }
 
     #[test]
-    fn nested_app_url_parses() {
+    fn cli_url_parses_three_segments() {
         let parsed = AgentUrl::parse("vmux://agent/vibe/abc-123").unwrap();
-        assert_eq!(parsed.kind, AgentKind::Vibe);
-        assert_eq!(parsed.variant, AgentVariant::App);
-        assert_eq!(parsed.sid, "abc-123");
+        assert_eq!(
+            parsed,
+            AgentUrl::Cli {
+                kind: AgentKind::Vibe,
+                sid: "abc-123".into(),
+            }
+        );
     }
 
     #[test]
-    fn nested_cli_url_parses() {
-        let parsed = AgentUrl::parse("vmux://agent/claude/cli/abc-123").unwrap();
-        assert_eq!(parsed.kind, AgentKind::Claude);
-        assert_eq!(parsed.variant, AgentVariant::Cli);
-        assert_eq!(parsed.sid, "abc-123");
+    fn app_url_parses_four_segments() {
+        let parsed = AgentUrl::parse("vmux://agent/openai/gpt-5.5/xHigh").unwrap();
+        assert_eq!(
+            parsed,
+            AgentUrl::App {
+                provider: "openai".into(),
+                model: "gpt-5.5".into(),
+                sid: "xHigh".into(),
+            }
+        );
     }
 
     #[test]
-    fn unknown_kind_returns_none() {
+    fn unknown_cli_kind_returns_none() {
         assert!(AgentUrl::parse("vmux://agent/nope/abc").is_none());
     }
 
     #[test]
-    fn url_format_round_trips() {
-        let u = AgentUrl {
+    fn url_format_round_trips_cli() {
+        let u = AgentUrl::Cli {
             kind: AgentKind::Codex,
-            variant: AgentVariant::Cli,
             sid: "xyz".into(),
         };
-        assert_eq!(u.format(), "vmux://agent/codex/cli/xyz");
+        assert_eq!(u.format(), "vmux://agent/codex/xyz");
         assert_eq!(AgentUrl::parse(&u.format()), Some(u));
     }
 
     #[test]
-    fn trailing_garbage_after_app_sid_rejected() {
-        assert_eq!(AgentUrl::parse("vmux://agent/vibe/abc/extra"), None);
+    fn url_format_round_trips_app() {
+        let u = AgentUrl::App {
+            provider: "anthropic".into(),
+            model: "claude-opus-4.7".into(),
+            sid: "xyz".into(),
+        };
+        assert_eq!(u.format(), "vmux://agent/anthropic/claude-opus-4.7/xyz");
+        assert_eq!(AgentUrl::parse(&u.format()), Some(u));
     }
 
     #[test]
-    fn trailing_garbage_after_cli_sid_rejected() {
-        assert_eq!(AgentUrl::parse("vmux://agent/vibe/cli/abc/extra"), None);
+    fn trailing_garbage_rejected() {
+        assert_eq!(AgentUrl::parse("vmux://agent/vibe/abc/extra/junk"), None);
+        assert_eq!(AgentUrl::parse("vmux://agent/openai/gpt/sid/extra"), None);
     }
 
     #[test]
     fn prefix_only_url_rejected() {
         assert_eq!(AgentUrl::parse("vmux://agent/vibe/"), None);
-        assert_eq!(AgentUrl::parse("vmux://agent/vibe/cli/"), None);
+        assert_eq!(AgentUrl::parse("vmux://agent/openai/gpt-5.5/"), None);
+    }
+
+    #[test]
+    fn variant_returned_correctly() {
+        let cli = AgentUrl::Cli {
+            kind: AgentKind::Vibe,
+            sid: "x".into(),
+        };
+        assert_eq!(cli.variant(), AgentVariant::Cli);
+        let app = AgentUrl::App {
+            provider: "p".into(),
+            model: "m".into(),
+            sid: "x".into(),
+        };
+        assert_eq!(app.variant(), AgentVariant::App);
     }
 }

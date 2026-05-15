@@ -8,7 +8,6 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::PageMetadata;
 
 use crate::AgentKind;
-use crate::AgentVariant;
 use crate::strategy::AgentStrategies;
 
 #[derive(Message, Debug, Clone, Copy)]
@@ -49,7 +48,7 @@ pub fn format_agent_url(
         let Some(strategy) = strategies.get_cli(agent.kind) else {
             continue;
         };
-        let prefix = strategy.kind().url_prefix(AgentVariant::Cli);
+        let prefix = strategy.kind().cli_url_prefix();
         let next = match sid {
             Some(SessionId(id)) => format!("{prefix}{id}"),
             None => prefix,
@@ -116,7 +115,7 @@ mod url_tests {
             .id();
         app.update();
         let url = &app.world().get::<PageMetadata>(entity).unwrap().url;
-        assert_eq!(url, "vmux://agent/vibe/cli/abc");
+        assert_eq!(url, "vmux://agent/vibe/abc");
     }
 
     #[test]
@@ -138,7 +137,7 @@ mod url_tests {
             .id();
         app.update();
         let url = &app.world().get::<PageMetadata>(entity).unwrap().url;
-        assert_eq!(url, "vmux://agent/vibe/cli/");
+        assert_eq!(url, "vmux://agent/vibe/");
     }
 }
 

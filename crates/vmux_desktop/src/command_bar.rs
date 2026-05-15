@@ -122,17 +122,12 @@ pub struct CommandBarEntry {
     pub shortcut: &'static str,
 }
 
-pub const APP_AGENT_ENTRIES: [(&str, &str); 3] = [
-    ("vibe_new_app", "New Vibe chat (App)"),
-    ("claude_new_app", "New Claude chat (App)"),
-    ("codex_new_app", "New Codex chat (App)"),
-];
+pub const APP_AGENT_ENTRIES: [(&str, &str); 1] =
+    [("app_stub_echo_new", "New stub/echo chat (App)")];
 
-pub fn app_agent_kind(id: &str) -> Option<vmux_agent::AgentKind> {
+pub fn app_agent_provider_model(id: &str) -> Option<(&'static str, &'static str)> {
     match id {
-        "vibe_new_app" => Some(vmux_agent::AgentKind::Vibe),
-        "claude_new_app" => Some(vmux_agent::AgentKind::Claude),
-        "codex_new_app" => Some(vmux_agent::AgentKind::Codex),
+        "app_stub_echo_new" => Some(("stub", "echo")),
         _ => None,
     }
 }
@@ -957,26 +952,31 @@ fn on_command_bar_action(
                                 .id();
                             commands.entity(term_e).insert(CefKeyboardTarget);
                         }
-                    } else if let Some((kind, sid_opt)) = crate::agent::parse_app_agent_url(&url) {
+                    } else if let Some((provider, model, sid_opt)) =
+                        crate::agent::parse_app_agent_url(&url)
+                    {
                         let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                        let final_url =
-                            format!("{}{}", kind.url_prefix(vmux_agent::AgentVariant::App), sid);
-                        crate::agent::attach_app_agent_to_stack(
-                            stack_e,
-                            kind,
-                            &sid,
-                            &final_url,
-                            &mut commands,
-                            &mut meshes,
-                            &mut webview_mt,
-                        );
-                    } else if let Some(kind) = vmux_agent::AgentKind::all().into_iter().find(|k| {
-                        url.starts_with(
-                            k.url_prefix(vmux_agent::AgentVariant::Cli)
-                                .trim_end_matches('/'),
-                        )
-                    }) {
-                        let prefix = kind.url_prefix(vmux_agent::AgentVariant::Cli);
+                        let strategies_ref = resource_params.p4();
+                        let strategies = strategies_ref.as_deref();
+                        if let Some(strategies) = strategies {
+                            let _ = crate::agent::attach_app_agent_to_stack(
+                                stack_e,
+                                &provider,
+                                &model,
+                                &sid,
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                                strategies,
+                            );
+                        } else {
+                            bevy::log::warn!("agent strategies not registered; skipping spawn");
+                        }
+                    } else if let Some(kind) = vmux_agent::AgentKind::all()
+                        .into_iter()
+                        .find(|k| url.starts_with(k.cli_url_prefix().trim_end_matches('/')))
+                    {
+                        let prefix = kind.cli_url_prefix();
                         let id_part = url
                             .strip_prefix(&prefix)
                             .filter(|s| !s.is_empty())
@@ -1073,7 +1073,7 @@ fn on_command_bar_action(
                         parse_pid_from_url(&url).and_then(|p| pid_to_entity.get(&p).copied());
                     let known_agent = vmux_agent::AgentKind::all().into_iter().find_map(|k| {
                         let id = url
-                            .strip_prefix(&k.url_prefix(vmux_agent::AgentVariant::Cli))
+                            .strip_prefix(&k.cli_url_prefix())
                             .filter(|s| !s.is_empty())?;
                         agent_to_entity
                             .as_ref()
@@ -1090,7 +1090,9 @@ fn on_command_bar_action(
                         writer_params
                             .p0()
                             .write(AppCommand::Terminal(TerminalCommand::New));
-                    } else if let Some((kind, sid_opt)) = crate::agent::parse_app_agent_url(&url) {
+                    } else if let Some((provider, model, sid_opt)) =
+                        crate::agent::parse_app_agent_url(&url)
+                    {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
                             &all_children,
@@ -1101,28 +1103,34 @@ fn on_command_bar_action(
                         );
                         if let Some(pane_e) = active_pane_opt {
                             let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                            let final_url = format!(
-                                "{}{}",
-                                kind.url_prefix(vmux_agent::AgentVariant::App),
-                                sid
-                            );
-                            crate::agent::spawn_app_agent_tab(
-                                kind,
-                                pane_e,
-                                &sid,
-                                &final_url,
-                                &mut commands,
-                                &mut meshes,
-                                &mut webview_mt,
-                            );
-                            custom_keyboard_restore = true;
+                            let strategies_ref = resource_params.p4();
+                            if let Some(strategies) = strategies_ref.as_deref() {
+                                if crate::agent::spawn_app_agent_tab(
+                                    &provider,
+                                    &model,
+                                    pane_e,
+                                    &sid,
+                                    &mut commands,
+                                    &mut meshes,
+                                    &mut webview_mt,
+                                    strategies,
+                                )
+                                .is_some()
+                                {
+                                    custom_keyboard_restore = true;
+                                } else {
+                                    bevy::log::warn!(
+                                        "no App agent strategy registered for {provider}/{model}"
+                                    );
+                                }
+                            } else {
+                                bevy::log::warn!("agent strategies not registered; skipping spawn");
+                            }
                         }
-                    } else if let Some(kind) = vmux_agent::AgentKind::all().into_iter().find(|k| {
-                        url.starts_with(
-                            k.url_prefix(vmux_agent::AgentVariant::Cli)
-                                .trim_end_matches('/'),
-                        )
-                    }) {
+                    } else if let Some(kind) = vmux_agent::AgentKind::all()
+                        .into_iter()
+                        .find(|k| url.starts_with(k.cli_url_prefix().trim_end_matches('/')))
+                    {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
                             &all_children,
@@ -1132,7 +1140,7 @@ fn on_command_bar_action(
                             &stack_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
-                            let prefix = kind.url_prefix(vmux_agent::AgentVariant::Cli);
+                            let prefix = kind.cli_url_prefix();
                             let title = match kind {
                                 vmux_agent::AgentKind::Vibe => "Vibe",
                                 vmux_agent::AgentKind::Claude => "Claude",
@@ -1388,47 +1396,61 @@ fn on_command_bar_action(
             } // end reattach else
         }
         "command" => {
-            if let Some(kind) = app_agent_kind(&evt.value) {
+            if let Some((provider, model)) = app_agent_provider_model(&evt.value) {
                 let sid = uuid::Uuid::new_v4().to_string();
-                let url = format!("{}{}", kind.url_prefix(vmux_agent::AgentVariant::App), sid);
-                if let Some(stack_e) = empty_stack {
-                    crate::agent::attach_app_agent_to_stack(
-                        stack_e,
-                        kind,
-                        &sid,
-                        &url,
-                        &mut commands,
-                        &mut meshes,
-                        &mut webview_mt,
-                    );
-                    commands.entity(stack_e).insert(LastActivatedAt::now());
-                    if let Ok(parent) = child_of_q.get(stack_e) {
-                        commands.entity(parent.0).insert(LastActivatedAt::now());
-                    }
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.previous_stack = None;
-                    custom_keyboard_restore = true;
-                } else {
-                    let (_, active_pane_opt, _) = focused_stack(
-                        &tab_q,
-                        &all_children,
-                        &leaf_panes,
-                        &pane_ts,
-                        &pane_children,
-                        &stack_ts,
-                    );
-                    if let Some(pane_e) = active_pane_opt {
-                        crate::agent::spawn_app_agent_tab(
-                            kind,
-                            pane_e,
+                let strategies_ref = resource_params.p4();
+                let strategies = strategies_ref.as_deref();
+                if let Some(strategies) = strategies {
+                    if let Some(stack_e) = empty_stack {
+                        let _ = crate::agent::attach_app_agent_to_stack(
+                            stack_e,
+                            provider,
+                            model,
                             &sid,
-                            &url,
                             &mut commands,
                             &mut meshes,
                             &mut webview_mt,
+                            strategies,
                         );
+                        commands.entity(stack_e).insert(LastActivatedAt::now());
+                        if let Ok(parent) = child_of_q.get(stack_e) {
+                            commands.entity(parent.0).insert(LastActivatedAt::now());
+                        }
+                        new_stack_ctx.stack = None;
+                        new_stack_ctx.previous_stack = None;
                         custom_keyboard_restore = true;
+                    } else {
+                        let (_, active_pane_opt, _) = focused_stack(
+                            &tab_q,
+                            &all_children,
+                            &leaf_panes,
+                            &pane_ts,
+                            &pane_children,
+                            &stack_ts,
+                        );
+                        if let Some(pane_e) = active_pane_opt {
+                            if crate::agent::spawn_app_agent_tab(
+                                provider,
+                                model,
+                                pane_e,
+                                &sid,
+                                &mut commands,
+                                &mut meshes,
+                                &mut webview_mt,
+                                strategies,
+                            )
+                            .is_some()
+                            {
+                                custom_keyboard_restore = true;
+                            } else {
+                                bevy::log::warn!(
+                                    "no App agent strategy registered for {provider}/{model}"
+                                );
+                            }
+                        }
                     }
+                } else {
+                    bevy::log::warn!("agent strategies not registered; skipping spawn");
                 }
             } else if resource_params
                 .p1()

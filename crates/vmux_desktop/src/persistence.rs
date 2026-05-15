@@ -323,14 +323,11 @@ pub(crate) fn rebuild_space_views(
                 if let Some(launch) = saved_launch {
                     commands.entity(term).insert(launch.clone());
                 }
-            } else if let Some(kind) = vmux_agent::AgentKind::all().into_iter().find(|k| {
-                meta.url
-                    .starts_with(&k.url_prefix(vmux_agent::AgentVariant::Cli))
-            }) {
-                let id_part = meta
-                    .url
-                    .strip_prefix(&kind.url_prefix(vmux_agent::AgentVariant::Cli))
-                    .unwrap_or("");
+            } else if let Some(kind) = vmux_agent::AgentKind::all()
+                .into_iter()
+                .find(|k| meta.url.starts_with(&k.cli_url_prefix()))
+            {
+                let id_part = meta.url.strip_prefix(&kind.cli_url_prefix()).unwrap_or("");
                 let session_id = (!id_part.is_empty()).then(|| id_part.to_string());
                 let cwd = saved_launch
                     .map(|l| std::path::PathBuf::from(&l.cwd))
