@@ -27,6 +27,7 @@ serde = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
+serde_json = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement"] }
