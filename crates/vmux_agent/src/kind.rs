@@ -102,7 +102,6 @@ impl AgentUrl {
             AgentUrl::Cli { sid, .. } => sid,
             AgentUrl::App { sid, .. } => sid,
         }
-        Some(AgentUrl { kind, variant, sid })
     }
 
     pub fn format(&self) -> String {
