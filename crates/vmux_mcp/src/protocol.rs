@@ -185,6 +185,11 @@ fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult
             "terminals": terminals.iter().map(terminal_info_to_json).collect::<Vec<_>>(),
         }),
         AgentQueryResult::Focused(focused) => focused_info_to_json(&focused),
+        AgentQueryResult::Settings(json_str) => {
+            return json!({
+                "content": [{"type": "text", "text": json_str}]
+            });
+        }
         AgentQueryResult::Error(message) => {
             return json!({
                 "isError": true,
