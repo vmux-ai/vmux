@@ -381,6 +381,11 @@ mod exit_tests {
             fn kind(&self) -> AgentKind {
                 AgentKind::Vibe
             }
+            fn variant(&self) -> crate::AgentVariant {
+                crate::AgentVariant::Cli
+            }
+        }
+        impl crate::CliAgentStrategy for EndedStrategy {
             fn sessions_root(&self) -> PathBuf {
                 PathBuf::from("/tmp/none")
             }

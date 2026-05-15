@@ -1,40 +1,31 @@
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::collections::HashMap;
 
 use bevy::prelude::Resource;
 
-use crate::{AgentKind, McpServerConfig};
+use crate::{AgentKind, AgentVariant};
+
+use super::cli_trait::CliAgentStrategy;
 
 pub trait AgentStrategy: Send + Sync + 'static {
     fn kind(&self) -> AgentKind;
-    fn sessions_root(&self) -> PathBuf;
-    fn build_args(&self, mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String>;
-    fn build_env(&self, mcp: &McpServerConfig) -> Vec<(String, String)>;
-    fn discover_session(
-        &self,
-        cwd: &Path,
-        spawn_time: SystemTime,
-        claimed: &HashSet<String>,
-    ) -> Option<String>;
-    fn detect_end_time(&self, session_id: &str) -> bool;
+    fn variant(&self) -> AgentVariant;
 }
 
 #[derive(Resource, Default)]
 pub struct AgentStrategies {
-    inner: HashMap<AgentKind, Box<dyn AgentStrategy>>,
+    inner: HashMap<AgentKind, Box<dyn CliAgentStrategy>>,
 }
 
 impl AgentStrategies {
-    pub fn register(&mut self, strategy: Box<dyn AgentStrategy>) {
+    pub fn register(&mut self, strategy: Box<dyn CliAgentStrategy>) {
         self.inner.insert(strategy.kind(), strategy);
     }
 
-    pub fn get(&self, kind: AgentKind) -> Option<&dyn AgentStrategy> {
+    pub fn get(&self, kind: AgentKind) -> Option<&dyn CliAgentStrategy> {
         self.inner.get(&kind).map(|b| b.as_ref())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&AgentKind, &dyn AgentStrategy)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&AgentKind, &dyn CliAgentStrategy)> {
         self.inner.iter().map(|(k, v)| (k, v.as_ref()))
     }
 }
@@ -42,12 +33,22 @@ impl AgentStrategies {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
+    use std::path::{Path, PathBuf};
+    use std::time::SystemTime;
+
+    use crate::McpServerConfig;
 
     struct StubStrategy;
     impl AgentStrategy for StubStrategy {
         fn kind(&self) -> AgentKind {
             AgentKind::Claude
         }
+        fn variant(&self) -> AgentVariant {
+            AgentVariant::Cli
+        }
+    }
+    impl CliAgentStrategy for StubStrategy {
         fn sessions_root(&self) -> PathBuf {
             PathBuf::from("/tmp/none")
         }

@@ -4,8 +4,9 @@ use std::time::SystemTime;
 
 use serde::Serialize;
 
+use crate::cli_trait::CliAgentStrategy;
 use crate::strategy::AgentStrategy;
-use crate::{AgentKind, McpServerConfig};
+use crate::{AgentKind, AgentVariant, McpServerConfig};
 
 pub struct VibeStrategy;
 
@@ -14,6 +15,12 @@ impl AgentStrategy for VibeStrategy {
         AgentKind::Vibe
     }
 
+    fn variant(&self) -> AgentVariant {
+        AgentVariant::Cli
+    }
+}
+
+impl CliAgentStrategy for VibeStrategy {
     fn sessions_root(&self) -> PathBuf {
         std::env::var("VIBE_HOME")
             .map(PathBuf::from)

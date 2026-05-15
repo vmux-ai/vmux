@@ -4,8 +4,9 @@ use std::time::SystemTime;
 
 use serde_json::{Map, Value};
 
+use crate::cli_trait::CliAgentStrategy;
 use crate::strategy::AgentStrategy;
-use crate::{AgentKind, McpServerConfig};
+use crate::{AgentKind, AgentVariant, McpServerConfig};
 
 pub struct ClaudeStrategy;
 
@@ -14,6 +15,12 @@ impl AgentStrategy for ClaudeStrategy {
         AgentKind::Claude
     }
 
+    fn variant(&self) -> AgentVariant {
+        AgentVariant::Cli
+    }
+}
+
+impl CliAgentStrategy for ClaudeStrategy {
     fn sessions_root(&self) -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_default();
         PathBuf::from(home).join(".claude").join("projects")

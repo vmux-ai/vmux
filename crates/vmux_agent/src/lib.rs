@@ -1,4 +1,5 @@
 pub mod claude;
+pub mod cli_trait;
 pub mod codex;
 pub mod exec;
 pub mod kind;
@@ -9,6 +10,7 @@ pub mod strategy;
 pub mod variant;
 pub mod vibe;
 
+pub use cli_trait::CliAgentStrategy;
 pub use kind::AgentKind;
 pub use kind::AgentUrl;
 pub use mcp::McpServerConfig;

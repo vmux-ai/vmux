@@ -2,8 +2,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::cli_trait::CliAgentStrategy;
 use crate::strategy::AgentStrategy;
-use crate::{AgentKind, McpServerConfig};
+use crate::{AgentKind, AgentVariant, McpServerConfig};
 
 pub struct CodexStrategy;
 
@@ -12,6 +13,12 @@ impl AgentStrategy for CodexStrategy {
         AgentKind::Codex
     }
 
+    fn variant(&self) -> AgentVariant {
+        AgentVariant::Cli
+    }
+}
+
+impl CliAgentStrategy for CodexStrategy {
     fn sessions_root(&self) -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_default();
         PathBuf::from(home).join(".codex").join("sessions")
