@@ -50,6 +50,7 @@ pub fn ensure_running(profile: &str, exe: &Path) -> Result<(), RegistrationError
                 }
                 crate::sm_app_service::register_main_app()?;
                 crate::sm_app_service::register_agent(bundle::EMBEDDED_AGENT_PLIST)?;
+                crate::launchd::kickstart(bundle::EMBEDDED_AGENT_LABEL)?;
                 Ok(())
             }
             #[cfg(not(target_os = "macos"))]
