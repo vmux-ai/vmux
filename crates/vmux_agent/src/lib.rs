@@ -8,6 +8,7 @@ pub mod mcp;
 pub mod plugin;
 pub mod session;
 pub mod strategy;
+pub mod stream;
 pub mod variant;
 pub mod vibe;
 
@@ -19,4 +20,5 @@ pub use mcp::McpServerConfig;
 pub use plugin::AgentSessionPlugin;
 pub use session::AgentSessionExited;
 pub use strategy::BoxedStrategy;
+pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use variant::AgentVariant;
