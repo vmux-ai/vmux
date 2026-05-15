@@ -66,7 +66,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx0.7.4-cef${{ env.CEF_VERSION }}
+          key: cargo-bin-${{ runner.os }}-dx0.7.4-cef${{ env.CEF_VERSION }}-v2
 
       - name: Cache CEF framework
         uses: actions/cache@v4
@@ -160,7 +160,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx0.7.4-cef${{ env.CEF_VERSION }}
+          key: cargo-bin-${{ runner.os }}-dx0.7.4-cef${{ env.CEF_VERSION }}-v2
 
       - name: Cache CEF framework
         uses: actions/cache@v4
