@@ -259,8 +259,51 @@ jobs:
     needs: changes
     if: needs.changes.outputs.packaging == 'true'
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Detect release PR + idempotency
+        id: relprep
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          TAG="v$VERSION"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+          if [ -z "${BASE_SHA:-}" ]; then
+            echo "Not a pull_request event; skipping release prep."
+            echo "IS_RELEASE_PR=0" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          BASE_VERSION=$(git show "${BASE_SHA}:Cargo.toml" 2>/dev/null | grep -m1 '^version' | sed 's/.*"\(.*\)".*/\1/' || true)
+          if [ "$BASE_VERSION" = "$VERSION" ]; then
+            echo "Version unchanged ($VERSION); not a release PR."
+            echo "IS_RELEASE_PR=0" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "Release PR detected: $BASE_VERSION -> $VERSION"
+          echo "IS_RELEASE_PR=1" >> "$GITHUB_ENV"
+
+          if gh release view "$TAG" --json isDraft,assets >/tmp/r.json 2>/dev/null; then
+            asset_count=$(jq '.assets | length' /tmp/r.json)
+            CASK_URL=$(grep -m1 '^  url' Casks/vmux.rb | sed 's/.*"\(.*\)".*/\1/')
+            EXPECTED_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/Vmux_${VERSION}_aarch64.dmg"
+            if [ "$asset_count" -ge 4 ] && [ "$CASK_URL" = "$EXPECTED_URL" ]; then
+              echo "Draft release ready and cask matches; release prep already complete."
+              echo "PREP_DONE=1" >> "$GITHUB_ENV"
+            fi
+          fi
 
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
@@ -321,6 +364,7 @@ jobs:
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
 
       - name: Build, sign, notarize, and package DMG
+        if: env.PREP_DONE != '1'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -331,9 +375,115 @@ jobs:
           VMUX_UPDATE_PUBLIC_KEY: ${{ secrets.VMUX_UPDATE_PUBLIC_KEY }}
         run: ./scripts/build-mac-release.sh
 
-      - name: Upload .dmg
+      - name: Upload .dmg artifact
+        if: env.PREP_DONE != '1' && env.IS_RELEASE_PR != '1'
         uses: actions/upload-artifact@v4
         with:
           name: Vmux-${{ github.sha }}.dmg
           path: target/release/Vmux_*.dmg
           retention-days: 7
+
+      - name: Create binary tarball
+        if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
+        run: |
+          cd target/release/Vmux.app/Contents/MacOS
+          tar czf "$GITHUB_WORKSPACE/target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz" Vmux
+
+      - name: Create app bundle tarball
+        if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
+        run: |
+          cd target/release
+          tar czf "Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz" Vmux.app
+
+      - name: Sign update artifact (minisign)
+        if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
+        env:
+          VMUX_UPDATE_PRIVATE_KEY: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY }}
+          VMUX_UPDATE_PRIVATE_KEY_PASSWORD: ${{ secrets.VMUX_UPDATE_PRIVATE_KEY_PASSWORD }}
+        run: |
+          TARBALL="target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
+          cargo packager signer sign "${TARBALL}" \
+            --private-key "${VMUX_UPDATE_PRIVATE_KEY}" \
+            --password "${VMUX_UPDATE_PRIVATE_KEY_PASSWORD}"
+
+      - name: Update Homebrew cask + manifest
+        if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
+        run: |
+          set -euo pipefail
+          DMG_NAME="Vmux_${VERSION}_aarch64.dmg"
+          DMG_PATH="target/release/${DMG_NAME}"
+          DMG_SHA=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
+          DMG_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${DMG_NAME}"
+
+          sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Casks/vmux.rb
+          sed -i '' "s/sha256 \".*\"/sha256 \"${DMG_SHA}\"/" Casks/vmux.rb
+          sed -i '' "s|^  url \".*\"|  url \"${DMG_URL}\"|" Casks/vmux.rb
+
+          TARBALL="target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
+          SIG=$(cat "${TARBALL}.sig")
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          mkdir -p website/public
+          cat > website/public/updates.json <<EOF
+          {
+            "version": "v${VERSION}",
+            "pub_date": "${DATE}",
+            "platforms": {
+              "macos-aarch64": {
+                "url": "${URL}",
+                "signature": "${SIG}",
+                "format": "app"
+              }
+            },
+            "downloads": {
+              "macos-aarch64": {
+                "url": "${DMG_URL}",
+                "filename": "${DMG_NAME}"
+              }
+            }
+          }
+          EOF
+
+      - name: Create or update draft release with assets
+        if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ASSETS=(
+            "target/release/Vmux_${VERSION}_aarch64.dmg"
+            "target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz"
+            "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz"
+            "target/release/Vmux-v${VERSION}-aarch64-apple-darwin.app.tar.gz.sig"
+          )
+          if gh release view "$TAG" --json isDraft >/tmp/r.json 2>/dev/null; then
+            is_draft=$(jq -r .isDraft /tmp/r.json)
+            if [ "$is_draft" != "true" ]; then
+              echo "::error::Release $TAG already published; refusing to upload."
+              exit 1
+            fi
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$TAG" \
+              --draft \
+              --target "${{ github.event.pull_request.head.sha }}" \
+              --title "Vmux $TAG" \
+              --generate-notes \
+              "${ASSETS[@]}"
+          fi
+
+      - name: Commit cask + manifest to PR branch
+        if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
+        env:
+          PR_BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/vmux.rb website/public/updates.json
+          if git diff --cached --quiet; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore(release): update cask and update manifest to ${VERSION}"
+          git push origin "HEAD:${PR_BRANCH}"
