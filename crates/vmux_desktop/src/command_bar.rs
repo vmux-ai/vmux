@@ -122,6 +122,21 @@ pub struct CommandBarEntry {
     pub shortcut: &'static str,
 }
 
+pub const GUI_AGENT_ENTRIES: [(&str, &str); 3] = [
+    ("vibe_new_gui", "New Vibe chat (GUI)"),
+    ("claude_new_gui", "New Claude chat (GUI)"),
+    ("codex_new_gui", "New Codex chat (GUI)"),
+];
+
+pub fn gui_agent_kind(id: &str) -> Option<vmux_agent::AgentKind> {
+    match id {
+        "vibe_new_gui" => Some(vmux_agent::AgentKind::Vibe),
+        "claude_new_gui" => Some(vmux_agent::AgentKind::Claude),
+        "codex_new_gui" => Some(vmux_agent::AgentKind::Codex),
+        _ => None,
+    }
+}
+
 pub fn command_list(agent_entries: Vec<AgentCommandEntry>) -> Vec<CommandBarEntry> {
     let mut entries: Vec<CommandBarEntry> = AppCommand::command_bar_entries()
         .into_iter()
@@ -131,6 +146,11 @@ pub fn command_list(agent_entries: Vec<AgentCommandEntry>) -> Vec<CommandBarEntr
         id: entry.id,
         name: entry.name,
         shortcut: entry.shortcut,
+    }));
+    entries.extend(GUI_AGENT_ENTRIES.iter().map(|(id, name)| CommandBarEntry {
+        id,
+        name,
+        shortcut: "",
     }));
     entries
 }
@@ -1304,7 +1324,49 @@ fn on_command_bar_action(
             } // end reattach else
         }
         "command" => {
-            if resource_params
+            if let Some(kind) = gui_agent_kind(&evt.value) {
+                let sid = uuid::Uuid::new_v4().to_string();
+                let url = format!("{}{}", kind.url_prefix(vmux_agent::AgentVariant::Gui), sid);
+                if let Some(stack_e) = empty_stack {
+                    commands.entity(stack_e).insert(PageMetadata {
+                        url: url.to_string(),
+                        title: format!("GUI Agent ({kind:?})"),
+                        ..default()
+                    });
+                    commands.entity(stack_e).insert((
+                        vmux_agent::components::AgentSession {
+                            kind,
+                            variant: vmux_agent::AgentVariant::Gui,
+                            sid: sid.clone(),
+                            provider: kind.as_url_segment().to_string(),
+                            model: "echo-stub".to_string(),
+                        },
+                        vmux_agent::AgentMessages::default(),
+                        vmux_agent::AgentApprovalPolicy::default(),
+                        vmux_agent::AgentRunState::default(),
+                    ));
+                    commands.entity(stack_e).insert(LastActivatedAt::now());
+                    if let Ok(parent) = child_of_q.get(stack_e) {
+                        commands.entity(parent.0).insert(LastActivatedAt::now());
+                    }
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.previous_stack = None;
+                    custom_keyboard_restore = true;
+                } else {
+                    let (_, active_pane_opt, _) = focused_stack(
+                        &tab_q,
+                        &all_children,
+                        &leaf_panes,
+                        &pane_ts,
+                        &pane_children,
+                        &stack_ts,
+                    );
+                    if let Some(pane_e) = active_pane_opt {
+                        crate::agent::spawn_gui_agent_tab(kind, pane_e, &sid, &url, &mut commands);
+                        custom_keyboard_restore = true;
+                    }
+                }
+            } else if resource_params
                 .p1()
                 .is_some_and(|providers| providers.contains(&evt.value))
             {
