@@ -166,6 +166,11 @@ pub fn command_list(
         name: entry.name,
         shortcut: String::new(),
     }));
+    entries.extend(GUI_AGENT_ENTRIES.iter().map(|(id, name)| CommandBarEntry {
+        id,
+        name,
+        shortcut: "",
+    }));
     entries
 }
 
