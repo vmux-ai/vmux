@@ -15,6 +15,7 @@ pub mod session;
 pub mod strategy;
 pub mod stream;
 pub mod systems {
+    pub mod approval;
     pub mod dispatch_tool;
     pub mod drain_stream;
     pub mod process_input;

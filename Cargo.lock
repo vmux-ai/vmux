@@ -9074,6 +9074,7 @@ dependencies = [
  "bevy",
  "chrono",
  "crossbeam-channel",
+ "futures-lite",
  "notify 6.1.1",
  "reqwest",
  "serde",
