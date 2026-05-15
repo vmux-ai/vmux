@@ -102,7 +102,20 @@ impl AgentUrl {
             AgentUrl::Cli { sid, .. } => sid,
             AgentUrl::App { sid, .. } => sid,
         }
-        Some(AgentUrl { kind, variant, sid })
+        for kind in AgentKind::all() {
+            let prefix = format!("vmux://{}/", kind.as_url_segment());
+            if let Some(rest) = url.strip_prefix(&prefix) {
+                if rest.is_empty() || rest.contains('/') {
+                    return None;
+                }
+                return Some(AgentUrl {
+                    kind,
+                    variant: AgentVariant::Gui,
+                    sid: rest.to_string(),
+                });
+            }
+        }
+        None
     }
 
     pub fn format(&self) -> String {
@@ -181,6 +194,7 @@ mod tests {
     #[test]
     fn unknown_cli_kind_returns_none() {
         assert!(AgentUrl::parse("vmux://agent/nope/abc").is_none());
+        assert!(AgentUrl::parse("vmux://nope/abc").is_none());
     }
 
     #[test]
@@ -212,6 +226,7 @@ mod tests {
 
     #[test]
     fn prefix_only_url_rejected() {
+        assert_eq!(AgentUrl::parse("vmux://vibe/"), None);
         assert_eq!(AgentUrl::parse("vmux://agent/vibe/"), None);
         assert_eq!(AgentUrl::parse("vmux://agent/openai/gpt-5.5/"), None);
     }
