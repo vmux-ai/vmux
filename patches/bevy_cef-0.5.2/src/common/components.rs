@@ -11,6 +11,7 @@ impl Plugin for WebviewCoreComponentsPlugin {
             .register_type::<WebviewSize>()
             .register_type::<WebviewSource>()
             .register_type::<CefKeyboardTarget>()
+            .register_type::<CefIgnorePinchZoom>()
             .register_type::<HistorySwipeVisualOffset>()
             .register_type::<HostWindow>()
             .register_type::<ZoomLevel>()
@@ -44,6 +45,14 @@ pub struct CefSuppressPointerInput(pub bool);
 /// [`CefSuppressPointerInput`] for host-managed chords).
 #[derive(Resource, Debug, Clone, Copy, Default)]
 pub struct CefSuppressKeyboardInput(pub bool);
+
+/// Marker: this webview should ignore pinch-to-zoom gestures.
+///
+/// Useful for chrome / UI webviews where the host doesn't want the user to
+/// inadvertently zoom the layout.
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct CefIgnorePinchZoom;
 
 #[derive(Component, Debug, Clone, Reflect)]
 #[reflect(Component, Debug)]

@@ -1,6 +1,6 @@
 use crate::common::{
-    CefPointerTarget, CefSuppressPointerInput, HistorySwipeVisualOffset, WebviewSize,
-    WebviewSource, ZoomLevel,
+    CefIgnorePinchZoom, CefPointerTarget, CefSuppressPointerInput, HistorySwipeVisualOffset,
+    WebviewSize, WebviewSource, ZoomLevel,
 };
 use crate::prelude::update_webview_image;
 use crate::webview::history_swipe::{HistorySwipeAction, HistorySwipeOutcome, HistorySwipeState};
@@ -173,14 +173,17 @@ fn on_mouse_wheel(
 
 fn on_pinch_zoom(
     mut er: MessageReader<PinchGesture>,
-    mut webviews: Query<(
-        Entity,
-        &Sprite,
-        &WebviewSize,
-        &GlobalTransform,
-        &mut ZoomLevel,
-        Has<CefPointerTarget>,
-    )>,
+    mut webviews: Query<
+        (
+            Entity,
+            &Sprite,
+            &WebviewSize,
+            &GlobalTransform,
+            &mut ZoomLevel,
+            Has<CefPointerTarget>,
+        ),
+        Without<CefIgnorePinchZoom>,
+    >,
     cameras: Query<(&Camera, &GlobalTransform)>,
     windows: Query<&Window>,
     suppress: Res<CefSuppressPointerInput>,
