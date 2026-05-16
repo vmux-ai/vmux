@@ -56,4 +56,5 @@ objc2-foundation = "0.3"
 objc2-service-management = "0.3"
 
 [dev-dependencies]
+serde_json = { workspace = true }
 tempfile = "3.27.0"

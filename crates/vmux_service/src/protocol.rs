@@ -1,3 +1,6 @@
+pub mod layout;
+pub use layout::{FocusDto, LayoutNodeDto, LayoutSnapshot, SpaceDto, SplitDirectionDto, TabDto};
+
 use vmux_terminal::event::{TermCursor, TermLine, TermSelectionRange};
 
 pub use vmux_core::ProcessId;
