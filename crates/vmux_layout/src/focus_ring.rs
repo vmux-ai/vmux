@@ -1,8 +1,8 @@
 use crate::{
     chrome::Loading,
-    pane::Pane,
+    pane::{Pane, PaneSplit},
     settings::LayoutSettings,
-    stack::{Stack, active_stack_in_pane},
+    stack::{Stack, active_stack_in_pane, collect_leaf_panes},
     window::{VmuxWindow, WEBVIEW_Z_FOCUS_RING},
 };
 use bevy::{
@@ -102,6 +102,8 @@ fn sync_focus_ring_to_active_pane(
     tab_children: Query<&Children, With<Stack>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     loading_q: Query<(), With<Loading>>,
+    all_children: Query<&Children>,
+    leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
 ) {
     let Ok((mut tf, mat_h, mut visibility)) = ring_q.single_mut() else {
         return;
@@ -112,6 +114,14 @@ fn sync_focus_ring_to_active_pane(
         *visibility = Visibility::Hidden;
         return;
     };
+    if let Some(active_tab) = focus.tab {
+        let mut leaves = Vec::new();
+        collect_leaf_panes(active_tab, &all_children, &leaf_pane_q, &mut leaves);
+        if leaves.len() <= 1 {
+            *visibility = Visibility::Hidden;
+            return;
+        }
+    }
     let Ok((pane_computed, pane_ui_gt)) = pane_layout.get(active_entity) else {
         *visibility = Visibility::Hidden;
         return;
