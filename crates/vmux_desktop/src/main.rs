@@ -36,6 +36,7 @@ fn main() {
 
     let mut app = App::new();
     app.add_plugins(VmuxPlugin);
+    app.add_plugins(vmux_history::HistoryPlugin);
 
     // Override Bevy's Ctrl+C handler with a synchronous signal handler.
     // Bevy's handler fires asynchronously via a pipe, giving macOS AppKit
