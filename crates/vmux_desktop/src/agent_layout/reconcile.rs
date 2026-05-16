@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use vmux_service::protocol::layout::{
     FocusDto, LayoutNodeDto, LayoutSnapshot, NodeKind, TabDto, parse_id,
 };
@@ -157,6 +157,105 @@ fn validate_focus(focus: &FocusDto, all_ids: &HashSet<String>) -> Result<(), Val
         }
     }
     Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum NodeAction {
+    Match {
+        existing: u64,
+        desired_kind: NodeKind,
+    },
+    Create,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct DiffPlan {
+    pub actions_by_id: HashMap<String, NodeAction>,
+    pub closes: Vec<String>,
+    pub focus: FocusDto,
+}
+
+pub fn plan_diff(
+    snapshot: &LayoutSnapshot,
+    existing_ids: &HashSet<String>,
+) -> Result<DiffPlan, ValidationError> {
+    validate(snapshot)?;
+    let mut actions_by_id: HashMap<String, NodeAction> = HashMap::new();
+    let mut referenced: HashSet<String> = HashSet::new();
+
+    for space in &snapshot.spaces {
+        if let Some(id) = &space.id {
+            referenced.insert(id.clone());
+            let (_, value) = parse_id(id).expect("validated above");
+            actions_by_id.insert(
+                id.clone(),
+                NodeAction::Match {
+                    existing: value,
+                    desired_kind: NodeKind::Space,
+                },
+            );
+        }
+        plan_node(&space.root, &mut actions_by_id, &mut referenced);
+    }
+
+    let closes: Vec<String> = existing_ids.difference(&referenced).cloned().collect();
+
+    Ok(DiffPlan {
+        actions_by_id,
+        closes,
+        focus: snapshot.focused.clone(),
+    })
+}
+
+fn plan_node(
+    node: &LayoutNodeDto,
+    actions_by_id: &mut HashMap<String, NodeAction>,
+    referenced: &mut HashSet<String>,
+) {
+    match node {
+        LayoutNodeDto::Split { id, children, .. } => {
+            if let Some(id) = id {
+                referenced.insert(id.clone());
+                let (_, value) = parse_id(id).expect("validated");
+                actions_by_id.insert(
+                    id.clone(),
+                    NodeAction::Match {
+                        existing: value,
+                        desired_kind: NodeKind::Split,
+                    },
+                );
+            }
+            for c in children {
+                plan_node(c, actions_by_id, referenced);
+            }
+        }
+        LayoutNodeDto::Pane { id, tabs, .. } => {
+            if let Some(id) = id {
+                referenced.insert(id.clone());
+                let (_, value) = parse_id(id).expect("validated");
+                actions_by_id.insert(
+                    id.clone(),
+                    NodeAction::Match {
+                        existing: value,
+                        desired_kind: NodeKind::Pane,
+                    },
+                );
+            }
+            for t in tabs {
+                if let Some(tid) = &t.id {
+                    referenced.insert(tid.clone());
+                    let (_, value) = parse_id(tid).expect("validated");
+                    actions_by_id.insert(
+                        tid.clone(),
+                        NodeAction::Match {
+                            existing: value,
+                            desired_kind: NodeKind::Tab,
+                        },
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -328,5 +427,79 @@ mod tests {
             validate(&snap),
             Err(ValidationError::FlexWeightsLengthMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn plan_marks_existing_ids_as_matches() {
+        let snap = snapshot(
+            pane(
+                Some("pane:2"),
+                vec![TabDto {
+                    id: Some("tab:3".into()),
+                    ..Default::default()
+                }],
+            ),
+            FocusDto {
+                space: Some("space:1".into()),
+                pane: Some("pane:2".into()),
+                tab: Some("tab:3".into()),
+            },
+        );
+        let existing: HashSet<String> = ["space:1", "pane:2", "tab:3"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let plan = plan_diff(&snap, &existing).unwrap();
+        assert!(plan.actions_by_id.contains_key("pane:2"));
+        assert!(plan.actions_by_id.contains_key("tab:3"));
+        assert!(plan.closes.is_empty());
+    }
+
+    #[test]
+    fn plan_lists_unreferenced_ids_for_close() {
+        let snap = snapshot(
+            pane(
+                Some("pane:2"),
+                vec![TabDto {
+                    id: Some("tab:3".into()),
+                    ..Default::default()
+                }],
+            ),
+            FocusDto {
+                space: Some("space:1".into()),
+                pane: Some("pane:2".into()),
+                tab: Some("tab:3".into()),
+            },
+        );
+        let existing: HashSet<String> = ["space:1", "pane:2", "tab:3", "tab:4"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let plan = plan_diff(&snap, &existing).unwrap();
+        assert_eq!(plan.closes, vec!["tab:4".to_string()]);
+    }
+
+    #[test]
+    fn plan_treats_id_omission_as_create() {
+        let snap = snapshot(
+            pane(
+                None,
+                vec![TabDto {
+                    id: None,
+                    url: "https://x".into(),
+                    kind: "browser".into(),
+                    ..Default::default()
+                }],
+            ),
+            FocusDto {
+                space: Some("space:1".into()),
+                pane: None,
+                tab: None,
+            },
+        );
+        let existing: HashSet<String> = ["space:1"].into_iter().map(String::from).collect();
+        let plan = plan_diff(&snap, &existing).unwrap();
+        assert!(plan.closes.is_empty());
+        assert_eq!(plan.actions_by_id.len(), 1);
     }
 }
