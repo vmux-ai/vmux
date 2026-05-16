@@ -25,11 +25,48 @@ fn apply_space(world: &mut World, space: &SpaceDto) {
         && let Ok((_, value)) = parse_id(id)
     {
         let entity = Entity::from_bits(value);
+        apply_structure(world, Some(entity), &space.root);
         if let Some(mut tab) = world.get_mut::<Tab>(entity) {
             tab.name = space.name.clone();
         }
     }
     apply_node(world, &space.root);
+}
+
+fn apply_structure(world: &mut World, parent: Option<Entity>, node: &LayoutNodeDto) {
+    if let Some(entity) = node_entity(node) {
+        if let Some(parent) = parent {
+            world.entity_mut(entity).insert(ChildOf(parent));
+        }
+        match node {
+            LayoutNodeDto::Split { children, .. } => {
+                for c in children {
+                    apply_structure(world, Some(entity), c);
+                }
+            }
+            LayoutNodeDto::Pane { tabs, .. } => {
+                for t in tabs {
+                    if let Some(tid) = t.id.as_deref()
+                        && let Ok((_, value)) = parse_id(tid)
+                    {
+                        let tab_entity = Entity::from_bits(value);
+                        world.entity_mut(tab_entity).insert(ChildOf(entity));
+                    }
+                }
+            }
+        }
+    } else {
+        // Created node — Task 10 handles spawning. Descend so any
+        // identified descendants still get reparented under their grandparent.
+        match node {
+            LayoutNodeDto::Split { children, .. } => {
+                for c in children {
+                    apply_structure(world, parent, c);
+                }
+            }
+            LayoutNodeDto::Pane { .. } => {}
+        }
+    }
 }
 
 fn apply_node(world: &mut World, node: &LayoutNodeDto) {
@@ -186,5 +223,62 @@ mod tests {
         apply(app.world_mut(), &snap).unwrap();
         assert_eq!(app.world().get::<PaneSize>(pane_a).unwrap().flex_grow, 3.0);
         assert_eq!(app.world().get::<PaneSize>(pane_b).unwrap().flex_grow, 1.0);
+    }
+
+    #[test]
+    fn moves_pane_to_new_parent() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+        let split_a = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(space),
+            ))
+            .id();
+        let split_b = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(space),
+            ))
+            .id();
+        let moved = app.world_mut().spawn((Pane, ChildOf(split_a))).id();
+        let _filler_b = app.world_mut().spawn((Pane, ChildOf(split_b))).id();
+
+        let snap = LayoutSnapshot {
+            spaces: vec![SpaceDto {
+                id: Some(format_id(NodeKind::Space, space.to_bits())),
+                name: "S".into(),
+                is_active: true,
+                root: LayoutNodeDto::Split {
+                    id: Some(format_id(NodeKind::Split, split_a.to_bits())),
+                    direction: SplitDirectionDto::Row,
+                    flex_weights: vec![],
+                    children: vec![LayoutNodeDto::Split {
+                        id: Some(format_id(NodeKind::Split, split_b.to_bits())),
+                        direction: SplitDirectionDto::Row,
+                        flex_weights: vec![],
+                        children: vec![LayoutNodeDto::Pane {
+                            id: Some(format_id(NodeKind::Pane, moved.to_bits())),
+                            is_zoomed: false,
+                            tabs: vec![],
+                        }],
+                    }],
+                },
+            }],
+            focused: FocusDto::default(),
+        };
+
+        apply(app.world_mut(), &snap).unwrap();
+        let parent = app.world().get::<ChildOf>(moved).map(|p| p.parent());
+        assert_eq!(parent, Some(split_b));
     }
 }
