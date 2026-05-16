@@ -20,6 +20,7 @@ pub mod strategy;
 pub mod stream;
 pub mod systems {
     pub mod approval;
+    pub mod continue_after_tool;
     pub mod dispatch_tool;
     pub mod drain_stream;
     pub mod process_input;

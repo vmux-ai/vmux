@@ -1,98 +1,86 @@
 ---
 name: vmux-release
-description: Use when releasing a new vmux version, cutting a vmux release, validating vmux release automation, or troubleshooting vmux release artifacts.
+description: Use when releasing Vmux, bumping Vmux versions, testing Vmux release automation, or checking GitHub Actions release/tag workflows for vmux-ai/vmux.
 ---
 
-# Vmux Release Procedure
+# Vmux Release
 
-## Preconditions
+Release is driven by a reviewed version bump. Do not manually create release tags.
 
-- Start from the repo root, but do not edit files in the main worktree.
-- Main is clean and current enough to branch from.
-- All recent CI runs green.
-- Apple signing secrets configured in repo Actions secrets: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID`.
-- Update signing secrets configured: `VMUX_UPDATE_PUBLIC_KEY`, `VMUX_UPDATE_PRIVATE_KEY`, `VMUX_UPDATE_PRIVATE_KEY_PASSWORD`.
+## Flow
 
-## Steps
+1. Start from current `main`.
 
-1. **Categorize the upgrade.** Choose exactly one SemVer category before bumping:
-   - **Patch:** bug fixes, CI/release fixes, docs, dependency updates, no user-facing behavior change.
-   - **Minor:** new user-facing features, compatible behavior changes, new settings or commands.
-   - **Major:** breaking changes, incompatible config/data/API changes, removed behavior, required manual migration.
-   Check `git log v$LAST..HEAD` for changes since last release and map every notable change into one category. Use the highest category present.
+```sh
+git switch main
+git pull --rebase origin main
+```
 
-2. **Determine next version.** Apply the category to the current version:
-   - Patch: `X.Y.Z` -> `X.Y.(Z+1)`
-   - Minor: `X.Y.Z` -> `X.(Y+1).0`
-   - Major: `X.Y.Z` -> `(X+1).0.0`
+2. Create release branch.
 
-3. **Create release worktree and bump version.**
-   ```bash
-   git worktree list
-   git worktree add .worktrees/vmux-release-vX.Y.Z -b release/vX.Y.Z main
-   cd .worktrees/vmux-release-vX.Y.Z
-   git pull --rebase origin main
-   # Edit Cargo.toml: workspace.package.version = "X.Y.Z"
-   make lint
-   make test
-   git commit -am "chore(release): vX.Y.Z"
-   git push -u origin release/vX.Y.Z
-   ```
+```sh
+VERSION=0.0.2
+git switch -c "release/v$VERSION"
+```
 
-4. **Open PR.**
-   ```bash
-   gh pr create --title "chore(release): vX.Y.Z" --body "Release vX.Y.Z"
-   ```
+3. Bump root `Cargo.toml`.
 
-5. **Wait for CI green.** Lint + test always run; build-mac runs only if packaging-touching paths changed.
+```sh
+perl -0pi -e "s/version = \"[0-9]+\\.[0-9]+\\.[0-9]+[^\\\"]*\"/version = \"$VERSION\"/" Cargo.toml
+cargo update -w
+```
 
-6. **Squash-merge PR to main.**
-   ```bash
-   gh pr merge --squash --delete-branch
-   ```
+4. Verify before commit.
 
-7. **Watch release pipeline.**
-   ```bash
-   gh run watch $(gh run list --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId')
-   ```
-   Expected: ~50 min for the macOS sign + notarize + DMG build.
+```sh
+make lint
+make test
+```
 
-8. **Verify GH release.**
-   ```bash
-   gh release view vX.Y.Z
-   ```
-   Assets present: `Vmux_X.Y.Z_aarch64.dmg`, `vmux-vX.Y.Z-aarch64-apple-darwin.tar.gz`, `Vmux-vX.Y.Z-aarch64-apple-darwin.app.tar.gz`, `Vmux-vX.Y.Z-aarch64-apple-darwin.app.tar.gz.sig`.
+5. Commit, push, open PR.
 
-9. **Verify auto-commit on main.**
-   ```bash
-   git pull --rebase origin main
-   git log -1 --stat
-   ```
-   Expect a commit `chore(release): update cask and update manifest to X.Y.Z` touching `Casks/vmux.rb` and `website/public/updates.json`.
+```sh
+git add Cargo.toml Cargo.lock
+git commit -m "chore(release): v$VERSION"
+git push -u origin "release/v$VERSION"
 
-10. **Verify website redeploy.** Wait ~5 min for `deploy-website.yml`, then:
-   ```bash
-   curl -fsSL https://vmux.ai/updates.json | jq .version
-   ```
-   Should print `"vX.Y.Z"`.
+gh pr create \
+  -B main \
+  -H "release/v$VERSION" \
+  -t "chore(release): v$VERSION" \
+  -b "Bump workspace version to $VERSION."
+```
 
-11. **Smoke test.** On a clean macOS machine or VM:
-    ```bash
-    brew tap vmux-ai/vmux https://github.com/vmux-ai/vmux
-    brew install --cask vmux
-    # or, for existing installs:
-    brew upgrade --cask vmux
-    open -a Vmux
-    ```
-    Confirm app launches and `About` shows the new version.
+6. Merge after PR CI passes.
 
-12. **(Optional) Test auto-update.** Install previous version, launch, wait for poll interval (default 1h). App should download + replace itself with the new version on next launch.
+```sh
+gh pr checks --watch
+gh pr merge --squash --delete-branch
+```
 
-## If something goes wrong
+7. Watch automation.
 
-- **Release pipeline fails partway:** check `gh run view --log-failed`. Common: notarization timeout (Apple side, retry the run), missing secret (re-add).
-- **detect-version says version unchanged after cask + manifest auto-commit:** expected. The auto-commit does not change `Cargo.toml`, so release should skip.
-- **detect-version says version unchanged after the release bump merge:** unexpected. The merged release commit did not change `Cargo.toml` version. Confirm the bump landed; check `git show main:Cargo.toml | head -10`.
-- **Tag already exists:** release.yml resumes if the existing `vX.Y.Z` tag points at the release SHA. It aborts if the tag points elsewhere. Fix by bumping version higher and pushing a new commit to main, or only delete the bad tag if you are certain it is safe.
-- **Cask commit conflicts:** rare; another commit landed on main between release start and cask push. The workflow does `git pull --rebase origin main` before push; if that fails, re-run the workflow.
-- **vmux.ai/updates.json shows old version:** `deploy-website.yml` didn't fire. Check workflow runs; manually re-run via `gh workflow run deploy-website.yml`.
+```sh
+gh run list --workflow CI --branch main --limit 1
+gh run list --workflow "Tag Release" --limit 1
+gh run list --workflow Release --limit 1
+git ls-remote --tags origin "v$VERSION"
+```
+
+Expected sequence:
+
+```txt
+main CI passes
+Tag Release creates v$VERSION
+Release runs from v$VERSION
+```
+
+## Rules
+
+- Version bump must happen in root `Cargo.toml` under `[workspace.package]`.
+- `Cargo.lock` may or may not change; include it only if changed.
+- If version did not change from previous commit, `Tag Release` skips.
+- If tag already exists, `Tag Release` fails. Pick a new version.
+- Never run `git tag` or push tags manually for normal releases.
+- If `make lint` or `make test` fails, fix before PR or merge.
+

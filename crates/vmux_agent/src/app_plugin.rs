@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession};
 use crate::strategy::AgentStrategies;
-use crate::systems::{approval, dispatch_tool, drain_stream, process_input};
+use crate::systems::{approval, continue_after_tool, dispatch_tool, drain_stream, process_input};
 
 pub struct AppAgentPlugin;
 
@@ -18,6 +18,7 @@ impl Plugin for AppAgentPlugin {
                     process_input::process_user_input,
                     drain_stream::drain_stream,
                     dispatch_tool::dispatch_tool,
+                    continue_after_tool::continue_after_tool,
                 ),
             );
 
