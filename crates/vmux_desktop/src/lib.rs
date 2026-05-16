@@ -104,12 +104,12 @@ impl Plugin for VmuxPlugin {
                     filter: "bevy_camera_controller=warn".into(),
                     ..default()
                 }),
+            WebviewAppRegistryPlugin,
             SettingsPlugin,
             CommandPlugin,
             ShortcutPlugin,
             ScenePlugin,
             OsMenuPlugin,
-            WebviewAppRegistryPlugin,
             LayoutChromePlugin,
             TerminalPlugin,
             ServicesPlugin,
