@@ -472,6 +472,38 @@ mod tests {
     }
 
     #[test]
+    fn agent_command_result_layout_rkyv_round_trip() {
+        let result = AgentCommandResult::Layout(LayoutSnapshot {
+            spaces: vec![SpaceDto {
+                id: Some("space:1".into()),
+                name: "X".into(),
+                is_active: true,
+                root: LayoutNodeDto::Pane {
+                    id: Some("pane:2".into()),
+                    is_zoomed: false,
+                    tabs: vec![TabDto {
+                        id: Some("tab:3".into()),
+                        title: "T".into(),
+                        url: "https://x".into(),
+                        kind: "browser".into(),
+                        is_loading: false,
+                        favicon_url: String::new(),
+                    }],
+                },
+            }],
+            focused: FocusDto {
+                space: Some("space:1".into()),
+                pane: Some("pane:2".into()),
+                tab: Some("tab:3".into()),
+            },
+        });
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&result).unwrap();
+        let recovered: AgentCommandResult =
+            rkyv::from_bytes::<AgentCommandResult, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(recovered, result);
+    }
+
+    #[test]
     fn agent_command_response_messages_roundtrip() {
         let request_id = AgentRequestId::new();
         let client_msg = ClientMessage::AgentCommandResponse {
