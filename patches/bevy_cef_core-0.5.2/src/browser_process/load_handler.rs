@@ -1,3 +1,6 @@
+mod transition;
+pub use transition::{CefTransitionCore, CefTransitionQualifiers, decode as decode_transition};
+
 use async_channel::Sender;
 use bevy::prelude::Entity;
 use cef::rc::{Rc, RcImpl};
