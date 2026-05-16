@@ -7,6 +7,7 @@ pub mod components;
 pub mod echo;
 pub mod events;
 pub mod exec;
+pub mod http;
 pub mod kind;
 pub mod mcp;
 pub mod message;

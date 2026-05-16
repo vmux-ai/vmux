@@ -9153,6 +9153,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "tokio",
  "vmux_core",
  "vmux_mcp",
 ]
