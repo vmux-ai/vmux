@@ -1976,13 +1976,20 @@ fn sync_terminal_theme(
 
 fn on_restart_pty(
     trigger: On<RestartPty>,
-    mut q: Query<(&mut ProcessId, &mut PageMetadata)>,
+    mut q: Query<(
+        &mut ProcessId,
+        &mut PageMetadata,
+        Option<&mut crate::terminal::launch::TerminalLaunch>,
+        Option<&vmux_agent::session::AgentSession>,
+        Option<&vmux_agent::session::SessionId>,
+    )>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
+    strategies: Option<Res<vmux_agent::strategy::AgentStrategies>>,
 ) {
     let entity = trigger.event().entity;
     let Some(service) = service else { return };
-    let Ok((mut pid, mut meta)) = q.get_mut(entity) else {
+    let Ok((mut pid, mut meta, mut launch, agent_session, session_id)) = q.get_mut(entity) else {
         return;
     };
 
@@ -1990,20 +1997,48 @@ fn on_restart_pty(
         .0
         .send(ClientMessage::KillProcess { process_id: *pid });
 
-    let shell = settings
-        .terminal
-        .as_ref()
-        .map(|t| t.resolve_theme(&t.default_theme).shell)
-        .unwrap_or_else(default_shell);
+    let (command, args, cwd, env) = match (launch.as_deref(), agent_session, strategies.as_deref())
+    {
+        (Some(l), Some(session), Some(strategies)) => {
+            let mut updated_args = l.args.clone();
+            if let Some(strategy) = strategies.get_cli(session.kind) {
+                let mcp = vmux_agent::McpServerConfig {
+                    command: l.command.clone(),
+                    args: vec![],
+                    cwd: None,
+                };
+                updated_args = strategy.build_args(&mcp, session_id.map(|s| s.0.as_str()));
+            }
+            (
+                l.command.clone(),
+                updated_args,
+                l.cwd.clone(),
+                l.env.clone(),
+            )
+        }
+        (Some(l), _, _) => (
+            l.command.clone(),
+            l.args.clone(),
+            l.cwd.clone(),
+            l.env.clone(),
+        ),
+        _ => {
+            let shell = settings
+                .terminal
+                .as_ref()
+                .map(|t| t.resolve_theme(&t.default_theme).shell)
+                .unwrap_or_else(default_shell);
+            (shell, vec![], String::new(), Vec::new())
+        }
+    };
 
-    // Create new process
     let new_id = ProcessId::new();
     service.0.send(ClientMessage::CreateProcess {
         process_id: new_id,
-        command: shell,
-        args: vec![],
-        cwd: String::new(),
-        env: Vec::new(),
+        command: command.clone(),
+        args: args.clone(),
+        cwd: cwd.clone(),
+        env: env.clone(),
         cols: 80,
         rows: 24,
     });
@@ -2012,8 +2047,12 @@ fn on_restart_pty(
         .send(ClientMessage::AttachProcess { process_id: new_id });
 
     *pid = new_id;
-    meta.url = TERMINAL_WEBVIEW_URL.to_string();
-    meta.title = format!("Terminal ({})", &new_id.to_string()[..8]);
+    if let Some(l) = launch.as_mut() {
+        l.args = args;
+    } else {
+        meta.url = TERMINAL_WEBVIEW_URL.to_string();
+        meta.title = format!("Terminal ({})", &new_id.to_string()[..8]);
+    }
 }
 
 /// Consume `AppCommand::Terminal::CopyMode` and ask the service to enter
