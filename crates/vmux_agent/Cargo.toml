@@ -14,4 +14,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 notify = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+crossbeam-channel = "0.5"
+futures-lite = "2"
 vmux_core = { path = "../vmux_core" }

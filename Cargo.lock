@@ -9073,7 +9073,10 @@ version = "0.0.9"
 dependencies = [
  "bevy",
  "chrono",
+ "crossbeam-channel",
+ "futures-lite",
  "notify 6.1.1",
+ "reqwest",
  "serde",
  "serde_json",
  "vmux_core",
@@ -9261,7 +9264,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_settings"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "dioxus",
  "rkyv",

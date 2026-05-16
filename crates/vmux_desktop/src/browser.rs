@@ -1279,14 +1279,32 @@ fn spawn_visit_on_navigation(
 
 fn sync_page_metadata_to_tab(
     browser_q: Query<(&PageMetadata, &ChildOf), (With<Browser>, Changed<PageMetadata>)>,
-    tab_q: Query<(), With<Stack>>,
+    tab_q: Query<
+        (
+            Option<&PageMetadata>,
+            Has<vmux_agent::components::AgentSession>,
+        ),
+        With<Stack>,
+    >,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
     mut commands: Commands,
 ) {
     for (meta, child_of) in &browser_q {
         let parent = child_of.get();
-        if !tab_q.contains(parent) || status_q.contains(parent) || side_sheet_q.contains(parent) {
+        let Ok((parent_meta, is_agent_session)) = tab_q.get(parent) else {
+            continue;
+        };
+        if status_q.contains(parent) || side_sheet_q.contains(parent) {
+            continue;
+        }
+        if is_agent_session {
+            continue;
+        }
+        if let Some(parent_url) = parent_meta.as_ref().map(|m| m.url.as_str())
+            && parent_url.starts_with("vmux://")
+            && (meta.url.starts_with("data:") || meta.url.is_empty())
+        {
             continue;
         }
         if let Ok(mut ecmds) = commands.get_entity(parent) {

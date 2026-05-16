@@ -29,10 +29,45 @@ impl Plugin for SettingsCorePlugin {
                     .before(vmux_layout::LayoutStartupSet::Post),
             )
             .add_systems(
+                Startup,
+                register_app_agents_from_settings.after(SettingsLoadSet),
+            )
+            .add_systems(
                 Update,
                 (persist_settings_to_disk, reload_settings_on_change).chain(),
             )
             .add_systems(Update, update_effective_startup_url);
+    }
+}
+
+fn register_app_agents_from_settings(
+    settings: Option<Res<AppSettings>>,
+    strategies: Option<ResMut<vmux_agent::strategy::AgentStrategies>>,
+) {
+    let Some(settings) = settings else { return };
+    let Some(mut strategies) = strategies else {
+        return;
+    };
+    for provider_settings in &settings.agent.app_providers {
+        let kind = match provider_settings.kind.as_str() {
+            "vibe" => vmux_agent::AgentKind::Vibe,
+            "claude" => vmux_agent::AgentKind::Claude,
+            "codex" => vmux_agent::AgentKind::Codex,
+            other => {
+                bevy::log::warn!(
+                    "agent.app_providers: unknown kind '{other}' for provider '{}'; defaulting to vibe",
+                    provider_settings.provider
+                );
+                vmux_agent::AgentKind::Vibe
+            }
+        };
+        for model in &provider_settings.models {
+            strategies.register_app(Box::new(vmux_agent::EchoAppStrategy::new(
+                provider_settings.provider.clone(),
+                model.clone(),
+                kind,
+            )));
+        }
     }
 }
 
@@ -63,13 +98,49 @@ pub struct AppSettings {
     pub auto_update: bool,
     #[serde(default)]
     pub startup_url: Option<String>,
+    #[serde(default = "default_agent_settings")]
+    pub agent: AgentSettings,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AgentSettings {
+    #[serde(default)]
+    pub app_providers: Vec<AppProviderSettings>,
+}
+
+impl Default for AgentSettings {
+    fn default() -> Self {
+        default_agent_settings()
+    }
+}
+
+fn default_agent_settings() -> AgentSettings {
+    AgentSettings {
+        app_providers: vec![AppProviderSettings {
+            provider: "stub".to_string(),
+            kind: "vibe".to_string(),
+            models: vec!["echo".to_string()],
+        }],
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct AppProviderSettings {
+    pub provider: String,
+    #[serde(default = "default_provider_kind")]
+    pub kind: String,
+    pub models: Vec<String>,
+}
+
+fn default_provider_kind() -> String {
+    "vibe".to_string()
 }
 
 pub fn resolve_startup_url(settings: &AppSettings) -> String {
     settings
         .startup_url
         .clone()
-        .unwrap_or_else(|| vmux_agent::AgentKind::Vibe.url_scheme().to_string())
+        .unwrap_or_else(|| vmux_agent::AgentKind::Vibe.cli_url_prefix())
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -674,6 +745,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
+            agent: crate::settings::AgentSettings::default(),
         }
     }
 
@@ -687,7 +759,7 @@ mod tests {
     #[test]
     fn resolve_startup_url_defaults_to_vibe() {
         let s = base_settings();
-        assert_eq!(resolve_startup_url(&s), "vmux://vibe/");
+        assert_eq!(resolve_startup_url(&s), "vmux://agent/vibe/");
     }
 
     #[test]

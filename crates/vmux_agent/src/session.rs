@@ -45,13 +45,13 @@ pub fn format_agent_url(
     >,
 ) {
     for (sid, agent, mut meta) in &mut q {
-        let Some(strategy) = strategies.get(agent.kind) else {
+        let Some(strategy) = strategies.get_cli(agent.kind) else {
             continue;
         };
-        let scheme = strategy.kind().url_scheme();
+        let prefix = strategy.kind().cli_url_prefix();
         let next = match sid {
-            Some(SessionId(id)) => format!("{scheme}{id}"),
-            None => scheme.to_string(),
+            Some(SessionId(id)) => format!("{prefix}{id}"),
+            None => prefix,
         };
         if meta.url != next {
             meta.url = next;
@@ -99,7 +99,7 @@ mod url_tests {
     fn format_agent_url_emits_scheme_with_session_id() {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
-        strategies.register(Box::new(VibeStrategy));
+        strategies.register_cli(Box::new(VibeStrategy));
         app.insert_resource(strategies);
         app.add_systems(Update, format_agent_url);
 
@@ -115,14 +115,14 @@ mod url_tests {
             .id();
         app.update();
         let url = &app.world().get::<PageMetadata>(entity).unwrap().url;
-        assert_eq!(url, "vmux://vibe/abc");
+        assert_eq!(url, "vmux://agent/vibe/abc");
     }
 
     #[test]
     fn format_agent_url_emits_scheme_only_when_no_session_id() {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
-        strategies.register(Box::new(VibeStrategy));
+        strategies.register_cli(Box::new(VibeStrategy));
         app.insert_resource(strategies);
         app.add_systems(Update, format_agent_url);
 
@@ -137,7 +137,7 @@ mod url_tests {
             .id();
         app.update();
         let url = &app.world().get::<PageMetadata>(entity).unwrap().url;
-        assert_eq!(url, "vmux://vibe/");
+        assert_eq!(url, "vmux://agent/vibe/");
     }
 }
 
@@ -169,7 +169,7 @@ pub fn discover_pending_agent_sessions(
 ) {
     let now = std::time::SystemTime::now();
     for (entity, pending) in &q {
-        let Some(strategy) = strategies.get(pending.kind) else {
+        let Some(strategy) = strategies.get_cli(pending.kind) else {
             continue;
         };
         let claimed: HashSet<String> = map
@@ -277,7 +277,7 @@ pub struct AgentSessionWatchers {
 pub fn start_agent_session_watchers(mut commands: Commands, strategies: Res<AgentStrategies>) {
     let mut receivers = Vec::new();
     let mut watchers = Vec::new();
-    for (_kind, strategy) in strategies.iter() {
+    for strategy in strategies.cli_strategies() {
         let root = strategy.sessions_root();
         if std::fs::create_dir_all(&root).is_err() {
             continue;
@@ -327,7 +327,7 @@ pub fn detect_file_end_time_exit(
     sessioned: Query<(Entity, &AgentSession, &SessionId)>,
 ) {
     for (entity, agent, sid) in &sessioned {
-        let Some(strategy) = strategies.get(agent.kind) else {
+        let Some(strategy) = strategies.get_cli(agent.kind) else {
             continue;
         };
         if !strategy.detect_end_time(&sid.0) {
@@ -351,7 +351,7 @@ mod discovery_tests {
     fn pending_with_no_match_within_timeout_keeps_pending() {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
-        strategies.register(Box::new(VibeStrategy));
+        strategies.register_cli(Box::new(VibeStrategy));
         app.insert_resource(strategies);
         app.init_resource::<AgentSessionToEntity>();
         app.add_systems(Update, discover_pending_agent_sessions);
@@ -380,6 +380,11 @@ mod exit_tests {
             fn kind(&self) -> AgentKind {
                 AgentKind::Vibe
             }
+            fn variant(&self) -> crate::AgentVariant {
+                crate::AgentVariant::Cli
+            }
+        }
+        impl crate::CliAgentStrategy for EndedStrategy {
             fn sessions_root(&self) -> PathBuf {
                 PathBuf::from("/tmp/none")
             }
@@ -404,7 +409,7 @@ mod exit_tests {
 
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
-        strategies.register(Box::new(EndedStrategy));
+        strategies.register_cli(Box::new(EndedStrategy));
         app.insert_resource(strategies);
         app.add_message::<AgentSessionExited>();
         app.add_systems(Update, detect_file_end_time_exit);

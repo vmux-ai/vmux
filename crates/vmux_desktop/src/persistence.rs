@@ -325,9 +325,9 @@ pub(crate) fn rebuild_space_views(
                 }
             } else if let Some(kind) = vmux_agent::AgentKind::all()
                 .into_iter()
-                .find(|k| meta.url.starts_with(k.url_scheme()))
+                .find(|k| meta.url.starts_with(&k.cli_url_prefix()))
             {
-                let id_part = meta.url.strip_prefix(kind.url_scheme()).unwrap_or("");
+                let id_part = meta.url.strip_prefix(&kind.cli_url_prefix()).unwrap_or("");
                 let session_id = (!id_part.is_empty()).then(|| id_part.to_string());
                 let cwd = saved_launch
                     .map(|l| std::path::PathBuf::from(&l.cwd))
@@ -501,6 +501,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
+            agent: crate::settings::AgentSettings::default(),
         }
     }
 

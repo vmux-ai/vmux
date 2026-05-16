@@ -74,4 +74,9 @@
         ],
     )),
     auto_update: true,
+    agent: (
+        app_providers: [
+            (provider: "stub", kind: "vibe", models: ["echo"]),
+        ],
+    ),
 )

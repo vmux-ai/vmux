@@ -4,8 +4,9 @@ use std::time::SystemTime;
 
 use serde::Serialize;
 
+use crate::cli_trait::CliAgentStrategy;
 use crate::strategy::AgentStrategy;
-use crate::{AgentKind, McpServerConfig};
+use crate::{AgentKind, AgentVariant, McpServerConfig};
 
 pub struct VibeStrategy;
 
@@ -14,6 +15,12 @@ impl AgentStrategy for VibeStrategy {
         AgentKind::Vibe
     }
 
+    fn variant(&self) -> AgentVariant {
+        AgentVariant::Cli
+    }
+}
+
+impl CliAgentStrategy for VibeStrategy {
     fn sessions_root(&self) -> PathBuf {
         std::env::var("VIBE_HOME")
             .map(PathBuf::from)
@@ -97,8 +104,6 @@ fn serialize_vibe_mcp_env(mcp: &McpServerConfig) -> String {
 
 #[derive(serde::Deserialize)]
 struct MetaJson {
-    session_id: String,
-    start_time: String,
     environment: MetaEnvironment,
 }
 #[derive(serde::Deserialize)]
@@ -126,38 +131,43 @@ pub(crate) fn discover_vibe_session_id(
     claimed: &HashSet<String>,
 ) -> Option<String> {
     let cwd_norm = normalize_cwd(cwd);
-    let spawn_secs = spawn_time
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-
     let entries = std::fs::read_dir(sessions_root).ok()?;
-    let mut best: Option<(i64, String)> = None;
+    let mut best: Option<(SystemTime, String)> = None;
     for entry in entries.flatten() {
-        let meta_path = entry.path().join("meta.json");
-        let Ok(text) = std::fs::read_to_string(&meta_path) else {
+        let path = entry.path();
+        let Some(dirname) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        let Ok(meta) = serde_json::from_str::<MetaJson>(&text) else {
-            continue;
-        };
-        let meta_cwd = normalize_cwd(Path::new(&meta.environment.working_directory));
-        if meta_cwd != cwd_norm {
+        if !dirname.starts_with("session_") {
             continue;
         }
-        if claimed.contains(&meta.session_id) {
-            continue;
-        }
-        let Ok(start_dt) = chrono::DateTime::parse_from_rfc3339(&meta.start_time) else {
+        let Some(short_id) = dirname.rsplit('_').next() else {
             continue;
         };
-        let start_secs = start_dt.timestamp();
-        if start_secs < spawn_secs {
+        if short_id.is_empty() || claimed.contains(short_id) {
             continue;
+        }
+        let Ok(meta) = std::fs::metadata(&path) else {
+            continue;
+        };
+        let Ok(created) = meta.created().or_else(|_| meta.modified()) else {
+            continue;
+        };
+        if created < spawn_time {
+            continue;
+        }
+        let meta_path = path.join("meta.json");
+        if let Ok(text) = std::fs::read_to_string(&meta_path)
+            && let Ok(parsed) = serde_json::from_str::<MetaJson>(&text)
+        {
+            let meta_cwd = normalize_cwd(Path::new(&parsed.environment.working_directory));
+            if meta_cwd != cwd_norm {
+                continue;
+            }
         }
         match &best {
-            None => best = Some((start_secs, meta.session_id)),
-            Some((cur, _)) if start_secs < *cur => best = Some((start_secs, meta.session_id)),
+            None => best = Some((created, short_id.to_string())),
+            Some((cur, _)) if created < *cur => best = Some((created, short_id.to_string())),
             _ => {}
         }
     }
@@ -201,36 +211,89 @@ mod tests {
     }
 
     #[test]
-    fn discover_picks_session_matching_cwd_and_after_spawn_time() {
-        let tmp = unique_tmp("vibe-discover");
+    fn discover_returns_short_uuid_from_session_dir_name() {
+        let tmp = unique_tmp("vibe-discover-shortid");
         let sessions = tmp.join("sessions");
-        let cwd = "/tmp/work-A";
-        write_meta(
-            &sessions.join("a"),
-            "older",
-            cwd,
-            "2025-12-31T23:00:00+00:00",
-            None,
-        );
-        write_meta(
-            &sessions.join("b"),
-            "this",
-            cwd,
-            "2026-05-11T12:00:00+00:00",
-            None,
-        );
-        write_meta(
-            &sessions.join("c"),
-            "other",
-            "/tmp/work-B",
-            "2026-05-11T12:00:00+00:00",
-            None,
-        );
-
-        let spawn = SystemTime::UNIX_EPOCH + Duration::from_secs(1_770_000_000);
+        std::fs::create_dir_all(&sessions).unwrap();
+        let spawn = SystemTime::now();
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::create_dir_all(sessions.join("session_20260515_214210_3d4fcbe1")).unwrap();
         let claimed = HashSet::new();
-        let result = discover_vibe_session_id(&sessions, Path::new(cwd), spawn, &claimed);
-        assert_eq!(result.as_deref(), Some("this"));
+        let result =
+            discover_vibe_session_id(&sessions, Path::new("/tmp/anything"), spawn, &claimed);
+        assert_eq!(result.as_deref(), Some("3d4fcbe1"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn discover_skips_dirs_created_before_spawn_time() {
+        let tmp = unique_tmp("vibe-discover-old");
+        let sessions = tmp.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::create_dir_all(sessions.join("session_20260101_000000_oldsess1")).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        let spawn = SystemTime::now();
+        let claimed = HashSet::new();
+        let result = discover_vibe_session_id(&sessions, Path::new("/tmp/x"), spawn, &claimed);
+        assert!(result.is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn discover_skips_claimed_short_ids() {
+        let tmp = unique_tmp("vibe-discover-claimed");
+        let sessions = tmp.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let spawn = SystemTime::now();
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::create_dir_all(sessions.join("session_20260515_214210_aaaaaaaa")).unwrap();
+        std::fs::create_dir_all(sessions.join("session_20260515_214300_bbbbbbbb")).unwrap();
+        let mut claimed = HashSet::new();
+        claimed.insert("aaaaaaaa".to_string());
+        let result = discover_vibe_session_id(&sessions, Path::new("/tmp/x"), spawn, &claimed);
+        assert_eq!(result.as_deref(), Some("bbbbbbbb"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn discover_filters_by_meta_cwd_when_meta_present() {
+        let tmp = unique_tmp("vibe-discover-meta-cwd");
+        let sessions = tmp.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let spawn = SystemTime::now();
+        std::thread::sleep(Duration::from_millis(20));
+        write_meta(
+            &sessions.join("session_20260515_214210_xxxxxxxx"),
+            "full-uuid-x",
+            "/tmp/work-X",
+            "2026-05-15T21:42:10+00:00",
+            None,
+        );
+        write_meta(
+            &sessions.join("session_20260515_214300_yyyyyyyy"),
+            "full-uuid-y",
+            "/tmp/work-Y",
+            "2026-05-15T21:43:00+00:00",
+            None,
+        );
+        let claimed = HashSet::new();
+        let result = discover_vibe_session_id(&sessions, Path::new("/tmp/work-Y"), spawn, &claimed);
+        assert_eq!(result.as_deref(), Some("yyyyyyyy"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn discover_uses_dirname_when_meta_json_absent() {
+        let tmp = unique_tmp("vibe-discover-nometa");
+        let sessions = tmp.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let spawn = SystemTime::now();
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::create_dir_all(sessions.join("session_20260515_214210_freshone")).unwrap();
+        let claimed = HashSet::new();
+        let result =
+            discover_vibe_session_id(&sessions, Path::new("/tmp/anywhere"), spawn, &claimed);
+        assert_eq!(result.as_deref(), Some("freshone"));
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

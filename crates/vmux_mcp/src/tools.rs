@@ -19,8 +19,14 @@ pub enum McpParamTool {
         #[mcp(enum_values = ["default", "commands", "path"])]
         mode: Option<String>,
     },
-    #[mcp(description = "Create a visible Vmux terminal tab.")]
-    NewTerminalTab { cwd: Option<String> },
+    #[mcp(
+        description = "Spawn a process in a new visible Vmux tab. If `command` is omitted, the user's default shell is launched. If `args` is provided as a single string, it is split on whitespace. If `cwd` is omitted, the active space's directory (~/.vmux/<space>) is used. Useful for opening claude/vibe/codex/nvim/etc. directly without going through a shell."
+    )]
+    NewTerminalTab {
+        cwd: Option<String>,
+        command: Option<String>,
+        args: Option<String>,
+    },
     #[mcp(description = "Run a shell command in a visible Vmux terminal.")]
     RunShell {
         command: String,
@@ -69,9 +75,19 @@ impl McpParamTool {
                 };
                 Ok(AgentCommand::AppCommand { id: id.to_string() })
             }
-            McpParamTool::NewTerminalTab { cwd } => Ok(AgentCommand::NewTerminalTab {
-                cwd: cwd.unwrap_or_default(),
-            }),
+            McpParamTool::NewTerminalTab { cwd, command, args } => {
+                let args_vec = args
+                    .unwrap_or_default()
+                    .split_whitespace()
+                    .map(|s| s.to_string())
+                    .collect();
+                Ok(AgentCommand::NewTerminalTab {
+                    cwd: cwd.unwrap_or_default(),
+                    command: command.unwrap_or_default(),
+                    args: args_vec,
+                    env: vec![],
+                })
+            }
             McpParamTool::RunShell { command, cwd, mode } => {
                 if command.trim().is_empty() {
                     return Err("run_shell.command is empty".to_string());

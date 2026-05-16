@@ -14,9 +14,9 @@ pub struct AgentSessionPlugin;
 impl Plugin for AgentSessionPlugin {
     fn build(&self, app: &mut App) {
         let mut strategies = AgentStrategies::default();
-        strategies.register(Box::new(VibeStrategy));
-        strategies.register(Box::new(ClaudeStrategy));
-        strategies.register(Box::new(CodexStrategy));
+        strategies.register_cli(Box::new(VibeStrategy));
+        strategies.register_cli(Box::new(ClaudeStrategy));
+        strategies.register_cli(Box::new(CodexStrategy));
         app.insert_resource(strategies)
             .init_resource::<AgentSessionToEntity>()
             .init_resource::<AgentSessionDirty>()
@@ -66,8 +66,8 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(AgentSessionPlugin);
         let strategies = app.world().resource::<AgentStrategies>();
-        assert!(strategies.get(crate::AgentKind::Vibe).is_some());
-        assert!(strategies.get(crate::AgentKind::Claude).is_some());
-        assert!(strategies.get(crate::AgentKind::Codex).is_some());
+        assert!(strategies.get_cli(crate::AgentKind::Vibe).is_some());
+        assert!(strategies.get_cli(crate::AgentKind::Claude).is_some());
+        assert!(strategies.get_cli(crate::AgentKind::Codex).is_some());
     }
 }
