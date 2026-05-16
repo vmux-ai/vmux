@@ -1,4 +1,6 @@
 pub mod event;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod transition;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use vmux_core::{CreatedAt, LastActivatedAt, Visit, now_millis};
