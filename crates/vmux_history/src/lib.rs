@@ -1,5 +1,7 @@
 pub mod event;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod spawn;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod transition;
 
 #[cfg(not(target_arch = "wasm32"))]
