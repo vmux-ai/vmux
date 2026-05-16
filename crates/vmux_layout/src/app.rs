@@ -87,16 +87,23 @@ fn favicon_src_for_url(favicon_url: &str, url: &str) -> Option<String> {
         .map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=32"))
 }
 
-fn favicon_src_for_stack(stack: &StackRow) -> Option<String> {
-    favicon_src_for_url(&stack.favicon_url, &stack.url)
-}
-
 fn favicon_src_for_stack_node(stack: &StackNode) -> Option<String> {
     favicon_src_for_url(&stack.favicon_url, &stack.url)
 }
 
 fn favicon_src_for_tab(tab: &TabRow) -> Option<String> {
     favicon_src_for_url(&tab.favicon_url, &tab.url)
+}
+
+fn format_address(stack: &StackRow) -> String {
+    let host = host_for_favicon_fallback(&stack.url);
+    let title = stack.title.trim();
+    match (host, title.is_empty()) {
+        (Some(h), false) => format!("{h} / {title}"),
+        (Some(h), true) => h.to_string(),
+        (None, false) => title.to_string(),
+        (None, true) => stack.url.clone(),
+    }
 }
 
 fn header_position_style(state: &LayoutStateEvent) -> String {
@@ -171,13 +178,6 @@ fn HeaderView(titlebar_height: f32) -> Element {
     let TabsHostEvent { tabs } = tabs_state();
     let active_row = stacks.iter().find(|t| t.is_active).cloned();
     let active_bg_color = active_row.as_ref().and_then(|r| r.bg_color.clone());
-    let favicon_src = active_row.as_ref().and_then(favicon_src_for_stack);
-    let mut favicon_error = use_signal(|| false);
-    let mut prev_src = use_signal(|| None::<String>);
-    if *prev_src.read() != favicon_src {
-        prev_src.set(favicon_src.clone());
-        favicon_error.set(false);
-    }
     let listener_loading = (listener.is_loading)();
     let listener_error = (listener.error)();
     let tabs_loading = (tabs_listener.is_loading)();
@@ -233,8 +233,6 @@ fn HeaderView(titlebar_height: f32) -> Element {
                     }
                     HeaderAddressBar {
                         active_row: active_row.clone(),
-                        favicon_src,
-                        favicon_error,
                         bg_color: active_bg_color.clone(),
                     }
                 }
@@ -244,18 +242,9 @@ fn HeaderView(titlebar_height: f32) -> Element {
 }
 
 #[component]
-fn HeaderAddressBar(
-    active_row: Option<StackRow>,
-    favicon_src: Option<String>,
-    favicon_error: Signal<bool>,
-    bg_color: Option<String>,
-) -> Element {
+fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> Element {
     let has_content = active_row.as_ref().is_some_and(|t| !t.url.is_empty());
-    let address_value = active_row
-        .as_ref()
-        .map(StackRow::address_text)
-        .unwrap_or_default()
-        .to_string();
+    let address_value = active_row.as_ref().map(format_address).unwrap_or_default();
     let placeholder = if has_content { "" } else { "New Stack" };
 
     let (bar_style, bar_class, input_class) = if let Some(ref color) = bg_color {
@@ -263,7 +252,7 @@ fn HeaderAddressBar(
         (
             format!("background-color: {};", color),
             format!(
-                "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2.5 shadow-sm {text_class}"
+                "flex h-8 min-w-0 flex-1 cursor-pointer items-center rounded-lg px-2.5 shadow-sm {text_class}"
             ),
             format!(
                 "min-w-0 flex-1 cursor-pointer bg-transparent text-ui outline-none placeholder:opacity-50 {text_class}"
@@ -272,13 +261,13 @@ fn HeaderAddressBar(
     } else if has_content {
         (
             String::new(),
-            "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-glass-border bg-glass px-2.5 shadow-sm backdrop-blur-xl backdrop-saturate-150".to_string(),
+            "flex h-8 min-w-0 flex-1 cursor-pointer items-center rounded-lg border border-glass-border bg-glass px-2.5 shadow-sm backdrop-blur-xl backdrop-saturate-150".to_string(),
             "min-w-0 flex-1 cursor-pointer bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground".to_string(),
         )
     } else {
         (
             String::new(),
-            "flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-glass-border bg-glass px-2.5 backdrop-blur-md".to_string(),
+            "flex h-8 min-w-0 flex-1 cursor-pointer items-center rounded-lg border border-glass-border bg-glass px-2.5 backdrop-blur-md".to_string(),
             "min-w-0 flex-1 cursor-pointer bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground".to_string(),
         )
     };
@@ -292,16 +281,6 @@ fn HeaderAddressBar(
                     header_command: "focus_address_bar".to_string(),
                 });
             },
-            if let Some(stack) = active_row.as_ref() {
-                if stack.url.is_empty() {
-                    Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                        path { d: "M5 12h14" }
-                        path { d: "M12 5v14" }
-                    }
-                } else {
-                    StackIcon { url: stack.url.clone(), title: stack.title.clone(), favicon_src, favicon_error }
-                }
-            }
             input {
                 r#type: "text",
                 readonly: true,

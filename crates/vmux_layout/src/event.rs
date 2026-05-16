@@ -173,19 +173,6 @@ mod tests {
     }
 
     #[test]
-    fn stack_row_address_text_uses_current_url() {
-        let row = StackRow {
-            title: "Google".to_string(),
-            url: "https://www.google.com".to_string(),
-            favicon_url: String::new(),
-            is_active: true,
-            bg_color: None,
-        };
-
-        assert_eq!(row.address_text(), "https://www.google.com");
-    }
-
-    #[test]
     fn header_command_event_rkyv_roundtrip() {
         let original = HeaderCommandEvent {
             header_command: "back".into(),
@@ -264,12 +251,6 @@ pub struct StackRow {
     pub is_active: bool,
     #[serde(default)]
     pub bg_color: Option<String>,
-}
-
-impl StackRow {
-    pub fn address_text(&self) -> &str {
-        self.url.as_str()
-    }
 }
 
 #[derive(
