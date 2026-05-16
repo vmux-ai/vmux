@@ -122,6 +122,9 @@ mod tests {
             fn endpoint(&self) -> &str {
                 "stub://"
             }
+            fn env_var(&self) -> &'static str {
+                ""
+            }
             fn build_request(
                 &self,
                 _: &str,
@@ -178,6 +181,9 @@ mod tests {
             }
             fn endpoint(&self) -> &str {
                 "stub://"
+            }
+            fn env_var(&self) -> &'static str {
+                ""
             }
             fn build_request(
                 &self,
