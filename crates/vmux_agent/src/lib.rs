@@ -12,6 +12,7 @@ pub mod kind;
 pub mod mcp;
 pub mod message;
 pub mod plugin;
+pub mod providers;
 pub mod run_state;
 pub mod run_state_kind;
 pub mod session;
