@@ -19,3 +19,4 @@ rkyv = { workspace = true }
 crossbeam-channel = "0.5"
 futures-lite = "2"
 vmux_core = { path = "../vmux_core" }
+vmux_mcp = { path = "../vmux_mcp" }
