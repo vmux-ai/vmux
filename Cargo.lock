@@ -9143,6 +9143,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tray-icon",
@@ -9155,6 +9156,7 @@ dependencies = [
  "vmux_layout",
  "vmux_macro",
  "vmux_service",
+ "vmux_settings",
  "vmux_space",
  "vmux_terminal",
  "vmux_ui",
@@ -9251,6 +9253,21 @@ dependencies = [
  "uuid",
  "vmux_core",
  "vmux_terminal",
+ "vmux_ui",
+ "vmux_webview_app",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "vmux_settings"
+version = "0.0.8"
+dependencies = [
+ "dioxus",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "tempfile",
  "vmux_ui",
  "vmux_webview_app",
  "wasm-bindgen",

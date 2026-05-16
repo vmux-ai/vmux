@@ -19,6 +19,7 @@ mod processes_monitor;
 pub mod profile;
 mod scene;
 mod settings;
+mod settings_view;
 pub(crate) mod shortcut;
 mod spaces;
 mod terminal;
@@ -40,7 +41,7 @@ use {
     os_menu::OsMenuPlugin,
     persistence::PersistencePlugin,
     processes_monitor::ProcessesMonitorPlugin,
-    settings::SettingsPlugin,
+    settings_view::SettingsPlugin,
     shortcut::ShortcutPlugin,
     spaces::SpacesPlugin,
     terminal::TerminalInputPlugin,

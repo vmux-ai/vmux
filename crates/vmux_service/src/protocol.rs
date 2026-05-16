@@ -50,6 +50,10 @@ pub enum AgentCommand {
         direction: String,
         url: String,
     },
+    UpdateSettings {
+        path: String,
+        value_json: String,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -69,6 +73,7 @@ pub enum AgentQuery {
     ListSpaces,
     ListTerminals,
     GetFocused,
+    GetSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -120,6 +125,7 @@ pub enum AgentQueryResult {
     Spaces(Vec<SpaceInfo>),
     Terminals(Vec<TerminalInfo>),
     Focused(FocusedInfo),
+    Settings(String),
     Error(String),
 }
 
@@ -140,6 +146,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::SplitAndNavigate { url, .. } if url.trim().is_empty() => {
             Err("split_and_navigate.url is empty")
+        }
+        AgentCommand::UpdateSettings { path, .. } if path.trim().is_empty() => {
+            Err("update_settings.path is empty")
         }
         _ => Ok(()),
     }
@@ -653,5 +662,41 @@ mod tests {
             }
             _ => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn update_settings_command_rkyv_roundtrip() {
+        let cmd = AgentCommand::UpdateSettings {
+            path: "layout.pane.gap".to_string(),
+            value_json: "12.0".to_string(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
+        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded, cmd);
+    }
+
+    #[test]
+    fn get_settings_query_rkyv_roundtrip() {
+        let q = AgentQuery::GetSettings;
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
+        let decoded = rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded, q);
+    }
+
+    #[test]
+    fn settings_query_result_rkyv_roundtrip() {
+        let r = AgentQueryResult::Settings("{\"auto_update\":true}".to_string());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&r).unwrap();
+        let decoded = rkyv::from_bytes::<AgentQueryResult, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded, r);
+    }
+
+    #[test]
+    fn update_settings_validation_rejects_empty_path() {
+        let cmd = AgentCommand::UpdateSettings {
+            path: "".to_string(),
+            value_json: "1".to_string(),
+        };
+        assert!(validate_agent_command(&cmd).is_err());
     }
 }

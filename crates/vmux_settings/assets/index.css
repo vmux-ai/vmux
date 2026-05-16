@@ -1,0 +1,5 @@
+@import "../../vmux_ui/assets/theme.css";
+@config "../tailwind.config.js";
+@import "tailwindcss";
+@source "../src";
+@source ".";

@@ -47,6 +47,14 @@ pub enum McpParamTool {
         direction: String,
         url: String,
     },
+    #[mcp(description = "Update a single vmux setting by dot-path. \
+            Example: { path: 'layout.pane.gap', value: 12 }. \
+            Use get_settings to discover the available paths and current values. \
+            For nested arrays, use bracket indexing like 'terminal.themes[0].font_size'.")]
+    UpdateSettings {
+        path: String,
+        value: serde_json::Value,
+    },
 }
 
 impl McpParamTool {
@@ -112,6 +120,15 @@ impl McpParamTool {
                 }
                 Ok(AgentCommand::SplitAndNavigate { direction, url })
             }
+            McpParamTool::UpdateSettings { path, value } => {
+                if path.trim().is_empty() {
+                    return Err("update_settings.path is empty".to_string());
+                }
+                Ok(AgentCommand::UpdateSettings {
+                    path,
+                    value_json: value.to_string(),
+                })
+            }
         }
     }
 }
@@ -128,6 +145,8 @@ pub enum McpQueryTool {
     ListTerminals,
     #[mcp(description = "Return the currently focused space, pane, and tab ids.")]
     GetFocused,
+    #[mcp(description = "Return the full vmux settings as a JSON snapshot.")]
+    GetSettings,
 }
 
 impl McpQueryTool {
@@ -139,10 +158,12 @@ impl McpQueryTool {
             McpQueryTool::ListSpaces => AgentQuery::ListSpaces,
             McpQueryTool::ListTerminals => AgentQuery::ListTerminals,
             McpQueryTool::GetFocused => AgentQuery::GetFocused,
+            McpQueryTool::GetSettings => AgentQuery::GetSettings,
         }
     }
 }
 
+#[derive(Debug)]
 pub enum DispatchTarget {
     Command(AgentCommand),
     Query(vmux_service::protocol::AgentQuery),
@@ -486,5 +507,47 @@ mod tests {
             serde_json::json!({"direction": "right"}),
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn list_tools_includes_update_settings_and_get_settings() {
+        let names = tool_names();
+        assert!(names.contains(&"update_settings".to_string()));
+        assert!(names.contains(&"get_settings".to_string()));
+    }
+
+    #[test]
+    fn update_settings_dispatches_with_path_and_value() {
+        let target = dispatch_from_tool_call(
+            "update_settings",
+            serde_json::json!({"path": "layout.pane.gap", "value": 12.0}),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::UpdateSettings { path, value_json }) => {
+                assert_eq!(path, "layout.pane.gap");
+                let parsed: serde_json::Value = serde_json::from_str(&value_json).unwrap();
+                assert_eq!(parsed, serde_json::json!(12.0));
+            }
+            other => panic!("expected UpdateSettings command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_settings_empty_path_returns_error() {
+        let result = dispatch_from_tool_call(
+            "update_settings",
+            serde_json::json!({"path": "", "value": 1}),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_settings_dispatches_to_query() {
+        let target = dispatch_from_tool_call("get_settings", serde_json::json!({})).unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Query(AgentQuery::GetSettings)
+        ));
     }
 }

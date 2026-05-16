@@ -844,6 +844,7 @@ fn type_schema_kind(ty: &syn::Type) -> Option<&'static str> {
         "String" => "string",
         "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" => "integer",
         "bool" => "boolean",
+        "Value" => "json",
         _ => return None,
     })
 }
@@ -940,6 +941,10 @@ fn impl_mcp_tool_leaf_fielded(
                 quote! {
                     ::serde_json::json!({"type": "string", "enum": [ #(#values),* ]})
                 }
+            } else if kind == "json" {
+                quote! {
+                    ::serde_json::json!({})
+                }
             } else {
                 quote! {
                     ::serde_json::json!({"type": #kind})
@@ -1011,6 +1016,25 @@ fn impl_mcp_tool_leaf_fielded(
                                 ::core::option::Option::None => {
                                     return ::core::option::Option::Some(
                                         ::core::result::Result::Err(format!("{} is required (boolean)", #field_name))
+                                    );
+                                }
+                            };
+                        }
+                    }
+                }
+                "json" => {
+                    let extract = quote! {
+                        args.get(#field_name).cloned()
+                    };
+                    if is_optional {
+                        quote! { let #field_ident: ::core::option::Option<::serde_json::Value> = #extract; }
+                    } else {
+                        quote! {
+                            let #field_ident: ::serde_json::Value = match #extract {
+                                ::core::option::Option::Some(v) => v,
+                                ::core::option::Option::None => {
+                                    return ::core::option::Option::Some(
+                                        ::core::result::Result::Err(format!("{} is required", #field_name))
                                     );
                                 }
                             };

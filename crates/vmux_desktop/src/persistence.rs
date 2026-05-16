@@ -17,11 +17,13 @@ use crate::{
     },
     profile::Profile,
     settings::AppSettings,
+    settings_view::SettingsView,
     spaces::{ActiveSpace, SpacesView},
     terminal::Terminal,
 };
 use vmux_core::PageMetadata;
 use vmux_layout::event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
+use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::SPACES_WEBVIEW_URL;
 use vmux_space::migration::migrate_legacy_session_files;
 
@@ -345,21 +347,27 @@ pub(crate) fn rebuild_space_views(
                 ) {
                     bevy::log::warn!("restore agent tab failed: {e}");
                 }
+            } else if meta
+                .url
+                .starts_with(SPACES_WEBVIEW_URL.trim_end_matches('/'))
+            {
+                commands.spawn((
+                    SpacesView::new(&mut meshes, &mut webview_mt),
+                    ChildOf(entity),
+                ));
+            } else if meta
+                .url
+                .starts_with(SETTINGS_WEBVIEW_URL.trim_end_matches('/'))
+            {
+                commands.spawn((
+                    SettingsView::new(&mut meshes, &mut webview_mt),
+                    ChildOf(entity),
+                ));
             } else {
-                if meta
-                    .url
-                    .starts_with(SPACES_WEBVIEW_URL.trim_end_matches('/'))
-                {
-                    commands.spawn((
-                        SpacesView::new(&mut meshes, &mut webview_mt),
-                        ChildOf(entity),
-                    ));
-                } else {
-                    commands.spawn((
-                        Browser::new(&mut meshes, &mut webview_mt, &meta.url),
-                        ChildOf(entity),
-                    ));
-                }
+                commands.spawn((
+                    Browser::new(&mut meshes, &mut webview_mt, &meta.url),
+                    ChildOf(entity),
+                ));
             }
         }
     }

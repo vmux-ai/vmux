@@ -10,7 +10,9 @@ use vmux_command::keyboard::{
     CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code,
     ignore_physical_rerouted_ctrl_keydown,
 };
-use vmux_command::results::{CommandBarResultItem as ResultItem, SPACES_PAGE_URL, filter_results};
+use vmux_command::results::{
+    CommandBarResultItem as ResultItem, SETTINGS_PAGE_URL, SPACES_PAGE_URL, filter_results,
+};
 use vmux_command::style::{command_bar_shell_class, result_item_class};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
@@ -450,13 +452,18 @@ pub fn App() -> Element {
                                                     span { class: "truncate text-base text-foreground", "Spaces Page" }
                                                     span { class: "truncate text-sm text-muted-foreground", "{url}" }
                                                 }
+                                            } else if url == SETTINGS_PAGE_URL {
+                                                div { class: "flex min-w-0 flex-col",
+                                                    span { class: "truncate text-base text-foreground", "Settings" }
+                                                    span { class: "truncate text-sm text-muted-foreground", "{url}" }
+                                                }
                                             } else if url.is_empty() {
                                                 span { class: "text-base text-foreground", "Search" }
                                             } else {
                                                 span { class: "min-w-0 break-all text-base text-foreground", "Search \"{url}\"" }
                                             }
                                         }
-                                        if url == SPACES_PAGE_URL {
+                                        if url == SPACES_PAGE_URL || url == SETTINGS_PAGE_URL {
                                             span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "New tab" }
                                         } else if !url.is_empty() {
                                             span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "\u{21b5}" }

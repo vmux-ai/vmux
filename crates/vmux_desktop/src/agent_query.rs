@@ -33,6 +33,7 @@ pub(crate) fn handle_agent_queries(
     terminals: TerminalQuery,
     all_children: ChildrenQuery,
     process_list: Option<Res<ServiceProcessList>>,
+    settings: Res<crate::settings::AppSettings>,
     focused: Option<Res<FocusedStack>>,
 ) {
     let Some(service) = service else { return };
@@ -63,6 +64,9 @@ pub(crate) fn handle_agent_queries(
                 AgentQueryResult::Terminals(collect_terminals(&terminals, process_list))
             }
             AgentQuery::GetFocused => AgentQueryResult::Focused(focused_info(&focused)),
+            AgentQuery::GetSettings => {
+                AgentQueryResult::Settings(crate::settings::serialize_settings_to_json(&settings))
+            }
         };
         service.0.send(ClientMessage::AgentQueryResponse {
             request_id: request.request_id,

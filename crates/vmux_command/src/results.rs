@@ -4,6 +4,10 @@ const SPACES_QUERY: &str = "vmux://spaces";
 pub const SPACES_PAGE_URL: &str = "vmux://spaces/";
 const SPACES_QUERY_PREFIX: &str = SPACES_PAGE_URL;
 
+const SETTINGS_QUERY: &str = "vmux://settings";
+pub const SETTINGS_PAGE_URL: &str = "vmux://settings/";
+const SETTINGS_QUERY_PREFIX: &str = SETTINGS_PAGE_URL;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandBarResultItem {
     Terminal {
@@ -65,10 +69,24 @@ fn space_query(q: &str) -> Option<&str> {
     }
 }
 
+fn settings_query(q: &str) -> Option<&str> {
+    if q == SETTINGS_QUERY {
+        Some("")
+    } else {
+        q.strip_prefix(SETTINGS_QUERY_PREFIX)
+    }
+}
+
 fn spaces_page_matches(search_lower: &str) -> bool {
     search_lower.is_empty()
         || "spaces".contains(search_lower)
         || SPACES_PAGE_URL.contains(search_lower)
+}
+
+fn settings_page_matches(search_lower: &str) -> bool {
+    search_lower.is_empty()
+        || "settings".contains(search_lower)
+        || SETTINGS_PAGE_URL.contains(search_lower)
 }
 
 fn space_results(spaces: &[CommandBarSpace], search_lower: &str) -> Vec<CommandBarResultItem> {
@@ -111,6 +129,14 @@ pub fn filter_results(
         if search_lower.is_empty() {
             items.extend(command_results(commands));
         }
+        return items;
+    }
+
+    if settings_query(q).is_some() {
+        let mut items = vec![CommandBarResultItem::Navigate {
+            url: SETTINGS_PAGE_URL.to_string(),
+        }];
+        items.extend(command_results(commands));
         return items;
     }
 
@@ -169,6 +195,11 @@ pub fn filter_results(
 
     if !starts_with_cmd && !is_path {
         items.extend(space_results(spaces, &search_lower));
+        if settings_page_matches(&search_lower) {
+            items.push(CommandBarResultItem::Navigate {
+                url: SETTINGS_PAGE_URL.to_string(),
+            });
+        }
     }
 
     if !starts_with_cmd || !search.is_empty() {
