@@ -12,8 +12,8 @@ use bevy::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_layout::LayoutSpawnRequest;
 use vmux_service::protocol::layout::{
-    LayoutNodeDto, LayoutSnapshot, NodeKind, SpaceDto, SplitDirectionDto, TabDto, format_id,
-    parse_id,
+    FocusDto, LayoutNodeDto, LayoutSnapshot, NodeKind, SpaceDto, SplitDirectionDto, TabDto,
+    format_id, parse_id,
 };
 
 use super::reconcile::ValidationError;
@@ -62,6 +62,7 @@ pub fn apply_with_existing(
     for id in &plan.closes {
         apply_close(world, id);
     }
+    apply_focus(world, &snapshot.focused);
     Ok(())
 }
 
@@ -282,6 +283,27 @@ fn apply_node(world: &mut World, node: &LayoutNodeDto) {
             }
         }
     }
+}
+
+fn apply_focus(world: &mut World, focus: &FocusDto) {
+    let Some(mut focused) = world.get_resource_mut::<crate::layout::stack::FocusedStack>() else {
+        return;
+    };
+    focused.tab = focus
+        .space
+        .as_deref()
+        .and_then(|id| parse_id(id).ok())
+        .map(|(_, v)| Entity::from_bits(v));
+    focused.pane = focus
+        .pane
+        .as_deref()
+        .and_then(|id| parse_id(id).ok())
+        .map(|(_, v)| Entity::from_bits(v));
+    focused.stack = focus
+        .tab
+        .as_deref()
+        .and_then(|id| parse_id(id).ok())
+        .map(|(_, v)| Entity::from_bits(v));
 }
 
 fn node_entity(node: &LayoutNodeDto) -> Option<Entity> {
@@ -631,5 +653,46 @@ mod tests {
             pane_count, 0,
             "children under malformed split must not spawn"
         );
+    }
+
+    #[test]
+    fn focus_change_writes_focused_stack() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(crate::layout::stack::FocusedStack::default());
+
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(pane)))
+            .id();
+
+        let snap = LayoutSnapshot {
+            spaces: vec![SpaceDto {
+                id: Some(format_id(NodeKind::Space, space.to_bits())),
+                name: "S".into(),
+                is_active: true,
+                root: LayoutNodeDto::Pane {
+                    id: Some(format_id(NodeKind::Pane, pane.to_bits())),
+                    is_zoomed: false,
+                    tabs: vec![TabDto {
+                        id: Some(format_id(NodeKind::Tab, stack.to_bits())),
+                        ..Default::default()
+                    }],
+                },
+            }],
+            focused: FocusDto {
+                space: Some(format_id(NodeKind::Space, space.to_bits())),
+                pane: Some(format_id(NodeKind::Pane, pane.to_bits())),
+                tab: Some(format_id(NodeKind::Tab, stack.to_bits())),
+            },
+        };
+
+        apply(app.world_mut(), &snap).unwrap();
+        let focused = app.world().resource::<crate::layout::stack::FocusedStack>();
+        assert_eq!(focused.tab, Some(space));
+        assert_eq!(focused.pane, Some(pane));
+        assert_eq!(focused.stack, Some(stack));
     }
 }
