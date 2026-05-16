@@ -49,8 +49,9 @@ use bevy::prelude::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::event::{
-    HISTORY_QUERY_RESPONSE_EVENT, HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry,
-    HistoryOpenRequest, HistoryQueryRequest, HistoryQueryResponse,
+    HISTORY_QUERY_RESPONSE_EVENT, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryClearAllRequest,
+    HistoryDeleteRequest, HistoryEntry, HistoryOpenRequest, HistoryQueryRequest,
+    HistoryQueryResponse, HistorySuggestionsRequest, HistorySuggestionsResponse,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive};
@@ -198,6 +199,53 @@ pub fn on_history_open_request(
         url: req.url.clone(),
         in_new_stack: req.in_new_stack,
     });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn on_history_suggestions_request(
+    trigger: On<BinReceive<HistorySuggestionsRequest>>,
+    urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
+    mut commands: Commands,
+) {
+    let req = &trigger.event().payload;
+    let now = vmux_core::now_millis();
+
+    let mut scored: Vec<(f32, HistoryEntry)> = urls
+        .iter()
+        .filter_map(|(e, meta, count, last)| {
+            let s = score(count.0, last.0, now, &req.query, &meta.url, &meta.title);
+            if s <= 0.0 {
+                return None;
+            }
+            Some((
+                s,
+                HistoryEntry {
+                    url_entity_bits: e.to_bits(),
+                    url: meta.url.clone(),
+                    title: meta.title.clone(),
+                    favicon_url: meta.favicon_url.clone(),
+                    visit_created_at: last.0,
+                    visit_count: count.0,
+                    last_visited_at: last.0,
+                },
+            ))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    let entries: Vec<HistoryEntry> = scored
+        .into_iter()
+        .take(req.limit as usize)
+        .map(|(_, e)| e)
+        .collect();
+
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        trigger.event().webview,
+        HISTORY_SUGGESTIONS_RESPONSE_EVENT,
+        &HistorySuggestionsResponse {
+            request_id: req.request_id,
+            entries,
+        },
+    ));
 }
 
 #[cfg(test)]
