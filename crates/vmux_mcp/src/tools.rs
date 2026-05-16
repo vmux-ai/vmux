@@ -149,58 +149,137 @@ impl McpParamTool {
     }
 }
 
-#[derive(Debug, McpTool)]
-pub enum McpQueryTool {
-    #[mcp(description = "Return the full vmux layout snapshot (spaces, panes, tabs, focused).")]
-    GetState,
-    #[mcp(description = "List all tabs across all spaces with title, url, and kind.")]
-    ListTabs,
-    #[mcp(description = "List all spaces with their panes and tabs.")]
-    ListSpaces,
-    #[mcp(description = "List all terminal processes with cwd and pid.")]
-    ListTerminals,
-    #[mcp(description = "Return the currently focused space, pane, and tab ids.")]
-    GetFocused,
-    #[mcp(description = "Return the full vmux settings as a JSON snapshot.")]
-    GetSettings,
-}
-
-impl McpQueryTool {
-    pub fn to_agent_query(self) -> vmux_service::protocol::AgentQuery {
-        use vmux_service::protocol::AgentQuery;
-        match self {
-            McpQueryTool::GetState => AgentQuery::GetState,
-            McpQueryTool::ListTabs => AgentQuery::ListTabs,
-            McpQueryTool::ListSpaces => AgentQuery::ListSpaces,
-            McpQueryTool::ListTerminals => AgentQuery::ListTerminals,
-            McpQueryTool::GetFocused => AgentQuery::GetFocused,
-            McpQueryTool::GetSettings => AgentQuery::GetSettings,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum DispatchTarget {
     Command(AgentCommand),
     Query(vmux_service::protocol::AgentQuery),
 }
 
+fn read_layout_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "read_layout".into(),
+        description: "Return the full vmux layout: spaces, recursive pane tree, focused triple. \
+                      Terminal tabs appear as tabs with kind=\"terminal\"; browser tabs use kind=\"browser\"."
+            .into(),
+        input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
+    }
+}
+
+fn update_layout_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "update_layout".into(),
+        description: "Submit the desired layout tree. Vmux diffs against current state and reconciles \
+                      atomically by id: omit `id` to create; omit a node entirely to close it; reorder \
+                      `children` to swap/move; mutate `direction`/`flex_weights`/`is_zoomed`/`title` in place."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["spaces", "focused"],
+            "$defs": {
+                "Space": {
+                    "type": "object",
+                    "required": ["name", "root"],
+                    "properties": {
+                        "id": {"type": "string", "description": "space:<id>; omit to create"},
+                        "name": {"type": "string"},
+                        "is_active": {"type": "boolean"},
+                        "root": {"$ref": "#/$defs/LayoutNode"}
+                    }
+                },
+                "LayoutNode": {
+                    "oneOf": [
+                        {
+                            "type": "object",
+                            "required": ["kind", "direction", "children"],
+                            "properties": {
+                                "kind": {"const": "split"},
+                                "id": {"type": "string", "description": "split:<id>; omit to create"},
+                                "direction": {"enum": ["row", "column"]},
+                                "flex_weights": {"type": "array", "items": {"type": "number"}},
+                                "children": {"type": "array", "items": {"$ref": "#/$defs/LayoutNode"}}
+                            }
+                        },
+                        {
+                            "type": "object",
+                            "required": ["kind"],
+                            "properties": {
+                                "kind": {"const": "pane"},
+                                "id": {"type": "string", "description": "pane:<id>; omit to create"},
+                                "is_zoomed": {"type": "boolean"},
+                                "tabs": {"type": "array", "items": {"$ref": "#/$defs/Tab"}}
+                            }
+                        }
+                    ]
+                },
+                "Tab": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "tab:<id>; omit to create"},
+                        "title": {"type": "string"},
+                        "url": {"type": "string", "description": "Required when id is omitted"},
+                        "kind": {"type": "string", "enum": ["browser", "terminal"], "description": "Required when id is omitted"},
+                        "is_loading": {"type": "boolean"},
+                        "favicon_url": {"type": "string"}
+                    }
+                }
+            },
+            "properties": {
+                "spaces": {"type": "array", "items": {"$ref": "#/$defs/Space"}},
+                "focused": {
+                    "type": "object",
+                    "properties": {
+                        "space": {"type": "string"},
+                        "pane": {"type": "string"},
+                        "tab": {"type": "string"}
+                    }
+                }
+            }
+        }),
+    }
+}
+
+fn get_settings_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "get_settings".into(),
+        description: "Return the full vmux settings as a JSON snapshot.".into(),
+        input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
+    }
+}
+
 pub fn tool_definitions() -> Vec<ToolDefinition> {
-    AppCommand::mcp_tool_entries()
+    let mut defs: Vec<ToolDefinition> = AppCommand::mcp_tool_entries()
         .into_iter()
         .chain(McpParamTool::mcp_tool_entries())
-        .chain(McpQueryTool::mcp_tool_entries())
         .map(|(name, description, schema)| ToolDefinition {
             name: name.to_string(),
             description: description.to_string(),
             input_schema: schema,
         })
-        .collect()
+        .collect();
+    defs.push(read_layout_definition());
+    defs.push(update_layout_definition());
+    defs.push(get_settings_definition());
+    defs
 }
 
 pub fn dispatch_from_tool_call(name: &str, arguments: Value) -> Result<DispatchTarget, String> {
-    if let Some(parsed) = McpQueryTool::from_mcp_id(name) {
-        return Ok(DispatchTarget::Query(parsed.to_agent_query()));
+    if name == "read_layout" {
+        return Ok(DispatchTarget::Query(
+            vmux_service::protocol::AgentQuery::ReadLayout,
+        ));
+    }
+    if name == "update_layout" {
+        let layout: vmux_service::protocol::layout::LayoutSnapshot =
+            serde_json::from_value(arguments)
+                .map_err(|e| format!("update_layout: invalid layout payload: {e}"))?;
+        return Ok(DispatchTarget::Command(AgentCommand::UpdateLayout {
+            layout,
+        }));
+    }
+    if name == "get_settings" {
+        return Ok(DispatchTarget::Query(
+            vmux_service::protocol::AgentQuery::GetSettings,
+        ));
     }
     if let Some(parsed) = McpParamTool::from_mcp_call(name, arguments) {
         return parsed
@@ -355,20 +434,10 @@ mod tests {
     }
 
     #[test]
-    fn tool_list_includes_query_tools() {
+    fn tool_list_includes_read_and_update_layout() {
         let names = tool_names();
-        for query in [
-            "get_state",
-            "list_tabs",
-            "list_spaces",
-            "list_terminals",
-            "get_focused",
-        ] {
-            assert!(
-                names.contains(&query.to_string()),
-                "missing query tool {query}"
-            );
-        }
+        assert!(names.contains(&"read_layout".to_string()));
+        assert!(names.contains(&"update_layout".to_string()));
     }
 
     #[test]
@@ -431,23 +500,6 @@ mod tests {
     }
 
     #[test]
-    fn mcp_query_tool_entries_includes_all_query_tools() {
-        let names: Vec<&'static str> = McpQueryTool::mcp_tool_entries()
-            .into_iter()
-            .map(|(name, _, _)| name)
-            .collect();
-        for expected in [
-            "get_state",
-            "list_tabs",
-            "list_spaces",
-            "list_terminals",
-            "get_focused",
-        ] {
-            assert!(names.contains(&expected), "missing query tool {expected}");
-        }
-    }
-
-    #[test]
     fn dispatch_from_tool_call_routes_command() {
         let target = dispatch_from_tool_call("split_v", serde_json::json!({})).unwrap();
         assert!(matches!(
@@ -457,12 +509,36 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_from_tool_call_routes_query() {
-        let target = dispatch_from_tool_call("get_state", serde_json::json!({})).unwrap();
+    fn dispatch_read_layout_routes_to_query() {
+        let target = dispatch_from_tool_call("read_layout", serde_json::json!({})).unwrap();
         assert!(matches!(
             target,
-            DispatchTarget::Query(AgentQuery::GetState)
+            DispatchTarget::Query(AgentQuery::ReadLayout)
         ));
+    }
+
+    #[test]
+    fn dispatch_update_layout_parses_payload() {
+        let payload = serde_json::json!({
+            "spaces": [{
+                "id": "space:1",
+                "name": "Work",
+                "is_active": true,
+                "root": { "kind": "pane", "id": "pane:2", "tabs": [{ "id": "tab:3" }] }
+            }],
+            "focused": { "space": "space:1", "pane": "pane:2", "tab": "tab:3" }
+        });
+        let target = dispatch_from_tool_call("update_layout", payload).unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Command(AgentCommand::UpdateLayout { .. })
+        ));
+    }
+
+    #[test]
+    fn dispatch_update_layout_rejects_malformed_payload() {
+        let payload = serde_json::json!({ "not_a_layout": true });
+        assert!(dispatch_from_tool_call("update_layout", payload).is_err());
     }
 
     #[test]
