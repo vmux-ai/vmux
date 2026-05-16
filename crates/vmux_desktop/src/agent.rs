@@ -768,7 +768,38 @@ fn spawn_vmux_tab(
                     Ok(())
                 }
                 Some(vmux_agent::AgentUrl::AppDefault) => {
-                    Err("AgentUrl::AppDefault not yet wired in spawn pipeline".into())
+                    match vmux_agent::resolve_default_app_provider() {
+                        Some(p) => {
+                            let sid = uuid::Uuid::new_v4().to_string();
+                            if spawn_app_agent_tab(
+                                p.provider,
+                                p.default_model,
+                                pane,
+                                &sid,
+                                commands,
+                                meshes,
+                                webview_mt,
+                                strategies,
+                            )
+                            .is_none()
+                            {
+                                return Err(format!(
+                                    "no App agent strategy registered for {}/{}",
+                                    p.provider, p.default_model
+                                ));
+                            }
+                            Ok(())
+                        }
+                        None => {
+                            bevy::log::warn!(
+                                "vmux://agent/ requested but no provider API key is set; falling back to terminal"
+                            );
+                            spawn_terminal_tab(
+                                pane, None, None, commands, meshes, webview_mt, settings,
+                            );
+                            Ok(())
+                        }
+                    }
                 }
                 None => {
                     if segs.len() == 1
@@ -2125,6 +2156,12 @@ mod tests {
         ] {
             assert!(providers.contains(id), "missing provider: {id}");
         }
+    }
+
+    #[test]
+    fn app_default_url_parses() {
+        let parsed = vmux_agent::AgentUrl::parse("vmux://agent/");
+        assert!(matches!(parsed, Some(vmux_agent::AgentUrl::AppDefault)));
     }
 
     #[test]
