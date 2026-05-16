@@ -183,9 +183,11 @@ fn HeaderView(titlebar_height: f32) -> Element {
     let tabs_loading = (tabs_listener.is_loading)();
     let tabs_error = (tabs_listener.error)();
 
+    let (url_row_style, url_row_class) = url_row_chrome(active_bg_color.as_deref());
+
     rsx! {
         div { class: "flex min-h-0 min-w-0 flex-1 flex-col text-foreground",
-            div { class: "flex min-w-0 shrink-0 items-center gap-1 px-2 pb-1",
+            div { class: "flex min-w-0 shrink-0 items-center gap-1 px-2",
                 if tabs_loading {
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
                 } else if let Some(err) = tabs_error {
@@ -203,7 +205,9 @@ fn HeaderView(titlebar_height: f32) -> Element {
                     }
                 }
             }
-            div { class: "flex min-w-0 shrink-0 items-center gap-1 px-2 pb-1",
+            div {
+                class: "{url_row_class}",
+                style: "{url_row_style}",
                 if listener_loading {
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
                 } else if let Some(err) = listener_error {
@@ -241,41 +245,35 @@ fn HeaderView(titlebar_height: f32) -> Element {
     }
 }
 
+fn url_row_chrome(bg_color: Option<&str>) -> (String, String) {
+    if let Some(color) = bg_color {
+        let text_class = text_color_class_for_bg(color);
+        (
+            format!("background-color: {color};"),
+            format!("flex min-w-0 flex-1 shrink-0 items-center gap-1 px-2 {text_class}"),
+        )
+    } else {
+        (
+            String::new(),
+            "flex min-w-0 flex-1 shrink-0 items-center gap-1 px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
+        )
+    }
+}
+
 #[component]
 fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> Element {
     let has_content = active_row.as_ref().is_some_and(|t| !t.url.is_empty());
     let address_value = active_row.as_ref().map(format_address).unwrap_or_default();
     let placeholder = if has_content { "" } else { "New Stack" };
-
-    let (bar_style, bar_class, input_class) = if let Some(ref color) = bg_color {
-        let text_class = text_color_class_for_bg(color);
-        (
-            format!("background-color: {};", color),
-            format!(
-                "flex h-8 min-w-0 flex-1 cursor-pointer items-center rounded-lg px-2.5 shadow-sm {text_class}"
-            ),
-            format!(
-                "min-w-0 flex-1 cursor-pointer bg-transparent text-ui outline-none placeholder:opacity-50 {text_class}"
-            ),
-        )
-    } else if has_content {
-        (
-            String::new(),
-            "flex h-8 min-w-0 flex-1 cursor-pointer items-center rounded-lg border border-glass-border bg-glass px-2.5 shadow-sm backdrop-blur-xl backdrop-saturate-150".to_string(),
-            "min-w-0 flex-1 cursor-pointer bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground".to_string(),
-        )
+    let placeholder_class = if bg_color.is_some() {
+        "placeholder:opacity-50"
     } else {
-        (
-            String::new(),
-            "flex h-8 min-w-0 flex-1 cursor-pointer items-center rounded-lg border border-glass-border bg-glass px-2.5 backdrop-blur-md".to_string(),
-            "min-w-0 flex-1 cursor-pointer bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground".to_string(),
-        )
+        "placeholder:text-muted-foreground"
     };
 
     rsx! {
         div {
-            class: "{bar_class}",
-            style: "{bar_style}",
+            class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center",
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&HeaderCommandEvent {
                     header_command: "focus_address_bar".to_string(),
@@ -284,7 +282,7 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
             input {
                 r#type: "text",
                 readonly: true,
-                class: "{input_class}",
+                class: "min-w-0 flex-1 cursor-pointer bg-transparent text-ui outline-none {placeholder_class}",
                 value: "{address_value}",
                 placeholder: "{placeholder}",
             }
