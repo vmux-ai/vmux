@@ -31,7 +31,7 @@ pub enum AgentShellMode {
     Active,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentCommand {
     AppCommand {
         id: String,
@@ -63,77 +63,31 @@ pub enum AgentCommand {
         path: String,
         value_json: String,
     },
+    UpdateLayout {
+        layout: crate::protocol::layout::LayoutSnapshot,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub const AGENT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentCommandResult {
     Ok,
+    Layout(crate::protocol::layout::LayoutSnapshot),
     Error(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentQuery {
-    GetState,
-    ListTabs,
-    ListSpaces,
-    ListTerminals,
-    GetFocused,
+    ReadLayout,
     GetSettings,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct TabInfo {
-    pub id: String,
-    pub title: String,
-    pub url: String,
-    pub kind: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct TerminalInfo {
-    pub id: String,
-    pub cwd: String,
-    pub pid: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct PaneInfo {
-    pub id: String,
-    pub tabs: Vec<TabInfo>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct SpaceInfo {
-    pub id: String,
-    pub name: String,
-    pub panes: Vec<PaneInfo>,
-    pub active: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct FocusedInfo {
-    pub space: Option<String>,
-    pub pane: Option<String>,
-    pub tab: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct StateSnapshot {
-    pub spaces: Vec<SpaceInfo>,
-    pub focused: FocusedInfo,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentQueryResult {
-    State(StateSnapshot),
-    Tabs(Vec<TabInfo>),
-    Spaces(Vec<SpaceInfo>),
-    Terminals(Vec<TerminalInfo>),
-    Focused(FocusedInfo),
+    Layout(crate::protocol::layout::LayoutSnapshot),
     Settings(String),
     Error(String),
 }
@@ -468,62 +422,40 @@ mod tests {
     }
 
     #[test]
-    fn agent_query_roundtrips() {
-        let q = AgentQuery::ListTabs;
+    fn agent_query_read_layout_rkyv_round_trip() {
+        let q = AgentQuery::ReadLayout;
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
-        let decoded = rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(decoded, q);
+        let recovered: AgentQuery =
+            rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(recovered, AgentQuery::ReadLayout);
     }
 
     #[test]
-    fn agent_query_result_state_roundtrips() {
-        let snapshot = StateSnapshot {
-            spaces: vec![SpaceInfo {
-                id: "1v0".to_string(),
-                name: "Main".to_string(),
-                panes: vec![PaneInfo {
-                    id: "2v0".to_string(),
-                    tabs: vec![TabInfo {
-                        id: "3v0".to_string(),
-                        title: "Hello".to_string(),
-                        url: "https://example.com".to_string(),
-                        kind: "browser".to_string(),
-                    }],
+    fn agent_command_update_layout_rkyv_round_trip() {
+        use crate::protocol::layout::{FocusDto, LayoutNodeDto, LayoutSnapshot, SpaceDto};
+        let cmd = AgentCommand::UpdateLayout {
+            layout: LayoutSnapshot {
+                spaces: vec![SpaceDto {
+                    id: Some("space:1".into()),
+                    name: "X".into(),
+                    is_active: true,
+                    root: LayoutNodeDto::Pane {
+                        id: Some("pane:2".into()),
+                        is_zoomed: false,
+                        tabs: vec![],
+                    },
                 }],
-                active: true,
-            }],
-            focused: FocusedInfo {
-                space: Some("1v0".to_string()),
-                pane: Some("2v0".to_string()),
-                tab: Some("3v0".to_string()),
+                focused: FocusDto {
+                    space: Some("space:1".into()),
+                    pane: Some("pane:2".into()),
+                    tab: None,
+                },
             },
         };
-        let result = AgentQueryResult::State(snapshot.clone());
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&result).unwrap();
-        let decoded = rkyv::from_bytes::<AgentQueryResult, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(decoded, result);
-    }
-
-    #[test]
-    fn agent_query_message_variants_roundtrip() {
-        let request_id = AgentRequestId::new();
-        let client_msg = ClientMessage::AgentQuery {
-            request_id,
-            query: AgentQuery::GetFocused,
-        };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client_msg).unwrap();
-        let _decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
-
-        let service_msg = ServiceMessage::AgentQueryResult {
-            request_id,
-            result: AgentQueryResult::Focused(FocusedInfo {
-                space: None,
-                pane: None,
-                tab: None,
-            }),
-        };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&service_msg).unwrap();
-        let _decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
+        let recovered: AgentCommand =
+            rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(recovered, cmd);
     }
 
     #[test]
