@@ -997,9 +997,7 @@ fn on_command_bar_action(
                                     strategies,
                                 );
                             } else {
-                                bevy::log::warn!(
-                                    "agent strategies not registered; skipping spawn"
-                                );
+                                bevy::log::warn!("agent strategies not registered; skipping spawn");
                             }
                         } else {
                             bevy::log::warn!(
