@@ -2,7 +2,8 @@
 
 use dioxus::prelude::*;
 use vmux_history::event::{
-    HISTORY_QUERY_RESPONSE_EVENT, HistoryEntry, HistoryQueryRequest, HistoryQueryResponse,
+    HISTORY_QUERY_RESPONSE_EVENT, HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry,
+    HistoryQueryRequest, HistoryQueryResponse,
 };
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
@@ -88,6 +89,8 @@ pub fn App() -> Element {
         }
     });
 
+    let mut confirm_open: Signal<bool> = use_signal(|| false);
+
     let on_input = move |e: Event<FormData>| {
         query.set(e.value());
         let new_id = *request_id.read() + 1;
@@ -97,7 +100,7 @@ pub fn App() -> Element {
         emit_query(&query.read(), 0, new_id);
     };
 
-    let entries_for_render = entries.read().clone();
+    let groups = group_by_day(&entries.read());
 
     rsx! {
         div { class: "flex flex-col h-screen bg-background text-foreground",
@@ -110,36 +113,62 @@ pub fn App() -> Element {
                 }
                 button {
                     class: "px-3 py-2 text-xs bg-destructive text-destructive-foreground rounded",
+                    onclick: move |_| confirm_open.set(true),
                     "Clear all"
                 }
             }
             main { class: "flex-1 overflow-y-auto p-3 text-sm",
-                {render_timeline(&entries_for_render)}
+                for (label, group) in groups {
+                    div { class: "text-xs text-muted-foreground uppercase mt-4 mb-1", "{label}" }
+                    for entry in group {
+                        div {
+                            class: "flex items-center gap-2 py-1 border-b border-border hover:bg-muted group",
+                            span { class: "text-xs text-muted-foreground w-12", "{format_time(entry.visit_created_at)}" }
+                            img {
+                                class: "w-4 h-4",
+                                src: "{entry.favicon_url}",
+                            }
+                            span { class: "flex-1 truncate",
+                                if entry.title.is_empty() { "{entry.url}" } else { "{entry.title}" }
+                            }
+                            button {
+                                class: "opacity-0 group-hover:opacity-100 text-xs text-muted-foreground hover:text-destructive px-2",
+                                onclick: {
+                                    let url_bits = entry.url_entity_bits;
+                                    move |e: Event<MouseData>| {
+                                        e.stop_propagation();
+                                        let _ = try_cef_bin_emit_rkyv(&HistoryDeleteRequest { url_entity_bits: url_bits });
+                                        entries.write().retain(|x| x.url_entity_bits != url_bits);
+                                    }
+                                },
+                                "\u{00d7}"
+                            }
+                        }
+                    }
+                }
                 div { id: "infinite-scroll-sentinel", class: "h-4" }
             }
         }
-    }
-}
-
-fn render_timeline(entries: &[HistoryEntry]) -> Element {
-    let groups = group_by_day(entries);
-    rsx! {
-        for (label, group) in groups {
-            div { class: "text-xs text-muted-foreground uppercase mt-4 mb-1", "{label}" }
-            for entry in group {
-                div {
-                    class: "flex items-center gap-2 py-1 border-b border-border hover:bg-muted group",
-                    span { class: "text-xs text-muted-foreground w-12", "{format_time(entry.visit_created_at)}" }
-                    img {
-                        class: "w-4 h-4",
-                        src: "{entry.favicon_url}",
-                    }
-                    span { class: "flex-1 truncate",
-                        if entry.title.is_empty() { "{entry.url}" } else { "{entry.title}" }
-                    }
-                    button {
-                        class: "opacity-0 group-hover:opacity-100 text-xs text-muted-foreground hover:text-destructive px-2",
-                        "\u{00d7}"
+        if *confirm_open.read() {
+            div { class: "fixed inset-0 bg-black/80 flex items-center justify-center z-50",
+                div { class: "bg-card border border-border p-6 rounded max-w-sm",
+                    h3 { class: "text-lg mb-2", "Clear all history?" }
+                    p { class: "text-sm text-muted-foreground mb-4", "This cannot be undone." }
+                    div { class: "flex gap-2 justify-end",
+                        button {
+                            class: "px-3 py-1 text-sm bg-muted rounded",
+                            onclick: move |_| confirm_open.set(false),
+                            "Cancel"
+                        }
+                        button {
+                            class: "px-3 py-1 text-sm bg-destructive text-destructive-foreground rounded",
+                            onclick: move |_| {
+                                let _ = try_cef_bin_emit_rkyv(&HistoryClearAllRequest);
+                                entries.write().clear();
+                                confirm_open.set(false);
+                            },
+                            "Clear all"
+                        }
                     }
                 }
             }
