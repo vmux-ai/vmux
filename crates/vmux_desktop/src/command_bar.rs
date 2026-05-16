@@ -1137,6 +1137,51 @@ fn on_command_bar_action(
                         writer_params
                             .p0()
                             .write(AppCommand::Terminal(TerminalCommand::New));
+                    } else if url == "vmux://agent/" || url == "vmux://agent" {
+                        if let Some(p) = vmux_agent::resolve_default_app_provider() {
+                            let (_, active_pane_opt, _) = focused_stack(
+                                &tab_q,
+                                &all_children,
+                                &leaf_panes,
+                                &pane_ts,
+                                &pane_children,
+                                &stack_ts,
+                            );
+                            if let Some(pane_e) = active_pane_opt {
+                                let sid = uuid::Uuid::new_v4().to_string();
+                                let strategies_ref = resource_params.p4();
+                                if let Some(strategies) = strategies_ref.as_deref() {
+                                    if crate::agent::spawn_app_agent_tab(
+                                        p.provider,
+                                        p.default_model,
+                                        pane_e,
+                                        &sid,
+                                        &mut commands,
+                                        &mut meshes,
+                                        &mut webview_mt,
+                                        strategies,
+                                    )
+                                    .is_some()
+                                    {
+                                        custom_keyboard_restore = true;
+                                    } else {
+                                        bevy::log::warn!(
+                                            "no App agent strategy registered for {}/{}",
+                                            p.provider,
+                                            p.default_model
+                                        );
+                                    }
+                                } else {
+                                    bevy::log::warn!(
+                                        "agent strategies not registered; skipping spawn"
+                                    );
+                                }
+                            }
+                        } else {
+                            bevy::log::warn!(
+                                "vmux://agent/ requested but no provider API key is set"
+                            );
+                        }
                     } else if let Some((provider, model, sid_opt)) =
                         crate::agent::parse_app_agent_url(&url)
                     {
