@@ -28,8 +28,9 @@ struct Delta<'a> {
 
 #[derive(Deserialize)]
 struct ToolCallDelta<'a> {
-    #[serde(rename = "index", default)]
-    _index: usize,
+    #[allow(dead_code)]
+    #[serde(default)]
+    index: usize,
     #[serde(borrow, default)]
     id: Option<&'a str>,
     #[serde(borrow, default)]
@@ -76,6 +77,9 @@ pub fn parse_chat_completions_sse(frame: &str) -> Option<StreamEvent> {
             });
         }
         if let Some(args) = call.function.and_then(|f| f.arguments) {
+            // Empty call_id is intentional: chat-completions continuation chunks
+            // only repeat `index`, not `id`. drain_stream correlates via the
+            // in-progress PartialToolUse in AgentRunState::Streaming.
             return Some(StreamEvent::ToolUseArgsDelta {
                 call_id: String::new(),
                 json_chunk: args,
