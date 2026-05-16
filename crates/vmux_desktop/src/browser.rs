@@ -34,8 +34,9 @@ use vmux_layout::{
     Header, LayoutChrome, NavigationState, Open,
     event::{
         HEADER_HEIGHT_PX, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent,
-        PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, TABS_EVENT, TabNode,
-        TabRow, TabsHostEvent, effective_titlebar_height,
+        PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT,
+        StackNode, StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsHostEvent,
+        effective_titlebar_height,
     },
 };
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
@@ -85,8 +86,9 @@ impl Plugin for BrowserPlugin {
                 Update,
                 (
                     push_layout_state_emit,
-                    push_tabs_host_emit,
+                    push_stacks_host_emit,
                     push_pane_tree_emit,
+                    push_tabs_host_emit,
                 )
                     .after(vmux_layout::apply_chrome_state_from_cef)
                     .after(crate::layout::stack::ComputeFocusSet),
@@ -670,7 +672,7 @@ fn push_layout_state_emit(
 fn should_emit_new_stack_placeholder(
     pending_stack: Option<Entity>,
     active_stack: Option<Entity>,
-    rows: &[TabRow],
+    rows: &[StackRow],
 ) -> bool {
     let Some(pending_stack) = pending_stack else {
         return false;
@@ -687,12 +689,12 @@ fn should_emit_cached_payload(body: &str, last: &str, ui_ready_changed: bool) ->
     ui_ready_changed || body != last
 }
 
-fn push_tabs_host_emit(
+fn push_stacks_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
     browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), With<Browser>>,
-    tab_q: Query<(), With<Stack>>,
+    stack_q: Query<(), With<Stack>>,
     zoomed_q: Query<(), With<vmux_layout::pane::Zoomed>>,
     new_stack_ctx: Res<crate::command_bar::NewStackContext>,
     focus: Res<crate::layout::stack::FocusedStack>,
@@ -708,11 +710,11 @@ fn push_tabs_host_emit(
     let active_pane = focus.pane;
     let active_stack_opt = focus.stack;
     if let Some(active_stack_entity) = active_stack_opt
-        && !tab_q.contains(active_stack_entity)
+        && !stack_q.contains(active_stack_entity)
     {
         return;
     }
-    let mut rows: Vec<TabRow> = Vec::new();
+    let mut rows: Vec<StackRow> = Vec::new();
     let mut can_go_back = false;
     let mut can_go_forward = false;
     let _ = active_stack_opt.is_none();
@@ -728,7 +730,7 @@ fn push_tabs_host_emit(
                 can_go_back = ns.can_go_back;
                 can_go_forward = ns.can_go_forward;
             }
-            rows.push(TabRow {
+            rows.push(StackRow {
                 title: meta.title.clone(),
                 url: meta.url.clone(),
                 favicon_url: meta.favicon_url.clone(),
@@ -739,7 +741,7 @@ fn push_tabs_host_emit(
     }
     if should_emit_new_stack_placeholder(new_stack_ctx.stack, active_stack_opt, &rows) {
         rows.retain(|r| !r.is_active);
-        rows.push(TabRow {
+        rows.push(StackRow {
             title: "New Stack".to_string(),
             url: String::new(),
             favicon_url: String::new(),
@@ -751,8 +753,8 @@ fn push_tabs_host_emit(
         return;
     }
     let is_zoomed = focus.tab.map(|t| zoomed_q.get(t).is_ok()).unwrap_or(false);
-    let payload = TabsHostEvent {
-        tabs: rows,
+    let payload = StacksHostEvent {
+        stacks: rows,
         can_go_back,
         can_go_forward,
         is_zoomed,
@@ -762,11 +764,15 @@ fn push_tabs_host_emit(
         return;
     }
     warn!(
-        "[tabs-debug] emitting TabsHostEvent: {} tabs, ron_len={}",
-        payload.tabs.len(),
+        "[stacks-debug] emitting StacksHostEvent: {} stacks, ron_len={}",
+        payload.stacks.len(),
         ron_body.len()
     );
-    commands.trigger(BinHostEmitEvent::from_rkyv(chrome_e, TABS_EVENT, &payload));
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        chrome_e,
+        STACKS_EVENT,
+        &payload,
+    ));
     *last = ron_body;
 }
 
@@ -808,7 +814,7 @@ fn push_pane_tree_emit(
     for &pane_entity in &tab_leaf_panes {
         let is_active = active_pane == Some(pane_entity);
         let active_stack = active_stack_in_pane(pane_entity, &pane_children, &stack_ts);
-        let mut stacks: Vec<TabNode> = Vec::new();
+        let mut stacks: Vec<StackNode> = Vec::new();
         let mut stack_index: usize = 0;
         if let Ok(children) = pane_children.get(pane_entity) {
             for child in children.iter() {
@@ -822,7 +828,7 @@ fn push_pane_tree_emit(
                         if let Ok((meta, loading)) = browser_meta.get(browser_e) {
                             let is_new_stack = new_stack_ctx.stack == Some(child)
                                 && (meta.url.is_empty() || meta.url == "about:blank");
-                            stacks.push(TabNode {
+                            stacks.push(StackNode {
                                 title: if is_new_stack {
                                     "New Stack".to_string()
                                 } else {
@@ -839,7 +845,7 @@ fn push_pane_tree_emit(
                                     meta.favicon_url.clone()
                                 },
                                 is_active: stack_is_active,
-                                tab_index: stack_index as u32,
+                                stack_index: stack_index as u32,
                                 is_loading: loading,
                                 bg_color: meta.bg_color.clone(),
                             });
@@ -848,12 +854,12 @@ fn push_pane_tree_emit(
                     }
                 }
                 if !found_browser {
-                    stacks.push(TabNode {
+                    stacks.push(StackNode {
                         title: "New Stack".to_string(),
                         url: String::new(),
                         favicon_url: String::new(),
                         is_active: stack_is_active,
-                        tab_index: stack_index as u32,
+                        stack_index: stack_index as u32,
                         is_loading: false,
                         bg_color: None,
                     });
@@ -864,7 +870,7 @@ fn push_pane_tree_emit(
         panes.push(PaneNode {
             id: pane_entity.to_bits(),
             is_active,
-            tabs: stacks,
+            stacks,
         });
     }
     let payload = PaneTreeEvent { panes };
@@ -878,6 +884,104 @@ fn push_pane_tree_emit(
         &payload,
     ));
     *last = ron_body;
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_tabs_host_emit(
+    mut commands: Commands,
+    browsers: NonSend<Browsers>,
+    chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
+    tabs: Query<(Entity, &Tab, &LastActivatedAt)>,
+    tab_q: Query<Entity, With<Tab>>,
+    child_of_q: Query<&ChildOf>,
+    all_children: Query<&Children>,
+    leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_children: Query<&Children, With<Pane>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    stack_children: Query<&Children>,
+    browser_meta: Query<&PageMetadata, With<Browser>>,
+    mut last: Local<String>,
+) {
+    let Ok((chrome_e, ui_ready)) = chrome_q.single() else {
+        return;
+    };
+    if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
+        return;
+    }
+
+    let active_tab = tabs.iter().max_by_key(|(_, _, ts)| ts.0).map(|t| t.0);
+
+    let ordered = if let Some(any) = tabs.iter().next() {
+        vmux_layout::tab::active_tab_siblings(any.0, &child_of_q, &all_children, &tab_q)
+    } else {
+        Vec::new()
+    };
+
+    let rows: Vec<TabRow> = ordered
+        .iter()
+        .filter_map(|e| tabs.get(*e).ok())
+        .map(|(entity, tab, _)| {
+            let active_stack = active_stack_in_tab(
+                entity,
+                &all_children,
+                &leaf_pane_q,
+                &pane_children,
+                &stack_ts,
+            );
+            let meta = active_stack
+                .and_then(|s| first_browser_meta(s, &stack_children, &browser_meta))
+                .cloned()
+                .unwrap_or_default();
+            let name = if tab.name.is_empty() {
+                "Tab".to_string()
+            } else {
+                tab.name.clone()
+            };
+            TabRow {
+                id: entity.to_bits().to_string(),
+                name,
+                is_active: Some(entity) == active_tab,
+                bg_color: meta.bg_color.clone(),
+                title: meta.title.clone(),
+                url: meta.url.clone(),
+                favicon_url: meta.favicon_url.clone(),
+            }
+        })
+        .collect();
+
+    let payload = TabsHostEvent { tabs: rows };
+    let body = ron::ser::to_string(&payload).unwrap_or_default();
+    if !ui_ready.is_changed() && body == *last {
+        return;
+    }
+    commands.trigger(BinHostEmitEvent::from_rkyv(chrome_e, TABS_EVENT, &payload));
+    *last = body;
+}
+
+fn active_stack_in_tab(
+    tab_e: Entity,
+    all_children: &Query<&Children>,
+    leaf_pane_q: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_children: &Query<&Children, With<Pane>>,
+    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
+) -> Option<Entity> {
+    let mut leaves = Vec::new();
+    collect_leaf_panes(tab_e, all_children, leaf_pane_q, &mut leaves);
+    leaves
+        .into_iter()
+        .filter_map(|p| active_stack_in_pane(p, pane_children, stack_ts).map(|s| (s, p)))
+        .filter_map(|(s, _)| stack_ts.get(s).ok())
+        .max_by_key(|(_, ts)| ts.0)
+        .map(|(e, _)| e)
+}
+
+fn first_browser_meta<'a>(
+    stack: Entity,
+    stack_children: &Query<&Children>,
+    browser_meta: &'a Query<&PageMetadata, With<Browser>>,
+) -> Option<&'a PageMetadata> {
+    let kids = stack_children.get(stack).ok()?;
+    kids.iter().find_map(|c| browser_meta.get(c).ok())
 }
 
 fn handle_browser_commands(
@@ -1052,8 +1156,8 @@ fn on_side_sheet_command_emit(
     let stack_entities: Vec<Entity> = children.iter().filter(|&e| stack_q.contains(e)).collect();
 
     match evt.command.as_str() {
-        "activate_tab" => {
-            let Some(&target_stack) = stack_entities.get(evt.tab_index as usize) else {
+        "activate_stack" => {
+            let Some(&target_stack) = stack_entities.get(evt.stack_index as usize) else {
                 return;
             };
             commands.entity(target_pane).insert(LastActivatedAt::now());
@@ -1069,8 +1173,8 @@ fn on_side_sheet_command_emit(
                 }
             }
         }
-        "close_tab" => {
-            let Some(&target_stack) = stack_entities.get(evt.tab_index as usize) else {
+        "close_stack" => {
+            let Some(&target_stack) = stack_entities.get(evt.stack_index as usize) else {
                 return;
             };
 
@@ -1392,8 +1496,8 @@ mod tests {
 
     #[test]
     fn active_browser_url_wins_over_stale_new_stack_placeholder() {
-        let tab = Entity::from_bits(1);
-        let rows = [TabRow {
+        let stack = Entity::from_bits(1);
+        let rows = [StackRow {
             title: "Google".to_string(),
             url: "https://www.google.com".to_string(),
             favicon_url: String::new(),
@@ -1402,8 +1506,8 @@ mod tests {
         }];
 
         assert!(!should_emit_new_stack_placeholder(
-            Some(tab),
-            Some(tab),
+            Some(stack),
+            Some(stack),
             &rows
         ));
     }

@@ -3,8 +3,8 @@
 use dioxus::prelude::*;
 use vmux_layout::event::{
     HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
-    PaneTreeEvent, RELOAD_EVENT, ReloadEvent, SPACES_EVENT, SpaceRow, SpacesCommandEvent,
-    SpacesHostEvent, TABS_EVENT, TabNode, TabRow, TabsHostEvent,
+    PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent,
+    TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
@@ -74,46 +74,29 @@ fn agent_host(url: &str) -> Option<&'static str> {
     None
 }
 
+fn favicon_src_for_url(favicon_url: &str, url: &str) -> Option<String> {
+    if !favicon_url.is_empty() {
+        return Some(favicon_url.to_string());
+    }
+    if let Some(host) = agent_host(url) {
+        return Some(format!(
+            "https://www.google.com/s2/favicons?domain={host}&sz=32"
+        ));
+    }
+    host_for_favicon_fallback(url)
+        .map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=32"))
+}
+
+fn favicon_src_for_stack(stack: &StackRow) -> Option<String> {
+    favicon_src_for_url(&stack.favicon_url, &stack.url)
+}
+
+fn favicon_src_for_stack_node(stack: &StackNode) -> Option<String> {
+    favicon_src_for_url(&stack.favicon_url, &stack.url)
+}
+
 fn favicon_src_for_tab(tab: &TabRow) -> Option<String> {
-    if !tab.favicon_url.is_empty() {
-        return Some(tab.favicon_url.clone());
-    }
-    if let Some(host) = agent_host(&tab.url) {
-        return Some(format!(
-            "https://www.google.com/s2/favicons?domain={host}&sz=32"
-        ));
-    }
-    host_for_favicon_fallback(&tab.url)
-        .map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=32"))
-}
-
-fn favicon_src(tab: &TabNode) -> Option<String> {
-    if !tab.favicon_url.is_empty() {
-        return Some(tab.favicon_url.clone());
-    }
-    if let Some(host) = agent_host(&tab.url) {
-        return Some(format!(
-            "https://www.google.com/s2/favicons?domain={host}&sz=32"
-        ));
-    }
-    host_for_favicon_fallback(&tab.url)
-        .map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=32"))
-}
-
-fn space_pill_class(is_active: bool) -> &'static str {
-    if is_active {
-        "group flex h-6 items-center gap-1 rounded-full bg-sidebar-primary pl-2.5 pr-1 text-ui-xs text-sidebar-primary-foreground shadow-sm"
-    } else {
-        "group flex h-6 items-center gap-1 rounded-full pl-2.5 pr-1 text-ui-xs text-muted-foreground hover:bg-glass-hover hover:text-foreground"
-    }
-}
-
-fn space_close_button_class(is_active: bool) -> &'static str {
-    if is_active {
-        "flex h-4 w-4 cursor-pointer items-center justify-center rounded-full text-sidebar-primary-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/20"
-    } else {
-        "flex h-4 w-4 cursor-pointer items-center justify-center rounded-full text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-glass-hover hover:text-foreground"
-    }
+    favicon_src_for_url(&tab.favicon_url, &tab.url)
 }
 
 fn header_position_style(state: &LayoutStateEvent) -> String {
@@ -164,14 +147,14 @@ pub fn App() -> Element {
 
 #[component]
 fn HeaderView(titlebar_height: f32) -> Element {
-    let mut tabs_state = use_signal(TabsHostEvent::default);
-    let listener = use_bin_event_listener::<TabsHostEvent, _>(TABS_EVENT, move |data| {
-        tabs_state.set(data);
+    let mut stacks_state = use_signal(StacksHostEvent::default);
+    let listener = use_bin_event_listener::<StacksHostEvent, _>(STACKS_EVENT, move |data| {
+        stacks_state.set(data);
     });
 
-    let mut spaces_state = use_signal(SpacesHostEvent::default);
-    let spaces_listener = use_bin_event_listener::<SpacesHostEvent, _>(SPACES_EVENT, move |data| {
-        spaces_state.set(data);
+    let mut tabs_state = use_signal(TabsHostEvent::default);
+    let tabs_listener = use_bin_event_listener::<TabsHostEvent, _>(TABS_EVENT, move |data| {
+        tabs_state.set(data);
     });
 
     let mut reload_key = use_signal(|| 0u32);
@@ -179,16 +162,16 @@ fn HeaderView(titlebar_height: f32) -> Element {
         reload_key.set(reload_key() + 1);
     });
 
-    let TabsHostEvent {
-        tabs,
+    let StacksHostEvent {
+        stacks,
         can_go_back,
         can_go_forward,
         is_zoomed: _,
-    } = tabs_state();
-    let SpacesHostEvent { spaces } = spaces_state();
-    let active_row = tabs.iter().find(|t| t.is_active).cloned();
+    } = stacks_state();
+    let TabsHostEvent { tabs } = tabs_state();
+    let active_row = stacks.iter().find(|t| t.is_active).cloned();
     let active_bg_color = active_row.as_ref().and_then(|r| r.bg_color.clone());
-    let favicon_src = active_row.as_ref().and_then(favicon_src_for_tab);
+    let favicon_src = active_row.as_ref().and_then(favicon_src_for_stack);
     let mut favicon_error = use_signal(|| false);
     let mut prev_src = use_signal(|| None::<String>);
     if *prev_src.read() != favicon_src {
@@ -197,26 +180,26 @@ fn HeaderView(titlebar_height: f32) -> Element {
     }
     let listener_loading = (listener.is_loading)();
     let listener_error = (listener.error)();
-    let spaces_loading = (spaces_listener.is_loading)();
-    let spaces_error = (spaces_listener.error)();
+    let tabs_loading = (tabs_listener.is_loading)();
+    let tabs_error = (tabs_listener.error)();
 
     rsx! {
         div { class: "flex min-h-0 min-w-0 flex-1 flex-col text-foreground",
             div { class: "flex min-w-0 shrink-0 items-center gap-1 px-2 pb-1",
-                if spaces_loading {
+                if tabs_loading {
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
-                } else if let Some(err) = spaces_error {
+                } else if let Some(err) = tabs_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
                     div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
-                        for (idx, space) in spaces.iter().enumerate() {
-                            SpacePill {
-                                key: "{space.id}",
-                                index: idx + 1,
-                                space: space.clone(),
+                        for tab in tabs.iter() {
+                            TabPill {
+                                key: "{tab.id}",
+                                tab: tab.clone(),
                                 active_bg_color: active_bg_color.clone(),
                             }
                         }
+                        NewTabButton {}
                     }
                 }
             }
@@ -262,7 +245,7 @@ fn HeaderView(titlebar_height: f32) -> Element {
 
 #[component]
 fn HeaderAddressBar(
-    active_row: Option<TabRow>,
+    active_row: Option<StackRow>,
     favicon_src: Option<String>,
     favicon_error: Signal<bool>,
     bg_color: Option<String>,
@@ -270,7 +253,7 @@ fn HeaderAddressBar(
     let has_content = active_row.as_ref().is_some_and(|t| !t.url.is_empty());
     let address_value = active_row
         .as_ref()
-        .map(TabRow::address_text)
+        .map(StackRow::address_text)
         .unwrap_or_default()
         .to_string();
     let placeholder = if has_content { "" } else { "New Stack" };
@@ -309,14 +292,14 @@ fn HeaderAddressBar(
                     header_command: "focus_address_bar".to_string(),
                 });
             },
-            if let Some(tab) = active_row.as_ref() {
-                if tab.url.is_empty() {
+            if let Some(stack) = active_row.as_ref() {
+                if stack.url.is_empty() {
                     Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                         path { d: "M5 12h14" }
                         path { d: "M12 5v14" }
                     }
                 } else {
-                    TabIcon { url: tab.url.clone(), title: tab.title.clone(), favicon_src, favicon_error }
+                    StackIcon { url: stack.url.clone(), title: stack.title.clone(), favicon_src, favicon_error }
                 }
             }
             input {
@@ -331,7 +314,7 @@ fn HeaderAddressBar(
 }
 
 #[component]
-fn TabIcon(
+fn StackIcon(
     url: String,
     title: String,
     favicon_src: Option<String>,
@@ -407,39 +390,53 @@ fn NavButton(
 }
 
 #[component]
-fn SpacePill(index: usize, space: SpaceRow, active_bg_color: Option<String>) -> Element {
-    let id_switch = space.id.clone();
-    let id_close = space.id.clone();
-    let name = space.name.clone();
-    let is_active = space.is_active;
+fn TabPill(tab: TabRow, active_bg_color: Option<String>) -> Element {
+    let id_switch = tab.id.clone();
+    let id_close = tab.id.clone();
+    let display_title = if !tab.title.is_empty() {
+        tab.title.clone()
+    } else if !tab.name.is_empty() {
+        tab.name.clone()
+    } else {
+        "Tab".to_string()
+    };
+    let tooltip = display_title.clone();
+    let is_active = tab.is_active;
+    let icon_src = favicon_src_for_tab(&tab);
+    let mut icon_error = use_signal(|| false);
+    let mut prev_src = use_signal(|| None::<String>);
+    if *prev_src.read() != icon_src {
+        prev_src.set(icon_src.clone());
+        icon_error.set(false);
+    }
 
-    let (pill_style, pill_class, index_class, close_class) = if is_active {
+    let (pill_style, pill_class, title_class, close_class) = if is_active {
         if let Some(ref color) = active_bg_color {
             let text_class = text_color_class_for_bg(color);
             (
-                format!("background-color: {};", color),
+                format!("background-color: {color};max-width:200px;"),
                 format!(
-                    "group flex h-6 items-center gap-1 rounded-full pl-2.5 pr-1 text-ui-xs shadow-sm {text_class}"
+                    "group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-md pl-2 pr-1 shadow-sm {text_class}"
                 ),
-                format!("font-mono {text_class}"),
+                format!("min-w-0 truncate text-ui-xs font-medium {text_class}"),
                 format!(
-                    "flex h-4 w-4 cursor-pointer items-center justify-center rounded-full opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/20 {text_class}"
+                    "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/20 {text_class}"
                 ),
             )
         } else {
             (
-                String::new(),
-                space_pill_class(true).to_string(),
-                "font-mono text-sidebar-primary-foreground".to_string(),
-                space_close_button_class(true).to_string(),
+                "max-width:200px;".to_string(),
+                "glass group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-md pl-2 pr-1".to_string(),
+                "min-w-0 truncate text-ui-xs font-medium text-foreground".to_string(),
+                "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
             )
         }
     } else {
         (
-            String::new(),
-            space_pill_class(false).to_string(),
-            "font-mono text-muted-foreground".to_string(),
-            space_close_button_class(false).to_string(),
+            "max-width:200px;".to_string(),
+            "group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-md pl-2 pr-1 text-muted-foreground hover:bg-glass-hover hover:text-foreground".to_string(),
+            "min-w-0 truncate text-ui-xs".to_string(),
+            "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
     };
 
@@ -449,27 +446,32 @@ fn SpacePill(index: usize, space: SpaceRow, active_bg_color: Option<String>) -> 
             style: "{pill_style}",
             button {
                 r#type: "button",
-                title: "{name}",
-                class: "flex min-w-0 cursor-pointer items-center gap-2",
+                title: "{tooltip}",
+                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-1.5",
                 onclick: move |_| {
-                    let _ = try_cef_bin_emit_rkyv(&SpacesCommandEvent {
+                    let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
                         command: "switch".to_string(),
-                        space_id: Some(id_switch.clone()),
+                        tab_id: Some(id_switch.clone()),
                     });
                 },
-                span { class: "{index_class}", "{index}" }
-                span { class: "min-w-0 truncate", "{name}" }
+                StackIcon {
+                    url: tab.url.clone(),
+                    title: display_title.clone(),
+                    favicon_src: icon_src,
+                    favicon_error: icon_error,
+                }
+                span { class: "{title_class}", "{display_title}" }
             }
             button {
                 r#type: "button",
-                aria_label: "Close space",
-                title: "Close space",
+                aria_label: "Close tab",
+                title: "Close tab",
                 class: "{close_class}",
                 onclick: move |evt| {
                     evt.stop_propagation();
-                    let _ = try_cef_bin_emit_rkyv(&SpacesCommandEvent {
+                    let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
                         command: "close".to_string(),
-                        space_id: Some(id_close.clone()),
+                        tab_id: Some(id_close.clone()),
                     });
                 },
                 Icon { class: "h-2.5 w-2.5",
@@ -482,17 +484,17 @@ fn SpacePill(index: usize, space: SpaceRow, active_bg_color: Option<String>) -> 
 }
 
 #[component]
-fn NewSpaceButton() -> Element {
+fn NewTabButton() -> Element {
     rsx! {
         button {
             r#type: "button",
-            aria_label: "New space",
-            title: "New space",
-            class: "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
+            aria_label: "New tab",
+            title: "New tab",
+            class: "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&SpacesCommandEvent {
+                let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
                     command: "new".to_string(),
-                    space_id: None,
+                    tab_id: None,
                 });
             },
             Icon { class: "h-3.5 w-3.5",
@@ -537,9 +539,9 @@ fn SideSheetView() -> Element {
 
 #[component]
 fn PaneSection(pane: PaneNode, index: usize) -> Element {
-    let label = format!("Stack {}", index + 1);
+    let label = format!("Pane {}", index + 1);
     let pane_id = pane.id;
-    let any_loading = pane.tabs.iter().any(|t| t.is_loading);
+    let any_loading = pane.stacks.iter().any(|s| s.is_loading);
 
     rsx! {
         div { class: if pane.is_active && any_loading {
@@ -558,8 +560,8 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                 "{label}"
             }
             div { class: "flex flex-col gap-px",
-                for tab in pane.tabs.iter() {
-                    SideSheetTabRow { tab: tab.clone(), pane_id }
+                for stack in pane.stacks.iter() {
+                    SideSheetStackRow { stack: stack.clone(), pane_id }
                 }
             }
         }
@@ -567,10 +569,10 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
 }
 
 #[component]
-fn SideSheetTabRow(tab: TabNode, pane_id: u64) -> Element {
-    let icon = favicon_src(&tab);
-    let is_active = tab.is_active;
-    let tab_index = tab.tab_index;
+fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
+    let icon = favicon_src_for_stack_node(&stack);
+    let is_active = stack.is_active;
+    let stack_index = stack.stack_index;
     let mut icon_error = use_signal(|| false);
     let mut prev_src = use_signal(|| None::<String>);
     if *prev_src.read() != icon {
@@ -587,28 +589,28 @@ fn SideSheetTabRow(tab: TabNode, pane_id: u64) -> Element {
             },
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
-                    command: "activate_tab".to_string(),
+                    command: "activate_stack".to_string(),
                     pane_id: pane_id.to_string(),
-                    tab_index,
+                    stack_index,
                 });
             },
-            TabIcon { url: tab.url.clone(), title: tab.title.clone(), favicon_src: icon, favicon_error: icon_error }
+            StackIcon { url: stack.url.clone(), title: stack.title.clone(), favicon_src: icon, favicon_error: icon_error }
             span {
                 class: if is_active {
                     "min-w-0 flex-1 truncate text-ui font-medium text-foreground"
                 } else {
                     "min-w-0 flex-1 truncate text-ui"
                 },
-                "{tab.title}"
+                "{stack.title}"
             }
             button {
                 class: "cursor-pointer ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-sm opacity-0 transition-colors group-hover:opacity-100 hover:bg-foreground/10 active:bg-transparent",
                 onclick: move |evt| {
                     evt.stop_propagation();
                     let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
-                        command: "close_tab".to_string(),
+                        command: "close_stack".to_string(),
                         pane_id: pane_id.to_string(),
-                        tab_index,
+                        stack_index,
                     });
                 },
                 span { class: "text-base leading-none", "x" }

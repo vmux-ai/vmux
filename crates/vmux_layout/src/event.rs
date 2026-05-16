@@ -3,7 +3,7 @@ pub const COMMAND_BAR_WEBVIEW_URL: &str = "vmux://command-bar/";
 pub const TERMINAL_WEBVIEW_URL: &str = "vmux://terminal/";
 pub const PROCESSES_WEBVIEW_URL: &str = "vmux://services/";
 pub const LAYOUT_STATE_EVENT: &str = "layout-state";
-pub const TABS_EVENT: &str = "tabs";
+pub const STACKS_EVENT: &str = "stacks";
 pub const RELOAD_EVENT: &str = "reload";
 
 #[derive(
@@ -20,7 +20,7 @@ pub const RELOAD_EVENT: &str = "reload";
     rkyv::Deserialize,
 )]
 pub struct ReloadEvent;
-pub const SPACES_EVENT: &str = "spaces";
+pub const TABS_EVENT: &str = "tabs";
 pub const PANE_TREE_EVENT: &str = "pane-tree";
 pub const SIDE_SHEET_COMMAND_EVENT: &str = "side-sheet-command";
 pub const SIDE_SHEET_DRAG_EVENT: &str = "side-sheet-drag";
@@ -173,8 +173,8 @@ mod tests {
     }
 
     #[test]
-    fn tab_row_address_text_uses_current_url() {
-        let row = TabRow {
+    fn stack_row_address_text_uses_current_url() {
+        let row = StackRow {
             title: "Google".to_string(),
             url: "https://www.google.com".to_string(),
             favicon_url: String::new(),
@@ -197,16 +197,16 @@ mod tests {
     }
 
     #[test]
-    fn spaces_command_event_rkyv_roundtrip() {
-        let original = SpacesCommandEvent {
-            command: "switch-space".into(),
-            space_id: Some("work".into()),
+    fn tabs_command_event_rkyv_roundtrip() {
+        let original = TabsCommandEvent {
+            command: "switch-tab".into(),
+            tab_id: Some("work".into()),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
         let recovered =
-            rkyv::from_bytes::<SpacesCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
-        assert_eq!(recovered.command, "switch-space");
-        assert_eq!(recovered.space_id.as_deref(), Some("work"));
+            rkyv::from_bytes::<TabsCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(recovered.command, "switch-tab");
+        assert_eq!(recovered.tab_id.as_deref(), Some("work"));
     }
 }
 
@@ -235,8 +235,8 @@ pub struct HeaderCommandEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct TabsHostEvent {
-    pub tabs: Vec<TabRow>,
+pub struct StacksHostEvent {
+    pub stacks: Vec<StackRow>,
     #[serde(default)]
     pub can_go_back: bool,
     #[serde(default)]
@@ -256,7 +256,7 @@ pub struct TabsHostEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct TabRow {
+pub struct StackRow {
     pub title: String,
     pub url: String,
     #[serde(default)]
@@ -266,7 +266,7 @@ pub struct TabRow {
     pub bg_color: Option<String>,
 }
 
-impl TabRow {
+impl StackRow {
     pub fn address_text(&self) -> &str {
         self.url.as_str()
     }
@@ -284,8 +284,8 @@ impl TabRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct SpacesHostEvent {
-    pub spaces: Vec<SpaceRow>,
+pub struct TabsHostEvent {
+    pub tabs: Vec<TabRow>,
 }
 
 #[derive(
@@ -299,12 +299,18 @@ pub struct SpacesHostEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct SpaceRow {
+pub struct TabRow {
     pub id: String,
     pub name: String,
     pub is_active: bool,
     #[serde(default)]
     pub bg_color: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub favicon_url: String,
 }
 
 #[derive(
@@ -316,10 +322,10 @@ pub struct SpaceRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct SpacesCommandEvent {
+pub struct TabsCommandEvent {
     pub command: String,
     #[serde(default)]
-    pub space_id: Option<String>,
+    pub tab_id: Option<String>,
 }
 
 #[derive(
@@ -349,7 +355,7 @@ pub struct PaneTreeEvent {
 pub struct PaneNode {
     pub id: u64,
     pub is_active: bool,
-    pub tabs: Vec<TabNode>,
+    pub stacks: Vec<StackNode>,
 }
 
 #[derive(
@@ -362,7 +368,7 @@ pub struct PaneNode {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct TabNode {
+pub struct StackNode {
     pub title: String,
     pub url: String,
     #[serde(default)]
@@ -370,7 +376,7 @@ pub struct TabNode {
     #[serde(default)]
     pub is_active: bool,
     #[serde(default)]
-    pub tab_index: u32,
+    pub stack_index: u32,
     #[serde(default)]
     pub is_loading: bool,
     #[serde(default)]
@@ -391,7 +397,7 @@ pub struct SideSheetCommandEvent {
     #[serde(default)]
     pub pane_id: String,
     #[serde(default)]
-    pub tab_index: u32,
+    pub stack_index: u32,
 }
 
 #[derive(
@@ -441,7 +447,7 @@ pub enum LayoutNode {
     Pane {
         id: u64,
         is_active: bool,
-        tabs: Vec<TabNode>,
+        stacks: Vec<StackNode>,
     },
 }
 
