@@ -1,5 +1,5 @@
 use crate::{
-    command::{AppCommand, BrowserCommand, ReadAppCommands},
+    command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand},
     command_bar::PendingCommandBarReveal,
     layout::{
         PendingWebviewReveal,
@@ -1141,6 +1141,7 @@ fn on_side_sheet_command_emit(
     )>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     settings: Res<AppSettings>,
+    mut messages: ResMut<Messages<AppCommand>>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
@@ -1291,6 +1292,10 @@ fn on_side_sheet_command_emit(
 
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
+        }
+        "new_stack" => {
+            commands.entity(target_pane).insert(LastActivatedAt::now());
+            messages.write(AppCommand::Layout(LayoutCommand::Stack(StackCommand::New)));
         }
         _ => {}
     }
