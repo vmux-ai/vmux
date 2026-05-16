@@ -2,7 +2,7 @@ mod transition;
 pub use transition::{CefTransitionCore, CefTransitionQualifiers, decode as decode_transition};
 
 use async_channel::Sender;
-use bevy::prelude::Entity;
+use bevy::prelude::{Entity, Message};
 use cef::rc::{Rc, RcImpl};
 use cef::{
     Browser, Frame, ImplFrame, ImplLoadHandler, LoadHandler, TransitionType, WrapLoadHandler, sys,
@@ -19,7 +19,7 @@ pub struct WebviewLoadingStateEvent {
 
 pub type WebviewLoadingStateSenderInner = Sender<WebviewLoadingStateEvent>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Message)]
 pub struct WebviewCommittedNavigationEvent {
     pub webview: Entity,
     pub url: String,

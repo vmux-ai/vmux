@@ -50,7 +50,8 @@ impl Plugin for BrowserPlugin {
             .resource::<WebviewAppRegistry>()
             .embedded_hosts();
         webview_debug_log(format!("BrowserPlugin embedded_hosts={embedded_hosts:?}"));
-        app.configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
+        app.add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
+            .configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
             .add_plugins(CefPlugin {
                 root_cache_path: cef_root_cache_path(),
                 embedded_hosts,
@@ -71,6 +72,7 @@ impl Plugin for BrowserPlugin {
                     handle_browser_commands.in_set(ReadAppCommands),
                     vmux_layout::apply_chrome_state_from_cef,
                     drain_loading_state,
+                    drain_committed_navigation,
                     spawn_popup_tabs,
                     inject_bg_color_script,
                 ),
@@ -648,6 +650,15 @@ fn drain_loading_state(receiver: Res<WebviewLoadingStateReceiver>, mut commands:
             can_go_back: ev.can_go_back,
             can_go_forward: ev.can_go_forward,
         });
+    }
+}
+
+fn drain_committed_navigation(
+    receiver: Res<WebviewCommittedNavigationReceiver>,
+    mut writer: MessageWriter<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>,
+) {
+    while let Ok(ev) = receiver.0.try_recv() {
+        writer.write(ev);
     }
 }
 
