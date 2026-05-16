@@ -1,5 +1,8 @@
 pub mod layout;
-pub use layout::{FocusDto, LayoutNodeDto, LayoutSnapshot, SpaceDto, SplitDirectionDto, TabDto};
+pub use layout::{
+    FocusDto, LayoutNodeDto, LayoutSnapshot, NodeKind, SpaceDto, SplitDirectionDto, TabDto,
+    format_id, parse_id,
+};
 
 use vmux_terminal::event::{TermCursor, TermLine, TermSelectionRange};
 
