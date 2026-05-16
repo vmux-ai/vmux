@@ -79,10 +79,11 @@ impl SettingsView {
     }
 }
 
-pub(crate) struct SettingsViewPlugin;
+pub(crate) struct SettingsPlugin;
 
-impl Plugin for SettingsViewPlugin {
+impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(crate::settings::SettingsCorePlugin);
         register_settings_webview_app(
             app.world_mut()
                 .resource_mut::<WebviewAppRegistry>()

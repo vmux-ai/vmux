@@ -10,9 +10,9 @@ pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
 };
 
-pub struct SettingsPlugin;
+pub(crate) struct SettingsCorePlugin;
 
-impl Plugin for SettingsPlugin {
+impl Plugin for SettingsCorePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LastSelfWriteHash>()
             .add_message::<SettingsWriteRequest>()

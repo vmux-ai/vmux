@@ -41,7 +41,7 @@ use {
     os_menu::OsMenuPlugin,
     persistence::PersistencePlugin,
     processes_monitor::ProcessesMonitorPlugin,
-    settings::SettingsPlugin,
+    settings_view::SettingsPlugin,
     shortcut::ShortcutPlugin,
     spaces::SpacesPlugin,
     terminal::TerminalInputPlugin,
@@ -116,7 +116,6 @@ impl Plugin for VmuxPlugin {
             CommandBarInputPlugin,
         ))
         .add_plugins(SpacesPlugin)
-        .add_plugins(settings_view::SettingsViewPlugin)
         .add_plugins(BrowserPlugin)
         .add_plugins((
             TerminalInputPlugin,
