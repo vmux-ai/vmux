@@ -89,6 +89,7 @@ pub struct SettingsLoadSet;
 pub struct AppSettings {
     #[allow(dead_code)]
     pub browser: BrowserSettings,
+    #[serde(default)]
     pub layout: LayoutSettings,
     #[serde(default)]
     pub shortcuts: ShortcutSettings,

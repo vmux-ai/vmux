@@ -1,9 +1,11 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Deserialize, Serialize, Resource)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, Resource)]
 pub struct LayoutSettings {
+    #[serde(default)]
     pub window: WindowSettings,
+    #[serde(default)]
     pub pane: PaneSettings,
     #[serde(default)]
     pub side_sheet: SideSheetSettings,
@@ -43,8 +45,9 @@ fn default_side_sheet_width() -> f32 {
     280.0
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct WindowSettings {
+    #[serde(default)]
     pub padding: f32,
     #[serde(default)]
     pub padding_top: Option<f32>,
@@ -190,8 +193,10 @@ fn default_outline_gradient_accent() -> FocusRingColor {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct PaneSettings {
+    #[serde(default)]
     pub gap: f32,
+    #[serde(default)]
     pub radius: f32,
 }
