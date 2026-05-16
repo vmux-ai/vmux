@@ -1,3 +1,5 @@
+pub mod reconcile;
+
 use crate::layout::{
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, Zoomed},
     stack::{FocusedStack, Stack},
