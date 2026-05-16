@@ -1,23 +1,79 @@
 #![allow(dead_code)]
 
+use std::collections::HashSet;
+
 use crate::layout::{
-    pane::{PaneSize, PaneSplit, PaneSplitDirection},
+    pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection},
+    stack::Stack,
     tab::Tab,
 };
 use bevy::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_service::protocol::layout::{
-    LayoutNodeDto, LayoutSnapshot, SpaceDto, SplitDirectionDto, parse_id,
+    LayoutNodeDto, LayoutSnapshot, NodeKind, SpaceDto, SplitDirectionDto, format_id, parse_id,
 };
 
 use super::reconcile::ValidationError;
 
 pub fn apply(world: &mut World, snapshot: &LayoutSnapshot) -> Result<(), ValidationError> {
-    super::reconcile::validate(snapshot)?;
+    let existing = collect_existing_ids(world);
+    apply_with_existing(world, snapshot, &existing)
+}
+
+pub fn apply_with_existing(
+    world: &mut World,
+    snapshot: &LayoutSnapshot,
+    existing: &HashSet<String>,
+) -> Result<(), ValidationError> {
+    let plan = super::reconcile::plan_diff(snapshot, existing)?;
+    for space in &snapshot.spaces {
+        if let Some(id) = &space.id
+            && let Ok((_, value)) = parse_id(id)
+        {
+            let space_entity = Entity::from_bits(value);
+            apply_structure(world, Some(space_entity), &space.root);
+        }
+    }
     for space in &snapshot.spaces {
         apply_space(world, space);
     }
+    for id in &plan.closes {
+        apply_close(world, id);
+    }
     Ok(())
+}
+
+fn apply_close(world: &mut World, id: &str) {
+    let Ok((_kind, value)) = parse_id(id) else {
+        return;
+    };
+    let entity = Entity::from_bits(value);
+    // TODO: integrate vmux_layout close helpers (PaneCommand::Close paths) so process
+    // shutdown and side-sheet sync happen. For v1, brute-force despawn is acceptable.
+    if let Ok(entity_ref) = world.get_entity_mut(entity) {
+        entity_ref.despawn();
+    }
+}
+
+fn collect_existing_ids(world: &mut World) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let mut q_space = world.query_filtered::<Entity, With<Tab>>();
+    for e in q_space.iter(world) {
+        out.insert(format_id(NodeKind::Space, e.to_bits()));
+    }
+    let mut q_split = world.query_filtered::<Entity, (With<Pane>, With<PaneSplit>)>();
+    for e in q_split.iter(world) {
+        out.insert(format_id(NodeKind::Split, e.to_bits()));
+    }
+    let mut q_pane = world.query_filtered::<Entity, (With<Pane>, Without<PaneSplit>)>();
+    for e in q_pane.iter(world) {
+        out.insert(format_id(NodeKind::Pane, e.to_bits()));
+    }
+    let mut q_tab = world.query_filtered::<Entity, With<Stack>>();
+    for e in q_tab.iter(world) {
+        out.insert(format_id(NodeKind::Tab, e.to_bits()));
+    }
+    out
 }
 
 fn apply_space(world: &mut World, space: &SpaceDto) {
@@ -25,7 +81,6 @@ fn apply_space(world: &mut World, space: &SpaceDto) {
         && let Ok((_, value)) = parse_id(id)
     {
         let entity = Entity::from_bits(value);
-        apply_structure(world, Some(entity), &space.root);
         if let Some(mut tab) = world.get_mut::<Tab>(entity) {
             tab.name = space.name.clone();
         }
@@ -280,5 +335,59 @@ mod tests {
         apply(app.world_mut(), &snap).unwrap();
         let parent = app.world().get::<ChildOf>(moved).map(|p| p.parent());
         assert_eq!(parent, Some(split_b));
+    }
+
+    #[test]
+    fn omitting_pane_from_snapshot_closes_it() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(space),
+            ))
+            .id();
+        let keep = app.world_mut().spawn((Pane, ChildOf(split))).id();
+        let drop_me = app.world_mut().spawn((Pane, ChildOf(split))).id();
+
+        let snap = LayoutSnapshot {
+            spaces: vec![SpaceDto {
+                id: Some(format_id(NodeKind::Space, space.to_bits())),
+                name: "S".into(),
+                is_active: true,
+                root: LayoutNodeDto::Split {
+                    id: Some(format_id(NodeKind::Split, split.to_bits())),
+                    direction: SplitDirectionDto::Row,
+                    flex_weights: vec![],
+                    children: vec![LayoutNodeDto::Pane {
+                        id: Some(format_id(NodeKind::Pane, keep.to_bits())),
+                        is_zoomed: false,
+                        tabs: vec![],
+                    }],
+                },
+            }],
+            focused: FocusDto::default(),
+        };
+
+        let existing: HashSet<String> = [
+            format_id(NodeKind::Space, space.to_bits()),
+            format_id(NodeKind::Split, split.to_bits()),
+            format_id(NodeKind::Pane, keep.to_bits()),
+            format_id(NodeKind::Pane, drop_me.to_bits()),
+        ]
+        .into_iter()
+        .collect();
+
+        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+        assert!(
+            app.world().get_entity(drop_me).is_err(),
+            "drop_me should be despawned"
+        );
+        assert!(app.world().get_entity(keep).is_ok(), "keep should survive");
     }
 }
