@@ -85,7 +85,7 @@ impl LastActivatedAt {
 pub struct Visit;
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Component, Clone, Debug, Reflect, Default)]
+#[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component, Default)]
 #[require(Save)]
 #[type_path = "vmux_history"]
