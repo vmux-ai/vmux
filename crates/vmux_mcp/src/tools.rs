@@ -323,29 +323,27 @@ mod tests {
                 "missing hand-written {hand}"
             );
         }
-        for auto in [
-            "stack_new",
-            "stack_close",
-            "new_tab",
-            "close_tab",
-            "split_v",
-            "terminal_clear",
-            "browser_reload",
-        ] {
+        for auto in ["terminal_clear", "browser_reload"] {
             assert!(
                 names.contains(&auto.to_string()),
                 "missing auto-generated {auto}"
+            );
+        }
+        for removed in ["stack_new", "close_tab", "split_v"] {
+            assert!(
+                !names.contains(&removed.to_string()),
+                "layout command {removed} should no longer appear in MCP tools"
             );
         }
     }
 
     #[test]
     fn auto_generated_tool_dispatches_as_app_command() {
-        let command = dispatch_command("split_v", serde_json::json!({})).unwrap();
+        let command = dispatch_command("terminal_clear", serde_json::json!({})).unwrap();
         assert_eq!(
             command,
             AgentCommand::AppCommand {
-                id: "split_v".to_string()
+                id: "terminal_clear".to_string()
             }
         );
     }
@@ -501,10 +499,10 @@ mod tests {
 
     #[test]
     fn dispatch_from_tool_call_routes_command() {
-        let target = dispatch_from_tool_call("split_v", serde_json::json!({})).unwrap();
+        let target = dispatch_from_tool_call("terminal_clear", serde_json::json!({})).unwrap();
         assert!(matches!(
             target,
-            DispatchTarget::Command(AgentCommand::AppCommand { id }) if id == "split_v"
+            DispatchTarget::Command(AgentCommand::AppCommand { id }) if id == "terminal_clear"
         ));
     }
 
