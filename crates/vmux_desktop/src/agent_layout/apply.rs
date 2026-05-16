@@ -7,10 +7,13 @@ use crate::layout::{
     stack::Stack,
     tab::Tab,
 };
+use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use vmux_core::PageMetadata;
+use vmux_layout::LayoutSpawnRequest;
 use vmux_service::protocol::layout::{
-    LayoutNodeDto, LayoutSnapshot, NodeKind, SpaceDto, SplitDirectionDto, format_id, parse_id,
+    LayoutNodeDto, LayoutSnapshot, NodeKind, SpaceDto, SplitDirectionDto, TabDto, format_id,
+    parse_id,
 };
 
 use super::reconcile::ValidationError;
@@ -26,6 +29,25 @@ pub fn apply_with_existing(
     existing: &HashSet<String>,
 ) -> Result<(), ValidationError> {
     let plan = super::reconcile::plan_diff(snapshot, existing)?;
+
+    // Pointer-keyed map lets future passes look up entities spawned for id-less nodes.
+    let mut new_entities: std::collections::HashMap<*const LayoutNodeDto, Entity> =
+        std::collections::HashMap::new();
+    for space in &snapshot.spaces {
+        let space_entity = match &space.id {
+            Some(id) => match parse_id(id) {
+                Ok((_, value)) => Entity::from_bits(value),
+                Err(_) => continue,
+            },
+            None => world
+                .spawn(Tab {
+                    name: space.name.clone(),
+                })
+                .id(),
+        };
+        create_descendants(world, space_entity, &space.root, &mut new_entities);
+    }
+
     for space in &snapshot.spaces {
         if let Some(id) = &space.id
             && let Ok((_, value)) = parse_id(id)
@@ -41,6 +63,95 @@ pub fn apply_with_existing(
         apply_close(world, id);
     }
     Ok(())
+}
+
+fn create_descendants(
+    world: &mut World,
+    parent: Entity,
+    node: &LayoutNodeDto,
+    new_entities: &mut std::collections::HashMap<*const LayoutNodeDto, Entity>,
+) {
+    let node_entity = match node {
+        LayoutNodeDto::Split { id, direction, .. } => match id {
+            Some(id_str) => parse_id(id_str)
+                .ok()
+                .map(|(_, v)| Entity::from_bits(v))
+                .unwrap_or_else(|| spawn_split(world, parent, *direction)),
+            None => {
+                let entity = spawn_split(world, parent, *direction);
+                new_entities.insert(node as *const _, entity);
+                entity
+            }
+        },
+        LayoutNodeDto::Pane { id, .. } => match id {
+            Some(id_str) => parse_id(id_str)
+                .ok()
+                .map(|(_, v)| Entity::from_bits(v))
+                .unwrap_or_else(|| spawn_leaf_pane(world, parent)),
+            None => {
+                let entity = spawn_leaf_pane(world, parent);
+                new_entities.insert(node as *const _, entity);
+                entity
+            }
+        },
+    };
+
+    match node {
+        LayoutNodeDto::Split { children, .. } => {
+            for c in children {
+                create_descendants(world, node_entity, c, new_entities);
+            }
+        }
+        LayoutNodeDto::Pane { tabs, .. } => {
+            for t in tabs {
+                if t.id.is_none() {
+                    spawn_tab(world, node_entity, t);
+                }
+            }
+        }
+    }
+}
+
+fn spawn_split(world: &mut World, parent: Entity, direction: SplitDirectionDto) -> Entity {
+    let pane_split_dir = match direction {
+        SplitDirectionDto::Row => PaneSplitDirection::Row,
+        SplitDirectionDto::Column => PaneSplitDirection::Column,
+    };
+    world
+        .spawn((
+            Pane,
+            PaneSplit {
+                direction: pane_split_dir,
+            },
+            PaneSize::default(),
+            ChildOf(parent),
+        ))
+        .id()
+}
+
+fn spawn_leaf_pane(world: &mut World, parent: Entity) -> Entity {
+    world
+        .spawn((Pane, PaneSize::default(), ChildOf(parent)))
+        .id()
+}
+
+fn spawn_tab(world: &mut World, pane: Entity, tab: &TabDto) {
+    let stack = world.spawn((Stack::default(), ChildOf(pane))).id();
+    match tab.kind.as_str() {
+        "terminal" => {
+            world
+                .resource_mut::<Messages<LayoutSpawnRequest>>()
+                .write(LayoutSpawnRequest::Terminal { stack });
+        }
+        _ => {
+            world.resource_mut::<Messages<LayoutSpawnRequest>>().write(
+                LayoutSpawnRequest::OpenUrl {
+                    stack,
+                    url: tab.url.clone(),
+                },
+            );
+        }
+    }
 }
 
 fn apply_close(world: &mut World, id: &str) {
@@ -185,7 +296,7 @@ fn node_entity(node: &LayoutNodeDto) -> Option<Entity> {
 mod tests {
     use super::*;
     use crate::layout::pane::{Pane, PaneSplitDirection};
-    use vmux_service::protocol::layout::{FocusDto, NodeKind, format_id};
+    use vmux_service::protocol::layout::{FocusDto, NodeKind, TabDto, format_id};
 
     #[test]
     fn updating_split_direction_changes_component() {
@@ -389,5 +500,43 @@ mod tests {
             "drop_me should be despawned"
         );
         assert!(app.world().get_entity(keep).is_ok(), "keep should survive");
+    }
+
+    #[test]
+    fn submitting_new_tab_id_none_spawns_stack_entity() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<vmux_layout::LayoutSpawnRequest>();
+
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
+
+        let snap = LayoutSnapshot {
+            spaces: vec![SpaceDto {
+                id: Some(format_id(NodeKind::Space, space.to_bits())),
+                name: "S".into(),
+                is_active: true,
+                root: LayoutNodeDto::Pane {
+                    id: Some(format_id(NodeKind::Pane, pane.to_bits())),
+                    is_zoomed: false,
+                    tabs: vec![TabDto {
+                        id: None,
+                        url: "https://example.com".into(),
+                        kind: "browser".into(),
+                        ..Default::default()
+                    }],
+                },
+            }],
+            focused: FocusDto::default(),
+        };
+
+        apply(app.world_mut(), &snap).unwrap();
+
+        let stack_count = app
+            .world_mut()
+            .query_filtered::<Entity, With<Stack>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(stack_count, 1, "one new Stack entity should be spawned");
     }
 }
