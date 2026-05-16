@@ -36,6 +36,18 @@ pub(crate) struct AgentQueryRequest {
     pub(crate) query: vmux_service::protocol::AgentQuery,
 }
 
+#[derive(Message, Clone, Debug)]
+pub(crate) struct AgentCommandResultMessage {
+    pub(crate) request_id: AgentRequestId,
+    pub(crate) result: vmux_service::protocol::AgentCommandResult,
+}
+
+#[derive(Message, Clone, Debug)]
+pub(crate) struct AgentQueryResultMessage {
+    pub(crate) request_id: AgentRequestId,
+    pub(crate) result: vmux_service::protocol::AgentQueryResult,
+}
+
 #[derive(Clone)]
 pub(crate) struct AgentProvider {
     pub(crate) id: &'static str,
@@ -171,6 +183,8 @@ impl Plugin for AgentPlugin {
         app.init_resource::<AgentProviders>()
             .add_message::<AgentCommandRequest>()
             .add_message::<AgentQueryRequest>()
+            .add_message::<AgentCommandResultMessage>()
+            .add_message::<AgentQueryResultMessage>()
             .add_message::<AgentLaunchRequested>()
             .add_message::<vmux_agent::AgentSessionExited>()
             .add_message::<crate::settings::SettingsWriteRequest>()
@@ -187,6 +201,14 @@ impl Plugin for AgentPlugin {
                     .chain()
                     .in_set(WriteAppCommands)
                     .after(ServiceMessageSet),
+            )
+            .add_systems(
+                Update,
+                (
+                    drain_app_agent_dispatches,
+                    relay_command_results_to_app_agent,
+                    relay_query_results_to_app_agent,
+                ),
             );
 
         let mut providers = app.world_mut().resource_mut::<AgentProviders>();
@@ -747,6 +769,9 @@ fn spawn_vmux_tab(
                     }
                     Ok(())
                 }
+                Some(vmux_agent::AgentUrl::AppDefault) => {
+                    Err("AgentUrl::AppDefault not yet wired in spawn pipeline".into())
+                }
                 None => {
                     if segs.len() == 1
                         && let Some(kind) = AgentKind::from_url_segment(segs[0])
@@ -855,6 +880,7 @@ struct AgentLookups<'w> {
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
+    mut cmd_result_writer: MessageWriter<AgentCommandResultMessage>,
     focus: Res<FocusedStack>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
@@ -964,6 +990,10 @@ fn handle_agent_commands(
                                 let result = AgentCommandResult::Error(format!(
                                     "browser_navigate: invalid pane id '{s}'"
                                 ));
+                                cmd_result_writer.write(AgentCommandResultMessage {
+                                    request_id: request.request_id,
+                                    result: result.clone(),
+                                });
                                 if let Some(service) = service.as_ref() {
                                     service.0.send(ClientMessage::AgentCommandResponse {
                                         request_id: request.request_id,
@@ -1087,6 +1117,10 @@ fn handle_agent_commands(
                 continue;
             }
         };
+        cmd_result_writer.write(AgentCommandResultMessage {
+            request_id: request.request_id,
+            result: result.clone(),
+        });
         if let Some(service) = service.as_ref() {
             service.0.send(ClientMessage::AgentCommandResponse {
                 request_id: request.request_id,
@@ -1125,6 +1159,54 @@ pub(crate) fn detect_agent_session_process_exit(
             meta.url = next;
         }
         writer.write(vmux_agent::AgentSessionExited { entity });
+    }
+}
+
+fn drain_app_agent_dispatches(
+    mut cmd_writer: MessageWriter<AgentCommandRequest>,
+    mut query_writer: MessageWriter<AgentQueryRequest>,
+) {
+    use vmux_agent::tool_dispatch::EMIT_CHANNEL;
+    use vmux_mcp::tools::DispatchTarget;
+    for emit in EMIT_CHANNEL.1.try_iter() {
+        let request_id = AgentRequestId(emit.request_id);
+        match emit.target {
+            DispatchTarget::Command(command) => {
+                cmd_writer.write(AgentCommandRequest {
+                    request_id,
+                    command,
+                });
+            }
+            DispatchTarget::Query(query) => {
+                query_writer.write(AgentQueryRequest { request_id, query });
+            }
+        }
+    }
+}
+
+fn relay_command_results_to_app_agent(mut reader: MessageReader<AgentCommandResultMessage>) {
+    use vmux_agent::tool_dispatch::{DispatchResult, deliver};
+    use vmux_service::protocol::AgentCommandResult;
+    for msg in reader.read() {
+        let (content, is_error) = match &msg.result {
+            AgentCommandResult::Ok => ("ok".to_string(), false),
+            AgentCommandResult::Layout(s) => (format!("{s:?}"), false),
+            AgentCommandResult::Error(e) => (e.clone(), true),
+        };
+        deliver(&msg.request_id.0, DispatchResult { content, is_error });
+    }
+}
+
+fn relay_query_results_to_app_agent(mut reader: MessageReader<AgentQueryResultMessage>) {
+    use vmux_agent::tool_dispatch::{DispatchResult, deliver};
+    use vmux_service::protocol::AgentQueryResult;
+    for msg in reader.read() {
+        let (content, is_error) = match &msg.result {
+            AgentQueryResult::Layout(s) => (format!("{s:?}"), false),
+            AgentQueryResult::Settings(s) => (s.clone(), false),
+            AgentQueryResult::Error(e) => (e.clone(), true),
+        };
+        deliver(&msg.request_id.0, DispatchResult { content, is_error });
     }
 }
 

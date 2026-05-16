@@ -1,10 +1,9 @@
 use bevy::prelude::*;
-use bevy::tasks::IoTaskPool;
 
 use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession};
 use crate::events::{AgentApprovalRequest, AgentDelta, AgentToolStatus, ToolStatus};
 use crate::message::{AssistantBlock, Message};
-use crate::run_state::{AgentRunState, ToolDispatchOutput};
+use crate::run_state::AgentRunState;
 use crate::stream::{PartialToolUse, StopReason, StreamEvent};
 
 pub fn drain_stream(
@@ -151,16 +150,9 @@ fn push_tool_use_block(messages: &mut AgentMessages, p: &PartialToolUse) {
     });
 }
 
-fn spawn_running_tool(p: &PartialToolUse, _args: serde_json::Value) -> AgentRunState {
+fn spawn_running_tool(p: &PartialToolUse, args: serde_json::Value) -> AgentRunState {
     let call_id = p.call_id.clone();
-    let call_id_for_task = call_id.clone();
-    let task = IoTaskPool::get().spawn(async move {
-        ToolDispatchOutput {
-            call_id: call_id_for_task,
-            content: "tool dispatch not yet wired".to_string(),
-            is_error: true,
-        }
-    });
+    let task = crate::tool_dispatch::spawn_tool_task(call_id.clone(), p.name.clone(), args);
     AgentRunState::RunningTool { call_id, task }
 }
 

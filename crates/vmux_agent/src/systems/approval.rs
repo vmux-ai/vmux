@@ -17,19 +17,29 @@ pub fn handle_approval_reply(
     let Ok((mut state, mut messages, mut policy)) = q.get_mut(reply.session) else {
         return;
     };
-    let AgentRunState::AwaitingApproval { call_id, name, .. } = &*state else {
-        return;
-    };
-    if call_id != &reply.call_id {
+    let matches_call = matches!(
+        &*state,
+        AgentRunState::AwaitingApproval { call_id, .. } if call_id == &reply.call_id
+    );
+    if !matches_call {
         return;
     }
-    let name = name.clone();
     match reply.decision {
         ApprovalDecision::Allow | ApprovalDecision::AllowAlways => {
+            let AgentRunState::AwaitingApproval {
+                call_id,
+                name,
+                args,
+                ..
+            } = std::mem::replace(&mut *state, AgentRunState::Idle)
+            else {
+                return;
+            };
             if reply.decision == ApprovalDecision::AllowAlways {
-                policy.auto.insert(name);
+                policy.auto.insert(name.clone());
             }
-            *state = AgentRunState::Idle;
+            let task = crate::tool_dispatch::spawn_tool_task(call_id.clone(), name, args);
+            *state = AgentRunState::RunningTool { call_id, task };
         }
         ApprovalDecision::Deny => {
             messages.0.push(Message::ToolResult {
@@ -49,6 +59,7 @@ mod tests {
 
     fn make_app() -> App {
         let mut app = App::new();
+        app.add_plugins(bevy::app::TaskPoolPlugin::default());
         app.add_observer(handle_approval_reply);
         app
     }
@@ -89,7 +100,7 @@ mod tests {
     }
 
     #[test]
-    fn allow_always_records_in_policy() {
+    fn allow_always_records_in_policy_and_runs_tool() {
         let mut app = make_app();
         let entity = app
             .world_mut()
@@ -113,5 +124,9 @@ mod tests {
 
         let policy = app.world().get::<AgentApprovalPolicy>(entity).unwrap();
         assert!(policy.auto.contains("run_shell"));
+        assert!(matches!(
+            app.world().get::<AgentRunState>(entity),
+            Some(AgentRunState::RunningTool { .. })
+        ));
     }
 }
