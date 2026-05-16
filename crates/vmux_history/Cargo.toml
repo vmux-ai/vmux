@@ -42,5 +42,6 @@ bevy = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
+js-sys = "0.3"
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = "0.2.115"
