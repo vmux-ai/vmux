@@ -29,9 +29,6 @@ use bevy_cef_core::prelude::{
 use bevy_remote::RemotePlugin;
 
 pub mod prelude {
-    pub use crate::loading_state::{
-        WebviewCommittedNavigationReceiver, WebviewCommittedNavigationSender,
-    };
     pub use crate::{
         CefPlugin, RunOnMainThread, chrome_state::*, common::*, keyboard::CefKeyboardInputSet,
         loading_state::*, navigation::*, popup_state::*, webview::prelude::*,
