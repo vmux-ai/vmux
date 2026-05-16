@@ -25,6 +25,7 @@ pub mod systems {
     pub mod process_input;
 }
 pub mod toast;
+pub mod tool_dispatch;
 pub mod tools;
 pub mod variant;
 pub mod vibe;
