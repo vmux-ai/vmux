@@ -521,9 +521,19 @@ pub(crate) fn attach_app_agent_to_stack(
 }
 
 pub(crate) fn app_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> String {
-    format!(
-        "data:text/html;charset=utf-8,<!doctype html><html><head><meta charset='utf-8'><title>App Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>App Agent</h1><p><code>{provider}</code> / <code>{model}</code></p><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the App agent design.</p></div></body></html>"
-    )
+    let html = format!(
+        "<!doctype html><html><head><meta charset='utf-8'><title>App Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>App Agent</h1><p><code>{provider}</code> / <code>{model}</code></p><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the App agent design.</p></div></body></html>"
+    );
+    let mut encoded = String::with_capacity(html.len() * 3);
+    for byte in html.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(*byte as char)
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    format!("data:text/html;charset=utf-8,{encoded}")
 }
 
 pub(crate) fn parse_app_agent_url(url: &str) -> Option<(String, String, Option<String>)> {
