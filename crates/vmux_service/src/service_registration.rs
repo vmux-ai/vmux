@@ -48,7 +48,9 @@ pub fn ensure_running(profile: &str, exe: &Path) -> Result<(), RegistrationError
                         tracing::warn!(error = %e, "legacy plist cleanup failed (continuing)")
                     }
                 }
-                crate::sm_app_service::register_main_app()?;
+                if let Err(e) = crate::sm_app_service::unregister_main_app() {
+                    tracing::debug!(error = %e, "unregister main app login item (ignored)");
+                }
                 crate::sm_app_service::register_agent(bundle::EMBEDDED_AGENT_PLIST)?;
                 crate::launchd::kickstart(bundle::EMBEDDED_AGENT_LABEL)?;
                 Ok(())
