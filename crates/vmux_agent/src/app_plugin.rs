@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_cef::prelude::BinJsEmitEventPlugin;
 
 use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession};
 use crate::run_state_kind::LastRunStateKind;
@@ -16,6 +17,9 @@ impl Plugin for AppAgentPlugin {
             .register_type::<AgentMessages>()
             .register_type::<AgentApprovalPolicy>()
             .add_message::<AgentToast>()
+            .add_plugins(BinJsEmitEventPlugin::<AgentToast>::with_id(
+                "vmux-agent-toast",
+            ))
             .add_observer(approval::handle_approval_reply)
             .add_systems(
                 Update,
@@ -47,11 +51,13 @@ fn attach_last_run_state_kind(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_cef::prelude::BinIpcEventRawBuffer;
 
     #[test]
     fn plugin_builds_without_panic() {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default());
+        app.init_resource::<BinIpcEventRawBuffer>();
         app.add_plugins(AppAgentPlugin);
         app.update();
     }
