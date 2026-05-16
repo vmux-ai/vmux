@@ -59,7 +59,11 @@ pub fn process_user_input(
         let (tx, rx) = unbounded::<StreamEvent>();
         let strat_arc = strategy.clone();
         let task = IoTaskPool::get().spawn(async move {
-            drive_sse(request, strat_arc, tx).await;
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime");
+            rt.block_on(drive_sse(request, strat_arc, tx));
         });
 
         *state = AgentRunState::Streaming {
