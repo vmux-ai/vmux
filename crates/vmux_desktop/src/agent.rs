@@ -106,10 +106,14 @@ impl AgentProviders {
 }
 
 pub(crate) fn default_space_dir() -> PathBuf {
+    space_dir("default")
+}
+
+pub(crate) fn space_dir(space_id: &str) -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"));
-    let dir = home.join(".vmux").join("default").join("space");
+    let dir = home.join(".vmux").join(space_id);
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
@@ -382,6 +386,51 @@ pub(crate) fn spawn_agent_resume_tab(
         .entity(terminal)
         .insert((launch, AgentSession { kind }, SessionId(session_id)));
     Ok(terminal)
+}
+
+pub(crate) fn spawn_process_tab(
+    pane: Entity,
+    command: String,
+    args: Vec<String>,
+    cwd: PathBuf,
+    env: Vec<(String, String)>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> Entity {
+    let tab = commands
+        .spawn((
+            crate::layout::stack::stack_bundle(),
+            LastActivatedAt::now(),
+            ChildOf(pane),
+        ))
+        .id();
+    let title = std::path::Path::new(&command)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&command)
+        .to_string();
+    commands.entity(tab).insert(PageMetadata {
+        url: TERMINAL_WEBVIEW_URL.to_string(),
+        title,
+        ..default()
+    });
+    let launch = crate::terminal::launch::TerminalLaunch {
+        command,
+        args,
+        cwd: cwd.to_string_lossy().to_string(),
+        env,
+        kind: crate::terminal::launch::TerminalKind::Plain,
+    };
+    let term = commands
+        .spawn((
+            crate::terminal::Terminal::new_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
+            ChildOf(tab),
+        ))
+        .id();
+    commands.entity(term).insert((launch, CefKeyboardTarget));
+    tab
 }
 
 pub(crate) fn spawn_browser_tab(
@@ -780,6 +829,13 @@ struct SettingsParams<'w> {
     writes: MessageWriter<'w, crate::settings::SettingsWriteRequest>,
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct AgentLookups<'w> {
+    pid_to_entity: Option<Res<'w, crate::terminal::pid::PidToEntity>>,
+    agent_to_entity: Option<Res<'w, vmux_agent::session::AgentSessionToEntity>>,
+    active_space: Option<Res<'w, crate::spaces::ActiveSpace>>,
+}
+
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
@@ -790,14 +846,16 @@ fn handle_agent_commands(
     tab_filter: Query<(), With<crate::layout::stack::Stack>>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     child_of_q: Query<&ChildOf>,
-    pid_to_entity: Option<Res<crate::terminal::pid::PidToEntity>>,
-    agent_to_entity: Option<Res<vmux_agent::session::AgentSessionToEntity>>,
+    lookups: AgentLookups,
     strategies: Res<AgentStrategies>,
     mut sp: SettingsParams,
     service: Option<Res<crate::terminal::ServiceClient>>,
     mut commands: Commands,
     mut assets: SpawnAssets,
 ) {
+    let pid_to_entity = lookups.pid_to_entity.as_deref();
+    let agent_to_entity = lookups.agent_to_entity.as_deref();
+    let active_space = lookups.active_space.as_deref();
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
 
     for request in reader.read() {
@@ -810,27 +868,49 @@ fn handle_agent_commands(
                     AgentCommandResult::Error(format!("unknown app command: {id}"))
                 }
             }
-            ServiceAgentCommand::NewTerminalTab { cwd } => {
-                if let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane)) {
-                    match valid_cwd(cwd) {
-                        Ok(cwd_path) => {
+            ServiceAgentCommand::NewTerminalTab {
+                cwd,
+                command,
+                args,
+                env,
+            } => match focus.pane.filter(|pane| panes.contains(*pane)) {
+                None => AgentCommandResult::Error("no active pane".to_string()),
+                Some(pane) => match valid_cwd(cwd) {
+                    Err(message) => AgentCommandResult::Error(message),
+                    Ok(cwd_opt) => {
+                        let cwd_path = cwd_opt.unwrap_or_else(|| {
+                            active_space
+                                .as_ref()
+                                .map(|s| space_dir(&s.record.id))
+                                .unwrap_or_else(default_space_dir)
+                        });
+                        if command.trim().is_empty() {
                             spawn_terminal_tab(
                                 pane,
-                                cwd_path.as_deref(),
+                                Some(&cwd_path),
                                 None,
                                 &mut commands,
                                 &mut assets.meshes,
                                 &mut assets.webview_mt,
                                 &sp.settings,
                             );
-                            AgentCommandResult::Ok
+                        } else {
+                            spawn_process_tab(
+                                pane,
+                                command.clone(),
+                                args.clone(),
+                                cwd_path,
+                                env.clone(),
+                                &mut commands,
+                                &mut assets.meshes,
+                                &mut assets.webview_mt,
+                                &sp.settings,
+                            );
                         }
-                        Err(message) => AgentCommandResult::Error(message),
+                        AgentCommandResult::Ok
                     }
-                } else {
-                    AgentCommandResult::Error("no active pane".to_string())
-                }
-            }
+                },
+            },
             ServiceAgentCommand::RunShell { command, cwd, mode } => {
                 let input = shell_command_input(command);
                 if matches!(mode, AgentShellMode::Active)
@@ -889,8 +969,8 @@ fn handle_agent_commands(
                             &mut assets.meshes,
                             &mut assets.webview_mt,
                             &sp.settings,
-                            pid_to_entity.as_deref(),
-                            agent_to_entity.as_deref(),
+                            pid_to_entity,
+                            agent_to_entity,
                             &strategies,
                             &child_of_q,
                         ) {
@@ -1015,8 +1095,8 @@ fn handle_agent_commands(
                                     &mut assets.meshes,
                                     &mut assets.webview_mt,
                                     &sp.settings,
-                                    pid_to_entity.as_deref(),
-                                    agent_to_entity.as_deref(),
+                                    pid_to_entity,
+                                    agent_to_entity,
                                     &strategies,
                                     &child_of_q,
                                 ) {

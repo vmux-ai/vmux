@@ -32,6 +32,9 @@ pub enum AgentCommand {
     },
     NewTerminalTab {
         cwd: String,
+        command: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
     },
     RunShell {
         command: String,
