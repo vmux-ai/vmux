@@ -9250,6 +9250,7 @@ dependencies = [
  "portable-pty",
  "rkyv",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tracing",
