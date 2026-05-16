@@ -14,9 +14,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 notify = { workspace = true }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 rkyv = { workspace = true }
 crossbeam-channel = "0.5"
 futures-lite = "2"
+futures-util = "0.3"
 vmux_core = { path = "../vmux_core" }
 vmux_mcp = { path = "../vmux_mcp" }
+
+[dev-dependencies]
+mockito = "1"
