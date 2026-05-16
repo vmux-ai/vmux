@@ -6,6 +6,7 @@
 )]
 
 mod agent;
+mod agent_layout;
 mod agent_query;
 mod background_lifecycle;
 mod browser;

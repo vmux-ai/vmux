@@ -1078,6 +1078,9 @@ fn handle_agent_commands(
                     )),
                 }
             }
+            ServiceAgentCommand::UpdateLayout { layout: _ } => AgentCommandResult::Error(
+                "update_layout: handler not yet wired (lands in Task 12)".to_string(),
+            ),
             ServiceAgentCommand::SplitAndNavigate { direction, url } => {
                 let split_dir_result = match direction.as_str() {
                     "right" => Ok(vmux_layout::pane::PaneSplitDirection::Row),
