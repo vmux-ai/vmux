@@ -418,20 +418,34 @@ fn handle_open_command_bar(
         .p1()
         .map(|providers| providers.command_entries())
         .unwrap_or_default();
-    let app_agent_entries = space_params
-        .p3()
-        .map(|strategies| {
-            strategies
-                .app_strategies()
-                .map(|s| AppAgentEntry {
-                    id: app_agent_id(s.provider(), s.model()),
-                    name: format!("New {}/{} chat (App)", s.provider(), s.model()),
-                    provider: s.provider().to_string(),
-                    model: s.model().to_string(),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let app_agent_entries = {
+        let mut entries: Vec<AppAgentEntry> = space_params
+            .p3()
+            .map(|strategies| {
+                strategies
+                    .app_strategies()
+                    .map(|s| AppAgentEntry {
+                        id: app_agent_id(s.provider(), s.model()),
+                        name: format!("New {}/{} chat (App)", s.provider(), s.model()),
+                        provider: s.provider().to_string(),
+                        model: s.model().to_string(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(default) = vmux_agent::resolve_default_app_provider() {
+            entries.insert(
+                0,
+                AppAgentEntry {
+                    id: app_agent_id(default.provider, default.default_model),
+                    name: "New chat".to_string(),
+                    provider: default.provider.to_string(),
+                    model: default.default_model.to_string(),
+                },
+            );
+        }
+        entries
+    };
     let mut new_stack_ctx = space_params.p2();
 
     let request = command_bar_open_request(reader.read().copied());
