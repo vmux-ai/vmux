@@ -850,6 +850,45 @@ struct AgentLookups<'w> {
     active_space: Option<Res<'w, crate::spaces::ActiveSpace>>,
 }
 
+fn read_layout_snapshot(world: &mut World) -> vmux_service::protocol::layout::LayoutSnapshot {
+    use bevy::ecs::system::RunSystemOnce;
+    world
+        .run_system_once(
+            |spaces: Query<(Entity, &crate::layout::tab::Tab, Option<&Children>)>,
+             splits: Query<
+                (Entity, &crate::layout::pane::PaneSplit, Option<&Children>),
+                With<crate::layout::pane::Pane>,
+            >,
+             leaves: Query<
+                (Entity, Option<&Children>),
+                (
+                    With<crate::layout::pane::Pane>,
+                    Without<crate::layout::pane::PaneSplit>,
+                ),
+            >,
+             stacks: Query<
+                (Entity, Option<&Children>, Option<&vmux_core::PageMetadata>),
+                With<crate::layout::stack::Stack>,
+            >,
+             terminals: Query<Entity, With<crate::terminal::Terminal>>,
+             pane_sizes: Query<&crate::layout::pane::PaneSize>,
+             zoomed_q: Query<&crate::layout::pane::Zoomed>,
+             focused: Res<crate::layout::stack::FocusedStack>| {
+                crate::agent_layout::build_layout_snapshot(
+                    &spaces,
+                    &splits,
+                    &leaves,
+                    &stacks,
+                    &pane_sizes,
+                    &terminals,
+                    &zoomed_q,
+                    &focused,
+                )
+            },
+        )
+        .expect("read_layout_snapshot system run")
+}
+
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
@@ -1078,9 +1117,25 @@ fn handle_agent_commands(
                     )),
                 }
             }
-            ServiceAgentCommand::UpdateLayout { layout: _ } => AgentCommandResult::Error(
-                "update_layout: handler not yet wired (lands in Task 12)".to_string(),
-            ),
+            ServiceAgentCommand::UpdateLayout { layout } => {
+                let layout = layout.clone();
+                let request_id = request.request_id;
+                // Response is sent from inside the queued closure because apply()
+                // needs exclusive &mut World, which isn't available in query params.
+                commands.queue(move |world: &mut World| {
+                    let apply_result = crate::agent_layout::apply::apply(world, &layout);
+                    let result = match apply_result {
+                        Ok(()) => AgentCommandResult::Layout(read_layout_snapshot(world)),
+                        Err(err) => AgentCommandResult::Error(format!("update_layout: {err:?}")),
+                    };
+                    if let Some(client) = world.get_resource::<crate::terminal::ServiceClient>() {
+                        client
+                            .0
+                            .send(ClientMessage::AgentCommandResponse { request_id, result });
+                    }
+                });
+                continue;
+            }
             ServiceAgentCommand::SplitAndNavigate { direction, url } => {
                 let split_dir_result = match direction.as_str() {
                     "right" => Ok(vmux_layout::pane::PaneSplitDirection::Row),
