@@ -656,6 +656,71 @@ mod tests {
     }
 
     #[test]
+    fn reordering_split_children_swaps_panes() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(space),
+            ))
+            .id();
+        let pane_a = app.world_mut().spawn((Pane, ChildOf(split))).id();
+        let pane_b = app.world_mut().spawn((Pane, ChildOf(split))).id();
+        let pane_c = app.world_mut().spawn((Pane, ChildOf(split))).id();
+
+        // Original order: [a, b, c]. Submit [c, a, b].
+        let snap = LayoutSnapshot {
+            spaces: vec![SpaceDto {
+                id: Some(format_id(NodeKind::Space, space.to_bits())),
+                name: "S".into(),
+                is_active: true,
+                root: LayoutNodeDto::Split {
+                    id: Some(format_id(NodeKind::Split, split.to_bits())),
+                    direction: SplitDirectionDto::Row,
+                    flex_weights: vec![],
+                    children: vec![
+                        LayoutNodeDto::Pane {
+                            id: Some(format_id(NodeKind::Pane, pane_c.to_bits())),
+                            is_zoomed: false,
+                            tabs: vec![],
+                        },
+                        LayoutNodeDto::Pane {
+                            id: Some(format_id(NodeKind::Pane, pane_a.to_bits())),
+                            is_zoomed: false,
+                            tabs: vec![],
+                        },
+                        LayoutNodeDto::Pane {
+                            id: Some(format_id(NodeKind::Pane, pane_b.to_bits())),
+                            is_zoomed: false,
+                            tabs: vec![],
+                        },
+                    ],
+                },
+            }],
+            focused: FocusDto::default(),
+        };
+
+        apply(app.world_mut(), &snap).unwrap();
+
+        let children = app
+            .world()
+            .get::<Children>(split)
+            .expect("split has Children");
+        let order: Vec<Entity> = children.iter().collect();
+        assert_eq!(
+            order,
+            vec![pane_c, pane_a, pane_b],
+            "Children should match submitted order"
+        );
+    }
+
+    #[test]
     fn focus_change_writes_focused_stack() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
