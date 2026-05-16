@@ -24,6 +24,7 @@ pub mod systems {
     pub mod dispatch_tool;
     pub mod drain_stream;
     pub mod process_input;
+    pub mod surface_errors;
 }
 pub mod toast;
 pub mod tool_dispatch;
