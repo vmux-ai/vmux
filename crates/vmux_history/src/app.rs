@@ -1,14 +1,64 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_history::event::HistoryEntry;
-use vmux_ui::hooks::use_theme;
+use vmux_history::event::{
+    HISTORY_QUERY_RESPONSE_EVENT, HistoryEntry, HistoryQueryRequest, HistoryQueryResponse,
+};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+
+fn emit_query(query: &str, offset: u32, request_id: u64) {
+    let req = HistoryQueryRequest {
+        query: if query.is_empty() {
+            None
+        } else {
+            Some(query.to_string())
+        },
+        offset,
+        limit: 50,
+        request_id,
+    };
+    let _ = try_cef_bin_emit_rkyv(&req);
+}
 
 #[component]
 pub fn App() -> Element {
     use_theme();
-    let entries: Signal<Vec<HistoryEntry>> = use_signal(Vec::new);
+    let mut entries: Signal<Vec<HistoryEntry>> = use_signal(Vec::new);
     let mut query: Signal<String> = use_signal(String::new);
+    let mut offset: Signal<u32> = use_signal(|| 0);
+    let mut has_more: Signal<bool> = use_signal(|| true);
+    let mut request_id: Signal<u64> = use_signal(|| 0);
+    let mut last_reset_id: Signal<u64> = use_signal(|| 0);
+
+    let _listener = use_bin_event_listener::<HistoryQueryResponse, _>(
+        HISTORY_QUERY_RESPONSE_EVENT,
+        move |resp: HistoryQueryResponse| {
+            if resp.request_id < *last_reset_id.read() {
+                return;
+            }
+            if resp.request_id == *last_reset_id.read() {
+                entries.set(resp.entries);
+            } else {
+                entries.write().extend(resp.entries);
+            }
+            has_more.set(resp.has_more);
+        },
+    );
+
+    use_effect(move || {
+        request_id.set(1);
+        last_reset_id.set(1);
+        emit_query("", 0, 1);
+    });
+
+    let on_input = move |e: Event<FormData>| {
+        query.set(e.value());
+        let new_id = *request_id.read() + 1;
+        request_id.set(new_id);
+        offset.set(0);
+        last_reset_id.set(new_id);
+        emit_query(&query.read(), 0, new_id);
+    };
 
     let entries_for_render = entries.read().clone();
 
@@ -19,7 +69,7 @@ pub fn App() -> Element {
                     class: "flex-1 bg-muted px-3 py-2 rounded text-sm outline-none",
                     placeholder: "Search history",
                     value: "{query.read()}",
-                    oninput: move |e| query.set(e.value()),
+                    oninput: on_input,
                 }
                 button {
                     class: "px-3 py-2 text-xs bg-destructive text-destructive-foreground rounded",
