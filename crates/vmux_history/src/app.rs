@@ -5,6 +5,8 @@ use vmux_history::event::{
     HISTORY_QUERY_RESPONSE_EVENT, HistoryEntry, HistoryQueryRequest, HistoryQueryResponse,
 };
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 
 fn emit_query(query: &str, offset: u32, request_id: u64) {
     let req = HistoryQueryRequest {
@@ -49,6 +51,41 @@ pub fn App() -> Element {
         request_id.set(1);
         last_reset_id.set(1);
         emit_query("", 0, 1);
+    });
+
+    use_effect(move || {
+        let load_more =
+            Closure::<dyn FnMut(js_sys::Array)>::new(move |entries_arr: js_sys::Array| {
+                if entries_arr.length() == 0 {
+                    return;
+                }
+                let entry: web_sys::IntersectionObserverEntry =
+                    entries_arr.get(0).dyn_into().unwrap();
+                if !entry.is_intersecting() {
+                    return;
+                }
+                if !*has_more.read() {
+                    return;
+                }
+                if entries.read().is_empty() {
+                    return;
+                }
+                let new_offset = *offset.read() + 50;
+                offset.set(new_offset);
+                let new_id = *request_id.read() + 1;
+                request_id.set(new_id);
+                emit_query(&query.read(), new_offset, new_id);
+            });
+
+        let window = web_sys::window().expect("window");
+        let document = window.document().expect("document");
+        if let Some(target) = document.get_element_by_id("infinite-scroll-sentinel") {
+            let cb: &js_sys::Function = load_more.as_ref().unchecked_ref();
+            if let Ok(observer) = web_sys::IntersectionObserver::new(cb) {
+                observer.observe(&target);
+                load_more.forget();
+            }
+        }
     });
 
     let on_input = move |e: Event<FormData>| {
