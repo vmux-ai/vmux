@@ -9184,6 +9184,7 @@ name = "vmux_agent"
 version = "0.0.9"
 dependencies = [
  "bevy",
+ "bevy_cef",
  "chrono",
  "crossbeam-channel",
  "futures-lite",
