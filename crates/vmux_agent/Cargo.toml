@@ -24,4 +24,5 @@ vmux_mcp = { path = "../vmux_mcp" }
 
 [dev-dependencies]
 mockito = "1"
+serial_test = "3"
 tokio = { workspace = true, features = ["rt", "macros"] }

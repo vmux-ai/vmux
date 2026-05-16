@@ -43,6 +43,10 @@ pub use kind::AgentUrl;
 pub use mcp::McpServerConfig;
 pub use message::{AssistantBlock, Message};
 pub use plugin::AgentSessionPlugin;
+pub use providers::{
+    AnthropicStrategy, BUILTIN_PROVIDERS, BuiltinProvider, MistralStrategy,
+    OpenAiResponsesStrategy, instantiate_builtin, resolve_default_app_provider,
+};
 pub use run_state::{AgentRunState, ToolDispatchOutput};
 pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
 pub use session::AgentSessionExited;
