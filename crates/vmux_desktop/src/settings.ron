@@ -4,11 +4,11 @@
     ),
     layout: (
         window: (
-            padding: 4.0,
+            padding: 0.0,
         ),
         pane: (
             gap: 8.0,
-            radius: 8.0,
+            radius: 0.0,
         ),
         side_sheet: (
             width: 280.0,
