@@ -981,7 +981,32 @@ fn on_command_bar_action(
 
                 if let Some(stack_e) = empty_stack {
                     // New tab mode: attach content to the empty tab
-                    if url.starts_with("vmux://terminal") {
+                    if url == "vmux://agent/" || url == "vmux://agent" {
+                        if let Some(p) = vmux_agent::resolve_default_app_provider() {
+                            let sid = uuid::Uuid::new_v4().to_string();
+                            let strategies_ref = resource_params.p4();
+                            if let Some(strategies) = strategies_ref.as_deref() {
+                                let _ = crate::agent::attach_app_agent_to_stack(
+                                    stack_e,
+                                    p.provider,
+                                    p.default_model,
+                                    &sid,
+                                    &mut commands,
+                                    &mut meshes,
+                                    &mut webview_mt,
+                                    strategies,
+                                );
+                            } else {
+                                bevy::log::warn!(
+                                    "agent strategies not registered; skipping spawn"
+                                );
+                            }
+                        } else {
+                            bevy::log::warn!(
+                                "vmux://agent/ requested but no provider API key is set"
+                            );
+                        }
+                    } else if url.starts_with("vmux://terminal") {
                         let known =
                             parse_pid_from_url(&url).and_then(|p| pid_to_entity.get(&p).copied());
                         if let Some(entity) = known {
