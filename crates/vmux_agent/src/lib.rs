@@ -23,6 +23,7 @@ pub mod systems {
     pub mod process_input;
 }
 pub mod toast;
+pub mod tools;
 pub mod variant;
 pub mod vibe;
 
@@ -45,4 +46,5 @@ pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
 pub use session::AgentSessionExited;
 pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use toast::{AgentToast, ToastLevel};
+pub use tools::mcp_tool_defs;
 pub use variant::AgentVariant;
