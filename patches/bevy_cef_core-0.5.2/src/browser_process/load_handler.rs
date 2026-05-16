@@ -4,7 +4,9 @@ pub use transition::{CefTransitionCore, CefTransitionQualifiers, decode as decod
 use async_channel::Sender;
 use bevy::prelude::Entity;
 use cef::rc::{Rc, RcImpl};
-use cef::{Browser, ImplLoadHandler, LoadHandler, WrapLoadHandler, sys};
+use cef::{
+    Browser, Frame, ImplFrame, ImplLoadHandler, LoadHandler, TransitionType, WrapLoadHandler, sys,
+};
 use std::os::raw::c_int;
 
 #[derive(Clone, Debug)]
@@ -17,19 +19,35 @@ pub struct WebviewLoadingStateEvent {
 
 pub type WebviewLoadingStateSenderInner = Sender<WebviewLoadingStateEvent>;
 
-/// Forwards CEF [`on_loading_state_change`](https://cef-builds.spotifycdn.com/docs/145.0/classCefLoadHandler.html) to Bevy on the browser process thread.
+#[derive(Clone, Debug)]
+pub struct WebviewCommittedNavigationEvent {
+    pub webview: Entity,
+    pub url: String,
+    pub is_main_frame: bool,
+    pub transition: CefTransitionCore,
+    pub qualifiers: CefTransitionQualifiers,
+}
+
+pub type WebviewCommittedNavigationSenderInner = Sender<WebviewCommittedNavigationEvent>;
+
 pub struct WebviewLoadHandlerBuilder {
     object: *mut RcImpl<sys::_cef_load_handler_t, Self>,
     webview: Entity,
     tx: WebviewLoadingStateSenderInner,
+    nav_tx: WebviewCommittedNavigationSenderInner,
 }
 
 impl WebviewLoadHandlerBuilder {
-    pub fn build(webview: Entity, tx: WebviewLoadingStateSenderInner) -> LoadHandler {
+    pub fn build(
+        webview: Entity,
+        tx: WebviewLoadingStateSenderInner,
+        nav_tx: WebviewCommittedNavigationSenderInner,
+    ) -> LoadHandler {
         LoadHandler::new(Self {
             object: core::ptr::null_mut(),
             webview,
             tx,
+            nav_tx,
         })
     }
 }
@@ -54,6 +72,7 @@ impl Clone for WebviewLoadHandlerBuilder {
             object,
             webview: self.webview,
             tx: self.tx.clone(),
+            nav_tx: self.nav_tx.clone(),
         }
     }
 }
@@ -78,6 +97,25 @@ impl ImplLoadHandler for WebviewLoadHandlerBuilder {
             is_loading: loading,
             can_go_back: can_go_back != 0,
             can_go_forward: can_go_forward != 0,
+        });
+    }
+
+    fn on_load_start(
+        &self,
+        _browser: Option<&mut Browser>,
+        frame: Option<&mut Frame>,
+        transition_type: TransitionType,
+    ) {
+        let Some(frame) = frame else { return };
+        let is_main_frame = frame.is_main() != 0;
+        let url = cef::CefString::from(&frame.url()).to_string();
+        let (transition, qualifiers) = decode_transition(transition_type.get_raw());
+        let _ = self.nav_tx.send_blocking(WebviewCommittedNavigationEvent {
+            webview: self.webview,
+            url,
+            is_main_frame,
+            transition,
+            qualifiers,
         });
     }
 

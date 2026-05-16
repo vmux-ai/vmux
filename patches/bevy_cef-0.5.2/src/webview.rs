@@ -5,7 +5,7 @@ use crate::common::{
     WebviewSource, WebviewTransparent,
 };
 use crate::cursor_icon::SystemCursorIconSender;
-use crate::loading_state::WebviewLoadingStateSender;
+use crate::loading_state::{WebviewCommittedNavigationSender, WebviewLoadingStateSender};
 use crate::popup_state::WebviewPopupSender;
 use crate::prelude::PreloadScripts;
 use crate::webview::mesh::MeshWebviewPlugin;
@@ -192,6 +192,7 @@ fn create_webview(
     brp_sender: Res<BrpSender>,
     cursor_icon_sender: Res<SystemCursorIconSender>,
     loading_state_sender: Res<WebviewLoadingStateSender>,
+    committed_nav_sender: Res<WebviewCommittedNavigationSender>,
     chrome_state_sender: Res<WebviewChromeStateSender>,
     popup_sender: Res<WebviewPopupSender>,
     texture_wake: Res<TextureWakeCallback>,
@@ -245,6 +246,7 @@ fn create_webview(
                 brp_sender.clone(),
                 cursor_icon_sender.clone(),
                 loading_state_sender.0.clone(),
+                committed_nav_sender.0.clone(),
                 chrome_state_sender.0.clone(),
                 popup_sender.0.clone(),
                 texture_wake.0.clone(),
