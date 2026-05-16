@@ -34,6 +34,13 @@ pub enum CommandBarResultItem {
     Navigate {
         url: String,
     },
+    History {
+        url: String,
+        title: String,
+        favicon_url: String,
+        visit_count: u32,
+        last_visited_at: i64,
+    },
 }
 
 fn looks_like_path(s: &str) -> bool {

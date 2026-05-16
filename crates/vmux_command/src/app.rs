@@ -177,6 +177,13 @@ pub fn App() -> Element {
             Some(ResultItem::Space { name, .. }) => name.clone(),
             Some(ResultItem::Terminal { path }) if path.is_empty() => "Terminal".to_string(),
             Some(ResultItem::Terminal { path }) => path.clone(),
+            Some(ResultItem::History { title, url, .. }) => {
+                if title.is_empty() {
+                    url.clone()
+                } else {
+                    title.clone()
+                }
+            }
             None => q.clone(),
         }
     } else {
@@ -237,6 +244,9 @@ pub fn App() -> Element {
                     emit_action("navigate", url);
                 }
             }
+            ResultItem::History { url, .. } => {
+                emit_action("navigate", url);
+            }
         }
     };
 
@@ -275,6 +285,7 @@ pub fn App() -> Element {
                                         let is_u = url.contains("://") || (url.contains('.') && !url.contains(' '));
                                         (false, false, is_u)
                                     }
+                                    Some(ResultItem::History { .. }) => (false, false, true),
                                     None => (false, false, false),
                                 }
                             } else {
@@ -440,6 +451,15 @@ pub fn App() -> Element {
                                             span { class: "text-base text-foreground", "{name}" }
                                         }
                                         span { class: "ml-2 shrink-0 rounded bg-muted px-1.5 py-0.5 text-sm text-muted-foreground", "{shortcut}" }
+                                    },
+                                    ResultItem::History { url, title, favicon_url, .. } => rsx! {
+                                        div { class: "flex items-center gap-2",
+                                            img { class: "h-4 w-4 shrink-0 rounded-sm", src: "{favicon_url}" }
+                                            span { class: "truncate text-base text-foreground",
+                                                if title.is_empty() { "{url}" } else { "{title}" }
+                                            }
+                                            span { class: "ml-auto truncate text-sm text-muted-foreground max-w-xs", "{url}" }
+                                        }
                                     },
                                     ResultItem::Navigate { url } => rsx! {
                                         div { class: "flex items-center gap-2",
