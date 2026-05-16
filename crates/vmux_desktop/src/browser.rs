@@ -85,6 +85,10 @@ impl Plugin for BrowserPlugin {
             )
             .add_systems(
                 Update,
+                vmux_layout::mirror_metadata_to_url.after(vmux_layout::apply_chrome_state_from_cef),
+            )
+            .add_systems(
+                Update,
                 (
                     push_layout_state_emit,
                     push_stacks_host_emit,

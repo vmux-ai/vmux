@@ -38,6 +38,34 @@ impl Plugin for LayoutChromePlugin {
     }
 }
 
+pub fn mirror_metadata_to_url(
+    chrome_q: Query<
+        &vmux_core::PageMetadata,
+        (Without<vmux_core::Url>, Changed<vmux_core::PageMetadata>),
+    >,
+    mut urls: Query<&mut vmux_core::PageMetadata, With<vmux_core::Url>>,
+) {
+    for tab_meta in chrome_q.iter() {
+        if tab_meta.url.is_empty() {
+            continue;
+        }
+        for mut url_meta in urls.iter_mut() {
+            if url_meta.url == tab_meta.url {
+                if !tab_meta.title.is_empty() {
+                    url_meta.title.clone_from(&tab_meta.title);
+                }
+                if !tab_meta.favicon_url.is_empty() {
+                    url_meta.favicon_url.clone_from(&tab_meta.favicon_url);
+                }
+                if tab_meta.bg_color.is_some() {
+                    url_meta.bg_color.clone_from(&tab_meta.bg_color);
+                }
+                break;
+            }
+        }
+    }
+}
+
 pub fn apply_chrome_state_from_cef(
     chrome_rx: Res<WebviewChromeStateReceiver>,
     mut browser_meta: Query<&mut vmux_core::PageMetadata>,
@@ -182,5 +210,84 @@ mod tests {
                 is_hoverable: true,
             }
         );
+    }
+}
+
+#[cfg(test)]
+mod url_mirror_tests {
+    use super::*;
+    use vmux_core::{CorePlugin, CreatedAt, LastVisitedAt, PageMetadata, Url, VisitCount};
+
+    #[test]
+    fn updates_matching_url_meta() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CorePlugin);
+        app.add_systems(Update, mirror_metadata_to_url);
+
+        app.world_mut().spawn((
+            Url,
+            PageMetadata {
+                url: "https://example.com".into(),
+                ..default()
+            },
+            VisitCount(1),
+            LastVisitedAt(0),
+            CreatedAt(0),
+        ));
+
+        app.world_mut().spawn(PageMetadata {
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            favicon_url: "https://example.com/fav.ico".into(),
+            bg_color: None,
+        });
+
+        app.update();
+
+        let url_meta = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Url>>()
+            .iter(app.world())
+            .next()
+            .unwrap();
+        assert_eq!(url_meta.title, "Example");
+        assert_eq!(url_meta.favicon_url, "https://example.com/fav.ico");
+    }
+
+    #[test]
+    fn skips_empty_tab_url() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(CorePlugin);
+        app.add_systems(Update, mirror_metadata_to_url);
+
+        app.world_mut().spawn((
+            Url,
+            PageMetadata {
+                url: "https://example.com".into(),
+                title: "old".into(),
+                ..default()
+            },
+            VisitCount(1),
+            LastVisitedAt(0),
+            CreatedAt(0),
+        ));
+
+        app.world_mut().spawn(PageMetadata {
+            url: "".into(),
+            title: "new".into(),
+            ..default()
+        });
+
+        app.update();
+
+        let url_meta = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Url>>()
+            .iter(app.world())
+            .next()
+            .unwrap();
+        assert_eq!(url_meta.title, "old");
     }
 }
