@@ -2,6 +2,9 @@
     browser: (
         startup_url: "https://www.google.com",
     ),
+    layout: (
+        radius: 0.0,
+    ),
     shortcuts: (
         leader: (key: "b", ctrl: true),
         chord_timeout_ms: 1000,

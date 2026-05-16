@@ -216,7 +216,7 @@ fn build_focus_ring_material(
     let w_o = w_i + 2.0 * b;
     let h_o = h_i + 2.0 * b;
     let m = w_i.min(h_i);
-    let r_i = settings.pane.radius.min(m * 0.5).max(0.0);
+    let r_i = settings.radius.min(m * 0.5).max(0.0);
     let m_o = w_o.min(h_o);
     let r_o = (r_i + b).min(m_o * 0.5);
     let c = &settings.focus_ring.color;
@@ -254,6 +254,7 @@ mod tests {
 
     fn test_layout_settings() -> LayoutSettings {
         LayoutSettings {
+            radius: 0.0,
             window: crate::settings::WindowSettings {
                 padding: 0.0,
                 padding_top: None,
@@ -261,10 +262,7 @@ mod tests {
                 padding_bottom: None,
                 padding_left: None,
             },
-            pane: crate::settings::PaneSettings {
-                gap: 0.0,
-                radius: 0.0,
-            },
+            pane: crate::settings::PaneSettings { gap: 0.0 },
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),
         }

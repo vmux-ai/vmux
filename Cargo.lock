@@ -9212,6 +9212,7 @@ dependencies = [
  "vmux_ui",
  "vmux_webview_app",
  "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

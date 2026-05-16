@@ -497,6 +497,7 @@ mod tests {
         left: Option<f32>,
     ) -> LayoutSettings {
         LayoutSettings {
+            radius: 0.0,
             window: WindowSettings {
                 padding,
                 padding_top: top,
@@ -504,10 +505,7 @@ mod tests {
                 padding_bottom: bottom,
                 padding_left: left,
             },
-            pane: PaneSettings {
-                gap: 0.0,
-                radius: 0.0,
-            },
+            pane: PaneSettings { gap: 0.0 },
             side_sheet: SideSheetSettings::default(),
             focus_ring: FocusRingSettings::default(),
         }

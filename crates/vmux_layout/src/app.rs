@@ -8,6 +8,7 @@ use vmux_layout::event::{
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use wasm_bindgen::JsCast;
 
 fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
     let trimmed = s.trim();
@@ -124,6 +125,17 @@ pub fn App() -> Element {
         });
 
     let state = layout_state();
+    let radius_px = state.radius;
+    use_effect(move || {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document())
+            && let Some(root) = doc.document_element()
+            && let Ok(html) = root.dyn_into::<web_sys::HtmlElement>()
+        {
+            let _ = html
+                .style()
+                .set_property("--radius", &format!("{radius_px}px"));
+        }
+    });
     let side_sheet_style = format!(
         "left:0;top:0;bottom:0;width:{}px;padding-top:{}px;",
         state.side_sheet_width,

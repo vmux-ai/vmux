@@ -53,3 +53,4 @@ vmux_webview_app = { path = "../vmux_webview_app" }
 dioxus = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = "0.2.115"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "CssStyleDeclaration"] }

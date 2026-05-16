@@ -48,6 +48,8 @@ pub struct LayoutStateEvent {
     pub pane_gap: f32,
     #[serde(default = "default_titlebar_height")]
     pub titlebar_height: f32,
+    #[serde(default)]
+    pub radius: f32,
 }
 
 impl LayoutStateEvent {

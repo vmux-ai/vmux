@@ -120,7 +120,7 @@ fn on_webview_ready_send_theme(
     webview_debug_log(format!("on_webview_ready_send_theme entity={entity:?}"));
     if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
         let payload = ThemeEvent {
-            radius: settings.layout.pane.radius,
+            radius: settings.layout.radius,
         };
         commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
     }
@@ -379,7 +379,7 @@ fn sync_webview_pane_corner_clip(
         With<SideSheet>,
     >,
 ) {
-    let r = settings.layout.pane.radius;
+    let r = settings.layout.radius;
     for (size, mat_h) in &tabs {
         let w = size.0.x.max(1.0e-6);
         let h = size.0.y.max(1.0e-6);
@@ -656,6 +656,7 @@ fn push_layout_state_emit(
         side_sheet_width: side_sheet_width.0,
         pane_gap: settings.layout.pane.gap,
         titlebar_height: effective_titlebar_height(settings.layout.window.pad_top()),
+        radius: settings.layout.radius,
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     if !should_emit_cached_payload(&body, &last, ui_ready.is_changed()) {

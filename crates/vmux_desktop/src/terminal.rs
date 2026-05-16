@@ -265,6 +265,7 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
 fn spawn_layout_requested_content(
     mut reader: MessageReader<LayoutSpawnRequest>,
     settings: Res<AppSettings>,
+    active_space: Res<crate::spaces::ActiveSpace>,
     strategies: Option<Res<vmux_agent::strategy::AgentStrategies>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -273,9 +274,10 @@ fn spawn_layout_requested_content(
     for request in reader.read() {
         match request {
             LayoutSpawnRequest::Terminal { stack } => {
+                let cwd = crate::agent::space_dir(&active_space.record.id);
                 let terminal = commands
                     .spawn((
-                        Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                        Terminal::new_with_cwd(&mut meshes, &mut webview_mt, &settings, Some(&cwd)),
                         ChildOf(*stack),
                     ))
                     .id();

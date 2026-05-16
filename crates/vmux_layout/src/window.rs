@@ -196,7 +196,7 @@ fn setup(
                     ..default()
                 },
                 extension: GlassCorners {
-                    clip: Vec4::new(settings.pane.radius, m.x, m.y, PIXELS_PER_METER),
+                    clip: Vec4::new(settings.radius, m.x, m.y, PIXELS_PER_METER),
                     ..default()
                 },
             })),
@@ -471,7 +471,7 @@ fn sync_glass_pane_clip(
     settings: Res<LayoutSettings>,
     mut materials: ResMut<Assets<GlassMaterial>>,
 ) {
-    let r = settings.pane.radius;
+    let r = settings.radius;
     for (child_of, handle) in &q {
         let Ok(computed) = parent_q.get(child_of.get()) else {
             continue;
@@ -579,7 +579,7 @@ pub fn fit_window_to_screen(
     }
     *last_size = m;
 
-    let r = settings.pane.radius;
+    let r = settings.radius;
 
     for (mut tf, handle) in &mut q {
         tf.translation = Vec3::new(0.0, m.y * 0.5, 0.0);
@@ -643,6 +643,7 @@ mod tests {
 
     fn test_settings(gap: f32) -> LayoutSettings {
         LayoutSettings {
+            radius: 0.0,
             window: crate::settings::WindowSettings {
                 padding: 0.0,
                 padding_top: None,
@@ -650,7 +651,7 @@ mod tests {
                 padding_bottom: None,
                 padding_left: None,
             },
-            pane: crate::settings::PaneSettings { gap, radius: 8.0 },
+            pane: crate::settings::PaneSettings { gap },
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),
         }
@@ -720,6 +721,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.init_resource::<crate::NewStackContext>();
         app.insert_resource(LayoutSettings {
+            radius: 0.0,
             window: crate::settings::WindowSettings {
                 padding: 0.0,
                 padding_top: None,
@@ -727,10 +729,7 @@ mod tests {
                 padding_bottom: None,
                 padding_left: None,
             },
-            pane: crate::settings::PaneSettings {
-                gap: 0.0,
-                radius: 0.0,
-            },
+            pane: crate::settings::PaneSettings { gap: 0.0 },
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),
         });
