@@ -1,20 +1,88 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use bevy::prelude::*;
+use bevy_cef::prelude::BinIpcEventRawBuffer;
 use vmux_agent::message::Message;
 use vmux_agent::{
     AgentApprovalPolicy, AgentKind, AgentMessages, AgentRunState, AgentSession, AgentVariant,
-    AppAgentPlugin, AssistantBlock, PendingUserInput,
+    AppAgentPlugin, AppAgentStrategy, AssistantBlock, LastRunStateKind, PendingUserInput,
+    strategy::{AgentStrategies, AgentStrategy},
+    stream::{StopReason, StreamEvent, ToolDef},
 };
 
-fn make_app() -> App {
-    let mut app = App::new();
-    app.add_plugins(bevy::app::TaskPoolPlugin::default());
-    app.add_plugins(AppAgentPlugin);
-    app
+struct EchoMock {
+    url: String,
+}
+
+impl AgentStrategy for EchoMock {
+    fn kind(&self) -> AgentKind {
+        AgentKind::Vibe
+    }
+    fn variant(&self) -> AgentVariant {
+        AgentVariant::App
+    }
+}
+
+impl AppAgentStrategy for EchoMock {
+    fn provider(&self) -> &str {
+        "vibe"
+    }
+    fn model(&self) -> &str {
+        "echo-stub"
+    }
+    fn endpoint(&self) -> &str {
+        &self.url
+    }
+    fn env_var(&self) -> &'static str {
+        ""
+    }
+    fn build_request(&self, _: &str, _: &[Message], _: &[ToolDef], _: &str) -> reqwest::Request {
+        reqwest::Client::new()
+            .post(&self.url)
+            .body("{}")
+            .build()
+            .unwrap()
+    }
+    fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
+        for line in payload.lines() {
+            if let Some(data) = line.strip_prefix("data: ") {
+                if data == "[STOP]" {
+                    return Some(StreamEvent::StopTurn {
+                        reason: StopReason::EndTurn,
+                    });
+                }
+                return Some(StreamEvent::TextDelta(data.to_string()));
+            }
+        }
+        None
+    }
 }
 
 #[test]
 fn echo_session_streams_to_assistant_message() {
-    let mut app = make_app();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+
+    let mut server = mockito::Server::new();
+    let body = "data: echo: hello\n\ndata: [STOP]\n\n";
+    let _m = server
+        .mock("POST", "/echo")
+        .with_status(200)
+        .with_header("content-type", "text/event-stream")
+        .with_body(body)
+        .create();
+
+    let mut app = App::new();
+    app.add_plugins(bevy::app::TaskPoolPlugin::default());
+    app.init_resource::<BinIpcEventRawBuffer>();
+    app.add_plugins(AppAgentPlugin);
+    let mut strategies = AgentStrategies::default();
+    strategies.register_app(Arc::new(EchoMock {
+        url: format!("{}/echo", server.url()),
+    }));
+    app.insert_resource(strategies);
+
     let entity = app
         .world_mut()
         .spawn((
@@ -28,11 +96,13 @@ fn echo_session_streams_to_assistant_message() {
             AgentMessages::default(),
             AgentApprovalPolicy::default(),
             AgentRunState::Idle,
+            LastRunStateKind::default(),
             PendingUserInput("hello".into()),
         ))
         .id();
 
-    for _ in 0..50 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
         app.update();
         let state = app.world().get::<AgentRunState>(entity).unwrap();
         if matches!(state, AgentRunState::Idle) {
@@ -41,7 +111,7 @@ fn echo_session_streams_to_assistant_message() {
                 break;
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::thread::sleep(Duration::from_millis(20));
     }
 
     let msgs = app.world().get::<AgentMessages>(entity).unwrap();
