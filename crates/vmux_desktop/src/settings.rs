@@ -44,29 +44,45 @@ fn register_app_agents_from_settings(
     settings: Option<Res<AppSettings>>,
     strategies: Option<ResMut<vmux_agent::strategy::AgentStrategies>>,
 ) {
-    let Some(settings) = settings else { return };
     let Some(mut strategies) = strategies else {
         return;
     };
+
+    for builtin in vmux_agent::BUILTIN_PROVIDERS {
+        let strat = vmux_agent::instantiate_builtin(builtin, builtin.default_model);
+        strategies.register_app(strat);
+    }
+
+    let Some(settings) = settings else { return };
     for provider_settings in &settings.agent.app_providers {
-        let kind = match provider_settings.kind.as_str() {
-            "vibe" => vmux_agent::AgentKind::Vibe,
-            "claude" => vmux_agent::AgentKind::Claude,
-            "codex" => vmux_agent::AgentKind::Codex,
-            other => {
-                bevy::log::warn!(
-                    "agent.app_providers: unknown kind '{other}' for provider '{}'; defaulting to vibe",
-                    provider_settings.provider
-                );
-                vmux_agent::AgentKind::Vibe
-            }
-        };
         for model in &provider_settings.models {
-            strategies.register_app(std::sync::Arc::new(vmux_agent::EchoAppStrategy::new(
-                provider_settings.provider.clone(),
-                model.clone(),
-                kind,
-            )));
+            let strat: std::sync::Arc<dyn vmux_agent::AppAgentStrategy> =
+                match provider_settings.provider.as_str() {
+                    "mistral" => std::sync::Arc::new(vmux_agent::MistralStrategy::new(
+                        provider_settings.provider.clone(),
+                        model.clone(),
+                    )),
+                    "anthropic" => std::sync::Arc::new(vmux_agent::AnthropicStrategy::new(
+                        provider_settings.provider.clone(),
+                        model.clone(),
+                    )),
+                    "openai" => std::sync::Arc::new(vmux_agent::OpenAiResponsesStrategy::new(
+                        provider_settings.provider.clone(),
+                        model.clone(),
+                    )),
+                    "stub" => std::sync::Arc::new(vmux_agent::EchoAppStrategy::new(
+                        provider_settings.provider.clone(),
+                        model.clone(),
+                        vmux_agent::AgentKind::Vibe,
+                    )),
+                    other => {
+                        bevy::log::warn!(
+                            "agent.app_providers: unknown provider '{other}' (model '{model}')"
+                        );
+                        continue;
+                    }
+                };
+            strategies.register_app(strat);
         }
     }
 }
@@ -117,11 +133,7 @@ impl Default for AgentSettings {
 
 fn default_agent_settings() -> AgentSettings {
     AgentSettings {
-        app_providers: vec![AppProviderSettings {
-            provider: "stub".to_string(),
-            kind: "vibe".to_string(),
-            models: vec!["echo".to_string()],
-        }],
+        app_providers: vec![],
     }
 }
 
