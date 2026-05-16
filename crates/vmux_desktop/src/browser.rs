@@ -1133,7 +1133,6 @@ fn on_side_sheet_command_emit(
     child_of_q: Query<&ChildOf>,
     split_q: Query<(), With<PaneSplit>>,
     mut close_extra: ParamSet<(
-        Query<'static, 'static, &'static UiGlobalTransform, With<Pane>>,
         Query<'static, 'static, &'static mut Window, With<PrimaryWindow>>,
         Query<'static, 'static, (), (With<Terminal>, Without<PtyExited>)>,
         Query<'static, 'static, (), With<CloseConfirmed>>,
@@ -1166,13 +1165,6 @@ fn on_side_sheet_command_emit(
 
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
-
-            if let Ok(ui_gt) = close_extra.p0().get(target_pane) {
-                let center = ui_gt.transform_point2(Vec2::ZERO);
-                if let Ok(mut window) = close_extra.p1().single_mut() {
-                    window.set_physical_cursor_position(Some(center.as_dvec2()));
-                }
-            }
         }
         "close_stack" => {
             let Some(&target_stack) = stack_entities.get(evt.stack_index as usize) else {
@@ -1181,12 +1173,12 @@ fn on_side_sheet_command_emit(
 
             // Confirm close if terminal is still running
             let needs_confirm = terminal::should_confirm_close(&settings)
-                && terminal::has_live_terminal(target_stack, &all_children, &close_extra.p2());
+                && terminal::has_live_terminal(target_stack, &all_children, &close_extra.p1());
             if needs_confirm {
-                if close_extra.p3().contains(target_stack) {
+                if close_extra.p2().contains(target_stack) {
                     commands.entity(target_stack).remove::<CloseConfirmed>();
                 } else {
-                    if !close_extra.p4().contains(target_stack) {
+                    if !close_extra.p3().contains(target_stack) {
                         commands.entity(target_stack).insert(PendingStackClose);
                     }
                     return;
@@ -1206,7 +1198,7 @@ fn on_side_sheet_command_emit(
                     commands.entity(next).insert(LastActivatedAt::now());
                 }
             } else if leaf_panes.iter().count() <= 1 {
-                if let Ok(mut window) = close_extra.p1().single_mut() {
+                if let Ok(mut window) = close_extra.p0().single_mut() {
                     window.visible = false;
                 }
             } else {

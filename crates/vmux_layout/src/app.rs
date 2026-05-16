@@ -489,10 +489,26 @@ fn SideSheetView() -> Element {
         tree_state.set(data);
     });
 
+    let mut spaces_state = use_signal(vmux_space::event::SpacesListEvent::default);
+    let _spaces_listener = use_bin_event_listener::<vmux_space::event::SpacesListEvent, _>(
+        vmux_space::event::SPACES_LIST_EVENT,
+        move |data| {
+            spaces_state.set(data);
+        },
+    );
+
     let PaneTreeEvent { panes } = tree_state();
+    let spaces = spaces_state().spaces;
 
     rsx! {
         div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3 pt-2 text-foreground",
+            if !spaces.is_empty() {
+                div { class: "mb-2 flex flex-col gap-px",
+                    for space in spaces.iter() {
+                        SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
+                    }
+                }
+            }
             if (listener.is_loading)() {
                 div { class: "flex items-center px-2 py-1",
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
@@ -509,6 +525,43 @@ fn SideSheetView() -> Element {
                 for (i, pane) in panes.iter().enumerate() {
                     PaneSection { key: "{pane.id}", pane: pane.clone(), index: i }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn SideSheetSpaceRow(space: vmux_space::event::SpaceRow) -> Element {
+    let attach_id = space.id.clone();
+    let is_active = space.is_active;
+    rsx! {
+        button {
+            r#type: "button",
+            class: if is_active {
+                "glass group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-foreground"
+            } else {
+                "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground"
+            },
+            onclick: move |_| {
+                let _ = try_cef_bin_emit_rkyv(&vmux_space::event::SpaceCommandEvent {
+                    command: "attach".to_string(),
+                    space_id: Some(attach_id.clone()),
+                    name: None,
+                });
+            },
+            Icon { class: "h-4 w-4 shrink-0",
+                path { d: "M3 3h7v7H3z" }
+                path { d: "M14 3h7v7h-7z" }
+                path { d: "M3 14h7v7H3z" }
+                path { d: "M14 14h7v7h-7z" }
+            }
+            span {
+                class: if is_active {
+                    "min-w-0 flex-1 truncate text-ui font-medium text-foreground text-left"
+                } else {
+                    "min-w-0 flex-1 truncate text-ui text-left"
+                },
+                "{space.name}"
             }
         }
     }

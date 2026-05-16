@@ -237,12 +237,13 @@ fn space_emit_targets(
 fn broadcast_spaces_to_views(
     active: Res<ActiveSpace>,
     spaces_views: Query<Entity, (With<SpacesView>, With<UiReady>)>,
+    chrome_views: Query<Entity, (With<vmux_layout::LayoutChrome>, With<UiReady>)>,
     browsers: NonSend<Browsers>,
     tabs: Query<(), With<Stack>>,
     mut cache: Local<SpaceBroadcastCache>,
     mut commands: Commands,
 ) {
-    if spaces_views.is_empty() {
+    if spaces_views.is_empty() && chrome_views.is_empty() {
         return;
     }
     let registry = read_space_registry_from(&profile::shared_data_dir());
@@ -251,7 +252,7 @@ fn broadcast_spaces_to_views(
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     let mut ready = Vec::new();
-    for entity in &spaces_views {
+    for entity in spaces_views.iter().chain(chrome_views.iter()) {
         if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
             ready.push(entity);
         }
