@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use vmux_history::event::{
     HISTORY_QUERY_RESPONSE_EVENT, HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry,
-    HistoryQueryRequest, HistoryQueryResponse,
+    HistoryOpenRequest, HistoryQueryRequest, HistoryQueryResponse,
 };
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
@@ -122,7 +122,16 @@ pub fn App() -> Element {
                     div { class: "text-xs text-muted-foreground uppercase mt-4 mb-1", "{label}" }
                     for entry in group {
                         div {
-                            class: "flex items-center gap-2 py-1 border-b border-border hover:bg-muted group",
+                            class: "flex items-center gap-2 py-1 border-b border-border hover:bg-muted group cursor-pointer",
+                            onclick: {
+                                let url = entry.url.clone();
+                                move |_| {
+                                    let _ = try_cef_bin_emit_rkyv(&HistoryOpenRequest {
+                                        url: url.clone(),
+                                        in_new_stack: true,
+                                    });
+                                }
+                            },
                             span { class: "text-xs text-muted-foreground w-12", "{format_time(entry.visit_created_at)}" }
                             img {
                                 class: "w-4 h-4",
