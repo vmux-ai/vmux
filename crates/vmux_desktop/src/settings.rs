@@ -62,7 +62,7 @@ fn register_app_agents_from_settings(
             }
         };
         for model in &provider_settings.models {
-            strategies.register_app(Box::new(vmux_agent::EchoAppStrategy::new(
+            strategies.register_app(std::sync::Arc::new(vmux_agent::EchoAppStrategy::new(
                 provider_settings.provider.clone(),
                 model.clone(),
                 kind,

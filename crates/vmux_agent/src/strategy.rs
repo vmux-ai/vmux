@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use bevy::prelude::Resource;
 
@@ -15,7 +16,7 @@ pub trait AgentStrategy: Send + Sync + 'static {
 #[derive(Resource, Default)]
 pub struct AgentStrategies {
     cli: HashMap<AgentKind, Box<dyn CliAgentStrategy>>,
-    app: HashMap<(String, String), Box<dyn AppAgentStrategy>>,
+    app: HashMap<(String, String), Arc<dyn AppAgentStrategy>>,
 }
 
 impl AgentStrategies {
@@ -27,7 +28,7 @@ impl AgentStrategies {
         self.cli.get(&kind).map(|b| b.as_ref())
     }
 
-    pub fn register_app(&mut self, strategy: Box<dyn AppAgentStrategy>) {
+    pub fn register_app(&mut self, strategy: Arc<dyn AppAgentStrategy>) {
         let key = (
             strategy.provider().to_string(),
             strategy.model().to_string(),
@@ -39,14 +40,14 @@ impl AgentStrategies {
         &self,
         provider: &str,
         model: &str,
-    ) -> Option<&dyn AppAgentStrategy> {
+    ) -> Option<Arc<dyn AppAgentStrategy>> {
         self.app
             .get(&(provider.to_string(), model.to_string()))
-            .map(|b| b.as_ref())
+            .cloned()
     }
 
-    pub fn app_strategies(&self) -> impl Iterator<Item = &dyn AppAgentStrategy> {
-        self.app.values().map(|b| b.as_ref())
+    pub fn app_strategies(&self) -> impl Iterator<Item = &Arc<dyn AppAgentStrategy>> {
+        self.app.values()
     }
 
     pub fn cli_strategies(&self) -> impl Iterator<Item = &dyn CliAgentStrategy> {
@@ -59,6 +60,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
     use std::time::SystemTime;
 
     use crate::McpServerConfig;
@@ -143,11 +145,11 @@ mod tests {
         }
 
         let mut s = AgentStrategies::default();
-        s.register_app(Box::new(StubApp {
+        s.register_app(Arc::new(StubApp {
             provider: "openai".into(),
             model: "gpt-5.5".into(),
         }));
-        s.register_app(Box::new(StubApp {
+        s.register_app(Arc::new(StubApp {
             provider: "anthropic".into(),
             model: "claude-opus-4.7".into(),
         }));
@@ -203,7 +205,7 @@ mod tests {
         }
         let mut s = AgentStrategies::default();
         s.register_cli(Box::new(StubStrategy));
-        s.register_app(Box::new(App));
+        s.register_app(Arc::new(App));
         assert!(s.get_cli(AgentKind::Claude).is_some());
         assert!(s.get_app_by_provider_model("p", "m").is_some());
     }
