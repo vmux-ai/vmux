@@ -1,5 +1,5 @@
 use crate::layout::{
-    pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection},
+    pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, Zoomed},
     stack::{FocusedStack, Stack},
     tab::Tab,
 };
@@ -17,12 +17,14 @@ pub(crate) fn build_layout_snapshot(
     stacks_q: &Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
     pane_sizes_q: &Query<&PaneSize>,
     terminals: &Query<Entity, With<crate::terminal::Terminal>>,
+    zoomed_q: &Query<&Zoomed>,
     focused: &FocusedStack,
 ) -> LayoutSnapshot {
     let active_space = focused.tab;
     let spaces = spaces_q
         .iter()
         .map(|(space_entity, tab, children)| {
+            let zoomed_leaf = zoomed_q.get(space_entity).ok().map(|z| z.leaf);
             let root = children
                 .and_then(|c| c.iter().next())
                 .map(|root_entity| {
@@ -33,6 +35,7 @@ pub(crate) fn build_layout_snapshot(
                         stacks_q,
                         pane_sizes_q,
                         terminals,
+                        zoomed_leaf,
                     )
                 })
                 .unwrap_or(LayoutNodeDto::Pane {
@@ -66,6 +69,7 @@ fn build_node(
     stacks_q: &Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
     pane_sizes_q: &Query<&PaneSize>,
     terminals: &Query<Entity, With<crate::terminal::Terminal>>,
+    zoomed_leaf: Option<Entity>,
 ) -> LayoutNodeDto {
     if let Ok((split_entity, split, children)) = splits_q.get(entity) {
         let child_entities: Vec<Entity> = children.map(|c| c.iter().collect()).unwrap_or_default();
@@ -80,7 +84,17 @@ fn build_node(
             .collect();
         let children_dto = child_entities
             .into_iter()
-            .map(|child| build_node(child, splits_q, leaves_q, stacks_q, pane_sizes_q, terminals))
+            .map(|child| {
+                build_node(
+                    child,
+                    splits_q,
+                    leaves_q,
+                    stacks_q,
+                    pane_sizes_q,
+                    terminals,
+                    zoomed_leaf,
+                )
+            })
             .collect();
         return LayoutNodeDto::Split {
             id: Some(format_id(NodeKind::Split, split_entity.to_bits())),
@@ -105,7 +119,7 @@ fn build_node(
             .unwrap_or_default();
         return LayoutNodeDto::Pane {
             id: Some(format_id(NodeKind::Pane, leaf_entity.to_bits())),
-            is_zoomed: false,
+            is_zoomed: zoomed_leaf == Some(leaf_entity),
             tabs,
         };
     }
@@ -165,6 +179,7 @@ mod tests {
                  stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
                  terminals: Query<Entity, With<crate::terminal::Terminal>>,
                  pane_sizes: Query<&PaneSize>,
+                 zoomed_q: Query<&Zoomed>,
                  focused: Res<FocusedStack>| {
                     build_layout_snapshot(
                         &spaces,
@@ -173,6 +188,7 @@ mod tests {
                         &stacks,
                         &pane_sizes,
                         &terminals,
+                        &zoomed_q,
                         &focused,
                     )
                 },
@@ -219,6 +235,7 @@ mod tests {
                  stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
                  terminals: Query<Entity, With<crate::terminal::Terminal>>,
                  pane_sizes: Query<&PaneSize>,
+                 zoomed_q: Query<&Zoomed>,
                  focused: Res<FocusedStack>| {
                     build_layout_snapshot(
                         &spaces,
@@ -227,6 +244,7 @@ mod tests {
                         &stacks,
                         &pane_sizes,
                         &terminals,
+                        &zoomed_q,
                         &focused,
                     )
                 },
@@ -247,5 +265,88 @@ mod tests {
             }
             other => panic!("expected split, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn zoomed_pane_reports_is_zoomed_true() {
+        let mut app = make_app();
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(space),
+            ))
+            .id();
+        let zoomed_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
+        let other_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
+
+        app.world_mut().entity_mut(space).insert(Zoomed {
+            leaf: zoomed_pane,
+            hidden: vec![other_pane],
+        });
+
+        {
+            let mut f = app.world_mut().resource_mut::<FocusedStack>();
+            f.tab = Some(space);
+        }
+
+        let snapshot = app
+            .world_mut()
+            .run_system_once(
+                |spaces: Query<(Entity, &Tab, Option<&Children>)>,
+                 splits: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
+                 leaves: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
+                 stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
+                 terminals: Query<Entity, With<crate::terminal::Terminal>>,
+                 pane_sizes: Query<&PaneSize>,
+                 zoomed_q: Query<&Zoomed>,
+                 focused: Res<FocusedStack>| {
+                    build_layout_snapshot(
+                        &spaces,
+                        &splits,
+                        &leaves,
+                        &stacks,
+                        &pane_sizes,
+                        &terminals,
+                        &zoomed_q,
+                        &focused,
+                    )
+                },
+            )
+            .unwrap();
+
+        let root = &snapshot.spaces[0].root;
+        let LayoutNodeDto::Split { children, .. } = root else {
+            panic!("expected split root")
+        };
+        let zoomed_flag = children.iter().find_map(|c| match c {
+            LayoutNodeDto::Pane { id, is_zoomed, .. } => {
+                let expected_id = format_id(NodeKind::Pane, zoomed_pane.to_bits());
+                if id.as_deref() == Some(expected_id.as_str()) {
+                    Some(*is_zoomed)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        });
+        assert_eq!(zoomed_flag, Some(true));
+
+        let other_flag = children.iter().find_map(|c| match c {
+            LayoutNodeDto::Pane { id, is_zoomed, .. } => {
+                let expected_id = format_id(NodeKind::Pane, other_pane.to_bits());
+                if id.as_deref() == Some(expected_id.as_str()) {
+                    Some(*is_zoomed)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        });
+        assert_eq!(other_flag, Some(false));
     }
 }

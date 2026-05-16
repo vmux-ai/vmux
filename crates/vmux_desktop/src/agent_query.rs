@@ -2,7 +2,7 @@ use crate::{
     agent::AgentQueryRequest,
     agent_layout::build_layout_snapshot,
     layout::{
-        pane::{Pane, PaneSize, PaneSplit},
+        pane::{Pane, PaneSize, PaneSplit, Zoomed},
         stack::{FocusedStack, Stack},
         tab::Tab,
     },
@@ -21,6 +21,7 @@ pub(crate) fn handle_agent_queries(
     stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
     terminals: Query<Entity, With<Terminal>>,
     pane_sizes: Query<&PaneSize>,
+    zoomed: Query<&Zoomed>,
     settings: Res<crate::settings::AppSettings>,
     focused: Option<Res<FocusedStack>>,
 ) {
@@ -36,6 +37,7 @@ pub(crate) fn handle_agent_queries(
                 &stacks,
                 &pane_sizes,
                 &terminals,
+                &zoomed,
                 &focused,
             )),
             AgentQuery::GetSettings => {
