@@ -3,8 +3,10 @@
 use dioxus::prelude::*;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarOpenEvent, CommandBarReadyEvent,
-    CommandBarRenderedEvent, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
-    PathEntry, command_bar_open_should_ack, command_bar_open_should_reset_input, looks_like_url,
+    CommandBarRenderedEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
+    HistorySuggestionsRequest, HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE,
+    PathCompleteRequest, PathCompleteResponse, PathEntry, command_bar_open_should_ack,
+    command_bar_open_should_reset_input, looks_like_url,
 };
 use vmux_command::keyboard::{
     CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code,
@@ -48,6 +50,8 @@ pub fn App() -> Element {
     let mut ready_sent = use_signal(|| false);
 
     let mut path_completions = use_signal(Vec::<PathEntry>::new);
+    let mut history_suggestions = use_signal(Vec::<HistoryEntry>::new);
+    let mut suggestions_request_id = use_signal(|| 0u64);
 
     let open_listener =
         use_bin_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
@@ -62,6 +66,7 @@ pub fn App() -> Element {
             }
             current_open_id.set(open_id);
             path_completions.set(Vec::new());
+            history_suggestions.set(Vec::new());
             query.set(data.url.clone());
             selected.set(0);
             nav_mode.set(false);
@@ -110,6 +115,37 @@ pub fn App() -> Element {
         });
     });
 
+    let _history_listener = use_bin_event_listener::<HistorySuggestionsResponse, _>(
+        HISTORY_SUGGESTIONS_RESPONSE_EVENT,
+        move |resp| {
+            if resp.request_id != *suggestions_request_id.read() {
+                return;
+            }
+            history_suggestions.set(resp.entries);
+        },
+    );
+
+    use_effect(move || {
+        let q = query();
+        let trimmed = q.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('>')
+            || trimmed.starts_with('/')
+            || trimmed.starts_with('~')
+            || trimmed.starts_with("vmux://")
+        {
+            history_suggestions.set(Vec::new());
+            return;
+        }
+        let id = *suggestions_request_id.read() + 1;
+        suggestions_request_id.set(id);
+        let _ = try_cef_bin_emit_rkyv(&HistorySuggestionsRequest {
+            query: trimmed.to_string(),
+            limit: 5,
+            request_id: id,
+        });
+    });
+
     // Focus input and install emacs-style Ctrl shortcuts AFTER Dioxus renders
     // the input element. Running in the event listener above is too early --
     // Dioxus hasn't created the DOM element yet.
@@ -131,7 +167,8 @@ pub fn App() -> Element {
     let q = query();
     let is_new_tab = new_tab();
     let results = {
-        let mut r = filter_results(&q, &tabs, &commands, &spaces, is_new_tab);
+        let history = history_suggestions();
+        let mut r = filter_results(&q, &tabs, &commands, &spaces, is_new_tab, &history);
         let completions = if looks_like_path(q.trim()) {
             path_completions()
         } else {
