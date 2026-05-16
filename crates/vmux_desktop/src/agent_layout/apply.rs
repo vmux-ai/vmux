@@ -73,10 +73,10 @@ fn create_descendants(
 ) {
     let node_entity = match node {
         LayoutNodeDto::Split { id, direction, .. } => match id {
-            Some(id_str) => parse_id(id_str)
-                .ok()
-                .map(|(_, v)| Entity::from_bits(v))
-                .unwrap_or_else(|| spawn_split(world, parent, *direction)),
+            Some(id_str) => match parse_id(id_str) {
+                Ok((_, v)) => Entity::from_bits(v),
+                Err(_) => return,
+            },
             None => {
                 let entity = spawn_split(world, parent, *direction);
                 new_entities.insert(node as *const _, entity);
@@ -84,10 +84,10 @@ fn create_descendants(
             }
         },
         LayoutNodeDto::Pane { id, .. } => match id {
-            Some(id_str) => parse_id(id_str)
-                .ok()
-                .map(|(_, v)| Entity::from_bits(v))
-                .unwrap_or_else(|| spawn_leaf_pane(world, parent)),
+            Some(id_str) => match parse_id(id_str) {
+                Ok((_, v)) => Entity::from_bits(v),
+                Err(_) => return,
+            },
             None => {
                 let entity = spawn_leaf_pane(world, parent);
                 new_entities.insert(node as *const _, entity);
@@ -538,5 +538,98 @@ mod tests {
             .iter(app.world())
             .count();
         assert_eq!(stack_count, 1, "one new Stack entity should be spawned");
+    }
+
+    #[test]
+    fn malformed_pane_id_skips_subtree_no_orphan_spawn() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<vmux_layout::LayoutSpawnRequest>();
+
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+
+        let pane_count_before = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Pane>, Without<PaneSplit>)>()
+            .iter(app.world())
+            .count();
+
+        let mut new_entities = std::collections::HashMap::new();
+        let bad_node = LayoutNodeDto::Pane {
+            id: Some("pane:not_a_number".into()),
+            is_zoomed: false,
+            tabs: vec![TabDto {
+                id: None,
+                url: "https://example.com".into(),
+                kind: "browser".into(),
+                ..Default::default()
+            }],
+        };
+        create_descendants(app.world_mut(), space, &bad_node, &mut new_entities);
+
+        let pane_count_after = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Pane>, Without<PaneSplit>)>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            pane_count_before, pane_count_after,
+            "malformed id must not spawn orphan pane"
+        );
+
+        let stack_count = app
+            .world_mut()
+            .query_filtered::<Entity, With<Stack>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(stack_count, 0, "tabs under malformed pane must not spawn");
+    }
+
+    #[test]
+    fn malformed_split_id_skips_subtree_no_orphan_spawn() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<vmux_layout::LayoutSpawnRequest>();
+
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+
+        let split_count_before = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Pane>, With<PaneSplit>)>()
+            .iter(app.world())
+            .count();
+
+        let mut new_entities = std::collections::HashMap::new();
+        let bad_node = LayoutNodeDto::Split {
+            id: Some("split:garbage".into()),
+            direction: SplitDirectionDto::Row,
+            flex_weights: vec![],
+            children: vec![LayoutNodeDto::Pane {
+                id: None,
+                is_zoomed: false,
+                tabs: vec![],
+            }],
+        };
+        create_descendants(app.world_mut(), space, &bad_node, &mut new_entities);
+
+        let split_count_after = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Pane>, With<PaneSplit>)>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            split_count_before, split_count_after,
+            "malformed id must not spawn orphan split"
+        );
+
+        let pane_count = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Pane>, Without<PaneSplit>)>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            pane_count, 0,
+            "children under malformed split must not spawn"
+        );
     }
 }
