@@ -2,15 +2,24 @@ use std::path::PathBuf;
 
 use bevy::{picking::Pickable, prelude::*, render::alpha::AlphaMode};
 use bevy_cef::prelude::*;
+use vmux_command::command::{AppCommand, LayoutCommand, WindowCommand};
+use vmux_command::{ReadAppCommands, WriteAppCommands};
 use vmux_core::PageMetadata;
+use vmux_history::{CreatedAt, LastActivatedAt};
 use vmux_settings::event::{
-    SETTINGS_LIST_EVENT, SETTINGS_WEBVIEW_URL, SettingsCommandEvent, SettingsListEvent,
+    SETTINGS_LIST_EVENT, SETTINGS_SCHEMA_EVENT, SETTINGS_WEBVIEW_URL, SettingsCommandEvent,
+    SettingsListEvent, SettingsSchemaEvent,
 };
+use vmux_settings::schema::{FieldSpec, SectionSpec, SettingsSchema, WidgetKind};
 use vmux_webview_app::{UiReady, WebviewAppConfig, WebviewAppRegistry};
 
 use crate::{
     browser::Browser,
-    layout::window::WEBVIEW_MESH_DEPTH_BIAS,
+    layout::{
+        pane::{Pane, PaneSplit},
+        stack::{FocusedStack, stack_bundle},
+        window::WEBVIEW_MESH_DEPTH_BIAS,
+    },
     settings::{
         AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json,
     },
@@ -81,8 +90,33 @@ impl Plugin for SettingsViewPlugin {
         );
         app.add_plugins(BinJsEmitEventPlugin::<SettingsCommandEvent>::default())
             .add_observer(on_settings_command)
-            .add_systems(Update, broadcast_settings_to_views);
+            .add_observer(reset_sent_markers_on_ui_ready)
+            .add_systems(
+                Update,
+                (broadcast_schema_to_views, broadcast_settings_to_views),
+            )
+            .add_systems(
+                Update,
+                handle_open_settings_command
+                    .in_set(ReadAppCommands)
+                    .after(WriteAppCommands),
+            );
     }
+}
+
+fn reset_sent_markers_on_ui_ready(
+    trigger: On<BinReceive<UiReady>>,
+    views: Query<Entity, With<SettingsView>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    if !views.contains(entity) {
+        return;
+    }
+    commands
+        .entity(entity)
+        .remove::<SettingsListSent>()
+        .remove::<SettingsSchemaSent>();
 }
 
 fn register_settings_webview_app(registry: &mut WebviewAppRegistry) {
@@ -92,35 +126,24 @@ fn register_settings_webview_app(registry: &mut WebviewAppRegistry) {
     );
 }
 
-#[derive(Default)]
-struct SettingsBroadcastCache {
-    body: String,
-    sent: std::collections::HashSet<Entity>,
-}
+#[derive(Component)]
+struct SettingsListSent;
+
+#[derive(Component)]
+struct SettingsSchemaSent;
 
 fn broadcast_settings_to_views(
     settings: Res<AppSettings>,
-    views: Query<Entity, (With<SettingsView>, With<UiReady>)>,
+    pending: Query<Entity, (With<SettingsView>, With<UiReady>, Without<SettingsListSent>)>,
+    sent: Query<Entity, (With<SettingsView>, With<UiReady>, With<SettingsListSent>)>,
     browsers: NonSend<Browsers>,
-    mut cache: Local<SettingsBroadcastCache>,
     mut commands: Commands,
 ) {
-    if views.is_empty() {
-        return;
-    }
     let payload = SettingsListEvent {
         json: serialize_settings_to_json(&settings),
     };
-    let body = payload.json.clone();
-    if body != cache.body {
-        cache.body = body;
-        cache.sent.clear();
-    }
-    for entity in &views {
+    for entity in &pending {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
-            continue;
-        }
-        if !cache.sent.insert(entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -128,6 +151,50 @@ fn broadcast_settings_to_views(
             SETTINGS_LIST_EVENT,
             &payload,
         ));
+        commands.entity(entity).insert(SettingsListSent);
+    }
+    if settings.is_changed() {
+        for entity in &sent {
+            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                continue;
+            }
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                SETTINGS_LIST_EVENT,
+                &payload,
+            ));
+        }
+    }
+}
+
+fn broadcast_schema_to_views(
+    pending: Query<
+        Entity,
+        (
+            With<SettingsView>,
+            With<UiReady>,
+            Without<SettingsSchemaSent>,
+        ),
+    >,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let payload = SettingsSchemaEvent {
+        json: serde_json::to_string(&build_settings_schema()).unwrap_or_default(),
+    };
+    for entity in &pending {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            SETTINGS_SCHEMA_EVENT,
+            &payload,
+        ));
+        commands.entity(entity).insert(SettingsSchemaSent);
     }
 }
 
@@ -150,4 +217,273 @@ fn on_settings_command(
         }
         Err(e) => bevy::log::warn!("settings: update {} rejected: {}", evt.path, e),
     }
+}
+
+fn handle_open_settings_command(
+    mut reader: MessageReader<AppCommand>,
+    focus: Option<Res<FocusedStack>>,
+    panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut commands: Commands,
+) {
+    for cmd in reader.read() {
+        if !matches!(
+            *cmd,
+            AppCommand::Layout(LayoutCommand::Window(WindowCommand::Settings))
+        ) {
+            continue;
+        }
+        let Some(focus) = focus.as_ref() else {
+            continue;
+        };
+        let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) else {
+            continue;
+        };
+        let tab = commands
+            .spawn((
+                stack_bundle(),
+                LastActivatedAt::now(),
+                CreatedAt::now(),
+                ChildOf(pane),
+            ))
+            .id();
+        commands.entity(tab).insert(PageMetadata {
+            url: SETTINGS_WEBVIEW_URL.to_string(),
+            title: "Settings".to_string(),
+            ..default()
+        });
+        commands.spawn((
+            SettingsView::new(&mut meshes, &mut webview_mt),
+            ChildOf(tab),
+        ));
+    }
+}
+
+fn build_settings_schema() -> SettingsSchema {
+    SettingsSchema {
+        sections: vec![
+            SectionSpec {
+                id: "general".to_string(),
+                title: "General".to_string(),
+                description: None,
+                synthetic_keys: vec!["auto_update".to_string(), "startup_url".to_string()],
+                root_path: String::new(),
+            },
+            SectionSpec {
+                id: "layout".to_string(),
+                title: "Layout".to_string(),
+                description: Some("Window chrome, panes, sidebar, and focus ring.".to_string()),
+                synthetic_keys: vec![],
+                root_path: "layout".to_string(),
+            },
+            SectionSpec {
+                id: "shortcuts".to_string(),
+                title: "Shortcuts".to_string(),
+                description: Some(
+                    "Read-only view. Edit settings.ron directly to change bindings.".to_string(),
+                ),
+                synthetic_keys: vec![],
+                root_path: "shortcuts".to_string(),
+            },
+            SectionSpec {
+                id: "terminal".to_string(),
+                title: "Terminal".to_string(),
+                description: None,
+                synthetic_keys: vec![],
+                root_path: "terminal".to_string(),
+            },
+            SectionSpec {
+                id: "browser".to_string(),
+                title: "Browser".to_string(),
+                description: None,
+                synthetic_keys: vec![],
+                root_path: "browser".to_string(),
+            },
+        ],
+        fields: vec![
+            field(
+                "auto_update",
+                FieldSpec {
+                    label: Some("Auto-update".into()),
+                    hint: Some("Check for new releases on launch.".into()),
+                    ..Default::default()
+                },
+            ),
+            field(
+                "startup_url",
+                FieldSpec {
+                    label: Some("Startup URL".into()),
+                    hint: Some("Empty defaults to vmux://vibe/.".into()),
+                    placeholder: Some("vmux://vibe/".into()),
+                    ..Default::default()
+                },
+            ),
+            field(
+                "layout",
+                FieldSpec {
+                    order: vec![
+                        "window".into(),
+                        "pane".into(),
+                        "side_sheet".into(),
+                        "focus_ring".into(),
+                    ],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "layout.window",
+                FieldSpec {
+                    label: Some("Window".into()),
+                    order: vec![
+                        "padding".into(),
+                        "padding_top".into(),
+                        "padding_right".into(),
+                        "padding_bottom".into(),
+                        "padding_left".into(),
+                    ],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "layout.pane",
+                FieldSpec {
+                    label: Some("Pane".into()),
+                    order: vec!["gap".into(), "radius".into()],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "layout.side_sheet",
+                FieldSpec {
+                    label: Some("Side sheet".into()),
+                    ..Default::default()
+                },
+            ),
+            field(
+                "layout.focus_ring",
+                FieldSpec {
+                    label: Some("Focus ring".into()),
+                    order: vec![
+                        "width".into(),
+                        "color".into(),
+                        "glow".into(),
+                        "gradient".into(),
+                    ],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "layout.focus_ring.glow",
+                FieldSpec {
+                    label: Some("Glow".into()),
+                    order: vec!["spread".into(), "intensity".into()],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "layout.focus_ring.gradient",
+                FieldSpec {
+                    label: Some("Gradient".into()),
+                    order: vec![
+                        "enabled".into(),
+                        "speed".into(),
+                        "cycles".into(),
+                        "accent".into(),
+                    ],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "layout.focus_ring.glow.intensity",
+                FieldSpec {
+                    step: Some(0.05),
+                    ..Default::default()
+                },
+            ),
+            field(
+                "layout.focus_ring.gradient.speed",
+                FieldSpec {
+                    step: Some(0.1),
+                    ..Default::default()
+                },
+            ),
+            field(
+                "layout.focus_ring.gradient.cycles",
+                FieldSpec {
+                    step: Some(0.1),
+                    ..Default::default()
+                },
+            ),
+            field(
+                "shortcuts",
+                FieldSpec {
+                    order: vec![
+                        "chord_timeout_ms".into(),
+                        "leader".into(),
+                        "bindings".into(),
+                    ],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "shortcuts.leader",
+                FieldSpec {
+                    label: Some("Leader".into()),
+                    hint: Some("Prefix key for chord shortcuts.".into()),
+                    widget: Some(WidgetKind::LeaderKbd),
+                    ..Default::default()
+                },
+            ),
+            field(
+                "shortcuts.chord_timeout_ms",
+                FieldSpec {
+                    label: Some("Chord timeout".into()),
+                    hint: Some("Milliseconds before a chord prefix expires.".into()),
+                    ..Default::default()
+                },
+            ),
+            field(
+                "shortcuts.bindings",
+                FieldSpec {
+                    label: Some("Bindings".into()),
+                    widget: Some(WidgetKind::BindingsList),
+                    ..Default::default()
+                },
+            ),
+            field(
+                "terminal",
+                FieldSpec {
+                    order: vec![
+                        "confirm_close".into(),
+                        "default_theme".into(),
+                        "themes".into(),
+                        "custom_themes".into(),
+                    ],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "terminal.confirm_close",
+                FieldSpec {
+                    label: Some("Confirm close".into()),
+                    hint: Some("Prompt before closing a terminal with a running process.".into()),
+                    ..Default::default()
+                },
+            ),
+            field(
+                "terminal.default_theme",
+                FieldSpec {
+                    label: Some("Default theme".into()),
+                    hint: Some("Name of the active theme from the themes list.".into()),
+                    placeholder: Some("default".into()),
+                    ..Default::default()
+                },
+            ),
+        ],
+    }
+}
+
+fn field(path: &str, spec: FieldSpec) -> (String, FieldSpec) {
+    (path.to_string(), spec)
 }
