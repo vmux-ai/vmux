@@ -45,14 +45,6 @@ pub enum McpParamTool {
     },
     #[mcp(description = "Select a tab by index (1-8).")]
     SelectTab { index: u8 },
-    #[mcp(
-        description = "Split current pane and open a URL in the new pane. Direction 'right' = side-by-side (vertical separator), 'down' = top/bottom. URLs starting with 'vmux://terminal/' open a terminal (use '?cwd=/path' to set working dir), 'vmux://spaces/' opens the spaces view, 'vmux://services/' opens the processes monitor; other 'vmux://' URLs are rejected; everything else opens as a browser."
-    )]
-    SplitAndNavigate {
-        #[mcp(enum_values = ["right", "down"])]
-        direction: String,
-        url: String,
-    },
     #[mcp(description = "Update a single vmux setting by dot-path. \
             Example: { path: 'layout.pane.gap', value: 12 }. \
             Use get_settings to discover the available paths and current values. \
@@ -125,17 +117,6 @@ impl McpParamTool {
                     id: format!("tab_select_{index}"),
                 })
             }
-            McpParamTool::SplitAndNavigate { direction, url } => {
-                if !["right", "down"].contains(&direction.as_str()) {
-                    return Err(format!(
-                        "split_and_navigate: direction must be 'right' or 'down', got '{direction}'"
-                    ));
-                }
-                if url.trim().is_empty() {
-                    return Err("split_and_navigate.url is empty".to_string());
-                }
-                Ok(AgentCommand::SplitAndNavigate { direction, url })
-            }
             McpParamTool::UpdateSettings { path, value } => {
                 if path.trim().is_empty() {
                     return Err("update_settings.path is empty".to_string());
@@ -158,8 +139,11 @@ pub enum DispatchTarget {
 fn read_layout_definition() -> ToolDefinition {
     ToolDefinition {
         name: "read_layout".into(),
-        description: "Return the full vmux layout: spaces, recursive pane tree, focused triple. \
-                      Terminal tabs appear as tabs with kind=\"terminal\"; browser tabs use kind=\"browser\"."
+        description: "Returns the full vmux layout (spaces, recursive pane tree, focused). \
+Call this FIRST before update_layout - you need the current tree (with ids) to construct a valid update. \
+Useful for: answering questions about what's open; finding the focused space/pane/tab; \
+reading a tab's url/kind so you can duplicate it elsewhere. \
+Terminal tabs appear as tabs with kind=\"terminal\"; browser tabs use kind=\"browser\"."
             .into(),
         input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
     }
@@ -168,9 +152,24 @@ fn read_layout_definition() -> ToolDefinition {
 fn update_layout_definition() -> ToolDefinition {
     ToolDefinition {
         name: "update_layout".into(),
-        description: "Submit the desired layout tree. Vmux diffs against current state and reconciles \
-                      atomically by id: omit `id` to create; omit a node entirely to close it; reorder \
-                      `children` to swap/move; mutate `direction`/`flex_weights`/`is_zoomed`/`title` in place."
+        description: "Submit the desired layout tree; vmux diffs against current state and reconciles by id (React-style). \
+Use this for compound or structural changes that the per-action tools can't express. \
+\
+Workflow: (1) call read_layout, (2) mutate the returned tree, (3) submit it back here. \
+\
+Recipes: \
+- Duplicate/mirror a tab: add a new pane (id: null) under the same parent, with a tab carrying the source tab's url and kind. \
+- Swap two panes: reorder their entries in the parent split's children array. \
+- Move a tab to another pane: remove from source pane's tabs, add (same id) to target pane's tabs. \
+- Close a pane/tab: omit it from the submitted tree. \
+- Resize a split: change flex_weights on the parent split. \
+- Equalize a split: set all flex_weights to the same value. \
+- Change focus: set the top-level focused triple. \
+- Toggle zoom: flip the pane's is_zoomed flag. \
+\
+Atomicity: all changes apply as one transaction. If validation fails (duplicate ids, malformed payload), nothing is applied. \
+\
+Identifiers use kind:value format (space:N, pane:N, split:N, tab:N). Omit id to create a new node; a new tab needs url+kind, a new pane needs at least one tab, a new space needs name."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -556,47 +555,6 @@ mod tests {
     #[test]
     fn dispatch_from_tool_call_unknown_returns_error() {
         assert!(dispatch_from_tool_call("nope", serde_json::json!({})).is_err());
-    }
-
-    #[test]
-    fn mcp_param_tool_entries_includes_split_and_navigate() {
-        let names: Vec<&'static str> = McpParamTool::mcp_tool_entries()
-            .into_iter()
-            .map(|(name, _, _)| name)
-            .collect();
-        assert!(names.contains(&"split_and_navigate"));
-    }
-
-    #[test]
-    fn split_and_navigate_dispatches_to_agent_command() {
-        let target = dispatch_from_tool_call(
-            "split_and_navigate",
-            serde_json::json!({"direction": "right", "url": "https://example.com"}),
-        )
-        .unwrap();
-        assert!(matches!(
-            target,
-            DispatchTarget::Command(AgentCommand::SplitAndNavigate { direction, url })
-                if direction == "right" && url == "https://example.com"
-        ));
-    }
-
-    #[test]
-    fn split_and_navigate_invalid_direction_returns_error() {
-        let result = dispatch_from_tool_call(
-            "split_and_navigate",
-            serde_json::json!({"direction": "sideways", "url": "https://example.com"}),
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn split_and_navigate_missing_url_returns_error() {
-        let result = dispatch_from_tool_call(
-            "split_and_navigate",
-            serde_json::json!({"direction": "right"}),
-        );
-        assert!(result.is_err());
     }
 
     #[test]
