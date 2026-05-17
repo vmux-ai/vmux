@@ -623,7 +623,7 @@ fn NewStackRow(pane_id: u64) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: "glass group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-foreground",
+            class: "glass group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-left text-foreground",
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
                     command: "new_stack".to_string(),
