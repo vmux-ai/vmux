@@ -609,7 +609,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                 },
                 "{label}"
             }
-            div { class: "flex flex-col gap-px",
+            div { class: "flex flex-col gap-1",
                 for stack in pane
                     .stacks
                     .iter()
@@ -681,7 +681,10 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 "{stack.title}"
             }
             button {
-                class: "cursor-pointer ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-sm opacity-0 transition-colors group-hover:opacity-100 hover:bg-foreground/10 active:bg-transparent",
+                r#type: "button",
+                aria_label: "Close stack",
+                title: "Close stack",
+                class: "ml-auto flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10",
                 onclick: move |evt| {
                     evt.stop_propagation();
                     let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
@@ -690,7 +693,10 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         stack_index,
                     });
                 },
-                span { class: "text-base leading-none", "x" }
+                Icon { class: "h-2.5 w-2.5",
+                    path { d: "M18 6 6 18" }
+                    path { d: "m6 6 12 12" }
+                }
             }
         }
     }
