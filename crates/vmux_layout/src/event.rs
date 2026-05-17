@@ -46,8 +46,6 @@ pub struct LayoutStateEvent {
     pub side_sheet_width: f32,
     #[serde(default = "default_pane_gap")]
     pub pane_gap: f32,
-    #[serde(default = "default_titlebar_height")]
-    pub titlebar_height: f32,
     #[serde(default)]
     pub radius: f32,
 }
@@ -61,12 +59,19 @@ impl LayoutStateEvent {
         }
     }
 
-    pub fn header_height_total(&self) -> f32 {
-        self.titlebar_height + self.header_height
-    }
-
     pub fn header_visible(&self) -> bool {
         self.header_open
+    }
+
+    /// Left padding on the tab row to keep tab pills clear of the macOS
+    /// traffic lights. Only needed when the side sheet is closed (when
+    /// open, the side sheet covers the traffic-lights region).
+    pub fn tab_row_pad_left(&self) -> f32 {
+        if self.side_sheet_open {
+            8.0
+        } else {
+            TRAFFIC_LIGHTS_PAD_PX
+        }
     }
 }
 
@@ -86,34 +91,18 @@ fn default_pane_gap() -> f32 {
     8.0
 }
 
-fn default_titlebar_height() -> f32 {
-    44.0
-}
-
-pub fn effective_titlebar_height(configured_height: f32) -> f32 {
-    configured_height.max(default_titlebar_height())
-}
-
-fn titlebar_nav_left_padding() -> f32 {
-    92.0
-}
-
-pub fn titlebar_nav_style(titlebar_height: f32) -> String {
-    format!(
-        "height:{titlebar_height}px;padding-left:{}px;justify-content:flex-end;",
-        titlebar_nav_left_padding()
-    )
-}
-
 pub const HEADER_HEIGHT_PX: f32 = 60.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
-/// Total vertical space the chrome reserves in the layout above the pane:
-/// the titlebar overlap area (where macOS draws the traffic lights) and
-/// the URL row height. Bevy's Header entity uses this for its node
-/// height so the pane begins exactly where the chrome webview's URL row
-/// ends — anything less would leave the pane peeking behind the chrome.
-pub const CHROME_RESERVED_HEIGHT_PX: f32 = 44.0 + HEADER_HEIGHT_PX;
+/// Left padding (px) reserved on the tab row for the macOS traffic
+/// lights when the side sheet is closed.
+pub const TRAFFIC_LIGHTS_PAD_PX: f32 = 80.0;
+
+/// Vertical space the chrome reserves in the layout above the pane.
+/// The chrome puts tabs at the very top (traffic lights sit on the
+/// left of the tab row, in the reserved padding) so no extra titlebar
+/// strip is needed.
+pub const CHROME_RESERVED_HEIGHT_PX: f32 = HEADER_HEIGHT_PX;
 
 /// Hardcoded window edge padding (px). Not user-configurable.
 pub const WINDOW_PAD_PX: f32 = 4.0;
@@ -153,14 +142,18 @@ mod tests {
     }
 
     #[test]
-    fn header_height_total_clears_titlebar_controls() {
-        let state = LayoutStateEvent {
-            header_height: 40.0,
-            titlebar_height: 28.0,
+    fn tab_row_pad_left_clears_traffic_lights_when_side_sheet_closed() {
+        let closed = LayoutStateEvent {
+            side_sheet_open: false,
+            ..Default::default()
+        };
+        let open = LayoutStateEvent {
+            side_sheet_open: true,
             ..Default::default()
         };
 
-        assert_eq!(state.header_height_total(), 68.0);
+        assert_eq!(closed.tab_row_pad_left(), TRAFFIC_LIGHTS_PAD_PX);
+        assert!(open.tab_row_pad_left() < TRAFFIC_LIGHTS_PAD_PX);
     }
 
     #[test]
@@ -178,20 +171,6 @@ mod tests {
 
         assert!(open.header_visible());
         assert!(!closed.header_visible());
-    }
-
-    #[test]
-    fn titlebar_height_keeps_minimum_traffic_light_clearance() {
-        assert_eq!(effective_titlebar_height(0.0), 44.0);
-        assert_eq!(effective_titlebar_height(52.0), 52.0);
-    }
-
-    #[test]
-    fn titlebar_nav_style_clears_lights_and_right_aligns_controls() {
-        assert_eq!(
-            titlebar_nav_style(44.0),
-            "height:44px;padding-left:92px;justify-content:flex-end;"
-        );
     }
 
     #[test]

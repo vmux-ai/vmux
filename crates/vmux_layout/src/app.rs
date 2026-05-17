@@ -138,10 +138,11 @@ pub fn App() -> Element {
         vmux_layout::event::url_bar_top(),
     );
     let header_vars = format!(
-        "--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;",
+        "--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;",
         state.main_chrome_left(),
         vmux_layout::event::WINDOW_PAD_PX,
-        state.header_height_total(),
+        state.header_height,
+        state.tab_row_pad_left(),
     );
 
     rsx! {
@@ -159,7 +160,7 @@ pub fn App() -> Element {
                 div {
                     class: "pointer-events-auto fixed top-0 left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
                     style: "{header_vars}",
-                    HeaderView { titlebar_height: state.titlebar_height }
+                    HeaderView {}
                 }
             }
         }
@@ -167,7 +168,7 @@ pub fn App() -> Element {
 }
 
 #[component]
-fn HeaderView(titlebar_height: f32) -> Element {
+fn HeaderView() -> Element {
     let mut stacks_state = use_signal(StacksHostEvent::default);
     let listener = use_bin_event_listener::<StacksHostEvent, _>(STACKS_EVENT, move |data| {
         stacks_state.set(data);
@@ -197,14 +198,13 @@ fn HeaderView(titlebar_height: f32) -> Element {
     let tabs_loading = (tabs_listener.is_loading)();
     let tabs_error = (tabs_listener.error)();
 
-    let (outer_extra_style, outer_class) = header_chrome(active_bg_color.as_deref());
-    let outer_style = format!("--vmux-titlebar-pad:{titlebar_height}px;{outer_extra_style}");
+    let (outer_style, outer_class) = header_chrome(active_bg_color.as_deref());
 
     rsx! {
         div {
             class: "{outer_class}",
             style: "{outer_style}",
-            div { class: "flex min-w-0 shrink-0 items-center gap-1 px-2",
+            div { class: "flex min-w-0 shrink-0 items-center gap-1 pl-[var(--vmux-tab-row-pad-left)] pr-2",
                 if tabs_loading {
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
                 } else if let Some(err) = tabs_error {
@@ -263,13 +263,13 @@ fn header_chrome(bg_color: Option<&str>) -> (String, String) {
         (
             format!("--vmux-url-bg:{color};"),
             format!(
-                "flex h-full min-h-0 min-w-0 flex-col rounded-t-[var(--radius)] pt-[var(--vmux-titlebar-pad)] bg-[var(--vmux-url-bg)] {text_class}"
+                "flex h-full min-h-0 min-w-0 flex-col rounded-t-[var(--radius)] bg-[var(--vmux-url-bg)] {text_class}"
             ),
         )
     } else {
         (
             String::new(),
-            "flex h-full min-h-0 min-w-0 flex-col rounded-t-[var(--radius)] pt-[var(--vmux-titlebar-pad)] bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
+            "flex h-full min-h-0 min-w-0 flex-col rounded-t-[var(--radius)] bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
         )
     }
 }
