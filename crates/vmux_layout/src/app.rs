@@ -211,7 +211,13 @@ fn HeaderView() -> Element {
                 } else {
                     div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pl-2",
                         for tab in tabs.iter() {
-                            Tab { key: "{tab.id}", tab: tab.clone() }
+                            {
+                                let mut tab = tab.clone();
+                                if tab.is_active {
+                                    tab.bg_color = active_bg_color.clone();
+                                }
+                                rsx! { Tab { key: "{tab.id}", tab } }
+                            }
                         }
                         NewTabButton {}
                     }
