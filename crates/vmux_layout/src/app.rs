@@ -660,9 +660,9 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     rsx! {
         div {
             class: if is_active {
-                "glass group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5"
+                "glass group flex h-9 cursor-default items-center gap-2 rounded-md px-2"
             } else {
-                "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground"
+                "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-muted-foreground hover:bg-glass-hover hover:text-foreground"
             },
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
