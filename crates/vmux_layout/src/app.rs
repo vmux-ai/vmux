@@ -138,9 +138,8 @@ pub fn App() -> Element {
         vmux_layout::event::url_bar_top(),
     );
     let header_style = format!(
-        "left:{}px;top:{}px;right:{}px;height:{}px;",
+        "left:{}px;top:0;right:{}px;height:{}px;",
         state.main_chrome_left(),
-        vmux_layout::event::HEADER_TOP_PX,
         vmux_layout::event::WINDOW_PAD_PX,
         state.header_height_total(),
     );
@@ -633,7 +632,7 @@ fn NewStackRow(pane_id: u64) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: "glass group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-left text-foreground",
+            class: "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
                     command: "new_stack".to_string(),
