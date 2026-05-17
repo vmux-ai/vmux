@@ -571,8 +571,8 @@ fn SideSheetSpaceRow(space: vmux_space::event::SpaceRow) -> Element {
             },
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&vmux_space::event::SpaceCommandEvent {
-                    command: "open_page".to_string(),
-                    space_id: None,
+                    command: "attach".to_string(),
+                    space_id: Some(space.id.clone()),
                     name: None,
                 });
             },
