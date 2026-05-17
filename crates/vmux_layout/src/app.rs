@@ -410,10 +410,10 @@ fn TabPill(tab: TabRow, active_bg_color: Option<String>) -> Element {
             let text_class = text_color_class_for_bg(color);
             (
                 format!(
-                    "background-color: {color};max-width:200px;margin-bottom:-3px;padding-bottom:3px;"
+                    "background-color: {color};--tab-bg: {color};max-width:200px;margin-bottom:-3px;padding-bottom:3px;"
                 ),
                 format!(
-                    "group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-t-md pl-2 pr-1 {text_class}"
+                    "tab-pill-skirt group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-t-md pl-2 pr-1 {text_class}"
                 ),
                 format!("min-w-0 truncate text-ui-xs font-medium {text_class}"),
                 format!(
@@ -422,8 +422,8 @@ fn TabPill(tab: TabRow, active_bg_color: Option<String>) -> Element {
             )
         } else {
             (
-                "max-width:200px;margin-bottom:-3px;padding-bottom:3px;".to_string(),
-                "glass group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-t-md border-b-0 pl-2 pr-1".to_string(),
+                "max-width:200px;margin-bottom:-3px;padding-bottom:3px;--tab-bg: var(--glass);".to_string(),
+                "tab-pill-skirt glass group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-t-md border-b-0 pl-2 pr-1".to_string(),
                 "min-w-0 truncate text-ui-xs font-medium text-foreground".to_string(),
                 "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
             )

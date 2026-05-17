@@ -52,3 +52,38 @@
   background-size: 200% 100%;
   animation: loading-sweep 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
+
+/* Active tab pill: concave "skirt" on the bottom corners so the tab
+   visually drips into the url row. The pill itself sets --tab-bg to its
+   own background-color via inline style; the pseudo-elements use a
+   radial gradient to carve out the concave curve. */
+.tab-pill-skirt {
+  position: relative;
+}
+.tab-pill-skirt::before,
+.tab-pill-skirt::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+}
+.tab-pill-skirt::before {
+  left: -8px;
+  background: radial-gradient(
+    circle at top left,
+    transparent 0,
+    transparent 8px,
+    var(--tab-bg, transparent) 8px
+  );
+}
+.tab-pill-skirt::after {
+  right: -8px;
+  background: radial-gradient(
+    circle at top right,
+    transparent 0,
+    transparent 8px,
+    var(--tab-bg, transparent) 8px
+  );
+}
