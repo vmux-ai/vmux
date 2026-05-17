@@ -407,7 +407,7 @@ fn pane_count_for_browser(
 
 fn sync_webview_pane_corner_clip(
     settings: Res<AppSettings>,
-    zen: Res<vmux_layout::zen::ZenMode>,
+    layout_hidden: Res<vmux_layout::toggle_layout::LayoutHidden>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     tabs: Query<
         (
@@ -435,8 +435,8 @@ fn sync_webview_pane_corner_clip(
         // corner_mode = 1.0 → round bottom corners only, so the pane top
         // sits flush against the url row above it. Switch to 0.0 (all
         // corners) when the active tab is split (each pane floats as a
-        // card) or when the chrome is hidden via zen mode (no url row
-        // above to merge with).
+        // card) or when the chrome is hidden (no url row above to merge
+        // with).
         let pane_count = pane_count_for_browser(
             browser_e,
             &child_of_q,
@@ -446,7 +446,7 @@ fn sync_webview_pane_corner_clip(
             &leaf_panes,
         )
         .unwrap_or(1);
-        let mode = if zen.active || pane_count > 1 {
+        let mode = if layout_hidden.0 || pane_count > 1 {
             0.0
         } else {
             1.0

@@ -40,9 +40,9 @@ pub mod swap;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tab;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod window;
+pub mod toggle_layout;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod zen;
+pub mod window;
 
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
@@ -68,6 +68,8 @@ use stack::StackPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 use tab::TabPlugin;
 #[cfg(not(target_arch = "wasm32"))]
+use toggle_layout::ToggleLayoutPlugin;
+#[cfg(not(target_arch = "wasm32"))]
 use vmux_webview_app::JsEmitUiReadyPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use webview_reveal::PendingWebviewReveal;
@@ -77,8 +79,6 @@ use webview_reveal::WebviewRevealPlugin;
 use window::WindowPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use window::fit_window_to_screen;
-#[cfg(not(target_arch = "wasm32"))]
-use zen::ZenPlugin;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -150,7 +150,7 @@ impl Plugin for LayoutPlugin {
             GlassMaterialPlugin,
             SideSheetLayoutPlugin,
             HeaderLayoutPlugin,
-            ZenPlugin,
+            ToggleLayoutPlugin,
             WebviewRevealPlugin,
         ));
     }

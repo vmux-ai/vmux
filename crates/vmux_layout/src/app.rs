@@ -209,7 +209,7 @@ fn HeaderView(titlebar_height: f32) -> Element {
                 } else {
                     div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pl-2",
                         for tab in tabs.iter() {
-                            TabPill { key: "{tab.id}", tab: tab.clone() }
+                            Tab { key: "{tab.id}", tab: tab.clone() }
                         }
                         NewTabButton {}
                     }
@@ -371,7 +371,7 @@ fn NavButton(
 }
 
 #[component]
-fn TabPill(tab: TabRow) -> Element {
+fn Tab(tab: TabRow) -> Element {
     let id_switch = tab.id.clone();
     let id_close = tab.id.clone();
     let display_title = if !tab.title.is_empty() {
@@ -397,12 +397,12 @@ fn TabPill(tab: TabRow) -> Element {
         after:content-[''] after:absolute after:bottom-0 after:-right-2 after:h-2 after:w-2 after:pointer-events-none \
         after:[background:radial-gradient(circle_at_top_right,transparent_0,transparent_8px,var(--tab-bg)_8px)]";
 
-    let (pill_class, title_class, close_class) = if is_active {
+    let (tab_class, title_class, close_class) = if is_active {
         if let Some(ref color) = tab.bg_color {
             let text_class = text_color_class_for_bg(color);
             (
                 format!(
-                    "{skirt_classes} group flex h-7 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-1.5 rounded-t-md pl-2 pr-1 bg-[{color}] [--tab-bg:{color}] {text_class}"
+                    "{skirt_classes} group flex h-7 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-1.5 rounded-t-md pl-2 pr-2 bg-[{color}] [--tab-bg:{color}] {text_class}"
                 ),
                 format!("min-w-0 truncate text-ui-xs font-medium {text_class}"),
                 format!(
@@ -412,7 +412,7 @@ fn TabPill(tab: TabRow) -> Element {
         } else {
             (
                 format!(
-                    "{skirt_classes} glass group flex h-7 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-1.5 rounded-t-md border-b-0 pl-2 pr-1 [--tab-bg:var(--glass)]"
+                    "{skirt_classes} glass group flex h-7 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-1.5 rounded-t-md border-b-0 pl-2 pr-2 [--tab-bg:var(--glass)]"
                 ),
                 "min-w-0 truncate text-ui-xs font-medium text-foreground".to_string(),
                 "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
@@ -420,14 +420,14 @@ fn TabPill(tab: TabRow) -> Element {
         }
     } else {
         (
-            "group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-md pl-2 pr-1 text-muted-foreground hover:bg-glass-hover hover:text-foreground".to_string(),
+            "group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-md pl-2 pr-2 text-muted-foreground hover:bg-glass-hover hover:text-foreground".to_string(),
             "min-w-0 truncate text-ui-xs".to_string(),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
     };
 
     rsx! {
-        div { class: "{pill_class}",
+        div { class: "{tab_class}",
             button {
                 r#type: "button",
                 title: "{tooltip}",
