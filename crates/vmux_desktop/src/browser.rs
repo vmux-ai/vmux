@@ -115,6 +115,7 @@ fn on_webview_ready_send_theme(
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     chrome_q: Query<(), With<LayoutChrome>>,
+    modal_q: Query<(), With<Modal>>,
     mut zoom_q: Query<&mut bevy_cef::prelude::ZoomLevel>,
     mut commands: Commands,
 ) {
@@ -126,10 +127,10 @@ fn on_webview_ready_send_theme(
         };
         commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
     }
-    // Chrome must never carry a stale zoom (e.g. from a previous session
-    // where pinch-zoom was allowed); force it to 0 once the webview is
-    // ready, both on the component and on the CEF host.
-    if chrome_q.get(entity).is_ok() {
+    // Chrome / modal must never carry a stale zoom (e.g. from a previous
+    // session where pinch-zoom was allowed); force them to 0 once the
+    // webview is ready, both on the component and on the CEF host.
+    if chrome_q.get(entity).is_ok() || modal_q.get(entity).is_ok() {
         if let Ok(mut zoom) = zoom_q.get_mut(entity) {
             zoom.0 = 0.0;
         }

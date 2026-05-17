@@ -118,6 +118,11 @@ pub const WINDOW_PAD_RIGHT_PX: f32 = 4.0;
 pub const WINDOW_PAD_BOTTOM_PX: f32 = 4.0;
 pub const WINDOW_PAD_LEFT_PX: f32 = 0.0;
 
+/// Default page bg color for terminal-like stacks (terminals, processes,
+/// agent CLIs). Matches catppuccin-mocha `base` so the chrome url row
+/// blends with the terminal surface below it.
+pub const TERMINAL_CHROME_BG_COLOR: &str = "#1e1e2e";
+
 #[cfg(test)]
 mod tests {
     use super::*;

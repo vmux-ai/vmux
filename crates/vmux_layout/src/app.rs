@@ -605,10 +605,14 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                 "{label}"
             }
             div { class: "flex flex-col gap-px",
-                for stack in pane.stacks.iter() {
+                NewStackRow { pane_id }
+                for stack in pane
+                    .stacks
+                    .iter()
+                    .filter(|s| !(s.url.is_empty() && s.title == "New Stack"))
+                {
                     SideSheetStackRow { stack: stack.clone(), pane_id }
                 }
-                NewStackRow { pane_id }
             }
         }
     }
@@ -619,7 +623,7 @@ fn NewStackRow(pane_id: u64) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+            class: "glass group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-foreground",
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
                     command: "new_stack".to_string(),
@@ -631,7 +635,7 @@ fn NewStackRow(pane_id: u64) -> Element {
                 path { d: "M12 5v14" }
                 path { d: "M5 12h14" }
             }
-            span { class: "min-w-0 flex-1 truncate text-ui", "New Stack" }
+            span { class: "min-w-0 flex-1 truncate text-ui font-medium", "New Stack" }
         }
     }
 }

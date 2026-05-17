@@ -222,6 +222,7 @@ fn handle_stack_commands(
                     commands.entity(stack).insert(vmux_core::PageMetadata {
                         url: TERMINAL_WEBVIEW_URL.to_string(),
                         title: "Terminal".to_string(),
+                        bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
                         ..default()
                     });
                     spawn_requests.write(LayoutSpawnRequest::Terminal { stack });
@@ -232,6 +233,7 @@ fn handle_stack_commands(
                     commands.entity(stack).insert(vmux_core::PageMetadata {
                         url: PROCESSES_WEBVIEW_URL.to_string(),
                         title: "Background Services".to_string(),
+                        bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
                         ..default()
                     });
                     spawn_requests.write(LayoutSpawnRequest::ProcessesMonitor { stack });

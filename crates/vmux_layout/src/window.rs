@@ -326,10 +326,13 @@ fn setup(
     ));
 
     commands.spawn((
-        Modal,
-        HostWindow(pw),
-        Browser,
-        WebviewTransparent,
+        (
+            Modal,
+            HostWindow(pw),
+            Browser,
+            WebviewTransparent,
+            bevy_cef::prelude::CefIgnorePinchZoom,
+        ),
         Node {
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),

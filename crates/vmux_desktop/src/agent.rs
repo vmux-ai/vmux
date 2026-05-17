@@ -287,6 +287,7 @@ pub(crate) fn spawn_terminal_tab(
     commands.entity(tab).insert(PageMetadata {
         url: TERMINAL_WEBVIEW_URL.to_string(),
         title,
+        bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
         ..default()
     });
     let terminal = commands
@@ -414,6 +415,7 @@ pub(crate) fn spawn_process_tab(
     commands.entity(tab).insert(PageMetadata {
         url: TERMINAL_WEBVIEW_URL.to_string(),
         title,
+        bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
         ..default()
     });
     let launch = crate::terminal::launch::TerminalLaunch {
@@ -498,6 +500,7 @@ pub(crate) fn attach_app_agent_to_stack(
     commands.entity(stack).insert(PageMetadata {
         url: url.clone(),
         title: format!("{provider}/{model}"),
+        bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
         ..default()
     });
     commands.entity(stack).insert((
@@ -628,6 +631,7 @@ pub(crate) fn spawn_processes_tab(
     commands.entity(tab).insert(PageMetadata {
         url: vmux_service::webview::event::PROCESSES_WEBVIEW_URL.to_string(),
         title: "Background Services".to_string(),
+        bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
         ..default()
     });
     commands.spawn((
