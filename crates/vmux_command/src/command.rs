@@ -381,6 +381,7 @@ pub enum WindowCommand {
     )]
     ToggleFullscreen,
     #[menu(id = "open_settings", label = "Settings", accel = "super+,", hidden)]
+    #[shortcut(direct = "Super+,")]
     Settings,
 }
 
