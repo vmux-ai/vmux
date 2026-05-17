@@ -684,7 +684,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 r#type: "button",
                 aria_label: "Close stack",
                 title: "Close stack",
-                class: "ml-auto flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10",
+                class: "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10",
                 onclick: move |evt| {
                     evt.stop_propagation();
                     let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
@@ -693,7 +693,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         stack_index,
                     });
                 },
-                Icon { class: "h-2.5 w-2.5",
+                Icon { class: "h-3 w-3 pointer-events-none",
                     path { d: "M18 6 6 18" }
                     path { d: "m6 6 12 12" }
                 }
