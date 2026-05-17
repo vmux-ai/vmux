@@ -109,9 +109,8 @@ pub const HEADER_HEIGHT_PX: f32 = 60.0;
 pub const HEADER_TOP_PX: f32 = 4.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
-/// Hardcoded window edge padding (px) applied uniformly to all sides.
-/// Not user-configurable.
-pub const WINDOW_PAD_PX: f32 = 8.0;
+/// Hardcoded window edge padding (px). Not user-configurable.
+pub const WINDOW_PAD_PX: f32 = 4.0;
 
 /// Default page bg color for terminal-like stacks (terminals, processes,
 /// agent CLIs). Matches catppuccin-mocha `base` so the chrome url row

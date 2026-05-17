@@ -354,7 +354,7 @@ pub fn split_pane_in_two(
     commands: &mut Commands,
     active: Entity,
     direction: PaneSplitDirection,
-    pane_settings: &crate::settings::PaneSettings,
+    _pane_settings: &crate::settings::PaneSettings,
     existing_tabs: &[Entity],
 ) -> (Entity, Entity) {
     let pane1 = spawn_leaf_pane(commands, active);
@@ -368,7 +368,7 @@ pub fn split_pane_in_two(
         PaneSplitDirection::Row => FlexDirection::Row,
         PaneSplitDirection::Column => FlexDirection::Column,
     };
-    let gap = pane_split_gaps(direction, pane_settings.gap);
+    let gap = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
     commands.entity(active).insert(PaneSplit { direction });
     commands.entity(active).insert(Node {
         flex_grow: 1.0,
