@@ -202,7 +202,9 @@ fn HeaderView(titlebar_height: f32) -> Element {
     let (url_row_style, url_row_class) = url_row_chrome(active_bg_color.as_deref());
 
     rsx! {
-        div { class: "flex min-h-0 min-w-0 flex-1 flex-col text-foreground",
+        div {
+            class: "flex h-full min-h-0 min-w-0 flex-col text-foreground",
+            style: "padding-top:{titlebar_height}px;",
             div { class: "flex min-w-0 shrink-0 items-center gap-1 px-2",
                 if tabs_loading {
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
