@@ -596,7 +596,7 @@ fn SideSheetSpaceRow(space: vmux_space::event::SpaceRow) -> Element {
 
 #[component]
 fn PaneSection(pane: PaneNode, index: usize) -> Element {
-    let label = format!("Pane {}", index + 1);
+    let label = format!("Stack {}", index + 1);
     let pane_id = pane.id;
     let any_loading = pane.stacks.iter().any(|s| s.is_loading);
 
