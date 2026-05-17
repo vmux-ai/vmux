@@ -109,6 +109,14 @@ pub const HEADER_HEIGHT_PX: f32 = 60.0;
 pub const HEADER_TOP_PX: f32 = 4.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
+/// Total vertical space the chrome reserves in the layout above the pane:
+/// the top offset, the titlebar overlap area (where macOS draws the
+/// traffic lights), and the URL row height. Bevy's Header entity uses
+/// this for its node height so the pane begins exactly where the chrome
+/// webview's URL row ends — anything less would leave the pane peeking
+/// behind the chrome.
+pub const CHROME_RESERVED_HEIGHT_PX: f32 = HEADER_TOP_PX + 44.0 + HEADER_HEIGHT_PX;
+
 /// Hardcoded window edge padding (px). Not user-configurable.
 pub const WINDOW_PAD_PX: f32 = 4.0;
 

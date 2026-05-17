@@ -273,7 +273,7 @@ fn setup(
         Transform::default(),
         GlobalTransform::default(),
         Node {
-            height: Val::Px(crate::event::HEADER_HEIGHT_PX),
+            height: Val::Px(crate::event::CHROME_RESERVED_HEIGHT_PX),
             flex_shrink: 0.0,
             ..default()
         },
