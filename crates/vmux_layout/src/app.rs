@@ -97,6 +97,9 @@ fn favicon_src_for_tab(tab: &TabRow) -> Option<String> {
 }
 
 fn format_address(stack: &StackRow) -> String {
+    if stack.url.starts_with("vmux://") {
+        return stack.url.clone();
+    }
     let host = host_for_favicon_fallback(&stack.url);
     let title = stack.title.trim();
     match (host, title.is_empty()) {
