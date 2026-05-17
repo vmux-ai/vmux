@@ -407,6 +407,7 @@ fn pane_count_for_browser(
 
 fn sync_webview_pane_corner_clip(
     settings: Res<AppSettings>,
+    zen: Res<vmux_layout::zen::ZenMode>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     tabs: Query<
         (
@@ -432,10 +433,11 @@ fn sync_webview_pane_corner_clip(
         let w = size.0.x.max(1.0e-6);
         let h = size.0.y.max(1.0e-6);
         // corner_mode = 1.0 → round bottom corners only, so the pane top
-        // sits flush against the url row above it. When the active tab
-        // has multiple split panes, use 0.0 → round all corners so each
-        // pane visually floats.
-        let mode = pane_count_for_browser(
+        // sits flush against the url row above it. Switch to 0.0 (all
+        // corners) when the active tab is split (each pane floats as a
+        // card) or when the chrome is hidden via zen mode (no url row
+        // above to merge with).
+        let pane_count = pane_count_for_browser(
             browser_e,
             &child_of_q,
             &tab_q,
@@ -443,8 +445,12 @@ fn sync_webview_pane_corner_clip(
             &all_children,
             &leaf_panes,
         )
-        .map(|count| if count > 1 { 0.0 } else { 1.0 })
-        .unwrap_or(1.0);
+        .unwrap_or(1);
+        let mode = if zen.active || pane_count > 1 {
+            0.0
+        } else {
+            1.0
+        };
         if let Some(mat) = materials.get_mut(mat_h.id()) {
             mat.extension.pane_corner_clip = Vec4::new(r, w, h, mode);
         }
