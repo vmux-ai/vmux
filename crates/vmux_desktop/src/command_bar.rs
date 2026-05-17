@@ -418,20 +418,34 @@ fn handle_open_command_bar(
         .p1()
         .map(|providers| providers.command_entries())
         .unwrap_or_default();
-    let app_agent_entries = space_params
-        .p3()
-        .map(|strategies| {
-            strategies
-                .app_strategies()
-                .map(|s| AppAgentEntry {
-                    id: app_agent_id(s.provider(), s.model()),
-                    name: format!("New {}/{} chat (App)", s.provider(), s.model()),
-                    provider: s.provider().to_string(),
-                    model: s.model().to_string(),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let app_agent_entries = {
+        let mut entries: Vec<AppAgentEntry> = space_params
+            .p3()
+            .map(|strategies| {
+                strategies
+                    .app_strategies()
+                    .map(|s| AppAgentEntry {
+                        id: app_agent_id(s.provider(), s.model()),
+                        name: format!("New {}/{} chat (App)", s.provider(), s.model()),
+                        provider: s.provider().to_string(),
+                        model: s.model().to_string(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(default) = vmux_agent::resolve_default_app_provider() {
+            entries.insert(
+                0,
+                AppAgentEntry {
+                    id: app_agent_id(default.provider, default.default_model),
+                    name: "New chat".to_string(),
+                    provider: default.provider.to_string(),
+                    model: default.default_model.to_string(),
+                },
+            );
+        }
+        entries
+    };
     let mut new_stack_ctx = space_params.p2();
 
     let request = command_bar_open_request(reader.read().copied());
@@ -962,7 +976,30 @@ fn on_command_bar_action(
 
                 if let Some(stack_e) = empty_stack {
                     // New tab mode: attach content to the empty tab
-                    if url.starts_with("vmux://terminal") {
+                    if url == "vmux://agent/" || url == "vmux://agent" {
+                        if let Some(p) = vmux_agent::resolve_default_app_provider() {
+                            let sid = uuid::Uuid::new_v4().to_string();
+                            let strategies_ref = resource_params.p4();
+                            if let Some(strategies) = strategies_ref.as_deref() {
+                                let _ = crate::agent::attach_app_agent_to_stack(
+                                    stack_e,
+                                    p.provider,
+                                    p.default_model,
+                                    &sid,
+                                    &mut commands,
+                                    &mut meshes,
+                                    &mut webview_mt,
+                                    strategies,
+                                );
+                            } else {
+                                bevy::log::warn!("agent strategies not registered; skipping spawn");
+                            }
+                        } else {
+                            bevy::log::warn!(
+                                "vmux://agent/ requested but no provider API key is set"
+                            );
+                        }
+                    } else if url.starts_with("vmux://terminal") {
                         let known =
                             parse_pid_from_url(&url).and_then(|p| pid_to_entity.get(&p).copied());
                         if let Some(entity) = known {
@@ -1122,6 +1159,51 @@ fn on_command_bar_action(
                         writer_params
                             .p0()
                             .write(AppCommand::Terminal(TerminalCommand::New));
+                    } else if url == "vmux://agent/" || url == "vmux://agent" {
+                        if let Some(p) = vmux_agent::resolve_default_app_provider() {
+                            let (_, active_pane_opt, _) = focused_stack(
+                                &tab_q,
+                                &all_children,
+                                &leaf_panes,
+                                &pane_ts,
+                                &pane_children,
+                                &stack_ts,
+                            );
+                            if let Some(pane_e) = active_pane_opt {
+                                let sid = uuid::Uuid::new_v4().to_string();
+                                let strategies_ref = resource_params.p4();
+                                if let Some(strategies) = strategies_ref.as_deref() {
+                                    if crate::agent::spawn_app_agent_tab(
+                                        p.provider,
+                                        p.default_model,
+                                        pane_e,
+                                        &sid,
+                                        &mut commands,
+                                        &mut meshes,
+                                        &mut webview_mt,
+                                        strategies,
+                                    )
+                                    .is_some()
+                                    {
+                                        custom_keyboard_restore = true;
+                                    } else {
+                                        bevy::log::warn!(
+                                            "no App agent strategy registered for {}/{}",
+                                            p.provider,
+                                            p.default_model
+                                        );
+                                    }
+                                } else {
+                                    bevy::log::warn!(
+                                        "agent strategies not registered; skipping spawn"
+                                    );
+                                }
+                            }
+                        } else {
+                            bevy::log::warn!(
+                                "vmux://agent/ requested but no provider API key is set"
+                            );
+                        }
                     } else if let Some((provider, model, sid_opt)) =
                         crate::agent::parse_app_agent_url(&url)
                     {

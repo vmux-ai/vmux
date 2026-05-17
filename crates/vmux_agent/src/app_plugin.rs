@@ -1,8 +1,13 @@
 use bevy::prelude::*;
+use bevy_cef::prelude::BinJsEmitEventPlugin;
 
 use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession};
+use crate::run_state_kind::LastRunStateKind;
 use crate::strategy::AgentStrategies;
-use crate::systems::{approval, dispatch_tool, drain_stream, process_input};
+use crate::systems::{
+    approval, continue_after_tool, dispatch_tool, drain_stream, process_input, surface_errors,
+};
+use crate::toast::AgentToast;
 
 pub struct AppAgentPlugin;
 
@@ -11,6 +16,10 @@ impl Plugin for AppAgentPlugin {
         app.register_type::<AgentSession>()
             .register_type::<AgentMessages>()
             .register_type::<AgentApprovalPolicy>()
+            .add_message::<AgentToast>()
+            .add_plugins(BinJsEmitEventPlugin::<AgentToast>::with_id(
+                "vmux-agent-toast",
+            ))
             .add_observer(approval::handle_approval_reply)
             .add_systems(
                 Update,
@@ -18,6 +27,9 @@ impl Plugin for AppAgentPlugin {
                     process_input::process_user_input,
                     drain_stream::drain_stream,
                     dispatch_tool::dispatch_tool,
+                    continue_after_tool::continue_after_tool,
+                    surface_errors::surface_errors,
+                    attach_last_run_state_kind,
                 ),
             );
 
@@ -27,14 +39,25 @@ impl Plugin for AppAgentPlugin {
     }
 }
 
+fn attach_last_run_state_kind(
+    mut commands: Commands,
+    q: Query<Entity, (With<AgentSession>, Without<LastRunStateKind>)>,
+) {
+    for entity in &q {
+        commands.entity(entity).insert(LastRunStateKind::default());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_cef::prelude::BinIpcEventRawBuffer;
 
     #[test]
     fn plugin_builds_without_panic() {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default());
+        app.init_resource::<BinIpcEventRawBuffer>();
         app.add_plugins(AppAgentPlugin);
         app.update();
     }

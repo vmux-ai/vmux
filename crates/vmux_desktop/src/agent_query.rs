@@ -26,6 +26,7 @@ type ChildrenQuery<'world, 'state> = Query<'world, 'state, &'static Children>;
 
 pub(crate) fn handle_agent_queries(
     mut reader: MessageReader<AgentQueryRequest>,
+    mut query_result_writer: MessageWriter<crate::agent::AgentQueryResultMessage>,
     service: Option<Res<ServiceClient>>,
     tabs: TabQuery,
     panes: PaneQuery,
@@ -36,7 +37,6 @@ pub(crate) fn handle_agent_queries(
     settings: Res<crate::settings::AppSettings>,
     focused: Option<Res<FocusedStack>>,
 ) {
-    let Some(service) = service else { return };
     let Some(focused) = focused else { return };
     let default_pl = ServiceProcessList::default();
     let process_list = process_list.as_deref().unwrap_or(&default_pl);
@@ -68,10 +68,16 @@ pub(crate) fn handle_agent_queries(
                 AgentQueryResult::Settings(crate::settings::serialize_settings_to_json(&settings))
             }
         };
-        service.0.send(ClientMessage::AgentQueryResponse {
+        query_result_writer.write(crate::agent::AgentQueryResultMessage {
             request_id: request.request_id,
-            result,
+            result: result.clone(),
         });
+        if let Some(service) = service.as_ref() {
+            service.0.send(ClientMessage::AgentQueryResponse {
+                request_id: request.request_id,
+                result,
+            });
+        }
     }
 }
 

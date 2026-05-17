@@ -67,6 +67,7 @@ pub enum AgentUrl {
         model: String,
         sid: String,
     },
+    AppDefault,
 }
 
 impl AgentUrl {
@@ -74,6 +75,7 @@ impl AgentUrl {
         let body = url.strip_prefix("vmux://agent/")?;
         let segs: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
         match segs.as_slice() {
+            [] => Some(AgentUrl::AppDefault),
             [kind_seg, sid] => {
                 let kind = AgentKind::from_url_segment(kind_seg)?;
                 Some(AgentUrl::Cli {
@@ -93,7 +95,7 @@ impl AgentUrl {
     pub fn variant(&self) -> AgentVariant {
         match self {
             AgentUrl::Cli { .. } => AgentVariant::Cli,
-            AgentUrl::App { .. } => AgentVariant::App,
+            AgentUrl::App { .. } | AgentUrl::AppDefault => AgentVariant::App,
         }
     }
 
@@ -101,6 +103,7 @@ impl AgentUrl {
         match self {
             AgentUrl::Cli { sid, .. } => sid,
             AgentUrl::App { sid, .. } => sid,
+            AgentUrl::AppDefault => "",
         }
     }
 
@@ -112,6 +115,7 @@ impl AgentUrl {
                 model,
                 sid,
             } => format!("{}{sid}", app_url_prefix(provider, model)),
+            AgentUrl::AppDefault => "vmux://agent/".to_string(),
         }
     }
 }
@@ -213,6 +217,22 @@ mod tests {
     fn prefix_only_url_rejected() {
         assert_eq!(AgentUrl::parse("vmux://agent/vibe/"), None);
         assert_eq!(AgentUrl::parse("vmux://agent/openai/gpt-5.5/"), None);
+    }
+
+    #[test]
+    fn bare_agent_url_parses_to_app_default() {
+        assert_eq!(AgentUrl::parse("vmux://agent/"), Some(AgentUrl::AppDefault));
+    }
+
+    #[test]
+    fn app_default_formats_back_to_bare() {
+        assert_eq!(AgentUrl::AppDefault.format(), "vmux://agent/");
+    }
+
+    #[test]
+    fn app_default_round_trip() {
+        let url = AgentUrl::AppDefault.format();
+        assert_eq!(AgentUrl::parse(&url), Some(AgentUrl::AppDefault));
     }
 
     #[test]
