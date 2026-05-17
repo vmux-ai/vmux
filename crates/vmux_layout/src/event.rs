@@ -106,7 +106,7 @@ pub fn titlebar_nav_style(titlebar_height: f32) -> String {
 }
 
 pub const HEADER_HEIGHT_PX: f32 = 60.0;
-pub const HEADER_TOP_PX: f32 = 4.0;
+pub const HEADER_TOP_PX: f32 = 0.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
 /// Total vertical space the chrome reserves in the layout above the pane:
