@@ -379,11 +379,32 @@ fn on_space_command(
     mut focus: Option<ResMut<crate::layout::stack::FocusedStack>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut spawn_requests: MessageWriter<vmux_layout::LayoutSpawnRequest>,
     mut commands: Commands,
 ) {
     let root = profile::shared_data_dir();
     let mut registry = read_space_registry_from(&root);
     let evt = &trigger.event().payload;
+    if evt.command == "open_page" {
+        let Some(focus_res) = focus.as_deref() else {
+            return;
+        };
+        let Some(pane) = focus_res.pane else {
+            return;
+        };
+        let stack = commands
+            .spawn((
+                crate::layout::stack::stack_bundle(),
+                vmux_history::LastActivatedAt::now(),
+                ChildOf(pane),
+            ))
+            .id();
+        spawn_requests.write(vmux_layout::LayoutSpawnRequest::OpenUrl {
+            stack,
+            url: SPACES_WEBVIEW_URL.to_string(),
+        });
+        return;
+    }
     if evt.command == "delete" {
         let Some(id) = evt.space_id.as_deref() else {
             return;

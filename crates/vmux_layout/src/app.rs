@@ -552,20 +552,19 @@ fn SideSheetView() -> Element {
 
 #[component]
 fn SideSheetSpaceRow(space: vmux_space::event::SpaceRow) -> Element {
-    let attach_id = space.id.clone();
     let is_active = space.is_active;
     rsx! {
         button {
             r#type: "button",
             class: if is_active {
-                "glass group flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-foreground"
+                "glass group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-foreground"
             } else {
                 "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground"
             },
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&vmux_space::event::SpaceCommandEvent {
-                    command: "attach".to_string(),
-                    space_id: Some(attach_id.clone()),
+                    command: "open_page".to_string(),
+                    space_id: None,
                     name: None,
                 });
             },
