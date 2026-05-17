@@ -381,24 +381,72 @@ fn sync_cef_webview_resize_after_ui(
     }
 }
 
+/// Walks up from a browser entity to find its enclosing Tab, then counts
+/// leaf panes under that tab. Returns None if the parent chain doesn't
+/// reach a Tab.
+fn pane_count_for_browser(
+    browser_e: Entity,
+    child_of_q: &Query<&ChildOf>,
+    tab_q: &Query<(), With<Tab>>,
+    _pane_q: &Query<(), With<Pane>>,
+    all_children: &Query<&Children>,
+    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+) -> Option<usize> {
+    let mut cur = browser_e;
+    let tab = loop {
+        let parent = child_of_q.get(cur).ok()?.get();
+        if tab_q.get(parent).is_ok() {
+            break parent;
+        }
+        cur = parent;
+    };
+    let mut leaves = Vec::new();
+    collect_leaf_panes(tab, all_children, leaf_panes, &mut leaves);
+    Some(leaves.len())
+}
+
 fn sync_webview_pane_corner_clip(
     settings: Res<AppSettings>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    tabs: Query<(&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>), With<Browser>>,
+    tabs: Query<
+        (
+            Entity,
+            &WebviewSize,
+            &MeshMaterial3d<WebviewExtendStandardMaterial>,
+        ),
+        With<Browser>,
+    >,
     status: Query<(&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>), With<Header>>,
     side_sheet: Query<
         (&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>),
         With<SideSheet>,
     >,
+    child_of_q: Query<&ChildOf>,
+    tab_q: Query<(), With<Tab>>,
+    pane_q: Query<(), With<Pane>>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
 ) {
     let r = settings.layout.radius;
-    for (size, mat_h) in &tabs {
+    for (browser_e, size, mat_h) in &tabs {
         let w = size.0.x.max(1.0e-6);
         let h = size.0.y.max(1.0e-6);
+        // corner_mode = 1.0 → round bottom corners only, so the pane top
+        // sits flush against the url row above it. When the active tab
+        // has multiple split panes, use 0.0 → round all corners so each
+        // pane visually floats.
+        let mode = pane_count_for_browser(
+            browser_e,
+            &child_of_q,
+            &tab_q,
+            &pane_q,
+            &all_children,
+            &leaf_panes,
+        )
+        .map(|count| if count > 1 { 0.0 } else { 1.0 })
+        .unwrap_or(1.0);
         if let Some(mat) = materials.get_mut(mat_h.id()) {
-            // corner_mode = 1.0 → round bottom corners only, so the pane top
-            // sits flush against the url row above it.
-            mat.extension.pane_corner_clip = Vec4::new(r, w, h, 1.0);
+            mat.extension.pane_corner_clip = Vec4::new(r, w, h, mode);
         }
     }
     for (size, mat_h) in &status {

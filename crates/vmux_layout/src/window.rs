@@ -79,6 +79,7 @@ impl Plugin for WindowPlugin {
                 fit_window_to_screen,
                 sync_glass_pane_clip,
                 sync_window_layout_to_settings,
+                sync_main_column_gap_to_pane_count,
             ),
         )
         .add_systems(
@@ -210,7 +211,12 @@ fn setup(
                 height: Val::Percent(100.0),
                 position_type: PositionType::Relative,
                 flex_direction: FlexDirection::Row,
-                padding: UiRect::all(Val::Px(crate::event::WINDOW_PAD_PX)),
+                padding: UiRect {
+                    top: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    right: Val::Px(crate::event::WINDOW_PAD_PX),
+                    bottom: Val::Px(crate::event::WINDOW_PAD_PX),
+                },
                 column_gap: Val::Px(0.0),
                 ..default()
             },
@@ -510,15 +516,24 @@ fn sync_window_layout_to_settings(
     let gap = crate::event::PANE_GAP_PX;
     let cfg_width = crate::event::SIDE_SHEET_WIDTH_PX;
 
-    // Root window: padding + flex-row column gap.
+    // Root window: padding + flex-row column gap. Top and left are flush
+    // with the window so the chrome / pane meet the system edge; right
+    // and bottom keep a gap.
     if let Ok(mut node) = window_q.single_mut() {
-        node.padding = UiRect::all(Val::Px(pad));
+        node.padding = UiRect {
+            top: Val::Px(0.0),
+            left: Val::Px(0.0),
+            right: Val::Px(pad),
+            bottom: Val::Px(pad),
+        };
         node.column_gap = Val::Px(gap);
     }
 
-    if let Ok(mut node) = main_column_q.single_mut() {
-        node.row_gap = Val::Px(gap);
-    }
+    // MainColumn row_gap (between Header and Main pane container) is
+    // managed by sync_main_column_gap_to_pane_count, which keeps it 0
+    // when the active tab has a single pane and switches to PANE_GAP_PX
+    // when split. Don't override here.
+    let _ = main_column_q.single_mut();
 
     // Side sheet width resource: initialise from settings on first run.
     if sheet_width.0 <= 0.0 {
@@ -544,6 +559,39 @@ fn sync_window_layout_to_settings(
                 node.right = Val::Px(pad);
                 node.bottom = Val::Px(pad);
             }
+        }
+    }
+}
+
+/// Keep MainColumn's row_gap at 0 when the active tab has a single pane
+/// (so the url row sits flush against the pane content) and switch to
+/// PANE_GAP_PX when it's split (so panes visually separate from chrome).
+fn sync_main_column_gap_to_pane_count(
+    focus: Res<crate::stack::FocusedStack>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    mut main_column_q: Query<&mut Node, With<MainColumn>>,
+) {
+    let pane_count = focus
+        .tab
+        .map(|tab_e| {
+            let mut leaves = Vec::new();
+            crate::stack::collect_leaf_panes(tab_e, &all_children, &leaf_panes, &mut leaves);
+            leaves.len()
+        })
+        .unwrap_or(0);
+    let target = if pane_count > 1 {
+        crate::event::PANE_GAP_PX
+    } else {
+        0.0
+    };
+    for mut node in &mut main_column_q {
+        let current = match node.row_gap {
+            Val::Px(v) => v,
+            _ => f32::NAN,
+        };
+        if (current - target).abs() > 0.01 {
+            node.row_gap = Val::Px(target);
         }
     }
 }
