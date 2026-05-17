@@ -110,8 +110,9 @@ fn format_address(stack: &StackRow) -> String {
 fn header_position_style(state: &LayoutStateEvent) -> String {
     let left = state.main_chrome_left();
     let top = vmux_layout::event::HEADER_TOP_PX;
+    let right = vmux_layout::event::WINDOW_PAD_RIGHT_PX;
     let height = state.header_height_total();
-    format!("left:{left}px;top:{top}px;right:0;height:{height}px;")
+    format!("left:{left}px;top:{top}px;right:{right}px;height:{height}px;")
 }
 
 #[component]

@@ -666,7 +666,7 @@ fn push_layout_state_emit(
         header_height: HEADER_HEIGHT_PX,
         side_sheet_width: side_sheet_width.0,
         pane_gap: settings.layout.pane.gap,
-        titlebar_height: effective_titlebar_height(settings.layout.window.pad_top()),
+        titlebar_height: effective_titlebar_height(vmux_layout::event::WINDOW_PAD_TOP_PX),
         radius: settings.layout.radius,
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();

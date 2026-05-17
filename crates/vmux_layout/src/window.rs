@@ -211,10 +211,10 @@ fn setup(
                 position_type: PositionType::Relative,
                 flex_direction: FlexDirection::Row,
                 padding: UiRect {
-                    top: Val::Px(settings.window.pad_top()),
-                    right: Val::Px(settings.window.pad_right()),
-                    bottom: Val::Px(settings.window.pad_bottom()),
-                    left: Val::Px(settings.window.pad_left()),
+                    top: Val::Px(crate::event::WINDOW_PAD_TOP_PX),
+                    right: Val::Px(crate::event::WINDOW_PAD_RIGHT_PX),
+                    bottom: Val::Px(crate::event::WINDOW_PAD_BOTTOM_PX),
+                    left: Val::Px(crate::event::WINDOW_PAD_LEFT_PX),
                 },
                 column_gap: Val::Px(0.0),
                 ..default()
@@ -300,9 +300,9 @@ fn setup(
         Node {
             width: Val::Px(280.0),
             position_type: PositionType::Absolute,
-            right: Val::Px(settings.window.pad_right()),
-            top: Val::Px(settings.window.pad_top()),
-            bottom: Val::Px(settings.window.pad_bottom()),
+            right: Val::Px(crate::event::WINDOW_PAD_RIGHT_PX),
+            top: Val::Px(crate::event::WINDOW_PAD_TOP_PX),
+            bottom: Val::Px(crate::event::WINDOW_PAD_BOTTOM_PX),
             display: Display::None,
             ..default()
         },
@@ -316,9 +316,9 @@ fn setup(
         Node {
             height: Val::Px(200.0),
             position_type: PositionType::Absolute,
-            left: Val::Px(settings.window.pad_left()),
-            right: Val::Px(settings.window.pad_right()),
-            bottom: Val::Px(settings.window.pad_bottom()),
+            left: Val::Px(crate::event::WINDOW_PAD_LEFT_PX),
+            right: Val::Px(crate::event::WINDOW_PAD_RIGHT_PX),
+            bottom: Val::Px(crate::event::WINDOW_PAD_BOTTOM_PX),
             display: Display::None,
             ..default()
         },
@@ -516,10 +516,10 @@ fn sync_window_layout_to_settings(
         return;
     }
 
-    let pad_top = settings.window.pad_top();
-    let pad_right = settings.window.pad_right();
-    let pad_bottom = settings.window.pad_bottom();
-    let pad_left = settings.window.pad_left();
+    let pad_top = crate::event::WINDOW_PAD_TOP_PX;
+    let pad_right = crate::event::WINDOW_PAD_RIGHT_PX;
+    let pad_bottom = crate::event::WINDOW_PAD_BOTTOM_PX;
+    let pad_left = crate::event::WINDOW_PAD_LEFT_PX;
     let gap = settings.pane.gap;
     let cfg_width = settings.side_sheet.width;
 

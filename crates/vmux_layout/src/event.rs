@@ -109,6 +109,15 @@ pub const HEADER_HEIGHT_PX: f32 = 60.0;
 pub const HEADER_TOP_PX: f32 = 4.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
+/// Hardcoded window edge padding (px). Not user-configurable — the layout
+/// snaps the chrome to the top + left edges and reserves a small gap on
+/// the right + bottom to keep the pane from butting up against the
+/// system window corners.
+pub const WINDOW_PAD_TOP_PX: f32 = 0.0;
+pub const WINDOW_PAD_RIGHT_PX: f32 = 4.0;
+pub const WINDOW_PAD_BOTTOM_PX: f32 = 4.0;
+pub const WINDOW_PAD_LEFT_PX: f32 = 0.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
