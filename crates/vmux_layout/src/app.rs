@@ -419,9 +419,9 @@ fn Tab(tab: TabRow) -> Element {
             (
                 format!("--tab-bg:{color};"),
                 format!(
-                    "{skirt_classes} group flex h-10 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-2 rounded-t-md pl-2.5 pr-2.5 bg-[var(--tab-bg)] {text_class}"
+                    "{skirt_classes} group flex h-10 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-2 rounded-t-md px-3.5 bg-[var(--tab-bg)] {text_class}"
                 ),
-                format!("min-w-0 truncate text-ui-xs font-medium {text_class}"),
+                format!("min-w-0 truncate text-ui font-medium {text_class}"),
                 format!(
                     "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/20 {text_class}"
                 ),
@@ -430,17 +430,17 @@ fn Tab(tab: TabRow) -> Element {
             (
                 "--tab-bg:var(--glass);".to_string(),
                 format!(
-                    "{skirt_classes} glass group flex h-10 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-2 rounded-t-md border-b-0 pl-2.5 pr-2.5"
+                    "{skirt_classes} glass group flex h-10 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-2 rounded-t-md border-b-0 px-3.5"
                 ),
-                "min-w-0 truncate text-ui-xs font-medium text-foreground".to_string(),
+                "min-w-0 truncate text-ui font-medium text-foreground".to_string(),
                 "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
             )
         }
     } else {
         (
             String::new(),
-            "group flex h-10 min-w-0 max-w-[200px] items-center gap-2 rounded-md pl-2.5 pr-2.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground".to_string(),
-            "min-w-0 truncate text-ui-xs".to_string(),
+            "group flex h-10 min-w-0 max-w-[200px] items-center gap-2 rounded-md px-3.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground".to_string(),
+            "min-w-0 truncate text-ui".to_string(),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
     };
@@ -452,7 +452,7 @@ fn Tab(tab: TabRow) -> Element {
             button {
                 r#type: "button",
                 title: "{tooltip}",
-                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2",
+                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2.5",
                 onclick: move |_| {
                     let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
                         command: "switch".to_string(),
