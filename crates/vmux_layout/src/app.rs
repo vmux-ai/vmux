@@ -605,7 +605,6 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                 "{label}"
             }
             div { class: "flex flex-col gap-px",
-                NewStackRow { pane_id }
                 for stack in pane
                     .stacks
                     .iter()
@@ -613,6 +612,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                 {
                     SideSheetStackRow { stack: stack.clone(), pane_id }
                 }
+                NewStackRow { pane_id }
             }
         }
     }
