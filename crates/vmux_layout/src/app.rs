@@ -570,8 +570,9 @@ fn SideSheetSpaceRow(space: vmux_space::event::SpaceRow) -> Element {
                 "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground"
             },
             onclick: move |_| {
+                let command = if is_active { "open_page" } else { "attach" };
                 let _ = try_cef_bin_emit_rkyv(&vmux_space::event::SpaceCommandEvent {
-                    command: "attach".to_string(),
+                    command: command.to_string(),
                     space_id: Some(space.id.clone()),
                     name: None,
                 });
