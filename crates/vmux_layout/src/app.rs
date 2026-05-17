@@ -211,11 +211,7 @@ fn HeaderView(titlebar_height: f32) -> Element {
                 } else {
                     div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pl-2",
                         for tab in tabs.iter() {
-                            TabPill {
-                                key: "{tab.id}",
-                                tab: tab.clone(),
-                                active_bg_color: active_bg_color.clone(),
-                            }
+                            TabPill { key: "{tab.id}", tab: tab.clone() }
                         }
                         NewTabButton {}
                     }
@@ -385,7 +381,7 @@ fn NavButton(
 }
 
 #[component]
-fn TabPill(tab: TabRow, active_bg_color: Option<String>) -> Element {
+fn TabPill(tab: TabRow) -> Element {
     let id_switch = tab.id.clone();
     let id_close = tab.id.clone();
     let display_title = if !tab.title.is_empty() {
@@ -412,7 +408,7 @@ fn TabPill(tab: TabRow, active_bg_color: Option<String>) -> Element {
         after:[background:radial-gradient(circle_at_top_right,transparent_0,transparent_8px,var(--tab-bg)_8px)]";
 
     let (pill_style, pill_class, title_class, close_class) = if is_active {
-        if let Some(ref color) = active_bg_color {
+        if let Some(ref color) = tab.bg_color {
             let text_class = text_color_class_for_bg(color);
             (
                 format!(
