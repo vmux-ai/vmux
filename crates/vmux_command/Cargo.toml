@@ -26,6 +26,7 @@ vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+vmux_history = { path = "../vmux_history", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true }

@@ -35,7 +35,8 @@ pub mod prelude {
     };
     pub use bevy_cef_core::prelude::{
         Browsers, CefDiskProfileRoot, CefEmbeddedHost, CefEmbeddedHosts, CefEmbeddedPageConfig,
-        CefExtensions, CommandLineConfig, WebviewChromeStateEvent, WebviewLoadingStateEvent,
+        CefExtensions, CefTransitionCore, CefTransitionQualifiers, CommandLineConfig,
+        WebviewChromeStateEvent, WebviewCommittedNavigationEvent, WebviewLoadingStateEvent,
         WebviewPopupEvent, compile_time_cef_embedded_scheme, resolved_cef_embedded_page_config,
     };
 }

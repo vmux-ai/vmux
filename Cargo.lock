@@ -9106,6 +9106,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "vmux_history",
  "vmux_macro",
  "vmux_ui",
  "vmux_webview_app",
@@ -9172,9 +9173,11 @@ version = "0.0.9"
 dependencies = [
  "bevy",
  "bevy_cef",
+ "bevy_cef_core",
  "bevy_ecs",
  "bevy_reflect",
  "dioxus",
+ "js-sys",
  "moonshine-save",
  "rkyv",
  "ron 0.8.1",
@@ -9183,6 +9186,7 @@ dependencies = [
  "vmux_ui",
  "vmux_webview_app",
  "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

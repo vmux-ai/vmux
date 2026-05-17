@@ -174,9 +174,11 @@ impl Plugin for AgentPlugin {
             .add_message::<AgentLaunchRequested>()
             .add_message::<vmux_agent::AgentSessionExited>()
             .add_message::<crate::settings::SettingsWriteRequest>()
+            .add_message::<vmux_history::query::HistoryOpenIntent>()
             .add_systems(
                 Update,
                 (
+                    forward_history_open_intent,
                     handle_agent_launch_requests,
                     handle_agent_commands,
                     crate::agent_query::handle_agent_queries,
@@ -813,6 +815,18 @@ fn active_webview_for_tab(
     })
 }
 
+fn active_stack_in_pane(
+    pane: Entity,
+    pane_children: &Query<&Children, With<Pane>>,
+    tab_filter: &Query<(), With<crate::layout::stack::Stack>>,
+) -> Option<Entity> {
+    pane_children
+        .get(pane)
+        .ok()?
+        .iter()
+        .rfind(|&e| tab_filter.contains(e))
+}
+
 fn parse_pane_target(
     s: &str,
     panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -1137,6 +1151,90 @@ fn handle_agent_commands(
                     }
                 }
             }
+            ServiceAgentCommand::BrowserGoBack { pane } => {
+                let target = match pane.as_deref() {
+                    Some(s) => parse_pane_target(s, &panes),
+                    None => focus.pane.filter(|p| panes.contains(*p)),
+                };
+                if let Some(pane_entity) = target {
+                    let active = active_webview_for_tab(
+                        active_stack_in_pane(pane_entity, &pane_children, &tab_filter),
+                        &browsers,
+                        &terminals,
+                    );
+                    if let Some(webview) = active {
+                        commands.trigger(bevy_cef::prelude::RequestGoBack { webview });
+                        AgentCommandResult::Ok
+                    } else {
+                        AgentCommandResult::Error(
+                            "browser_go_back: no browser in target pane".to_string(),
+                        )
+                    }
+                } else {
+                    AgentCommandResult::Error("browser_go_back: no active pane".to_string())
+                }
+            }
+            ServiceAgentCommand::BrowserGoForward { pane } => {
+                let target = match pane.as_deref() {
+                    Some(s) => parse_pane_target(s, &panes),
+                    None => focus.pane.filter(|p| panes.contains(*p)),
+                };
+                if let Some(pane_entity) = target {
+                    let active = active_webview_for_tab(
+                        active_stack_in_pane(pane_entity, &pane_children, &tab_filter),
+                        &browsers,
+                        &terminals,
+                    );
+                    if let Some(webview) = active {
+                        commands.trigger(bevy_cef::prelude::RequestGoForward { webview });
+                        AgentCommandResult::Ok
+                    } else {
+                        AgentCommandResult::Error(
+                            "browser_go_forward: no browser in target pane".to_string(),
+                        )
+                    }
+                } else {
+                    AgentCommandResult::Error("browser_go_forward: no active pane".to_string())
+                }
+            }
+            ServiceAgentCommand::BrowserHistorySearch { query, limit } => {
+                bevy::log::info!("browser_history_search: query={:?} limit={}", query, limit);
+                AgentCommandResult::Ok
+            }
+            ServiceAgentCommand::OpenInNewStack { url } => {
+                if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
+                    if url.starts_with("vmux://") {
+                        match spawn_vmux_tab(
+                            url,
+                            pane,
+                            &mut commands,
+                            &mut assets.meshes,
+                            &mut assets.webview_mt,
+                            &sp.settings,
+                            pid_to_entity,
+                            agent_to_entity,
+                            &strategies,
+                            &child_of_q,
+                        ) {
+                            Ok(()) => AgentCommandResult::Ok,
+                            Err(message) => {
+                                AgentCommandResult::Error(format!("open_in_new_stack: {message}"))
+                            }
+                        }
+                    } else {
+                        spawn_browser_tab(
+                            pane,
+                            url,
+                            &mut commands,
+                            &mut assets.meshes,
+                            &mut assets.webview_mt,
+                        );
+                        AgentCommandResult::Ok
+                    }
+                } else {
+                    AgentCommandResult::Error("open_in_new_stack: no focused pane".to_string())
+                }
+            }
         };
         if let Some(service) = service.as_ref() {
             service.0.send(ClientMessage::AgentCommandResponse {
@@ -1225,6 +1323,28 @@ fn handle_agent_launch_requests(
                 cwd: prepared.cwd.clone(),
             },
         ));
+    }
+}
+
+pub(crate) fn forward_history_open_intent(
+    mut intents: MessageReader<vmux_history::query::HistoryOpenIntent>,
+    mut requests: MessageWriter<AgentCommandRequest>,
+) {
+    for intent in intents.read() {
+        let command = if intent.in_new_stack {
+            ServiceAgentCommand::OpenInNewStack {
+                url: intent.url.clone(),
+            }
+        } else {
+            ServiceAgentCommand::BrowserNavigate {
+                url: intent.url.clone(),
+                pane: None,
+            }
+        };
+        requests.write(AgentCommandRequest {
+            request_id: AgentRequestId::new(),
+            command,
+        });
     }
 }
 

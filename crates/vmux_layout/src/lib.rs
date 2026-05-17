@@ -49,7 +49,7 @@ use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use chrome::{
     Browser, LayoutChrome, LayoutChromePlugin, Loading, NavigationState,
-    apply_chrome_state_from_cef,
+    apply_chrome_state_from_cef, mirror_metadata_to_url,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use focus_ring::FocusRingPlugin;

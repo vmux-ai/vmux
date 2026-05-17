@@ -1,4 +1,4 @@
-use crate::event::{CommandBarCommandEntry, CommandBarSpace, CommandBarTab};
+use crate::event::{CommandBarCommandEntry, CommandBarSpace, CommandBarTab, HistoryEntry};
 
 const SPACES_QUERY: &str = "vmux://spaces";
 pub const SPACES_PAGE_URL: &str = "vmux://spaces/";
@@ -33,6 +33,13 @@ pub enum CommandBarResultItem {
     },
     Navigate {
         url: String,
+    },
+    History {
+        url: String,
+        title: String,
+        favicon_url: String,
+        visit_count: u32,
+        last_visited_at: i64,
     },
 }
 
@@ -121,6 +128,7 @@ pub fn filter_results(
     commands: &[CommandBarCommandEntry],
     spaces: &[CommandBarSpace],
     new_tab: bool,
+    history: &[HistoryEntry],
 ) -> Vec<CommandBarResultItem> {
     let q = query.trim();
     if let Some(search) = space_query(q) {
@@ -219,6 +227,18 @@ pub fn filter_results(
     }
 
     if !starts_with_cmd {
+        for h in history.iter().take(5) {
+            items.push(CommandBarResultItem::History {
+                url: h.url.clone(),
+                title: h.title.clone(),
+                favicon_url: h.favicon_url.clone(),
+                visit_count: h.visit_count,
+                last_visited_at: h.last_visited_at,
+            });
+        }
+    }
+
+    if !starts_with_cmd {
         for c in commands {
             if c.name.to_lowercase().contains(&search_lower) || c.id.contains(&search_lower) {
                 items.push(CommandBarResultItem::Command {
@@ -267,6 +287,7 @@ mod tests {
             &[] as &[CommandBarCommandEntry],
             &spaces,
             false,
+            &[],
         );
 
         assert_eq!(
@@ -301,7 +322,7 @@ mod tests {
             shortcut: "super+k".to_string(),
         }];
 
-        let results = filter_results("vmux://spaces/", &[], &commands, &[], false);
+        let results = filter_results("vmux://spaces/", &[], &commands, &[], false, &[]);
 
         assert!(results.contains(&CommandBarResultItem::Navigate {
             url: SPACES_PAGE_URL.to_string(),
@@ -321,7 +342,7 @@ mod tests {
             shortcut: "<leader> s".to_string(),
         }];
 
-        let results = filter_results("spaces", &[], &commands, &[], false);
+        let results = filter_results("spaces", &[], &commands, &[], false, &[]);
 
         assert!(results.contains(&CommandBarResultItem::Navigate {
             url: SPACES_PAGE_URL.to_string(),
@@ -341,7 +362,7 @@ mod tests {
         ];
         let tabs: Vec<CommandBarTab> = Vec::new();
 
-        let results = filter_results("client", &tabs, &[], &spaces, false);
+        let results = filter_results("client", &tabs, &[], &spaces, false, &[]);
 
         assert!(matches!(
             results.first(),
