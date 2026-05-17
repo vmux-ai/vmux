@@ -405,6 +405,12 @@ fn TabPill(tab: TabRow, active_bg_color: Option<String>) -> Element {
         icon_error.set(false);
     }
 
+    let skirt_classes = "relative \
+        before:content-[''] before:absolute before:bottom-0 before:-left-2 before:h-2 before:w-2 before:pointer-events-none \
+        before:[background:radial-gradient(circle_at_top_left,transparent_0,transparent_8px,var(--tab-bg)_8px)] \
+        after:content-[''] after:absolute after:bottom-0 after:-right-2 after:h-2 after:w-2 after:pointer-events-none \
+        after:[background:radial-gradient(circle_at_top_right,transparent_0,transparent_8px,var(--tab-bg)_8px)]";
+
     let (pill_style, pill_class, title_class, close_class) = if is_active {
         if let Some(ref color) = active_bg_color {
             let text_class = text_color_class_for_bg(color);
@@ -413,7 +419,7 @@ fn TabPill(tab: TabRow, active_bg_color: Option<String>) -> Element {
                     "background-color: {color};--tab-bg: {color};max-width:200px;margin-bottom:-3px;padding-bottom:3px;"
                 ),
                 format!(
-                    "tab-pill-skirt group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-t-md pl-2 pr-1 {text_class}"
+                    "{skirt_classes} group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-t-md pl-2 pr-1 {text_class}"
                 ),
                 format!("min-w-0 truncate text-ui-xs font-medium {text_class}"),
                 format!(
@@ -423,7 +429,9 @@ fn TabPill(tab: TabRow, active_bg_color: Option<String>) -> Element {
         } else {
             (
                 "max-width:200px;margin-bottom:-3px;padding-bottom:3px;--tab-bg: var(--glass);".to_string(),
-                "tab-pill-skirt glass group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-t-md border-b-0 pl-2 pr-1".to_string(),
+                format!(
+                    "{skirt_classes} glass group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-t-md border-b-0 pl-2 pr-1"
+                ),
                 "min-w-0 truncate text-ui-xs font-medium text-foreground".to_string(),
                 "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
             )
