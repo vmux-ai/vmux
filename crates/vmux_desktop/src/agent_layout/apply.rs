@@ -3,14 +3,16 @@
 use std::collections::HashSet;
 
 use crate::layout::{
-    pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection},
+    pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
     stack::Stack,
     tab::Tab,
 };
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use vmux_core::PageMetadata;
+use vmux_history::LastActivatedAt;
 use vmux_layout::LayoutSpawnRequest;
+use vmux_layout::event::PANE_GAP_PX;
 use vmux_service::protocol::layout::{
     FocusDto, LayoutNodeDto, LayoutSnapshot, NodeKind, SpaceDto, SplitDirectionDto, TabDto,
     format_id, parse_id,
@@ -118,6 +120,11 @@ fn spawn_split(world: &mut World, parent: Entity, direction: SplitDirectionDto) 
         SplitDirectionDto::Row => PaneSplitDirection::Row,
         SplitDirectionDto::Column => PaneSplitDirection::Column,
     };
+    let flex_direction = match pane_split_dir {
+        PaneSplitDirection::Row => bevy::ui::FlexDirection::Row,
+        PaneSplitDirection::Column => bevy::ui::FlexDirection::Column,
+    };
+    let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
     world
         .spawn((
             Pane,
@@ -125,6 +132,15 @@ fn spawn_split(world: &mut World, parent: Entity, direction: SplitDirectionDto) 
                 direction: pane_split_dir,
             },
             PaneSize::default(),
+            Node {
+                flex_grow: 1.0,
+                flex_direction,
+                column_gap: gap.column_gap,
+                row_gap: gap.row_gap,
+                align_items: AlignItems::Stretch,
+                ..default()
+            },
+            LastActivatedAt::now(),
             ChildOf(parent),
         ))
         .id()
@@ -132,7 +148,7 @@ fn spawn_split(world: &mut World, parent: Entity, direction: SplitDirectionDto) 
 
 fn spawn_leaf_pane(world: &mut World, parent: Entity) -> Entity {
     world
-        .spawn((Pane, PaneSize::default(), ChildOf(parent)))
+        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
         .id()
 }
 
@@ -248,11 +264,21 @@ fn apply_node(world: &mut World, node: &LayoutNodeDto) {
                 && let Ok((_, value)) = parse_id(id)
             {
                 let entity = Entity::from_bits(value);
+                let pane_split_dir = match direction {
+                    SplitDirectionDto::Row => PaneSplitDirection::Row,
+                    SplitDirectionDto::Column => PaneSplitDirection::Column,
+                };
                 if let Some(mut split) = world.get_mut::<PaneSplit>(entity) {
-                    split.direction = match direction {
-                        SplitDirectionDto::Row => PaneSplitDirection::Row,
-                        SplitDirectionDto::Column => PaneSplitDirection::Column,
+                    split.direction = pane_split_dir;
+                }
+                if let Some(mut node) = world.get_mut::<Node>(entity) {
+                    node.flex_direction = match pane_split_dir {
+                        PaneSplitDirection::Row => bevy::ui::FlexDirection::Row,
+                        PaneSplitDirection::Column => bevy::ui::FlexDirection::Column,
                     };
+                    let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
+                    node.column_gap = gap.column_gap;
+                    node.row_gap = gap.row_gap;
                 }
             }
             if !flex_weights.is_empty() && flex_weights.len() == children.len() {
@@ -759,5 +785,58 @@ mod tests {
         assert_eq!(focused.tab, Some(space));
         assert_eq!(focused.pane, Some(pane));
         assert_eq!(focused.stack, Some(stack));
+    }
+
+    #[test]
+    fn spawn_split_inserts_node_with_flex_direction() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<vmux_layout::LayoutSpawnRequest>();
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
+
+        let snap = LayoutSnapshot {
+            spaces: vec![SpaceDto {
+                id: Some(format_id(NodeKind::Space, space.to_bits())),
+                name: "S".into(),
+                is_active: true,
+                root: LayoutNodeDto::Split {
+                    id: None,
+                    direction: SplitDirectionDto::Row,
+                    flex_weights: vec![],
+                    children: vec![
+                        LayoutNodeDto::Pane {
+                            id: Some(format_id(NodeKind::Pane, pane.to_bits())),
+                            is_zoomed: false,
+                            tabs: vec![],
+                        },
+                        LayoutNodeDto::Pane {
+                            id: None,
+                            is_zoomed: false,
+                            tabs: vec![TabDto {
+                                id: None,
+                                url: "https://example.com".into(),
+                                kind: "browser".into(),
+                                ..Default::default()
+                            }],
+                        },
+                    ],
+                },
+            }],
+            focused: FocusDto::default(),
+        };
+
+        apply(app.world_mut(), &snap).unwrap();
+
+        let split_count = app
+            .world_mut()
+            .query_filtered::<&Node, (With<Pane>, With<PaneSplit>)>()
+            .iter(app.world())
+            .filter(|node| node.flex_direction == bevy::ui::FlexDirection::Row)
+            .count();
+        assert!(
+            split_count >= 1,
+            "spawn_split should produce a Pane+PaneSplit with Node{{flex_direction: Row}}"
+        );
     }
 }
