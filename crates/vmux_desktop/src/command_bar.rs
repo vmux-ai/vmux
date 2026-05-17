@@ -858,6 +858,7 @@ fn on_command_bar_action(
         Query<Entity, With<Main>>,
         Query<Entity, With<PrimaryWindow>>,
         Option<ResMut<crate::layout::stack::FocusedStack>>,
+        Query<(), With<crate::terminal::Terminal>>,
     )>,
     child_of_q: Query<&ChildOf>,
     content_browsers: Query<
@@ -1303,7 +1304,7 @@ fn on_command_bar_action(
                                     .ok()
                                     .map(|co| co.get() == tab)
                                     .unwrap_or(false);
-                                if is_child {
+                                if is_child && !stack_params.p4().contains(browser_e) {
                                     commands.entity(browser_e).insert(WebviewSource::new(&url));
                                     updated_existing = true;
                                 }
