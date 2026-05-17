@@ -18,7 +18,6 @@ use crate::{
     command_bar::NewStackContext,
     layout::{stack::Stack, window::WEBVIEW_MESH_DEPTH_BIAS},
     profile,
-    settings::AppSettings,
 };
 
 #[derive(Resource, Clone, Debug)]
@@ -279,7 +278,6 @@ fn apply_pending_space_switch(
     >,
     main_q: Query<Entity, With<crate::layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    settings: Res<AppSettings>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     focus: Option<ResMut<crate::layout::stack::FocusedStack>>,
     mut commands: Commands,
@@ -312,7 +310,6 @@ fn apply_pending_space_switch(
         let spawned = crate::layout::window::spawn_default_space_layout(
             main,
             *primary_window,
-            &settings.layout,
             &mut new_stack_ctx,
             &mut commands,
         );
@@ -327,7 +324,6 @@ fn apply_pending_space_switch(
 fn spawn_spaces_page_layout(
     main: Entity,
     primary_window: Entity,
-    settings: &AppSettings,
     new_stack_ctx: &mut NewStackContext,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -337,7 +333,6 @@ fn spawn_spaces_page_layout(
     let spawned = crate::layout::window::spawn_default_space_layout(
         main,
         primary_window,
-        &settings.layout,
         new_stack_ctx,
         commands,
     );
@@ -374,12 +369,11 @@ fn on_space_command(
     >,
     main_q: Query<Entity, With<crate::layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    settings: Res<AppSettings>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut focus: Option<ResMut<crate::layout::stack::FocusedStack>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    mut spawn_requests: MessageWriter<vmux_layout::LayoutSpawnRequest>,
+    mut spawn_requests: Option<MessageWriter<vmux_layout::LayoutSpawnRequest>>,
     mut commands: Commands,
 ) {
     let root = profile::shared_data_dir();
@@ -390,6 +384,9 @@ fn on_space_command(
             return;
         };
         let Some(pane) = focus_res.pane else {
+            return;
+        };
+        let Some(spawn_requests) = spawn_requests.as_mut() else {
             return;
         };
         let stack = commands
@@ -481,7 +478,6 @@ fn on_space_command(
             spawn_spaces_page_layout(
                 main,
                 *primary_window,
-                &settings,
                 &mut new_stack_ctx,
                 &mut meshes,
                 &mut webview_mt,
@@ -492,7 +488,6 @@ fn on_space_command(
             let spawned = crate::layout::window::spawn_default_space_layout(
                 main,
                 *primary_window,
-                &settings.layout,
                 &mut new_stack_ctx,
                 &mut commands,
             );

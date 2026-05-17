@@ -121,7 +121,7 @@ fn side_sheet_drag_resize(
 }
 
 fn sync_side_sheet_visibility(
-    settings: Res<LayoutSettings>,
+    _settings: Res<LayoutSettings>,
     mut width_res: ResMut<SideSheetWidth>,
     mut side_sheet_q: Query<
         (Entity, &SideSheetPosition, &mut Visibility, &mut Node),
@@ -151,7 +151,7 @@ fn sync_side_sheet_visibility(
 
     // Initialize width from settings if not yet set
     if width_res.0 <= 0.0 {
-        width_res.0 = settings.side_sheet.width;
+        width_res.0 = crate::event::SIDE_SHEET_WIDTH_PX;
     }
 
     let width = width_res.0;

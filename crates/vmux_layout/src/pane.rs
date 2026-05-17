@@ -1224,7 +1224,7 @@ fn sync_pane_split_gaps_to_settings(
         return;
     }
     for (split, mut node) in &mut splits {
-        apply_pane_split_gaps(split, &mut node, settings.pane.gap);
+        apply_pane_split_gaps(split, &mut node, crate::event::PANE_GAP_PX);
     }
 }
 

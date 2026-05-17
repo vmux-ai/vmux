@@ -109,19 +109,20 @@ pub const HEADER_HEIGHT_PX: f32 = 60.0;
 pub const HEADER_TOP_PX: f32 = 4.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
-/// Hardcoded window edge padding (px). Not user-configurable — the layout
-/// snaps the chrome to the top + left edges and reserves a small gap on
-/// the right + bottom to keep the pane from butting up against the
-/// system window corners.
-pub const WINDOW_PAD_TOP_PX: f32 = 0.0;
-pub const WINDOW_PAD_RIGHT_PX: f32 = 4.0;
-pub const WINDOW_PAD_BOTTOM_PX: f32 = 4.0;
-pub const WINDOW_PAD_LEFT_PX: f32 = 0.0;
+/// Hardcoded window edge padding (px) applied uniformly to all sides.
+/// Not user-configurable.
+pub const WINDOW_PAD_PX: f32 = 8.0;
 
 /// Default page bg color for terminal-like stacks (terminals, processes,
 /// agent CLIs). Matches catppuccin-mocha `base` so the chrome url row
 /// blends with the terminal surface below it.
 pub const TERMINAL_CHROME_BG_COLOR: &str = "#1e1e2e";
+
+/// Gap (px) between split panes inside a tab.
+pub const PANE_GAP_PX: f32 = 4.0;
+
+/// Default side-sheet width (px).
+pub const SIDE_SHEET_WIDTH_PX: f32 = 220.0;
 
 #[cfg(test)]
 mod tests {

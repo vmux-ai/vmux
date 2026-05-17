@@ -231,7 +231,7 @@ pub(crate) fn rebuild_space_views(
             PaneSplitDirection::Row => FlexDirection::Row,
             PaneSplitDirection::Column => FlexDirection::Column,
         };
-        let gap = pane_split_gaps(split.direction, settings.layout.pane.gap);
+        let gap = pane_split_gaps(split.direction, vmux_layout::event::PANE_GAP_PX);
         let mut ecmds = commands.entity(entity);
         ecmds.insert((
             HostWindow(pw),

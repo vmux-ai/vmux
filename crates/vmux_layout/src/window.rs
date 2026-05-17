@@ -210,12 +210,7 @@ fn setup(
                 height: Val::Percent(100.0),
                 position_type: PositionType::Relative,
                 flex_direction: FlexDirection::Row,
-                padding: UiRect {
-                    top: Val::Px(crate::event::WINDOW_PAD_TOP_PX),
-                    right: Val::Px(crate::event::WINDOW_PAD_RIGHT_PX),
-                    bottom: Val::Px(crate::event::WINDOW_PAD_BOTTOM_PX),
-                    left: Val::Px(crate::event::WINDOW_PAD_LEFT_PX),
-                },
+                padding: UiRect::all(Val::Px(crate::event::WINDOW_PAD_PX)),
                 column_gap: Val::Px(0.0),
                 ..default()
             },
@@ -232,7 +227,7 @@ fn setup(
             GlobalTransform::default(),
             Visibility::Inherited,
             Node {
-                width: Val::Px(settings.side_sheet.width),
+                width: Val::Px(crate::event::SIDE_SHEET_WIDTH_PX),
                 min_height: Val::Px(0.0),
                 flex_shrink: 0.0,
                 flex_direction: FlexDirection::Column,
@@ -300,9 +295,9 @@ fn setup(
         Node {
             width: Val::Px(280.0),
             position_type: PositionType::Absolute,
-            right: Val::Px(crate::event::WINDOW_PAD_RIGHT_PX),
-            top: Val::Px(crate::event::WINDOW_PAD_TOP_PX),
-            bottom: Val::Px(crate::event::WINDOW_PAD_BOTTOM_PX),
+            right: Val::Px(crate::event::WINDOW_PAD_PX),
+            top: Val::Px(crate::event::WINDOW_PAD_PX),
+            bottom: Val::Px(crate::event::WINDOW_PAD_PX),
             display: Display::None,
             ..default()
         },
@@ -316,9 +311,9 @@ fn setup(
         Node {
             height: Val::Px(200.0),
             position_type: PositionType::Absolute,
-            left: Val::Px(crate::event::WINDOW_PAD_LEFT_PX),
-            right: Val::Px(crate::event::WINDOW_PAD_RIGHT_PX),
-            bottom: Val::Px(crate::event::WINDOW_PAD_BOTTOM_PX),
+            left: Val::Px(crate::event::WINDOW_PAD_PX),
+            right: Val::Px(crate::event::WINDOW_PAD_PX),
+            bottom: Val::Px(crate::event::WINDOW_PAD_PX),
             display: Display::None,
             ..default()
         },
@@ -373,7 +368,6 @@ fn spawn_default_space(
     main_q: Query<Entity, With<Main>>,
     profile_q: Query<(), With<Profile>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    settings: Res<LayoutSettings>,
     space_file: Option<Res<SpaceFilePresent>>,
     mut new_stack_ctx: ResMut<crate::NewStackContext>,
     mut commands: Commands,
@@ -386,13 +380,7 @@ fn spawn_default_space(
     }
 
     let Ok(main) = main_q.single() else { return };
-    spawn_default_space_layout(
-        main,
-        *primary_window,
-        &settings,
-        &mut new_stack_ctx,
-        &mut commands,
-    );
+    spawn_default_space_layout(main, *primary_window, &mut new_stack_ctx, &mut commands);
 }
 
 pub struct SpawnedSessionLayout {
@@ -404,7 +392,6 @@ pub struct SpawnedSessionLayout {
 pub fn spawn_default_space_layout(
     main: Entity,
     pw: Entity,
-    settings: &LayoutSettings,
     new_stack_ctx: &mut crate::NewStackContext,
     commands: &mut Commands,
 ) -> SpawnedSessionLayout {
@@ -418,7 +405,7 @@ pub fn spawn_default_space_layout(
         ))
         .id();
 
-    let gap = pane_split_gaps(PaneSplitDirection::Row, settings.pane.gap);
+    let gap = pane_split_gaps(PaneSplitDirection::Row, crate::event::PANE_GAP_PX);
     let split_root = commands
         .spawn((
             Pane,
@@ -519,21 +506,13 @@ fn sync_window_layout_to_settings(
         return;
     }
 
-    let pad_top = crate::event::WINDOW_PAD_TOP_PX;
-    let pad_right = crate::event::WINDOW_PAD_RIGHT_PX;
-    let pad_bottom = crate::event::WINDOW_PAD_BOTTOM_PX;
-    let pad_left = crate::event::WINDOW_PAD_LEFT_PX;
-    let gap = settings.pane.gap;
-    let cfg_width = settings.side_sheet.width;
+    let pad = crate::event::WINDOW_PAD_PX;
+    let gap = crate::event::PANE_GAP_PX;
+    let cfg_width = crate::event::SIDE_SHEET_WIDTH_PX;
 
     // Root window: padding + flex-row column gap.
     if let Ok(mut node) = window_q.single_mut() {
-        node.padding = UiRect {
-            top: Val::Px(pad_top),
-            right: Val::Px(pad_right),
-            bottom: Val::Px(pad_bottom),
-            left: Val::Px(pad_left),
-        };
+        node.padding = UiRect::all(Val::Px(pad));
         node.column_gap = Val::Px(gap);
     }
 
@@ -556,14 +535,14 @@ fn sync_window_layout_to_settings(
                 node.width = Val::Px(live_width);
             }
             SideSheetPosition::Right => {
-                node.right = Val::Px(pad_right);
-                node.top = Val::Px(pad_top);
-                node.bottom = Val::Px(pad_bottom);
+                node.right = Val::Px(pad);
+                node.top = Val::Px(pad);
+                node.bottom = Val::Px(pad);
             }
             SideSheetPosition::Bottom => {
-                node.left = Val::Px(pad_left);
-                node.right = Val::Px(pad_right);
-                node.bottom = Val::Px(pad_bottom);
+                node.left = Val::Px(pad);
+                node.right = Val::Px(pad);
+                node.bottom = Val::Px(pad);
             }
         }
     }

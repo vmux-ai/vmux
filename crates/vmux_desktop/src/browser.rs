@@ -396,7 +396,9 @@ fn sync_webview_pane_corner_clip(
         let w = size.0.x.max(1.0e-6);
         let h = size.0.y.max(1.0e-6);
         if let Some(mat) = materials.get_mut(mat_h.id()) {
-            mat.extension.pane_corner_clip = Vec4::new(r, w, h, 0.0);
+            // corner_mode = 1.0 → round bottom corners only, so the pane top
+            // sits flush against the url row above it.
+            mat.extension.pane_corner_clip = Vec4::new(r, w, h, 1.0);
         }
     }
     for (size, mat_h) in &status {
@@ -666,8 +668,8 @@ fn push_layout_state_emit(
             .any(|(pos, is_open)| *pos == SideSheetPosition::Left && is_open),
         header_height: HEADER_HEIGHT_PX,
         side_sheet_width: side_sheet_width.0,
-        pane_gap: settings.layout.pane.gap,
-        titlebar_height: effective_titlebar_height(vmux_layout::event::WINDOW_PAD_TOP_PX),
+        pane_gap: vmux_layout::event::PANE_GAP_PX,
+        titlebar_height: effective_titlebar_height(vmux_layout::event::WINDOW_PAD_PX),
         radius: settings.layout.radius,
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
