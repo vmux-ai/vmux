@@ -68,6 +68,81 @@ pub fn apply_with_existing(
     Ok(())
 }
 
+fn find_existing_leaf_child(world: &World, parent: Entity) -> Option<Entity> {
+    let children = world.get::<Children>(parent)?;
+    children
+        .iter()
+        .find(|&e| world.get::<Pane>(e).is_some() && world.get::<PaneSplit>(e).is_none())
+}
+
+fn child_refers_to_entity(node: &LayoutNodeDto, entity: Entity) -> bool {
+    match node {
+        LayoutNodeDto::Pane { id: Some(id), .. } | LayoutNodeDto::Split { id: Some(id), .. } => {
+            parse_id(id)
+                .ok()
+                .is_some_and(|(_, v)| Entity::from_bits(v) == entity)
+        }
+        _ => false,
+    }
+}
+
+fn convert_leaf_to_split(world: &mut World, pane: Entity, direction: SplitDirectionDto) {
+    let pane_split_dir = match direction {
+        SplitDirectionDto::Row => PaneSplitDirection::Row,
+        SplitDirectionDto::Column => PaneSplitDirection::Column,
+    };
+    let flex_direction = match pane_split_dir {
+        PaneSplitDirection::Row => bevy::ui::FlexDirection::Row,
+        PaneSplitDirection::Column => bevy::ui::FlexDirection::Column,
+    };
+    let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
+    world.entity_mut(pane).insert(PaneSplit {
+        direction: pane_split_dir,
+    });
+    world.entity_mut(pane).insert(Node {
+        flex_grow: 1.0,
+        flex_direction,
+        column_gap: gap.column_gap,
+        row_gap: gap.row_gap,
+        align_items: AlignItems::Stretch,
+        ..default()
+    });
+
+    let existing_tabs: Vec<Entity> = world
+        .get::<Children>(pane)
+        .map(|c| {
+            c.iter()
+                .filter(|&e| world.get::<Stack>(e).is_some())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let new_leaf = world
+        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+        .id();
+    for tab in existing_tabs {
+        world.entity_mut(tab).insert(ChildOf(new_leaf));
+    }
+}
+
+fn try_convert_existing_pane(
+    world: &mut World,
+    parent: Entity,
+    direction: SplitDirectionDto,
+    children: &[LayoutNodeDto],
+) -> Option<Entity> {
+    world.get::<Tab>(parent)?;
+    let existing_leaf = find_existing_leaf_child(world, parent)?;
+    let any_child_matches = children
+        .iter()
+        .any(|c| child_refers_to_entity(c, existing_leaf));
+    if !any_child_matches {
+        return None;
+    }
+    convert_leaf_to_split(world, existing_leaf, direction);
+    Some(existing_leaf)
+}
+
 fn create_descendants(
     world: &mut World,
     parent: Entity,
@@ -75,15 +150,27 @@ fn create_descendants(
     new_entities: &mut std::collections::HashMap<*const LayoutNodeDto, Entity>,
 ) {
     let node_entity = match node {
-        LayoutNodeDto::Split { id, direction, .. } => match id {
+        LayoutNodeDto::Split {
+            id,
+            direction,
+            children,
+            ..
+        } => match id {
             Some(id_str) => match parse_id(id_str) {
                 Ok((_, v)) => Entity::from_bits(v),
                 Err(_) => return,
             },
             None => {
-                let entity = spawn_split(world, parent, *direction);
-                new_entities.insert(node as *const _, entity);
-                entity
+                if let Some(converted) =
+                    try_convert_existing_pane(world, parent, *direction, children)
+                {
+                    new_entities.insert(node as *const _, converted);
+                    converted
+                } else {
+                    let entity = spawn_split(world, parent, *direction);
+                    new_entities.insert(node as *const _, entity);
+                    entity
+                }
             }
         },
         LayoutNodeDto::Pane { id, .. } => match id {
@@ -228,12 +315,25 @@ fn apply_structure(world: &mut World, parent: Option<Entity>, node: &LayoutNodeD
                 }
             }
             LayoutNodeDto::Pane { tabs, .. } => {
+                let tab_parent = if world.get::<PaneSplit>(entity).is_some() {
+                    world
+                        .get::<Children>(entity)
+                        .and_then(|c| {
+                            c.iter().find(|&e| {
+                                world.get::<Pane>(e).is_some()
+                                    && world.get::<PaneSplit>(e).is_none()
+                            })
+                        })
+                        .unwrap_or(entity)
+                } else {
+                    entity
+                };
                 for t in tabs {
                     if let Some(tid) = t.id.as_deref()
                         && let Ok((_, value)) = parse_id(tid)
                     {
                         let tab_entity = Entity::from_bits(value);
-                        world.entity_mut(tab_entity).insert(ChildOf(entity));
+                        world.entity_mut(tab_entity).insert(ChildOf(tab_parent));
                     }
                 }
             }
@@ -837,6 +937,107 @@ mod tests {
         assert!(
             split_count >= 1,
             "spawn_split should produce a Pane+PaneSplit with Node{{flex_direction: Row}}"
+        );
+    }
+
+    #[test]
+    fn split_via_convert_reuses_existing_pane_entity() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<vmux_layout::LayoutSpawnRequest>();
+
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+        let existing_pane = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(space)))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(existing_pane)))
+            .id();
+
+        let snap = LayoutSnapshot {
+            spaces: vec![SpaceDto {
+                id: Some(format_id(NodeKind::Space, space.to_bits())),
+                name: "S".into(),
+                is_active: true,
+                root: LayoutNodeDto::Split {
+                    id: None,
+                    direction: SplitDirectionDto::Row,
+                    flex_weights: vec![],
+                    children: vec![
+                        LayoutNodeDto::Pane {
+                            id: Some(format_id(NodeKind::Pane, existing_pane.to_bits())),
+                            is_zoomed: false,
+                            tabs: vec![TabDto {
+                                id: Some(format_id(NodeKind::Tab, stack.to_bits())),
+                                ..Default::default()
+                            }],
+                        },
+                        LayoutNodeDto::Pane {
+                            id: None,
+                            is_zoomed: false,
+                            tabs: vec![TabDto {
+                                id: None,
+                                url: "https://example.com".into(),
+                                kind: "browser".into(),
+                                ..Default::default()
+                            }],
+                        },
+                    ],
+                },
+            }],
+            focused: FocusDto::default(),
+        };
+
+        let existing: HashSet<String> = [
+            format_id(NodeKind::Space, space.to_bits()),
+            format_id(NodeKind::Pane, existing_pane.to_bits()),
+            format_id(NodeKind::Tab, stack.to_bits()),
+        ]
+        .into_iter()
+        .collect();
+
+        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+
+        assert!(
+            app.world().get::<PaneSplit>(existing_pane).is_some(),
+            "existing pane should be converted to split"
+        );
+        let node = app.world().get::<Node>(existing_pane).unwrap();
+        assert_eq!(
+            node.flex_direction,
+            bevy::ui::FlexDirection::Row,
+            "converted split should have Row flex direction"
+        );
+
+        let split_count = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Pane>, With<PaneSplit>)>()
+            .iter(app.world())
+            .count();
+        assert_eq!(split_count, 1, "exactly one split entity should exist");
+
+        let children = app
+            .world()
+            .get::<Children>(existing_pane)
+            .expect("converted split should have children");
+        let child_panes: Vec<Entity> = children
+            .iter()
+            .filter(|&e| {
+                app.world().get::<Pane>(e).is_some() && app.world().get::<PaneSplit>(e).is_none()
+            })
+            .collect();
+        assert_eq!(
+            child_panes.len(),
+            2,
+            "split should have two leaf pane children"
+        );
+
+        let stack_parent = app.world().get::<ChildOf>(stack).map(|p| p.parent());
+        assert!(
+            child_panes.contains(&stack_parent.unwrap()),
+            "original stack should be reparented under a child leaf pane"
         );
     }
 }
