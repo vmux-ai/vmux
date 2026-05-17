@@ -209,7 +209,7 @@ fn HeaderView(titlebar_height: f32) -> Element {
                 } else if let Some(err) = tabs_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
-                    div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
+                    div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pl-2",
                         for tab in tabs.iter() {
                             TabPill {
                                 key: "{tab.id}",
