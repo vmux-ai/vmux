@@ -197,13 +197,13 @@ fn HeaderView(titlebar_height: f32) -> Element {
     let tabs_loading = (tabs_listener.is_loading)();
     let tabs_error = (tabs_listener.error)();
 
-    let (url_row_style, url_row_class) = url_row_chrome(active_bg_color.as_deref());
-    let outer_vars = format!("--vmux-titlebar-pad:{titlebar_height}px;");
+    let (outer_extra_style, outer_class) = header_chrome(active_bg_color.as_deref());
+    let outer_style = format!("--vmux-titlebar-pad:{titlebar_height}px;{outer_extra_style}");
 
     rsx! {
         div {
-            class: "flex h-full min-h-0 min-w-0 flex-col text-foreground pt-[var(--vmux-titlebar-pad)]",
-            style: "{outer_vars}",
+            class: "{outer_class}",
+            style: "{outer_style}",
             div { class: "flex min-w-0 shrink-0 items-center gap-1 px-2",
                 if tabs_loading {
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
@@ -219,8 +219,7 @@ fn HeaderView(titlebar_height: f32) -> Element {
                 }
             }
             div {
-                class: "{url_row_class}",
-                style: "{url_row_style}",
+                class: "flex min-w-0 flex-1 shrink-0 items-center gap-1 px-2",
                 if listener_loading {
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
                 } else if let Some(err) = listener_error {
@@ -258,19 +257,19 @@ fn HeaderView(titlebar_height: f32) -> Element {
     }
 }
 
-fn url_row_chrome(bg_color: Option<&str>) -> (String, String) {
+fn header_chrome(bg_color: Option<&str>) -> (String, String) {
     if let Some(color) = bg_color {
         let text_class = text_color_class_for_bg(color);
         (
             format!("--vmux-url-bg:{color};"),
             format!(
-                "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-lg px-2 bg-[var(--vmux-url-bg)] {text_class}"
+                "flex h-full min-h-0 min-w-0 flex-col rounded-t-[var(--radius)] pt-[var(--vmux-titlebar-pad)] bg-[var(--vmux-url-bg)] {text_class}"
             ),
         )
     } else {
         (
             String::new(),
-            "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-lg px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
+            "flex h-full min-h-0 min-w-0 flex-col rounded-t-[var(--radius)] pt-[var(--vmux-titlebar-pad)] bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
         )
     }
 }
