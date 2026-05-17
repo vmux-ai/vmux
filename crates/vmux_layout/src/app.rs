@@ -198,12 +198,11 @@ fn HeaderView() -> Element {
     let tabs_loading = (tabs_listener.is_loading)();
     let tabs_error = (tabs_listener.error)();
 
-    let (outer_style, outer_class) = header_chrome(active_bg_color.as_deref());
+    let (url_row_style, url_row_class) = url_row_chrome(active_bg_color.as_deref());
 
     rsx! {
         div {
-            class: "{outer_class}",
-            style: "{outer_style}",
+            class: "flex h-full min-h-0 min-w-0 flex-col text-foreground",
             div { class: "flex min-w-0 shrink-0 items-center gap-1 pl-[var(--vmux-tab-row-pad-left)] pr-2",
                 if tabs_loading {
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
@@ -219,7 +218,8 @@ fn HeaderView() -> Element {
                 }
             }
             div {
-                class: "flex min-w-0 flex-1 shrink-0 items-center gap-1 px-2",
+                class: "{url_row_class}",
+                style: "{url_row_style}",
                 if listener_loading {
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
                 } else if let Some(err) = listener_error {
@@ -257,19 +257,19 @@ fn HeaderView() -> Element {
     }
 }
 
-fn header_chrome(bg_color: Option<&str>) -> (String, String) {
+fn url_row_chrome(bg_color: Option<&str>) -> (String, String) {
     if let Some(color) = bg_color {
         let text_class = text_color_class_for_bg(color);
         (
             format!("--vmux-url-bg:{color};"),
             format!(
-                "flex h-full min-h-0 min-w-0 flex-col rounded-t-[var(--radius)] bg-[var(--vmux-url-bg)] {text_class}"
+                "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] px-2 bg-[var(--vmux-url-bg)] {text_class}"
             ),
         )
     } else {
         (
             String::new(),
-            "flex h-full min-h-0 min-w-0 flex-col rounded-t-[var(--radius)] bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
+            "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
         )
     }
 }
