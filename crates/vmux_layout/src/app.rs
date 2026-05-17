@@ -132,31 +132,34 @@ pub fn App() -> Element {
                 .set_property("--radius", &format!("{radius_px}px"));
         }
     });
-    let side_sheet_width = state.side_sheet_width;
-    let side_sheet_top_pad = vmux_layout::event::url_bar_top();
-    let side_sheet_class = format!(
-        "pointer-events-auto fixed left-0 top-0 bottom-0 min-h-0 overflow-hidden w-[{side_sheet_width}px] pt-[{side_sheet_top_pad}px]"
+    let side_sheet_style = format!(
+        "left:0;top:0;bottom:0;width:{}px;padding-top:{}px;",
+        state.side_sheet_width,
+        vmux_layout::event::url_bar_top(),
     );
-
-    let header_left = state.main_chrome_left();
-    let header_top = vmux_layout::event::HEADER_TOP_PX;
-    let header_right = vmux_layout::event::WINDOW_PAD_PX;
-    let header_height = state.header_height_total();
-    let header_class = format!(
-        "pointer-events-auto fixed left-[{header_left}px] top-[{header_top}px] right-[{header_right}px] h-[{header_height}px]"
+    let header_style = format!(
+        "left:{}px;top:{}px;right:{}px;height:{}px;",
+        state.main_chrome_left(),
+        vmux_layout::event::HEADER_TOP_PX,
+        vmux_layout::event::WINDOW_PAD_PX,
+        state.header_height_total(),
     );
 
     rsx! {
         div { class: "fixed inset-0 pointer-events-none text-foreground",
             if state.side_sheet_open {
-                aside { class: "{side_sheet_class}",
+                aside {
+                    class: "pointer-events-auto fixed min-h-0 overflow-hidden",
+                    style: "{side_sheet_style}",
                     div { class: "flex h-full min-h-0 flex-col",
                         SideSheetView {}
                     }
                 }
             }
             if state.header_visible() {
-                div { class: "{header_class}",
+                div {
+                    class: "pointer-events-auto fixed",
+                    style: "{header_style}",
                     HeaderView { titlebar_height: state.titlebar_height }
                 }
             }
@@ -195,12 +198,13 @@ fn HeaderView(titlebar_height: f32) -> Element {
     let tabs_loading = (tabs_listener.is_loading)();
     let tabs_error = (tabs_listener.error)();
 
-    let url_row_class = url_row_chrome(active_bg_color.as_deref());
-    let outer_class =
-        format!("flex h-full min-h-0 min-w-0 flex-col text-foreground pt-[{titlebar_height}px]");
+    let (url_row_style, url_row_class) = url_row_chrome(active_bg_color.as_deref());
+    let outer_style = format!("padding-top:{titlebar_height}px;");
 
     rsx! {
-        div { class: "{outer_class}",
+        div {
+            class: "flex h-full min-h-0 min-w-0 flex-col text-foreground",
+            style: "{outer_style}",
             div { class: "flex min-w-0 shrink-0 items-center gap-1 px-2",
                 if tabs_loading {
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
@@ -215,7 +219,9 @@ fn HeaderView(titlebar_height: f32) -> Element {
                     }
                 }
             }
-            div { class: "{url_row_class}",
+            div {
+                class: "{url_row_class}",
+                style: "{url_row_style}",
                 if listener_loading {
                     span { class: "text-ui text-muted-foreground", "Connecting..." }
                 } else if let Some(err) = listener_error {
@@ -253,14 +259,20 @@ fn HeaderView(titlebar_height: f32) -> Element {
     }
 }
 
-fn url_row_chrome(bg_color: Option<&str>) -> String {
+fn url_row_chrome(bg_color: Option<&str>) -> (String, String) {
     if let Some(color) = bg_color {
         let text_class = text_color_class_for_bg(color);
-        format!(
-            "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-lg px-2 bg-[{color}] {text_class}"
+        (
+            format!("background-color: {color};"),
+            format!(
+                "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-lg px-2 {text_class}"
+            ),
         )
     } else {
-        "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-lg px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string()
+        (
+            String::new(),
+            "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-lg px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
+        )
     }
 }
 
@@ -397,12 +409,15 @@ fn Tab(tab: TabRow) -> Element {
         after:content-[''] after:absolute after:bottom-0 after:-right-2 after:h-2 after:w-2 after:pointer-events-none \
         after:[background:radial-gradient(circle_at_top_right,transparent_0,transparent_8px,var(--tab-bg)_8px)]";
 
-    let (tab_class, title_class, close_class) = if is_active {
+    let (tab_style, tab_class, title_class, close_class) = if is_active {
         if let Some(ref color) = tab.bg_color {
             let text_class = text_color_class_for_bg(color);
             (
                 format!(
-                    "{skirt_classes} group flex h-7 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-1.5 rounded-t-md pl-2 pr-2 bg-[{color}] [--tab-bg:{color}] {text_class}"
+                    "background-color:{color};--tab-bg:{color};max-width:200px;margin-bottom:-3px;padding-bottom:3px;"
+                ),
+                format!(
+                    "{skirt_classes} group flex h-7 min-w-0 items-center gap-1.5 rounded-t-md pl-2 pr-2 {text_class}"
                 ),
                 format!("min-w-0 truncate text-ui-xs font-medium {text_class}"),
                 format!(
@@ -411,8 +426,9 @@ fn Tab(tab: TabRow) -> Element {
             )
         } else {
             (
+                "max-width:200px;margin-bottom:-3px;padding-bottom:3px;--tab-bg:var(--glass);".to_string(),
                 format!(
-                    "{skirt_classes} glass group flex h-7 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-1.5 rounded-t-md border-b-0 pl-2 pr-2 [--tab-bg:var(--glass)]"
+                    "{skirt_classes} glass group flex h-7 min-w-0 items-center gap-1.5 rounded-t-md border-b-0 pl-2 pr-2"
                 ),
                 "min-w-0 truncate text-ui-xs font-medium text-foreground".to_string(),
                 "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
@@ -420,14 +436,17 @@ fn Tab(tab: TabRow) -> Element {
         }
     } else {
         (
-            "group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-md pl-2 pr-2 text-muted-foreground hover:bg-glass-hover hover:text-foreground".to_string(),
+            "max-width:200px;".to_string(),
+            "group flex h-7 min-w-0 items-center gap-1.5 rounded-md pl-2 pr-2 text-muted-foreground hover:bg-glass-hover hover:text-foreground".to_string(),
             "min-w-0 truncate text-ui-xs".to_string(),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
     };
 
     rsx! {
-        div { class: "{tab_class}",
+        div {
+            class: "{tab_class}",
+            style: "{tab_style}",
             button {
                 r#type: "button",
                 title: "{tooltip}",
