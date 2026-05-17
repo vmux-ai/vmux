@@ -354,7 +354,7 @@ pub fn split_pane_in_two(
     commands: &mut Commands,
     active: Entity,
     direction: PaneSplitDirection,
-    pane_settings: &crate::settings::PaneSettings,
+    _pane_settings: &crate::settings::PaneSettings,
     existing_tabs: &[Entity],
 ) -> (Entity, Entity) {
     let pane1 = spawn_leaf_pane(commands, active);
@@ -368,7 +368,7 @@ pub fn split_pane_in_two(
         PaneSplitDirection::Row => FlexDirection::Row,
         PaneSplitDirection::Column => FlexDirection::Column,
     };
-    let gap = pane_split_gaps(direction, pane_settings.gap);
+    let gap = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
     commands.entity(active).insert(PaneSplit { direction });
     commands.entity(active).insert(Node {
         flex_grow: 1.0,
@@ -1224,7 +1224,7 @@ fn sync_pane_split_gaps_to_settings(
         return;
     }
     for (split, mut node) in &mut splits {
-        apply_pane_split_gaps(split, &mut node, settings.pane.gap);
+        apply_pane_split_gaps(split, &mut node, crate::event::PANE_GAP_PX);
     }
 }
 
@@ -1341,6 +1341,7 @@ mod tests {
 
     fn test_settings() -> LayoutSettings {
         LayoutSettings {
+            radius: 0.0,
             window: WindowSettings {
                 padding: 0.0,
                 padding_top: None,
@@ -1348,10 +1349,7 @@ mod tests {
                 padding_bottom: None,
                 padding_left: None,
             },
-            pane: PaneSettings {
-                gap: 0.0,
-                radius: 0.0,
-            },
+            pane: PaneSettings { gap: 0.0 },
             side_sheet: SideSheetSettings::default(),
             focus_ring: FocusRingSettings::default(),
         }

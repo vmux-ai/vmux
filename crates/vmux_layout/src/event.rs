@@ -3,7 +3,7 @@ pub const COMMAND_BAR_WEBVIEW_URL: &str = "vmux://command-bar/";
 pub const TERMINAL_WEBVIEW_URL: &str = "vmux://terminal/";
 pub const PROCESSES_WEBVIEW_URL: &str = "vmux://services/";
 pub const LAYOUT_STATE_EVENT: &str = "layout-state";
-pub const TABS_EVENT: &str = "tabs";
+pub const STACKS_EVENT: &str = "stacks";
 pub const RELOAD_EVENT: &str = "reload";
 
 #[derive(
@@ -20,7 +20,7 @@ pub const RELOAD_EVENT: &str = "reload";
     rkyv::Deserialize,
 )]
 pub struct ReloadEvent;
-pub const SPACES_EVENT: &str = "spaces";
+pub const TABS_EVENT: &str = "tabs";
 pub const PANE_TREE_EVENT: &str = "pane-tree";
 pub const SIDE_SHEET_COMMAND_EVENT: &str = "side-sheet-command";
 pub const SIDE_SHEET_DRAG_EVENT: &str = "side-sheet-drag";
@@ -46,8 +46,8 @@ pub struct LayoutStateEvent {
     pub side_sheet_width: f32,
     #[serde(default = "default_pane_gap")]
     pub pane_gap: f32,
-    #[serde(default = "default_titlebar_height")]
-    pub titlebar_height: f32,
+    #[serde(default)]
+    pub radius: f32,
 }
 
 impl LayoutStateEvent {
@@ -59,17 +59,24 @@ impl LayoutStateEvent {
         }
     }
 
-    pub fn header_height_total(&self) -> f32 {
-        self.titlebar_height + self.header_height
-    }
-
     pub fn header_visible(&self) -> bool {
         self.header_open
+    }
+
+    /// Left padding on the tab row to keep tab pills clear of the macOS
+    /// traffic lights. Only needed when the side sheet is closed (when
+    /// open, the side sheet covers the traffic-lights region).
+    pub fn tab_row_pad_left(&self) -> f32 {
+        if self.side_sheet_open {
+            8.0
+        } else {
+            TRAFFIC_LIGHTS_PAD_PX
+        }
     }
 }
 
 pub fn url_bar_top() -> f32 {
-    HEADER_TOP_PX + SPACES_ROW_HEIGHT_PX
+    SPACES_ROW_HEIGHT_PX
 }
 
 fn default_header_height() -> f32 {
@@ -84,28 +91,32 @@ fn default_pane_gap() -> f32 {
     8.0
 }
 
-fn default_titlebar_height() -> f32 {
-    44.0
-}
-
-pub fn effective_titlebar_height(configured_height: f32) -> f32 {
-    configured_height.max(default_titlebar_height())
-}
-
-fn titlebar_nav_left_padding() -> f32 {
-    92.0
-}
-
-pub fn titlebar_nav_style(titlebar_height: f32) -> String {
-    format!(
-        "height:{titlebar_height}px;padding-left:{}px;justify-content:flex-end;",
-        titlebar_nav_left_padding()
-    )
-}
-
 pub const HEADER_HEIGHT_PX: f32 = 60.0;
-pub const HEADER_TOP_PX: f32 = 4.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
+
+/// Left padding (px) reserved on the tab row for the macOS traffic
+/// lights when the side sheet is closed.
+pub const TRAFFIC_LIGHTS_PAD_PX: f32 = 80.0;
+
+/// Vertical space the chrome reserves in the layout above the pane.
+/// The chrome puts tabs at the very top (traffic lights sit on the
+/// left of the tab row, in the reserved padding) so no extra titlebar
+/// strip is needed.
+pub const CHROME_RESERVED_HEIGHT_PX: f32 = HEADER_HEIGHT_PX;
+
+/// Hardcoded window edge padding (px). Not user-configurable.
+pub const WINDOW_PAD_PX: f32 = 4.0;
+
+/// Default page bg color for terminal-like stacks (terminals, processes,
+/// agent CLIs). Matches catppuccin-mocha `base` so the chrome url row
+/// blends with the terminal surface below it.
+pub const TERMINAL_CHROME_BG_COLOR: &str = "#1e1e2e";
+
+/// Gap (px) between split panes inside a tab.
+pub const PANE_GAP_PX: f32 = 4.0;
+
+/// Default side-sheet width (px).
+pub const SIDE_SHEET_WIDTH_PX: f32 = 220.0;
 
 #[cfg(test)]
 mod tests {
@@ -131,14 +142,18 @@ mod tests {
     }
 
     #[test]
-    fn header_height_total_clears_titlebar_controls() {
-        let state = LayoutStateEvent {
-            header_height: 40.0,
-            titlebar_height: 28.0,
+    fn tab_row_pad_left_clears_traffic_lights_when_side_sheet_closed() {
+        let closed = LayoutStateEvent {
+            side_sheet_open: false,
+            ..Default::default()
+        };
+        let open = LayoutStateEvent {
+            side_sheet_open: true,
             ..Default::default()
         };
 
-        assert_eq!(state.header_height_total(), 68.0);
+        assert_eq!(closed.tab_row_pad_left(), TRAFFIC_LIGHTS_PAD_PX);
+        assert!(open.tab_row_pad_left() < TRAFFIC_LIGHTS_PAD_PX);
     }
 
     #[test]
@@ -159,33 +174,6 @@ mod tests {
     }
 
     #[test]
-    fn titlebar_height_keeps_minimum_traffic_light_clearance() {
-        assert_eq!(effective_titlebar_height(0.0), 44.0);
-        assert_eq!(effective_titlebar_height(52.0), 52.0);
-    }
-
-    #[test]
-    fn titlebar_nav_style_clears_lights_and_right_aligns_controls() {
-        assert_eq!(
-            titlebar_nav_style(44.0),
-            "height:44px;padding-left:92px;justify-content:flex-end;"
-        );
-    }
-
-    #[test]
-    fn tab_row_address_text_uses_current_url() {
-        let row = TabRow {
-            title: "Google".to_string(),
-            url: "https://www.google.com".to_string(),
-            favicon_url: String::new(),
-            is_active: true,
-            bg_color: None,
-        };
-
-        assert_eq!(row.address_text(), "https://www.google.com");
-    }
-
-    #[test]
     fn header_command_event_rkyv_roundtrip() {
         let original = HeaderCommandEvent {
             header_command: "back".into(),
@@ -197,16 +185,16 @@ mod tests {
     }
 
     #[test]
-    fn spaces_command_event_rkyv_roundtrip() {
-        let original = SpacesCommandEvent {
-            command: "switch-space".into(),
-            space_id: Some("work".into()),
+    fn tabs_command_event_rkyv_roundtrip() {
+        let original = TabsCommandEvent {
+            command: "switch-tab".into(),
+            tab_id: Some("work".into()),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
         let recovered =
-            rkyv::from_bytes::<SpacesCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
-        assert_eq!(recovered.command, "switch-space");
-        assert_eq!(recovered.space_id.as_deref(), Some("work"));
+            rkyv::from_bytes::<TabsCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(recovered.command, "switch-tab");
+        assert_eq!(recovered.tab_id.as_deref(), Some("work"));
     }
 }
 
@@ -235,8 +223,8 @@ pub struct HeaderCommandEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct TabsHostEvent {
-    pub tabs: Vec<TabRow>,
+pub struct StacksHostEvent {
+    pub stacks: Vec<StackRow>,
     #[serde(default)]
     pub can_go_back: bool,
     #[serde(default)]
@@ -256,7 +244,7 @@ pub struct TabsHostEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct TabRow {
+pub struct StackRow {
     pub title: String,
     pub url: String,
     #[serde(default)]
@@ -264,12 +252,6 @@ pub struct TabRow {
     pub is_active: bool,
     #[serde(default)]
     pub bg_color: Option<String>,
-}
-
-impl TabRow {
-    pub fn address_text(&self) -> &str {
-        self.url.as_str()
-    }
 }
 
 #[derive(
@@ -284,8 +266,8 @@ impl TabRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct SpacesHostEvent {
-    pub spaces: Vec<SpaceRow>,
+pub struct TabsHostEvent {
+    pub tabs: Vec<TabRow>,
 }
 
 #[derive(
@@ -299,12 +281,18 @@ pub struct SpacesHostEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct SpaceRow {
+pub struct TabRow {
     pub id: String,
     pub name: String,
     pub is_active: bool,
     #[serde(default)]
     pub bg_color: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub favicon_url: String,
 }
 
 #[derive(
@@ -316,10 +304,10 @@ pub struct SpaceRow {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct SpacesCommandEvent {
+pub struct TabsCommandEvent {
     pub command: String,
     #[serde(default)]
-    pub space_id: Option<String>,
+    pub tab_id: Option<String>,
 }
 
 #[derive(
@@ -349,7 +337,7 @@ pub struct PaneTreeEvent {
 pub struct PaneNode {
     pub id: u64,
     pub is_active: bool,
-    pub tabs: Vec<TabNode>,
+    pub stacks: Vec<StackNode>,
 }
 
 #[derive(
@@ -362,7 +350,7 @@ pub struct PaneNode {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct TabNode {
+pub struct StackNode {
     pub title: String,
     pub url: String,
     #[serde(default)]
@@ -370,7 +358,7 @@ pub struct TabNode {
     #[serde(default)]
     pub is_active: bool,
     #[serde(default)]
-    pub tab_index: u32,
+    pub stack_index: u32,
     #[serde(default)]
     pub is_loading: bool,
     #[serde(default)]
@@ -391,7 +379,7 @@ pub struct SideSheetCommandEvent {
     #[serde(default)]
     pub pane_id: String,
     #[serde(default)]
-    pub tab_index: u32,
+    pub stack_index: u32,
 }
 
 #[derive(
@@ -441,7 +429,7 @@ pub enum LayoutNode {
     Pane {
         id: u64,
         is_active: bool,
-        tabs: Vec<TabNode>,
+        stacks: Vec<StackNode>,
     },
 }
 

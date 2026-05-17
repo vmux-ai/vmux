@@ -26,6 +26,7 @@ vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
 rkyv = { workspace = true }
 serde = { workspace = true }
 vmux_core = { path = "../vmux_core" }
+vmux_space = { path = "../vmux_space" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true, features = [
@@ -52,3 +53,4 @@ vmux_webview_app = { path = "../vmux_webview_app" }
 dioxus = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = "0.2.115"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "CssStyleDeclaration"] }

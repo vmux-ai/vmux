@@ -58,8 +58,8 @@ pub enum LayoutCommand {
     #[menu(label = "Window")]
     Window(WindowCommand),
 
-    #[menu(label = "Zen")]
-    Zen(ZenCommand),
+    #[menu(label = "Layout")]
+    ToggleLayout(ToggleLayoutCommand),
 
     #[menu(label = "Tab")]
     Tab(TabCommand),
@@ -355,9 +355,9 @@ pub enum TabCommand {
 #[derive(
     OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
 )]
-pub enum ZenCommand {
+pub enum ToggleLayoutCommand {
     #[default]
-    #[menu(id = "zen_toggle", label = "Toggle Zen Mode", accel = "super+shift+s")]
+    #[menu(id = "toggle_layout", label = "Toggle Layout", accel = "super+shift+s")]
     Toggle,
 }
 
@@ -482,8 +482,10 @@ mod tests {
             Some(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SplitV)))
         );
         assert_eq!(
-            AppCommand::from_menu_id("zen_toggle"),
-            Some(AppCommand::Layout(LayoutCommand::Zen(ZenCommand::Toggle)))
+            AppCommand::from_menu_id("toggle_layout"),
+            Some(AppCommand::Layout(LayoutCommand::ToggleLayout(
+                ToggleLayoutCommand::Toggle
+            )))
         );
         assert_eq!(
             AppCommand::from_menu_id("space_open"),

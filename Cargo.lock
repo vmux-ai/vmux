@@ -9208,9 +9208,11 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_history",
+ "vmux_space",
  "vmux_ui",
  "vmux_webview_app",
  "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

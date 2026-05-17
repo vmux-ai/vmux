@@ -1,7 +1,4 @@
-use crate::{
-    LayoutChrome,
-    event::{SPACES_EVENT, SpaceRow, SpacesCommandEvent, SpacesHostEvent},
-};
+use crate::event::TabsCommandEvent;
 use crate::{
     NewStackContext,
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
@@ -19,7 +16,6 @@ use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, TabCommand};
 use vmux_history::{CreatedAt, LastActivatedAt};
-use vmux_webview_app::UiReady;
 
 pub struct TabPlugin;
 
@@ -29,15 +25,14 @@ pub struct TabCommandSet;
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
-            .add_plugins(BinJsEmitEventPlugin::<SpacesCommandEvent>::default())
-            .add_observer(on_spaces_command_emit)
+            .add_plugins(BinJsEmitEventPlugin::<TabsCommandEvent>::default())
+            .add_observer(on_tabs_command_emit)
             .add_systems(
                 Update,
                 handle_tab_commands
                     .in_set(ReadAppCommands)
                     .in_set(TabCommandSet),
             )
-            .add_systems(Update, push_spaces_host_emit)
             .add_systems(PostUpdate, sync_tab_visibility);
     }
 }
@@ -339,7 +334,7 @@ fn close_tab_entity(
     commands.entity(target).despawn();
 }
 
-fn active_tab_siblings(
+pub fn active_tab_siblings(
     active: Entity,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
@@ -397,64 +392,8 @@ fn sync_tab_visibility(
     }
 }
 
-/// Push the current set of spaces (and the active marker) to the tab pill UI
-/// whenever the payload changes.
-#[allow(clippy::too_many_arguments)]
-fn push_spaces_host_emit(
-    mut commands: Commands,
-    browsers: NonSend<Browsers>,
-    chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
-    tabs: Query<(Entity, &Tab, &LastActivatedAt)>,
-    child_of_q: Query<&ChildOf>,
-    all_children: Query<&Children>,
-    tab_q: Query<Entity, With<Tab>>,
-    mut last: Local<String>,
-) {
-    let Ok((chrome_e, ui_ready)) = chrome_q.single() else {
-        return;
-    };
-    if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
-        return;
-    }
-
-    let active_tab = tabs.iter().max_by_key(|(_, _, ts)| ts.0).map(|t| t.0);
-
-    let ordered = if let Some(any) = tabs.iter().next() {
-        active_tab_siblings(any.0, &child_of_q, &all_children, &tab_q)
-    } else {
-        Vec::new()
-    };
-
-    let rows: Vec<SpaceRow> = ordered
-        .iter()
-        .filter_map(|e| tabs.get(*e).ok())
-        .map(|(entity, tab, _)| SpaceRow {
-            id: entity.to_bits().to_string(),
-            name: if tab.name.is_empty() {
-                "Tab".to_string()
-            } else {
-                tab.name.clone()
-            },
-            is_active: Some(entity) == active_tab,
-            bg_color: None,
-        })
-        .collect();
-
-    let payload = SpacesHostEvent { spaces: rows };
-    let body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !ui_ready.is_changed() && body == *last {
-        return;
-    }
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        chrome_e,
-        SPACES_EVENT,
-        &payload,
-    ));
-    *last = body;
-}
-
-fn on_spaces_command_emit(
-    trigger: On<BinReceive<SpacesCommandEvent>>,
+fn on_tabs_command_emit(
+    trigger: On<BinReceive<TabsCommandEvent>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     tab_q: Query<Entity, With<Tab>>,
     main_q: Query<Entity, With<MainNode>>,
@@ -475,11 +414,8 @@ fn on_spaces_command_emit(
             messages.write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::New)));
         }
         "close" => {
-            let target = space_target_tab(
-                evt.space_id.as_deref(),
-                tabs.iter().map(|(entity, _)| entity),
-            )
-            .or(active_tab);
+            let target = tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
+                .or(active_tab);
             let Some(target) = target else { return };
             close_tab_entity(
                 target,
@@ -498,7 +434,7 @@ fn on_spaces_command_emit(
             );
         }
         "switch" => {
-            let Some(id_str) = evt.space_id.as_deref() else {
+            let Some(id_str) = evt.tab_id.as_deref() else {
                 return;
             };
             let Ok(bits) = id_str.parse::<u64>() else {
@@ -513,7 +449,7 @@ fn on_spaces_command_emit(
     }
 }
 
-fn space_target_tab(id: Option<&str>, tabs: impl IntoIterator<Item = Entity>) -> Option<Entity> {
+fn tab_target(id: Option<&str>, tabs: impl IntoIterator<Item = Entity>) -> Option<Entity> {
     let bits = id?.parse::<u64>().ok()?;
     tabs.into_iter().find(|tab_e| tab_e.to_bits() == bits)
 }
@@ -523,11 +459,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn space_target_tab_uses_event_space_id() {
+    fn tab_target_uses_event_tab_id() {
         let target = Entity::from_bits(42);
         let other = Entity::from_bits(7);
         let id = target.to_bits().to_string();
 
-        assert_eq!(space_target_tab(Some(&id), [other, target]), Some(target));
+        assert_eq!(tab_target(Some(&id), [other, target]), Some(target));
     }
 }

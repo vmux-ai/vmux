@@ -174,9 +174,20 @@ fn on_pinch_zoom(
     windows: Query<&Window>,
     mut webviews_all: Query<
         (Entity, &mut ZoomLevel),
-        (With<WebviewSource>, Or<(With<Mesh3d>, With<Mesh2d>)>),
+        (
+            With<WebviewSource>,
+            Or<(With<Mesh3d>, With<Mesh2d>)>,
+            Without<CefIgnorePinchZoom>,
+        ),
     >,
-    webviews_targeted: Query<Entity, (With<WebviewSource>, With<CefPointerTarget>)>,
+    webviews_targeted: Query<
+        Entity,
+        (
+            With<WebviewSource>,
+            With<CefPointerTarget>,
+            Without<CefIgnorePinchZoom>,
+        ),
+    >,
     suppress: Res<CefSuppressPointerInput>,
 ) {
     if suppress.0 {

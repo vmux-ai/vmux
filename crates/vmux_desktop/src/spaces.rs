@@ -18,7 +18,6 @@ use crate::{
     command_bar::NewStackContext,
     layout::{stack::Stack, window::WEBVIEW_MESH_DEPTH_BIAS},
     profile,
-    settings::AppSettings,
 };
 
 #[derive(Resource, Clone, Debug)]
@@ -237,12 +236,13 @@ fn space_emit_targets(
 fn broadcast_spaces_to_views(
     active: Res<ActiveSpace>,
     spaces_views: Query<Entity, (With<SpacesView>, With<UiReady>)>,
+    chrome_views: Query<Entity, (With<vmux_layout::LayoutChrome>, With<UiReady>)>,
     browsers: NonSend<Browsers>,
     tabs: Query<(), With<Stack>>,
     mut cache: Local<SpaceBroadcastCache>,
     mut commands: Commands,
 ) {
-    if spaces_views.is_empty() {
+    if spaces_views.is_empty() && chrome_views.is_empty() {
         return;
     }
     let registry = read_space_registry_from(&profile::shared_data_dir());
@@ -251,7 +251,7 @@ fn broadcast_spaces_to_views(
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     let mut ready = Vec::new();
-    for entity in &spaces_views {
+    for entity in spaces_views.iter().chain(chrome_views.iter()) {
         if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
             ready.push(entity);
         }
@@ -278,7 +278,6 @@ fn apply_pending_space_switch(
     >,
     main_q: Query<Entity, With<crate::layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    settings: Res<AppSettings>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     focus: Option<ResMut<crate::layout::stack::FocusedStack>>,
     mut commands: Commands,
@@ -311,7 +310,6 @@ fn apply_pending_space_switch(
         let spawned = crate::layout::window::spawn_default_space_layout(
             main,
             *primary_window,
-            &settings.layout,
             &mut new_stack_ctx,
             &mut commands,
         );
@@ -326,7 +324,6 @@ fn apply_pending_space_switch(
 fn spawn_spaces_page_layout(
     main: Entity,
     primary_window: Entity,
-    settings: &AppSettings,
     new_stack_ctx: &mut NewStackContext,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -336,7 +333,6 @@ fn spawn_spaces_page_layout(
     let spawned = crate::layout::window::spawn_default_space_layout(
         main,
         primary_window,
-        &settings.layout,
         new_stack_ctx,
         commands,
     );
@@ -373,16 +369,39 @@ fn on_space_command(
     >,
     main_q: Query<Entity, With<crate::layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    settings: Res<AppSettings>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut focus: Option<ResMut<crate::layout::stack::FocusedStack>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut spawn_requests: Option<MessageWriter<vmux_layout::LayoutSpawnRequest>>,
     mut commands: Commands,
 ) {
     let root = profile::shared_data_dir();
     let mut registry = read_space_registry_from(&root);
     let evt = &trigger.event().payload;
+    if evt.command == "open_page" {
+        let Some(focus_res) = focus.as_deref() else {
+            return;
+        };
+        let Some(pane) = focus_res.pane else {
+            return;
+        };
+        let Some(spawn_requests) = spawn_requests.as_mut() else {
+            return;
+        };
+        let stack = commands
+            .spawn((
+                crate::layout::stack::stack_bundle(),
+                vmux_history::LastActivatedAt::now(),
+                ChildOf(pane),
+            ))
+            .id();
+        spawn_requests.write(vmux_layout::LayoutSpawnRequest::OpenUrl {
+            stack,
+            url: SPACES_WEBVIEW_URL.to_string(),
+        });
+        return;
+    }
     if evt.command == "delete" {
         let Some(id) = evt.space_id.as_deref() else {
             return;
@@ -459,7 +478,6 @@ fn on_space_command(
             spawn_spaces_page_layout(
                 main,
                 *primary_window,
-                &settings,
                 &mut new_stack_ctx,
                 &mut meshes,
                 &mut webview_mt,
@@ -470,7 +488,6 @@ fn on_space_command(
             let spawned = crate::layout::window::spawn_default_space_layout(
                 main,
                 *primary_window,
-                &settings.layout,
                 &mut new_stack_ctx,
                 &mut commands,
             );
@@ -540,6 +557,7 @@ mod tests {
                 startup_url: "about:blank".to_string(),
             },
             layout: LayoutSettings {
+                radius: 0.0,
                 window: WindowSettings {
                     padding: 0.0,
                     padding_top: None,
@@ -547,10 +565,7 @@ mod tests {
                     padding_bottom: None,
                     padding_left: None,
                 },
-                pane: PaneSettings {
-                    gap: 0.0,
-                    radius: 0.0,
-                },
+                pane: PaneSettings { gap: 0.0 },
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             },

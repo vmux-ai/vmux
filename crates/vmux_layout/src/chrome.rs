@@ -115,6 +115,7 @@ pub fn layout_chrome_bundle(
         Browser,
         HostWindow(host_window),
         WebviewTransparent,
+        bevy_cef::prelude::CefIgnorePinchZoom,
         Node {
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),

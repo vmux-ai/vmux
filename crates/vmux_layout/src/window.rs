@@ -79,6 +79,7 @@ impl Plugin for WindowPlugin {
                 fit_window_to_screen,
                 sync_glass_pane_clip,
                 sync_window_layout_to_settings,
+                sync_main_column_gap_to_pane_count,
             ),
         )
         .add_systems(
@@ -196,7 +197,7 @@ fn setup(
                     ..default()
                 },
                 extension: GlassCorners {
-                    clip: Vec4::new(settings.pane.radius, m.x, m.y, PIXELS_PER_METER),
+                    clip: Vec4::new(settings.radius, m.x, m.y, PIXELS_PER_METER),
                     ..default()
                 },
             })),
@@ -211,10 +212,10 @@ fn setup(
                 position_type: PositionType::Relative,
                 flex_direction: FlexDirection::Row,
                 padding: UiRect {
-                    top: Val::Px(settings.window.pad_top()),
-                    right: Val::Px(settings.window.pad_right()),
-                    bottom: Val::Px(settings.window.pad_bottom()),
-                    left: Val::Px(settings.window.pad_left()),
+                    top: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    right: Val::Px(crate::event::WINDOW_PAD_PX),
+                    bottom: Val::Px(crate::event::WINDOW_PAD_PX),
                 },
                 column_gap: Val::Px(0.0),
                 ..default()
@@ -232,7 +233,7 @@ fn setup(
             GlobalTransform::default(),
             Visibility::Inherited,
             Node {
-                width: Val::Px(settings.side_sheet.width),
+                width: Val::Px(crate::event::SIDE_SHEET_WIDTH_PX),
                 min_height: Val::Px(0.0),
                 flex_shrink: 0.0,
                 flex_direction: FlexDirection::Column,
@@ -272,7 +273,7 @@ fn setup(
         Transform::default(),
         GlobalTransform::default(),
         Node {
-            height: Val::Px(crate::event::HEADER_HEIGHT_PX),
+            height: Val::Px(crate::event::CHROME_RESERVED_HEIGHT_PX),
             flex_shrink: 0.0,
             ..default()
         },
@@ -300,9 +301,9 @@ fn setup(
         Node {
             width: Val::Px(280.0),
             position_type: PositionType::Absolute,
-            right: Val::Px(settings.window.pad_right()),
-            top: Val::Px(settings.window.pad_top()),
-            bottom: Val::Px(settings.window.pad_bottom()),
+            right: Val::Px(crate::event::WINDOW_PAD_PX),
+            top: Val::Px(crate::event::WINDOW_PAD_PX),
+            bottom: Val::Px(crate::event::WINDOW_PAD_PX),
             display: Display::None,
             ..default()
         },
@@ -316,9 +317,9 @@ fn setup(
         Node {
             height: Val::Px(200.0),
             position_type: PositionType::Absolute,
-            left: Val::Px(settings.window.pad_left()),
-            right: Val::Px(settings.window.pad_right()),
-            bottom: Val::Px(settings.window.pad_bottom()),
+            left: Val::Px(crate::event::WINDOW_PAD_PX),
+            right: Val::Px(crate::event::WINDOW_PAD_PX),
+            bottom: Val::Px(crate::event::WINDOW_PAD_PX),
             display: Display::None,
             ..default()
         },
@@ -326,10 +327,13 @@ fn setup(
     ));
 
     commands.spawn((
-        Modal,
-        HostWindow(pw),
-        Browser,
-        WebviewTransparent,
+        (
+            Modal,
+            HostWindow(pw),
+            Browser,
+            WebviewTransparent,
+            bevy_cef::prelude::CefIgnorePinchZoom,
+        ),
         Node {
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
@@ -370,7 +374,6 @@ fn spawn_default_space(
     main_q: Query<Entity, With<Main>>,
     profile_q: Query<(), With<Profile>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    settings: Res<LayoutSettings>,
     space_file: Option<Res<SpaceFilePresent>>,
     mut new_stack_ctx: ResMut<crate::NewStackContext>,
     mut commands: Commands,
@@ -383,13 +386,7 @@ fn spawn_default_space(
     }
 
     let Ok(main) = main_q.single() else { return };
-    spawn_default_space_layout(
-        main,
-        *primary_window,
-        &settings,
-        &mut new_stack_ctx,
-        &mut commands,
-    );
+    spawn_default_space_layout(main, *primary_window, &mut new_stack_ctx, &mut commands);
 }
 
 pub struct SpawnedSessionLayout {
@@ -401,7 +398,6 @@ pub struct SpawnedSessionLayout {
 pub fn spawn_default_space_layout(
     main: Entity,
     pw: Entity,
-    settings: &LayoutSettings,
     new_stack_ctx: &mut crate::NewStackContext,
     commands: &mut Commands,
 ) -> SpawnedSessionLayout {
@@ -415,7 +411,7 @@ pub fn spawn_default_space_layout(
         ))
         .id();
 
-    let gap = pane_split_gaps(PaneSplitDirection::Row, settings.pane.gap);
+    let gap = pane_split_gaps(PaneSplitDirection::Row, crate::event::PANE_GAP_PX);
     let split_root = commands
         .spawn((
             Pane,
@@ -471,7 +467,7 @@ fn sync_glass_pane_clip(
     settings: Res<LayoutSettings>,
     mut materials: ResMut<Assets<GlassMaterial>>,
 ) {
-    let r = settings.pane.radius;
+    let r = settings.radius;
     for (child_of, handle) in &q {
         let Ok(computed) = parent_q.get(child_of.get()) else {
             continue;
@@ -516,27 +512,28 @@ fn sync_window_layout_to_settings(
         return;
     }
 
-    let pad_top = settings.window.pad_top();
-    let pad_right = settings.window.pad_right();
-    let pad_bottom = settings.window.pad_bottom();
-    let pad_left = settings.window.pad_left();
-    let gap = settings.pane.gap;
-    let cfg_width = settings.side_sheet.width;
+    let pad = crate::event::WINDOW_PAD_PX;
+    let gap = crate::event::PANE_GAP_PX;
+    let cfg_width = crate::event::SIDE_SHEET_WIDTH_PX;
 
-    // Root window: padding + flex-row column gap.
+    // Root window: padding + flex-row column gap. Top and left are flush
+    // with the window so the chrome / pane meet the system edge; right
+    // and bottom keep a gap.
     if let Ok(mut node) = window_q.single_mut() {
         node.padding = UiRect {
-            top: Val::Px(pad_top),
-            right: Val::Px(pad_right),
-            bottom: Val::Px(pad_bottom),
-            left: Val::Px(pad_left),
+            top: Val::Px(0.0),
+            left: Val::Px(0.0),
+            right: Val::Px(pad),
+            bottom: Val::Px(pad),
         };
         node.column_gap = Val::Px(gap);
     }
 
-    if let Ok(mut node) = main_column_q.single_mut() {
-        node.row_gap = Val::Px(gap);
-    }
+    // MainColumn row_gap (between Header and Main pane container) is
+    // managed by sync_main_column_gap_to_pane_count, which keeps it 0
+    // when the active tab has a single pane and switches to PANE_GAP_PX
+    // when split. Don't override here.
+    let _ = main_column_q.single_mut();
 
     // Side sheet width resource: initialise from settings on first run.
     if sheet_width.0 <= 0.0 {
@@ -553,15 +550,48 @@ fn sync_window_layout_to_settings(
                 node.width = Val::Px(live_width);
             }
             SideSheetPosition::Right => {
-                node.right = Val::Px(pad_right);
-                node.top = Val::Px(pad_top);
-                node.bottom = Val::Px(pad_bottom);
+                node.right = Val::Px(pad);
+                node.top = Val::Px(pad);
+                node.bottom = Val::Px(pad);
             }
             SideSheetPosition::Bottom => {
-                node.left = Val::Px(pad_left);
-                node.right = Val::Px(pad_right);
-                node.bottom = Val::Px(pad_bottom);
+                node.left = Val::Px(pad);
+                node.right = Val::Px(pad);
+                node.bottom = Val::Px(pad);
             }
+        }
+    }
+}
+
+/// Keep MainColumn's row_gap at 0 when the active tab has a single pane
+/// (so the url row sits flush against the pane content) and switch to
+/// PANE_GAP_PX when it's split (so panes visually separate from chrome).
+fn sync_main_column_gap_to_pane_count(
+    focus: Res<crate::stack::FocusedStack>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    mut main_column_q: Query<&mut Node, With<MainColumn>>,
+) {
+    let pane_count = focus
+        .tab
+        .map(|tab_e| {
+            let mut leaves = Vec::new();
+            crate::stack::collect_leaf_panes(tab_e, &all_children, &leaf_panes, &mut leaves);
+            leaves.len()
+        })
+        .unwrap_or(0);
+    let target = if pane_count > 1 {
+        crate::event::PANE_GAP_PX
+    } else {
+        0.0
+    };
+    for mut node in &mut main_column_q {
+        let current = match node.row_gap {
+            Val::Px(v) => v,
+            _ => f32::NAN,
+        };
+        if (current - target).abs() > 0.01 {
+            node.row_gap = Val::Px(target);
         }
     }
 }
@@ -579,7 +609,7 @@ pub fn fit_window_to_screen(
     }
     *last_size = m;
 
-    let r = settings.pane.radius;
+    let r = settings.radius;
 
     for (mut tf, handle) in &mut q {
         tf.translation = Vec3::new(0.0, m.y * 0.5, 0.0);
@@ -643,6 +673,7 @@ mod tests {
 
     fn test_settings(gap: f32) -> LayoutSettings {
         LayoutSettings {
+            radius: 0.0,
             window: crate::settings::WindowSettings {
                 padding: 0.0,
                 padding_top: None,
@@ -650,7 +681,7 @@ mod tests {
                 padding_bottom: None,
                 padding_left: None,
             },
-            pane: crate::settings::PaneSettings { gap, radius: 8.0 },
+            pane: crate::settings::PaneSettings { gap },
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),
         }
@@ -720,6 +751,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.init_resource::<crate::NewStackContext>();
         app.insert_resource(LayoutSettings {
+            radius: 0.0,
             window: crate::settings::WindowSettings {
                 padding: 0.0,
                 padding_top: None,
@@ -727,10 +759,7 @@ mod tests {
                 padding_bottom: None,
                 padding_left: None,
             },
-            pane: crate::settings::PaneSettings {
-                gap: 0.0,
-                radius: 0.0,
-            },
+            pane: crate::settings::PaneSettings { gap: 0.0 },
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),
         });

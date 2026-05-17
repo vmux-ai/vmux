@@ -1,6 +1,5 @@
 use crate::{
     LayoutStartupSet, fit_window_to_screen,
-    settings::LayoutSettings,
     unit::{PIXELS_PER_METER, WindowExt},
 };
 use bevy::{
@@ -22,7 +21,7 @@ const TRANSITION_DURATION: f32 = 0.3;
 const BLOOM_INTENSITY: f32 = 0.15; // Bloom::NATURAL intensity
 const SUNLIGHT_ILLUMINANCE: f32 = 8000.0;
 
-fn camera_margin_px(_settings: &LayoutSettings) -> f32 {
+fn camera_margin_px() -> f32 {
     0.0
 }
 
@@ -110,11 +109,7 @@ impl Plugin for ScenePlugin {
     }
 }
 
-pub fn setup(
-    mut commands: Commands,
-    window: Single<&Window, With<PrimaryWindow>>,
-    settings: Res<LayoutSettings>,
-) {
+pub fn setup(mut commands: Commands, window: Single<&Window, With<PrimaryWindow>>) {
     let mut state = FreeCameraState::default();
     state.enabled = false;
 
@@ -125,7 +120,7 @@ pub fn setup(
             fov: FOV_Y,
             ..default()
         }),
-        frame_main_camera_transform(&window, window.aspect(), camera_margin_px(&settings)),
+        frame_main_camera_transform(&window, window.aspect(), camera_margin_px()),
         FreeCamera {
             sensitivity: 1.0,
             friction: 25.0,
@@ -139,7 +134,6 @@ pub fn setup(
 
 fn fit_main_camera(
     window: Single<&Window, With<PrimaryWindow>>,
-    settings: Res<LayoutSettings>,
     mut camera_q: Query<(&mut Transform, &mut Projection), With<MainCamera>>,
     camera_state: Single<&FreeCameraState, With<MainCamera>>,
     mode: Res<InteractionMode>,
@@ -163,13 +157,12 @@ fn fit_main_camera(
 
     // Only reset transform in User mode
     if *mode == InteractionMode::User {
-        *tf = frame_main_camera_transform(&window, aspect, camera_margin_px(&settings));
+        *tf = frame_main_camera_transform(&window, aspect, camera_margin_px());
     }
 }
 
 fn update_camera_home(
     window: Single<&Window, With<PrimaryWindow>>,
-    settings: Res<LayoutSettings>,
     mode: Res<InteractionMode>,
     home: Option<ResMut<CameraHome>>,
 ) {
@@ -177,7 +170,7 @@ fn update_camera_home(
         return;
     }
     let Some(mut home) = home else { return };
-    home.0 = frame_main_camera_transform(&window, window.aspect(), camera_margin_px(&settings));
+    home.0 = frame_main_camera_transform(&window, window.aspect(), camera_margin_px());
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +180,6 @@ fn update_camera_home(
 fn on_toggle_player_mode(
     mut reader: MessageReader<AppCommand>,
     window: Single<&Window, With<PrimaryWindow>>,
-    settings: Res<LayoutSettings>,
     mut state: Single<&mut FreeCameraState, With<MainCamera>>,
     camera: Single<Entity, With<MainCamera>>,
     kb_targets: Query<Entity, With<CefKeyboardTarget>>,
@@ -209,11 +201,8 @@ fn on_toggle_player_mode(
         match *mode {
             InteractionMode::User => {
                 // Store home transform
-                let home = frame_main_camera_transform(
-                    &window,
-                    window.aspect(),
-                    camera_margin_px(&settings),
-                );
+                let home =
+                    frame_main_camera_transform(&window, window.aspect(), camera_margin_px());
                 commands.insert_resource(CameraHome(home));
 
                 *mode = InteractionMode::Player;
@@ -485,38 +474,8 @@ pub fn frame_main_camera_transform(window: &Window, aspect: f32, margin_px: f32)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{
-        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
-    };
-
-    fn settings_with_padding(
-        padding: f32,
-        top: Option<f32>,
-        right: Option<f32>,
-        bottom: Option<f32>,
-        left: Option<f32>,
-    ) -> LayoutSettings {
-        LayoutSettings {
-            window: WindowSettings {
-                padding,
-                padding_top: top,
-                padding_right: right,
-                padding_bottom: bottom,
-                padding_left: left,
-            },
-            pane: PaneSettings {
-                gap: 0.0,
-                radius: 0.0,
-            },
-            side_sheet: SideSheetSettings::default(),
-            focus_ring: FocusRingSettings::default(),
-        }
-    }
-
     #[test]
-    fn camera_margin_ignores_inner_window_padding() {
-        let settings = settings_with_padding(4.0, Some(40.0), Some(12.0), Some(6.0), None);
-
-        assert_eq!(camera_margin_px(&settings), 0.0);
+    fn camera_margin_is_zero() {
+        assert_eq!(camera_margin_px(), 0.0);
     }
 }

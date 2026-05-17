@@ -222,6 +222,7 @@ fn handle_stack_commands(
                     commands.entity(stack).insert(vmux_core::PageMetadata {
                         url: TERMINAL_WEBVIEW_URL.to_string(),
                         title: "Terminal".to_string(),
+                        bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
                         ..default()
                     });
                     spawn_requests.write(LayoutSpawnRequest::Terminal { stack });
@@ -232,6 +233,7 @@ fn handle_stack_commands(
                     commands.entity(stack).insert(vmux_core::PageMetadata {
                         url: PROCESSES_WEBVIEW_URL.to_string(),
                         title: "Background Services".to_string(),
+                        bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
                         ..default()
                     });
                     spawn_requests.write(LayoutSpawnRequest::ProcessesMonitor { stack });
@@ -617,6 +619,7 @@ mod tests {
 
     fn test_settings() -> LayoutSettings {
         LayoutSettings {
+            radius: 0.0,
             window: WindowSettings {
                 padding: 0.0,
                 padding_top: None,
@@ -624,10 +627,7 @@ mod tests {
                 padding_bottom: None,
                 padding_left: None,
             },
-            pane: PaneSettings {
-                gap: 0.0,
-                radius: 0.0,
-            },
+            pane: PaneSettings { gap: 0.0 },
             side_sheet: SideSheetSettings::default(),
             focus_ring: FocusRingSettings::default(),
         }

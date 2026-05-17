@@ -1,8 +1,8 @@
 use crate::{
     chrome::Loading,
-    pane::Pane,
+    pane::{Pane, PaneSplit},
     settings::LayoutSettings,
-    stack::{Stack, active_stack_in_pane},
+    stack::{Stack, active_stack_in_pane, collect_leaf_panes},
     window::{VmuxWindow, WEBVIEW_Z_FOCUS_RING},
 };
 use bevy::{
@@ -102,6 +102,8 @@ fn sync_focus_ring_to_active_pane(
     tab_children: Query<&Children, With<Stack>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     loading_q: Query<(), With<Loading>>,
+    all_children: Query<&Children>,
+    leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
 ) {
     let Ok((mut tf, mat_h, mut visibility)) = ring_q.single_mut() else {
         return;
@@ -112,6 +114,14 @@ fn sync_focus_ring_to_active_pane(
         *visibility = Visibility::Hidden;
         return;
     };
+    if let Some(active_tab) = focus.tab {
+        let mut leaves = Vec::new();
+        collect_leaf_panes(active_tab, &all_children, &leaf_pane_q, &mut leaves);
+        if leaves.len() <= 1 {
+            *visibility = Visibility::Hidden;
+            return;
+        }
+    }
     let Ok((pane_computed, pane_ui_gt)) = pane_layout.get(active_entity) else {
         *visibility = Visibility::Hidden;
         return;
@@ -206,7 +216,7 @@ fn build_focus_ring_material(
     let w_o = w_i + 2.0 * b;
     let h_o = h_i + 2.0 * b;
     let m = w_i.min(h_i);
-    let r_i = settings.pane.radius.min(m * 0.5).max(0.0);
+    let r_i = settings.radius.min(m * 0.5).max(0.0);
     let m_o = w_o.min(h_o);
     let r_o = (r_i + b).min(m_o * 0.5);
     let c = &settings.focus_ring.color;
@@ -244,6 +254,7 @@ mod tests {
 
     fn test_layout_settings() -> LayoutSettings {
         LayoutSettings {
+            radius: 0.0,
             window: crate::settings::WindowSettings {
                 padding: 0.0,
                 padding_top: None,
@@ -251,10 +262,7 @@ mod tests {
                 padding_bottom: None,
                 padding_left: None,
             },
-            pane: crate::settings::PaneSettings {
-                gap: 0.0,
-                radius: 0.0,
-            },
+            pane: crate::settings::PaneSettings { gap: 0.0 },
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),
         }

@@ -231,7 +231,7 @@ pub(crate) fn rebuild_space_views(
             PaneSplitDirection::Row => FlexDirection::Row,
             PaneSplitDirection::Column => FlexDirection::Column,
         };
-        let gap = pane_split_gaps(split.direction, settings.layout.pane.gap);
+        let gap = pane_split_gaps(split.direction, vmux_layout::event::PANE_GAP_PX);
         let mut ecmds = commands.entity(entity);
         ecmds.insert((
             HostWindow(pw),
@@ -483,6 +483,7 @@ mod tests {
                 startup_url: "about:blank".to_string(),
             },
             layout: LayoutSettings {
+                radius: 0.0,
                 window: WindowSettings {
                     padding: 0.0,
                     padding_top: None,
@@ -490,10 +491,7 @@ mod tests {
                     padding_bottom: None,
                     padding_left: None,
                 },
-                pane: PaneSettings {
-                    gap: 0.0,
-                    radius: 0.0,
-                },
+                pane: PaneSettings { gap: 0.0 },
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             },

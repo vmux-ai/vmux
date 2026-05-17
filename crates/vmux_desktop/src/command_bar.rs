@@ -811,7 +811,6 @@ fn attach_settings_page_to_tab(
 fn spawn_spaces_page_layout_from_command_bar(
     main: Option<Entity>,
     primary_window: Option<Entity>,
-    settings: &AppSettings,
     new_stack_ctx: &mut NewStackContext,
     focus: Option<&mut crate::layout::stack::FocusedStack>,
     commands: &mut Commands,
@@ -827,7 +826,6 @@ fn spawn_spaces_page_layout_from_command_bar(
     let spawned = crate::layout::window::spawn_default_space_layout(
         main,
         primary_window,
-        &settings.layout,
         new_stack_ctx,
         commands,
     );
@@ -1254,7 +1252,6 @@ fn on_command_bar_action(
                             if spawn_spaces_page_layout_from_command_bar(
                                 main,
                                 primary_window,
-                                &settings,
                                 &mut new_stack_ctx,
                                 focus.as_deref_mut(),
                                 &mut commands,
@@ -1915,6 +1912,7 @@ mod tests {
                 startup_url: "about:blank".to_string(),
             },
             layout: LayoutSettings {
+                radius: 0.0,
                 window: WindowSettings {
                     padding: 0.0,
                     padding_top: None,
@@ -1922,10 +1920,7 @@ mod tests {
                     padding_bottom: None,
                     padding_left: None,
                 },
-                pane: PaneSettings {
-                    gap: 0.0,
-                    radius: 0.0,
-                },
+                pane: PaneSettings { gap: 0.0 },
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             },

@@ -89,6 +89,7 @@ pub struct SettingsLoadSet;
 pub struct AppSettings {
     #[allow(dead_code)]
     pub browser: BrowserSettings,
+    #[serde(default)]
     pub layout: LayoutSettings,
     #[serde(default)]
     pub shortcuts: ShortcutSettings,
@@ -727,6 +728,7 @@ mod tests {
                 startup_url: "about:blank".to_string(),
             },
             layout: LayoutSettings {
+                radius: 0.0,
                 window: WindowSettings {
                     padding: 0.0,
                     padding_top: None,
@@ -734,10 +736,7 @@ mod tests {
                     padding_bottom: None,
                     padding_left: None,
                 },
-                pane: PaneSettings {
-                    gap: 0.0,
-                    radius: 0.0,
-                },
+                pane: PaneSettings { gap: 0.0 },
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
             },
