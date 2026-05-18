@@ -353,10 +353,10 @@ fn spawn_url_into_stack(
             ChildOf(stack),
         ));
     } else {
-        let terminal = commands
-            .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
+        let browser_e = commands
+            .spawn((Browser::new(meshes, webview_mt, url), ChildOf(stack)))
             .id();
-        commands.entity(terminal).insert(CefKeyboardTarget);
+        commands.entity(browser_e).insert(CefKeyboardTarget);
     }
 }
 
