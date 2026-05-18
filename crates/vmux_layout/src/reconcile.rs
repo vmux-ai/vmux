@@ -276,7 +276,7 @@ use crate::tab::Tab as SpaceTab;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{LayoutSpawnRequest, event::PANE_GAP_PX};
 #[cfg(not(target_arch = "wasm32"))]
-use bevy::ecs::message::Messages;
+use bevy::ecs::message::{MessageReader, MessageWriter, Messages};
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
@@ -309,6 +309,82 @@ pub struct LayoutSnapshotRequest {
 pub struct LayoutSnapshotResponse {
     pub request_id: u64,
     pub snapshot: LayoutSnapshot,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn serve_snapshot_requests(
+    mut reader: MessageReader<LayoutSnapshotRequest>,
+    spaces_q: Query<(Entity, &SpaceTab, Option<&Children>)>,
+    splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
+    leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
+    stacks_q: Query<(Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<Stack>>,
+    pane_sizes_q: Query<&PaneSize>,
+    zoomed_q: Query<&crate::pane::Zoomed>,
+    focused: Res<crate::stack::FocusedStack>,
+    mut writer: MessageWriter<LayoutSnapshotResponse>,
+) {
+    for request in reader.read() {
+        let snapshot = crate::snapshot::build_layout_snapshot(
+            &spaces_q,
+            &splits_q,
+            &leaves_q,
+            &stacks_q,
+            &pane_sizes_q,
+            &zoomed_q,
+            &focused,
+        );
+        writer.write(LayoutSnapshotResponse {
+            request_id: request.request_id,
+            snapshot,
+        });
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn apply_layout_requests(
+    mut reader: MessageReader<LayoutApplyRequest>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let snapshot = request.snapshot.clone();
+        let request_id = request.request_id;
+        commands.queue(move |world: &mut World| {
+            let result = match apply(world, &snapshot) {
+                Ok(()) => {
+                    let snapshot = run_build_snapshot(world);
+                    Ok(snapshot)
+                }
+                Err(err) => Err(format!("update_layout: {err:?}")),
+            };
+            world
+                .resource_mut::<Messages<LayoutApplyResponse>>()
+                .write(LayoutApplyResponse { request_id, result });
+        });
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_build_snapshot(world: &mut World) -> LayoutSnapshot {
+    use bevy::ecs::system::SystemState;
+    let mut state = SystemState::<(
+        Query<(Entity, &SpaceTab, Option<&Children>)>,
+        Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
+        Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
+        Query<(Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<Stack>>,
+        Query<&PaneSize>,
+        Query<&crate::pane::Zoomed>,
+        Res<crate::stack::FocusedStack>,
+    )>::new(world);
+    let (spaces, splits, leaves, stacks, pane_sizes, zoomed, focused) = state.get(world);
+    crate::snapshot::build_layout_snapshot(
+        &spaces,
+        &splits,
+        &leaves,
+        &stacks,
+        &pane_sizes,
+        &zoomed,
+        &focused,
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1662,6 +1738,88 @@ mod tests {
             .collect();
         assert_eq!(children.len(), 2);
         assert_eq!(children[0], existing_leaf);
+    }
+
+    #[test]
+    fn serve_snapshot_requests_emits_response() {
+        use bevy::ecs::message::Messages;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<LayoutSnapshotRequest>();
+        app.add_message::<LayoutSnapshotResponse>();
+        app.insert_resource(crate::stack::FocusedStack::default());
+        app.add_systems(Update, super::serve_snapshot_requests);
+
+        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let _ = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), ChildOf(space)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<LayoutSnapshotRequest>>()
+            .write(LayoutSnapshotRequest { request_id: 7 });
+        app.update();
+
+        let responses = app.world().resource::<Messages<LayoutSnapshotResponse>>();
+        let mut cursor = responses.get_cursor();
+        let response = cursor
+            .read(responses)
+            .next()
+            .expect("expected one response");
+        assert_eq!(response.request_id, 7);
+        assert_eq!(response.snapshot.spaces.len(), 1);
+    }
+
+    #[test]
+    fn apply_layout_requests_emits_response_with_snapshot() {
+        use bevy::ecs::message::Messages;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<LayoutApplyRequest>();
+        app.add_message::<LayoutApplyResponse>();
+        app.add_message::<crate::LayoutSpawnRequest>();
+        app.insert_resource(crate::stack::FocusedStack::default());
+        app.add_systems(Update, super::apply_layout_requests);
+
+        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let pane = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), ChildOf(space)))
+            .id();
+
+        let snap = LayoutSnapshot {
+            spaces: vec![proto::Space {
+                id: Some(format_id(NodeKind::Space, space.to_bits())),
+                name: "S".into(),
+                is_active: true,
+                root: proto::LayoutNode::Pane {
+                    id: Some(format_id(NodeKind::Pane, pane.to_bits())),
+                    is_zoomed: false,
+                    tabs: vec![],
+                },
+            }],
+            focused: proto::Focus::default(),
+        };
+
+        app.world_mut()
+            .resource_mut::<Messages<LayoutApplyRequest>>()
+            .write(LayoutApplyRequest {
+                request_id: 42,
+                snapshot: snap.clone(),
+            });
+        app.update();
+
+        let responses = app.world().resource::<Messages<LayoutApplyResponse>>();
+        let mut cursor = responses.get_cursor();
+        let response = cursor
+            .read(responses)
+            .next()
+            .expect("expected one response");
+        assert_eq!(response.request_id, 42);
+        assert!(response.result.is_ok(), "apply should succeed");
     }
 
     #[test]
