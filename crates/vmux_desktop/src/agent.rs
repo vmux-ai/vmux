@@ -175,6 +175,7 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_agent::AgentSessionExited>()
             .add_message::<crate::settings::SettingsWriteRequest>()
             .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
             .add_systems(
                 Update,
                 (
