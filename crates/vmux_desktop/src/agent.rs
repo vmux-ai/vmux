@@ -174,6 +174,7 @@ impl Plugin for AgentPlugin {
             .add_message::<AgentLaunchRequested>()
             .add_message::<vmux_agent::AgentSessionExited>()
             .add_message::<crate::settings::SettingsWriteRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
             .add_systems(
                 Update,
                 (
@@ -850,6 +851,7 @@ struct AgentLookups<'w> {
     active_space: Option<Res<'w, crate::spaces::ActiveSpace>>,
 }
 
+#[allow(dead_code)]
 fn read_layout_snapshot(world: &mut World) -> vmux_service::protocol::layout::LayoutSnapshot {
     use bevy::ecs::system::RunSystemOnce;
     world
@@ -899,6 +901,7 @@ fn handle_agent_commands(
     strategies: Res<AgentStrategies>,
     mut sp: SettingsParams,
     service: Option<Res<crate::terminal::ServiceClient>>,
+    mut layout_apply_writer: MessageWriter<vmux_layout::reconcile::LayoutApplyRequest>,
     mut commands: Commands,
     mut assets: SpawnAssets,
 ) {
@@ -1114,21 +1117,9 @@ fn handle_agent_commands(
                 }
             }
             ServiceAgentCommand::UpdateLayout { layout } => {
-                let layout = layout.clone();
-                let request_id = request.request_id;
-                // Response is sent from inside the queued closure because apply()
-                // needs exclusive &mut World, which isn't available in query params.
-                commands.queue(move |world: &mut World| {
-                    let apply_result = crate::agent_layout::apply::apply(world, &layout);
-                    let result = match apply_result {
-                        Ok(()) => AgentCommandResult::Layout(read_layout_snapshot(world)),
-                        Err(err) => AgentCommandResult::Error(format!("update_layout: {err:?}")),
-                    };
-                    if let Some(client) = world.get_resource::<crate::terminal::ServiceClient>() {
-                        client
-                            .0
-                            .send(ClientMessage::AgentCommandResponse { request_id, result });
-                    }
+                layout_apply_writer.write(vmux_layout::reconcile::LayoutApplyRequest {
+                    request_id: request.request_id.0,
+                    snapshot: layout.clone(),
                 });
                 continue;
             }

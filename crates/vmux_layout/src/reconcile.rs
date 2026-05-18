@@ -287,27 +287,27 @@ use vmux_history::LastActivatedAt;
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Message, Clone)]
 pub struct LayoutApplyRequest {
-    pub request_id: u64,
+    pub request_id: [u8; 16],
     pub snapshot: LayoutSnapshot,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Message, Clone)]
 pub struct LayoutApplyResponse {
-    pub request_id: u64,
+    pub request_id: [u8; 16],
     pub result: Result<LayoutSnapshot, String>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Message, Clone)]
 pub struct LayoutSnapshotRequest {
-    pub request_id: u64,
+    pub request_id: [u8; 16],
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Message, Clone)]
 pub struct LayoutSnapshotResponse {
-    pub request_id: u64,
+    pub request_id: [u8; 16],
     pub snapshot: LayoutSnapshot,
 }
 
@@ -1759,7 +1759,9 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<LayoutSnapshotRequest>>()
-            .write(LayoutSnapshotRequest { request_id: 7 });
+            .write(LayoutSnapshotRequest {
+                request_id: [7; 16],
+            });
         app.update();
 
         let responses = app.world().resource::<Messages<LayoutSnapshotResponse>>();
@@ -1768,7 +1770,7 @@ mod tests {
             .read(responses)
             .next()
             .expect("expected one response");
-        assert_eq!(response.request_id, 7);
+        assert_eq!(response.request_id, [7; 16]);
         assert_eq!(response.snapshot.spaces.len(), 1);
     }
 
@@ -1807,7 +1809,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<LayoutApplyRequest>>()
             .write(LayoutApplyRequest {
-                request_id: 42,
+                request_id: [42; 16],
                 snapshot: snap.clone(),
             });
         app.update();
@@ -1818,7 +1820,7 @@ mod tests {
             .read(responses)
             .next()
             .expect("expected one response");
-        assert_eq!(response.request_id, 42);
+        assert_eq!(response.request_id, [42; 16]);
         assert!(response.result.is_ok(), "apply should succeed");
     }
 
