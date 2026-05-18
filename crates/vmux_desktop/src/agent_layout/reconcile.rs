@@ -1,9 +1,7 @@
 #![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};
-use vmux_service::protocol::layout::{
-    FocusDto, LayoutNodeDto, LayoutSnapshot, NodeKind, TabDto, parse_id,
-};
+use vmux_service::protocol::layout::{Focus, LayoutNode, LayoutSnapshot, NodeKind, Tab, parse_id};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ValidationError {
@@ -55,12 +53,12 @@ pub fn validate(snapshot: &LayoutSnapshot) -> Result<(), ValidationError> {
 }
 
 fn validate_node(
-    node: &LayoutNodeDto,
+    node: &LayoutNode,
     seen: &mut HashSet<String>,
     all_ids: &mut HashSet<String>,
 ) -> Result<(), ValidationError> {
     match node {
-        LayoutNodeDto::Split {
+        LayoutNode::Split {
             id,
             flex_weights,
             children,
@@ -92,7 +90,7 @@ fn validate_node(
             }
             Ok(())
         }
-        LayoutNodeDto::Pane { id, tabs, .. } => {
+        LayoutNode::Pane { id, tabs, .. } => {
             if let Some(id) = id {
                 let (kind, _) =
                     parse_id(id).map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
@@ -119,7 +117,7 @@ fn validate_node(
 }
 
 fn validate_tab(
-    tab: &TabDto,
+    tab: &Tab,
     seen: &mut HashSet<String>,
     all_ids: &mut HashSet<String>,
 ) -> Result<(), ValidationError> {
@@ -147,7 +145,7 @@ fn validate_tab(
     Ok(())
 }
 
-fn validate_focus(focus: &FocusDto, all_ids: &HashSet<String>) -> Result<(), ValidationError> {
+fn validate_focus(focus: &Focus, all_ids: &HashSet<String>) -> Result<(), ValidationError> {
     for id in [&focus.space, &focus.pane, &focus.tab]
         .into_iter()
         .flatten()
@@ -172,7 +170,7 @@ pub enum NodeAction {
 pub struct DiffPlan {
     pub actions_by_id: HashMap<String, NodeAction>,
     pub closes: Vec<String>,
-    pub focus: FocusDto,
+    pub focus: Focus,
 }
 
 pub fn plan_diff(
@@ -208,12 +206,12 @@ pub fn plan_diff(
 }
 
 fn plan_node(
-    node: &LayoutNodeDto,
+    node: &LayoutNode,
     actions_by_id: &mut HashMap<String, NodeAction>,
     referenced: &mut HashSet<String>,
 ) {
     match node {
-        LayoutNodeDto::Split { id, children, .. } => {
+        LayoutNode::Split { id, children, .. } => {
             if let Some(id) = id {
                 referenced.insert(id.clone());
                 let (_, value) = parse_id(id).expect("validated");
@@ -229,7 +227,7 @@ fn plan_node(
                 plan_node(c, actions_by_id, referenced);
             }
         }
-        LayoutNodeDto::Pane { id, tabs, .. } => {
+        LayoutNode::Pane { id, tabs, .. } => {
             if let Some(id) = id {
                 referenced.insert(id.clone());
                 let (_, value) = parse_id(id).expect("validated");
@@ -261,28 +259,28 @@ fn plan_node(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_service::protocol::layout::{SpaceDto, SplitDirectionDto};
+    use vmux_service::protocol::layout::{Space, SplitDirection};
 
-    fn pane(id: Option<&str>, tabs: Vec<TabDto>) -> LayoutNodeDto {
-        LayoutNodeDto::Pane {
+    fn pane(id: Option<&str>, tabs: Vec<Tab>) -> LayoutNode {
+        LayoutNode::Pane {
             id: id.map(str::to_string),
             is_zoomed: false,
             tabs,
         }
     }
 
-    fn split(id: Option<&str>, children: Vec<LayoutNodeDto>, weights: Vec<f32>) -> LayoutNodeDto {
-        LayoutNodeDto::Split {
+    fn split(id: Option<&str>, children: Vec<LayoutNode>, weights: Vec<f32>) -> LayoutNode {
+        LayoutNode::Split {
             id: id.map(str::to_string),
-            direction: SplitDirectionDto::Row,
+            direction: SplitDirection::Row,
             flex_weights: weights,
             children,
         }
     }
 
-    fn snapshot(root: LayoutNodeDto, focus: FocusDto) -> LayoutSnapshot {
+    fn snapshot(root: LayoutNode, focus: Focus) -> LayoutSnapshot {
         LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![Space {
                 id: Some("space:1".into()),
                 name: "S".into(),
                 is_active: true,
@@ -297,12 +295,12 @@ mod tests {
         let snap = snapshot(
             pane(
                 Some("pane:2"),
-                vec![TabDto {
+                vec![Tab {
                     id: Some("tab:3".into()),
                     ..Default::default()
                 }],
             ),
-            FocusDto {
+            Focus {
                 space: Some("space:1".into()),
                 pane: Some("pane:2".into()),
                 tab: Some("tab:3".into()),
@@ -319,7 +317,7 @@ mod tests {
                 vec![pane(Some("pane:2"), vec![]), pane(Some("pane:2"), vec![])],
                 vec![1.0, 1.0],
             ),
-            FocusDto::default(),
+            Focus::default(),
         );
         assert!(matches!(
             validate(&snap),
@@ -329,7 +327,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_new_pane_without_tabs() {
-        let snap = snapshot(pane(None, vec![]), FocusDto::default());
+        let snap = snapshot(pane(None, vec![]), Focus::default());
         assert!(matches!(
             validate(&snap),
             Err(ValidationError::NewPaneMissingTabs)
@@ -341,14 +339,14 @@ mod tests {
         let snap = snapshot(
             pane(
                 None,
-                vec![TabDto {
+                vec![Tab {
                     id: None,
                     url: String::new(),
                     kind: "browser".into(),
                     ..Default::default()
                 }],
             ),
-            FocusDto::default(),
+            Focus::default(),
         );
         assert!(matches!(
             validate(&snap),
@@ -361,14 +359,14 @@ mod tests {
         let snap = snapshot(
             pane(
                 None,
-                vec![TabDto {
+                vec![Tab {
                     id: None,
                     url: "https://x".into(),
                     kind: String::new(),
                     ..Default::default()
                 }],
             ),
-            FocusDto::default(),
+            Focus::default(),
         );
         assert!(matches!(
             validate(&snap),
@@ -381,12 +379,12 @@ mod tests {
         let snap = snapshot(
             pane(
                 Some("pane:2"),
-                vec![TabDto {
+                vec![Tab {
                     id: Some("tab:3".into()),
                     ..Default::default()
                 }],
             ),
-            FocusDto {
+            Focus {
                 space: Some("space:1".into()),
                 pane: Some("pane:99".into()),
                 tab: None,
@@ -400,7 +398,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_wrong_kind_in_position() {
-        let snap = snapshot(pane(Some("tab:2"), vec![]), FocusDto::default());
+        let snap = snapshot(pane(Some("tab:2"), vec![]), Focus::default());
         assert!(matches!(
             validate(&snap),
             Err(ValidationError::WrongKindForPosition { .. })
@@ -414,14 +412,14 @@ mod tests {
                 Some("split:1"),
                 vec![pane(
                     Some("pane:2"),
-                    vec![TabDto {
+                    vec![Tab {
                         id: Some("tab:3".into()),
                         ..Default::default()
                     }],
                 )],
                 vec![1.0, 2.0],
             ),
-            FocusDto::default(),
+            Focus::default(),
         );
         assert!(matches!(
             validate(&snap),
@@ -434,12 +432,12 @@ mod tests {
         let snap = snapshot(
             pane(
                 Some("pane:2"),
-                vec![TabDto {
+                vec![Tab {
                     id: Some("tab:3".into()),
                     ..Default::default()
                 }],
             ),
-            FocusDto {
+            Focus {
                 space: Some("space:1".into()),
                 pane: Some("pane:2".into()),
                 tab: Some("tab:3".into()),
@@ -460,12 +458,12 @@ mod tests {
         let snap = snapshot(
             pane(
                 Some("pane:2"),
-                vec![TabDto {
+                vec![Tab {
                     id: Some("tab:3".into()),
                     ..Default::default()
                 }],
             ),
-            FocusDto {
+            Focus {
                 space: Some("space:1".into()),
                 pane: Some("pane:2".into()),
                 tab: Some("tab:3".into()),
@@ -484,14 +482,14 @@ mod tests {
         let snap = snapshot(
             pane(
                 None,
-                vec![TabDto {
+                vec![Tab {
                     id: None,
                     url: "https://x".into(),
                     kind: "browser".into(),
                     ..Default::default()
                 }],
             ),
-            FocusDto {
+            Focus {
                 space: Some("space:1".into()),
                 pane: None,
                 tab: None,

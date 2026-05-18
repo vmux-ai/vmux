@@ -13,10 +13,8 @@ use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
 use vmux_layout::LayoutSpawnRequest;
 use vmux_layout::event::PANE_GAP_PX;
-use vmux_service::protocol::layout::{
-    FocusDto, LayoutNodeDto, LayoutSnapshot, NodeKind, SpaceDto, SplitDirectionDto, TabDto,
-    format_id, parse_id,
-};
+use vmux_service::protocol::layout as proto;
+use vmux_service::protocol::layout::{LayoutSnapshot, NodeKind, format_id, parse_id};
 
 use super::reconcile::ValidationError;
 
@@ -32,7 +30,7 @@ pub fn apply_with_existing(
 ) -> Result<(), ValidationError> {
     let plan = super::reconcile::plan_diff(snapshot, existing)?;
 
-    let mut new_entities: std::collections::HashMap<*const LayoutNodeDto, Entity> =
+    let mut new_entities: std::collections::HashMap<*const proto::LayoutNode, Entity> =
         std::collections::HashMap::new();
     for space in &snapshot.spaces {
         let space_entity = match &space.id {
@@ -69,8 +67,8 @@ pub fn apply_with_existing(
         .filter_map(|(ptr, &entity)| {
             let node = unsafe { &**ptr };
             let kind = match node {
-                LayoutNodeDto::Split { .. } => NodeKind::Split,
-                LayoutNodeDto::Pane { .. } => NodeKind::Pane,
+                proto::LayoutNode::Split { .. } => NodeKind::Split,
+                proto::LayoutNode::Pane { .. } => NodeKind::Pane,
             };
             let id = format_id(kind, entity.to_bits());
             existing.contains(&id).then_some(id)
@@ -89,11 +87,11 @@ pub fn apply_with_existing(
 fn create_descendants(
     world: &mut World,
     parent: Entity,
-    node: &LayoutNodeDto,
-    new_entities: &mut std::collections::HashMap<*const LayoutNodeDto, Entity>,
+    node: &proto::LayoutNode,
+    new_entities: &mut std::collections::HashMap<*const proto::LayoutNode, Entity>,
 ) {
     let node_entity = match node {
-        LayoutNodeDto::Split { id, direction, .. } => match id {
+        proto::LayoutNode::Split { id, direction, .. } => match id {
             Some(id_str) => match parse_id(id_str) {
                 Ok((_, v)) => Entity::from_bits(v),
                 Err(_) => return,
@@ -112,7 +110,7 @@ fn create_descendants(
                 }
             }
         },
-        LayoutNodeDto::Pane { id, .. } => match id {
+        proto::LayoutNode::Pane { id, .. } => match id {
             Some(id_str) => match parse_id(id_str) {
                 Ok((_, v)) => Entity::from_bits(v),
                 Err(_) => return,
@@ -126,12 +124,12 @@ fn create_descendants(
     };
 
     match node {
-        LayoutNodeDto::Split { children, .. } => {
+        proto::LayoutNode::Split { children, .. } => {
             for c in children {
                 create_descendants(world, node_entity, c, new_entities);
             }
         }
-        LayoutNodeDto::Pane { tabs, .. } => {
+        proto::LayoutNode::Pane { tabs, .. } => {
             for t in tabs {
                 if t.id.is_none() {
                     spawn_tab(world, node_entity, t);
@@ -148,10 +146,10 @@ fn find_root_split_child(world: &World, space: Entity) -> Option<Entity> {
         .find(|&e| world.get::<PaneSplit>(e).is_some())
 }
 
-fn set_split_direction(world: &mut World, entity: Entity, direction: SplitDirectionDto) {
+fn set_split_direction(world: &mut World, entity: Entity, direction: proto::SplitDirection) {
     let pane_split_dir = match direction {
-        SplitDirectionDto::Row => PaneSplitDirection::Row,
-        SplitDirectionDto::Column => PaneSplitDirection::Column,
+        proto::SplitDirection::Row => PaneSplitDirection::Row,
+        proto::SplitDirection::Column => PaneSplitDirection::Column,
     };
     if let Some(mut split) = world.get_mut::<PaneSplit>(entity) {
         split.direction = pane_split_dir;
@@ -167,10 +165,10 @@ fn set_split_direction(world: &mut World, entity: Entity, direction: SplitDirect
     }
 }
 
-fn spawn_split(world: &mut World, parent: Entity, direction: SplitDirectionDto) -> Entity {
+fn spawn_split(world: &mut World, parent: Entity, direction: proto::SplitDirection) -> Entity {
     let pane_split_dir = match direction {
-        SplitDirectionDto::Row => PaneSplitDirection::Row,
-        SplitDirectionDto::Column => PaneSplitDirection::Column,
+        proto::SplitDirection::Row => PaneSplitDirection::Row,
+        proto::SplitDirection::Column => PaneSplitDirection::Column,
     };
     let flex_direction = match pane_split_dir {
         PaneSplitDirection::Row => bevy::ui::FlexDirection::Row,
@@ -207,7 +205,7 @@ fn spawn_leaf_pane(world: &mut World, parent: Entity) -> Entity {
         .id()
 }
 
-fn spawn_tab(world: &mut World, pane: Entity, tab: &TabDto) {
+fn spawn_tab(world: &mut World, pane: Entity, tab: &proto::Tab) {
     let stack = world
         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
@@ -261,7 +259,7 @@ fn collect_existing_ids(world: &mut World) -> HashSet<String> {
     out
 }
 
-fn apply_space(world: &mut World, space: &SpaceDto) {
+fn apply_space(world: &mut World, space: &proto::Space) {
     if let Some(id) = &space.id
         && let Ok((_, value)) = parse_id(id)
     {
@@ -276,17 +274,17 @@ fn apply_space(world: &mut World, space: &SpaceDto) {
 fn apply_structure(
     world: &mut World,
     parent: Option<Entity>,
-    node: &LayoutNodeDto,
-    new_entities: &std::collections::HashMap<*const LayoutNodeDto, Entity>,
+    node: &proto::LayoutNode,
+    new_entities: &std::collections::HashMap<*const proto::LayoutNode, Entity>,
 ) {
     let Some(entity) = resolve_node_entity(node, new_entities) else {
         match node {
-            LayoutNodeDto::Split { children, .. } => {
+            proto::LayoutNode::Split { children, .. } => {
                 for c in children {
                     apply_structure(world, parent, c, new_entities);
                 }
             }
-            LayoutNodeDto::Pane { .. } => {}
+            proto::LayoutNode::Pane { .. } => {}
         }
         return;
     };
@@ -294,12 +292,12 @@ fn apply_structure(
         world.entity_mut(entity).insert(ChildOf(parent));
     }
     match node {
-        LayoutNodeDto::Split { children, .. } => {
+        proto::LayoutNode::Split { children, .. } => {
             for c in children {
                 apply_structure(world, Some(entity), c, new_entities);
             }
         }
-        LayoutNodeDto::Pane { tabs, .. } => {
+        proto::LayoutNode::Pane { tabs, .. } => {
             for t in tabs {
                 if let Some(tid) = t.id.as_deref()
                     && let Ok((_, value)) = parse_id(tid)
@@ -313,11 +311,11 @@ fn apply_structure(
 }
 
 fn resolve_node_entity(
-    node: &LayoutNodeDto,
-    new_entities: &std::collections::HashMap<*const LayoutNodeDto, Entity>,
+    node: &proto::LayoutNode,
+    new_entities: &std::collections::HashMap<*const proto::LayoutNode, Entity>,
 ) -> Option<Entity> {
     let id = match node {
-        LayoutNodeDto::Split { id, .. } | LayoutNodeDto::Pane { id, .. } => id.as_deref(),
+        proto::LayoutNode::Split { id, .. } | proto::LayoutNode::Pane { id, .. } => id.as_deref(),
     };
     if let Some(id_str) = id {
         parse_id(id_str).ok().map(|(_, v)| Entity::from_bits(v))
@@ -326,9 +324,9 @@ fn resolve_node_entity(
     }
 }
 
-fn apply_node(world: &mut World, node: &LayoutNodeDto) {
+fn apply_node(world: &mut World, node: &proto::LayoutNode) {
     match node {
-        LayoutNodeDto::Split {
+        proto::LayoutNode::Split {
             id,
             direction,
             flex_weights,
@@ -339,8 +337,8 @@ fn apply_node(world: &mut World, node: &LayoutNodeDto) {
             {
                 let entity = Entity::from_bits(value);
                 let pane_split_dir = match direction {
-                    SplitDirectionDto::Row => PaneSplitDirection::Row,
-                    SplitDirectionDto::Column => PaneSplitDirection::Column,
+                    proto::SplitDirection::Row => PaneSplitDirection::Row,
+                    proto::SplitDirection::Column => PaneSplitDirection::Column,
                 };
                 if let Some(mut split) = world.get_mut::<PaneSplit>(entity) {
                     split.direction = pane_split_dir;
@@ -368,7 +366,7 @@ fn apply_node(world: &mut World, node: &LayoutNodeDto) {
                 apply_node(world, c);
             }
         }
-        LayoutNodeDto::Pane { tabs, .. } => {
+        proto::LayoutNode::Pane { tabs, .. } => {
             for t in tabs {
                 if let Some(tid) = &t.id
                     && let Ok((_, value)) = parse_id(tid)
@@ -385,7 +383,7 @@ fn apply_node(world: &mut World, node: &LayoutNodeDto) {
     }
 }
 
-fn apply_focus(world: &mut World, focus: &FocusDto) {
+fn apply_focus(world: &mut World, focus: &proto::Focus) {
     let Some(mut focused) = world.get_resource_mut::<crate::layout::stack::FocusedStack>() else {
         return;
     };
@@ -400,9 +398,9 @@ fn apply_focus(world: &mut World, focus: &FocusDto) {
     }
 }
 
-fn node_entity(node: &LayoutNodeDto) -> Option<Entity> {
+fn node_entity(node: &proto::LayoutNode) -> Option<Entity> {
     match node {
-        LayoutNodeDto::Split { id, .. } | LayoutNodeDto::Pane { id, .. } => id
+        proto::LayoutNode::Split { id, .. } | proto::LayoutNode::Pane { id, .. } => id
             .as_deref()
             .and_then(|id| parse_id(id).ok().map(|(_, value)| Entity::from_bits(value))),
     }
@@ -412,7 +410,6 @@ fn node_entity(node: &LayoutNodeDto) -> Option<Entity> {
 mod tests {
     use super::*;
     use crate::layout::pane::{Pane, PaneSplitDirection};
-    use vmux_service::protocol::layout::{FocusDto, NodeKind, TabDto, format_id};
 
     #[test]
     fn updating_split_direction_changes_component() {
@@ -433,18 +430,18 @@ mod tests {
         let _pane_b = app.world_mut().spawn((Pane, ChildOf(split))).id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![proto::Space {
                 id: Some(format_id(NodeKind::Space, space.to_bits())),
                 name: "S".into(),
                 is_active: true,
-                root: LayoutNodeDto::Split {
+                root: proto::LayoutNode::Split {
                     id: Some(format_id(NodeKind::Split, split.to_bits())),
-                    direction: SplitDirectionDto::Column,
+                    direction: proto::SplitDirection::Column,
                     flex_weights: vec![],
                     children: vec![],
                 },
             }],
-            focused: FocusDto::default(),
+            focused: proto::Focus::default(),
         };
 
         apply(app.world_mut(), &snap).unwrap();
@@ -477,21 +474,21 @@ mod tests {
             .id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![proto::Space {
                 id: Some(format_id(NodeKind::Space, space.to_bits())),
                 name: "S".into(),
                 is_active: true,
-                root: LayoutNodeDto::Split {
+                root: proto::LayoutNode::Split {
                     id: Some(format_id(NodeKind::Split, split.to_bits())),
-                    direction: SplitDirectionDto::Row,
+                    direction: proto::SplitDirection::Row,
                     flex_weights: vec![3.0, 1.0],
                     children: vec![
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, pane_a.to_bits())),
                             is_zoomed: false,
                             tabs: vec![],
                         },
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, pane_b.to_bits())),
                             is_zoomed: false,
                             tabs: vec![],
@@ -499,7 +496,7 @@ mod tests {
                     ],
                 },
             }],
-            focused: FocusDto::default(),
+            focused: proto::Focus::default(),
         };
 
         apply(app.world_mut(), &snap).unwrap();
@@ -536,19 +533,19 @@ mod tests {
         let _filler_b = app.world_mut().spawn((Pane, ChildOf(split_b))).id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![proto::Space {
                 id: Some(format_id(NodeKind::Space, space.to_bits())),
                 name: "S".into(),
                 is_active: true,
-                root: LayoutNodeDto::Split {
+                root: proto::LayoutNode::Split {
                     id: Some(format_id(NodeKind::Split, split_a.to_bits())),
-                    direction: SplitDirectionDto::Row,
+                    direction: proto::SplitDirection::Row,
                     flex_weights: vec![],
-                    children: vec![LayoutNodeDto::Split {
+                    children: vec![proto::LayoutNode::Split {
                         id: Some(format_id(NodeKind::Split, split_b.to_bits())),
-                        direction: SplitDirectionDto::Row,
+                        direction: proto::SplitDirection::Row,
                         flex_weights: vec![],
-                        children: vec![LayoutNodeDto::Pane {
+                        children: vec![proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, moved.to_bits())),
                             is_zoomed: false,
                             tabs: vec![],
@@ -556,7 +553,7 @@ mod tests {
                     }],
                 },
             }],
-            focused: FocusDto::default(),
+            focused: proto::Focus::default(),
         };
 
         apply(app.world_mut(), &snap).unwrap();
@@ -583,22 +580,22 @@ mod tests {
         let drop_me = app.world_mut().spawn((Pane, ChildOf(split))).id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![proto::Space {
                 id: Some(format_id(NodeKind::Space, space.to_bits())),
                 name: "S".into(),
                 is_active: true,
-                root: LayoutNodeDto::Split {
+                root: proto::LayoutNode::Split {
                     id: Some(format_id(NodeKind::Split, split.to_bits())),
-                    direction: SplitDirectionDto::Row,
+                    direction: proto::SplitDirection::Row,
                     flex_weights: vec![],
-                    children: vec![LayoutNodeDto::Pane {
+                    children: vec![proto::LayoutNode::Pane {
                         id: Some(format_id(NodeKind::Pane, keep.to_bits())),
                         is_zoomed: false,
                         tabs: vec![],
                     }],
                 },
             }],
-            focused: FocusDto::default(),
+            focused: proto::Focus::default(),
         };
 
         let existing: HashSet<String> = [
@@ -628,14 +625,14 @@ mod tests {
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![proto::Space {
                 id: Some(format_id(NodeKind::Space, space.to_bits())),
                 name: "S".into(),
                 is_active: true,
-                root: LayoutNodeDto::Pane {
+                root: proto::LayoutNode::Pane {
                     id: Some(format_id(NodeKind::Pane, pane.to_bits())),
                     is_zoomed: false,
-                    tabs: vec![TabDto {
+                    tabs: vec![proto::Tab {
                         id: None,
                         url: "https://example.com".into(),
                         kind: "browser".into(),
@@ -643,7 +640,7 @@ mod tests {
                     }],
                 },
             }],
-            focused: FocusDto::default(),
+            focused: proto::Focus::default(),
         };
 
         apply(app.world_mut(), &snap).unwrap();
@@ -671,10 +668,10 @@ mod tests {
             .count();
 
         let mut new_entities = std::collections::HashMap::new();
-        let bad_node = LayoutNodeDto::Pane {
+        let bad_node = proto::LayoutNode::Pane {
             id: Some("pane:not_a_number".into()),
             is_zoomed: false,
-            tabs: vec![TabDto {
+            tabs: vec![proto::Tab {
                 id: None,
                 url: "https://example.com".into(),
                 kind: "browser".into(),
@@ -716,11 +713,11 @@ mod tests {
             .count();
 
         let mut new_entities = std::collections::HashMap::new();
-        let bad_node = LayoutNodeDto::Split {
+        let bad_node = proto::LayoutNode::Split {
             id: Some("split:garbage".into()),
-            direction: SplitDirectionDto::Row,
+            direction: proto::SplitDirection::Row,
             flex_weights: vec![],
-            children: vec![LayoutNodeDto::Pane {
+            children: vec![proto::LayoutNode::Pane {
                 id: None,
                 is_zoomed: false,
                 tabs: vec![],
@@ -770,26 +767,26 @@ mod tests {
 
         // Original order: [a, b, c]. Submit [c, a, b].
         let snap = LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![proto::Space {
                 id: Some(format_id(NodeKind::Space, space.to_bits())),
                 name: "S".into(),
                 is_active: true,
-                root: LayoutNodeDto::Split {
+                root: proto::LayoutNode::Split {
                     id: Some(format_id(NodeKind::Split, split.to_bits())),
-                    direction: SplitDirectionDto::Row,
+                    direction: proto::SplitDirection::Row,
                     flex_weights: vec![],
                     children: vec![
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, pane_c.to_bits())),
                             is_zoomed: false,
                             tabs: vec![],
                         },
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, pane_a.to_bits())),
                             is_zoomed: false,
                             tabs: vec![],
                         },
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, pane_b.to_bits())),
                             is_zoomed: false,
                             tabs: vec![],
@@ -797,7 +794,7 @@ mod tests {
                     ],
                 },
             }],
-            focused: FocusDto::default(),
+            focused: proto::Focus::default(),
         };
 
         apply(app.world_mut(), &snap).unwrap();
@@ -828,20 +825,20 @@ mod tests {
             .id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![proto::Space {
                 id: Some(format_id(NodeKind::Space, space.to_bits())),
                 name: "S".into(),
                 is_active: true,
-                root: LayoutNodeDto::Pane {
+                root: proto::LayoutNode::Pane {
                     id: Some(format_id(NodeKind::Pane, pane.to_bits())),
                     is_zoomed: false,
-                    tabs: vec![TabDto {
+                    tabs: vec![proto::Tab {
                         id: Some(format_id(NodeKind::Tab, stack.to_bits())),
                         ..Default::default()
                     }],
                 },
             }],
-            focused: FocusDto {
+            focused: proto::Focus {
                 space: Some(format_id(NodeKind::Space, space.to_bits())),
                 pane: Some(format_id(NodeKind::Pane, pane.to_bits())),
                 tab: Some(format_id(NodeKind::Tab, stack.to_bits())),
@@ -879,20 +876,20 @@ mod tests {
         }
 
         let snap = LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![proto::Space {
                 id: Some(format_id(NodeKind::Space, space.to_bits())),
                 name: "S".into(),
                 is_active: true,
-                root: LayoutNodeDto::Pane {
+                root: proto::LayoutNode::Pane {
                     id: Some(format_id(NodeKind::Pane, pane.to_bits())),
                     is_zoomed: false,
-                    tabs: vec![TabDto {
+                    tabs: vec![proto::Tab {
                         id: Some(format_id(NodeKind::Tab, stack.to_bits())),
                         ..Default::default()
                     }],
                 },
             }],
-            focused: FocusDto::default(),
+            focused: proto::Focus::default(),
         };
 
         apply(app.world_mut(), &snap).unwrap();
@@ -911,24 +908,24 @@ mod tests {
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![proto::Space {
                 id: Some(format_id(NodeKind::Space, space.to_bits())),
                 name: "S".into(),
                 is_active: true,
-                root: LayoutNodeDto::Split {
+                root: proto::LayoutNode::Split {
                     id: None,
-                    direction: SplitDirectionDto::Row,
+                    direction: proto::SplitDirection::Row,
                     flex_weights: vec![],
                     children: vec![
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, pane.to_bits())),
                             is_zoomed: false,
                             tabs: vec![],
                         },
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: None,
                             is_zoomed: false,
-                            tabs: vec![TabDto {
+                            tabs: vec![proto::Tab {
                                 id: None,
                                 url: "https://example.com".into(),
                                 kind: "browser".into(),
@@ -938,7 +935,7 @@ mod tests {
                     ],
                 },
             }],
-            focused: FocusDto::default(),
+            focused: proto::Focus::default(),
         };
 
         apply(app.world_mut(), &snap).unwrap();
@@ -972,27 +969,27 @@ mod tests {
             .id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![proto::Space {
                 id: Some(format_id(NodeKind::Space, space.to_bits())),
                 name: "S".into(),
                 is_active: true,
-                root: LayoutNodeDto::Split {
+                root: proto::LayoutNode::Split {
                     id: None,
-                    direction: SplitDirectionDto::Row,
+                    direction: proto::SplitDirection::Row,
                     flex_weights: vec![],
                     children: vec![
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, existing_pane.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![TabDto {
+                            tabs: vec![proto::Tab {
                                 id: Some(format_id(NodeKind::Tab, stack.to_bits())),
                                 ..Default::default()
                             }],
                         },
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: None,
                             is_zoomed: false,
-                            tabs: vec![TabDto {
+                            tabs: vec![proto::Tab {
                                 id: None,
                                 url: "https://example.com".into(),
                                 kind: "browser".into(),
@@ -1002,7 +999,7 @@ mod tests {
                     ],
                 },
             }],
-            focused: FocusDto::default(),
+            focused: proto::Focus::default(),
         };
 
         let existing: HashSet<String> = [
@@ -1078,27 +1075,27 @@ mod tests {
             .id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![proto::Space {
                 id: Some(format_id(NodeKind::Space, space.to_bits())),
                 name: "S".into(),
                 is_active: true,
-                root: LayoutNodeDto::Split {
+                root: proto::LayoutNode::Split {
                     id: None,
-                    direction: SplitDirectionDto::Row,
+                    direction: proto::SplitDirection::Row,
                     flex_weights: vec![],
                     children: vec![
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, existing_leaf.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![TabDto {
+                            tabs: vec![proto::Tab {
                                 id: Some(format_id(NodeKind::Tab, stack.to_bits())),
                                 ..Default::default()
                             }],
                         },
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: None,
                             is_zoomed: false,
-                            tabs: vec![TabDto {
+                            tabs: vec![proto::Tab {
                                 id: None,
                                 url: "https://example.com".into(),
                                 kind: "browser".into(),
@@ -1108,7 +1105,7 @@ mod tests {
                     ],
                 },
             }],
-            focused: FocusDto::default(),
+            focused: proto::Focus::default(),
         };
 
         let existing: HashSet<String> = [
@@ -1160,29 +1157,29 @@ mod tests {
             .id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![SpaceDto {
+            spaces: vec![proto::Space {
                 id: Some(format_id(NodeKind::Space, space.to_bits())),
                 name: "S".into(),
                 is_active: true,
-                root: LayoutNodeDto::Split {
+                root: proto::LayoutNode::Split {
                     id: None,
-                    direction: SplitDirectionDto::Row,
+                    direction: proto::SplitDirection::Row,
                     flex_weights: vec![],
                     children: vec![
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: None,
                             is_zoomed: false,
-                            tabs: vec![TabDto {
+                            tabs: vec![proto::Tab {
                                 id: None,
                                 url: "https://example.com".into(),
                                 kind: "browser".into(),
                                 ..Default::default()
                             }],
                         },
-                        LayoutNodeDto::Pane {
+                        proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, existing_pane.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![TabDto {
+                            tabs: vec![proto::Tab {
                                 id: Some(format_id(NodeKind::Tab, stack.to_bits())),
                                 ..Default::default()
                             }],
@@ -1190,7 +1187,7 @@ mod tests {
                     ],
                 },
             }],
-            focused: FocusDto::default(),
+            focused: proto::Focus::default(),
         };
 
         let existing: HashSet<String> = [

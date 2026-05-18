@@ -8,10 +8,8 @@ use crate::layout::{
 };
 use bevy::prelude::*;
 use vmux_core::PageMetadata;
-use vmux_service::protocol::layout::{
-    FocusDto, LayoutNodeDto, LayoutSnapshot, NodeKind, SpaceDto, SplitDirectionDto, TabDto,
-    format_id,
-};
+use vmux_service::protocol::layout as proto;
+use vmux_service::protocol::layout::{LayoutSnapshot, NodeKind, format_id};
 
 pub(crate) fn build_layout_snapshot(
     spaces_q: &Query<(Entity, &Tab, Option<&Children>)>,
@@ -41,12 +39,12 @@ pub(crate) fn build_layout_snapshot(
                         zoomed_leaf,
                     )
                 })
-                .unwrap_or(LayoutNodeDto::Pane {
+                .unwrap_or(proto::LayoutNode::Pane {
                     id: None,
                     is_zoomed: false,
                     tabs: Vec::new(),
                 });
-            SpaceDto {
+            proto::Space {
                 id: Some(format_id(NodeKind::Space, space_entity.to_bits())),
                 name: tab.name.clone(),
                 is_active: Some(space_entity) == active_space,
@@ -57,7 +55,7 @@ pub(crate) fn build_layout_snapshot(
 
     LayoutSnapshot {
         spaces,
-        focused: FocusDto {
+        focused: proto::Focus {
             space: focused.tab.map(|e| format_id(NodeKind::Space, e.to_bits())),
             pane: focused.pane.map(|e| format_id(NodeKind::Pane, e.to_bits())),
             tab: focused.stack.map(|e| format_id(NodeKind::Tab, e.to_bits())),
@@ -73,7 +71,7 @@ fn build_node(
     pane_sizes_q: &Query<&PaneSize>,
     terminals: &Query<Entity, With<crate::terminal::Terminal>>,
     zoomed_leaf: Option<Entity>,
-) -> LayoutNodeDto {
+) -> proto::LayoutNode {
     if let Ok((split_entity, split, children)) = splits_q.get(entity) {
         let child_entities: Vec<Entity> = children.map(|c| c.iter().collect()).unwrap_or_default();
         let flex_weights = child_entities
@@ -99,11 +97,11 @@ fn build_node(
                 )
             })
             .collect();
-        return LayoutNodeDto::Split {
+        return proto::LayoutNode::Split {
             id: Some(format_id(NodeKind::Split, split_entity.to_bits())),
             direction: match split.direction {
-                PaneSplitDirection::Row => SplitDirectionDto::Row,
-                PaneSplitDirection::Column => SplitDirectionDto::Column,
+                PaneSplitDirection::Row => proto::SplitDirection::Row,
+                PaneSplitDirection::Column => proto::SplitDirection::Column,
             },
             flex_weights,
             children: children_dto,
@@ -120,13 +118,13 @@ fn build_node(
                     .collect()
             })
             .unwrap_or_default();
-        return LayoutNodeDto::Pane {
+        return proto::LayoutNode::Pane {
             id: Some(format_id(NodeKind::Pane, leaf_entity.to_bits())),
             is_zoomed: zoomed_leaf == Some(leaf_entity),
             tabs,
         };
     }
-    LayoutNodeDto::Pane {
+    proto::LayoutNode::Pane {
         id: None,
         is_zoomed: false,
         tabs: Vec::new(),
@@ -138,7 +136,7 @@ fn build_tab(
     children: Option<&Children>,
     page: Option<&PageMetadata>,
     terminals: &Query<Entity, With<crate::terminal::Terminal>>,
-) -> TabDto {
+) -> proto::Tab {
     let kind = if children
         .map(|c| c.iter().any(|child| terminals.contains(child)))
         .unwrap_or(false)
@@ -147,7 +145,7 @@ fn build_tab(
     } else {
         "browser"
     };
-    TabDto {
+    proto::Tab {
         id: Some(format_id(NodeKind::Tab, stack_entity.to_bits())),
         title: page.map(|p| p.title.clone()).unwrap_or_default(),
         url: page.map(|p| p.url.clone()).unwrap_or_default(),
@@ -198,7 +196,7 @@ mod tests {
             )
             .unwrap();
         assert!(snapshot.spaces.is_empty());
-        assert_eq!(snapshot.focused, FocusDto::default());
+        assert_eq!(snapshot.focused, proto::Focus::default());
     }
 
     #[test]
@@ -256,13 +254,13 @@ mod tests {
 
         let root = &snapshot.spaces[0].root;
         match root {
-            LayoutNodeDto::Split {
+            proto::LayoutNode::Split {
                 direction,
                 flex_weights,
                 children,
                 ..
             } => {
-                assert_eq!(*direction, SplitDirectionDto::Row);
+                assert_eq!(*direction, proto::SplitDirection::Row);
                 assert_eq!(flex_weights, &vec![1.0, 2.0]);
                 assert_eq!(children.len(), 2);
             }
@@ -323,11 +321,11 @@ mod tests {
             .unwrap();
 
         let root = &snapshot.spaces[0].root;
-        let LayoutNodeDto::Split { children, .. } = root else {
+        let proto::LayoutNode::Split { children, .. } = root else {
             panic!("expected split root")
         };
         let zoomed_flag = children.iter().find_map(|c| match c {
-            LayoutNodeDto::Pane { id, is_zoomed, .. } => {
+            proto::LayoutNode::Pane { id, is_zoomed, .. } => {
                 let expected_id = format_id(NodeKind::Pane, zoomed_pane.to_bits());
                 if id.as_deref() == Some(expected_id.as_str()) {
                     Some(*is_zoomed)
@@ -340,7 +338,7 @@ mod tests {
         assert_eq!(zoomed_flag, Some(true));
 
         let other_flag = children.iter().find_map(|c| match c {
-            LayoutNodeDto::Pane { id, is_zoomed, .. } => {
+            proto::LayoutNode::Pane { id, is_zoomed, .. } => {
                 let expected_id = format_id(NodeKind::Pane, other_pane.to_bits());
                 if id.as_deref() == Some(expected_id.as_str()) {
                     Some(*is_zoomed)
