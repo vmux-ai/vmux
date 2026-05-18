@@ -14,6 +14,7 @@ mod clipboard;
 mod command;
 mod command_bar;
 mod layout;
+mod layout_response;
 mod os_menu;
 mod persistence;
 mod processes_monitor;
@@ -124,6 +125,7 @@ impl Plugin for VmuxPlugin {
             vmux_agent::AgentSessionPlugin,
             vmux_agent::AppAgentPlugin,
             ProcessesMonitorPlugin,
+            layout_response::LayoutResponseForwarderPlugin,
             PersistencePlugin,
             ProfilePlugin,
             LayoutPlugin,
