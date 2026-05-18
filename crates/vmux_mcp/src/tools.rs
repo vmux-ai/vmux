@@ -158,6 +158,7 @@ Use this for compound or structural changes that the per-action tools can't expr
 Workflow: (1) call read_layout, (2) mutate the returned tree, (3) submit it back here. \
 \
 Recipes: \
+- Add a new pane to a space: keep the existing root split's id, append a new pane (id: null) to its children. Do NOT wrap the existing pane in a new split - the space's root split is always present. \
 - Duplicate/mirror a tab: add a new pane (id: null) under the same parent, with a tab carrying the source tab's url and kind. \
 - Swap two panes: reorder their entries in the parent split's children array. \
 - Move a tab to another pane: remove from source pane's tabs, add (same id) to target pane's tabs. \

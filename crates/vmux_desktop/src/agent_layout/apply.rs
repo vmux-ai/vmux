@@ -4,8 +4,8 @@ use std::collections::HashSet;
 
 use crate::layout::{
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
-    stack::Stack,
-    tab::Tab,
+    stack::{Stack, stack_bundle},
+    tab::{Tab, tab_bundle},
 };
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
@@ -32,7 +32,6 @@ pub fn apply_with_existing(
 ) -> Result<(), ValidationError> {
     let plan = super::reconcile::plan_diff(snapshot, existing)?;
 
-    // Pointer-keyed map lets future passes look up entities spawned for id-less nodes.
     let mut new_entities: std::collections::HashMap<*const LayoutNodeDto, Entity> =
         std::collections::HashMap::new();
     for space in &snapshot.spaces {
@@ -41,11 +40,15 @@ pub fn apply_with_existing(
                 Ok((_, value)) => Entity::from_bits(value),
                 Err(_) => continue,
             },
-            None => world
-                .spawn(Tab {
-                    name: space.name.clone(),
-                })
-                .id(),
+            None => {
+                let entity = world.spawn((tab_bundle(), LastActivatedAt::now())).id();
+                if !space.name.is_empty()
+                    && let Some(mut tab) = world.get_mut::<Tab>(entity)
+                {
+                    tab.name = space.name.clone();
+                }
+                entity
+            }
         };
         create_descendants(world, space_entity, &space.root, &mut new_entities);
     }
@@ -55,92 +58,32 @@ pub fn apply_with_existing(
             && let Ok((_, value)) = parse_id(id)
         {
             let space_entity = Entity::from_bits(value);
-            apply_structure(world, Some(space_entity), &space.root);
+            apply_structure(world, Some(space_entity), &space.root, &new_entities);
         }
     }
     for space in &snapshot.spaces {
         apply_space(world, space);
     }
+    let rescued: HashSet<String> = new_entities
+        .iter()
+        .filter_map(|(ptr, &entity)| {
+            let node = unsafe { &**ptr };
+            let kind = match node {
+                LayoutNodeDto::Split { .. } => NodeKind::Split,
+                LayoutNodeDto::Pane { .. } => NodeKind::Pane,
+            };
+            let id = format_id(kind, entity.to_bits());
+            existing.contains(&id).then_some(id)
+        })
+        .collect();
     for id in &plan.closes {
+        if rescued.contains(id) {
+            continue;
+        }
         apply_close(world, id);
     }
     apply_focus(world, &snapshot.focused);
     Ok(())
-}
-
-fn find_existing_leaf_child(world: &World, parent: Entity) -> Option<Entity> {
-    let children = world.get::<Children>(parent)?;
-    children
-        .iter()
-        .find(|&e| world.get::<Pane>(e).is_some() && world.get::<PaneSplit>(e).is_none())
-}
-
-fn child_refers_to_entity(node: &LayoutNodeDto, entity: Entity) -> bool {
-    match node {
-        LayoutNodeDto::Pane { id: Some(id), .. } | LayoutNodeDto::Split { id: Some(id), .. } => {
-            parse_id(id)
-                .ok()
-                .is_some_and(|(_, v)| Entity::from_bits(v) == entity)
-        }
-        _ => false,
-    }
-}
-
-fn convert_leaf_to_split(world: &mut World, pane: Entity, direction: SplitDirectionDto) {
-    let pane_split_dir = match direction {
-        SplitDirectionDto::Row => PaneSplitDirection::Row,
-        SplitDirectionDto::Column => PaneSplitDirection::Column,
-    };
-    let flex_direction = match pane_split_dir {
-        PaneSplitDirection::Row => bevy::ui::FlexDirection::Row,
-        PaneSplitDirection::Column => bevy::ui::FlexDirection::Column,
-    };
-    let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
-    world.entity_mut(pane).insert(PaneSplit {
-        direction: pane_split_dir,
-    });
-    world.entity_mut(pane).insert(Node {
-        flex_grow: 1.0,
-        flex_direction,
-        column_gap: gap.column_gap,
-        row_gap: gap.row_gap,
-        align_items: AlignItems::Stretch,
-        ..default()
-    });
-
-    let existing_tabs: Vec<Entity> = world
-        .get::<Children>(pane)
-        .map(|c| {
-            c.iter()
-                .filter(|&e| world.get::<Stack>(e).is_some())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let new_leaf = world
-        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-        .id();
-    for tab in existing_tabs {
-        world.entity_mut(tab).insert(ChildOf(new_leaf));
-    }
-}
-
-fn try_convert_existing_pane(
-    world: &mut World,
-    parent: Entity,
-    direction: SplitDirectionDto,
-    children: &[LayoutNodeDto],
-) -> Option<Entity> {
-    world.get::<Tab>(parent)?;
-    let existing_leaf = find_existing_leaf_child(world, parent)?;
-    let any_child_matches = children
-        .iter()
-        .any(|c| child_refers_to_entity(c, existing_leaf));
-    if !any_child_matches {
-        return None;
-    }
-    convert_leaf_to_split(world, existing_leaf, direction);
-    Some(existing_leaf)
 }
 
 fn create_descendants(
@@ -150,22 +93,18 @@ fn create_descendants(
     new_entities: &mut std::collections::HashMap<*const LayoutNodeDto, Entity>,
 ) {
     let node_entity = match node {
-        LayoutNodeDto::Split {
-            id,
-            direction,
-            children,
-            ..
-        } => match id {
+        LayoutNodeDto::Split { id, direction, .. } => match id {
             Some(id_str) => match parse_id(id_str) {
                 Ok((_, v)) => Entity::from_bits(v),
                 Err(_) => return,
             },
             None => {
-                if let Some(converted) =
-                    try_convert_existing_pane(world, parent, *direction, children)
+                if world.get::<Tab>(parent).is_some()
+                    && let Some(existing_root) = find_root_split_child(world, parent)
                 {
-                    new_entities.insert(node as *const _, converted);
-                    converted
+                    set_split_direction(world, existing_root, *direction);
+                    new_entities.insert(node as *const _, existing_root);
+                    existing_root
                 } else {
                     let entity = spawn_split(world, parent, *direction);
                     new_entities.insert(node as *const _, entity);
@@ -202,6 +141,32 @@ fn create_descendants(
     }
 }
 
+fn find_root_split_child(world: &World, space: Entity) -> Option<Entity> {
+    world
+        .get::<Children>(space)?
+        .iter()
+        .find(|&e| world.get::<PaneSplit>(e).is_some())
+}
+
+fn set_split_direction(world: &mut World, entity: Entity, direction: SplitDirectionDto) {
+    let pane_split_dir = match direction {
+        SplitDirectionDto::Row => PaneSplitDirection::Row,
+        SplitDirectionDto::Column => PaneSplitDirection::Column,
+    };
+    if let Some(mut split) = world.get_mut::<PaneSplit>(entity) {
+        split.direction = pane_split_dir;
+    }
+    if let Some(mut node) = world.get_mut::<Node>(entity) {
+        node.flex_direction = match pane_split_dir {
+            PaneSplitDirection::Row => bevy::ui::FlexDirection::Row,
+            PaneSplitDirection::Column => bevy::ui::FlexDirection::Column,
+        };
+        let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
+        node.column_gap = gap.column_gap;
+        node.row_gap = gap.row_gap;
+    }
+}
+
 fn spawn_split(world: &mut World, parent: Entity, direction: SplitDirectionDto) -> Entity {
     let pane_split_dir = match direction {
         SplitDirectionDto::Row => PaneSplitDirection::Row,
@@ -219,6 +184,9 @@ fn spawn_split(world: &mut World, parent: Entity, direction: SplitDirectionDto) 
                 direction: pane_split_dir,
             },
             PaneSize::default(),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
             Node {
                 flex_grow: 1.0,
                 flex_direction,
@@ -240,7 +208,9 @@ fn spawn_leaf_pane(world: &mut World, parent: Entity) -> Entity {
 }
 
 fn spawn_tab(world: &mut World, pane: Entity, tab: &TabDto) {
-    let stack = world.spawn((Stack::default(), ChildOf(pane))).id();
+    let stack = world
+        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+        .id();
     match tab.kind.as_str() {
         "terminal" => {
             world
@@ -303,52 +273,56 @@ fn apply_space(world: &mut World, space: &SpaceDto) {
     apply_node(world, &space.root);
 }
 
-fn apply_structure(world: &mut World, parent: Option<Entity>, node: &LayoutNodeDto) {
-    if let Some(entity) = node_entity(node) {
-        if let Some(parent) = parent {
-            world.entity_mut(entity).insert(ChildOf(parent));
-        }
+fn apply_structure(
+    world: &mut World,
+    parent: Option<Entity>,
+    node: &LayoutNodeDto,
+    new_entities: &std::collections::HashMap<*const LayoutNodeDto, Entity>,
+) {
+    let Some(entity) = resolve_node_entity(node, new_entities) else {
         match node {
             LayoutNodeDto::Split { children, .. } => {
                 for c in children {
-                    apply_structure(world, Some(entity), c);
-                }
-            }
-            LayoutNodeDto::Pane { tabs, .. } => {
-                let tab_parent = if world.get::<PaneSplit>(entity).is_some() {
-                    world
-                        .get::<Children>(entity)
-                        .and_then(|c| {
-                            c.iter().find(|&e| {
-                                world.get::<Pane>(e).is_some()
-                                    && world.get::<PaneSplit>(e).is_none()
-                            })
-                        })
-                        .unwrap_or(entity)
-                } else {
-                    entity
-                };
-                for t in tabs {
-                    if let Some(tid) = t.id.as_deref()
-                        && let Ok((_, value)) = parse_id(tid)
-                    {
-                        let tab_entity = Entity::from_bits(value);
-                        world.entity_mut(tab_entity).insert(ChildOf(tab_parent));
-                    }
-                }
-            }
-        }
-    } else {
-        // Created node — Task 10 handles spawning. Descend so any
-        // identified descendants still get reparented under their grandparent.
-        match node {
-            LayoutNodeDto::Split { children, .. } => {
-                for c in children {
-                    apply_structure(world, parent, c);
+                    apply_structure(world, parent, c, new_entities);
                 }
             }
             LayoutNodeDto::Pane { .. } => {}
         }
+        return;
+    };
+    if let Some(parent) = parent {
+        world.entity_mut(entity).insert(ChildOf(parent));
+    }
+    match node {
+        LayoutNodeDto::Split { children, .. } => {
+            for c in children {
+                apply_structure(world, Some(entity), c, new_entities);
+            }
+        }
+        LayoutNodeDto::Pane { tabs, .. } => {
+            for t in tabs {
+                if let Some(tid) = t.id.as_deref()
+                    && let Ok((_, value)) = parse_id(tid)
+                {
+                    let tab_entity = Entity::from_bits(value);
+                    world.entity_mut(tab_entity).insert(ChildOf(entity));
+                }
+            }
+        }
+    }
+}
+
+fn resolve_node_entity(
+    node: &LayoutNodeDto,
+    new_entities: &std::collections::HashMap<*const LayoutNodeDto, Entity>,
+) -> Option<Entity> {
+    let id = match node {
+        LayoutNodeDto::Split { id, .. } | LayoutNodeDto::Pane { id, .. } => id.as_deref(),
+    };
+    if let Some(id_str) = id {
+        parse_id(id_str).ok().map(|(_, v)| Entity::from_bits(v))
+    } else {
+        new_entities.get(&(node as *const _)).copied()
     }
 }
 
@@ -415,21 +389,15 @@ fn apply_focus(world: &mut World, focus: &FocusDto) {
     let Some(mut focused) = world.get_resource_mut::<crate::layout::stack::FocusedStack>() else {
         return;
     };
-    focused.tab = focus
-        .space
-        .as_deref()
-        .and_then(|id| parse_id(id).ok())
-        .map(|(_, v)| Entity::from_bits(v));
-    focused.pane = focus
-        .pane
-        .as_deref()
-        .and_then(|id| parse_id(id).ok())
-        .map(|(_, v)| Entity::from_bits(v));
-    focused.stack = focus
-        .tab
-        .as_deref()
-        .and_then(|id| parse_id(id).ok())
-        .map(|(_, v)| Entity::from_bits(v));
+    if let Some(id) = focus.space.as_deref() {
+        focused.tab = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
+    }
+    if let Some(id) = focus.pane.as_deref() {
+        focused.pane = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
+    }
+    if let Some(id) = focus.tab.as_deref() {
+        focused.stack = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
+    }
 }
 
 fn node_entity(node: &LayoutNodeDto) -> Option<Entity> {
@@ -888,6 +856,53 @@ mod tests {
     }
 
     #[test]
+    fn apply_focus_preserves_existing_when_dto_fields_omitted() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<vmux_layout::LayoutSpawnRequest>();
+        app.insert_resource(crate::layout::stack::FocusedStack::default());
+
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(pane)))
+            .id();
+
+        {
+            let mut f = app
+                .world_mut()
+                .resource_mut::<crate::layout::stack::FocusedStack>();
+            f.tab = Some(space);
+            f.pane = Some(pane);
+            f.stack = Some(stack);
+        }
+
+        let snap = LayoutSnapshot {
+            spaces: vec![SpaceDto {
+                id: Some(format_id(NodeKind::Space, space.to_bits())),
+                name: "S".into(),
+                is_active: true,
+                root: LayoutNodeDto::Pane {
+                    id: Some(format_id(NodeKind::Pane, pane.to_bits())),
+                    is_zoomed: false,
+                    tabs: vec![TabDto {
+                        id: Some(format_id(NodeKind::Tab, stack.to_bits())),
+                        ..Default::default()
+                    }],
+                },
+            }],
+            focused: FocusDto::default(),
+        };
+
+        apply(app.world_mut(), &snap).unwrap();
+        let f = app.world().resource::<crate::layout::stack::FocusedStack>();
+        assert_eq!(f.tab, Some(space), "focused.tab must be preserved");
+        assert_eq!(f.pane, Some(pane), "focused.pane must be preserved");
+        assert_eq!(f.stack, Some(stack), "focused.stack must be preserved");
+    }
+
+    #[test]
     fn spawn_split_inserts_node_with_flex_direction() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
@@ -941,7 +956,7 @@ mod tests {
     }
 
     #[test]
-    fn split_via_convert_reuses_existing_pane_entity() {
+    fn new_split_wraps_existing_pane_without_converting_it() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_message::<vmux_layout::LayoutSpawnRequest>();
@@ -1001,43 +1016,209 @@ mod tests {
         apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
 
         assert!(
-            app.world().get::<PaneSplit>(existing_pane).is_some(),
-            "existing pane should be converted to split"
-        );
-        let node = app.world().get::<Node>(existing_pane).unwrap();
-        assert_eq!(
-            node.flex_direction,
-            bevy::ui::FlexDirection::Row,
-            "converted split should have Row flex direction"
+            app.world().get::<PaneSplit>(existing_pane).is_none(),
+            "existing pane should stay a leaf"
         );
 
-        let split_count = app
+        let splits: Vec<Entity> = app
             .world_mut()
             .query_filtered::<Entity, (With<Pane>, With<PaneSplit>)>()
             .iter(app.world())
-            .count();
-        assert_eq!(split_count, 1, "exactly one split entity should exist");
-
-        let children = app
-            .world()
-            .get::<Children>(existing_pane)
-            .expect("converted split should have children");
-        let child_panes: Vec<Entity> = children
-            .iter()
-            .filter(|&e| {
-                app.world().get::<Pane>(e).is_some() && app.world().get::<PaneSplit>(e).is_none()
-            })
             .collect();
+        assert_eq!(splits.len(), 1, "exactly one new split entity should exist");
+        let new_split = splits[0];
+
+        let node = app.world().get::<Node>(new_split).unwrap();
+        assert_eq!(node.flex_direction, bevy::ui::FlexDirection::Row);
+
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(new_split)
+            .expect("split has children")
+            .iter()
+            .collect();
+        assert_eq!(children.len(), 2, "split should have two leaf children");
         assert_eq!(
-            child_panes.len(),
-            2,
-            "split should have two leaf pane children"
+            children[0], existing_pane,
+            "existing pane should be first per submitted order"
         );
 
         let stack_parent = app.world().get::<ChildOf>(stack).map(|p| p.parent());
-        assert!(
-            child_panes.contains(&stack_parent.unwrap()),
-            "original stack should be reparented under a child leaf pane"
+        assert_eq!(
+            stack_parent,
+            Some(existing_pane),
+            "existing stack should stay under existing pane"
+        );
+    }
+
+    #[test]
+    fn new_root_split_id_none_reuses_existing_root_split_of_space() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<vmux_layout::LayoutSpawnRequest>();
+
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+        let existing_root = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(space),
+            ))
+            .id();
+        let existing_leaf = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), ChildOf(existing_root)))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(existing_leaf)))
+            .id();
+
+        let snap = LayoutSnapshot {
+            spaces: vec![SpaceDto {
+                id: Some(format_id(NodeKind::Space, space.to_bits())),
+                name: "S".into(),
+                is_active: true,
+                root: LayoutNodeDto::Split {
+                    id: None,
+                    direction: SplitDirectionDto::Row,
+                    flex_weights: vec![],
+                    children: vec![
+                        LayoutNodeDto::Pane {
+                            id: Some(format_id(NodeKind::Pane, existing_leaf.to_bits())),
+                            is_zoomed: false,
+                            tabs: vec![TabDto {
+                                id: Some(format_id(NodeKind::Tab, stack.to_bits())),
+                                ..Default::default()
+                            }],
+                        },
+                        LayoutNodeDto::Pane {
+                            id: None,
+                            is_zoomed: false,
+                            tabs: vec![TabDto {
+                                id: None,
+                                url: "https://example.com".into(),
+                                kind: "browser".into(),
+                                ..Default::default()
+                            }],
+                        },
+                    ],
+                },
+            }],
+            focused: FocusDto::default(),
+        };
+
+        let existing: HashSet<String> = [
+            format_id(NodeKind::Space, space.to_bits()),
+            format_id(NodeKind::Split, existing_root.to_bits()),
+            format_id(NodeKind::Pane, existing_leaf.to_bits()),
+            format_id(NodeKind::Tab, stack.to_bits()),
+        ]
+        .into_iter()
+        .collect();
+
+        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+
+        let splits: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Pane>, With<PaneSplit>)>()
+            .iter(app.world())
+            .collect();
+        assert_eq!(
+            splits,
+            vec![existing_root],
+            "should reuse existing root split, not spawn a new one"
+        );
+
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(existing_root)
+            .expect("root split has children")
+            .iter()
+            .collect();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0], existing_leaf);
+    }
+
+    #[test]
+    fn new_split_preserves_submitted_children_order_with_new_pane_first() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<vmux_layout::LayoutSpawnRequest>();
+
+        let space = app.world_mut().spawn(Tab { name: "S".into() }).id();
+        let existing_pane = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(space)))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(existing_pane)))
+            .id();
+
+        let snap = LayoutSnapshot {
+            spaces: vec![SpaceDto {
+                id: Some(format_id(NodeKind::Space, space.to_bits())),
+                name: "S".into(),
+                is_active: true,
+                root: LayoutNodeDto::Split {
+                    id: None,
+                    direction: SplitDirectionDto::Row,
+                    flex_weights: vec![],
+                    children: vec![
+                        LayoutNodeDto::Pane {
+                            id: None,
+                            is_zoomed: false,
+                            tabs: vec![TabDto {
+                                id: None,
+                                url: "https://example.com".into(),
+                                kind: "browser".into(),
+                                ..Default::default()
+                            }],
+                        },
+                        LayoutNodeDto::Pane {
+                            id: Some(format_id(NodeKind::Pane, existing_pane.to_bits())),
+                            is_zoomed: false,
+                            tabs: vec![TabDto {
+                                id: Some(format_id(NodeKind::Tab, stack.to_bits())),
+                                ..Default::default()
+                            }],
+                        },
+                    ],
+                },
+            }],
+            focused: FocusDto::default(),
+        };
+
+        let existing: HashSet<String> = [
+            format_id(NodeKind::Space, space.to_bits()),
+            format_id(NodeKind::Pane, existing_pane.to_bits()),
+            format_id(NodeKind::Tab, stack.to_bits()),
+        ]
+        .into_iter()
+        .collect();
+
+        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+
+        let splits: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Pane>, With<PaneSplit>)>()
+            .iter(app.world())
+            .collect();
+        let new_split = splits[0];
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(new_split)
+            .expect("split has children")
+            .iter()
+            .collect();
+        assert_eq!(children.len(), 2);
+        assert_eq!(
+            children[1], existing_pane,
+            "existing pane should be second per submitted order"
         );
     }
 }
