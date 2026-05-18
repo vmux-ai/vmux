@@ -134,6 +134,10 @@ impl Plugin for LayoutPlugin {
         app.init_resource::<NewStackContext>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .add_message::<LayoutSpawnRequest>()
+            .add_message::<reconcile::LayoutApplyRequest>()
+            .add_message::<reconcile::LayoutApplyResponse>()
+            .add_message::<reconcile::LayoutSnapshotRequest>()
+            .add_message::<reconcile::LayoutSnapshotResponse>()
             .configure_sets(
                 Startup,
                 (
@@ -143,6 +147,13 @@ impl Plugin for LayoutPlugin {
                     LayoutStartupSet::Post,
                 )
                     .chain(),
+            )
+            .add_systems(
+                Update,
+                (
+                    reconcile::apply_layout_requests,
+                    reconcile::serve_snapshot_requests,
+                ),
             );
         app.add_plugins((
             JsEmitUiReadyPlugin,
