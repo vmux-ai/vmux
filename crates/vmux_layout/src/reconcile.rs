@@ -285,6 +285,33 @@ use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone)]
+pub struct LayoutApplyRequest {
+    pub request_id: u64,
+    pub snapshot: LayoutSnapshot,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone)]
+pub struct LayoutApplyResponse {
+    pub request_id: u64,
+    pub result: Result<LayoutSnapshot, String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone)]
+pub struct LayoutSnapshotRequest {
+    pub request_id: u64,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone)]
+pub struct LayoutSnapshotResponse {
+    pub request_id: u64,
+    pub snapshot: LayoutSnapshot,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn apply(world: &mut World, snapshot: &LayoutSnapshot) -> Result<(), ValidationError> {
     let existing = collect_existing_ids(world);
     apply_with_existing(world, snapshot, &existing)
