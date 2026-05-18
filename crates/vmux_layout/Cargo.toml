@@ -25,6 +25,7 @@ vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 vmux_core = { path = "../vmux_core" }
 vmux_space = { path = "../vmux_space" }
 

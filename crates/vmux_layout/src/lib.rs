@@ -5,6 +5,7 @@
 )]
 
 pub mod event;
+pub mod protocol;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod chrome;
