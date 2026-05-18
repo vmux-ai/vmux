@@ -13,12 +13,8 @@ use vmux_space::{
 };
 use vmux_webview_app::{UiReady, WebviewAppConfig, WebviewAppRegistry};
 
-use crate::{
-    browser::Browser,
-    command_bar::NewStackContext,
-    layout::{stack::Stack, window::WEBVIEW_MESH_DEPTH_BIAS},
-    profile,
-};
+use crate::{browser::Browser, command_bar::NewStackContext, profile};
+use vmux_layout::{stack::Stack, window::WEBVIEW_MESH_DEPTH_BIAS};
 
 #[derive(Resource, Clone, Debug)]
 pub(crate) struct ActiveSpace {
@@ -297,14 +293,14 @@ fn apply_pending_space_switch(
         Entity,
         Or<(
             With<crate::profile::Profile>,
-            With<crate::layout::tab::Tab>,
+            With<vmux_layout::tab::Tab>,
             With<vmux_history::Visit>,
         )>,
     >,
-    main_q: Query<Entity, With<crate::layout::window::Main>>,
+    main_q: Query<Entity, With<vmux_layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     mut new_stack_ctx: ResMut<NewStackContext>,
-    focus: Option<ResMut<crate::layout::stack::FocusedStack>>,
+    focus: Option<ResMut<vmux_layout::stack::FocusedStack>>,
     mut commands: Commands,
 ) {
     let Some(mut pending) = pending else {
@@ -332,7 +328,7 @@ fn apply_pending_space_switch(
             commands.entity(entity).try_despawn();
         }
         let Ok(main) = main_q.single() else { return };
-        let spawned = crate::layout::window::spawn_default_space_layout(
+        let spawned = vmux_layout::window::spawn_default_space_layout(
             main,
             *primary_window,
             &mut new_stack_ctx,
@@ -352,10 +348,10 @@ fn spawn_spaces_page_layout(
     new_stack_ctx: &mut NewStackContext,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    focus: Option<&mut crate::layout::stack::FocusedStack>,
+    focus: Option<&mut vmux_layout::stack::FocusedStack>,
     commands: &mut Commands,
 ) {
-    let spawned = crate::layout::window::spawn_default_space_layout(
+    let spawned = vmux_layout::window::spawn_default_space_layout(
         main,
         primary_window,
         new_stack_ctx,
@@ -388,14 +384,14 @@ fn on_space_command(
         Entity,
         Or<(
             With<crate::profile::Profile>,
-            With<crate::layout::tab::Tab>,
+            With<vmux_layout::tab::Tab>,
             With<vmux_history::Visit>,
         )>,
     >,
-    main_q: Query<Entity, With<crate::layout::window::Main>>,
+    main_q: Query<Entity, With<vmux_layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     mut new_stack_ctx: ResMut<NewStackContext>,
-    mut focus: Option<ResMut<crate::layout::stack::FocusedStack>>,
+    mut focus: Option<ResMut<vmux_layout::stack::FocusedStack>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut spawn_requests: Option<MessageWriter<vmux_layout::LayoutSpawnRequest>>,
@@ -425,7 +421,7 @@ fn on_space_command(
         };
         let stack = commands
             .spawn((
-                crate::layout::stack::stack_bundle(),
+                vmux_layout::stack::stack_bundle(),
                 vmux_history::LastActivatedAt::now(),
                 ChildOf(pane),
             ))
@@ -519,7 +515,7 @@ fn on_space_command(
                 &mut commands,
             );
         } else {
-            let spawned = crate::layout::window::spawn_default_space_layout(
+            let spawned = vmux_layout::window::spawn_default_space_layout(
                 main,
                 *primary_window,
                 &mut new_stack_ctx,
@@ -537,14 +533,12 @@ fn on_space_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        layout::{pane::Pane, stack::Stack, tab::Tab, window::Main},
-        settings::{
-            AppSettings, BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings,
-            ShortcutSettings, SideSheetSettings, WindowSettings,
-        },
+    use crate::settings::{
+        AppSettings, BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings,
+        ShortcutSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_history::LastActivatedAt;
+    use vmux_layout::{pane::Pane, stack::Stack, tab::Tab, window::Main};
     use vmux_space::model::DEFAULT_PROFILE_ID;
     use vmux_webview_app::WebviewAppRegistry;
 
@@ -816,7 +810,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_observer(on_space_command);
-        app.insert_resource(crate::layout::stack::FocusedStack::default());
+        app.insert_resource(vmux_layout::stack::FocusedStack::default());
         app.insert_resource(ActiveSpace {
             record: default_space_record(),
         });
@@ -844,8 +838,8 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn((SpacesView, ChildOf(tab))).id();
         *app.world_mut()
-            .resource_mut::<crate::layout::stack::FocusedStack>() =
-            crate::layout::stack::FocusedStack {
+            .resource_mut::<vmux_layout::stack::FocusedStack>() =
+            vmux_layout::stack::FocusedStack {
                 tab: Some(old_tab),
                 pane: Some(pane),
                 stack: Some(tab),
@@ -888,7 +882,7 @@ mod tests {
         assert_eq!(tabs.len(), 1);
         assert_eq!(tabs[0].1, SPACES_WEBVIEW_URL);
         assert!(tabs[0].2);
-        let focus = app.world().resource::<crate::layout::stack::FocusedStack>();
+        let focus = app.world().resource::<vmux_layout::stack::FocusedStack>();
         assert_ne!(focus.tab, Some(old_tab));
         assert!(focus.tab.is_some());
         assert!(focus.pane.is_some());
@@ -908,10 +902,10 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(bevy_cef::prelude::JsEmitEventPlugin::<SpaceCommandEvent>::default());
-        app.add_plugins(crate::layout::stack::StackPlugin);
+        app.add_plugins(vmux_layout::stack::StackPlugin);
         app.add_message::<vmux_layout::LayoutSpawnRequest>();
         app.add_observer(on_space_command);
-        app.init_resource::<crate::layout::pane::PendingCursorWarp>();
+        app.init_resource::<vmux_layout::pane::PendingCursorWarp>();
         app.init_resource::<bevy_cef::prelude::IpcEventRawBuffer>();
         app.insert_resource(ActiveSpace {
             record: default_space_record(),
@@ -959,7 +953,7 @@ mod tests {
 
         app.update();
 
-        let focus = app.world().resource::<crate::layout::stack::FocusedStack>();
+        let focus = app.world().resource::<vmux_layout::stack::FocusedStack>();
         assert!(focus.tab.is_some());
         assert!(focus.pane.is_some());
         assert!(focus.stack.is_some());

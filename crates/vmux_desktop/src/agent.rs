@@ -5,15 +5,15 @@ use std::{
 
 use crate::{
     command::{AppCommand, WriteAppCommands},
-    layout::{
-        pane::{Pane, PaneSplit},
-        stack::FocusedStack,
-    },
     settings::AppSettings,
     terminal::{PendingTerminalInput, ProcessExited, ServiceMessageSet, Terminal},
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::{CefKeyboardTarget, RequestNavigate, WebviewExtendStandardMaterial};
+use vmux_layout::{
+    pane::{Pane, PaneSplit},
+    stack::FocusedStack,
+};
 
 use crate::browser::Browser;
 use vmux_agent::session::{AgentSession, PendingAgentSession, SessionId};
@@ -278,7 +278,7 @@ pub(crate) fn spawn_terminal_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::stack::stack_bundle(),
+            vmux_layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -404,7 +404,7 @@ pub(crate) fn spawn_process_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::stack::stack_bundle(),
+            vmux_layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -446,7 +446,7 @@ pub(crate) fn spawn_browser_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::stack::stack_bundle(),
+            vmux_layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -475,7 +475,7 @@ pub(crate) fn spawn_app_agent_tab(
 ) -> Option<Entity> {
     let tab = commands
         .spawn((
-            crate::layout::stack::stack_bundle(),
+            vmux_layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -600,7 +600,7 @@ pub(crate) fn spawn_sessions_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::stack::stack_bundle(),
+            vmux_layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -625,7 +625,7 @@ pub(crate) fn spawn_processes_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::stack::stack_bundle(),
+            vmux_layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -1257,7 +1257,7 @@ mod tests {
         let pane = app.world_mut().spawn(Pane).id();
         let stack = app
             .world_mut()
-            .spawn(crate::layout::stack::stack_bundle())
+            .spawn(vmux_layout::stack::stack_bundle())
             .insert(ChildOf(pane))
             .id();
         app.world_mut().spawn(Browser).insert(ChildOf(stack));
@@ -1334,11 +1334,7 @@ mod tests {
         assert_eq!(rows[0].0, "echo");
 
         let tab = rows[0].1;
-        assert!(
-            app.world()
-                .get::<crate::layout::stack::Stack>(tab)
-                .is_some()
-        );
+        assert!(app.world().get::<vmux_layout::stack::Stack>(tab).is_some());
         assert_eq!(
             app.world().get::<PageMetadata>(tab).unwrap().url,
             TERMINAL_WEBVIEW_URL
@@ -1360,7 +1356,7 @@ mod tests {
         let pane = app.world_mut().spawn(Pane).id();
         let stack = app
             .world_mut()
-            .spawn(crate::layout::stack::stack_bundle())
+            .spawn(vmux_layout::stack::stack_bundle())
             .insert(ChildOf(pane))
             .id();
         let terminal = app.world_mut().spawn(Terminal).insert(ChildOf(stack)).id();
@@ -1419,7 +1415,7 @@ mod tests {
         app.update();
 
         let world = app.world_mut();
-        let mut tabs = world.query_filtered::<&ChildOf, With<crate::layout::stack::Stack>>();
+        let mut tabs = world.query_filtered::<&ChildOf, With<vmux_layout::stack::Stack>>();
         let tab_count_under_pane = tabs
             .iter(world)
             .filter(|child_of| child_of.get() == pane)
@@ -1430,7 +1426,7 @@ mod tests {
         );
 
         let mut tab_metadata =
-            world.query_filtered::<&PageMetadata, With<crate::layout::stack::Stack>>();
+            world.query_filtered::<&PageMetadata, With<vmux_layout::stack::Stack>>();
         let tab_urls: Vec<String> = tab_metadata.iter(world).map(|p| p.url.clone()).collect();
         assert!(
             tab_urls.contains(&"https://example.com".to_string()),
@@ -1475,7 +1471,7 @@ mod tests {
         app.update();
 
         let world = app.world_mut();
-        let mut tabs = world.query_filtered::<&ChildOf, With<crate::layout::stack::Stack>>();
+        let mut tabs = world.query_filtered::<&ChildOf, With<vmux_layout::stack::Stack>>();
         let tabs_in_b = tabs
             .iter(world)
             .filter(|child_of| child_of.get() == pane_b)

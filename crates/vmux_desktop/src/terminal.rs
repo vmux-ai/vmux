@@ -1,7 +1,6 @@
 use crate::{
     browser::Browser,
     command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands},
-    layout::window::WEBVIEW_MESH_DEPTH_BIAS,
     processes_monitor::ProcessesMonitor,
     settings::AppSettings,
 };
@@ -19,6 +18,7 @@ use bevy::{
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
+use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
 use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
 use vmux_service::{
     client::{ServiceHandle, ServiceWake},
@@ -245,7 +245,7 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
         .add_systems(Update, respawn_shell_on_vibe_exit)
         .add_systems(
             Update,
-            spawn_layout_requested_content.after(crate::layout::stack::StackCommandSet),
+            spawn_layout_requested_content.after(vmux_layout::stack::StackCommandSet),
         )
         .add_systems(
             Update,
@@ -1129,7 +1129,7 @@ fn handle_terminal_keyboard(
     targeted_terminals: Query<&ProcessId, (With<Terminal>, With<CefKeyboardTarget>)>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    focus: Res<crate::layout::stack::FocusedStack>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
     mode: Res<crate::scene::InteractionMode>,
     input: Res<ButtonInput<KeyCode>>,
     chord_state: Res<crate::shortcut::ChordState>,
@@ -1575,7 +1575,7 @@ fn handle_terminal_scroll(
     targeted_terminals: Query<&ProcessId, (With<Terminal>, With<CefKeyboardTarget>)>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    focus: Res<crate::layout::stack::FocusedStack>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
     mode: Res<crate::scene::InteractionMode>,
     service: Option<Res<ServiceClient>>,
 ) {
@@ -2069,7 +2069,7 @@ fn handle_terminal_copy_mode_command(
     targeted_terminals: Query<&ProcessId, (With<Terminal>, With<CefKeyboardTarget>)>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    focus: Res<crate::layout::stack::FocusedStack>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
     mode: Res<crate::scene::InteractionMode>,
     service: Option<Res<ServiceClient>>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
