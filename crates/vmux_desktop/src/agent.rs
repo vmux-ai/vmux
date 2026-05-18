@@ -870,7 +870,6 @@ fn read_layout_snapshot(world: &mut World) -> vmux_service::protocol::layout::La
                 (Entity, Option<&Children>, Option<&vmux_core::PageMetadata>),
                 With<crate::layout::stack::Stack>,
             >,
-             terminals: Query<Entity, With<crate::terminal::Terminal>>,
              pane_sizes: Query<&crate::layout::pane::PaneSize>,
              zoomed_q: Query<&crate::layout::pane::Zoomed>,
              focused: Res<crate::layout::stack::FocusedStack>| {
@@ -880,7 +879,6 @@ fn read_layout_snapshot(world: &mut World) -> vmux_service::protocol::layout::La
                     &leaves,
                     &stacks,
                     &pane_sizes,
-                    &terminals,
                     &zoomed_q,
                     &focused,
                 )

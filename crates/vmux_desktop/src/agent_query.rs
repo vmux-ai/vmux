@@ -6,7 +6,7 @@ use crate::{
         stack::{FocusedStack, Stack},
         tab::Tab,
     },
-    terminal::{ServiceClient, Terminal},
+    terminal::ServiceClient,
 };
 use bevy::prelude::*;
 use vmux_core::PageMetadata;
@@ -19,7 +19,6 @@ pub(crate) fn handle_agent_queries(
     splits: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
     leaves: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
     stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
-    terminals: Query<Entity, With<Terminal>>,
     pane_sizes: Query<&PaneSize>,
     zoomed: Query<&Zoomed>,
     settings: Res<crate::settings::AppSettings>,
@@ -36,7 +35,6 @@ pub(crate) fn handle_agent_queries(
                 &leaves,
                 &stacks,
                 &pane_sizes,
-                &terminals,
                 &zoomed,
                 &focused,
             )),
