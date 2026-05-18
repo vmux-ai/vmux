@@ -345,6 +345,30 @@ pub fn leaf_pane_bundle() -> impl Bundle {
     )
 }
 
+pub fn split_root_bundle(direction: PaneSplitDirection) -> impl Bundle {
+    let flex_direction = match direction {
+        PaneSplitDirection::Row => FlexDirection::Row,
+        PaneSplitDirection::Column => FlexDirection::Column,
+    };
+    let gap = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
+    (
+        Pane,
+        PaneSplit { direction },
+        PaneSize::default(),
+        Transform::default(),
+        GlobalTransform::default(),
+        Visibility::default(),
+        Node {
+            flex_grow: 1.0,
+            flex_direction,
+            column_gap: gap.column_gap,
+            row_gap: gap.row_gap,
+            align_items: AlignItems::Stretch,
+            ..default()
+        },
+    )
+}
+
 fn spawn_leaf_pane(commands: &mut Commands, parent: Entity) -> Entity {
     commands
         .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
@@ -365,20 +389,7 @@ pub fn split_pane_in_two(
         commands.entity(*tab).insert(ChildOf(pane1));
     }
 
-    let flex_direction = match direction {
-        PaneSplitDirection::Row => FlexDirection::Row,
-        PaneSplitDirection::Column => FlexDirection::Column,
-    };
-    let gap = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
-    commands.entity(active).insert(PaneSplit { direction });
-    commands.entity(active).insert(Node {
-        flex_grow: 1.0,
-        flex_direction,
-        column_gap: gap.column_gap,
-        row_gap: gap.row_gap,
-        align_items: AlignItems::Stretch,
-        ..default()
-    });
+    commands.entity(active).insert(split_root_bundle(direction));
     commands.entity(pane2).insert(LastActivatedAt::now());
 
     (pane1, pane2)
