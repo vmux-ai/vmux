@@ -114,11 +114,28 @@ impl Plugin for SpacesPlugin {
         );
         app.add_plugins(BinJsEmitEventPlugin::<SpaceCommandEvent>::default())
             .add_observer(on_space_command)
+            .add_observer(reset_spaces_sent_marker_on_ui_ready)
             .add_systems(
                 Update,
                 (apply_pending_space_switch, broadcast_spaces_to_views).chain(),
             );
     }
+}
+
+#[derive(Component)]
+struct SpacesListSent;
+
+fn reset_spaces_sent_marker_on_ui_ready(
+    trigger: On<BinReceive<UiReady>>,
+    spaces_views: Query<(), With<SpacesView>>,
+    chrome_views: Query<(), With<vmux_layout::LayoutChrome>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    if spaces_views.get(entity).is_err() && chrome_views.get(entity).is_err() {
+        return;
+    }
+    commands.entity(entity).remove::<SpacesListSent>();
 }
 
 fn register_spaces_webview_app(registry: &mut WebviewAppRegistry) {
@@ -204,12 +221,6 @@ pub(crate) fn active_space_rows(active: &ActiveSpace, active_stack_count: usize)
     space_rows(active, &registry, active_stack_count)
 }
 
-#[derive(Default)]
-struct SpaceBroadcastCache {
-    body: String,
-    sent: std::collections::HashSet<Entity>,
-}
-
 #[derive(Resource)]
 struct PendingSpaceSwitch {
     from_id: String,
@@ -217,32 +228,34 @@ struct PendingSpaceSwitch {
     delay_frames: u8,
 }
 
-fn space_emit_targets(
-    ready_views: &[Entity],
-    body: &str,
-    cache: &mut SpaceBroadcastCache,
-) -> Vec<Entity> {
-    if body != cache.body {
-        cache.body = body.to_string();
-        cache.sent.clear();
-    }
-    ready_views
-        .iter()
-        .copied()
-        .filter(|entity| cache.sent.insert(*entity))
-        .collect()
-}
-
 fn broadcast_spaces_to_views(
     active: Res<ActiveSpace>,
-    spaces_views: Query<Entity, (With<SpacesView>, With<UiReady>)>,
-    chrome_views: Query<Entity, (With<vmux_layout::LayoutChrome>, With<UiReady>)>,
+    pending_spaces: Query<Entity, (With<SpacesView>, With<UiReady>, Without<SpacesListSent>)>,
+    sent_spaces: Query<Entity, (With<SpacesView>, With<UiReady>, With<SpacesListSent>)>,
+    pending_chrome: Query<
+        Entity,
+        (
+            With<vmux_layout::LayoutChrome>,
+            With<UiReady>,
+            Without<SpacesListSent>,
+        ),
+    >,
+    sent_chrome: Query<
+        Entity,
+        (
+            With<vmux_layout::LayoutChrome>,
+            With<UiReady>,
+            With<SpacesListSent>,
+        ),
+    >,
     browsers: NonSend<Browsers>,
     tabs: Query<(), With<Stack>>,
-    mut cache: Local<SpaceBroadcastCache>,
+    mut last_body: Local<String>,
     mut commands: Commands,
 ) {
-    if spaces_views.is_empty() && chrome_views.is_empty() {
+    let pending_total = pending_spaces.iter().count() + pending_chrome.iter().count();
+    let sent_total = sent_spaces.iter().count() + sent_chrome.iter().count();
+    if pending_total == 0 && sent_total == 0 {
         return;
     }
     let registry = read_space_registry_from(&profile::shared_data_dir());
@@ -250,18 +263,30 @@ fn broadcast_spaces_to_views(
         spaces: space_rows(&active, &registry, tabs.iter().count()),
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
-    let mut ready = Vec::new();
-    for entity in spaces_views.iter().chain(chrome_views.iter()) {
-        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
-            ready.push(entity);
+    let body_changed = body != *last_body;
+    for entity in pending_spaces.iter().chain(pending_chrome.iter()) {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
         }
-    }
-    for entity in space_emit_targets(&ready, &body, &mut cache) {
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             SPACES_LIST_EVENT,
             &payload,
         ));
+        commands.entity(entity).insert(SpacesListSent);
+    }
+    if body_changed {
+        for entity in sent_spaces.iter().chain(sent_chrome.iter()) {
+            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                continue;
+            }
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                SPACES_LIST_EVENT,
+                &payload,
+            ));
+        }
+        *last_body = body;
     }
 }
 
@@ -374,12 +399,21 @@ fn on_space_command(
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut spawn_requests: Option<MessageWriter<vmux_layout::LayoutSpawnRequest>>,
+    stack_q: Query<(Entity, &PageMetadata), With<Stack>>,
+    child_of_q: Query<&ChildOf>,
     mut commands: Commands,
 ) {
     let root = profile::shared_data_dir();
     let mut registry = read_space_registry_from(&root);
     let evt = &trigger.event().payload;
     if evt.command == "open_page" {
+        if let Some((existing, _)) = stack_q
+            .iter()
+            .find(|(_, meta)| meta.url == SPACES_WEBVIEW_URL)
+        {
+            crate::terminal::pid::focus_pane_entity(existing, &mut commands, &child_of_q);
+            return;
+        }
         let Some(focus_res) = focus.as_deref() else {
             return;
         };
@@ -612,22 +646,6 @@ mod tests {
         let hosts = registry.embedded_hosts();
         let entry = hosts.entry_for_host("spaces").unwrap();
         assert_eq!(entry.default_document, "spaces/index.html");
-    }
-
-    #[test]
-    fn unchanged_payload_is_sent_to_new_spaces_view() {
-        let first = Entity::from_bits(1);
-        let second = Entity::from_bits(2);
-        let mut cache = SpaceBroadcastCache::default();
-
-        assert_eq!(
-            space_emit_targets(&[first], "same", &mut cache),
-            vec![first]
-        );
-        assert_eq!(
-            space_emit_targets(&[first, second], "same", &mut cache),
-            vec![second]
-        );
     }
 
     #[test]
