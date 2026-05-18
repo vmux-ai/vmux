@@ -159,7 +159,7 @@ Workflow: (1) call read_layout, (2) mutate the returned tree, (3) submit it back
 \
 Recipes: \
 - Add a new pane to a space: keep the existing root split's id, append a new pane (id: null) to its children. Do NOT wrap the existing pane in a new split - the space's root split is always present. \
-- Duplicate/mirror a tab: add a new pane (id: null) under the same parent, with a tab carrying the source tab's url and kind. \
+- Duplicate/mirror a tab: add a new pane (id: null) under the same parent, with a tab carrying the source tab's url. \
 - Swap two panes: reorder their entries in the parent split's children array. \
 - Move a tab to another pane: remove from source pane's tabs, add (same id) to target pane's tabs. \
 - Close a pane/tab: omit it from the submitted tree. \
@@ -170,7 +170,7 @@ Recipes: \
 \
 Atomicity: all changes apply as one transaction. If validation fails (duplicate ids, malformed payload), nothing is applied. \
 \
-Identifiers use kind:value format (space:N, pane:N, split:N, tab:N). Omit id to create a new node; a new tab needs url+kind, a new pane needs at least one tab, a new space needs name."
+Identifiers use kind:value format (space:N, pane:N, split:N, tab:N). Omit id to create a new node; a new tab needs url (use vmux://terminal/ for a terminal, anything else loads as a browser), a new pane needs at least one tab, a new space needs name."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -217,7 +217,6 @@ Identifiers use kind:value format (space:N, pane:N, split:N, tab:N). Omit id to 
                         "id": {"type": "string", "description": "tab:<id>; omit to create"},
                         "title": {"type": "string"},
                         "url": {"type": "string", "description": "Required when id is omitted"},
-                        "kind": {"type": "string", "enum": ["browser", "terminal"], "description": "Required when id is omitted"},
                         "is_loading": {"type": "boolean"},
                         "favicon_url": {"type": "string"}
                     }
