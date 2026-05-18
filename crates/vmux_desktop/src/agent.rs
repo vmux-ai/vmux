@@ -852,44 +852,6 @@ struct AgentLookups<'w> {
     active_space: Option<Res<'w, crate::spaces::ActiveSpace>>,
 }
 
-#[allow(dead_code)]
-fn read_layout_snapshot(world: &mut World) -> vmux_service::protocol::layout::LayoutSnapshot {
-    use bevy::ecs::system::RunSystemOnce;
-    world
-        .run_system_once(
-            |spaces: Query<(Entity, &crate::layout::tab::Tab, Option<&Children>)>,
-             splits: Query<
-                (Entity, &crate::layout::pane::PaneSplit, Option<&Children>),
-                With<crate::layout::pane::Pane>,
-            >,
-             leaves: Query<
-                (Entity, Option<&Children>),
-                (
-                    With<crate::layout::pane::Pane>,
-                    Without<crate::layout::pane::PaneSplit>,
-                ),
-            >,
-             stacks: Query<
-                (Entity, Option<&Children>, Option<&vmux_core::PageMetadata>),
-                With<crate::layout::stack::Stack>,
-            >,
-             pane_sizes: Query<&crate::layout::pane::PaneSize>,
-             zoomed_q: Query<&crate::layout::pane::Zoomed>,
-             focused: Res<crate::layout::stack::FocusedStack>| {
-                crate::agent_layout::build_layout_snapshot(
-                    &spaces,
-                    &splits,
-                    &leaves,
-                    &stacks,
-                    &pane_sizes,
-                    &zoomed_q,
-                    &focused,
-                )
-            },
-        )
-        .expect("read_layout_snapshot system run")
-}
-
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
