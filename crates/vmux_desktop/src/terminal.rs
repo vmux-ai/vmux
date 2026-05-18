@@ -347,6 +347,11 @@ fn spawn_url_into_stack(
         }
     } else if url.starts_with(vmux_service::webview::event::PROCESSES_WEBVIEW_URL) {
         commands.spawn((ProcessesMonitor::new(meshes, webview_mt), ChildOf(stack)));
+    } else if url.starts_with(vmux_space::event::SPACES_WEBVIEW_URL) {
+        commands.spawn((
+            crate::spaces::SpacesView::new(meshes, webview_mt),
+            ChildOf(stack),
+        ));
     } else {
         let terminal = commands
             .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
