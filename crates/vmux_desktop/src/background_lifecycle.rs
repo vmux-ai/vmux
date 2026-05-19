@@ -2,7 +2,8 @@ use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::window::Window;
 
-use crate::terminal::{self, PtyExited, Terminal};
+use crate::terminal::{self};
+use vmux_terminal::{PtyExited, Terminal};
 
 #[derive(Message, Debug, Clone, Copy)]
 pub enum LifecycleEvent {

@@ -407,7 +407,7 @@ fn on_space_command(
             .iter()
             .find(|(_, meta)| meta.url == SPACES_WEBVIEW_URL)
         {
-            crate::terminal::pid::focus_pane_entity(existing, &mut commands, &child_of_q);
+            vmux_terminal::pid::focus_pane_entity(existing, &mut commands, &child_of_q);
             return;
         }
         let Some(focus_res) = focus.as_deref() else {

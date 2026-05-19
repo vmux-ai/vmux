@@ -27,25 +27,11 @@ use vmux_settings::AppSettings;
 use vmux_terminal::event::*;
 use vmux_webview_app::UiReady;
 
-pub(crate) mod pid;
+use vmux_terminal::pid::{self, Pid};
+pub(crate) use vmux_terminal::{ProcessExited, PtyExited, Terminal};
 
-/// Maximum interval between consecutive mouse-down events that count as a
-/// multi-click (double, triple).
 const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
-/// Maximum cell distance between consecutive mouse-down points that still
-/// counts as a multi-click (jitter tolerance).
 const MULTI_CLICK_CELL_TOLERANCE: i32 = 1;
-
-/// Marker component for terminal content entities (analogous to Browser).
-#[derive(Component)]
-pub(crate) struct Terminal;
-
-/// Marker: service-managed process has exited; tab close is pending.
-#[derive(Component)]
-pub(crate) struct ProcessExited;
-
-/// Alias for backwards compatibility with close-confirmation code.
-pub(crate) type PtyExited = ProcessExited;
 
 /// Check if confirmation is needed based on settings.
 pub(crate) fn should_confirm_close(settings: &AppSettings) -> bool {
@@ -180,6 +166,27 @@ pub(crate) struct TerminalInputPlugin;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ServiceMessageSet;
 
+pub(crate) fn format_terminal_url(
+    mut q: Query<
+        (Option<&Pid>, &mut PageMetadata),
+        (
+            With<Terminal>,
+            Without<vmux_agent::session::AgentSession>,
+            Or<(Changed<Pid>, Added<PageMetadata>)>,
+        ),
+    >,
+) {
+    for (pid, mut meta) in &mut q {
+        let next = match pid {
+            Some(Pid(p)) => format!("{TERMINAL_WEBVIEW_URL}{p}"),
+            None => TERMINAL_WEBVIEW_URL.to_string(),
+        };
+        if meta.url != next {
+            meta.url = next;
+        }
+    }
+}
+
 impl Plugin for TerminalInputPlugin {
     fn build(&self, app: &mut App) {
         let service_wake = service_wake_callback(app);
@@ -196,15 +203,7 @@ impl Plugin for TerminalInputPlugin {
         app.init_resource::<MouseSelectionState>()
             .init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
-            .init_resource::<pid::PidToEntity>()
-            .add_systems(
-                Update,
-                (pid::track_pid_inserts, pid::track_pid_removals).chain(),
-            )
-            .add_systems(
-                Update,
-                pid::format_terminal_url.after(pid::track_pid_inserts),
-            )
+            .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
             .add_plugins(BinJsEmitEventPlugin::<TermResizeEvent>::default())
             .add_plugins(BinJsEmitEventPlugin::<TermMouseEvent>::default())
             .add_systems(
@@ -280,7 +279,12 @@ fn spawn_layout_requested_content(
                 let cwd = crate::agent::space_dir(&active_space.record.id);
                 let terminal = commands
                     .spawn((
-                        Terminal::new_with_cwd(&mut meshes, &mut webview_mt, &settings, Some(&cwd)),
+                        new_terminal_bundle_with_cwd(
+                            &mut meshes,
+                            &mut webview_mt,
+                            &settings,
+                            Some(&cwd),
+                        ),
                         ChildOf(*stack),
                     ))
                     .id();
@@ -318,7 +322,10 @@ fn spawn_url_into_stack(
 ) {
     if url.starts_with(vmux_terminal::event::TERMINAL_WEBVIEW_URL) {
         let terminal = commands
-            .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
+            .spawn((
+                new_terminal_bundle(meshes, webview_mt, settings),
+                ChildOf(stack),
+            ))
             .id();
         commands.entity(terminal).insert(CefKeyboardTarget);
     } else if let Some(kind) = vmux_agent::AgentKind::all()
@@ -333,7 +340,10 @@ fn spawn_url_into_stack(
             None => {
                 bevy::log::warn!("agent strategies not registered; falling back to terminal");
                 let terminal = commands
-                    .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
+                    .spawn((
+                        new_terminal_bundle(meshes, webview_mt, settings),
+                        ChildOf(stack),
+                    ))
                     .id();
                 commands.entity(terminal).insert(CefKeyboardTarget);
                 return;
@@ -344,7 +354,10 @@ fn spawn_url_into_stack(
         ) {
             bevy::log::warn!("agent spawn ({kind:?}) failed: {e}; falling back to terminal");
             let terminal = commands
-                .spawn((Terminal::new(meshes, webview_mt, settings), ChildOf(stack)))
+                .spawn((
+                    new_terminal_bundle(meshes, webview_mt, settings),
+                    ChildOf(stack),
+                ))
                 .id();
             commands.entity(terminal).insert(CefKeyboardTarget);
         }
@@ -377,7 +390,7 @@ pub(crate) fn spawn_agent_into_stack(
     let launch = crate::agent::build_agent_launch(kind, &cwd, session_id.as_deref(), strategies)?;
     let terminal = commands
         .spawn((
-            Terminal::new_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
+            new_terminal_bundle_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
             ChildOf(stack),
         ))
         .id();
@@ -412,142 +425,139 @@ fn service_wake_callback(app: &App) -> Option<ServiceWake> {
         })
 }
 
-impl Terminal {
-    pub(crate) fn new(
-        meshes: &mut ResMut<Assets<Mesh>>,
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-        settings: &AppSettings,
-    ) -> impl Bundle {
-        Self::new_with_cwd(meshes, webview_mt, settings, None)
-    }
+pub(crate) fn new_terminal_bundle(
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> impl Bundle {
+    new_terminal_bundle_with_cwd(meshes, webview_mt, settings, None)
+}
 
-    pub(crate) fn new_with_cwd(
-        meshes: &mut ResMut<Assets<Mesh>>,
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-        settings: &AppSettings,
-        cwd: Option<&std::path::Path>,
-    ) -> impl Bundle {
-        let shell = settings
-            .terminal
-            .as_ref()
-            .map(|t| t.resolve_theme(&t.default_theme).shell)
-            .unwrap_or_else(default_shell);
+pub(crate) fn new_terminal_bundle_with_cwd(
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+    cwd: Option<&std::path::Path>,
+) -> impl Bundle {
+    let shell = settings
+        .terminal
+        .as_ref()
+        .map(|t| t.resolve_theme(&t.default_theme).shell)
+        .unwrap_or_else(default_shell);
 
-        let cwd_str = cwd
-            .filter(|d| !d.to_string_lossy().contains("://"))
-            .map(|d| d.to_string_lossy().to_string())
-            .unwrap_or_default();
+    let cwd_str = cwd
+        .filter(|d| !d.to_string_lossy().contains("://"))
+        .map(|d| d.to_string_lossy().to_string())
+        .unwrap_or_default();
 
-        let launch = vmux_terminal::launch::TerminalLaunch {
-            command: shell,
-            args: vec![],
-            cwd: cwd_str,
-            env: vec![],
-            kind: vmux_terminal::launch::TerminalKind::Plain,
-        };
+    let launch = vmux_terminal::launch::TerminalLaunch {
+        command: shell,
+        args: vec![],
+        cwd: cwd_str,
+        env: vec![],
+        kind: vmux_terminal::launch::TerminalKind::Plain,
+    };
 
-        let process_id = ProcessId::new();
+    let process_id = ProcessId::new();
 
+    (
         (
-            (
-                Self,
-                Browser,
-                CloseRequiresConfirmation,
-                process_id,
-                launch,
-                PendingServiceCreate,
-                PageMetadata {
-                    title: format!("Terminal ({})", &process_id.to_string()[..8]),
-                    url: TERMINAL_WEBVIEW_URL.to_string(),
-                    favicon_url: String::new(),
-                    bg_color: None,
-                },
-                WebviewSource::new(TERMINAL_WEBVIEW_URL),
-                ResolvedWebviewUri(TERMINAL_WEBVIEW_URL.to_string()),
-                Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
-                    Vec3::Z,
-                    Vec2::splat(0.5),
-                ))),
-            ),
-            (
-                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                    base: StandardMaterial {
-                        unlit: true,
-                        alpha_mode: AlphaMode::Blend,
-                        depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                        ..default()
-                    },
-                    ..default()
-                })),
-                WebviewSize(Vec2::new(1280.0, 720.0)),
-                Transform::default(),
-                GlobalTransform::default(),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    ..default()
-                },
-                Visibility::Inherited,
-                Pickable::default(),
-            ),
-        )
-    }
-
-    /// Create a terminal bundle that reattaches to an existing service-managed process.
-    pub(crate) fn reattach(
-        meshes: &mut ResMut<Assets<Mesh>>,
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-        process_id: ProcessId,
-    ) -> impl Bundle {
+            Terminal,
+            Browser,
+            CloseRequiresConfirmation,
+            process_id,
+            launch,
+            PendingServiceCreate,
+            PageMetadata {
+                title: format!("Terminal ({})", &process_id.to_string()[..8]),
+                url: TERMINAL_WEBVIEW_URL.to_string(),
+                favicon_url: String::new(),
+                bg_color: None,
+            },
+            WebviewSource::new(TERMINAL_WEBVIEW_URL),
+            ResolvedWebviewUri(TERMINAL_WEBVIEW_URL.to_string()),
+            Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
+                Vec3::Z,
+                Vec2::splat(0.5),
+            ))),
+        ),
         (
-            (
-                Self,
-                Browser,
-                CloseRequiresConfirmation,
-                process_id,
-                PendingServiceAttach,
-                PageMetadata {
-                    title: format!("Terminal ({})", &process_id.to_string()[..8]),
-                    url: TERMINAL_WEBVIEW_URL.to_string(),
-                    favicon_url: String::new(),
-                    bg_color: None,
-                },
-                WebviewSource::new(TERMINAL_WEBVIEW_URL),
-                ResolvedWebviewUri(TERMINAL_WEBVIEW_URL.to_string()),
-                Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
-                    Vec3::Z,
-                    Vec2::splat(0.5),
-                ))),
-            ),
-            (
-                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                    base: StandardMaterial {
-                        unlit: true,
-                        alpha_mode: AlphaMode::Blend,
-                        depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                        ..default()
-                    },
-                    ..default()
-                })),
-                WebviewSize(Vec2::new(1280.0, 720.0)),
-                Transform::default(),
-                GlobalTransform::default(),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
+            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
+                base: StandardMaterial {
+                    unlit: true,
+                    alpha_mode: AlphaMode::Blend,
+                    depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
                     ..default()
                 },
-                Visibility::Inherited,
-                Pickable::default(),
-            ),
-        )
-    }
+                ..default()
+            })),
+            WebviewSize(Vec2::new(1280.0, 720.0)),
+            Transform::default(),
+            GlobalTransform::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                ..default()
+            },
+            Visibility::Inherited,
+            Pickable::default(),
+        ),
+    )
+}
+
+pub(crate) fn reattach_terminal_bundle(
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    process_id: ProcessId,
+) -> impl Bundle {
+    (
+        (
+            Terminal,
+            Browser,
+            CloseRequiresConfirmation,
+            process_id,
+            PendingServiceAttach,
+            PageMetadata {
+                title: format!("Terminal ({})", &process_id.to_string()[..8]),
+                url: TERMINAL_WEBVIEW_URL.to_string(),
+                favicon_url: String::new(),
+                bg_color: None,
+            },
+            WebviewSource::new(TERMINAL_WEBVIEW_URL),
+            ResolvedWebviewUri(TERMINAL_WEBVIEW_URL.to_string()),
+            Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
+                Vec3::Z,
+                Vec2::splat(0.5),
+            ))),
+        ),
+        (
+            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
+                base: StandardMaterial {
+                    unlit: true,
+                    alpha_mode: AlphaMode::Blend,
+                    depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
+                    ..default()
+                },
+                ..default()
+            })),
+            WebviewSize(Vec2::new(1280.0, 720.0)),
+            Transform::default(),
+            GlobalTransform::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                ..default()
+            },
+            Visibility::Inherited,
+            Pickable::default(),
+        ),
+    )
 }
 
 #[derive(Component)]
@@ -2759,15 +2769,15 @@ mod tests {
 
         let world = app.world();
         assert_eq!(
-            world.get::<crate::terminal::pid::Pid>(e1).map(|p| p.0),
+            world.get::<vmux_terminal::pid::Pid>(e1).map(|p| p.0),
             Some(111)
         );
         assert_eq!(
-            world.get::<crate::terminal::pid::Pid>(e2).map(|p| p.0),
+            world.get::<vmux_terminal::pid::Pid>(e2).map(|p| p.0),
             Some(222)
         );
         assert_eq!(
-            world.get::<crate::terminal::pid::Pid>(e3).map(|p| p.0),
+            world.get::<vmux_terminal::pid::Pid>(e3).map(|p| p.0),
             Some(333)
         );
     }

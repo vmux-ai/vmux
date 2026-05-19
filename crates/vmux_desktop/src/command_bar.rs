@@ -7,7 +7,7 @@ use crate::{
     },
     processes_monitor::ProcessesMonitor,
     spaces::{ActiveSpace, SpacesView},
-    terminal::Terminal,
+    terminal::{new_terminal_bundle, new_terminal_bundle_with_cwd},
 };
 use bevy::{
     ecs::message::MessageReader, ecs::relationship::Relationship, picking::Pickable, prelude::*,
@@ -36,8 +36,9 @@ use vmux_settings::AppSettings;
 use vmux_settings::SettingsView;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::{SPACES_WEBVIEW_URL, SpaceCommandEvent};
+use vmux_terminal::Terminal;
 
-pub(crate) use crate::terminal::pid::focus_pane_entity;
+pub(crate) use vmux_terminal::pid::focus_pane_entity;
 
 pub(crate) fn parse_pid_from_url(url: &str) -> Option<u32> {
     let suffix = url.strip_prefix(TERMINAL_WEBVIEW_URL)?;
@@ -856,7 +857,7 @@ fn on_command_bar_action(
         Query<Entity, With<Main>>,
         Query<Entity, With<PrimaryWindow>>,
         Option<ResMut<vmux_layout::stack::FocusedStack>>,
-        Query<(), With<crate::terminal::Terminal>>,
+        Query<(), With<Terminal>>,
     )>,
     child_of_q: Query<&ChildOf>,
     content_browsers: Query<
@@ -871,7 +872,7 @@ fn on_command_bar_action(
     mut resource_params: ParamSet<(
         Res<AppSettings>,
         Option<Res<AgentProviders>>,
-        Option<Res<crate::terminal::pid::PidToEntity>>,
+        Option<Res<vmux_terminal::pid::PidToEntity>>,
         Option<Res<vmux_agent::session::AgentSessionToEntity>>,
         Option<Res<vmux_agent::strategy::AgentStrategies>>,
     )>,
@@ -932,7 +933,7 @@ fn on_command_bar_action(
                     });
                     let term_e = commands
                         .spawn((
-                            Terminal::new_with_cwd(
+                            new_terminal_bundle_with_cwd(
                                 &mut meshes,
                                 &mut webview_mt,
                                 &settings,
@@ -977,7 +978,7 @@ fn on_command_bar_action(
                             });
                             let term_e = commands
                                 .spawn((
-                                    Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                                    new_terminal_bundle(&mut meshes, &mut webview_mt, &settings),
                                     ChildOf(stack_e),
                                 ))
                                 .id();
@@ -1048,7 +1049,11 @@ fn on_command_bar_action(
                                     );
                                     let term_e = commands
                                         .spawn((
-                                            Terminal::new(&mut meshes, &mut webview_mt, &settings),
+                                            new_terminal_bundle(
+                                                &mut meshes,
+                                                &mut webview_mt,
+                                                &settings,
+                                            ),
                                             ChildOf(stack_e),
                                         ))
                                         .id();
@@ -1370,7 +1375,7 @@ fn on_command_bar_action(
                     });
                     let term_e = commands
                         .spawn((
-                            Terminal::new_with_cwd(
+                            new_terminal_bundle_with_cwd(
                                 &mut meshes,
                                 &mut webview_mt,
                                 &settings,
@@ -1407,7 +1412,7 @@ fn on_command_bar_action(
                         });
                         let term_e = commands
                             .spawn((
-                                Terminal::new_with_cwd(
+                                new_terminal_bundle_with_cwd(
                                     &mut meshes,
                                     &mut webview_mt,
                                     &settings,

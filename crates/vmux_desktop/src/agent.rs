@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     command::{AppCommand, WriteAppCommands},
-    terminal::{PendingTerminalInput, ProcessExited, ServiceMessageSet, Terminal},
+    terminal::{PendingTerminalInput, ServiceMessageSet, new_terminal_bundle_with_cwd},
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
@@ -14,6 +14,7 @@ use vmux_layout::{
     stack::FocusedStack,
 };
 use vmux_settings::AppSettings;
+use vmux_terminal::{ProcessExited, Terminal};
 
 use crate::browser::Browser;
 use vmux_agent::session::{AgentSession, PendingAgentSession, SessionId};
@@ -297,7 +298,7 @@ pub(crate) fn spawn_terminal_tab(
     });
     let terminal = commands
         .spawn((
-            Terminal::new_with_cwd(meshes, webview_mt, settings, cwd),
+            new_terminal_bundle_with_cwd(meshes, webview_mt, settings, cwd),
             ChildOf(tab),
         ))
         .id();
@@ -432,7 +433,7 @@ pub(crate) fn spawn_process_tab(
     };
     let term = commands
         .spawn((
-            crate::terminal::Terminal::new_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
+            new_terminal_bundle_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
             ChildOf(tab),
         ))
         .id();
@@ -653,7 +654,7 @@ pub(crate) fn spawn_vmux_tab(
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
-    pid_to_entity: Option<&crate::terminal::pid::PidToEntity>,
+    pid_to_entity: Option<&vmux_terminal::pid::PidToEntity>,
     agent_to_entity: Option<&vmux_agent::session::AgentSessionToEntity>,
     strategies: &AgentStrategies,
     child_of_q: &Query<&ChildOf>,
@@ -670,7 +671,7 @@ pub(crate) fn spawn_vmux_tab(
                         if let Some(map) = pid_to_entity
                             && let Some(&entity) = map.0.get(&pid)
                         {
-                            crate::terminal::pid::focus_pane_entity(entity, commands, child_of_q);
+                            vmux_terminal::pid::focus_pane_entity(entity, commands, child_of_q);
                             return Ok(());
                         }
                         bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
@@ -735,7 +736,7 @@ pub(crate) fn spawn_vmux_tab(
                     if let Some(map) = agent_to_entity
                         && let Some(&entity) = map.0.get(&(kind, sid.clone()))
                     {
-                        crate::terminal::pid::focus_pane_entity(entity, commands, child_of_q);
+                        vmux_terminal::pid::focus_pane_entity(entity, commands, child_of_q);
                         return Ok(());
                     }
                     if let Err(e) = spawn_agent_resume_tab(
@@ -850,7 +851,7 @@ struct SettingsParams<'w> {
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentLookups<'w> {
-    pub(crate) pid_to_entity: Option<Res<'w, crate::terminal::pid::PidToEntity>>,
+    pub(crate) pid_to_entity: Option<Res<'w, vmux_terminal::pid::PidToEntity>>,
     pub(crate) agent_to_entity: Option<Res<'w, vmux_agent::session::AgentSessionToEntity>>,
     pub(crate) active_space: Option<Res<'w, crate::spaces::ActiveSpace>>,
 }
@@ -993,11 +994,7 @@ pub(crate) fn detect_agent_session_process_exit(
     mut commands: Commands,
     mut writer: MessageWriter<vmux_agent::AgentSessionExited>,
     mut q: Query<
-        (
-            Entity,
-            Option<&crate::terminal::pid::Pid>,
-            &mut PageMetadata,
-        ),
+        (Entity, Option<&vmux_terminal::pid::Pid>, &mut PageMetadata),
         (With<AgentSession>, With<ProcessExited>),
     >,
 ) {
@@ -1008,7 +1005,7 @@ pub(crate) fn detect_agent_session_process_exit(
             .remove::<SessionId>()
             .remove::<PendingAgentSession>();
         let next = match pid {
-            Some(crate::terminal::pid::Pid(p)) => {
+            Some(vmux_terminal::pid::Pid(p)) => {
                 format!("{}{p}", vmux_terminal::event::TERMINAL_WEBVIEW_URL)
             }
             None => vmux_terminal::event::TERMINAL_WEBVIEW_URL.to_string(),

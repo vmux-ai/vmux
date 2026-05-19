@@ -10,7 +10,7 @@ use vmux_webview_app::UiReady;
 
 use crate::{
     browser::Browser,
-    terminal::{ServiceClient, Terminal},
+    terminal::{ServiceClient, reattach_terminal_bundle},
 };
 use vmux_layout::{
     event::SERVICES_WEBVIEW_URL,
@@ -19,6 +19,7 @@ use vmux_layout::{
     stack::{Stack, focused_stack, stack_bundle},
     window::WEBVIEW_MESH_DEPTH_BIAS,
 };
+use vmux_terminal::Terminal;
 
 /// Marker for the processes monitor webview entity.
 #[derive(Component)]
@@ -227,7 +228,7 @@ fn on_process_navigate(
         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
     commands.spawn((
-        Terminal::reattach(&mut meshes, &mut webview_mt, process_id),
+        reattach_terminal_bundle(&mut meshes, &mut webview_mt, process_id),
         ChildOf(tab),
     ));
 }

@@ -29,7 +29,12 @@ impl Plugin for TerminalPlugin {
         app.register_type::<launch::TerminalLaunch>()
             .register_type::<launch::TerminalKind>()
             .add_message::<TerminalSendRequest>()
-            .add_message::<RunShellRequest>();
+            .add_message::<RunShellRequest>()
+            .init_resource::<pid::PidToEntity>()
+            .add_systems(
+                Update,
+                (pid::track_pid_inserts, pid::track_pid_removals).chain(),
+            );
         app.world_mut()
             .resource_mut::<WebviewAppRegistry>()
             .register(

@@ -142,7 +142,7 @@ fn sync_keyboard_target(
     side_sheet_q: Query<(), With<SideSheet>>,
     modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
     content_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
-    terminal_q: Query<(), With<crate::terminal::Terminal>>,
+    terminal_q: Query<(), With<vmux_terminal::Terminal>>,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
     mut commands: Commands,
 ) {

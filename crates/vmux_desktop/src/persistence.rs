@@ -10,7 +10,7 @@ use crate::{
     browser::Browser,
     profile::Profile,
     spaces::{ActiveSpace, SpacesView},
-    terminal::Terminal,
+    terminal::new_terminal_bundle_with_cwd,
 };
 use vmux_core::PageMetadata;
 use vmux_layout::event::SERVICES_WEBVIEW_URL;
@@ -27,6 +27,7 @@ use vmux_settings::SettingsView;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::SPACES_WEBVIEW_URL;
 use vmux_space::migration::migrate_legacy_session_files;
+use vmux_terminal::Terminal;
 
 fn run_legacy_migration() {
     migrate_legacy_session_files(crate::profile::shared_data_dir());
@@ -348,7 +349,7 @@ pub(crate) fn rebuild_space_views(
                 let cwd = saved_launch.map(|l| std::path::PathBuf::from(&l.cwd));
                 let term = commands
                     .spawn((
-                        Terminal::new_with_cwd(
+                        new_terminal_bundle_with_cwd(
                             &mut meshes,
                             &mut webview_mt,
                             &settings,
