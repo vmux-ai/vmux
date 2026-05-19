@@ -2217,12 +2217,12 @@ pub(crate) fn handle_terminal_send_requests(
         let vmux_terminal::TerminalSendRequest { text, terminal } = request.clone();
 
         let target = if let Some(s) = terminal.as_deref() {
-            match crate::agent::parse_terminal_target(s, &terminals) {
+            match vmux_agent::target::parse_terminal_target(s, &terminals) {
                 Some(t) => Ok(Some(t)),
                 None => Err(format!("terminal_send: invalid terminal id '{s}'")),
             }
         } else {
-            Ok(crate::agent::active_terminal_for_tab(
+            Ok(vmux_agent::target::active_terminal_for_tab(
                 focus.stack,
                 &terminals,
             ))
@@ -2262,7 +2262,8 @@ pub(crate) fn handle_run_shell_requests(
         let vmux_terminal::RunShellRequest { command, cwd, mode } = request.clone();
         let input = crate::agent::shell_command_input(&command);
         if matches!(mode, vmux_terminal::ShellMode::Active)
-            && let Some(terminal) = crate::agent::active_terminal_for_tab(focus.stack, &terminals)
+            && let Some(terminal) =
+                vmux_agent::target::active_terminal_for_tab(focus.stack, &terminals)
         {
             commands
                 .entity(terminal)

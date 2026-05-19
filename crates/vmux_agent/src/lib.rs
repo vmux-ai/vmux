@@ -17,6 +17,7 @@ pub mod run_state;
 pub mod session;
 pub mod strategy;
 pub mod stream;
+pub mod target;
 pub mod systems {
     pub mod approval;
     pub mod dispatch_tool;

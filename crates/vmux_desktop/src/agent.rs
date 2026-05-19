@@ -7,23 +7,21 @@ use crate::{
     command::{AppCommand, WriteAppCommands},
     terminal::{PendingTerminalInput, ServiceMessageSet, new_terminal_bundle_with_cwd},
 };
-use bevy::{ecs::relationship::Relationship, prelude::*};
+use bevy::prelude::*;
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
-use vmux_layout::{
-    pane::{Pane, PaneSplit},
-    stack::FocusedStack,
-};
-use vmux_settings::AppSettings;
-use vmux_terminal::{ProcessExited, Terminal};
-
-use crate::browser::Browser;
 use vmux_agent::session::{AgentSession, PendingAgentSession, SessionId};
 use vmux_agent::strategy::AgentStrategies;
 use vmux_agent::{AgentKind, AgentVariant};
 use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
 use vmux_layout::event::TERMINAL_WEBVIEW_URL;
+use vmux_layout::{
+    pane::{Pane, PaneSplit},
+    stack::FocusedStack,
+};
 use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentShellMode};
+use vmux_settings::AppSettings;
+use vmux_terminal::ProcessExited;
 
 pub(crate) use vmux_agent::events::{AgentCommandRequest, AgentQueryRequest};
 
@@ -735,51 +733,6 @@ pub(crate) fn spawn_vmux_tab(
     }
 }
 
-pub(crate) fn active_terminal_for_tab(
-    tab: Option<Entity>,
-    terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-) -> Option<Entity> {
-    let tab = tab?;
-    terminals
-        .iter()
-        .find_map(|(entity, child_of)| (child_of.get() == tab).then_some(entity))
-}
-
-pub(crate) fn active_webview_for_tab(
-    tab: Option<Entity>,
-    browsers: &Query<(Entity, &ChildOf), With<Browser>>,
-    terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-) -> Option<Entity> {
-    let tab = tab?;
-    browsers.iter().find_map(|(entity, child_of)| {
-        if child_of.get() != tab {
-            return None;
-        }
-        if terminals.iter().any(|(t, _)| t == entity) {
-            return None;
-        }
-        Some(entity)
-    })
-}
-
-pub(crate) fn parse_pane_target(
-    s: &str,
-    panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-) -> Option<Entity> {
-    let bits = s.parse::<u64>().ok()?;
-    let entity = Entity::try_from_bits(bits)?;
-    panes.contains(entity).then_some(entity)
-}
-
-pub(crate) fn parse_terminal_target(
-    s: &str,
-    terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-) -> Option<Entity> {
-    let bits = s.parse::<u64>().ok()?;
-    let entity = Entity::try_from_bits(bits)?;
-    terminals.iter().any(|(e, _)| e == entity).then_some(entity)
-}
-
 #[derive(bevy::ecs::system::SystemParam)]
 struct SpawnAssets<'w> {
     meshes: ResMut<'w, Assets<Mesh>>,
@@ -1012,11 +965,14 @@ fn handle_agent_launch_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::browser::Browser;
+    use bevy::ecs::relationship::Relationship;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_service::protocol::AgentRequestId;
     use vmux_settings::{BrowserSettings, ShortcutSettings};
+    use vmux_terminal::Terminal;
 
     fn test_settings() -> AppSettings {
         AppSettings {

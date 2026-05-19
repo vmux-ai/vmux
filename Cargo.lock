@@ -9080,6 +9080,7 @@ dependencies = [
  "serde",
  "serde_json",
  "vmux_core",
+ "vmux_layout",
  "vmux_service",
  "vmux_terminal",
 ]
