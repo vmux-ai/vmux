@@ -1,0 +1,13 @@
+[package]
+name = "vmux_terminal_proto"
+description = "Wire protocol types for terminal events, shared between vmux_terminal and vmux_service"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+rkyv = { workspace = true }

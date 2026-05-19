@@ -9264,7 +9264,7 @@ dependencies = [
  "uuid",
  "vmux_core",
  "vmux_layout",
- "vmux_terminal",
+ "vmux_terminal_proto",
  "vmux_ui",
  "vmux_webview_app",
  "wasm-bindgen",
@@ -9324,10 +9324,19 @@ dependencies = [
  "serde",
  "unicode-width",
  "vmux_history",
+ "vmux_terminal_proto",
  "vmux_ui",
  "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "vmux_terminal_proto"
+version = "0.0.9"
+dependencies = [
+ "rkyv",
+ "serde",
 ]
 
 [[package]]

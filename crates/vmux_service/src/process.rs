@@ -15,7 +15,7 @@ use std::{
     time::Instant,
 };
 use tokio::sync::{broadcast, mpsc};
-use vmux_terminal::event::*;
+use vmux_terminal_proto::*;
 
 const MAX_PTY_CHUNKS_PER_POLL: usize = 64;
 const _: () = assert!(MAX_PTY_CHUNKS_PER_POLL <= 256);
