@@ -22,17 +22,50 @@ In scope:
 - Establish message-typed boundaries where cross-crate calls were previously direct.
 - Each extracted crate exposes one top-level `Plugin`.
 - All existing tests pass; new tests cover each new message round-trip.
-- **Companion cleanup:** rename `PROCESSES_WEBVIEW_URL` → `SERVICES_WEBVIEW_URL` and dedupe to a single definition (see below).
+- **Companion cleanup A:** rename `PROCESSES_WEBVIEW_URL` → `SERVICES_WEBVIEW_URL` and dedupe to a single definition (see below).
+- **Companion cleanup B:** rename `vmux_layout::Tab` component → `vmux_layout::Space`; rename `tab.rs` → `space.rs`, `tab_bundle()` → `space_bundle()`, `TabPlugin` → `SpacePlugin`, etc. Preserve `#[type_path = "vmux_desktop::layout::tab"]` on the component so saved layouts still deserialize.
 
 Out of scope:
 - Extracting `browser.rs` (no `vmux_browser` crate today; would require creating one).
 - Extracting `spaces.rs` into `vmux_space` (`vmux_space` currently owns DTOs/events only; moving in the Bevy systems is its own design).
-- Renaming the `Tab` component to `Space` (per VMX-121 follow-up notes).
+- Introducing a real `Tab` (tmux-window-equivalent) entity between `Space` and root `Pane`. The full 4-level hierarchy (Space → Tab → Pane → Stack) is the target end state, but only the Space rename lands here.
 - Renaming `PROCESSES_LIST_EVENT`/`PROCESSES_NAVIGATE_EVENT`/`ProcessesMonitor` component/`processes_monitor.rs` module (follow-up).
 - Any user-visible behavior changes.
-- Saved-layout migrations.
+- Saved-layout file-format migrations (the `type_path` preservation avoids needing one for the rename).
 
-## Companion cleanup: `PROCESSES_WEBVIEW_URL` rename + dedup
+## End-state hierarchy (terminology reference)
+
+For naming clarity throughout this document and the codebase:
+
+| Concept | tmux analog | Codebase today | After this PR |
+|---------|-------------|----------------|---------------|
+| **Space** | session | `vmux_layout::Tab` (misnamed) | `vmux_layout::Space` ✓ |
+| **Tab** | window | (none — not implemented) | (still none — future work) |
+| **Pane** | pane | `vmux_layout::Pane` ✓ | `vmux_layout::Pane` ✓ |
+| **Stack** | (vmux-specific) | `vmux_layout::Stack` ✓ | `vmux_layout::Stack` ✓ |
+
+The user-facing "tab pills" rendered above the focused pane are `Stack` entities (one Stack per pill). A real `Tab` (tmux-window-equivalent) level — where one Space holds multiple independent pane layouts — is target architecture but not built in this PR. The Tab→Space rename here resolves the naming confusion in the meantime.
+
+## Companion cleanup B: `Tab` → `Space` rename
+
+The component currently named `Tab` represents a Space, not a pane-tab. Memory note (carried from prior sessions): "always use 'space' in vmux code, events, components, copy". This rename closes that gap.
+
+**Mechanical changes:**
+- `crates/vmux_layout/src/tab.rs` → renamed to `space.rs`
+- `pub struct Tab` → `pub struct Space`
+- `pub fn tab_bundle()` → `pub fn space_bundle()`
+- `pub struct TabPlugin` → `pub struct SpacePlugin`
+- `pub struct TabCommandSet` → `pub struct SpaceCommandSet`
+- All callers updated (~80 references across the workspace).
+- `mod tab;` → `mod space;` in `lib.rs`.
+
+**Persistence compat:**
+The component carries `#[type_path = "vmux_desktop::layout::tab"]`. This string is what `moonshine_save` writes into saved-layout files. **Keep this string unchanged** even after renaming the struct — the on-disk format stays compatible, so users' existing saved layouts continue to load without migration. (Precedent: the current `vmux_desktop::layout::tab` path is already stale — the type now lives in `vmux_layout::tab` — and is preserved for the same reason.)
+
+**Conflict with the protocol DTO:**
+`vmux_layout::protocol::Tab` (the DTO introduced in VMX-121) represents a pane-tab (`Stack`-equivalent). After this rename, there's no longer a name collision with `vmux_layout::Tab` (component) — the component is now `Space`. The disambiguation aliases in reconciler code (`use vmux_layout::tab::Tab as SpaceTab;`) become unnecessary and get simplified to direct `vmux_layout::Space` imports.
+
+## Companion cleanup A: `PROCESSES_WEBVIEW_URL` rename + dedup
 
 Two crates currently define the same constant:
 
@@ -184,7 +217,8 @@ To eliminate direct cross-crate calls from `vmux_agent` → other domains:
 
 Within the PR, commits land in this order:
 
-0. **Companion:** rename `PROCESSES_WEBVIEW_URL` → `SERVICES_WEBVIEW_URL` in `vmux_service::webview::event`, delete duplicate from `vmux_layout::event`, update importers. One commit, mechanical.
+0a. **Companion A:** rename `PROCESSES_WEBVIEW_URL` → `SERVICES_WEBVIEW_URL` in `vmux_service::webview::event`, delete duplicate from `vmux_layout::event`, update importers. One commit, mechanical.
+0b. **Companion B:** rename `vmux_layout::Tab` → `vmux_layout::Space` (file rename, struct rename, bundle rename, plugin rename, ~80 caller updates, preserve `type_path` string). Drop the `SpaceTab` disambiguation aliases left over from VMX-121. One commit.
 1. Create empty `vmux_settings::plugin` skeleton + `SettingsPlugin`; move `themes.rs` (purely data, no Bevy systems).
 2. Move `settings.rs` into `vmux_settings` (file watcher, `AppSettings` resource).
 3. Move `settings_view.rs` into `vmux_settings`.
