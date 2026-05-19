@@ -274,7 +274,7 @@ fn spawn_layout_requested_content(
     for request in reader.read() {
         match request {
             LayoutSpawnRequest::Terminal { stack } => {
-                let cwd = crate::agent::space_dir(&active_space.record.id);
+                let cwd = vmux_agent::cwd::space_dir(&active_space.record.id);
                 let terminal = commands
                     .spawn((
                         new_terminal_bundle_with_cwd(
@@ -385,7 +385,7 @@ pub(crate) fn spawn_agent_into_stack(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
 ) -> Result<(), String> {
-    let launch = crate::agent::build_agent_launch(kind, &cwd, session_id.as_deref(), strategies)?;
+    let launch = vmux_agent::build_agent_launch(kind, &cwd, session_id.as_deref(), strategies)?;
     let terminal = commands
         .spawn((
             new_terminal_bundle_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
@@ -2268,7 +2268,7 @@ pub(crate) fn handle_run_shell_requests(
                 .entity(terminal)
                 .insert(PendingTerminalInput { data: input });
         } else if let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane))
-            && let Ok(cwd_path) = crate::agent::valid_cwd(&cwd)
+            && let Ok(cwd_path) = vmux_agent::cwd::valid_cwd(&cwd)
         {
             crate::agent::spawn_terminal_tab(
                 pane,

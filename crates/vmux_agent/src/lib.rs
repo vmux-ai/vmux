@@ -4,10 +4,12 @@ pub mod claude;
 pub mod cli_trait;
 pub mod codex;
 pub mod components;
+pub mod cwd;
 pub mod echo;
 pub mod events;
 pub mod exec;
 pub mod kind;
+pub mod launch;
 pub mod mcp;
 pub mod message;
 pub mod plugin;
@@ -28,6 +30,7 @@ pub use app::AppAgentStrategy;
 pub use app_plugin::AppAgentPlugin;
 pub use cli_trait::CliAgentStrategy;
 pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};
+pub use cwd::{default_space_dir, space_dir, valid_cwd};
 pub use echo::{EchoAppStrategy, synthetic_echo_stream};
 pub use events::{
     AgentApprovalReply, AgentApprovalRequest, AgentDelta, AgentInput, AgentToolStatus,
@@ -35,6 +38,7 @@ pub use events::{
 };
 pub use kind::AgentKind;
 pub use kind::AgentUrl;
+pub use launch::build_agent_launch;
 pub use mcp::McpServerConfig;
 pub use message::{AssistantBlock, Message};
 pub use plugin::AgentSessionPlugin;

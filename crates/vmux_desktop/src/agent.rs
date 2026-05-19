@@ -19,7 +19,7 @@ use vmux_terminal::{ProcessExited, Terminal};
 use crate::browser::Browser;
 use vmux_agent::session::{AgentSession, PendingAgentSession, SessionId};
 use vmux_agent::strategy::AgentStrategies;
-use vmux_agent::{AgentKind, AgentVariant, mcp};
+use vmux_agent::{AgentKind, AgentVariant};
 use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
 use vmux_layout::event::TERMINAL_WEBVIEW_URL;
@@ -106,18 +106,7 @@ impl AgentProviders {
     }
 }
 
-pub(crate) fn default_space_dir() -> PathBuf {
-    space_dir("default")
-}
-
-pub(crate) fn space_dir(space_id: &str) -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"));
-    let dir = home.join(".vmux").join(space_id);
-    let _ = std::fs::create_dir_all(&dir);
-    dir
-}
+pub(crate) use vmux_agent::cwd::{default_space_dir, space_dir};
 
 #[derive(Message)]
 pub(crate) struct AgentLaunchRequested {
@@ -256,20 +245,7 @@ pub(crate) fn shell_command_input(command: &str) -> Vec<u8> {
     data
 }
 
-pub(crate) fn valid_cwd(cwd: &str) -> Result<Option<std::path::PathBuf>, String> {
-    let trimmed = cwd.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-    let path = std::path::PathBuf::from(trimmed);
-    if !path.exists() {
-        return Err(format!("cwd does not exist: {}", path.display()));
-    }
-    if !path.is_dir() {
-        return Err(format!("cwd is not a directory: {}", path.display()));
-    }
-    Ok(Some(path))
-}
+pub(crate) use vmux_agent::cwd::valid_cwd;
 
 pub(crate) fn spawn_terminal_tab(
     pane: Entity,
@@ -311,30 +287,7 @@ pub(crate) fn spawn_terminal_tab(
     terminal
 }
 
-pub(crate) fn build_agent_launch(
-    kind: AgentKind,
-    cwd: &Path,
-    session_id: Option<&str>,
-    strategies: &AgentStrategies,
-) -> Result<vmux_terminal::launch::TerminalLaunch, String> {
-    let strategy = strategies
-        .get_cli(kind)
-        .ok_or_else(|| format!("CLI strategy not registered for {:?}", kind))?;
-    let exe_name = kind.executable();
-    let exe_path = vmux_agent::exec::find_executable(exe_name)
-        .ok_or_else(|| format!("{exe_name} executable not found"))?;
-    let mcp_cfg = mcp::resolve(cwd)?;
-    let args = strategy.build_args(&mcp_cfg, session_id);
-    let mut env: Vec<(String, String)> = std::env::vars().collect();
-    env.extend(strategy.build_env(&mcp_cfg));
-    Ok(vmux_terminal::launch::TerminalLaunch {
-        command: exe_path.to_string_lossy().to_string(),
-        args,
-        cwd: cwd.to_string_lossy().to_string(),
-        env,
-        kind: kind.into(),
-    })
-}
+pub(crate) use vmux_agent::build_agent_launch;
 
 pub(crate) fn spawn_fresh_agent_tab(
     kind: AgentKind,
