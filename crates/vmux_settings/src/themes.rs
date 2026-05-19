@@ -335,8 +335,7 @@ pub fn resolve_theme(name: &str, custom_themes: &[TerminalColorScheme]) -> Termi
     if let Some(t) = get_builtin_themes().into_iter().find(|t| t.name == name) {
         return t;
     }
-    // Fallback
-    bevy::log::warn!(
+    eprintln!(
         "Unknown terminal theme '{}', falling back to catppuccin-mocha",
         name
     );

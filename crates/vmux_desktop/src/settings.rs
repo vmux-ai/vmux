@@ -280,7 +280,7 @@ pub struct TerminalSettings {
     #[serde(default)]
     pub themes: Vec<TerminalTheme>,
     #[serde(default)]
-    pub custom_themes: Vec<crate::themes::TerminalColorScheme>,
+    pub custom_themes: Vec<vmux_settings::themes::TerminalColorScheme>,
     #[serde(default = "default_true")]
     pub confirm_close: bool,
 }

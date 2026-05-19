@@ -23,7 +23,6 @@ mod settings_view;
 pub(crate) mod shortcut;
 mod spaces;
 mod terminal;
-mod themes;
 mod tray;
 pub mod updater;
 use bevy::asset::io::web::WebAssetPlugin;

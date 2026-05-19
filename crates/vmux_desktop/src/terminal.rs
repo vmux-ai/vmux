@@ -1928,7 +1928,7 @@ fn sync_terminal_theme(
 
     let theme = terminal_settings.resolve_theme(&terminal_settings.default_theme);
     let colors =
-        crate::themes::resolve_theme(&theme.color_scheme, &terminal_settings.custom_themes);
+        vmux_settings::themes::resolve_theme(&theme.color_scheme, &terminal_settings.custom_themes);
 
     let hash = {
         let mut h: u64 = 0;
