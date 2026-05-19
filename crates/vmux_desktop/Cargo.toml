@@ -42,7 +42,7 @@ tracing = "0.1"
 vmux_service = { path = "../vmux_service" }
 vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
-vmux_settings = { path = "../vmux_settings" }
+vmux_setting = { path = "../vmux_setting" }
 vmux_page = { path = "../vmux_page" }
 url = { workspace = true }
 

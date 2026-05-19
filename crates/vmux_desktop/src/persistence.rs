@@ -18,9 +18,9 @@ use vmux_layout::{
     stack::Stack,
     window::Main,
 };
-use vmux_settings::AppSettings;
-use vmux_settings::Settings;
-use vmux_settings::event::SETTINGS_WEBVIEW_URL;
+use vmux_setting::AppSettings;
+use vmux_setting::Settings;
+use vmux_setting::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::SPACES_WEBVIEW_URL;
 use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::Terminal;
@@ -481,7 +481,7 @@ mod tests {
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
+    use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -542,7 +542,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: vmux_settings::AgentSettings::default(),
+            agent: vmux_setting::AgentSettings::default(),
         }
     }
 

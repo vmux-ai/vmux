@@ -31,7 +31,7 @@ use vmux_layout::{
     },
 };
 use vmux_page::{PageReady, PageRegistry};
-use vmux_settings::AppSettings;
+use vmux_setting::AppSettings;
 use vmux_terminal::{self as terminal, PtyExited, RestartPty, Terminal};
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
 
@@ -1626,7 +1626,7 @@ mod tests {
         };
         use vmux_layout::stack::FocusedStack;
         use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentRequestId};
-        use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
+        use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
         use vmux_terminal::Terminal;
 
         fn test_settings() -> AppSettings {
@@ -1651,7 +1651,7 @@ mod tests {
                 terminal: None,
                 auto_update: false,
                 startup_url: None,
-                agent: vmux_settings::AgentSettings::default(),
+                agent: vmux_setting::AgentSettings::default(),
             }
         }
 

@@ -19,7 +19,7 @@ use vmux_service::protocol::{
     AgentCommand as ServiceAgentCommand, AgentCommandResult, AgentQuery, AgentQueryResult,
     AgentRequestId, AgentShellMode, ClientMessage,
 };
-use vmux_settings::AppSettings;
+use vmux_setting::AppSettings;
 use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::ProcessExited;
 use vmux_terminal::{ServiceMessageSet, new_terminal_bundle_with_cwd};
@@ -155,7 +155,7 @@ impl Plugin for AgentPlugin {
             .add_message::<AgentQueryRequest>()
             .add_message::<AgentLaunchRequested>()
             .add_message::<crate::AgentSessionExited>()
-            .add_message::<vmux_settings::SettingsWriteRequest>()
+            .add_message::<vmux_setting::SettingsWriteRequest>()
             .add_message::<vmux_layout::BrowserNavigateRequest>()
             .add_message::<vmux_terminal::TerminalSendRequest>()
             .add_message::<vmux_terminal::RunShellRequest>()
@@ -705,7 +705,7 @@ struct SpawnAssets<'w> {
 #[derive(bevy::ecs::system::SystemParam)]
 struct SettingsParams<'w> {
     settings: ResMut<'w, AppSettings>,
-    writes: MessageWriter<'w, vmux_settings::SettingsWriteRequest>,
+    writes: MessageWriter<'w, vmux_setting::SettingsWriteRequest>,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -814,18 +814,17 @@ fn handle_agent_commands(
             }
             ServiceAgentCommand::UpdateSettings { path, value_json } => {
                 match serde_json::from_str::<serde_json::Value>(value_json) {
-                    Ok(value) => match vmux_settings::apply_settings_update(
-                        sp.settings.as_mut(),
-                        path,
-                        value,
-                    ) {
-                        Ok(ron_bytes) => {
-                            sp.writes
-                                .write(vmux_settings::SettingsWriteRequest { ron_bytes });
-                            AgentCommandResult::Ok
+                    Ok(value) => {
+                        match vmux_setting::apply_settings_update(sp.settings.as_mut(), path, value)
+                        {
+                            Ok(ron_bytes) => {
+                                sp.writes
+                                    .write(vmux_setting::SettingsWriteRequest { ron_bytes });
+                                AgentCommandResult::Ok
+                            }
+                            Err(message) => AgentCommandResult::Error(message),
                         }
-                        Err(message) => AgentCommandResult::Error(message),
-                    },
+                    }
                     Err(e) => AgentCommandResult::Error(format!(
                         "update_settings: invalid JSON value: {e}"
                     )),
@@ -941,9 +940,8 @@ fn handle_agent_queries(
                 });
             }
             AgentQuery::GetSettings => {
-                let result = AgentQueryResult::Settings(vmux_settings::serialize_settings_to_json(
-                    &settings,
-                ));
+                let result =
+                    AgentQueryResult::Settings(vmux_setting::serialize_settings_to_json(&settings));
                 service.0.send(ClientMessage::AgentQueryResponse {
                     request_id: request.request_id,
                     result,
@@ -989,7 +987,7 @@ mod tests {
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_settings::{BrowserSettings, ShortcutSettings};
+    use vmux_setting::{BrowserSettings, ShortcutSettings};
     use vmux_terminal::Terminal;
 
     pub(super) fn test_settings() -> AppSettings {
@@ -1014,7 +1012,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: vmux_settings::AgentSettings::default(),
+            agent: vmux_setting::AgentSettings::default(),
         }
     }
 
@@ -1137,7 +1135,7 @@ mod tests {
     fn update_settings_via_apply_mutates_resource_and_returns_ron() {
         let mut settings = test_settings();
         assert!(!settings.auto_update);
-        let ron_bytes = vmux_settings::apply_settings_update(
+        let ron_bytes = vmux_setting::apply_settings_update(
             &mut settings,
             "auto_update",
             serde_json::json!(true),

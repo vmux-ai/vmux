@@ -8,5 +8,5 @@ fn main() {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    eprintln!("vmux_settings: wasm binary is for wasm32 (see build.rs).");
+    eprintln!("vmux_setting: wasm binary is for wasm32 (see build.rs).");
 }

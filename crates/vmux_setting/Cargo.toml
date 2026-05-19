@@ -1,5 +1,5 @@
 [package]
-name = "vmux_settings"
+name = "vmux_setting"
 description = "Settings webview app"
 version.workspace = true
 edition.workspace = true
@@ -11,7 +11,7 @@ default = []
 web = []
 
 [[bin]]
-name = "vmux_settings_app"
+name = "vmux_setting_app"
 path = "src/main.rs"
 required-features = ["web"]
 

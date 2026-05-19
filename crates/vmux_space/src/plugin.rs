@@ -443,7 +443,7 @@ mod tests {
     };
     use vmux_layout::{pane::Pane, space::Space, stack::Stack, window::Main};
     use vmux_page::PageRegistry;
-    use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
+    use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
     struct HomeEnvGuard {
         _guard: std::sync::MutexGuard<'static, ()>,
@@ -504,7 +504,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: vmux_settings::AgentSettings::default(),
+            agent: vmux_setting::AgentSettings::default(),
         }
     }
 

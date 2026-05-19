@@ -49,4 +49,4 @@ tempfile = "3"
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 bevy_cef_core = { workspace = true }
 serde_json = { workspace = true }
-vmux_settings = { path = "../vmux_settings" }
+vmux_setting = { path = "../vmux_setting" }

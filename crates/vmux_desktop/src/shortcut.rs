@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use std::time::Instant;
 pub(crate) use vmux_command::shortcut::{ChordState, KeyCombo, Modifiers, Shortcut};
 use vmux_command::{AppCommand, WriteAppCommands};
-use vmux_settings::{AppSettings, load_settings};
+use vmux_setting::{AppSettings, load_settings};
 
 pub struct ShortcutPlugin;
 
@@ -220,7 +220,7 @@ mod tests {
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_settings::{AppSettings, BrowserSettings, KeyComboDef, ShortcutSettings};
+    use vmux_setting::{AppSettings, BrowserSettings, KeyComboDef, ShortcutSettings};
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -274,7 +274,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: vmux_settings::AgentSettings::default(),
+            agent: vmux_setting::AgentSettings::default(),
         }
     }
 

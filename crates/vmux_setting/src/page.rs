@@ -2,11 +2,11 @@
 
 use dioxus::prelude::*;
 use serde_json::{Map, Value};
-use vmux_settings::event::{
+use vmux_setting::event::{
     SETTINGS_LIST_EVENT, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent, SettingsListEvent,
     SettingsSchemaEvent,
 };
-use vmux_settings::schema::{SettingsSchema, WidgetKind};
+use vmux_setting::schema::{SettingsSchema, WidgetKind};
 use vmux_ui::components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
 use vmux_ui::components::input::Input;
 use vmux_ui::dioxus_ext::attributes;

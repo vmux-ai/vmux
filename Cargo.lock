@@ -9086,7 +9086,7 @@ dependencies = [
  "vmux_core",
  "vmux_layout",
  "vmux_service",
- "vmux_settings",
+ "vmux_setting",
  "vmux_space",
  "vmux_terminal",
 ]
@@ -9169,7 +9169,7 @@ dependencies = [
  "vmux_macro",
  "vmux_page",
  "vmux_service",
- "vmux_settings",
+ "vmux_setting",
  "vmux_space",
  "vmux_terminal",
  "vmux_ui",
@@ -9288,7 +9288,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vmux_settings"
+name = "vmux_setting"
 version = "0.0.9"
 dependencies = [
  "bevy",
@@ -9331,7 +9331,7 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_page",
- "vmux_settings",
+ "vmux_setting",
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",
@@ -9358,7 +9358,7 @@ dependencies = [
  "vmux_layout",
  "vmux_page",
  "vmux_service",
- "vmux_settings",
+ "vmux_setting",
  "vmux_space",
  "vmux_ui",
  "wasm-bindgen",

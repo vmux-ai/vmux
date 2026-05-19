@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_settings::{AppSettings, SettingsLoadSet};
+use vmux_setting::{AppSettings, SettingsLoadSet};
 
 use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession};
 use crate::echo::EchoAppStrategy;

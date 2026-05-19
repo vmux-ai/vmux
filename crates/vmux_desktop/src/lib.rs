@@ -24,7 +24,7 @@ use {
     browser::BrowserPlugin, command_bar::CommandBarInputPlugin, os_menu::OsMenuPlugin,
     persistence::PersistencePlugin, shortcut::ShortcutPlugin, vmux_command::CommandPlugin,
     vmux_layout::LayoutPlugin, vmux_page::PageRegistryPlugin,
-    vmux_service::webview::ServicesPlugin, vmux_settings::SettingsPlugin, vmux_space::SpacePlugin,
+    vmux_service::webview::ServicesPlugin, vmux_setting::SettingsPlugin, vmux_space::SpacePlugin,
     vmux_terminal::TerminalPlugin,
 };
 

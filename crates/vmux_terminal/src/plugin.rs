@@ -23,7 +23,7 @@ use vmux_service::{
     client::{ServiceHandle, ServiceWake},
     protocol::{ClientMessage, ProcessId, ServiceMessage},
 };
-use vmux_settings::AppSettings;
+use vmux_setting::AppSettings;
 
 use crate::event::*;
 use crate::pid::{self, Pid};
@@ -1955,7 +1955,7 @@ fn sync_terminal_theme(
 
     let theme = terminal_settings.resolve_theme(&terminal_settings.default_theme);
     let colors =
-        vmux_settings::themes::resolve_theme(&theme.color_scheme, &terminal_settings.custom_themes);
+        vmux_setting::themes::resolve_theme(&theme.color_scheme, &terminal_settings.custom_themes);
 
     let hash = {
         let mut h: u64 = 0;

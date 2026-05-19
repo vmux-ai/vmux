@@ -6,7 +6,7 @@ use vmux_core::agent::{
 };
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{ClientMessage, ProcessId};
-use vmux_settings::AppSettings;
+use vmux_setting::AppSettings;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::new_terminal_bundle_with_cwd;
 
