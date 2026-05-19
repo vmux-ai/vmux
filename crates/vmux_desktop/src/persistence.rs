@@ -10,7 +10,6 @@ use crate::{
     browser::Browser,
     profile::Profile,
     spaces::{ActiveSpace, SpacesView},
-    terminal::new_terminal_bundle_with_cwd,
 };
 use vmux_core::PageMetadata;
 use vmux_layout::event::SERVICES_WEBVIEW_URL;
@@ -28,6 +27,7 @@ use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::SPACES_WEBVIEW_URL;
 use vmux_space::migration::migrate_legacy_session_files;
 use vmux_terminal::Terminal;
+use vmux_terminal::new_terminal_bundle_with_cwd;
 
 fn run_legacy_migration() {
     migrate_legacy_session_files(crate::profile::shared_data_dir());
@@ -339,7 +339,10 @@ pub(crate) fn rebuild_space_views(
                 .starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/'))
             {
                 commands.spawn((
-                    crate::processes_monitor::ProcessesMonitor::new(&mut meshes, &mut webview_mt),
+                    vmux_terminal::processes_monitor::ProcessesMonitor::new(
+                        &mut meshes,
+                        &mut webview_mt,
+                    ),
                     ChildOf(entity),
                 ));
             } else if meta
@@ -372,7 +375,7 @@ pub(crate) fn rebuild_space_views(
                     .unwrap_or_else(|| {
                         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
                     });
-                if let Err(e) = crate::terminal::spawn_agent_into_stack(
+                if let Err(e) = vmux_terminal::spawn_agent_into_stack(
                     kind,
                     entity,
                     cwd,

@@ -1,7 +1,7 @@
-use crate::terminal::ServiceClient;
 use bevy::prelude::*;
 use vmux_agent::events::AgentQueryRequest;
 use vmux_service::protocol::{AgentQuery, AgentQueryResult, ClientMessage};
+use vmux_terminal::ServiceClient;
 
 pub(crate) fn handle_agent_queries(
     mut reader: MessageReader<AgentQueryRequest>,

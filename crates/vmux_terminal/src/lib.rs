@@ -1,3 +1,9 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::new_ret_no_self
+)]
+
 pub mod event;
 pub mod render_model;
 
@@ -16,4 +22,9 @@ pub use component::{ProcessExited, PtyExited, Terminal};
 pub use launch::{TerminalKind, TerminalLaunch};
 
 #[cfg(not(target_arch = "wasm32"))]
-include!("plugin.rs");
+pub mod plugin;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod processes_monitor;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use plugin::*;

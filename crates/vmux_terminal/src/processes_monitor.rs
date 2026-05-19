@@ -5,25 +5,24 @@ use vmux_service::protocol::{ClientMessage, ProcessId};
 use vmux_service::webview::event::*;
 use vmux_webview_app::UiReady;
 
-use crate::terminal::{ServiceClient, reattach_terminal_bundle};
-pub(crate) use vmux_layout::processes_monitor::ProcessesMonitor;
+use crate::Terminal;
+use crate::plugin::{ServiceClient, reattach_terminal_bundle};
+pub use vmux_layout::processes_monitor::ProcessesMonitor;
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     space::Space,
     stack::{Stack, focused_stack, stack_bundle},
 };
-use vmux_terminal::Terminal;
 
 #[derive(Resource, Default)]
-pub(crate) struct ServiceProcessList {
+pub struct ServiceProcessList {
     pub processes: Vec<vmux_service::protocol::ProcessInfo>,
 }
 
-/// Timer for periodic process list polling.
 #[derive(Resource)]
 struct ProcessesPollTimer(Timer);
 
-pub(crate) struct ProcessesMonitorPlugin;
+pub struct ProcessesMonitorPlugin;
 
 impl Plugin for ProcessesMonitorPlugin {
     fn build(&self, app: &mut App) {

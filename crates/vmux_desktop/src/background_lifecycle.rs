@@ -2,7 +2,7 @@ use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::window::Window;
 
-use crate::terminal::{self};
+use vmux_terminal as terminal;
 use vmux_terminal::{PtyExited, Terminal};
 
 #[derive(Message, Debug, Clone, Copy)]

@@ -1,7 +1,6 @@
 use crate::{
     command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand},
     command_bar::PendingCommandBarReveal,
-    terminal::{self, PtyExited, RestartPty, Terminal},
 };
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
@@ -34,6 +33,7 @@ use vmux_layout::{
     },
 };
 use vmux_settings::AppSettings;
+use vmux_terminal::{self as terminal, PtyExited, RestartPty, Terminal};
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
 use vmux_webview_app::{UiReady, WebviewAppRegistry};
 
@@ -69,7 +69,7 @@ impl Plugin for BrowserPlugin {
                     drain_loading_state,
                     spawn_popup_tabs,
                     inject_bg_color_script,
-                    handle_browser_navigate_requests.after(crate::terminal::ServiceMessageSet),
+                    handle_browser_navigate_requests.after(vmux_terminal::ServiceMessageSet),
                 ),
             )
             .add_systems(

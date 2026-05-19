@@ -5,9 +5,7 @@ use crate::{
         AppCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands, SpaceCommand,
         StackCommand, TerminalCommand,
     },
-    processes_monitor::ProcessesMonitor,
     spaces::{ActiveSpace, SpacesView},
-    terminal::{new_terminal_bundle, new_terminal_bundle_with_cwd},
 };
 use bevy::{
     ecs::message::MessageReader, ecs::relationship::Relationship, picking::Pickable, prelude::*,
@@ -37,6 +35,8 @@ use vmux_settings::SettingsView;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::{SPACES_WEBVIEW_URL, SpaceCommandEvent};
 use vmux_terminal::Terminal;
+use vmux_terminal::processes_monitor::ProcessesMonitor;
+use vmux_terminal::{new_terminal_bundle, new_terminal_bundle_with_cwd};
 
 pub(crate) use vmux_terminal::pid::focus_pane_entity;
 
@@ -1033,7 +1033,7 @@ fn on_command_bar_action(
                                 .unwrap_or_else(|_| std::path::PathBuf::from("/"));
                             let strategies_ref = resource_params.p4();
                             if let Some(strategies) = strategies_ref.as_deref() {
-                                if let Err(e) = crate::terminal::spawn_agent_into_stack(
+                                if let Err(e) = vmux_terminal::spawn_agent_into_stack(
                                     kind,
                                     stack_e,
                                     cwd,
@@ -1202,7 +1202,7 @@ fn on_command_bar_action(
                                 .unwrap_or_else(|_| std::path::PathBuf::from("/"));
                             let strategies_ref = resource_params.p4();
                             if let Some(strategies) = strategies_ref.as_deref() {
-                                if let Err(e) = crate::terminal::spawn_agent_into_stack(
+                                if let Err(e) = vmux_terminal::spawn_agent_into_stack(
                                     kind,
                                     stack_e,
                                     cwd,

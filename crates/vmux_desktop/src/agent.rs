@@ -3,10 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{
-    command::{AppCommand, WriteAppCommands},
-    terminal::{ServiceMessageSet, new_terminal_bundle_with_cwd},
-};
+use crate::command::{AppCommand, WriteAppCommands};
 use bevy::prelude::*;
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
 use vmux_agent::session::{AgentSession, PendingAgentSession, SessionId};
@@ -22,6 +19,7 @@ use vmux_layout::{
 use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentShellMode};
 use vmux_settings::AppSettings;
 use vmux_terminal::ProcessExited;
+use vmux_terminal::{ServiceMessageSet, new_terminal_bundle_with_cwd};
 
 pub(crate) use vmux_agent::events::{AgentCommandRequest, AgentQueryRequest};
 
@@ -227,9 +225,9 @@ impl Plugin for AgentPlugin {
     }
 }
 
-pub(crate) use crate::terminal::spawn_terminal_tab;
 pub(crate) use vmux_agent::build_agent_launch;
 pub(crate) use vmux_agent::cwd::valid_cwd;
+pub(crate) use vmux_terminal::spawn_terminal_tab;
 
 pub(crate) fn spawn_fresh_agent_tab(
     kind: AgentKind,
@@ -536,7 +534,7 @@ pub(crate) fn spawn_processes_tab(
         ..default()
     });
     commands.spawn((
-        crate::processes_monitor::ProcessesMonitor::new(meshes, webview_mt),
+        vmux_terminal::processes_monitor::ProcessesMonitor::new(meshes, webview_mt),
         ChildOf(tab),
     ));
     tab
@@ -919,7 +917,6 @@ fn handle_agent_launch_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terminal::PendingTerminalInput;
     use bevy::ecs::relationship::Relationship;
     use vmux_layout::Browser;
     use vmux_layout::settings::{
@@ -927,6 +924,7 @@ mod tests {
     };
     use vmux_service::protocol::AgentRequestId;
     use vmux_settings::{BrowserSettings, ShortcutSettings};
+    use vmux_terminal::PendingTerminalInput;
     use vmux_terminal::Terminal;
 
     fn test_settings() -> AppSettings {
@@ -979,8 +977,8 @@ mod tests {
             Update,
             (
                 crate::browser::handle_browser_navigate_requests,
-                crate::terminal::handle_terminal_send_requests,
-                crate::terminal::handle_run_shell_requests,
+                vmux_terminal::handle_terminal_send_requests,
+                vmux_terminal::handle_run_shell_requests,
             ),
         );
     }
