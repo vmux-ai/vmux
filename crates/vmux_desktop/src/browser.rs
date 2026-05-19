@@ -25,11 +25,11 @@ use vmux_layout::{
     },
     pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_stack_in_pane},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
+    space::Space,
     stack::{
         CloseConfirmed, PendingStackClose, Stack, active_stack_in_pane, collect_leaf_panes,
         focused_stack, stack_bundle,
     },
-    tab::Tab,
     window::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
     },
@@ -376,13 +376,13 @@ fn sync_cef_webview_resize_after_ui(
     }
 }
 
-/// Walks up from a browser entity to find its enclosing Tab, then counts
-/// leaf panes under that tab. Returns None if the parent chain doesn't
-/// reach a Tab.
+/// Walks up from a browser entity to find its enclosing Space, then counts
+/// leaf panes under that space. Returns None if the parent chain doesn't
+/// reach a Space.
 fn pane_count_for_browser(
     browser_e: Entity,
     child_of_q: &Query<&ChildOf>,
-    tab_q: &Query<(), With<Tab>>,
+    tab_q: &Query<(), With<Space>>,
     _pane_q: &Query<(), With<Pane>>,
     all_children: &Query<&Children>,
     leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -418,7 +418,7 @@ fn sync_webview_pane_corner_clip(
         With<SideSheet>,
     >,
     child_of_q: Query<&ChildOf>,
-    tab_q: Query<(), With<Tab>>,
+    tab_q: Query<(), With<Space>>,
     pane_q: Query<(), With<Pane>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -845,7 +845,7 @@ fn push_pane_tree_emit(
     chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
     new_stack_ctx: Res<crate::command_bar::NewStackContext>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    tab_q: Query<(), With<Tab>>,
+    tab_q: Query<(), With<Space>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
@@ -954,8 +954,8 @@ fn push_tabs_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
-    tabs: Query<(Entity, &Tab, &LastActivatedAt)>,
-    tab_q: Query<Entity, With<Tab>>,
+    tabs: Query<(Entity, &Space, &LastActivatedAt)>,
+    tab_q: Query<Entity, With<Space>>,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -975,7 +975,7 @@ fn push_tabs_host_emit(
     let active_tab = tabs.iter().max_by_key(|(_, _, ts)| ts.0).map(|t| t.0);
 
     let ordered = if let Some(any) = tabs.iter().next() {
-        vmux_layout::tab::active_tab_siblings(any.0, &child_of_q, &all_children, &tab_q)
+        vmux_layout::space::active_space_siblings(any.0, &child_of_q, &all_children, &tab_q)
     } else {
         Vec::new()
     };
@@ -1049,7 +1049,7 @@ fn first_browser_meta<'a>(
 
 fn handle_browser_commands(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -1187,7 +1187,7 @@ fn on_hard_reload_notify_header(
 fn on_side_sheet_command_emit(
     trigger: On<BinReceive<SideSheetCommandEvent>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    tab_query: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_query: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,

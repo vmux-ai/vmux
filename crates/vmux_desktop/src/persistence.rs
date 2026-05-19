@@ -20,8 +20,8 @@ use vmux_layout::event::TERMINAL_WEBVIEW_URL;
 use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
+    space::Space,
     stack::Stack,
-    tab::Tab,
     window::Main,
 };
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
@@ -89,7 +89,7 @@ fn mark_dirty_on_change(
     mut auto_save: ResMut<AutoSave>,
     added_stacks: Query<(), Added<Stack>>,
     added_panes: Query<(), Added<Pane>>,
-    added_tabs: Query<(), Added<Tab>>,
+    added_tabs: Query<(), Added<Space>>,
     removed_stacks: RemovedComponents<Stack>,
     removed_panes: RemovedComponents<Pane>,
     changed_meta: Query<(), (Changed<PageMetadata>, With<Stack>)>,
@@ -144,7 +144,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<ChildOf>()
         .allow::<Children>()
         .allow::<Stack>()
-        .allow::<Tab>()
+        .allow::<Space>()
         .allow::<Pane>()
         .allow::<PaneSplit>()
         .allow::<PaneSize>()
@@ -174,7 +174,7 @@ pub(crate) fn load_space_on_startup(active: Res<ActiveSpace>, mut commands: Comm
 /// components; this system adds the visual layer.
 pub(crate) fn rebuild_space_views(
     main_q: Query<Entity, With<Main>>,
-    tabs_need_view: Query<Entity, (With<Tab>, Without<Node>)>,
+    tabs_need_view: Query<Entity, (With<Space>, Without<Node>)>,
     splits_need_view: Query<(Entity, &PaneSplit), Without<Node>>,
     panes_need_view: Query<Entity, (With<Pane>, Without<PaneSplit>, Without<Node>)>,
     stacks_need_view: Query<
@@ -516,7 +516,10 @@ mod tests {
 
         let main = app.world_mut().spawn(Main).id();
         app.world_mut().spawn(PrimaryWindow);
-        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
+        let space = app
+            .world_mut()
+            .spawn((Space::default(), ChildOf(main)))
+            .id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let saved_url = format!(
             "{}{}",
@@ -568,7 +571,10 @@ mod tests {
         app.world_mut().spawn(PrimaryWindow);
         app.update();
 
-        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
+        let space = app
+            .world_mut()
+            .spawn((Space::default(), ChildOf(main)))
+            .id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let tab = app
             .world_mut()

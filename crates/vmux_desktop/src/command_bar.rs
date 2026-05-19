@@ -30,8 +30,8 @@ use vmux_layout::{Header, event::TERMINAL_WEBVIEW_URL};
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
+    space::Space,
     stack::{Stack, active_among, collect_leaf_panes, focused_stack},
-    tab::Tab,
     window::{Main, Modal},
 };
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
@@ -92,7 +92,7 @@ impl Plugin for CommandBarInputPlugin {
                 handle_open_command_bar
                     .in_set(ReadAppCommands)
                     .after(prewarm_command_bar_modal)
-                    .after(vmux_layout::tab::TabCommandSet)
+                    .after(vmux_layout::space::SpaceCommandSet)
                     .after(vmux_layout::stack::StackCommandSet),
             )
             .add_systems(
@@ -383,7 +383,7 @@ fn handle_open_command_bar(
     >,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
     browsers: NonSend<Browsers>,
-    tab_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -845,7 +845,7 @@ fn spawn_spaces_page_layout_from_command_bar(
 fn on_command_bar_action(
     trigger: On<BinReceive<CommandBarActionEvent>>,
     mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
-    tab_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -1618,7 +1618,7 @@ fn on_command_bar_action(
 
 fn close_tab_if_only_pending_stack(
     stack: Entity,
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Space>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
     stack_q: &Query<Entity, With<Stack>>,
@@ -1643,7 +1643,7 @@ fn close_tab_if_only_pending_stack(
 
 fn ancestor_tab(
     entity: Entity,
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Space>>,
     child_of_q: &Query<&ChildOf>,
 ) -> Option<Entity> {
     let mut current = entity;
@@ -1672,7 +1672,7 @@ fn entity_tree_contains_stack_other_than(
 
 fn sibling_tabs(
     tab: Entity,
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Space>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
 ) -> Vec<Entity> {
@@ -2399,7 +2399,7 @@ mod tests {
             .id();
         let space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -2465,7 +2465,7 @@ mod tests {
         let mut spaces_query = app.world_mut().query::<&SpacesView>();
         assert_eq!(spaces_query.iter(app.world()).count(), 1);
 
-        let mut tabs = app.world_mut().query::<&Tab>();
+        let mut tabs = app.world_mut().query::<&Space>();
         assert_eq!(tabs.iter(app.world()).count(), 1);
 
         let tabs = {
@@ -2532,7 +2532,7 @@ mod tests {
             .id();
         let space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -2586,7 +2586,7 @@ mod tests {
             .id();
         let space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -2637,7 +2637,7 @@ mod tests {
             .id();
         let space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -2688,7 +2688,7 @@ mod tests {
         let root = app.world_mut().spawn_empty().id();
         let old_space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
+            .spawn((Space::default(), LastActivatedAt(1), ChildOf(root)))
             .id();
         let old_pane = app
             .world_mut()
@@ -2700,7 +2700,7 @@ mod tests {
             .id();
         let new_space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(root)))
+            .spawn((Space::default(), LastActivatedAt(2), ChildOf(root)))
             .id();
         let new_pane = app
             .world_mut()

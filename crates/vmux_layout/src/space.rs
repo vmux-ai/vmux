@@ -17,23 +17,23 @@ use moonshine_save::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, TabCommand};
 use vmux_history::{CreatedAt, LastActivatedAt};
 
-pub struct TabPlugin;
+pub struct SpacePlugin;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TabCommandSet;
+pub struct SpaceCommandSet;
 
-impl Plugin for TabPlugin {
+impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<Tab>()
+        app.register_type::<Space>()
             .add_plugins(BinJsEmitEventPlugin::<TabsCommandEvent>::default())
             .add_observer(on_tabs_command_emit)
             .add_systems(
                 Update,
-                handle_tab_commands
+                handle_space_commands
                     .in_set(ReadAppCommands)
-                    .in_set(TabCommandSet),
+                    .in_set(SpaceCommandSet),
             )
-            .add_systems(PostUpdate, sync_tab_visibility);
+            .add_systems(PostUpdate, sync_space_visibility);
     }
 }
 
@@ -41,13 +41,13 @@ impl Plugin for TabPlugin {
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::tab"]
 #[require(Save)]
-pub struct Tab {
+pub struct Space {
     pub name: String,
 }
 
-pub fn tab_bundle() -> impl Bundle {
+pub fn space_bundle() -> impl Bundle {
     (
-        Tab::default(),
+        Space::default(),
         Transform::default(),
         GlobalTransform::default(),
         Visibility::default(),
@@ -65,7 +65,7 @@ pub fn tab_bundle() -> impl Bundle {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn spawn_new_tab(
+fn spawn_new_space(
     main: Entity,
     pw: Entity,
     name: String,
@@ -75,9 +75,9 @@ fn spawn_new_tab(
     spawn_requests: &mut MessageWriter<crate::LayoutSpawnRequest>,
     commands: &mut Commands,
 ) -> Entity {
-    let tab_e = commands
+    let space_e = commands
         .spawn((
-            Tab { name },
+            Space { name },
             Transform::default(),
             GlobalTransform::default(),
             Visibility::default(),
@@ -115,7 +115,7 @@ fn spawn_new_tab(
                 row_gap: gap.row_gap,
                 ..default()
             },
-            ChildOf(tab_e),
+            ChildOf(space_e),
         ))
         .id();
 
@@ -127,7 +127,7 @@ fn spawn_new_tab(
         ))
         .id();
 
-    let tab = commands
+    let stack = commands
         .spawn((
             stack_bundle(),
             LastActivatedAt::now(),
@@ -136,8 +136,8 @@ fn spawn_new_tab(
         ))
         .id();
 
-    if let Some(old_tab) = new_stack_ctx.stack.take() {
-        commands.entity(old_tab).despawn();
+    if let Some(old_stack) = new_stack_ctx.stack.take() {
+        commands.entity(old_stack).despawn();
     }
     new_stack_ctx.previous_stack = None;
     new_stack_ctx.dismiss_modal = false;
@@ -146,20 +146,20 @@ fn spawn_new_tab(
         .map(|u| u.0.clone())
         .unwrap_or_default();
     if url.is_empty() {
-        new_stack_ctx.stack = Some(tab);
+        new_stack_ctx.stack = Some(stack);
         new_stack_ctx.needs_open = true;
     } else {
-        spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl { stack: tab, url });
+        spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl { stack, url });
     }
 
-    tab_e
+    space_e
 }
 
 #[allow(clippy::too_many_arguments)]
-fn handle_tab_commands(
+fn handle_space_commands(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
-    tab_q: Query<Entity, With<Tab>>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    space_q: Query<Entity, With<Space>>,
     main_q: Query<Entity, With<MainNode>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
@@ -175,14 +175,14 @@ fn handle_tab_commands(
             continue;
         };
 
-        let active_tab = tabs.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
+        let active_space = spaces.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
 
         match tab_cmd {
             TabCommand::New => {
                 let Ok(main) = main_q.single() else { continue };
-                let count = tabs.iter().count();
+                let count = spaces.iter().count();
                 let name = format!("Tab {}", count + 1);
-                spawn_new_tab(
+                spawn_new_space(
                     main,
                     *primary_window,
                     name,
@@ -194,12 +194,12 @@ fn handle_tab_commands(
                 );
             }
             TabCommand::Close => {
-                let Some(active) = active_tab else { continue };
-                close_tab_entity(
+                let Some(active) = active_space else { continue };
+                close_space_entity(
                     active,
-                    active_tab,
-                    tabs.iter().count(),
-                    &tab_q,
+                    active_space,
+                    spaces.iter().count(),
+                    &space_q,
                     &main_q,
                     *primary_window,
                     &child_of_q,
@@ -212,8 +212,8 @@ fn handle_tab_commands(
                 );
             }
             TabCommand::Next | TabCommand::Previous => {
-                let Some(active) = active_tab else { continue };
-                let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
+                let Some(active) = active_space else { continue };
+                let siblings = active_space_siblings(active, &child_of_q, &all_children, &space_q);
                 if siblings.len() <= 1 {
                     continue;
                 }
@@ -240,8 +240,8 @@ fn handle_tab_commands(
             | TabCommand::SelectIndex7
             | TabCommand::SelectIndex8
             | TabCommand::SelectLast => {
-                let Some(active) = active_tab else { continue };
-                let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
+                let Some(active) = active_space else { continue };
+                let siblings = active_space_siblings(active, &child_of_q, &all_children, &space_q);
                 if siblings.is_empty() {
                     continue;
                 }
@@ -266,7 +266,7 @@ fn handle_tab_commands(
                 }
             }
             TabCommand::SwapPrev | TabCommand::SwapNext => {
-                let Some(active) = active_tab else { continue };
+                let Some(active) = active_space else { continue };
                 let Ok(co) = child_of_q.get(active) else {
                     continue;
                 };
@@ -277,7 +277,7 @@ fn handle_tab_commands(
                 let kind_positions: Vec<usize> = children
                     .iter()
                     .enumerate()
-                    .filter(|(_, e)| tab_q.contains(*e))
+                    .filter(|(_, e)| space_q.contains(*e))
                     .map(|(i, _)| i)
                     .collect();
                 let Some(active_idx) = find_kind_index(active, children, &kind_positions) else {
@@ -297,11 +297,11 @@ fn handle_tab_commands(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn close_tab_entity(
+fn close_space_entity(
     target: Entity,
-    active_tab: Option<Entity>,
-    tab_count: usize,
-    tab_q: &Query<Entity, With<Tab>>,
+    active_space: Option<Entity>,
+    space_count: usize,
+    space_q: &Query<Entity, With<Space>>,
     main_q: &Query<Entity, With<MainNode>>,
     primary_window: Entity,
     child_of_q: &Query<&ChildOf>,
@@ -312,11 +312,11 @@ fn close_tab_entity(
     spawn_requests: &mut MessageWriter<crate::LayoutSpawnRequest>,
     commands: &mut Commands,
 ) {
-    let siblings = active_tab_siblings(target, child_of_q, all_children, tab_q);
+    let siblings = active_space_siblings(target, child_of_q, all_children, space_q);
     if siblings.len() <= 1 {
         let Ok(main) = main_q.single() else { return };
-        let name = format!("Tab {}", tab_count + 1);
-        spawn_new_tab(
+        let name = format!("Tab {}", space_count + 1);
+        spawn_new_space(
             main,
             primary_window,
             name,
@@ -326,7 +326,7 @@ fn close_tab_entity(
             spawn_requests,
             commands,
         );
-    } else if active_tab == Some(target)
+    } else if active_space == Some(target)
         && let Some(next) = pick_after_close(target, &siblings)
     {
         commands.entity(next).insert(LastActivatedAt::now());
@@ -334,11 +334,11 @@ fn close_tab_entity(
     commands.entity(target).despawn();
 }
 
-pub fn active_tab_siblings(
+pub fn active_space_siblings(
     active: Entity,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
-    tab_q: &Query<Entity, With<Tab>>,
+    space_q: &Query<Entity, With<Space>>,
 ) -> Vec<Entity> {
     let Ok(co) = child_of_q.get(active) else {
         return vec![active];
@@ -349,11 +349,10 @@ pub fn active_tab_siblings(
     };
     children
         .iter()
-        .filter(|e| tab_q.contains(*e))
+        .filter(|e| space_q.contains(*e))
         .collect::<Vec<_>>()
 }
 
-/// When closing `active`, return the entity that should become active.
 fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
     if siblings.len() <= 1 {
         return None;
@@ -364,14 +363,14 @@ fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
     if target == active { None } else { Some(target) }
 }
 
-fn sync_tab_visibility(
-    mut tabs: Query<(Entity, &LastActivatedAt, &mut Node, &mut Visibility), With<Tab>>,
+fn sync_space_visibility(
+    mut spaces: Query<(Entity, &LastActivatedAt, &mut Node, &mut Visibility), With<Space>>,
 ) {
-    let active = tabs
+    let active = spaces
         .iter()
         .max_by_key(|(_, ts, _, _)| ts.0)
         .map(|(e, _, _, _)| e);
-    for (entity, _, mut node, mut vis) in &mut tabs {
+    for (entity, _, mut node, mut vis) in &mut spaces {
         let is_active = Some(entity) == active;
         let target_display = if is_active {
             Display::Flex
@@ -394,8 +393,8 @@ fn sync_tab_visibility(
 
 fn on_tabs_command_emit(
     trigger: On<BinReceive<TabsCommandEvent>>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
-    tab_q: Query<Entity, With<Tab>>,
+    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
+    space_q: Query<Entity, With<Space>>,
     main_q: Query<Entity, With<MainNode>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
@@ -408,20 +407,23 @@ fn on_tabs_command_emit(
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
-    let active_tab = tabs.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
+    let active_space = spaces.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
     match evt.command.as_str() {
         "new" => {
             messages.write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::New)));
         }
         "close" => {
-            let target = tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
-                .or(active_tab);
+            let target = space_target(
+                evt.tab_id.as_deref(),
+                spaces.iter().map(|(entity, _)| entity),
+            )
+            .or(active_space);
             let Some(target) = target else { return };
-            close_tab_entity(
+            close_space_entity(
                 target,
-                active_tab,
-                tabs.iter().count(),
-                &tab_q,
+                active_space,
+                spaces.iter().count(),
+                &space_q,
                 &main_q,
                 *primary_window,
                 &child_of_q,
@@ -440,7 +442,7 @@ fn on_tabs_command_emit(
             let Ok(bits) = id_str.parse::<u64>() else {
                 return;
             };
-            let Some((target, _)) = tabs.iter().find(|(e, _)| e.to_bits() == bits) else {
+            let Some((target, _)) = spaces.iter().find(|(e, _)| e.to_bits() == bits) else {
                 return;
             };
             commands.entity(target).insert(LastActivatedAt::now());
@@ -449,9 +451,9 @@ fn on_tabs_command_emit(
     }
 }
 
-fn tab_target(id: Option<&str>, tabs: impl IntoIterator<Item = Entity>) -> Option<Entity> {
+fn space_target(id: Option<&str>, spaces: impl IntoIterator<Item = Entity>) -> Option<Entity> {
     let bits = id?.parse::<u64>().ok()?;
-    tabs.into_iter().find(|tab_e| tab_e.to_bits() == bits)
+    spaces.into_iter().find(|e| e.to_bits() == bits)
 }
 
 #[cfg(test)]
@@ -459,11 +461,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tab_target_uses_event_tab_id() {
+    fn space_target_uses_event_tab_id() {
         let target = Entity::from_bits(42);
         let other = Entity::from_bits(7);
         let id = target.to_bits().to_string();
 
-        assert_eq!(tab_target(Some(&id), [other, target]), Some(target));
+        assert_eq!(space_target(Some(&id), [other, target]), Some(target));
     }
 }
