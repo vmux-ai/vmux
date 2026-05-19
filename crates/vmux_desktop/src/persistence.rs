@@ -30,6 +30,44 @@ use vmux_space::migration::migrate_legacy_session_files;
 
 fn run_legacy_migration() {
     migrate_legacy_session_files(crate::profile::shared_data_dir());
+    migrate_tab_to_space_type_name(crate::profile::shared_data_dir());
+}
+
+fn migrate_tab_to_space_type_name(root: std::path::PathBuf) {
+    let profiles = root.join("profiles");
+    let Ok(entries) = std::fs::read_dir(&profiles) else {
+        return;
+    };
+    for profile_entry in entries.flatten() {
+        let profile_dir = profile_entry.path();
+        if !profile_dir.is_dir() {
+            continue;
+        }
+        migrate_file(&profile_dir.join("space.ron"));
+        let Ok(space_entries) = std::fs::read_dir(profile_dir.join("spaces")) else {
+            continue;
+        };
+        for space_entry in space_entries.flatten() {
+            let space_dir = space_entry.path();
+            if space_dir.is_dir() {
+                migrate_file(&space_dir.join("space.ron"));
+            }
+        }
+    }
+}
+
+fn migrate_file(path: &std::path::Path) {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let needle = "vmux_desktop::layout::tab::Tab";
+    if !content.contains(needle) {
+        return;
+    }
+    let migrated = content.replace(needle, "vmux_desktop::layout::tab::Space");
+    if std::fs::write(path, migrated).is_ok() {
+        info!("Migrated Tab -> Space type name in {path:?}");
+    }
 }
 
 pub(crate) struct PersistencePlugin;
