@@ -866,7 +866,7 @@ fn handle_agent_commands(
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     lookups: AgentLookups,
     mut sp: SettingsParams,
-    service: Option<Res<crate::terminal::ServiceClient>>,
+    service: Option<Res<vmux_service::client::ServiceClient>>,
     mut layout_apply_writer: MessageWriter<vmux_layout::reconcile::LayoutApplyRequest>,
     mut commands: Commands,
     mut assets: SpawnAssets,

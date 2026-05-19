@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use vmux_layout::reconcile::{LayoutApplyResponse, LayoutSnapshotResponse};
 use vmux_service::protocol::{AgentCommandResult, AgentQueryResult, AgentRequestId, ClientMessage};
 
-use crate::terminal::ServiceClient;
+use vmux_service::client::ServiceClient;
 
 pub(crate) struct LayoutResponseForwarderPlugin;
 

@@ -1488,7 +1488,7 @@ pub(crate) fn handle_browser_navigate_requests(
     lookups: crate::agent::AgentLookups,
     strategies: Res<vmux_agent::strategy::AgentStrategies>,
     settings: Res<AppSettings>,
-    service: Option<Res<crate::terminal::ServiceClient>>,
+    service: Option<Res<vmux_service::client::ServiceClient>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,

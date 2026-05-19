@@ -68,9 +68,7 @@ pub(crate) fn confirm_quit_dialog(count: usize) -> bool {
     matches!(result, MessageDialogResult::Ok)
 }
 
-/// Bevy resource wrapping the service connection.
-#[derive(Resource)]
-pub(crate) struct ServiceClient(pub ServiceHandle);
+pub(crate) use vmux_service::client::ServiceClient;
 
 #[derive(Resource, Clone)]
 struct ServiceWakeCallback(Option<ServiceWake>);

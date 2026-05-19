@@ -9244,6 +9244,7 @@ version = "0.0.9"
 dependencies = [
  "alacritty_terminal",
  "bevy",
+ "bevy_ecs",
  "dioxus",
  "libc",
  "objc2 0.6.4",
