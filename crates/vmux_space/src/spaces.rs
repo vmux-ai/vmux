@@ -3,17 +3,15 @@ use std::path::{Path, PathBuf};
 use bevy::{picking::Pickable, prelude::*, render::alpha::AlphaMode};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
-use vmux_space::{
-    event::{SPACES_WEBVIEW_URL, SpaceRow},
-    model::{
-        DEFAULT_SPACE_ID, SpaceRecord, SpaceRegistry, default_space_record, registry_path,
-        space_layout_path_for,
-    },
-};
+use vmux_core::profile;
+use vmux_layout::chrome::Browser;
+use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
 
-use crate::chrome::Browser;
-use crate::profile;
-use crate::window::WEBVIEW_MESH_DEPTH_BIAS;
+use crate::event::{SPACES_WEBVIEW_URL, SpaceRow};
+use crate::model::{
+    DEFAULT_SPACE_ID, SpaceRecord, SpaceRegistry, default_space_record, registry_path,
+    space_layout_path_for,
+};
 
 #[derive(Resource, Clone, Debug)]
 pub struct ActiveSpace {

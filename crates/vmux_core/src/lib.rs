@@ -3,6 +3,8 @@ pub mod process_id;
 pub use process_id::ProcessId;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod profile;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod terminal;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -76,6 +78,18 @@ pub struct LastActivatedAt(pub i64);
 impl LastActivatedAt {
     pub fn now() -> Self {
         Self(now_millis())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn focus_pane_entity(entity: Entity, commands: &mut Commands, child_of_q: &Query<&ChildOf>) {
+    use bevy::ecs::relationship::Relationship;
+    commands.entity(entity).insert(LastActivatedAt::now());
+    let mut current = entity;
+    while let Ok(parent_rel) = child_of_q.get(current) {
+        let parent = parent_rel.get();
+        commands.entity(parent).insert(LastActivatedAt::now());
+        current = parent;
     }
 }
 

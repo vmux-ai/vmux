@@ -4,7 +4,7 @@ pub mod view;
 use bevy::prelude::*;
 use bevy_cef::prelude::BinJsEmitEventPlugin;
 use vmux_command::{ReadAppCommands, WriteAppCommands};
-use vmux_webview_app::WebviewAppRegistry;
+use vmux_page::PageRegistry;
 
 use crate::event::SettingsCommandEvent;
 use runtime::{
@@ -13,7 +13,7 @@ use runtime::{
 };
 use view::{
     broadcast_schema_to_views, broadcast_settings_to_views, handle_open_settings_command,
-    on_settings_command, register_settings_webview_app, reset_sent_markers_on_ui_ready,
+    on_settings_command, register_settings_page, reset_sent_markers_on_ui_ready,
 };
 
 pub struct SettingsPlugin;
@@ -40,9 +40,9 @@ impl Plugin for SettingsPlugin {
             )
             .add_systems(Update, update_effective_startup_url);
 
-        register_settings_webview_app(
+        register_settings_page(
             app.world_mut()
-                .resource_mut::<WebviewAppRegistry>()
+                .resource_mut::<PageRegistry>()
                 .as_mut(),
         );
         app.add_plugins(BinJsEmitEventPlugin::<SettingsCommandEvent>::default())

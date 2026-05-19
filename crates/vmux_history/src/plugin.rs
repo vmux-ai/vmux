@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bevy_cef::prelude::*;
-use vmux_webview_app::{UiReady, WebviewAppConfig, WebviewAppRegistry};
+use vmux_page::{UiReady, PageConfig, PageRegistry};
 
 use crate::event::{HISTORY_EVENT, HistoryEvent};
 use vmux_core::PageMetadata;
@@ -11,10 +11,10 @@ pub struct HistoryPlugin;
 impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut()
-            .resource_mut::<WebviewAppRegistry>()
+            .resource_mut::<PageRegistry>()
             .register(
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-                &WebviewAppConfig::with_custom_host("history"),
+                &PageConfig::with_custom_host("history"),
             );
         app.add_systems(Update, push_history_via_host_emit);
     }

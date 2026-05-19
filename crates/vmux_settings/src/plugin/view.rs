@@ -11,7 +11,7 @@ use vmux_layout::{
     stack::{FocusedStack, stack_bundle},
     window::WEBVIEW_MESH_DEPTH_BIAS,
 };
-use vmux_webview_app::{UiReady, WebviewAppConfig, WebviewAppRegistry};
+use vmux_page::{UiReady, PageConfig, PageRegistry};
 
 use crate::event::{
     SETTINGS_LIST_EVENT, SETTINGS_SCHEMA_EVENT, SETTINGS_WEBVIEW_URL, SettingsCommandEvent,
@@ -88,10 +88,10 @@ pub(crate) fn reset_sent_markers_on_ui_ready(
         .remove::<SettingsSchemaSent>();
 }
 
-pub(crate) fn register_settings_webview_app(registry: &mut WebviewAppRegistry) {
+pub(crate) fn register_settings_page(registry: &mut PageRegistry) {
     registry.register(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-        &WebviewAppConfig::with_custom_host("settings"),
+        &PageConfig::with_custom_host("settings"),
     );
 }
 

@@ -35,7 +35,7 @@ fn emit_action(action: &str, value: &str) {
 }
 
 #[component]
-pub fn App() -> Element {
+pub fn Page() -> Element {
     use_theme();
     let mut state = use_signal(CommandBarOpenEvent::default);
     let mut query = use_signal(String::new);

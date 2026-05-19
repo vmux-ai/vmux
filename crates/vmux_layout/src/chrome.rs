@@ -4,7 +4,7 @@ use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy::render::alpha::AlphaMode;
 use bevy_cef::prelude::*;
-use vmux_webview_app::{WebviewAppConfig, WebviewAppRegistry};
+use vmux_page::{PageConfig, PageRegistry};
 
 use crate::event::LAYOUT_WEBVIEW_URL;
 use crate::window::WEBVIEW_MESH_DEPTH_BIAS;
@@ -30,10 +30,10 @@ pub struct LayoutChromePlugin;
 impl Plugin for LayoutChromePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut()
-            .resource_mut::<WebviewAppRegistry>()
+            .resource_mut::<PageRegistry>()
             .register(
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-                &WebviewAppConfig::with_custom_host("layout"),
+                &PageConfig::with_custom_host("layout"),
             );
     }
 }

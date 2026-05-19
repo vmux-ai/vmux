@@ -35,7 +35,7 @@ const CONTAINER_ID: &str = "term-container";
 const MEASURE_ID: &str = "term-measure";
 
 #[component]
-pub fn App() -> Element {
+pub fn Page() -> Element {
     use_theme();
     let mut rows = use_signal(Vec::<Signal<TermLine>>::new);
     let mut cursor_rows = use_signal(Vec::<Signal<Option<TermCursor>>>::new);

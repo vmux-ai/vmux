@@ -41,7 +41,7 @@ use {
     vmux_settings::SettingsPlugin,
     vmux_terminal::TerminalPlugin,
     vmux_terminal::processes_monitor::ProcessesMonitorPlugin,
-    vmux_webview_app::WebviewAppRegistryPlugin,
+    vmux_page::PageRegistryPlugin,
 };
 
 use vmux_agent::AgentPlugin;
@@ -99,7 +99,7 @@ impl Plugin for VmuxPlugin {
                     filter: "bevy_camera_controller=warn".into(),
                     ..default()
                 }),
-            WebviewAppRegistryPlugin,
+            PageRegistryPlugin,
             SettingsPlugin,
             CommandPlugin,
             ShortcutPlugin,

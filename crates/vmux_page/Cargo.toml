@@ -1,5 +1,5 @@
 [package]
-name = "vmux_webview_app"
+name = "vmux_page"
 description = "Bevy plugin: embed Dioxus-style dist/ and assets/ trees for CEF webviews"
 version.workspace = true
 edition.workspace = true

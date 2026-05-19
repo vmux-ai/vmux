@@ -1,3 +1,5 @@
+pub mod space;
+
 use serde::{Deserialize, Serialize};
 
 pub const TERM_VIEWPORT_EVENT: &str = "term_viewport";

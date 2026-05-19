@@ -5,7 +5,7 @@ use vmux_history::event::{HISTORY_EVENT, HistoryEvent};
 use vmux_ui::hooks::use_bin_event_listener;
 
 #[component]
-pub fn App() -> Element {
+pub fn Page() -> Element {
     let mut history = use_signal(Vec::<String>::new);
     let listener = use_bin_event_listener::<HistoryEvent, _>(HISTORY_EVENT, move |data| {
         history.set(data.history);

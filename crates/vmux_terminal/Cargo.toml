@@ -19,7 +19,7 @@ required-features = ["web"]
 path = "src/lib.rs"
 
 [build-dependencies]
-vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
+vmux_page = { path = "../vmux_page", features = ["build"] }
 
 [dependencies]
 serde = { workspace = true }
@@ -39,7 +39,7 @@ vmux_layout = { path = "../vmux_layout" }
 vmux_service = { path = "../vmux_service" }
 vmux_settings = { path = "../vmux_settings" }
 vmux_space = { path = "../vmux_space" }
-vmux_webview_app = { path = "../vmux_webview_app" }
+vmux_page = { path = "../vmux_page" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }

@@ -23,7 +23,7 @@ use vmux_service::{
     protocol::{ClientMessage, ProcessId, ServiceMessage},
 };
 use vmux_settings::AppSettings;
-use vmux_webview_app::{UiReady, WebviewAppConfig, WebviewAppRegistry};
+use vmux_page::{UiReady, PageConfig, PageRegistry};
 
 use crate::event::*;
 use crate::pid::{self, Pid};
@@ -216,10 +216,10 @@ impl Plugin for TerminalPlugin {
                 (pid::track_pid_inserts, pid::track_pid_removals).chain(),
             );
         app.world_mut()
-            .resource_mut::<WebviewAppRegistry>()
+            .resource_mut::<PageRegistry>()
             .register(
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-                &WebviewAppConfig::with_custom_host("terminal"),
+                &PageConfig::with_custom_host("terminal"),
             );
 
         let service_wake = service_wake_callback(app);
@@ -257,6 +257,8 @@ impl Plugin for TerminalPlugin {
             .add_observer(on_term_mouse)
             .add_observer(on_restart_pty)
             .add_observer(on_terminal_removed);
+
+        app.add_plugins(crate::processes_monitor::ProcessesMonitorPlugin);
     }
 }
 
@@ -300,7 +302,7 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
 fn spawn_layout_requested_content(
     mut reader: MessageReader<LayoutSpawnRequest>,
     settings: Res<AppSettings>,
-    active_space: Res<vmux_layout::spaces::ActiveSpace>,
+    active_space: Res<vmux_space::spaces::ActiveSpace>,
     mut spawn_agent: MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -378,7 +380,7 @@ fn spawn_url_into_stack(
         commands.spawn((ProcessesMonitor::new(meshes, webview_mt), ChildOf(stack)));
     } else if url.starts_with(vmux_space::event::SPACES_WEBVIEW_URL) {
         commands.spawn((
-            vmux_layout::spaces::SpacesView::new(meshes, webview_mt),
+            vmux_space::spaces::SpacesView::new(meshes, webview_mt),
             ChildOf(stack),
         ));
     } else {

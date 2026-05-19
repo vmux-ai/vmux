@@ -12,33 +12,33 @@ pub const CEF_EMBEDDED_APP_INDEX_CSS: &str = "index.css";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CefMode {
     Browser,
-    WebviewApp,
+    Page,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct CefEmbeddedWebviewFinalize {
+pub struct CefEmbeddedPageFinalize {
     pub strip_uncompiled_tailwind_css: bool,
 }
 
 #[derive(Debug)]
-pub struct WebviewAppBuilder {
+pub struct PageBuilder {
     pub manifest_dir: PathBuf,
     pub dx_package: &'static str,
     pub dx_bin: &'static str,
     pub dx_extra_args: &'static [&'static str],
-    pub cef_finalize: CefEmbeddedWebviewFinalize,
+    pub cef_finalize: CefEmbeddedPageFinalize,
     pub extra_tracked: Vec<PathBuf>,
     pub tailwind_postprocess_stale_prefixes: Option<&'static [&'static str]>,
 }
 
-impl WebviewAppBuilder {
+impl PageBuilder {
     pub fn new(manifest_dir: PathBuf, dx_package: &'static str, dx_bin: &'static str) -> Self {
         Self {
             manifest_dir,
             dx_package,
             dx_bin,
             dx_extra_args: &[],
-            cef_finalize: CefEmbeddedWebviewFinalize::default(),
+            cef_finalize: CefEmbeddedPageFinalize::default(),
             extra_tracked: Vec::new(),
             tailwind_postprocess_stale_prefixes: None,
         }
@@ -49,7 +49,7 @@ impl WebviewAppBuilder {
         self
     }
 
-    pub fn cef_finalize(mut self, v: CefEmbeddedWebviewFinalize) -> Self {
+    pub fn cef_finalize(mut self, v: CefEmbeddedPageFinalize) -> Self {
         self.cef_finalize = v;
         self
     }
@@ -409,7 +409,7 @@ pub fn finish_cef_embedded_webview_dist(
     manifest_dir: &Path,
     workspace_root: &Path,
     shell_index: &Path,
-    opts: CefEmbeddedWebviewFinalize,
+    opts: CefEmbeddedPageFinalize,
 ) -> io::Result<()> {
     copy_shared_theme_css_to_cef_dist(dist, workspace_root)?;
     let manifest_assets = manifest_dir.join("assets");
@@ -454,7 +454,7 @@ fn cef_stylesheet_link_tags(dist: &Path, mode: CefMode) -> String {
         CefMode::Browser => {
             names.sort();
         }
-        CefMode::WebviewApp => {
+        CefMode::Page => {
             names.retain(|n| n == "theme.css" || n == "index.css" || n.starts_with("index-"));
             names.sort_by(|a, b| {
                 fn ord(n: &str) -> (u8, &str) {

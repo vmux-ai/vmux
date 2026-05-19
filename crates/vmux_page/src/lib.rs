@@ -14,7 +14,7 @@ const UI_READY_BIN_EVENT_ID: &str = "vmux-ui-ready";
 pub mod build;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WebviewAppEmbedSet;
+pub struct PageEmbedSet;
 
 #[derive(
     Clone,
@@ -56,14 +56,14 @@ mod ui_ready_tests {
 }
 
 #[derive(Clone, Debug)]
-pub struct WebviewAppConfig {
+pub struct PageConfig {
     pub scheme: &'static str,
     pub host: &'static str,
     pub bundle_dir: &'static str,
     pub index_file_path: &'static str,
 }
 
-impl WebviewAppConfig {
+impl PageConfig {
     pub const fn with_custom_host(host: &'static str) -> Self {
         Self {
             scheme: "vmux",
@@ -75,28 +75,28 @@ impl WebviewAppConfig {
 }
 
 #[derive(Clone, Debug)]
-struct WebviewAppEntry {
+struct PageEntry {
     manifest_dir: PathBuf,
     bundle_dir: String,
     host: String,
     index_file_path: String,
 }
 
-impl WebviewAppEntry {
+impl PageEntry {
     fn bundle_root(&self, resources_dir: Option<&Path>) -> PathBuf {
-        packaged_webview_app_root(resources_dir, &self.host)
+        packaged_page_root(resources_dir, &self.host)
             .unwrap_or_else(|| self.manifest_dir.join(&self.bundle_dir))
     }
 }
 
 #[derive(Clone, Debug, Resource, Default)]
-pub struct WebviewAppRegistry {
-    entries: Vec<WebviewAppEntry>,
+pub struct PageRegistry {
+    entries: Vec<PageEntry>,
 }
 
-impl WebviewAppRegistry {
-    pub fn register(&mut self, manifest_dir: impl Into<PathBuf>, config: &WebviewAppConfig) {
-        self.entries.push(WebviewAppEntry {
+impl PageRegistry {
+    pub fn register(&mut self, manifest_dir: impl Into<PathBuf>, config: &PageConfig) {
+        self.entries.push(PageEntry {
             manifest_dir: manifest_dir.into(),
             bundle_dir: config.bundle_dir.to_string(),
             host: config.host.to_string(),
@@ -121,15 +121,15 @@ impl WebviewAppRegistry {
     }
 }
 
-pub struct WebviewAppRegistryPlugin;
+pub struct PageRegistryPlugin;
 
-impl Plugin for WebviewAppRegistryPlugin {
+impl Plugin for PageRegistryPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WebviewAppRegistry>()
-            .configure_sets(Startup, WebviewAppEmbedSet)
+        app.init_resource::<PageRegistry>()
+            .configure_sets(Startup, PageEmbedSet)
             .add_systems(
                 Startup,
-                embed_webview_app_static_assets.in_set(WebviewAppEmbedSet),
+                embed_page_static_assets.in_set(PageEmbedSet),
             );
     }
 }
@@ -178,7 +178,7 @@ fn current_app_resources_dir() -> Option<PathBuf> {
         .and_then(|exe| macos_resources_dir_from_exe(&exe))
 }
 
-fn packaged_webview_app_root(resources_dir: Option<&Path>, host: &str) -> Option<PathBuf> {
+fn packaged_page_root(resources_dir: Option<&Path>, host: &str) -> Option<PathBuf> {
     let h = host.trim().trim_matches('/');
     if h.is_empty() {
         return None;
@@ -187,15 +187,15 @@ fn packaged_webview_app_root(resources_dir: Option<&Path>, host: &str) -> Option
     root.is_dir().then_some(root)
 }
 
-fn embed_webview_app_static_assets(
-    registry: Res<WebviewAppRegistry>,
+fn embed_page_static_assets(
+    registry: Res<PageRegistry>,
     mut reg: ResMut<EmbeddedAssetRegistry>,
 ) {
     let resources_dir = current_app_resources_dir();
     for entry in &registry.entries {
         let bundle_root = entry.bundle_root(resources_dir.as_deref());
         if !bundle_root.is_dir() {
-            bevy::log::warn!("WebviewAppPlugin: skip {:?}: not a directory", bundle_root);
+            bevy::log::warn!("PagePlugin: skip {:?}: not a directory", bundle_root);
             continue;
         }
         let host_trim = entry.host.trim().trim_matches('/');
@@ -211,7 +211,7 @@ fn embed_webview_app_static_assets(
             None,
             prefix.as_deref(),
         ) {
-            bevy::log::error!("WebviewAppPlugin: failed to embed {:?}: {e}", bundle_root);
+            bevy::log::error!("PagePlugin: failed to embed {:?}: {e}", bundle_root);
         }
     }
 }
@@ -264,27 +264,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn packaged_webview_app_root_uses_resources_webview_host_dir() {
+    fn packaged_page_root_uses_resources_webview_host_dir() {
         let root =
             std::env::temp_dir().join(format!("vmux-webview-app-test-{}", std::process::id()));
         let host_dir = root.join("webview-apps").join("terminal");
         std::fs::create_dir_all(&host_dir).unwrap();
 
-        let found = packaged_webview_app_root(Some(&root), "terminal");
+        let found = packaged_page_root(Some(&root), "terminal");
 
         let _ = std::fs::remove_dir_all(&root);
         assert_eq!(found, Some(host_dir));
     }
 
     #[test]
-    fn packaged_webview_app_root_ignores_missing_host_dir() {
+    fn packaged_page_root_ignores_missing_host_dir() {
         let root = std::env::temp_dir().join(format!(
             "vmux-webview-app-missing-test-{}",
             std::process::id()
         ));
         std::fs::create_dir_all(&root).unwrap();
 
-        let found = packaged_webview_app_root(Some(&root), "terminal");
+        let found = packaged_page_root(Some(&root), "terminal");
 
         let _ = std::fs::remove_dir_all(&root);
         assert_eq!(found, None);

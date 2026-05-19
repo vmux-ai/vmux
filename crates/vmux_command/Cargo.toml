@@ -20,7 +20,7 @@ required-features = ["web"]
 path = "src/lib.rs"
 
 [build-dependencies]
-vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
+vmux_page = { path = "../vmux_page", features = ["build"] }
 
 [dependencies]
 rkyv = { workspace = true }
@@ -32,7 +32,7 @@ bevy = { workspace = true }
 bevy_ecs = { workspace = true }
 muda = "0.19"
 vmux_macro = { path = "../vmux_macro" }
-vmux_webview_app = { path = "../vmux_webview_app" }
+vmux_page = { path = "../vmux_page" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }

@@ -15,7 +15,7 @@ fn emit_command(command: &str, space_id: Option<String>, name: Option<String>) {
 }
 
 #[component]
-pub fn App() -> Element {
+pub fn Page() -> Element {
     use_theme();
     let mut state = use_signal(SpacesListEvent::default);
     let mut selected = use_signal(|| 0usize);

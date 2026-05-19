@@ -111,7 +111,7 @@ fn format_address(stack: &StackRow) -> String {
 }
 
 #[component]
-pub fn App() -> Element {
+pub fn Page() -> Element {
     use_theme();
 
     let mut layout_state = use_signal(LayoutStateEvent::default);
@@ -517,9 +517,9 @@ fn SideSheetView() -> Element {
         tree_state.set(data);
     });
 
-    let mut spaces_state = use_signal(vmux_space::event::SpacesListEvent::default);
-    let _spaces_listener = use_bin_event_listener::<vmux_space::event::SpacesListEvent, _>(
-        vmux_space::event::SPACES_LIST_EVENT,
+    let mut spaces_state = use_signal(vmux_core::event::space::SpacesListEvent::default);
+    let _spaces_listener = use_bin_event_listener::<vmux_core::event::space::SpacesListEvent, _>(
+        vmux_core::event::space::SPACES_LIST_EVENT,
         move |data| {
             spaces_state.set(data);
         },
@@ -557,13 +557,13 @@ fn SideSheetView() -> Element {
 }
 
 #[component]
-fn SideSheetSpaceRow(space: vmux_space::event::SpaceRow) -> Element {
+fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
     rsx! {
         button {
             r#type: "button",
             class: "glass group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-foreground",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&vmux_space::event::SpaceCommandEvent {
+                let _ = try_cef_bin_emit_rkyv(&vmux_core::event::space::SpaceCommandEvent {
                     command: "open_page".to_string(),
                     space_id: Some(space.id.clone()),
                     name: None,

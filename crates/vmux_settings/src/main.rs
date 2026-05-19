@@ -1,9 +1,9 @@
 #[cfg(target_arch = "wasm32")]
-mod app;
+mod page;
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
-    dioxus::launch(app::App);
+    dioxus::launch(page::Page);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

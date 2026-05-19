@@ -4,29 +4,34 @@ use bevy::{prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::TriggerLoad;
 use vmux_core::PageMetadata;
-use vmux_space::{
-    event::{SPACES_LIST_EVENT, SPACES_WEBVIEW_URL, SpaceCommandEvent, SpaceRow, SpacesListEvent},
-    model::{
-        DEFAULT_SPACE_ID, SpaceRecord, SpaceRegistry, default_space_record, registry_path,
-        space_layout_path_for, unique_space_id,
-    },
-};
-use vmux_webview_app::{UiReady, WebviewAppConfig, WebviewAppRegistry};
-
-use crate::{command_bar::NewStackContext, profile};
-pub(crate) use vmux_layout::spaces::{
-    ActiveSpace, SpacesView, active_space_rows, read_space_registry_from,
-};
+use vmux_core::profile;
+use vmux_layout::NewStackContext;
 use vmux_layout::stack::Stack;
+use vmux_page::{UiReady, PageConfig, PageRegistry};
 
-pub(crate) struct SpacesPlugin;
+use crate::event::{
+    SPACES_LIST_EVENT, SPACES_WEBVIEW_URL, SpaceCommandEvent, SpaceRow, SpacesListEvent,
+};
+use crate::model::{
+    DEFAULT_SPACE_ID, SpaceRecord, SpaceRegistry, default_space_record, registry_path,
+    space_layout_path_for, unique_space_id,
+};
+use crate::spaces::{ActiveSpace, SpacesView, read_space_registry_from};
 
-impl Plugin for SpacesPlugin {
+#[derive(Message, Clone)]
+pub struct SaveSpaceRequest {
+    pub path: PathBuf,
+}
+
+pub struct SpacePlugin;
+
+impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActiveSpace>();
-        register_spaces_webview_app(
+        app.add_message::<SaveSpaceRequest>();
+        register_spaces_page(
             app.world_mut()
-                .resource_mut::<WebviewAppRegistry>()
+                .resource_mut::<PageRegistry>()
                 .as_mut(),
         );
         app.add_plugins(BinJsEmitEventPlugin::<SpaceCommandEvent>::default())
@@ -55,10 +60,10 @@ fn reset_spaces_sent_marker_on_ui_ready(
     commands.entity(entity).remove::<SpacesListSent>();
 }
 
-fn register_spaces_webview_app(registry: &mut WebviewAppRegistry) {
+fn register_spaces_page(registry: &mut PageRegistry) {
     registry.register(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_space"),
-        &WebviewAppConfig::with_custom_host("spaces"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+        &PageConfig::with_custom_host("spaces"),
     );
 }
 
@@ -190,7 +195,7 @@ fn apply_pending_space_switch(
     space_entities: Query<
         Entity,
         Or<(
-            With<crate::profile::Profile>,
+            With<vmux_layout::profile::Profile>,
             With<vmux_layout::space::Space>,
             With<vmux_history::Visit>,
         )>,
@@ -281,7 +286,7 @@ fn on_space_command(
     space_entities: Query<
         Entity,
         Or<(
-            With<crate::profile::Profile>,
+            With<vmux_layout::profile::Profile>,
             With<vmux_layout::space::Space>,
             With<vmux_history::Visit>,
         )>,
@@ -293,6 +298,7 @@ fn on_space_command(
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut spawn_requests: Option<MessageWriter<vmux_layout::LayoutSpawnRequest>>,
+    mut save_requests: MessageWriter<SaveSpaceRequest>,
     stack_q: Query<(Entity, &PageMetadata), With<Stack>>,
     child_of_q: Query<&ChildOf>,
     mut commands: Commands,
@@ -305,7 +311,7 @@ fn on_space_command(
             .iter()
             .find(|(_, meta)| meta.url == SPACES_WEBVIEW_URL)
         {
-            vmux_terminal::pid::focus_pane_entity(existing, &mut commands, &child_of_q);
+            vmux_core::focus_pane_entity(existing, &mut commands, &child_of_q);
             return;
         }
         let Some(focus_res) = focus.as_deref() else {
@@ -390,7 +396,9 @@ fn on_space_command(
     }
 
     let current_path = active.layout_path();
-    crate::persistence::save_space_to_path(&mut commands, current_path);
+    save_requests.write(SaveSpaceRequest {
+        path: current_path,
+    });
     active.record = target;
     let target_path = active.layout_path();
     if target_path.exists() {
@@ -438,7 +446,7 @@ mod tests {
     use vmux_layout::{pane::Pane, space::Space, stack::Stack, window::Main};
     use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
     use vmux_space::model::DEFAULT_PROFILE_ID;
-    use vmux_webview_app::WebviewAppRegistry;
+    use vmux_page::PageRegistry;
 
     struct HomeEnvGuard {
         _guard: std::sync::MutexGuard<'static, ()>,
@@ -532,8 +540,8 @@ mod tests {
 
     #[test]
     fn registers_spaces_host_before_cef_embedded_hosts_are_read() {
-        let mut registry = WebviewAppRegistry::default();
-        register_spaces_webview_app(&mut registry);
+        let mut registry = PageRegistry::default();
+        register_spaces_page(&mut registry);
 
         let hosts = registry.embedded_hosts();
         let entry = hosts.entry_for_host("spaces").unwrap();

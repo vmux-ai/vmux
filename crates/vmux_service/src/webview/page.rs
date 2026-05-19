@@ -5,7 +5,7 @@ use vmux_service::webview::event::*;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 
 #[component]
-pub fn App() -> Element {
+pub fn Page() -> Element {
     use_theme();
     let mut state = use_signal(|| ProcessesListEvent {
         connected: false,

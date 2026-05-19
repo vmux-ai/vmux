@@ -9116,8 +9116,8 @@ dependencies = [
  "serde",
  "serde_json",
  "vmux_macro",
+ "vmux_page",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -9167,12 +9167,12 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_macro",
+ "vmux_page",
  "vmux_service",
  "vmux_settings",
  "vmux_space",
  "vmux_terminal",
  "vmux_ui",
- "vmux_webview_app",
 ]
 
 [[package]]
@@ -9189,8 +9189,8 @@ dependencies = [
  "ron 0.8.1",
  "serde",
  "vmux_core",
+ "vmux_page",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
 ]
 
@@ -9218,9 +9218,8 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_history",
- "vmux_space",
+ "vmux_page",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -9247,6 +9246,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_page"
+version = "0.0.9"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_cef_core",
+ "regex",
+ "rkyv",
+ "serde",
+]
+
+[[package]]
 name = "vmux_service"
 version = "0.0.9"
 dependencies = [
@@ -9270,8 +9281,8 @@ dependencies = [
  "uuid",
  "vmux_core",
  "vmux_layout",
+ "vmux_page",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -9294,8 +9305,8 @@ dependencies = [
  "vmux_core",
  "vmux_history",
  "vmux_layout",
+ "vmux_page",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -9304,12 +9315,21 @@ dependencies = [
 name = "vmux_space"
 version = "0.0.9"
 dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
  "dioxus",
+ "moonshine-save",
  "rkyv",
+ "ron 0.8.1",
  "serde",
  "tempfile",
+ "vmux_command",
+ "vmux_core",
+ "vmux_history",
+ "vmux_layout",
+ "vmux_page",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -9333,11 +9353,11 @@ dependencies = [
  "vmux_core",
  "vmux_history",
  "vmux_layout",
+ "vmux_page",
  "vmux_service",
  "vmux_settings",
  "vmux_space",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -9354,21 +9374,9 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
- "vmux_webview_app",
+ "vmux_page",
  "wasm-bindgen",
  "web-sys",
-]
-
-[[package]]
-name = "vmux_webview_app"
-version = "0.0.9"
-dependencies = [
- "bevy",
- "bevy_cef",
- "bevy_cef_core",
- "regex",
- "rkyv",
- "serde",
 ]
 
 [[package]]

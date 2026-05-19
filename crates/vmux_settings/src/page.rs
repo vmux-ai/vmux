@@ -21,7 +21,7 @@ fn emit_update(path: &str, value: Value) {
 }
 
 #[component]
-pub fn App() -> Element {
+pub fn Page() -> Element {
     use_theme();
     let mut snapshot = use_signal(|| Value::Null);
     let mut schema = use_signal(SettingsSchema::default);
