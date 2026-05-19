@@ -22,13 +22,11 @@ use vmux_settings::AppSettings;
 use vmux_settings::Settings;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::SPACES_WEBVIEW_URL;
-use vmux_space::migration::migrate_legacy_session_files;
 use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
 
 fn run_legacy_migration() {
-    migrate_legacy_session_files(vmux_core::profile::shared_data_dir());
     migrate_tab_to_space_type_name(vmux_core::profile::shared_data_dir());
 }
 

@@ -4,7 +4,6 @@
     clippy::new_ret_no_self
 )]
 
-pub mod migration;
 pub mod model;
 
 pub use vmux_core::event::space as event;
