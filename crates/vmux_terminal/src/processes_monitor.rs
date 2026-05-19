@@ -31,11 +31,11 @@ impl Plugin for ProcessesMonitorPlugin {
                 1.0,
                 TimerMode::Repeating,
             )))
-            .add_plugins((
-                BinJsEmitEventPlugin::<ProcessNavigateEvent>::default(),
-                BinJsEmitEventPlugin::<ProcessKillEvent>::default(),
-                BinJsEmitEventPlugin::<ProcessKillAllEvent>::default(),
-            ))
+            .add_plugins(BinEventEmitterPlugin::<(
+                ProcessNavigateEvent,
+                ProcessKillEvent,
+                ProcessKillAllEvent,
+            )>::default())
             .add_systems(
                 Update,
                 (request_process_list, broadcast_to_monitors).chain(),

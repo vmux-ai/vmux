@@ -25,7 +25,7 @@ pub struct SpaceCommandSet;
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Space>()
-            .add_plugins(BinJsEmitEventPlugin::<TabsCommandEvent>::default())
+            .add_plugins(BinEventEmitterPlugin::<(TabsCommandEvent,)>::default())
             .add_observer(on_tabs_command_emit)
             .add_systems(
                 Update,

@@ -14,7 +14,11 @@ use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
 };
-use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentShellMode};
+use vmux_service::client::ServiceClient;
+use vmux_service::protocol::{
+    AgentCommand as ServiceAgentCommand, AgentCommandResult, AgentQuery, AgentQueryResult,
+    AgentRequestId, AgentShellMode, ClientMessage,
+};
 use vmux_settings::AppSettings;
 use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::ProcessExited;
@@ -156,17 +160,27 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_terminal::TerminalSendRequest>()
             .add_message::<vmux_terminal::RunShellRequest>()
             .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
             .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
             .add_systems(
                 Update,
                 (
                     handle_agent_launch_requests,
                     handle_agent_commands,
+                    handle_agent_queries,
                     detect_agent_session_process_exit,
                 )
                     .chain()
                     .in_set(WriteAppCommands)
                     .after(ServiceMessageSet),
+            )
+            .add_systems(
+                Update,
+                (
+                    forward_layout_apply_responses,
+                    forward_layout_snapshot_responses,
+                ),
             );
 
         let mut providers = app.world_mut().resource_mut::<AgentProviders>();
@@ -911,6 +925,64 @@ fn handle_agent_launch_requests(
     }
 }
 
+fn handle_agent_queries(
+    mut reader: MessageReader<AgentQueryRequest>,
+    service: Option<Res<ServiceClient>>,
+    settings: Res<AppSettings>,
+    mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
+) {
+    let Some(service) = service else { return };
+
+    for request in reader.read() {
+        match request.query {
+            AgentQuery::ReadLayout => {
+                layout_snapshot_writer.write(vmux_layout::reconcile::LayoutSnapshotRequest {
+                    request_id: request.request_id.0,
+                });
+            }
+            AgentQuery::GetSettings => {
+                let result = AgentQueryResult::Settings(vmux_settings::serialize_settings_to_json(
+                    &settings,
+                ));
+                service.0.send(ClientMessage::AgentQueryResponse {
+                    request_id: request.request_id,
+                    result,
+                });
+            }
+        }
+    }
+}
+
+fn forward_layout_apply_responses(
+    mut reader: MessageReader<vmux_layout::reconcile::LayoutApplyResponse>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else { return };
+    for response in reader.read() {
+        let result = match response.result.clone() {
+            Ok(snapshot) => AgentCommandResult::Layout(snapshot),
+            Err(message) => AgentCommandResult::Error(message),
+        };
+        service.0.send(ClientMessage::AgentCommandResponse {
+            request_id: AgentRequestId(response.request_id),
+            result,
+        });
+    }
+}
+
+fn forward_layout_snapshot_responses(
+    mut reader: MessageReader<vmux_layout::reconcile::LayoutSnapshotResponse>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else { return };
+    for response in reader.read() {
+        service.0.send(ClientMessage::AgentQueryResponse {
+            request_id: AgentRequestId(response.request_id),
+            result: AgentQueryResult::Layout(response.snapshot.clone()),
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1073,5 +1145,47 @@ mod tests {
         .expect("apply ok");
         assert!(settings.auto_update);
         assert!(ron_bytes.contains("auto_update"));
+    }
+
+    #[test]
+    fn terminal_send_writes_raw_text_to_active_terminal() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+        app.add_systems(Update, vmux_terminal::handle_terminal_send_requests);
+        app.init_resource::<AgentStrategies>();
+        app.insert_resource(FocusedStack::default());
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let pane = app.world_mut().spawn(Pane).id();
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .insert(ChildOf(pane))
+            .id();
+        let terminal = app.world_mut().spawn(Terminal).insert(ChildOf(stack)).id();
+
+        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                command: ServiceAgentCommand::TerminalSend {
+                    text: "ls".to_string(),
+                    terminal: None,
+                },
+            });
+
+        app.update();
+        app.update();
+
+        let pending = app
+            .world()
+            .get::<vmux_terminal::PendingTerminalInput>(terminal)
+            .expect("PendingTerminalInput inserted");
+        assert_eq!(pending.data, b"ls".to_vec());
     }
 }

@@ -6,10 +6,11 @@ use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use std::path::PathBuf;
 
-use crate::{browser::Browser, profile::Profile};
+use crate::browser::Browser;
 use vmux_core::PageMetadata;
 use vmux_layout::event::SERVICES_WEBVIEW_URL;
 use vmux_layout::event::TERMINAL_WEBVIEW_URL;
+use vmux_layout::profile::Profile;
 use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
@@ -27,8 +28,8 @@ use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
 
 fn run_legacy_migration() {
-    migrate_legacy_session_files(crate::profile::shared_data_dir());
-    migrate_tab_to_space_type_name(crate::profile::shared_data_dir());
+    migrate_legacy_session_files(vmux_core::profile::shared_data_dir());
+    migrate_tab_to_space_type_name(vmux_core::profile::shared_data_dir());
 }
 
 fn migrate_tab_to_space_type_name(root: std::path::PathBuf) {
@@ -484,6 +485,8 @@ mod tests {
     };
     use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     struct HomeEnvGuard {
         _guard: std::sync::MutexGuard<'static, ()>,
         old_home: Option<std::ffi::OsString>,
@@ -491,7 +494,7 @@ mod tests {
 
     impl HomeEnvGuard {
         fn use_temp_home(name: &str) -> Self {
-            let guard = crate::profile::ENV_LOCK.lock().expect("env lock");
+            let guard = ENV_LOCK.lock().expect("env lock");
             let old_home = std::env::var_os("HOME");
             let home =
                 std::env::temp_dir().join(format!("vmux-test-{name}-{}", std::process::id()));

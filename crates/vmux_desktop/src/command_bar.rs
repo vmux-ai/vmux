@@ -1,21 +1,19 @@
-use crate::{
-    agent::{AgentCommandEntry, AgentLaunchRequested, AgentProviders},
-    browser::Browser,
-    command::{
-        AppCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands, SpaceCommand,
-        StackCommand, TerminalCommand,
-    },
-};
+use crate::browser::Browser;
 use bevy::{
     ecs::message::MessageReader, ecs::relationship::Relationship, picking::Pickable, prelude::*,
     ui::UiSystems, window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
+use vmux_agent::desktop_plugin::{AgentCommandEntry, AgentLaunchRequested, AgentProviders};
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSpace, CommandBarTab,
     PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
+};
+use vmux_command::{
+    AppCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands, SpaceCommand,
+    StackCommand, TerminalCommand,
 };
 use vmux_core::PageMetadata;
 use vmux_history::{LastActivatedAt, now_millis};
@@ -77,12 +75,12 @@ impl Plugin for CommandBarInputPlugin {
             .init_resource::<AgentProviders>()
             .init_resource::<Messages<AgentLaunchRequested>>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .add_plugins((
-                BinJsEmitEventPlugin::<CommandBarActionEvent>::default(),
-                BinJsEmitEventPlugin::<PathCompleteRequest>::default(),
-                BinJsEmitEventPlugin::<CommandBarReadyEvent>::default(),
-                BinJsEmitEventPlugin::<CommandBarRenderedEvent>::default(),
-            ))
+            .add_plugins(BinEventEmitterPlugin::<(
+                CommandBarActionEvent,
+                PathCompleteRequest,
+                CommandBarReadyEvent,
+                CommandBarRenderedEvent,
+            )>::default())
             .add_observer(on_command_bar_action)
             .add_observer(on_path_complete_request)
             .add_observer(on_command_bar_ready)
@@ -989,13 +987,13 @@ fn on_command_bar_action(
                             commands.entity(term_e).insert(CefKeyboardTarget);
                         }
                     } else if let Some((provider, model, sid_opt)) =
-                        crate::agent::parse_app_agent_url(&url)
+                        vmux_agent::desktop_plugin::parse_app_agent_url(&url)
                     {
                         let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                         let strategies_ref = resource_params.p4();
                         let strategies = strategies_ref.as_deref();
                         if let Some(strategies) = strategies {
-                            let _ = crate::agent::attach_app_agent_to_stack(
+                            let _ = vmux_agent::desktop_plugin::attach_app_agent_to_stack(
                                 stack_e,
                                 &provider,
                                 &model,
@@ -1108,7 +1106,7 @@ fn on_command_bar_action(
                             .p0()
                             .write(AppCommand::Terminal(TerminalCommand::New));
                     } else if let Some((provider, model, sid_opt)) =
-                        crate::agent::parse_app_agent_url(&url)
+                        vmux_agent::desktop_plugin::parse_app_agent_url(&url)
                     {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
@@ -1122,7 +1120,7 @@ fn on_command_bar_action(
                             let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                             let strategies_ref = resource_params.p4();
                             if let Some(strategies) = strategies_ref.as_deref() {
-                                if crate::agent::spawn_app_agent_tab(
+                                if vmux_agent::desktop_plugin::spawn_app_agent_tab(
                                     &provider,
                                     &model,
                                     pane_e,
@@ -1192,7 +1190,7 @@ fn on_command_bar_action(
                             custom_keyboard_restore = true;
                         }
                     } else if url.starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/')) {
-                        use crate::command::ServiceCommand;
+                        use vmux_command::ServiceCommand;
                         writer_params
                             .p0()
                             .write(AppCommand::Service(ServiceCommand::Open));
@@ -1408,7 +1406,7 @@ fn on_command_bar_action(
                 let strategies = strategies_ref.as_deref();
                 if let Some(strategies) = strategies {
                     if let Some(stack_e) = empty_stack {
-                        let _ = crate::agent::attach_app_agent_to_stack(
+                        let _ = vmux_agent::desktop_plugin::attach_app_agent_to_stack(
                             stack_e,
                             &provider,
                             &model,
@@ -1435,7 +1433,7 @@ fn on_command_bar_action(
                             &stack_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
-                            if crate::agent::spawn_app_agent_tab(
+                            if vmux_agent::desktop_plugin::spawn_app_agent_tab(
                                 &provider,
                                 &model,
                                 pane_e,
@@ -1869,11 +1867,11 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::CommandPlugin;
     use bevy::{
         ecs::schedule::{NodeId, Schedules, SystemSet},
         window::PrimaryWindow,
     };
+    use vmux_command::CommandPlugin;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };

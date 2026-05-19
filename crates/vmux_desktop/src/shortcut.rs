@@ -1,8 +1,8 @@
-use crate::command::{AppCommand, WriteAppCommands};
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use std::time::Instant;
 pub(crate) use vmux_command::shortcut::{ChordState, KeyCombo, Modifiers, Shortcut};
+use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_settings::{AppSettings, load_settings};
 
 pub struct ShortcutPlugin;
@@ -215,8 +215,8 @@ fn is_modifier_key(key: KeyCode) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::{CommandPlugin, LayoutCommand, SpaceCommand};
     use bevy::ecs::message::Messages;
+    use vmux_command::{CommandPlugin, LayoutCommand, SpaceCommand};
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn leader_h_emits_select_pane_left() {
-        use crate::command::PaneCommand;
+        use vmux_command::PaneCommand;
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn leader_l_emits_select_pane_right() {
-        use crate::command::PaneCommand;
+        use vmux_command::PaneCommand;
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn leader_j_emits_select_pane_down() {
-        use crate::command::PaneCommand;
+        use vmux_command::PaneCommand;
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);
@@ -385,7 +385,7 @@ mod tests {
 
     #[test]
     fn leader_k_emits_select_pane_up() {
-        use crate::command::PaneCommand;
+        use vmux_command::PaneCommand;
         let mut app = test_app();
 
         press(&mut app, KeyCode::ControlLeft);

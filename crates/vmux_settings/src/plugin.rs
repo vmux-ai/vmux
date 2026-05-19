@@ -2,7 +2,7 @@ pub mod runtime;
 pub mod view;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::BinJsEmitEventPlugin;
+use bevy_cef::prelude::BinEventEmitterPlugin;
 use vmux_command::{ReadAppCommands, WriteAppCommands};
 use vmux_page::PageRegistry;
 
@@ -41,7 +41,7 @@ impl Plugin for SettingsPlugin {
             .add_systems(Update, update_effective_startup_url);
 
         register_settings_page(app.world_mut().resource_mut::<PageRegistry>().as_mut());
-        app.add_plugins(BinJsEmitEventPlugin::<SettingsCommandEvent>::default())
+        app.add_plugins(BinEventEmitterPlugin::<(SettingsCommandEvent,)>::default())
             .add_observer(on_settings_command)
             .add_observer(reset_sent_markers_on_page_ready)
             .add_systems(

@@ -1,10 +1,10 @@
-use crate::command::{AppCommand, WriteAppCommands, build_native_root_menu};
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::window::WindowCloseRequested;
 use muda::{Menu, MenuEvent};
 use parking_lot::Mutex;
 use std::sync::LazyLock;
+use vmux_command::{AppCommand, WriteAppCommands, build_native_root_menu};
 use vmux_settings::AppSettings;
 use vmux_terminal as terminal;
 use vmux_terminal::{PtyExited, Terminal};

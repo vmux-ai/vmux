@@ -30,7 +30,7 @@ impl Plugin for SpacePlugin {
         app.init_resource::<ActiveSpace>();
         app.add_message::<SaveSpaceRequest>();
         register_spaces_page(app.world_mut().resource_mut::<PageRegistry>().as_mut());
-        app.add_plugins(BinJsEmitEventPlugin::<SpaceCommandEvent>::default())
+        app.add_plugins(BinEventEmitterPlugin::<(SpaceCommandEvent,)>::default())
             .add_observer(on_space_command)
             .add_observer(reset_spaces_sent_marker_on_page_ready)
             .add_systems(

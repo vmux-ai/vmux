@@ -433,11 +433,6 @@ pub enum LayoutNode {
     },
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct PageBgColorEvent {
-    pub color: String,
-}
-
 #[cfg_attr(not(target_arch = "wasm32"), derive(bevy_ecs::message::Message))]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind")]

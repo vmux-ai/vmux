@@ -1,7 +1,4 @@
-use crate::{
-    command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand},
-    command_bar::PendingCommandBarReveal,
-};
+use crate::command_bar::PendingCommandBarReveal;
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     prelude::*,
@@ -10,9 +7,10 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
+use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand};
 use vmux_core::PageMetadata;
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
-use vmux_layout::event::{PageBgColorEvent, SideSheetCommandEvent};
+use vmux_layout::event::SideSheetCommandEvent;
 pub(crate) use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutChrome, NavigationState, Open, PendingWebviewReveal,
@@ -50,16 +48,13 @@ impl Plugin for BrowserPlugin {
                     embedded_hosts,
                     ..default()
                 },
-                BinJsEmitEventPlugin::<HeaderCommandEvent>::default(),
-                BinJsEmitEventPlugin::<SideSheetCommandEvent>::default(),
-                JsEmitEventPlugin::<PageBgColorEvent>::default(),
+                BinEventEmitterPlugin::<(HeaderCommandEvent, SideSheetCommandEvent)>::default(),
             ))
             .add_observer(on_webview_ready_send_theme)
             .add_observer(on_header_command_emit)
             .add_observer(on_side_sheet_command_emit)
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
-            .add_observer(on_page_bg_color_emit)
             .add_systems(
                 Update,
                 (
@@ -67,7 +62,6 @@ impl Plugin for BrowserPlugin {
                     vmux_layout::apply_chrome_state_from_cef,
                     drain_loading_state,
                     spawn_popup_tabs,
-                    inject_bg_color_script,
                     handle_browser_navigate_requests.after(vmux_terminal::ServiceMessageSet),
                 ),
             )
@@ -1356,68 +1350,6 @@ fn on_side_sheet_command_emit(
     }
 }
 
-const BG_COLOR_SCRIPT: &str = r#"
-(function(){
-    function pick(){
-        if(!document.body)return null;
-        var b=window.getComputedStyle(document.body).backgroundColor;
-        if(b&&b!=='rgba(0, 0, 0, 0)'&&b!=='transparent')return b;
-        var r=window.getComputedStyle(document.documentElement).backgroundColor;
-        if(r&&r!=='rgba(0, 0, 0, 0)'&&r!=='transparent')return r;
-        return null;
-    }
-    function send(c){if(c&&window.cef&&window.cef.emit)window.cef.emit({color:c});}
-    send(pick());
-    window.addEventListener('load',function(){send(pick());});
-})();
-"#;
-
-fn inject_bg_color_script(
-    browsers: NonSend<Browsers>,
-    q: Query<
-        (Entity, &PageMetadata),
-        (
-            With<Browser>,
-            Without<Loading>,
-            Without<Header>,
-            Without<SideSheet>,
-            Without<Modal>,
-            Without<Terminal>,
-            Without<LayoutChrome>,
-        ),
-    >,
-    mut injected: Local<std::collections::HashMap<u64, String>>,
-) {
-    for (entity, meta) in &q {
-        if meta.url.is_empty() || meta.url == "about:blank" {
-            continue;
-        }
-        if !browsers.has_browser(entity) {
-            continue;
-        }
-        let key = entity.to_bits();
-        let already = injected.get(&key).map(|u| u == &meta.url).unwrap_or(false);
-        if already {
-            continue;
-        }
-        injected.insert(key, meta.url.clone());
-        browsers.execute_js(&entity, BG_COLOR_SCRIPT);
-    }
-}
-
-fn on_page_bg_color_emit(
-    trigger: On<Receive<PageBgColorEvent>>,
-    mut meta_q: Query<&mut PageMetadata, With<Browser>>,
-) {
-    let webview = trigger.event_target();
-    let color = &trigger.event().payload.color;
-    if let Ok(mut meta) = meta_q.get_mut(webview)
-        && meta.bg_color.as_deref() != Some(color.as_str())
-    {
-        meta.bg_color = Some(color.clone());
-    }
-}
-
 fn spawn_visit_on_navigation(
     changed_tabs: Query<(Entity, &PageMetadata), (With<Stack>, Changed<PageMetadata>)>,
     mut last_urls: Local<std::collections::HashMap<u64, String>>,
@@ -1484,7 +1416,7 @@ pub(crate) fn handle_browser_navigate_requests(
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     child_of_q: Query<&ChildOf>,
-    lookups: crate::agent::AgentLookups,
+    lookups: vmux_agent::desktop_plugin::AgentLookups,
     strategies: Res<vmux_agent::strategy::AgentStrategies>,
     settings: Res<AppSettings>,
     service: Option<Res<vmux_service::client::ServiceClient>>,
@@ -1519,7 +1451,7 @@ pub(crate) fn handle_browser_navigate_requests(
             };
 
             if let Some(pane_entity) = target {
-                match crate::agent::spawn_vmux_tab(
+                match vmux_agent::desktop_plugin::spawn_vmux_tab(
                     &url,
                     pane_entity,
                     &mut commands,
@@ -1543,7 +1475,7 @@ pub(crate) fn handle_browser_navigate_requests(
             }
         } else if let Some(s) = pane.as_deref() {
             if let Some(target) = vmux_layout::target::parse_pane_target(s, &panes) {
-                crate::agent::spawn_browser_tab(
+                vmux_agent::desktop_plugin::spawn_browser_tab(
                     target,
                     &url,
                     &mut commands,
@@ -1563,7 +1495,7 @@ pub(crate) fn handle_browser_navigate_requests(
             });
             AgentCommandResult::Ok
         } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
-            crate::agent::spawn_browser_tab(
+            vmux_agent::desktop_plugin::spawn_browser_tab(
                 pane,
                 &url,
                 &mut commands,
@@ -1579,7 +1511,7 @@ pub(crate) fn handle_browser_navigate_requests(
 }
 
 fn cef_root_cache_path() -> Option<String> {
-    crate::profile::cef_cache_path()
+    vmux_core::profile::cef_cache_path()
 }
 
 #[cfg(test)]

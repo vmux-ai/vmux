@@ -5,17 +5,11 @@
     clippy::new_ret_no_self
 )]
 
-mod agent;
-mod agent_query;
 mod background_lifecycle;
 mod browser;
-
-mod command;
 mod command_bar;
-mod layout_response;
 mod os_menu;
 mod persistence;
-pub mod profile;
 
 pub(crate) mod shortcut;
 mod tray;
@@ -27,8 +21,8 @@ use bevy::winit::WinitSettings;
 use std::time::Duration;
 
 use {
-    browser::BrowserPlugin, command::CommandPlugin, command_bar::CommandBarInputPlugin,
-    os_menu::OsMenuPlugin, persistence::PersistencePlugin, shortcut::ShortcutPlugin,
+    browser::BrowserPlugin, command_bar::CommandBarInputPlugin, os_menu::OsMenuPlugin,
+    persistence::PersistencePlugin, shortcut::ShortcutPlugin, vmux_command::CommandPlugin,
     vmux_layout::LayoutPlugin, vmux_page::PageRegistryPlugin,
     vmux_service::webview::ServicesPlugin, vmux_settings::SettingsPlugin, vmux_space::SpacePlugin,
     vmux_terminal::TerminalPlugin,
@@ -100,18 +94,11 @@ impl Plugin for VmuxPlugin {
             SpacePlugin,
             BrowserPlugin,
         ))
-        .add_systems(
-            Update,
-            agent_query::handle_agent_queries
-                .in_set(vmux_command::WriteAppCommands)
-                .after(vmux_terminal::ServiceMessageSet),
-        )
         .add_plugins((
             AgentPlugin,
             vmux_agent::AgentSessionPlugin,
             vmux_agent::AppAgentPlugin,
             vmux_agent::TerminalIntegrationPlugin,
-            layout_response::LayoutResponseForwarderPlugin,
             PersistencePlugin,
             LayoutPlugin,
             updater::VmuxUpdater::builder().build().plugin(),

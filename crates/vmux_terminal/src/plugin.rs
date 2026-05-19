@@ -235,10 +235,7 @@ impl Plugin for TerminalPlugin {
             .init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
             .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
-            .add_plugins((
-                BinJsEmitEventPlugin::<TermResizeEvent>::default(),
-                BinJsEmitEventPlugin::<TermMouseEvent>::default(),
-            ))
+            .add_plugins(BinEventEmitterPlugin::<(TermResizeEvent, TermMouseEvent)>::default())
             .add_systems(
                 PreUpdate,
                 (

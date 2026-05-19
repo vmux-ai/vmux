@@ -3,7 +3,7 @@ use bevy::prelude::{
     App, Commands, Component, IntoScheduleConfigs, On, Plugin, Res, ResMut, Resource, Startup,
     SystemSet,
 };
-use bevy_cef::prelude::{BinJsEmitEventPlugin, BinReceive};
+use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 use bevy_cef_core::prelude::{CefEmbeddedHost, CefEmbeddedHosts, webview_debug_log};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -135,7 +135,7 @@ pub struct JsEmitPageReadyPlugin;
 
 impl Plugin for JsEmitPageReadyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinJsEmitEventPlugin::<PageReady>::with_id(
+        app.add_plugins(BinEventEmitterPlugin::<(PageReady,)>::with_id(
             PAGE_READY_BIN_EVENT_ID,
         ))
         .add_observer(mark_webview_page_ready_on_js_emit);
