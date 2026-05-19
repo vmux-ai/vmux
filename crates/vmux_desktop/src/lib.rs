@@ -18,7 +18,6 @@ mod persistence;
 mod processes_monitor;
 pub mod profile;
 mod scene;
-mod settings_view;
 pub(crate) mod shortcut;
 mod spaces;
 mod terminal;
@@ -38,13 +37,13 @@ use {
     os_menu::OsMenuPlugin,
     persistence::PersistencePlugin,
     processes_monitor::ProcessesMonitorPlugin,
-    settings_view::SettingsPlugin,
     shortcut::ShortcutPlugin,
     spaces::SpacesPlugin,
     terminal::TerminalInputPlugin,
     vmux_layout::LayoutPlugin,
     vmux_layout::{LayoutChromePlugin, profile::ProfilePlugin, scene::ScenePlugin},
     vmux_service::webview::ServicesPlugin,
+    vmux_settings::SettingsPlugin,
     vmux_terminal::TerminalPlugin,
     vmux_webview_app::WebviewAppRegistryPlugin,
 };

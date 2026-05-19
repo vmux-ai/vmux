@@ -9,7 +9,6 @@ use std::path::PathBuf;
 use crate::{
     browser::Browser,
     profile::Profile,
-    settings_view::SettingsView,
     spaces::{ActiveSpace, SpacesView},
     terminal::Terminal,
 };
@@ -24,6 +23,7 @@ use vmux_layout::{
     window::Main,
 };
 use vmux_settings::AppSettings;
+use vmux_settings::SettingsView;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::SPACES_WEBVIEW_URL;
 use vmux_space::migration::migrate_legacy_session_files;

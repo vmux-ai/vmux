@@ -6,7 +6,6 @@ use crate::{
         StackCommand, TerminalCommand,
     },
     processes_monitor::ProcessesMonitor,
-    settings_view::SettingsView,
     spaces::{ActiveSpace, SpacesView},
     terminal::Terminal,
 };
@@ -34,6 +33,7 @@ use vmux_layout::{
     window::{Main, Modal},
 };
 use vmux_settings::AppSettings;
+use vmux_settings::SettingsView;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::{SPACES_WEBVIEW_URL, SpaceCommandEvent};
 

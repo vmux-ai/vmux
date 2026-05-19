@@ -9272,6 +9272,7 @@ name = "vmux_settings"
 version = "0.0.9"
 dependencies = [
  "bevy",
+ "bevy_cef",
  "bevy_ecs",
  "dioxus",
  "notify 6.1.1",
@@ -9282,6 +9283,8 @@ dependencies = [
  "tempfile",
  "vmux_agent",
  "vmux_command",
+ "vmux_core",
+ "vmux_history",
  "vmux_layout",
  "vmux_ui",
  "vmux_webview_app",
