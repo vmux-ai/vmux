@@ -1,8 +1,4 @@
-use crate::{
-    browser::Browser,
-    command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands},
-    processes_monitor::ProcessesMonitor,
-};
+use crate::processes_monitor::ProcessesMonitor;
 use bevy::{
     ecs::relationship::Relationship,
     input::{
@@ -15,8 +11,10 @@ use bevy::{
     render::alpha::AlphaMode,
 };
 use bevy_cef::prelude::*;
+use vmux_command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands};
 use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
+use vmux_layout::Browser;
 use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
 use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
 use vmux_service::{
@@ -255,7 +253,7 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
                     .in_set(WriteAppCommands)
                     .in_set(ServiceMessageSet),
                 flush_pending_terminal_input,
-                handle_terminal_copy_mode_command.in_set(crate::command::ReadAppCommands),
+                handle_terminal_copy_mode_command.in_set(vmux_command::ReadAppCommands),
                 sync_terminal_theme,
             )
                 .chain(),
@@ -1181,7 +1179,7 @@ fn handle_terminal_keyboard(
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    mode: Res<crate::scene::InteractionMode>,
+    mode: Res<vmux_layout::scene::InteractionMode>,
     input: Res<ButtonInput<KeyCode>>,
     chord_state: Res<crate::shortcut::ChordState>,
     service: Option<Res<ServiceClient>>,
@@ -1544,13 +1542,13 @@ fn resolve_terminal_input_targets(
     any_keyboard_target_active: bool,
     focused_tab: Option<Entity>,
     terminal_ids_by_tab: impl IntoIterator<Item = (Entity, ProcessId)>,
-    mode: crate::scene::InteractionMode,
+    mode: vmux_layout::scene::InteractionMode,
 ) -> Vec<ProcessId> {
     let targeted: Vec<ProcessId> = targeted_terminal_ids.into_iter().collect();
     if !targeted.is_empty() {
         return targeted;
     }
-    if any_keyboard_target_active || mode != crate::scene::InteractionMode::User {
+    if any_keyboard_target_active || mode != vmux_layout::scene::InteractionMode::User {
         return Vec::new();
     }
     let Some(focused_tab) = focused_tab else {
@@ -1627,7 +1625,7 @@ fn handle_terminal_scroll(
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    mode: Res<crate::scene::InteractionMode>,
+    mode: Res<vmux_layout::scene::InteractionMode>,
     service: Option<Res<ServiceClient>>,
 ) {
     let target_processes = resolve_terminal_input_targets(
@@ -2121,7 +2119,7 @@ fn handle_terminal_copy_mode_command(
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    mode: Res<crate::scene::InteractionMode>,
+    mode: Res<vmux_layout::scene::InteractionMode>,
     service: Option<Res<ServiceClient>>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
 ) {
@@ -2142,7 +2140,7 @@ fn handle_terminal_copy_mode_command(
     for cmd in er.read() {
         if matches!(
             cmd,
-            AppCommand::Terminal(crate::command::TerminalCommand::CopyMode)
+            AppCommand::Terminal(vmux_command::TerminalCommand::CopyMode)
         ) && let Some(process_id) = active_process_id
         {
             set_local_copy_mode(&mut local_copy_mode, process_id, true);
@@ -2384,7 +2382,7 @@ mod tests {
     fn terminal_update_schedule_has_no_before_after_cycle() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(crate::command::CommandPlugin)
+            .add_plugins(vmux_command::CommandPlugin)
             .add_plugins(vmux_layout::stack::StackPlugin)
             .add_message::<LayoutSpawnRequest>();
         add_terminal_update_systems(&mut app);
@@ -2408,7 +2406,7 @@ mod tests {
             false,
             Some(tab),
             [(tab, process_id)],
-            crate::scene::InteractionMode::User,
+            vmux_layout::scene::InteractionMode::User,
         );
 
         assert_eq!(targets, vec![process_id]);
@@ -2423,7 +2421,7 @@ mod tests {
             true,
             Some(tab),
             [(tab, process_id(7))],
-            crate::scene::InteractionMode::User,
+            vmux_layout::scene::InteractionMode::User,
         );
 
         assert!(targets.is_empty());

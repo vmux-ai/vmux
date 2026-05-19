@@ -356,7 +356,7 @@ pub(crate) fn spawn_browser_tab(
         ..default()
     });
     commands.spawn((
-        crate::browser::Browser::new(meshes, webview_mt, url),
+        vmux_layout::Browser::new(meshes, webview_mt, url),
         ChildOf(tab),
     ));
     tab
@@ -418,7 +418,7 @@ pub(crate) fn attach_app_agent_to_stack(
     ));
     let placeholder = app_agent_placeholder_url(provider, model, sid);
     commands.spawn((
-        crate::browser::Browser::new(meshes, webview_mt, &placeholder),
+        vmux_layout::Browser::new(meshes, webview_mt, &placeholder),
         ChildOf(stack),
     ));
     Some(())
@@ -919,9 +919,9 @@ fn handle_agent_launch_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::browser::Browser;
     use crate::terminal::PendingTerminalInput;
     use bevy::ecs::relationship::Relationship;
+    use vmux_layout::Browser;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -990,12 +990,12 @@ mod tests {
 
     #[test]
     fn browser_navigate_triggers_request_navigate_with_url() {
-        use crate::browser::Browser;
         use bevy_cef::prelude::RequestNavigate;
+        use vmux_layout::Browser;
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(vmux_command::CommandPlugin);
         app.add_plugins(AgentPlugin);
         add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
@@ -1043,7 +1043,7 @@ mod tests {
     fn agent_launch_request_uses_registered_provider_to_spawn_terminal_tab() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(vmux_command::CommandPlugin);
         app.add_plugins(AgentPlugin);
         app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
@@ -1095,7 +1095,7 @@ mod tests {
     fn terminal_send_writes_raw_text_to_active_terminal() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(vmux_command::CommandPlugin);
         app.add_plugins(AgentPlugin);
         add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
@@ -1137,11 +1137,11 @@ mod tests {
 
     #[test]
     fn browser_navigate_auto_spawns_tab_when_pane_is_empty() {
-        use crate::browser::Browser;
+        use vmux_layout::Browser;
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(vmux_command::CommandPlugin);
         app.add_plugins(AgentPlugin);
         add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
@@ -1199,7 +1199,7 @@ mod tests {
     fn browser_navigate_targets_specific_pane_when_id_provided() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(vmux_command::CommandPlugin);
         app.add_plugins(AgentPlugin);
         add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
@@ -1244,7 +1244,7 @@ mod tests {
     fn browser_navigate_with_terminal_url_spawns_terminal_in_focused_pane() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(vmux_command::CommandPlugin);
         app.add_plugins(AgentPlugin);
         add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
@@ -1281,7 +1281,7 @@ mod tests {
     fn browser_navigate_with_terminal_url_and_target_pane_uses_target() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(vmux_command::CommandPlugin);
         app.add_plugins(AgentPlugin);
         add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
@@ -1327,11 +1327,11 @@ mod tests {
 
     #[test]
     fn browser_navigate_with_unknown_vmux_url_errors() {
-        use crate::browser::Browser;
+        use vmux_layout::Browser;
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(vmux_command::CommandPlugin);
         app.add_plugins(AgentPlugin);
         add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
@@ -1373,7 +1373,7 @@ mod tests {
     fn browser_navigate_with_claude_url_does_not_spawn_standalone_browser() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(vmux_command::CommandPlugin);
         app.add_plugins(AgentPlugin);
         add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
@@ -1413,7 +1413,7 @@ mod tests {
     fn browser_navigate_with_codex_url_does_not_spawn_standalone_browser() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(vmux_command::CommandPlugin);
         app.add_plugins(AgentPlugin);
         add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
@@ -1481,7 +1481,7 @@ mod tests {
     fn agent_plugin_registers_all_six_provider_entries() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(vmux_command::CommandPlugin);
         app.add_plugins(AgentPlugin);
         let providers = app.world().resource::<AgentProviders>();
         for id in [
