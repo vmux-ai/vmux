@@ -9,26 +9,65 @@ use std::path::PathBuf;
 use crate::{
     browser::Browser,
     profile::Profile,
-    settings::AppSettings,
-    settings_view::SettingsView,
     spaces::{ActiveSpace, SpacesView},
     terminal::Terminal,
 };
 use vmux_core::PageMetadata;
-use vmux_layout::event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
+use vmux_layout::event::SERVICES_WEBVIEW_URL;
+use vmux_layout::event::TERMINAL_WEBVIEW_URL;
 use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
+    space::Space,
     stack::Stack,
-    tab::Tab,
     window::Main,
 };
+use vmux_settings::AppSettings;
+use vmux_settings::SettingsView;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::SPACES_WEBVIEW_URL;
 use vmux_space::migration::migrate_legacy_session_files;
 
 fn run_legacy_migration() {
     migrate_legacy_session_files(crate::profile::shared_data_dir());
+    migrate_tab_to_space_type_name(crate::profile::shared_data_dir());
+}
+
+fn migrate_tab_to_space_type_name(root: std::path::PathBuf) {
+    let profiles = root.join("profiles");
+    let Ok(entries) = std::fs::read_dir(&profiles) else {
+        return;
+    };
+    for profile_entry in entries.flatten() {
+        let profile_dir = profile_entry.path();
+        if !profile_dir.is_dir() {
+            continue;
+        }
+        migrate_file(&profile_dir.join("space.ron"));
+        let Ok(space_entries) = std::fs::read_dir(profile_dir.join("spaces")) else {
+            continue;
+        };
+        for space_entry in space_entries.flatten() {
+            let space_dir = space_entry.path();
+            if space_dir.is_dir() {
+                migrate_file(&space_dir.join("space.ron"));
+            }
+        }
+    }
+}
+
+fn migrate_file(path: &std::path::Path) {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let needle = "vmux_desktop::layout::tab::Tab";
+    if !content.contains(needle) {
+        return;
+    }
+    let migrated = content.replace(needle, "vmux_desktop::layout::tab::Space");
+    if std::fs::write(path, migrated).is_ok() {
+        info!("Migrated Tab -> Space type name in {path:?}");
+    }
 }
 
 pub(crate) struct PersistencePlugin;
@@ -88,7 +127,7 @@ fn mark_dirty_on_change(
     mut auto_save: ResMut<AutoSave>,
     added_stacks: Query<(), Added<Stack>>,
     added_panes: Query<(), Added<Pane>>,
-    added_tabs: Query<(), Added<Tab>>,
+    added_tabs: Query<(), Added<Space>>,
     removed_stacks: RemovedComponents<Stack>,
     removed_panes: RemovedComponents<Pane>,
     changed_meta: Query<(), (Changed<PageMetadata>, With<Stack>)>,
@@ -143,7 +182,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<ChildOf>()
         .allow::<Children>()
         .allow::<Stack>()
-        .allow::<Tab>()
+        .allow::<Space>()
         .allow::<Pane>()
         .allow::<PaneSplit>()
         .allow::<PaneSize>()
@@ -173,7 +212,7 @@ pub(crate) fn load_space_on_startup(active: Res<ActiveSpace>, mut commands: Comm
 /// components; this system adds the visual layer.
 pub(crate) fn rebuild_space_views(
     main_q: Query<Entity, With<Main>>,
-    tabs_need_view: Query<Entity, (With<Tab>, Without<Node>)>,
+    tabs_need_view: Query<Entity, (With<Space>, Without<Node>)>,
     splits_need_view: Query<(Entity, &PaneSplit), Without<Node>>,
     panes_need_view: Query<Entity, (With<Pane>, Without<PaneSplit>, Without<Node>)>,
     stacks_need_view: Query<
@@ -298,7 +337,7 @@ pub(crate) fn rebuild_space_views(
         if !has_browser {
             if meta
                 .url
-                .starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/'))
+                .starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/'))
             {
                 commands.spawn((
                     crate::processes_monitor::ProcessesMonitor::new(&mut meshes, &mut webview_mt),
@@ -436,11 +475,11 @@ fn sync_launch_to_stack(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{
-        AppSettings, BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings,
-        ShortcutSettings, SideSheetSettings, WindowSettings,
-    };
     use bevy::ecs::entity::EntityHashMap;
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
 
     struct HomeEnvGuard {
         _guard: std::sync::MutexGuard<'static, ()>,
@@ -499,7 +538,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: crate::settings::AgentSettings::default(),
+            agent: vmux_settings::AgentSettings::default(),
         }
     }
 
@@ -515,7 +554,10 @@ mod tests {
 
         let main = app.world_mut().spawn(Main).id();
         app.world_mut().spawn(PrimaryWindow);
-        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
+        let space = app
+            .world_mut()
+            .spawn((Space::default(), ChildOf(main)))
+            .id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let saved_url = format!(
             "{}{}",
@@ -567,7 +609,10 @@ mod tests {
         app.world_mut().spawn(PrimaryWindow);
         app.update();
 
-        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
+        let space = app
+            .world_mut()
+            .spawn((Space::default(), ChildOf(main)))
+            .id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let tab = app
             .world_mut()

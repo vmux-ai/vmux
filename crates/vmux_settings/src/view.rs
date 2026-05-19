@@ -6,31 +6,26 @@ use vmux_command::command::{AppCommand, LayoutCommand, WindowCommand};
 use vmux_command::{ReadAppCommands, WriteAppCommands};
 use vmux_core::PageMetadata;
 use vmux_history::{CreatedAt, LastActivatedAt};
-use vmux_settings::event::{
-    SETTINGS_LIST_EVENT, SETTINGS_SCHEMA_EVENT, SETTINGS_WEBVIEW_URL, SettingsCommandEvent,
-    SettingsListEvent, SettingsSchemaEvent,
-};
-use vmux_settings::schema::{FieldSpec, SectionSpec, SettingsSchema, WidgetKind};
-use vmux_webview_app::{UiReady, WebviewAppConfig, WebviewAppRegistry};
-
-use crate::{
-    browser::Browser,
-    settings::{
-        AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json,
-    },
-};
 use vmux_layout::{
+    Browser,
     pane::{Pane, PaneSplit},
     stack::{FocusedStack, stack_bundle},
     window::WEBVIEW_MESH_DEPTH_BIAS,
 };
+use vmux_webview_app::{UiReady, WebviewAppConfig, WebviewAppRegistry};
+
+use crate::event::{
+    SETTINGS_LIST_EVENT, SETTINGS_SCHEMA_EVENT, SETTINGS_WEBVIEW_URL, SettingsCommandEvent,
+    SettingsListEvent, SettingsSchemaEvent,
+};
+use crate::schema::{FieldSpec, SectionSpec, SettingsSchema, WidgetKind};
+use crate::{AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json};
 
 #[derive(Component)]
-pub(crate) struct SettingsView;
+pub struct SettingsView;
 
 impl SettingsView {
-    #[allow(dead_code)]
-    pub(crate) fn new(
+    pub fn new(
         meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     ) -> impl Bundle {
@@ -79,11 +74,11 @@ impl SettingsView {
     }
 }
 
-pub(crate) struct SettingsPlugin;
+pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::settings::SettingsCorePlugin);
+        app.add_plugins(crate::SettingsCorePlugin);
         register_settings_webview_app(
             app.world_mut()
                 .resource_mut::<WebviewAppRegistry>()
@@ -122,7 +117,7 @@ fn reset_sent_markers_on_ui_ready(
 
 fn register_settings_webview_app(registry: &mut WebviewAppRegistry) {
     registry.register(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_settings"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")),
         &WebviewAppConfig::with_custom_host("settings"),
     );
 }

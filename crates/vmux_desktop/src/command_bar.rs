@@ -6,8 +6,6 @@ use crate::{
         StackCommand, TerminalCommand,
     },
     processes_monitor::ProcessesMonitor,
-    settings::AppSettings,
-    settings_view::SettingsView,
     spaces::{ActiveSpace, SpacesView},
     terminal::Terminal,
 };
@@ -25,17 +23,17 @@ use vmux_command::event::{
 use vmux_core::PageMetadata;
 use vmux_history::{LastActivatedAt, now_millis};
 pub(crate) use vmux_layout::NewStackContext;
-use vmux_layout::{
-    Header,
-    event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL},
-};
+use vmux_layout::event::SERVICES_WEBVIEW_URL;
+use vmux_layout::{Header, event::TERMINAL_WEBVIEW_URL};
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
+    space::Space,
     stack::{Stack, active_among, collect_leaf_panes, focused_stack},
-    tab::Tab,
     window::{Main, Modal},
 };
+use vmux_settings::AppSettings;
+use vmux_settings::SettingsView;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::{SPACES_WEBVIEW_URL, SpaceCommandEvent};
 
@@ -94,7 +92,7 @@ impl Plugin for CommandBarInputPlugin {
                 handle_open_command_bar
                     .in_set(ReadAppCommands)
                     .after(prewarm_command_bar_modal)
-                    .after(vmux_layout::tab::TabCommandSet)
+                    .after(vmux_layout::space::SpaceCommandSet)
                     .after(vmux_layout::stack::StackCommandSet),
             )
             .add_systems(
@@ -385,7 +383,7 @@ fn handle_open_command_bar(
     >,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
     browsers: NonSend<Browsers>,
-    tab_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -847,7 +845,7 @@ fn spawn_spaces_page_layout_from_command_bar(
 fn on_command_bar_action(
     trigger: On<BinReceive<CommandBarActionEvent>>,
     mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
-    tab_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -1060,9 +1058,9 @@ fn on_command_bar_action(
                                 bevy::log::warn!("agent strategies not registered; skipping spawn");
                             }
                         }
-                    } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/')) {
                         commands.entity(stack_e).insert(PageMetadata {
-                            url: PROCESSES_WEBVIEW_URL.to_string(),
+                            url: SERVICES_WEBVIEW_URL.to_string(),
                             title: "Background Services".to_string(),
                             ..default()
                         });
@@ -1217,7 +1215,7 @@ fn on_command_bar_action(
                             }
                             custom_keyboard_restore = true;
                         }
-                    } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/')) {
                         use crate::command::ServiceCommand;
                         writer_params
                             .p0()
@@ -1620,7 +1618,7 @@ fn on_command_bar_action(
 
 fn close_tab_if_only_pending_stack(
     stack: Entity,
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Space>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
     stack_q: &Query<Entity, With<Stack>>,
@@ -1645,7 +1643,7 @@ fn close_tab_if_only_pending_stack(
 
 fn ancestor_tab(
     entity: Entity,
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Space>>,
     child_of_q: &Query<&ChildOf>,
 ) -> Option<Entity> {
     let mut current = entity;
@@ -1674,7 +1672,7 @@ fn entity_tree_contains_stack_other_than(
 
 fn sibling_tabs(
     tab: Entity,
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Space>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
 ) -> Vec<Entity> {
@@ -1895,17 +1893,15 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        command::CommandPlugin,
-        settings::{
-            AppSettings, BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings,
-            ShortcutSettings, SideSheetSettings, WindowSettings,
-        },
-    };
+    use crate::command::CommandPlugin;
     use bevy::{
         ecs::schedule::{NodeId, Schedules, SystemSet},
         window::PrimaryWindow,
     };
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
 
     fn test_settings() -> AppSettings {
         AppSettings {
@@ -1929,7 +1925,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: crate::settings::AgentSettings::default(),
+            agent: vmux_settings::AgentSettings::default(),
         }
     }
 
@@ -2401,7 +2397,7 @@ mod tests {
             .id();
         let space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -2467,7 +2463,7 @@ mod tests {
         let mut spaces_query = app.world_mut().query::<&SpacesView>();
         assert_eq!(spaces_query.iter(app.world()).count(), 1);
 
-        let mut tabs = app.world_mut().query::<&Tab>();
+        let mut tabs = app.world_mut().query::<&Space>();
         assert_eq!(tabs.iter(app.world()).count(), 1);
 
         let tabs = {
@@ -2534,7 +2530,7 @@ mod tests {
             .id();
         let space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -2588,7 +2584,7 @@ mod tests {
             .id();
         let space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -2639,7 +2635,7 @@ mod tests {
             .id();
         let space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -2690,7 +2686,7 @@ mod tests {
         let root = app.world_mut().spawn_empty().id();
         let old_space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
+            .spawn((Space::default(), LastActivatedAt(1), ChildOf(root)))
             .id();
         let old_pane = app
             .world_mut()
@@ -2702,7 +2698,7 @@ mod tests {
             .id();
         let new_space = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(root)))
+            .spawn((Space::default(), LastActivatedAt(2), ChildOf(root)))
             .id();
         let new_pane = app
             .world_mut()

@@ -1,7 +1,6 @@
 use crate::{
     command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand},
     command_bar::PendingCommandBarReveal,
-    settings::AppSettings,
     terminal::{self, PtyExited, RestartPty, Terminal},
 };
 use bevy::{
@@ -25,15 +24,16 @@ use vmux_layout::{
     },
     pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_stack_in_pane},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
+    space::Space,
     stack::{
         CloseConfirmed, PendingStackClose, Stack, active_stack_in_pane, collect_leaf_panes,
         focused_stack, stack_bundle,
     },
-    tab::Tab,
     window::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
     },
 };
+use vmux_settings::AppSettings;
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
 use vmux_webview_app::{UiReady, WebviewAppRegistry};
 
@@ -69,6 +69,7 @@ impl Plugin for BrowserPlugin {
                     drain_loading_state,
                     spawn_popup_tabs,
                     inject_bg_color_script,
+                    handle_browser_navigate_requests.after(crate::terminal::ServiceMessageSet),
                 ),
             )
             .add_systems(
@@ -376,13 +377,13 @@ fn sync_cef_webview_resize_after_ui(
     }
 }
 
-/// Walks up from a browser entity to find its enclosing Tab, then counts
-/// leaf panes under that tab. Returns None if the parent chain doesn't
-/// reach a Tab.
+/// Walks up from a browser entity to find its enclosing Space, then counts
+/// leaf panes under that space. Returns None if the parent chain doesn't
+/// reach a Space.
 fn pane_count_for_browser(
     browser_e: Entity,
     child_of_q: &Query<&ChildOf>,
-    tab_q: &Query<(), With<Tab>>,
+    tab_q: &Query<(), With<Space>>,
     _pane_q: &Query<(), With<Pane>>,
     all_children: &Query<&Children>,
     leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -418,7 +419,7 @@ fn sync_webview_pane_corner_clip(
         With<SideSheet>,
     >,
     child_of_q: Query<&ChildOf>,
-    tab_q: Query<(), With<Tab>>,
+    tab_q: Query<(), With<Space>>,
     pane_q: Query<(), With<Pane>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -845,7 +846,7 @@ fn push_pane_tree_emit(
     chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
     new_stack_ctx: Res<crate::command_bar::NewStackContext>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    tab_q: Query<(), With<Tab>>,
+    tab_q: Query<(), With<Space>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
@@ -954,8 +955,8 @@ fn push_tabs_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
-    tabs: Query<(Entity, &Tab, &LastActivatedAt)>,
-    tab_q: Query<Entity, With<Tab>>,
+    tabs: Query<(Entity, &Space, &LastActivatedAt)>,
+    tab_q: Query<Entity, With<Space>>,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -975,7 +976,7 @@ fn push_tabs_host_emit(
     let active_tab = tabs.iter().max_by_key(|(_, _, ts)| ts.0).map(|t| t.0);
 
     let ordered = if let Some(any) = tabs.iter().next() {
-        vmux_layout::tab::active_tab_siblings(any.0, &child_of_q, &all_children, &tab_q)
+        vmux_layout::space::active_space_siblings(any.0, &child_of_q, &all_children, &tab_q)
     } else {
         Vec::new()
     };
@@ -1049,7 +1050,7 @@ fn first_browser_meta<'a>(
 
 fn handle_browser_commands(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -1187,7 +1188,7 @@ fn on_hard_reload_notify_header(
 fn on_side_sheet_command_emit(
     trigger: On<BinReceive<SideSheetCommandEvent>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    tab_query: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_query: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
@@ -1474,6 +1475,107 @@ fn sync_page_metadata_to_tab(
         if let Ok(mut ecmds) = commands.get_entity(parent) {
             ecmds.insert(meta.clone());
         }
+    }
+}
+
+pub(crate) fn handle_browser_navigate_requests(
+    mut reader: MessageReader<vmux_layout::BrowserNavigateRequest>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
+    panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
+    browsers: Query<(Entity, &ChildOf), With<Browser>>,
+    child_of_q: Query<&ChildOf>,
+    lookups: crate::agent::AgentLookups,
+    strategies: Res<vmux_agent::strategy::AgentStrategies>,
+    settings: Res<AppSettings>,
+    service: Option<Res<crate::terminal::ServiceClient>>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    use vmux_service::protocol::{AgentCommandResult, ClientMessage};
+    let pid_to_entity = lookups.pid_to_entity.as_deref();
+    let agent_to_entity = lookups.agent_to_entity.as_deref();
+
+    for request in reader.read() {
+        let vmux_layout::BrowserNavigateRequest { url, pane } = request.clone();
+
+        let result = if url.starts_with("vmux://") {
+            let target = match pane.as_deref() {
+                Some(s) => match crate::agent::parse_pane_target(s, &panes) {
+                    Some(t) => Some(t),
+                    None => {
+                        if let Some(service) = service.as_ref() {
+                            service.0.send(ClientMessage::AgentCommandResponse {
+                                request_id: vmux_service::protocol::AgentRequestId::new(),
+                                result: AgentCommandResult::Error(format!(
+                                    "browser_navigate: invalid pane id '{s}'"
+                                )),
+                            });
+                        }
+                        continue;
+                    }
+                },
+                None => focus.pane.filter(|p| panes.contains(*p)),
+            };
+
+            if let Some(pane_entity) = target {
+                match crate::agent::spawn_vmux_tab(
+                    &url,
+                    pane_entity,
+                    &mut commands,
+                    &mut meshes,
+                    &mut webview_mt,
+                    &settings,
+                    pid_to_entity,
+                    agent_to_entity,
+                    &strategies,
+                    &child_of_q,
+                ) {
+                    Ok(()) => AgentCommandResult::Ok,
+                    Err(message) => {
+                        AgentCommandResult::Error(format!("browser_navigate: {message}"))
+                    }
+                }
+            } else {
+                AgentCommandResult::Error(
+                    "browser_navigate: no focused pane for vmux URL".to_string(),
+                )
+            }
+        } else if let Some(s) = pane.as_deref() {
+            if let Some(target) = crate::agent::parse_pane_target(s, &panes) {
+                crate::agent::spawn_browser_tab(
+                    target,
+                    &url,
+                    &mut commands,
+                    &mut meshes,
+                    &mut webview_mt,
+                );
+                AgentCommandResult::Ok
+            } else {
+                AgentCommandResult::Error(format!("browser_navigate: invalid pane id '{s}'"))
+            }
+        } else if let Some(webview) =
+            crate::agent::active_webview_for_tab(focus.stack, &browsers, &terminals)
+        {
+            commands.trigger(RequestNavigate {
+                webview,
+                url: url.clone(),
+            });
+            AgentCommandResult::Ok
+        } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
+            crate::agent::spawn_browser_tab(
+                pane,
+                &url,
+                &mut commands,
+                &mut meshes,
+                &mut webview_mt,
+            );
+            AgentCommandResult::Ok
+        } else {
+            AgentCommandResult::Error("browser_navigate: no focused pane".to_string())
+        };
+        let _ = result;
     }
 }
 

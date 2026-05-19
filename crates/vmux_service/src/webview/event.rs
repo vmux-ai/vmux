@@ -6,9 +6,6 @@ pub const PROCESSES_LIST_EVENT: &str = "processes_list";
 /// Event name for process navigation (webview -> host).
 pub const PROCESSES_NAVIGATE_EVENT: &str = "processes_navigate";
 
-/// URL for the processes monitor webview.
-pub const PROCESSES_WEBVIEW_URL: &str = "vmux://services/";
-
 /// Service connection status + process list, sent periodically to the webview.
 #[derive(
     Debug,

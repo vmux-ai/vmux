@@ -8,8 +8,8 @@ use crate::{
     scene::MainCamera,
     settings::LayoutSettings,
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
+    space::space_bundle,
     stack::stack_bundle,
-    tab::tab_bundle,
     unit::{PIXELS_PER_METER, WindowExt},
 };
 use bevy::{
@@ -404,7 +404,7 @@ pub fn spawn_default_space_layout(
     commands.spawn(Profile::default_profile());
     let tab_e = commands
         .spawn((
-            tab_bundle(),
+            space_bundle(),
             LastActivatedAt::now(),
             CreatedAt::now(),
             ChildOf(main),

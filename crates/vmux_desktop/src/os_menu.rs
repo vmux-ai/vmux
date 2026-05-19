@@ -1,5 +1,4 @@
 use crate::command::{AppCommand, WriteAppCommands, build_native_root_menu};
-use crate::settings::AppSettings;
 use crate::terminal::{self, PtyExited, Terminal};
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
@@ -7,6 +6,7 @@ use bevy::window::WindowCloseRequested;
 use muda::{Menu, MenuEvent};
 use parking_lot::Mutex;
 use std::sync::LazyLock;
+use vmux_settings::AppSettings;
 
 /// Resource: window entity awaiting quit confirmation dialog.
 #[derive(Resource, Default)]

@@ -38,11 +38,11 @@ pub mod drag;
 pub mod pane;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod side_sheet;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod space;
 #[allow(dead_code)]
 #[cfg(not(target_arch = "wasm32"))]
 pub mod swap;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod tab;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod toggle_layout;
 #[cfg(not(target_arch = "wasm32"))]
@@ -68,9 +68,9 @@ use pane::PanePlugin;
 #[cfg(not(target_arch = "wasm32"))]
 use side_sheet::SideSheetLayoutPlugin;
 #[cfg(not(target_arch = "wasm32"))]
-use stack::StackPlugin;
+use space::SpacePlugin;
 #[cfg(not(target_arch = "wasm32"))]
-use tab::TabPlugin;
+use stack::StackPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 use toggle_layout::ToggleLayoutPlugin;
 #[cfg(not(target_arch = "wasm32"))]
@@ -125,6 +125,13 @@ pub enum LayoutSpawnRequest {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone)]
+pub struct BrowserNavigateRequest {
+    pub url: String,
+    pub pane: Option<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub struct LayoutPlugin;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -134,6 +141,7 @@ impl Plugin for LayoutPlugin {
         app.init_resource::<NewStackContext>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .add_message::<LayoutSpawnRequest>()
+            .add_message::<BrowserNavigateRequest>()
             .add_message::<reconcile::LayoutApplyRequest>()
             .add_message::<reconcile::LayoutApplyResponse>()
             .add_message::<reconcile::LayoutSnapshotRequest>()
@@ -158,7 +166,7 @@ impl Plugin for LayoutPlugin {
         app.add_plugins((
             JsEmitUiReadyPlugin,
             WindowPlugin,
-            TabPlugin,
+            SpacePlugin,
             PanePlugin,
             StackPlugin,
             FocusRingPlugin,

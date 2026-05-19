@@ -2,7 +2,6 @@ use crate::{
     browser::Browser,
     command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands},
     processes_monitor::ProcessesMonitor,
-    settings::AppSettings,
 };
 use bevy::{
     ecs::relationship::Relationship,
@@ -24,6 +23,7 @@ use vmux_service::{
     client::{ServiceHandle, ServiceWake},
     protocol::{ClientMessage, ProcessId, ServiceMessage},
 };
+use vmux_settings::AppSettings;
 use vmux_terminal::event::*;
 use vmux_webview_app::UiReady;
 
@@ -217,6 +217,10 @@ impl Plugin for TerminalInputPlugin {
                     .after(InputSystems),
             );
         add_terminal_update_systems(app)
+            .add_systems(
+                Update,
+                (handle_terminal_send_requests, handle_run_shell_requests).after(ServiceMessageSet),
+            )
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
             .add_observer(on_term_mouse)
@@ -345,7 +349,7 @@ fn spawn_url_into_stack(
                 .id();
             commands.entity(terminal).insert(CefKeyboardTarget);
         }
-    } else if url.starts_with(vmux_service::webview::event::PROCESSES_WEBVIEW_URL) {
+    } else if url.starts_with(vmux_layout::event::SERVICES_WEBVIEW_URL) {
         commands.spawn((ProcessesMonitor::new(meshes, webview_mt), ChildOf(stack)));
     } else if url.starts_with(vmux_space::event::SPACES_WEBVIEW_URL) {
         commands.spawn((
@@ -1928,7 +1932,7 @@ fn sync_terminal_theme(
 
     let theme = terminal_settings.resolve_theme(&terminal_settings.default_theme);
     let colors =
-        crate::themes::resolve_theme(&theme.color_scheme, &terminal_settings.custom_themes);
+        vmux_settings::themes::resolve_theme(&theme.color_scheme, &terminal_settings.custom_themes);
 
     let hash = {
         let mut h: u64 = 0;
@@ -2193,6 +2197,82 @@ fn update_local_copy_mode_for_mouse_action(
             set_local_copy_mode(local_copy_mode, process_id, false)
         }
         _ => {}
+    }
+}
+
+pub(crate) fn handle_terminal_send_requests(
+    mut reader: MessageReader<vmux_terminal::TerminalSendRequest>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
+    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let vmux_terminal::TerminalSendRequest { text, terminal } = request.clone();
+
+        let target = if let Some(s) = terminal.as_deref() {
+            match crate::agent::parse_terminal_target(s, &terminals) {
+                Some(t) => Ok(Some(t)),
+                None => Err(format!("terminal_send: invalid terminal id '{s}'")),
+            }
+        } else {
+            Ok(crate::agent::active_terminal_for_tab(
+                focus.stack,
+                &terminals,
+            ))
+        };
+
+        match target {
+            Err(_) => {}
+            Ok(Some(terminal_entity)) => {
+                commands
+                    .entity(terminal_entity)
+                    .insert(PendingTerminalInput {
+                        data: text.as_bytes().to_vec(),
+                    });
+            }
+            Ok(None) => {}
+        }
+    }
+}
+
+pub(crate) fn handle_run_shell_requests(
+    mut reader: MessageReader<vmux_terminal::RunShellRequest>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
+    panes: Query<
+        Entity,
+        (
+            With<vmux_layout::pane::Pane>,
+            Without<vmux_layout::pane::PaneSplit>,
+        ),
+    >,
+    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    settings: Res<AppSettings>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for request in reader.read() {
+        let vmux_terminal::RunShellRequest { command, cwd, mode } = request.clone();
+        let input = crate::agent::shell_command_input(&command);
+        if matches!(mode, vmux_terminal::ShellMode::Active)
+            && let Some(terminal) = crate::agent::active_terminal_for_tab(focus.stack, &terminals)
+        {
+            commands
+                .entity(terminal)
+                .insert(PendingTerminalInput { data: input });
+        } else if let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane))
+            && let Ok(cwd_path) = crate::agent::valid_cwd(&cwd)
+        {
+            crate::agent::spawn_terminal_tab(
+                pane,
+                cwd_path.as_deref(),
+                Some(input),
+                &mut commands,
+                &mut meshes,
+                &mut webview_mt,
+                &settings,
+            );
+        }
     }
 }
 

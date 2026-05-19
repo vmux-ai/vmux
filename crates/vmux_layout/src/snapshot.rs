@@ -3,12 +3,14 @@ use vmux_core::PageMetadata;
 
 use crate::pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, Zoomed};
 use crate::protocol::format_id;
-use crate::protocol::{Focus, LayoutNode, LayoutSnapshot, NodeKind, Space, SplitDirection, Tab};
+use crate::protocol::{
+    Focus, LayoutNode, LayoutSnapshot, NodeKind, Space as SpaceDto, SplitDirection, Tab,
+};
+use crate::space::Space;
 use crate::stack::{FocusedStack, Stack};
-use crate::tab::Tab as SpaceTab;
 
 pub fn build_layout_snapshot(
-    spaces_q: &Query<(Entity, &SpaceTab, Option<&Children>)>,
+    spaces_q: &Query<(Entity, &Space, Option<&Children>)>,
     splits_q: &Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
     leaves_q: &Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
     stacks_q: &Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
@@ -38,7 +40,7 @@ pub fn build_layout_snapshot(
                     is_zoomed: false,
                     tabs: Vec::new(),
                 });
-            Space {
+            SpaceDto {
                 id: Some(format_id(NodeKind::Space, space_entity.to_bits())),
                 name: tab.name.clone(),
                 is_active: Some(space_entity) == active_space,
@@ -156,7 +158,7 @@ mod tests {
     #[test]
     fn terminal_url_classifies_tab_as_terminal() {
         let mut app = make_app();
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let leaf = app
             .world_mut()
             .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(space)))
@@ -175,7 +177,7 @@ mod tests {
         let snap = app
             .world_mut()
             .run_system_once(
-                |spaces_q: Query<(Entity, &SpaceTab, Option<&Children>)>,
+                |spaces_q: Query<(Entity, &Space, Option<&Children>)>,
                  splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
                  leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
                  stacks_q: Query<
@@ -208,7 +210,7 @@ mod tests {
     #[test]
     fn browser_url_classifies_tab_as_browser() {
         let mut app = make_app();
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let leaf = app
             .world_mut()
             .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(space)))
@@ -227,7 +229,7 @@ mod tests {
         let snap = app
             .world_mut()
             .run_system_once(
-                |spaces_q: Query<(Entity, &SpaceTab, Option<&Children>)>,
+                |spaces_q: Query<(Entity, &Space, Option<&Children>)>,
                  splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
                  leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
                  stacks_q: Query<
@@ -263,7 +265,7 @@ mod tests {
         let snapshot = app
             .world_mut()
             .run_system_once(
-                |spaces: Query<(Entity, &SpaceTab, Option<&Children>)>,
+                |spaces: Query<(Entity, &Space, Option<&Children>)>,
                  splits: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
                  leaves: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
                  stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
@@ -289,7 +291,7 @@ mod tests {
     #[test]
     fn split_with_two_panes_produces_recursive_node() {
         let mut app = make_app();
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let split = app
             .world_mut()
             .spawn((
@@ -317,7 +319,7 @@ mod tests {
         let snapshot = app
             .world_mut()
             .run_system_once(
-                |spaces: Query<(Entity, &SpaceTab, Option<&Children>)>,
+                |spaces: Query<(Entity, &Space, Option<&Children>)>,
                  splits: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
                  leaves: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
                  stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
@@ -356,7 +358,7 @@ mod tests {
     #[test]
     fn zoomed_pane_reports_is_zoomed_true() {
         let mut app = make_app();
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let split = app
             .world_mut()
             .spawn((
@@ -383,7 +385,7 @@ mod tests {
         let snapshot = app
             .world_mut()
             .run_system_once(
-                |spaces: Query<(Entity, &SpaceTab, Option<&Children>)>,
+                |spaces: Query<(Entity, &Space, Option<&Children>)>,
                  splits: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
                  leaves: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
                  stacks: Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
@@ -437,7 +439,7 @@ mod tests {
     #[test]
     fn favicon_url_propagated_from_page_metadata() {
         let mut app = make_app();
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let leaf = app
             .world_mut()
             .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(space)))
@@ -456,7 +458,7 @@ mod tests {
         let snap = app
             .world_mut()
             .run_system_once(
-                |spaces_q: Query<(Entity, &SpaceTab, Option<&Children>)>,
+                |spaces_q: Query<(Entity, &Space, Option<&Children>)>,
                  splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
                  leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
                  stacks_q: Query<

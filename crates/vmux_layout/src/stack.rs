@@ -1,9 +1,9 @@
-use crate::event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
+use crate::event::{SERVICES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
 use crate::{
     LayoutSpawnRequest, NewStackContext,
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
+    space::Space,
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
-    tab::Tab,
 };
 use bevy::{
     ecs::relationship::Relationship,
@@ -122,7 +122,7 @@ pub fn active_stack_in_pane(
 }
 
 pub fn focused_stack(
-    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: &Query<&Children>,
     leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -137,7 +137,7 @@ pub fn focused_stack(
 
 fn compute_focused_stack(
     mut cached: ResMut<FocusedStack>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -177,7 +177,7 @@ pub fn stack_bundle() -> impl Bundle {
 
 fn handle_stack_commands(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -231,7 +231,7 @@ fn handle_stack_commands(
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
                     commands.entity(stack).insert(vmux_core::PageMetadata {
-                        url: PROCESSES_WEBVIEW_URL.to_string(),
+                        url: SERVICES_WEBVIEW_URL.to_string(),
                         title: "Background Services".to_string(),
                         bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
                         ..default()
@@ -463,7 +463,7 @@ fn handle_stack_commands(
 fn close_tab_if_only_closing_stack(
     tab: Entity,
     closing_stack: Entity,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Space>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
     stack_q: &Query<Entity, With<Stack>>,
@@ -499,7 +499,7 @@ fn entity_tree_contains_stack_other_than(
 
 fn sibling_tabs(
     tab: Entity,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Space>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
 ) -> Vec<Entity> {
@@ -548,7 +548,7 @@ fn sync_stack_picking(
 }
 
 pub fn open_startup_url_if_no_stacks(
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -650,7 +650,7 @@ mod tests {
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let tab_e = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -702,7 +702,7 @@ mod tests {
         let root = app.world_mut().spawn_empty().id();
         let remaining_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
+            .spawn((Space::default(), LastActivatedAt(1), ChildOf(root)))
             .id();
         let remaining_pane = app
             .world_mut()
@@ -716,7 +716,7 @@ mod tests {
 
         let closing_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(root)))
+            .spawn((Space::default(), LastActivatedAt(2), ChildOf(root)))
             .id();
         let closing_pane = app
             .world_mut()
@@ -752,7 +752,7 @@ mod tests {
 
         let old_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((Space::default(), LastActivatedAt(1)))
             .id();
         let old_pane = app
             .world_mut()
@@ -763,7 +763,7 @@ mod tests {
 
         let active_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(2)))
+            .spawn((Space::default(), LastActivatedAt(2)))
             .id();
         let active_pane = app
             .world_mut()
@@ -793,7 +793,7 @@ mod tests {
 
         let tab_e = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((Space::default(), LastActivatedAt(1)))
             .id();
         let pane_with_stack = app
             .world_mut()
@@ -824,7 +824,7 @@ mod tests {
 
         let tab_e = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt(1)))
+            .spawn((Space::default(), LastActivatedAt(1)))
             .id();
         let pane = app
             .world_mut()

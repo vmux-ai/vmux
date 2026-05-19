@@ -1,12 +1,12 @@
 use crate::{
     CloseRequiresConfirmation, NewStackContext,
     settings::{ConfirmCloseSettings, LayoutSettings},
+    space::Space,
     stack::{
         CloseConfirmed, PendingStackClose, Stack, active_among, active_pane_in_tab,
         active_stack_in_pane, focused_stack, stack_bundle,
     },
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
-    tab::Tab,
 };
 use bevy::{
     ecs::{
@@ -124,7 +124,7 @@ pub struct Zoomed {
 fn tab_of(
     leaf: Entity,
     child_of_q: &Query<&ChildOf>,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Space>>,
 ) -> Option<Entity> {
     let mut cur = leaf;
     loop {
@@ -164,7 +164,7 @@ fn collect_siblings_to_hide(
 
 fn handle_zoom_command(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -464,7 +464,7 @@ impl PaneStartupContext<'_> {
 
 fn handle_pane_commands(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -807,7 +807,7 @@ fn handle_pane_commands(
 
 fn on_pane_select(
     mut reader: MessageReader<AppCommand>,
-    tab_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -1320,7 +1320,10 @@ fn process_pending_pane_closes(world: &mut World) {
             }
             let mut current = pane;
             for _ in 0..10 {
-                if world.get_entity(current).is_ok_and(|e| e.contains::<Tab>()) {
+                if world
+                    .get_entity(current)
+                    .is_ok_and(|e| e.contains::<Space>())
+                {
                     if let Ok(mut entity_mut) = world.get_entity_mut(current) {
                         entity_mut.insert(LastActivatedAt::now());
                     }
@@ -1469,7 +1472,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let split_v = app
             .world_mut()
@@ -1558,7 +1561,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let split_v = app
             .world_mut()
@@ -1640,7 +1643,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let split = app
             .world_mut()
@@ -1723,7 +1726,7 @@ mod tests {
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let tab_e = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -1760,7 +1763,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Space::default(),
                 Zoomed {
                     leaf,
                     hidden: vec![],
@@ -1789,7 +1792,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let split = app
             .world_mut()
@@ -1857,7 +1860,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let split = app
             .world_mut()
@@ -1924,7 +1927,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let only = app
             .world_mut()
@@ -1953,7 +1956,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Space::default(),
                 Zoomed {
                     leaf: leaf_b,
                     hidden: vec![leaf_a],
@@ -1988,7 +1991,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let split = app
             .world_mut()
@@ -2059,7 +2062,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((Space::default(), LastActivatedAt::now()))
             .id();
         let split = app
             .world_mut()
@@ -2136,7 +2139,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Space::default(),
                 Zoomed {
                     leaf,
                     hidden: vec![sib],
@@ -2165,7 +2168,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Tab::default(),
+                Space::default(),
                 Zoomed {
                     leaf,
                     hidden: vec![sib_a, sib_b],
@@ -2196,7 +2199,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Space::default()).id();
         let split_root = app
             .world_mut()
             .spawn((
@@ -2236,7 +2239,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
-        let tab = app.world_mut().spawn(Tab::default()).id();
+        let tab = app.world_mut().spawn(Space::default()).id();
         let only = app.world_mut().spawn((Pane, ChildOf(tab))).id();
 
         let result = {

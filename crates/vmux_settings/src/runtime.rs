@@ -10,7 +10,7 @@ pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
 };
 
-pub(crate) struct SettingsCorePlugin;
+pub struct SettingsCorePlugin;
 
 impl Plugin for SettingsCorePlugin {
     fn build(&self, app: &mut App) {
@@ -192,40 +192,36 @@ pub struct ShortcutEntry {
 pub enum ShortcutDef {
     Direct(KeyComboDef),
     Chord(KeyComboDef, KeyComboDef),
-    /// Chord binding that uses the configured leader key as prefix.
     Leader(KeyComboDef),
 }
 
 impl ShortcutDef {
-    pub fn to_shortcut(&self) -> Option<crate::shortcut::Shortcut> {
+    pub fn to_shortcut(&self) -> Option<vmux_command::shortcut::Shortcut> {
         match self {
-            ShortcutDef::Direct(combo) => {
-                Some(crate::shortcut::Shortcut::Direct(combo.to_key_combo()?))
-            }
-            ShortcutDef::Chord(prefix, second) => Some(crate::shortcut::Shortcut::Chord(
+            ShortcutDef::Direct(combo) => Some(vmux_command::shortcut::Shortcut::Direct(
+                combo.to_key_combo()?,
+            )),
+            ShortcutDef::Chord(prefix, second) => Some(vmux_command::shortcut::Shortcut::Chord(
                 prefix.to_key_combo()?,
                 second.to_key_combo()?,
             )),
-            ShortcutDef::Leader(_second) => {
-                // Resolved in init_shortcuts with the configured leader
-                None
-            }
+            ShortcutDef::Leader(_second) => None,
         }
     }
 
     pub fn to_shortcut_with_leader(
         &self,
-        leader: &crate::shortcut::KeyCombo,
-    ) -> Option<crate::shortcut::Shortcut> {
+        leader: &vmux_command::shortcut::KeyCombo,
+    ) -> Option<vmux_command::shortcut::Shortcut> {
         match self {
-            ShortcutDef::Direct(combo) => {
-                Some(crate::shortcut::Shortcut::Direct(combo.to_key_combo()?))
-            }
-            ShortcutDef::Chord(prefix, second) => Some(crate::shortcut::Shortcut::Chord(
+            ShortcutDef::Direct(combo) => Some(vmux_command::shortcut::Shortcut::Direct(
+                combo.to_key_combo()?,
+            )),
+            ShortcutDef::Chord(prefix, second) => Some(vmux_command::shortcut::Shortcut::Chord(
                 prefix.to_key_combo()?,
                 second.to_key_combo()?,
             )),
-            ShortcutDef::Leader(second) => Some(crate::shortcut::Shortcut::Chord(
+            ShortcutDef::Leader(second) => Some(vmux_command::shortcut::Shortcut::Chord(
                 leader.clone(),
                 second.to_key_combo()?,
             )),
@@ -247,11 +243,11 @@ pub struct KeyComboDef {
 }
 
 impl KeyComboDef {
-    pub fn to_key_combo(&self) -> Option<crate::shortcut::KeyCombo> {
-        let resolved = crate::shortcut::resolve_key(&self.key)?;
-        Some(crate::shortcut::KeyCombo {
+    pub fn to_key_combo(&self) -> Option<vmux_command::shortcut::KeyCombo> {
+        let resolved = vmux_command::shortcut::resolve_key(&self.key)?;
+        Some(vmux_command::shortcut::KeyCombo {
             key: resolved.key,
-            modifiers: crate::shortcut::Modifiers {
+            modifiers: vmux_command::shortcut::Modifiers {
                 ctrl: self.ctrl,
                 shift: self.shift || resolved.implicit_shift,
                 alt: self.alt,
@@ -269,12 +265,10 @@ pub struct BrowserSettings {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TerminalSettings {
-    // Legacy fields for backward compatibility
     #[serde(default)]
     pub shell: Option<String>,
     #[serde(default)]
     pub font_family: Option<String>,
-    // New fields
     #[serde(default = "default_theme_name")]
     pub default_theme: String,
     #[serde(default)]
@@ -347,7 +341,6 @@ fn default_terminal_font_family() -> String {
 }
 
 impl TerminalSettings {
-    /// Get the effective profile, migrating legacy fields if needed.
     pub fn resolve_theme(&self, name: &str) -> TerminalTheme {
         // Check explicit themes
         if let Some(t) = self.themes.iter().find(|t| t.name == name) {
@@ -373,17 +366,13 @@ impl TerminalSettings {
 
 const DEFAULT_SETTINGS: &str = include_str!("settings.ron");
 
-/// Holds the file watcher and channel for settings hot-reload.
 #[derive(Resource)]
 struct SettingsWatcher {
     rx: Mutex<mpsc::Receiver<()>>,
     path: std::path::PathBuf,
-    // Keep watcher alive -- dropping it stops watching.
     _watcher: RecommendedWatcher,
 }
 
-/// Returns the Vmux data directory (~/Library/Application Support/Vmux on macOS).
-/// Matches the paths used by persistence, browser profiles, and the service.
 fn data_dir() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "macos")]
     {
@@ -520,7 +509,7 @@ fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
     });
 }
 
-pub(crate) fn apply_settings_update(
+pub fn apply_settings_update(
     settings: &mut AppSettings,
     path: &str,
     value: serde_json::Value,
@@ -536,11 +525,11 @@ pub(crate) fn apply_settings_update(
     Ok(ron_bytes)
 }
 
-pub(crate) fn serialize_settings_to_json(settings: &AppSettings) -> String {
+pub fn serialize_settings_to_json(settings: &AppSettings) -> String {
     serde_json::to_string(settings).unwrap_or_else(|_| "{}".to_string())
 }
 
-pub(crate) fn set_at_path(
+pub fn set_at_path(
     root: &mut serde_json::Value,
     path: &str,
     value: serde_json::Value,
@@ -744,7 +733,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: crate::settings::AgentSettings::default(),
+            agent: crate::runtime::AgentSettings::default(),
         }
     }
 

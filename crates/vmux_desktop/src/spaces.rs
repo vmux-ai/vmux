@@ -293,7 +293,7 @@ fn apply_pending_space_switch(
         Entity,
         Or<(
             With<crate::profile::Profile>,
-            With<vmux_layout::tab::Tab>,
+            With<vmux_layout::space::Space>,
             With<vmux_history::Visit>,
         )>,
     >,
@@ -384,7 +384,7 @@ fn on_space_command(
         Entity,
         Or<(
             With<crate::profile::Profile>,
-            With<vmux_layout::tab::Tab>,
+            With<vmux_layout::space::Space>,
             With<vmux_history::Visit>,
         )>,
     >,
@@ -533,12 +533,12 @@ fn on_space_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{
-        AppSettings, BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings,
-        ShortcutSettings, SideSheetSettings, WindowSettings,
-    };
     use vmux_history::LastActivatedAt;
-    use vmux_layout::{pane::Pane, stack::Stack, tab::Tab, window::Main};
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use vmux_layout::{pane::Pane, space::Space, stack::Stack, window::Main};
+    use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
     use vmux_space::model::DEFAULT_PROFILE_ID;
     use vmux_webview_app::WebviewAppRegistry;
 
@@ -601,7 +601,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: crate::settings::AgentSettings::default(),
+            agent: vmux_settings::AgentSettings::default(),
         }
     }
 
@@ -696,7 +696,10 @@ mod tests {
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
-        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
+        let space = app
+            .world_mut()
+            .spawn((Space::default(), ChildOf(main)))
+            .id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let tab = app
             .world_mut()
@@ -753,7 +756,10 @@ mod tests {
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
-        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
+        let space = app
+            .world_mut()
+            .spawn((Space::default(), ChildOf(main)))
+            .id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let tab = app
             .world_mut()
@@ -794,7 +800,7 @@ mod tests {
             app.world().resource::<ActiveSpace>().record,
             default_space_record()
         );
-        let mut tab_query = app.world_mut().query::<&Tab>();
+        let mut tab_query = app.world_mut().query::<&Space>();
         assert_eq!(tab_query.iter(app.world()).count(), 1);
     }
 
@@ -821,7 +827,10 @@ mod tests {
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
-        let old_tab = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
+        let old_tab = app
+            .world_mut()
+            .spawn((Space::default(), ChildOf(main)))
+            .id();
         let pane = app.world_mut().spawn((Pane, ChildOf(old_tab))).id();
         let tab = app
             .world_mut()
@@ -862,7 +871,7 @@ mod tests {
         assert!(!app.world().resource::<NewStackContext>().needs_open);
         assert!(app.world().resource::<NewStackContext>().stack.is_none());
 
-        let mut tab_query = app.world_mut().query::<&Tab>();
+        let mut tab_query = app.world_mut().query::<&Space>();
         assert_eq!(tab_query.iter(app.world()).count(), 1);
 
         let tabs = {
@@ -919,7 +928,7 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let old_tab = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(main)))
+            .spawn((Space::default(), LastActivatedAt::now(), ChildOf(main)))
             .id();
         let pane = app
             .world_mut()

@@ -270,9 +270,9 @@ use crate::protocol as proto;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::protocol::format_id;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::stack::{Stack, stack_bundle};
+use crate::space::Space;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::tab::Tab as SpaceTab;
+use crate::stack::{Stack, stack_bundle};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{LayoutSpawnRequest, event::PANE_GAP_PX};
 #[cfg(not(target_arch = "wasm32"))]
@@ -314,7 +314,7 @@ pub struct LayoutSnapshotResponse {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn serve_snapshot_requests(
     mut reader: MessageReader<LayoutSnapshotRequest>,
-    spaces_q: Query<(Entity, &SpaceTab, Option<&Children>)>,
+    spaces_q: Query<(Entity, &Space, Option<&Children>)>,
     splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
     leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
     stacks_q: Query<(Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<Stack>>,
@@ -367,7 +367,7 @@ pub fn apply_layout_requests(
 fn run_build_snapshot(world: &mut World) -> LayoutSnapshot {
     use bevy::ecs::system::SystemState;
     let mut state = SystemState::<(
-        Query<(Entity, &SpaceTab, Option<&Children>)>,
+        Query<(Entity, &Space, Option<&Children>)>,
         Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
         Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
         Query<(Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<Stack>>,
@@ -411,10 +411,10 @@ pub fn apply_with_existing(
             },
             None => {
                 let entity = world
-                    .spawn((crate::tab::tab_bundle(), LastActivatedAt::now()))
+                    .spawn((crate::space::space_bundle(), LastActivatedAt::now()))
                     .id();
                 if !space.name.is_empty()
-                    && let Some(mut tab) = world.get_mut::<SpaceTab>(entity)
+                    && let Some(mut tab) = world.get_mut::<Space>(entity)
                 {
                     tab.name = space.name.clone();
                 }
@@ -471,7 +471,7 @@ fn create_descendants(
                 Err(_) => return,
             },
             None => {
-                if world.get::<SpaceTab>(parent).is_some()
+                if world.get::<Space>(parent).is_some()
                     && let Some(existing_root) = find_root_split_child(world, parent)
                 {
                     set_split_direction(world, existing_root, *direction);
@@ -594,7 +594,7 @@ fn apply_close(world: &mut World, id: &str) {
 #[cfg(not(target_arch = "wasm32"))]
 fn collect_existing_ids(world: &mut World) -> ApplyHashSet<String> {
     let mut out = ApplyHashSet::new();
-    let mut q_space = world.query_filtered::<Entity, With<SpaceTab>>();
+    let mut q_space = world.query_filtered::<Entity, With<Space>>();
     for e in q_space.iter(world) {
         out.insert(format_id(NodeKind::Space, e.to_bits()));
     }
@@ -619,7 +619,7 @@ fn apply_space(world: &mut World, space: &proto::Space) {
         && let Ok((_, value)) = parse_id(id)
     {
         let entity = Entity::from_bits(value);
-        if let Some(mut tab) = world.get_mut::<SpaceTab>(entity) {
+        if let Some(mut tab) = world.get_mut::<Space>(entity) {
             tab.name = space.name.clone();
         }
     }
@@ -769,7 +769,7 @@ fn node_entity(node: &proto::LayoutNode) -> Option<Entity> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{Space, SplitDirection};
+    use crate::protocol::{Space as SpaceDto, SplitDirection};
 
     fn pane(id: Option<&str>, tabs: Vec<Tab>) -> LayoutNode {
         LayoutNode::Pane {
@@ -790,7 +790,7 @@ mod tests {
 
     fn snapshot(root: LayoutNode, focus: Focus) -> LayoutSnapshot {
         LayoutSnapshot {
-            spaces: vec![Space {
+            spaces: vec![SpaceDto {
                 id: Some("space:1".into()),
                 name: "S".into(),
                 is_active: true,
@@ -1012,13 +1012,13 @@ mod tests {
     }
 
     use crate::pane::{Pane, PaneSplitDirection};
-    use crate::tab::Tab as SpaceTab;
+    use crate::space::Space;
 
     #[test]
     fn updating_split_direction_changes_component() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let split_e = app
             .world_mut()
             .spawn((
@@ -1056,7 +1056,7 @@ mod tests {
     fn updating_flex_weights_writes_pane_size_flex_grow() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let split_e = app
             .world_mut()
             .spawn((
@@ -1111,7 +1111,7 @@ mod tests {
     fn moves_pane_to_new_parent() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let split_a = app
             .world_mut()
             .spawn((
@@ -1168,7 +1168,7 @@ mod tests {
     fn omitting_pane_from_snapshot_closes_it() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let split_e = app
             .world_mut()
             .spawn((
@@ -1224,7 +1224,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<crate::LayoutSpawnRequest>();
 
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(space))).id();
 
         let snap = LayoutSnapshot {
@@ -1262,7 +1262,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<crate::LayoutSpawnRequest>();
 
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
 
         let pane_count_before = app
             .world_mut()
@@ -1307,7 +1307,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<crate::LayoutSpawnRequest>();
 
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
 
         let split_count_before = app
             .world_mut()
@@ -1353,7 +1353,7 @@ mod tests {
     fn reordering_split_children_swaps_panes() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let split_e = app
             .world_mut()
             .spawn((
@@ -1419,7 +1419,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.insert_resource(crate::stack::FocusedStack::default());
 
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let stack = app
             .world_mut()
@@ -1461,7 +1461,7 @@ mod tests {
         app.add_message::<crate::LayoutSpawnRequest>();
         app.insert_resource(crate::stack::FocusedStack::default());
 
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let stack = app
             .world_mut()
@@ -1504,7 +1504,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_message::<crate::LayoutSpawnRequest>();
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(space))).id();
 
         let snap = LayoutSnapshot {
@@ -1558,7 +1558,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<crate::LayoutSpawnRequest>();
 
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let existing_pane = app
             .world_mut()
             .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(space)))
@@ -1654,7 +1654,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<crate::LayoutSpawnRequest>();
 
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let existing_root = app
             .world_mut()
             .spawn((
@@ -1751,7 +1751,7 @@ mod tests {
         app.insert_resource(crate::stack::FocusedStack::default());
         app.add_systems(Update, super::serve_snapshot_requests);
 
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let _ = app
             .world_mut()
             .spawn((leaf_pane_bundle(), ChildOf(space)))
@@ -1786,7 +1786,7 @@ mod tests {
         app.insert_resource(crate::stack::FocusedStack::default());
         app.add_systems(Update, super::apply_layout_requests);
 
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let pane = app
             .world_mut()
             .spawn((leaf_pane_bundle(), ChildOf(space)))
@@ -1830,7 +1830,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_message::<crate::LayoutSpawnRequest>();
 
-        let space = app.world_mut().spawn(SpaceTab { name: "S".into() }).id();
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
         let existing_pane = app
             .world_mut()
             .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(space)))

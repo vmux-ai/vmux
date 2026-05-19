@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
-use crate::settings::AppSettings;
+use vmux_settings::AppSettings;
 
 const DEFAULT_ENDPOINT: &str = "https://vmux.ai/updates.json";
 

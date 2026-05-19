@@ -5,15 +5,15 @@ use std::{
 
 use crate::{
     command::{AppCommand, WriteAppCommands},
-    settings::AppSettings,
     terminal::{PendingTerminalInput, ProcessExited, ServiceMessageSet, Terminal},
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
-use bevy_cef::prelude::{CefKeyboardTarget, RequestNavigate, WebviewExtendStandardMaterial};
+use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
 };
+use vmux_settings::AppSettings;
 
 use crate::browser::Browser;
 use vmux_agent::session::{AgentSession, PendingAgentSession, SessionId};
@@ -173,7 +173,10 @@ impl Plugin for AgentPlugin {
             .add_message::<AgentQueryRequest>()
             .add_message::<AgentLaunchRequested>()
             .add_message::<vmux_agent::AgentSessionExited>()
-            .add_message::<crate::settings::SettingsWriteRequest>()
+            .add_message::<vmux_settings::SettingsWriteRequest>()
+            .add_message::<vmux_layout::BrowserNavigateRequest>()
+            .add_message::<vmux_terminal::TerminalSendRequest>()
+            .add_message::<vmux_terminal::RunShellRequest>()
             .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
             .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
             .add_systems(
@@ -252,7 +255,7 @@ pub(crate) fn shell_command_input(command: &str) -> Vec<u8> {
     data
 }
 
-fn valid_cwd(cwd: &str) -> Result<Option<std::path::PathBuf>, String> {
+pub(crate) fn valid_cwd(cwd: &str) -> Result<Option<std::path::PathBuf>, String> {
     let trimmed = cwd.trim();
     if trimmed.is_empty() {
         return Ok(None);
@@ -631,7 +634,7 @@ pub(crate) fn spawn_processes_tab(
         ))
         .id();
     commands.entity(tab).insert(PageMetadata {
-        url: vmux_service::webview::event::PROCESSES_WEBVIEW_URL.to_string(),
+        url: vmux_layout::event::SERVICES_WEBVIEW_URL.to_string(),
         title: "Background Services".to_string(),
         bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
         ..default()
@@ -643,7 +646,7 @@ pub(crate) fn spawn_processes_tab(
     tab
 }
 
-fn spawn_vmux_tab(
+pub(crate) fn spawn_vmux_tab(
     url: &str,
     pane: Entity,
     commands: &mut Commands,
@@ -788,7 +791,7 @@ fn spawn_vmux_tab(
     }
 }
 
-fn active_terminal_for_tab(
+pub(crate) fn active_terminal_for_tab(
     tab: Option<Entity>,
     terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
 ) -> Option<Entity> {
@@ -798,7 +801,7 @@ fn active_terminal_for_tab(
         .find_map(|(entity, child_of)| (child_of.get() == tab).then_some(entity))
 }
 
-fn active_webview_for_tab(
+pub(crate) fn active_webview_for_tab(
     tab: Option<Entity>,
     browsers: &Query<(Entity, &ChildOf), With<Browser>>,
     terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
@@ -815,7 +818,7 @@ fn active_webview_for_tab(
     })
 }
 
-fn parse_pane_target(
+pub(crate) fn parse_pane_target(
     s: &str,
     panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
 ) -> Option<Entity> {
@@ -824,7 +827,7 @@ fn parse_pane_target(
     panes.contains(entity).then_some(entity)
 }
 
-fn parse_terminal_target(
+pub(crate) fn parse_terminal_target(
     s: &str,
     terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
 ) -> Option<Entity> {
@@ -842,34 +845,31 @@ struct SpawnAssets<'w> {
 #[derive(bevy::ecs::system::SystemParam)]
 struct SettingsParams<'w> {
     settings: ResMut<'w, AppSettings>,
-    writes: MessageWriter<'w, crate::settings::SettingsWriteRequest>,
+    writes: MessageWriter<'w, vmux_settings::SettingsWriteRequest>,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-struct AgentLookups<'w> {
-    pid_to_entity: Option<Res<'w, crate::terminal::pid::PidToEntity>>,
-    agent_to_entity: Option<Res<'w, vmux_agent::session::AgentSessionToEntity>>,
-    active_space: Option<Res<'w, crate::spaces::ActiveSpace>>,
+pub(crate) struct AgentLookups<'w> {
+    pub(crate) pid_to_entity: Option<Res<'w, crate::terminal::pid::PidToEntity>>,
+    pub(crate) agent_to_entity: Option<Res<'w, vmux_agent::session::AgentSessionToEntity>>,
+    pub(crate) active_space: Option<Res<'w, crate::spaces::ActiveSpace>>,
 }
 
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
+    mut browser_nav_writer: MessageWriter<vmux_layout::BrowserNavigateRequest>,
+    mut terminal_send_writer: MessageWriter<vmux_terminal::TerminalSendRequest>,
+    mut run_shell_writer: MessageWriter<vmux_terminal::RunShellRequest>,
     focus: Res<FocusedStack>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    browsers: Query<(Entity, &ChildOf), With<Browser>>,
-    child_of_q: Query<&ChildOf>,
     lookups: AgentLookups,
-    strategies: Res<AgentStrategies>,
     mut sp: SettingsParams,
     service: Option<Res<crate::terminal::ServiceClient>>,
     mut layout_apply_writer: MessageWriter<vmux_layout::reconcile::LayoutApplyRequest>,
     mut commands: Commands,
     mut assets: SpawnAssets,
 ) {
-    let pid_to_entity = lookups.pid_to_entity.as_deref();
-    let agent_to_entity = lookups.agent_to_entity.as_deref();
     let active_space = lookups.active_space.as_deref();
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
 
@@ -927,149 +927,41 @@ fn handle_agent_commands(
                 },
             },
             ServiceAgentCommand::RunShell { command, cwd, mode } => {
-                let input = shell_command_input(command);
-                if matches!(mode, AgentShellMode::Active)
-                    && let Some(terminal) = active_terminal_for_tab(focus.stack, &terminals)
-                {
-                    commands
-                        .entity(terminal)
-                        .insert(PendingTerminalInput { data: input });
-                    AgentCommandResult::Ok
-                } else if let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane)) {
-                    match valid_cwd(cwd) {
-                        Ok(cwd_path) => {
-                            spawn_terminal_tab(
-                                pane,
-                                cwd_path.as_deref(),
-                                Some(input),
-                                &mut commands,
-                                &mut assets.meshes,
-                                &mut assets.webview_mt,
-                                &sp.settings,
-                            );
-                            AgentCommandResult::Ok
-                        }
-                        Err(message) => AgentCommandResult::Error(message),
-                    }
-                } else {
-                    AgentCommandResult::Error("no active pane".to_string())
-                }
+                let shell_mode = match mode {
+                    AgentShellMode::Active => vmux_terminal::ShellMode::Active,
+                    AgentShellMode::NewTab => vmux_terminal::ShellMode::NewTab,
+                };
+                run_shell_writer.write(vmux_terminal::RunShellRequest {
+                    command: command.clone(),
+                    cwd: cwd.clone(),
+                    mode: shell_mode,
+                });
+                AgentCommandResult::Ok
             }
             ServiceAgentCommand::BrowserNavigate { url, pane } => {
-                if url.starts_with("vmux://") {
-                    let target = match pane.as_deref() {
-                        Some(s) => match parse_pane_target(s, &panes) {
-                            Some(t) => Some(t),
-                            None => {
-                                let result = AgentCommandResult::Error(format!(
-                                    "browser_navigate: invalid pane id '{s}'"
-                                ));
-                                if let Some(service) = service.as_ref() {
-                                    service.0.send(ClientMessage::AgentCommandResponse {
-                                        request_id: request.request_id,
-                                        result,
-                                    });
-                                }
-                                continue;
-                            }
-                        },
-                        None => focus.pane.filter(|p| panes.contains(*p)),
-                    };
-
-                    if let Some(pane_entity) = target {
-                        match spawn_vmux_tab(
-                            url,
-                            pane_entity,
-                            &mut commands,
-                            &mut assets.meshes,
-                            &mut assets.webview_mt,
-                            &sp.settings,
-                            pid_to_entity,
-                            agent_to_entity,
-                            &strategies,
-                            &child_of_q,
-                        ) {
-                            Ok(()) => AgentCommandResult::Ok,
-                            Err(message) => {
-                                AgentCommandResult::Error(format!("browser_navigate: {message}"))
-                            }
-                        }
-                    } else {
-                        AgentCommandResult::Error(
-                            "browser_navigate: no focused pane for vmux URL".to_string(),
-                        )
-                    }
-                } else if let Some(s) = pane.as_deref() {
-                    if let Some(target) = parse_pane_target(s, &panes) {
-                        spawn_browser_tab(
-                            target,
-                            url,
-                            &mut commands,
-                            &mut assets.meshes,
-                            &mut assets.webview_mt,
-                        );
-                        AgentCommandResult::Ok
-                    } else {
-                        AgentCommandResult::Error(format!(
-                            "browser_navigate: invalid pane id '{s}'"
-                        ))
-                    }
-                } else if let Some(webview) =
-                    active_webview_for_tab(focus.stack, &browsers, &terminals)
-                {
-                    commands.trigger(RequestNavigate {
-                        webview,
-                        url: url.clone(),
-                    });
-                    AgentCommandResult::Ok
-                } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
-                    spawn_browser_tab(
-                        pane,
-                        url,
-                        &mut commands,
-                        &mut assets.meshes,
-                        &mut assets.webview_mt,
-                    );
-                    AgentCommandResult::Ok
-                } else {
-                    AgentCommandResult::Error("browser_navigate: no focused pane".to_string())
-                }
+                browser_nav_writer.write(vmux_layout::BrowserNavigateRequest {
+                    url: url.clone(),
+                    pane: pane.clone(),
+                });
+                AgentCommandResult::Ok
             }
             ServiceAgentCommand::TerminalSend { text, terminal } => {
-                let target = if let Some(s) = terminal.as_deref() {
-                    match parse_terminal_target(s, &terminals) {
-                        Some(t) => Ok(Some(t)),
-                        None => Err(format!("terminal_send: invalid terminal id '{s}'")),
-                    }
-                } else {
-                    Ok(active_terminal_for_tab(focus.stack, &terminals))
-                };
-
-                match target {
-                    Err(message) => AgentCommandResult::Error(message),
-                    Ok(Some(terminal_entity)) => {
-                        commands
-                            .entity(terminal_entity)
-                            .insert(PendingTerminalInput {
-                                data: text.as_bytes().to_vec(),
-                            });
-                        AgentCommandResult::Ok
-                    }
-                    Ok(None) => {
-                        AgentCommandResult::Error("terminal_send: no active terminal".to_string())
-                    }
-                }
+                terminal_send_writer.write(vmux_terminal::TerminalSendRequest {
+                    text: text.clone(),
+                    terminal: terminal.clone(),
+                });
+                AgentCommandResult::Ok
             }
             ServiceAgentCommand::UpdateSettings { path, value_json } => {
                 match serde_json::from_str::<serde_json::Value>(value_json) {
-                    Ok(value) => match crate::settings::apply_settings_update(
+                    Ok(value) => match vmux_settings::apply_settings_update(
                         sp.settings.as_mut(),
                         path,
                         value,
                     ) {
                         Ok(ron_bytes) => {
                             sp.writes
-                                .write(crate::settings::SettingsWriteRequest { ron_bytes });
+                                .write(vmux_settings::SettingsWriteRequest { ron_bytes });
                             AgentCommandResult::Ok
                         }
                         Err(message) => AgentCommandResult::Error(message),
@@ -1180,10 +1072,10 @@ fn handle_agent_launch_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{
-        BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings, ShortcutSettings,
-        SideSheetSettings, WindowSettings,
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
+    use vmux_settings::{BrowserSettings, ShortcutSettings};
 
     fn test_settings() -> AppSettings {
         AppSettings {
@@ -1207,7 +1099,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: crate::settings::AgentSettings::default(),
+            agent: vmux_settings::AgentSettings::default(),
         }
     }
 
@@ -1235,6 +1127,17 @@ mod tests {
         })
     }
 
+    fn add_consumer_systems(app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                crate::browser::handle_browser_navigate_requests,
+                crate::terminal::handle_terminal_send_requests,
+                crate::terminal::handle_run_shell_requests,
+            ),
+        );
+    }
+
     #[derive(Resource, Default)]
     struct CapturedNavigateUrls(Vec<String>);
 
@@ -1247,6 +1150,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
@@ -1281,6 +1185,7 @@ mod tests {
                 },
             });
 
+        app.update();
         app.update();
 
         let captured = app.world().resource::<CapturedNavigateUrls>();
@@ -1347,6 +1252,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
@@ -1375,6 +1281,7 @@ mod tests {
             });
 
         app.update();
+        app.update();
 
         let pending = app
             .world()
@@ -1391,6 +1298,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
@@ -1412,6 +1320,7 @@ mod tests {
                 },
             });
 
+        app.update();
         app.update();
 
         let world = app.world_mut();
@@ -1447,6 +1356,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
@@ -1469,6 +1379,7 @@ mod tests {
             });
 
         app.update();
+        app.update();
 
         let world = app.world_mut();
         let mut tabs = world.query_filtered::<&ChildOf, With<vmux_layout::stack::Stack>>();
@@ -1490,6 +1401,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
@@ -1510,6 +1422,7 @@ mod tests {
             });
 
         app.update();
+        app.update();
 
         let world = app.world_mut();
         let terminal_count = world.query::<&Terminal>().iter(world).count();
@@ -1525,6 +1438,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
@@ -1545,6 +1459,7 @@ mod tests {
                 },
             });
 
+        app.update();
         app.update();
 
         let world = app.world_mut();
@@ -1573,6 +1488,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
@@ -1592,6 +1508,7 @@ mod tests {
                 },
             });
 
+        app.update();
         app.update();
 
         let world = app.world_mut();
@@ -1613,6 +1530,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
@@ -1633,6 +1551,7 @@ mod tests {
             });
 
         app.update();
+        app.update();
 
         let world = app.world_mut();
         let standalone_browser_count = world
@@ -1651,6 +1570,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(AgentPlugin);
+        add_consumer_systems(&mut app);
         app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
@@ -1670,6 +1590,7 @@ mod tests {
                 },
             });
 
+        app.update();
         app.update();
 
         let world = app.world_mut();
@@ -1734,7 +1655,7 @@ mod tests {
     fn update_settings_via_apply_mutates_resource_and_returns_ron() {
         let mut settings = test_settings();
         assert!(!settings.auto_update);
-        let ron_bytes = crate::settings::apply_settings_update(
+        let ron_bytes = vmux_settings::apply_settings_update(
             &mut settings,
             "auto_update",
             serde_json::json!(true),

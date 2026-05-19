@@ -13,9 +13,10 @@ use crate::{
     terminal::{ServiceClient, Terminal},
 };
 use vmux_layout::{
+    event::SERVICES_WEBVIEW_URL,
     pane::{Pane, PaneSplit},
+    space::Space,
     stack::{Stack, focused_stack, stack_bundle},
-    tab::Tab,
     window::WEBVIEW_MESH_DEPTH_BIAS,
 };
 
@@ -33,11 +34,11 @@ impl ProcessesMonitor {
             (
                 Self,
                 Browser,
-                WebviewSource::new(PROCESSES_WEBVIEW_URL),
-                ResolvedWebviewUri(PROCESSES_WEBVIEW_URL.to_string()),
+                WebviewSource::new(SERVICES_WEBVIEW_URL),
+                ResolvedWebviewUri(SERVICES_WEBVIEW_URL.to_string()),
                 PageMetadata {
                     title: "Background Services".to_string(),
-                    url: PROCESSES_WEBVIEW_URL.to_string(),
+                    url: SERVICES_WEBVIEW_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },
@@ -181,7 +182,7 @@ fn on_process_navigate(
     trigger: On<BinReceive<ProcessNavigateEvent>>,
     terminals: Query<(Entity, &ProcessId, &ChildOf), With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
