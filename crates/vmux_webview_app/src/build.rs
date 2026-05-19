@@ -599,7 +599,7 @@ fn compile_tailwind_index_css(manifest_dir: &Path, dist_assets: &Path) -> io::Re
     };
     let out = dist_assets.join(CEF_EMBEDDED_APP_INDEX_CSS);
     let status = Command::new(&tw)
-        .args(["-c", "tailwind.config.js", "-i", "assets/index.css", "-o"])
+        .args(["-i", "assets/index.css", "-o"])
         .arg(&out)
         .arg("--minify")
         .current_dir(manifest_dir)
