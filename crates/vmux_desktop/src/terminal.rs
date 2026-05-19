@@ -1181,7 +1181,7 @@ fn handle_terminal_keyboard(
     focus: Res<vmux_layout::stack::FocusedStack>,
     mode: Res<vmux_layout::scene::InteractionMode>,
     input: Res<ButtonInput<KeyCode>>,
-    chord_state: Res<crate::shortcut::ChordState>,
+    chord_state: Res<vmux_command::shortcut::ChordState>,
     service: Option<Res<ServiceClient>>,
     mode_map: Res<TerminalModeMap>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,

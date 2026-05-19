@@ -2,7 +2,7 @@ use crate::command::{AppCommand, WriteAppCommands};
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use std::time::Instant;
-pub(crate) use vmux_command::shortcut::{KeyCombo, Modifiers, Shortcut};
+pub(crate) use vmux_command::shortcut::{ChordState, KeyCombo, Modifiers, Shortcut};
 use vmux_settings::{AppSettings, load_settings};
 
 pub struct ShortcutPlugin;
@@ -18,11 +18,6 @@ impl Plugin for ShortcutPlugin {
 pub struct ShortcutMap {
     pub bindings: Vec<(Shortcut, String)>,
     pub chord_timeout_ms: u64,
-}
-
-#[derive(Resource, Default)]
-pub struct ChordState {
-    pub pending_prefix: Option<(KeyCombo, Instant)>,
 }
 
 fn init_shortcuts(mut commands: Commands, settings: Option<Res<AppSettings>>) {
