@@ -9,7 +9,7 @@ mod agent;
 mod agent_query;
 mod background_lifecycle;
 mod browser;
-mod clipboard;
+
 mod command;
 mod command_bar;
 mod layout_response;

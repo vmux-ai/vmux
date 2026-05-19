@@ -1088,7 +1088,7 @@ fn poll_service_messages(
                 process_id: _,
                 text,
             } if !text.is_empty() => {
-                crate::clipboard::write(text);
+                vmux_terminal::clipboard::write(text);
             }
             ServiceMessage::AgentCommand {
                 request_id,
@@ -1264,7 +1264,7 @@ fn handle_terminal_keyboard(
             match event.key_code {
                 KeyCode::KeyV => {
                     // Paste via OS clipboard.
-                    if let Some(text) = crate::clipboard::read_blocking()
+                    if let Some(text) = vmux_terminal::clipboard::read_blocking()
                         && !text.is_empty()
                     {
                         // Wrap in bracketed paste sequences
