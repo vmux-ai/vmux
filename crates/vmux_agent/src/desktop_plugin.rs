@@ -10,13 +10,13 @@ use vmux_core::LastActivatedAt;
 use vmux_core::PageMetadata;
 use vmux_core::agent::AgentKind;
 use vmux_layout::event::TERMINAL_WEBVIEW_URL;
-use vmux_layout::spaces::{ActiveSpace, SpacesView};
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
 };
 use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentShellMode};
 use vmux_settings::AppSettings;
+use vmux_space::{ActiveSpace, SpacesView};
 use vmux_terminal::ProcessExited;
 use vmux_terminal::{ServiceMessageSet, new_terminal_bundle_with_cwd};
 

@@ -7,7 +7,7 @@ use vmux_core::PageMetadata;
 use vmux_core::profile;
 use vmux_layout::NewStackContext;
 use vmux_layout::stack::Stack;
-use vmux_page::{UiReady, PageConfig, PageRegistry};
+use vmux_page::{PageConfig, PageRegistry, UiReady};
 
 use crate::event::{
     SPACES_LIST_EVENT, SPACES_WEBVIEW_URL, SpaceCommandEvent, SpaceRow, SpacesListEvent,
@@ -29,11 +29,7 @@ impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActiveSpace>();
         app.add_message::<SaveSpaceRequest>();
-        register_spaces_page(
-            app.world_mut()
-                .resource_mut::<PageRegistry>()
-                .as_mut(),
-        );
+        register_spaces_page(app.world_mut().resource_mut::<PageRegistry>().as_mut());
         app.add_plugins(BinJsEmitEventPlugin::<SpaceCommandEvent>::default())
             .add_observer(on_space_command)
             .add_observer(reset_spaces_sent_marker_on_ui_ready)
@@ -396,9 +392,7 @@ fn on_space_command(
     }
 
     let current_path = active.layout_path();
-    save_requests.write(SaveSpaceRequest {
-        path: current_path,
-    });
+    save_requests.write(SaveSpaceRequest { path: current_path });
     active.record = target;
     let target_path = active.layout_path();
     if target_path.exists() {
@@ -437,16 +431,19 @@ fn on_space_command(
 }
 
 #[cfg(test)]
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::DEFAULT_PROFILE_ID;
     use vmux_history::LastActivatedAt;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_layout::{pane::Pane, space::Space, stack::Stack, window::Main};
-    use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
-    use vmux_space::model::DEFAULT_PROFILE_ID;
     use vmux_page::PageRegistry;
+    use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
 
     struct HomeEnvGuard {
         _guard: std::sync::MutexGuard<'static, ()>,
@@ -455,7 +452,7 @@ mod tests {
 
     impl HomeEnvGuard {
         fn use_temp_home(name: &str) -> Self {
-            let guard = profile::ENV_LOCK
+            let guard = super::ENV_LOCK
                 .lock()
                 .unwrap_or_else(|err| err.into_inner());
             let old_home = std::env::var_os("HOME");
@@ -591,6 +588,7 @@ mod tests {
         );
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_message::<SaveSpaceRequest>();
         app.add_observer(on_space_command);
         app.insert_resource(ActiveSpace {
             record: active_record,
@@ -650,6 +648,7 @@ mod tests {
         );
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_message::<SaveSpaceRequest>();
         app.add_observer(on_space_command);
         app.add_systems(Update, apply_pending_space_switch);
         app.insert_resource(ActiveSpace {
@@ -721,6 +720,7 @@ mod tests {
         );
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_message::<SaveSpaceRequest>();
         app.add_observer(on_space_command);
         app.insert_resource(vmux_layout::stack::FocusedStack::default());
         app.insert_resource(ActiveSpace {
@@ -815,10 +815,11 @@ mod tests {
         );
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
+        app.add_plugins(vmux_command::CommandPlugin);
         app.add_plugins(bevy_cef::prelude::JsEmitEventPlugin::<SpaceCommandEvent>::default());
         app.add_plugins(vmux_layout::stack::StackPlugin);
         app.add_message::<vmux_layout::LayoutSpawnRequest>();
+        app.add_message::<SaveSpaceRequest>();
         app.add_observer(on_space_command);
         app.init_resource::<vmux_layout::pane::PendingCursorWarp>();
         app.init_resource::<bevy_cef::prelude::IpcEventRawBuffer>();

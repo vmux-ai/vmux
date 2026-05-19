@@ -1,3 +1,9 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::new_ret_no_self
+)]
+
 pub mod migration;
 pub mod model;
 
@@ -11,6 +17,6 @@ pub mod plugin;
 pub mod spaces;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use plugin::SpacePlugin;
+pub use plugin::{SaveSpaceRequest, SpacePlugin};
 #[cfg(not(target_arch = "wasm32"))]
 pub use spaces::{ActiveSpace, SpacesView, active_space_rows, read_space_registry_from};

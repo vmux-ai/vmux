@@ -5,7 +5,6 @@ use crate::{
         AppCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands, SpaceCommand,
         StackCommand, TerminalCommand,
     },
-    spaces::{ActiveSpace, SpacesView},
 };
 use bevy::{
     ecs::message::MessageReader, ecs::relationship::Relationship, picking::Pickable, prelude::*,
@@ -34,6 +33,7 @@ use vmux_settings::AppSettings;
 use vmux_settings::SettingsView;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::{SPACES_WEBVIEW_URL, SpaceCommandEvent};
+use vmux_space::{ActiveSpace, SpacesView};
 use vmux_terminal::Terminal;
 use vmux_terminal::processes_monitor::ProcessesMonitor;
 use vmux_terminal::{new_terminal_bundle, new_terminal_bundle_with_cwd};
@@ -690,7 +690,7 @@ fn handle_open_command_bar(
         return;
     }
 
-    let bar_spaces = crate::spaces::active_space_rows(&active_space, active_stack_count)
+    let bar_spaces = vmux_space::active_space_rows(&active_space, active_stack_count)
         .into_iter()
         .map(|space| CommandBarSpace {
             id: space.id,

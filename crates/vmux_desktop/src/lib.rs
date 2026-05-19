@@ -18,7 +18,6 @@ mod persistence;
 pub mod profile;
 mod scene;
 pub(crate) mod shortcut;
-mod spaces;
 mod tray;
 pub mod updater;
 use bevy::asset::io::web::WebAssetPlugin;
@@ -28,20 +27,11 @@ use bevy::winit::WinitSettings;
 use std::time::Duration;
 
 use {
-    browser::BrowserPlugin,
-    command::CommandPlugin,
-    command_bar::CommandBarInputPlugin,
-    os_menu::OsMenuPlugin,
-    persistence::PersistencePlugin,
-    shortcut::ShortcutPlugin,
-    spaces::SpacesPlugin,
-    vmux_layout::LayoutPlugin,
-    vmux_layout::{LayoutChromePlugin, profile::ProfilePlugin, scene::ScenePlugin},
-    vmux_service::webview::ServicesPlugin,
-    vmux_settings::SettingsPlugin,
+    browser::BrowserPlugin, command::CommandPlugin, command_bar::CommandBarInputPlugin,
+    os_menu::OsMenuPlugin, persistence::PersistencePlugin, shortcut::ShortcutPlugin,
+    vmux_layout::LayoutPlugin, vmux_page::PageRegistryPlugin,
+    vmux_service::webview::ServicesPlugin, vmux_settings::SettingsPlugin, vmux_space::SpacePlugin,
     vmux_terminal::TerminalPlugin,
-    vmux_terminal::processes_monitor::ProcessesMonitorPlugin,
-    vmux_page::PageRegistryPlugin,
 };
 
 use vmux_agent::AgentPlugin;
@@ -103,14 +93,12 @@ impl Plugin for VmuxPlugin {
             SettingsPlugin,
             CommandPlugin,
             ShortcutPlugin,
-            ScenePlugin,
             OsMenuPlugin,
-            LayoutChromePlugin,
             TerminalPlugin,
             ServicesPlugin,
             CommandBarInputPlugin,
         ))
-        .add_plugins(SpacesPlugin)
+        .add_plugins(SpacePlugin)
         .add_plugins(BrowserPlugin)
         .add_systems(
             Update,
@@ -123,10 +111,8 @@ impl Plugin for VmuxPlugin {
             vmux_agent::AgentSessionPlugin,
             vmux_agent::AppAgentPlugin,
             vmux_agent::TerminalIntegrationPlugin,
-            ProcessesMonitorPlugin,
             layout_response::LayoutResponseForwarderPlugin,
             PersistencePlugin,
-            ProfilePlugin,
             LayoutPlugin,
             updater::VmuxUpdater::builder().build().plugin(),
             background_lifecycle::BackgroundLifecyclePlugin,

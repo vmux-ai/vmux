@@ -45,3 +45,8 @@ web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlE
 
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+bevy_cef_core = { workspace = true }
+serde_json = { workspace = true }
+vmux_settings = { path = "../vmux_settings" }

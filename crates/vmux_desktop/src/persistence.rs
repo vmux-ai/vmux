@@ -6,11 +6,7 @@ use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use std::path::PathBuf;
 
-use crate::{
-    browser::Browser,
-    profile::Profile,
-    spaces::{ActiveSpace, SpacesView},
-};
+use crate::{browser::Browser, profile::Profile};
 use vmux_core::PageMetadata;
 use vmux_layout::event::SERVICES_WEBVIEW_URL;
 use vmux_layout::event::TERMINAL_WEBVIEW_URL;
@@ -26,6 +22,7 @@ use vmux_settings::SettingsView;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::SPACES_WEBVIEW_URL;
 use vmux_space::migration::migrate_legacy_session_files;
+use vmux_space::{ActiveSpace, SpacesView};
 use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
 
@@ -81,6 +78,7 @@ impl Plugin for PersistencePlugin {
             dirty: false,
         })
         .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+        .add_message::<vmux_space::SaveSpaceRequest>()
         .add_observer(save_on_default_event)
         .add_observer(load_on_default_event)
         .add_systems(Startup, run_legacy_migration.before(load_space_on_startup))
@@ -97,7 +95,17 @@ impl Plugin for PersistencePlugin {
                 .run_if(resource_exists::<SpaceViewsNeedRebuild>),
         )
         .add_systems(Update, (mark_dirty_on_change, auto_save_system).chain())
-        .add_systems(Update, sync_launch_to_stack);
+        .add_systems(Update, sync_launch_to_stack)
+        .add_systems(Update, handle_save_space_requests);
+    }
+}
+
+fn handle_save_space_requests(
+    mut requests: MessageReader<vmux_space::SaveSpaceRequest>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        save_space_to_path(&mut commands, request.path.clone());
     }
 }
 
