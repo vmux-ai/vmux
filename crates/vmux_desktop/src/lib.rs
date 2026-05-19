@@ -28,7 +28,6 @@ use bevy::winit::WinitSettings;
 use std::time::Duration;
 
 use {
-    agent::AgentPlugin,
     browser::BrowserPlugin,
     command::CommandPlugin,
     command_bar::CommandBarInputPlugin,
@@ -44,6 +43,8 @@ use {
     vmux_terminal::processes_monitor::ProcessesMonitorPlugin,
     vmux_webview_app::WebviewAppRegistryPlugin,
 };
+
+use vmux_agent::AgentPlugin;
 
 pub struct VmuxPlugin;
 
@@ -111,6 +112,12 @@ impl Plugin for VmuxPlugin {
         ))
         .add_plugins(SpacesPlugin)
         .add_plugins(BrowserPlugin)
+        .add_systems(
+            Update,
+            agent_query::handle_agent_queries
+                .in_set(vmux_command::WriteAppCommands)
+                .after(vmux_terminal::ServiceMessageSet),
+        )
         .add_plugins((
             AgentPlugin,
             vmux_agent::AgentSessionPlugin,

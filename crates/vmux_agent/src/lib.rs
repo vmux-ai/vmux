@@ -1,9 +1,12 @@
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 pub mod app;
 pub mod app_plugin;
 pub mod claude;
 pub mod cli_trait;
 pub mod codex;
 pub mod components;
+pub mod desktop_plugin;
 pub mod echo;
 pub mod events;
 pub mod exec;
@@ -30,6 +33,7 @@ pub use app::AppAgentStrategy;
 pub use app_plugin::AppAgentPlugin;
 pub use cli_trait::CliAgentStrategy;
 pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};
+pub use desktop_plugin::AgentPlugin;
 pub use echo::{EchoAppStrategy, synthetic_echo_stream};
 pub use events::{
     AgentApprovalReply, AgentApprovalRequest, AgentCommandRequest, AgentDelta, AgentInput,

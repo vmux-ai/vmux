@@ -18,8 +18,12 @@ notify = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 crossbeam-channel = "0.5"
 futures-lite = "2"
+uuid = { workspace = true }
+url = { workspace = true }
+vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_service = { path = "../vmux_service" }
 vmux_settings = { path = "../vmux_settings" }
+vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
