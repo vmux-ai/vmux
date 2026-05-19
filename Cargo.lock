@@ -9312,6 +9312,7 @@ version = "0.0.9"
 dependencies = [
  "bevy",
  "bevy_cef",
+ "bevy_ecs",
  "dioxus",
  "js-sys",
  "rkyv",

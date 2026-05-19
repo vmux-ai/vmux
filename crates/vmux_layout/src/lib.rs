@@ -125,6 +125,13 @@ pub enum LayoutSpawnRequest {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone)]
+pub struct BrowserNavigateRequest {
+    pub url: String,
+    pub pane: Option<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub struct LayoutPlugin;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -134,6 +141,7 @@ impl Plugin for LayoutPlugin {
         app.init_resource::<NewStackContext>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .add_message::<LayoutSpawnRequest>()
+            .add_message::<BrowserNavigateRequest>()
             .add_message::<reconcile::LayoutApplyRequest>()
             .add_message::<reconcile::LayoutApplyResponse>()
             .add_message::<reconcile::LayoutSnapshotRequest>()
