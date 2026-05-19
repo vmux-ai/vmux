@@ -63,8 +63,7 @@ mod tests {
     #[test]
     fn plugin_registers_three_strategies() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(AgentSessionPlugin);
+        app.add_plugins((MinimalPlugins, AgentSessionPlugin));
         let strategies = app.world().resource::<AgentStrategies>();
         assert!(strategies.get_cli(crate::AgentKind::Vibe).is_some());
         assert!(strategies.get_cli(crate::AgentKind::Claude).is_some());

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use bevy_cef::prelude::*;
-use vmux_page::{UiReady, PageConfig, PageRegistry};
+use vmux_page::{PageReady, PageConfig, PageRegistry};
 
 use crate::event::{HISTORY_EVENT, HistoryEvent};
 use vmux_core::PageMetadata;
@@ -27,7 +27,7 @@ struct Sent(#[allow(dead_code)] i64);
 fn push_history_via_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    ready: Query<Entity, (With<WebviewSource>, With<UiReady>, Without<Sent>)>,
+    ready: Query<Entity, (With<WebviewSource>, With<PageReady>, Without<Sent>)>,
     history_q: Query<(&PageMetadata, &CreatedAt), With<Visit>>,
 ) {
     for wv in ready.iter() {

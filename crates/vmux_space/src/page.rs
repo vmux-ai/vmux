@@ -6,14 +6,6 @@ use vmux_space::model::DEFAULT_SPACE_ID;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 
-fn emit_command(command: &str, space_id: Option<String>, name: Option<String>) {
-    let _ = try_cef_bin_emit_rkyv(&SpaceCommandEvent {
-        command: command.to_string(),
-        space_id,
-        name,
-    });
-}
-
 #[component]
 pub fn Page() -> Element {
     use_theme();
@@ -111,6 +103,14 @@ pub fn Page() -> Element {
             }
         }
     }
+}
+
+fn emit_command(command: &str, space_id: Option<String>, name: Option<String>) {
+    let _ = try_cef_bin_emit_rkyv(&SpaceCommandEvent {
+        command: command.to_string(),
+        space_id,
+        name,
+    });
 }
 
 #[component]

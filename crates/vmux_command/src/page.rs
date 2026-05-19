@@ -19,21 +19,6 @@ use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-fn looks_like_path(s: &str) -> bool {
-    s.starts_with('/')
-        || s.starts_with("~/")
-        || s.starts_with("./")
-        || s.starts_with("../")
-        || s.contains('/') && !s.contains(' ') && !s.contains("://")
-}
-
-fn emit_action(action: &str, value: &str) {
-    let _ = try_cef_bin_emit_rkyv(&CommandBarActionEvent {
-        action: action.to_string(),
-        value: value.to_string(),
-    });
-}
-
 #[component]
 pub fn Page() -> Element {
     use_theme();
@@ -479,6 +464,21 @@ pub fn Page() -> Element {
             }
         }
     }
+}
+
+fn looks_like_path(s: &str) -> bool {
+    s.starts_with('/')
+        || s.starts_with("~/")
+        || s.starts_with("./")
+        || s.starts_with("../")
+        || s.contains('/') && !s.contains(' ') && !s.contains("://")
+}
+
+fn emit_action(action: &str, value: &str) {
+    let _ = try_cef_bin_emit_rkyv(&CommandBarActionEvent {
+        action: action.to_string(),
+        value: value.to_string(),
+    });
 }
 
 fn focus_and_install_ctrl_bindings() {

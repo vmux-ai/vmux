@@ -19,4 +19,4 @@ pub mod spaces;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::{SaveSpaceRequest, SpacePlugin};
 #[cfg(not(target_arch = "wasm32"))]
-pub use spaces::{ActiveSpace, SpacesView, active_space_rows, read_space_registry_from};
+pub use spaces::{ActiveSpace, Spaces, active_space_rows, read_space_registry_from};

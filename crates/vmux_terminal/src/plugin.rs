@@ -18,7 +18,7 @@ use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
 use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
-use vmux_page::{PageConfig, PageRegistry, UiReady};
+use vmux_page::{PageConfig, PageReady, PageRegistry};
 use vmux_service::{
     client::{ServiceHandle, ServiceWake},
     protocol::{ClientMessage, ProcessId, ServiceMessage},
@@ -235,8 +235,10 @@ impl Plugin for TerminalPlugin {
             .init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
             .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
-            .add_plugins(BinJsEmitEventPlugin::<TermResizeEvent>::default())
-            .add_plugins(BinJsEmitEventPlugin::<TermMouseEvent>::default())
+            .add_plugins((
+                BinJsEmitEventPlugin::<TermResizeEvent>::default(),
+                BinJsEmitEventPlugin::<TermMouseEvent>::default(),
+            ))
             .add_systems(
                 PreUpdate,
                 (
@@ -378,7 +380,7 @@ fn spawn_url_into_stack(
         commands.spawn((ProcessesMonitor::new(meshes, webview_mt), ChildOf(stack)));
     } else if url.starts_with(vmux_space::event::SPACES_WEBVIEW_URL) {
         commands.spawn((
-            vmux_space::spaces::SpacesView::new(meshes, webview_mt),
+            vmux_space::spaces::Spaces::new(meshes, webview_mt),
             ChildOf(stack),
         ));
     } else {
@@ -1885,7 +1887,7 @@ fn on_term_mouse(
 
 /// Mark dirty when webview becomes ready so initial viewport is sent.
 fn on_term_ready(
-    trigger: On<Add, UiReady>,
+    trigger: On<Add, PageReady>,
     q: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
 ) {
@@ -1944,7 +1946,7 @@ fn on_term_resize(
 fn sync_terminal_theme(
     q: Query<Entity, With<Terminal>>,
     new_terminals: Query<Entity, Added<Terminal>>,
-    newly_ready: Query<Entity, (With<Terminal>, Added<UiReady>)>,
+    newly_ready: Query<Entity, (With<Terminal>, Added<PageReady>)>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     mut commands: Commands,
@@ -2345,10 +2347,12 @@ mod tests {
     #[test]
     fn terminal_update_schedule_has_no_before_after_cycle() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(vmux_command::CommandPlugin)
-            .add_plugins(vmux_layout::stack::StackPlugin)
-            .add_message::<LayoutSpawnRequest>();
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_command::CommandPlugin,
+            vmux_layout::stack::StackPlugin,
+        ))
+        .add_message::<LayoutSpawnRequest>();
         add_terminal_update_systems(&mut app);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();

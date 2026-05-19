@@ -16,7 +16,7 @@ use vmux_layout::{
 };
 use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentShellMode};
 use vmux_settings::AppSettings;
-use vmux_space::{ActiveSpace, SpacesView};
+use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::ProcessExited;
 use vmux_terminal::{ServiceMessageSet, new_terminal_bundle_with_cwd};
 
@@ -507,7 +507,7 @@ pub fn spawn_sessions_tab(
         title: "Sessions".to_string(),
         ..default()
     });
-    commands.spawn((SpacesView::new(meshes, webview_mt), ChildOf(tab)));
+    commands.spawn((Spaces::new(meshes, webview_mt), ChildOf(tab)));
     tab
 }
 
@@ -969,9 +969,7 @@ mod tests {
     fn agent_launch_request_uses_registered_provider_to_spawn_terminal_tab() {
         use bevy::ecs::relationship::Relationship;
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(vmux_command::CommandPlugin);
-        app.add_plugins(AgentPlugin);
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
         app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
@@ -1049,9 +1047,7 @@ mod tests {
     #[test]
     fn agent_plugin_registers_all_six_provider_entries() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(vmux_command::CommandPlugin);
-        app.add_plugins(AgentPlugin);
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
         let providers = app.world().resource::<AgentProviders>();
         for id in [
             "vibe_new",

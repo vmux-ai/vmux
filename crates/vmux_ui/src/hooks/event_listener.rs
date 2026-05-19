@@ -11,7 +11,7 @@ use wasm_bindgen::JsValue;
 use wasm_bindgen::closure::Closure;
 use web_sys::window;
 
-const UI_READY_BIN_EVENT_ID: &str = "vmux-ui-ready";
+const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventListenerError {
@@ -216,17 +216,17 @@ where
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-struct UiReadyPayload {}
+struct PageReadyPayload {}
 
-pub fn try_emit_ui_ready() -> Result<(), EventListenerError> {
+pub fn try_emit_page_ready() -> Result<(), EventListenerError> {
     use js_sys::{ArrayBuffer, Uint8Array};
 
     let cef = window_cef()?;
     let emit_fn = cef_bin_emit_fn(&cef)?;
 
-    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&UiReadyPayload {})
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&PageReadyPayload {})
         .map_err(|_| EventListenerError::SerializePayload)?;
-    let envelope = encode_bin_ipc_envelope(UI_READY_BIN_EVENT_ID, &bytes);
+    let envelope = encode_bin_ipc_envelope(PAGE_READY_BIN_EVENT_ID, &bytes);
     let buffer = ArrayBuffer::new(envelope.len() as u32);
     let view = Uint8Array::new(&buffer);
     view.copy_from(&envelope);
@@ -293,7 +293,7 @@ where
                 is_listening.set(true);
                 is_loading.set(false);
                 error.set(None);
-                match try_emit_ui_ready() {
+                match try_emit_page_ready() {
                     Ok(()) => {}
                     Err(e) => error.set(Some(format!("cef.emit failed: {e}"))),
                 }
@@ -349,7 +349,7 @@ where
                 is_listening.set(true);
                 is_loading.set(false);
                 error.set(None);
-                match try_emit_ui_ready() {
+                match try_emit_page_ready() {
                     Ok(()) => {}
                     Err(e) => error.set(Some(format!("cef.binEmit/emit failed: {e}"))),
                 }

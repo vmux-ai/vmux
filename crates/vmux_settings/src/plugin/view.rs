@@ -11,7 +11,7 @@ use vmux_layout::{
     stack::{FocusedStack, stack_bundle},
     window::WEBVIEW_MESH_DEPTH_BIAS,
 };
-use vmux_page::{PageConfig, PageRegistry, UiReady};
+use vmux_page::{PageConfig, PageReady, PageRegistry};
 
 use crate::event::{
     SETTINGS_LIST_EVENT, SETTINGS_SCHEMA_EVENT, SETTINGS_WEBVIEW_URL, SettingsCommandEvent,
@@ -21,9 +21,9 @@ use crate::schema::{FieldSpec, SectionSpec, SettingsSchema, WidgetKind};
 use crate::{AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json};
 
 #[derive(Component)]
-pub struct SettingsView;
+pub struct Settings;
 
-impl SettingsView {
+impl Settings {
     pub fn new(
         meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -73,9 +73,9 @@ impl SettingsView {
     }
 }
 
-pub(crate) fn reset_sent_markers_on_ui_ready(
-    trigger: On<BinReceive<UiReady>>,
-    views: Query<Entity, With<SettingsView>>,
+pub(crate) fn reset_sent_markers_on_page_ready(
+    trigger: On<BinReceive<PageReady>>,
+    views: Query<Entity, With<Settings>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -103,8 +103,8 @@ pub(crate) struct SettingsSchemaSent;
 
 pub(crate) fn broadcast_settings_to_views(
     settings: Res<AppSettings>,
-    pending: Query<Entity, (With<SettingsView>, With<UiReady>, Without<SettingsListSent>)>,
-    sent: Query<Entity, (With<SettingsView>, With<UiReady>, With<SettingsListSent>)>,
+    pending: Query<Entity, (With<Settings>, With<PageReady>, Without<SettingsListSent>)>,
+    sent: Query<Entity, (With<Settings>, With<PageReady>, With<SettingsListSent>)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -137,14 +137,7 @@ pub(crate) fn broadcast_settings_to_views(
 }
 
 pub(crate) fn broadcast_schema_to_views(
-    pending: Query<
-        Entity,
-        (
-            With<SettingsView>,
-            With<UiReady>,
-            Without<SettingsSchemaSent>,
-        ),
-    >,
+    pending: Query<Entity, (With<Settings>, With<PageReady>, Without<SettingsSchemaSent>)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -222,10 +215,7 @@ pub(crate) fn handle_open_settings_command(
             title: "Settings".to_string(),
             ..default()
         });
-        commands.spawn((
-            SettingsView::new(&mut meshes, &mut webview_mt),
-            ChildOf(tab),
-        ));
+        commands.spawn((Settings::new(&mut meshes, &mut webview_mt), ChildOf(tab)));
     }
 }
 

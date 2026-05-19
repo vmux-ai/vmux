@@ -7,8 +7,7 @@ use vmux_agent::{
 
 fn make_app() -> App {
     let mut app = App::new();
-    app.add_plugins(bevy::app::TaskPoolPlugin::default());
-    app.add_plugins(AppAgentPlugin);
+    app.add_plugins((bevy::app::TaskPoolPlugin::default(), AppAgentPlugin));
     app
 }
 

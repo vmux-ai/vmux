@@ -16,7 +16,7 @@ mod layout_response;
 mod os_menu;
 mod persistence;
 pub mod profile;
-mod scene;
+
 pub(crate) mod shortcut;
 mod tray;
 pub mod updater;
@@ -78,8 +78,8 @@ impl Plugin for VmuxPlugin {
             focused_mode: bevy::winit::UpdateMode::Continuous,
             unfocused_mode: bevy::winit::UpdateMode::reactive_low_power(Duration::from_secs(1)),
         })
-        .add_plugins(vmux_core::CorePlugin)
         .add_plugins((
+            vmux_core::CorePlugin,
             DefaultPlugins
                 .set(WebAssetPlugin {
                     silence_startup_warning: true,
@@ -97,9 +97,9 @@ impl Plugin for VmuxPlugin {
             TerminalPlugin,
             ServicesPlugin,
             CommandBarInputPlugin,
+            SpacePlugin,
+            BrowserPlugin,
         ))
-        .add_plugins(SpacePlugin)
-        .add_plugins(BrowserPlugin)
         .add_systems(
             Update,
             agent_query::handle_agent_queries

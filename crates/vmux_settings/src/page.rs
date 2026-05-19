@@ -13,13 +13,6 @@ use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 
-fn emit_update(path: &str, value: Value) {
-    let _ = try_cef_bin_emit_rkyv(&SettingsCommandEvent {
-        path: path.to_string(),
-        value: value.to_string(),
-    });
-}
-
 #[component]
 pub fn Page() -> Element {
     use_theme();
@@ -98,6 +91,13 @@ pub fn Page() -> Element {
             }
         }
     }
+}
+
+fn emit_update(path: &str, value: Value) {
+    let _ = try_cef_bin_emit_rkyv(&SettingsCommandEvent {
+        path: path.to_string(),
+        value: value.to_string(),
+    });
 }
 
 #[derive(Clone)]

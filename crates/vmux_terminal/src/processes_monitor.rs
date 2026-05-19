@@ -1,7 +1,7 @@
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_history::LastActivatedAt;
-use vmux_page::UiReady;
+use vmux_page::PageReady;
 use vmux_service::protocol::{ClientMessage, ProcessId};
 use vmux_service::webview::event::*;
 
@@ -31,9 +31,11 @@ impl Plugin for ProcessesMonitorPlugin {
                 1.0,
                 TimerMode::Repeating,
             )))
-            .add_plugins(BinJsEmitEventPlugin::<ProcessNavigateEvent>::default())
-            .add_plugins(BinJsEmitEventPlugin::<ProcessKillEvent>::default())
-            .add_plugins(BinJsEmitEventPlugin::<ProcessKillAllEvent>::default())
+            .add_plugins((
+                BinJsEmitEventPlugin::<ProcessNavigateEvent>::default(),
+                BinJsEmitEventPlugin::<ProcessKillEvent>::default(),
+                BinJsEmitEventPlugin::<ProcessKillAllEvent>::default(),
+            ))
             .add_systems(
                 Update,
                 (request_process_list, broadcast_to_monitors).chain(),
@@ -66,7 +68,7 @@ fn request_process_list(
 fn broadcast_to_monitors(
     process_list: Res<ServiceProcessList>,
     service: Option<Res<ServiceClient>>,
-    monitors: Query<Entity, (With<ProcessesMonitor>, With<UiReady>)>,
+    monitors: Query<Entity, (With<ProcessesMonitor>, With<PageReady>)>,
     browsers: NonSend<Browsers>,
     terminal_pids: Query<&ProcessId, With<Terminal>>,
     mut commands: Commands,

@@ -13,7 +13,7 @@ use runtime::{
 };
 use view::{
     broadcast_schema_to_views, broadcast_settings_to_views, handle_open_settings_command,
-    on_settings_command, register_settings_page, reset_sent_markers_on_ui_ready,
+    on_settings_command, register_settings_page, reset_sent_markers_on_page_ready,
 };
 
 pub struct SettingsPlugin;
@@ -43,7 +43,7 @@ impl Plugin for SettingsPlugin {
         register_settings_page(app.world_mut().resource_mut::<PageRegistry>().as_mut());
         app.add_plugins(BinJsEmitEventPlugin::<SettingsCommandEvent>::default())
             .add_observer(on_settings_command)
-            .add_observer(reset_sent_markers_on_ui_ready)
+            .add_observer(reset_sent_markers_on_page_ready)
             .add_systems(
                 Update,
                 (broadcast_schema_to_views, broadcast_settings_to_views),

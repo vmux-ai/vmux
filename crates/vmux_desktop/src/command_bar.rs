@@ -30,10 +30,10 @@ use vmux_layout::{
     window::{Main, Modal},
 };
 use vmux_settings::AppSettings;
-use vmux_settings::SettingsView;
+use vmux_settings::Settings;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::{SPACES_WEBVIEW_URL, SpaceCommandEvent};
-use vmux_space::{ActiveSpace, SpacesView};
+use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::Terminal;
 use vmux_terminal::processes_monitor::ProcessesMonitor;
 use vmux_terminal::{new_terminal_bundle, new_terminal_bundle_with_cwd};
@@ -77,10 +77,12 @@ impl Plugin for CommandBarInputPlugin {
             .init_resource::<AgentProviders>()
             .init_resource::<Messages<AgentLaunchRequested>>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .add_plugins(BinJsEmitEventPlugin::<CommandBarActionEvent>::default())
-            .add_plugins(BinJsEmitEventPlugin::<PathCompleteRequest>::default())
-            .add_plugins(BinJsEmitEventPlugin::<CommandBarReadyEvent>::default())
-            .add_plugins(BinJsEmitEventPlugin::<CommandBarRenderedEvent>::default())
+            .add_plugins((
+                BinJsEmitEventPlugin::<CommandBarActionEvent>::default(),
+                BinJsEmitEventPlugin::<PathCompleteRequest>::default(),
+                BinJsEmitEventPlugin::<CommandBarReadyEvent>::default(),
+                BinJsEmitEventPlugin::<CommandBarRenderedEvent>::default(),
+            ))
             .add_observer(on_command_bar_action)
             .add_observer(on_path_complete_request)
             .add_observer(on_command_bar_ready)
@@ -790,7 +792,7 @@ fn attach_spaces_page_to_tab(
         title: "Spaces".to_string(),
         ..default()
     });
-    commands.spawn((SpacesView::new(meshes, webview_mt), ChildOf(tab)));
+    commands.spawn((Spaces::new(meshes, webview_mt), ChildOf(tab)));
 }
 
 fn attach_settings_page_to_tab(
@@ -804,7 +806,7 @@ fn attach_settings_page_to_tab(
         title: "Settings".to_string(),
         ..default()
     });
-    commands.spawn((SettingsView::new(meshes, webview_mt), ChildOf(tab)));
+    commands.spawn((Settings::new(meshes, webview_mt), ChildOf(tab)));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2247,8 +2249,7 @@ mod tests {
     #[test]
     fn command_bar_open_runs_after_tab_commands() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_plugins(vmux_layout::stack::StackPlugin);
         app.add_plugins(CommandBarInputPlugin);
 
@@ -2279,8 +2280,7 @@ mod tests {
     #[test]
     fn command_bar_open_bootstraps_hidden_modal_before_js_ready() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<NewStackContext>();
         app.init_resource::<ActiveSpace>();
         app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
@@ -2315,8 +2315,7 @@ mod tests {
     #[test]
     fn command_bar_open_retries_hidden_keyboard_targeted_modal() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<NewStackContext>();
         app.init_resource::<ActiveSpace>();
         app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
@@ -2350,8 +2349,7 @@ mod tests {
     #[test]
     fn spaces_url_from_command_bar_opens_spaces_tab() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
@@ -2392,7 +2390,7 @@ mod tests {
             });
         app.update();
 
-        let mut spaces_query = app.world_mut().query::<&SpacesView>();
+        let mut spaces_query = app.world_mut().query::<&Spaces>();
         let spaces_count = spaces_query.iter(app.world()).count();
 
         assert_eq!(spaces_count, 1);
@@ -2401,8 +2399,7 @@ mod tests {
     #[test]
     fn spaces_url_without_active_pane_spawns_spaces_page_layout() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
@@ -2436,7 +2433,7 @@ mod tests {
             });
         app.update();
 
-        let mut spaces_query = app.world_mut().query::<&SpacesView>();
+        let mut spaces_query = app.world_mut().query::<&Spaces>();
         assert_eq!(spaces_query.iter(app.world()).count(), 1);
 
         let mut tabs = app.world_mut().query::<&Space>();
@@ -2451,7 +2448,7 @@ mod tests {
                 .map(|(entity, meta, children)| {
                     let has_spaces_view = children
                         .iter()
-                        .any(|child| app.world().get::<SpacesView>(child).is_some());
+                        .any(|child| app.world().get::<Spaces>(child).is_some());
                     (entity, meta.url.clone(), has_spaces_view)
                 })
                 .collect::<Vec<_>>()
@@ -2483,8 +2480,7 @@ mod tests {
     #[test]
     fn space_action_forwards_attach_event() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_observer(on_command_bar_action);
         app.add_observer(capture_space_command);
@@ -2540,8 +2536,7 @@ mod tests {
     #[test]
     fn space_action_does_not_restore_keyboard_to_old_browser() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
@@ -2591,8 +2586,7 @@ mod tests {
     #[test]
     fn space_action_disables_modal_picking() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
@@ -2643,8 +2637,7 @@ mod tests {
     #[test]
     fn dismissing_only_pending_stack_in_new_space_closes_space() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();

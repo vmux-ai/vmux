@@ -10,6 +10,63 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 
+#[component]
+pub fn Page() -> Element {
+    use_theme();
+
+    let mut layout_state = use_signal(LayoutStateEvent::default);
+    let _layout_listener =
+        use_bin_event_listener::<LayoutStateEvent, _>(LAYOUT_STATE_EVENT, move |data| {
+            layout_state.set(data);
+        });
+
+    let state = layout_state();
+    let radius_px = state.radius;
+    use_effect(move || {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document())
+            && let Some(root) = doc.document_element()
+            && let Ok(html) = root.dyn_into::<web_sys::HtmlElement>()
+        {
+            let _ = html
+                .style()
+                .set_property("--radius", &format!("{radius_px}px"));
+        }
+    });
+    let side_sheet_vars = format!(
+        "--vmux-side-sheet-width:{}px;--vmux-side-sheet-pad-top:{}px;",
+        state.side_sheet_width,
+        vmux_layout::event::url_bar_top(),
+    );
+    let header_vars = format!(
+        "--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;",
+        state.main_chrome_left(),
+        vmux_layout::event::WINDOW_PAD_PX,
+        state.header_height,
+        state.tab_row_pad_left(),
+    );
+
+    rsx! {
+        div { class: "fixed inset-0 pointer-events-none text-foreground",
+            if state.side_sheet_open {
+                aside {
+                    class: "pointer-events-auto fixed left-0 top-0 bottom-0 min-h-0 overflow-hidden w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
+                    style: "{side_sheet_vars}",
+                    div { class: "flex h-full min-h-0 flex-col",
+                        SideSheetView {}
+                    }
+                }
+            }
+            if state.header_visible() {
+                div {
+                    class: "pointer-events-auto fixed top-0 left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
+                    style: "{header_vars}",
+                    HeaderView {}
+                }
+            }
+        }
+    }
+}
+
 fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
     let trimmed = s.trim();
     if let Some(rest) = trimmed.strip_prefix('#')
@@ -107,63 +164,6 @@ fn format_address(stack: &StackRow) -> String {
         (Some(h), true) => h.to_string(),
         (None, false) => title.to_string(),
         (None, true) => stack.url.clone(),
-    }
-}
-
-#[component]
-pub fn Page() -> Element {
-    use_theme();
-
-    let mut layout_state = use_signal(LayoutStateEvent::default);
-    let _layout_listener =
-        use_bin_event_listener::<LayoutStateEvent, _>(LAYOUT_STATE_EVENT, move |data| {
-            layout_state.set(data);
-        });
-
-    let state = layout_state();
-    let radius_px = state.radius;
-    use_effect(move || {
-        if let Some(doc) = web_sys::window().and_then(|w| w.document())
-            && let Some(root) = doc.document_element()
-            && let Ok(html) = root.dyn_into::<web_sys::HtmlElement>()
-        {
-            let _ = html
-                .style()
-                .set_property("--radius", &format!("{radius_px}px"));
-        }
-    });
-    let side_sheet_vars = format!(
-        "--vmux-side-sheet-width:{}px;--vmux-side-sheet-pad-top:{}px;",
-        state.side_sheet_width,
-        vmux_layout::event::url_bar_top(),
-    );
-    let header_vars = format!(
-        "--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;",
-        state.main_chrome_left(),
-        vmux_layout::event::WINDOW_PAD_PX,
-        state.header_height,
-        state.tab_row_pad_left(),
-    );
-
-    rsx! {
-        div { class: "fixed inset-0 pointer-events-none text-foreground",
-            if state.side_sheet_open {
-                aside {
-                    class: "pointer-events-auto fixed left-0 top-0 bottom-0 min-h-0 overflow-hidden w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
-                    style: "{side_sheet_vars}",
-                    div { class: "flex h-full min-h-0 flex-col",
-                        SideSheetView {}
-                    }
-                }
-            }
-            if state.header_visible() {
-                div {
-                    class: "pointer-events-auto fixed top-0 left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
-                    style: "{header_vars}",
-                    HeaderView {}
-                }
-            }
-        }
     }
 }
 

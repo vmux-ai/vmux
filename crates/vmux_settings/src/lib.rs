@@ -20,4 +20,4 @@ pub use plugin::runtime::{
     resolve_startup_url, serialize_settings_to_json, set_at_path,
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub use plugin::view::SettingsView;
+pub use plugin::view::Settings;

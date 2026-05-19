@@ -71,8 +71,7 @@ mod tests {
     #[test]
     fn plugin_builds_without_panic() {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        app.add_plugins(AppAgentPlugin);
+        app.add_plugins((bevy::app::TaskPoolPlugin::default(), AppAgentPlugin));
         app.update();
     }
 }

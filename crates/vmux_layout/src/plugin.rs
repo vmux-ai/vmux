@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_page::JsEmitUiReadyPlugin;
+use vmux_page::JsEmitPageReadyPlugin;
 
 use crate::chrome::LayoutChromePlugin;
 use crate::focus_ring::FocusRingPlugin;
@@ -52,7 +52,7 @@ impl Plugin for LayoutPlugin {
                 ),
             );
         app.add_plugins((
-            JsEmitUiReadyPlugin,
+            JsEmitPageReadyPlugin,
             ProfilePlugin,
             ScenePlugin,
             LayoutChromePlugin,

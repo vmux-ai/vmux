@@ -67,7 +67,11 @@ fn reveal_webviews(
     }
 }
 
-fn webview_reveal_ready(_source: &WebviewSource, _has_ui_ready: bool, pending_frames: u8) -> bool {
+fn webview_reveal_ready(
+    _source: &WebviewSource,
+    _has_page_ready: bool,
+    pending_frames: u8,
+) -> bool {
     pending_frames >= REVEAL_FRAMES
 }
 
@@ -76,7 +80,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn vmux_ui_webviews_reveal_after_frame_delay_even_without_ui_ready() {
+    fn vmux_ui_webviews_reveal_after_frame_delay_even_without_page_ready() {
         assert!(!webview_reveal_ready(
             &WebviewSource::new("vmux://header/"),
             false,

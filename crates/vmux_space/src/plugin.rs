@@ -7,7 +7,7 @@ use vmux_core::PageMetadata;
 use vmux_core::profile;
 use vmux_layout::NewStackContext;
 use vmux_layout::stack::Stack;
-use vmux_page::{PageConfig, PageRegistry, UiReady};
+use vmux_page::{PageConfig, PageReady, PageRegistry};
 
 use crate::event::{
     SPACES_LIST_EVENT, SPACES_WEBVIEW_URL, SpaceCommandEvent, SpaceRow, SpacesListEvent,
@@ -16,7 +16,7 @@ use crate::model::{
     DEFAULT_SPACE_ID, SpaceRecord, SpaceRegistry, default_space_record, registry_path,
     space_layout_path_for, unique_space_id,
 };
-use crate::spaces::{ActiveSpace, SpacesView, read_space_registry_from};
+use crate::spaces::{ActiveSpace, Spaces, read_space_registry_from};
 
 #[derive(Message, Clone)]
 pub struct SaveSpaceRequest {
@@ -32,7 +32,7 @@ impl Plugin for SpacePlugin {
         register_spaces_page(app.world_mut().resource_mut::<PageRegistry>().as_mut());
         app.add_plugins(BinJsEmitEventPlugin::<SpaceCommandEvent>::default())
             .add_observer(on_space_command)
-            .add_observer(reset_spaces_sent_marker_on_ui_ready)
+            .add_observer(reset_spaces_sent_marker_on_page_ready)
             .add_systems(
                 Update,
                 (apply_pending_space_switch, broadcast_spaces_to_views).chain(),
@@ -43,9 +43,9 @@ impl Plugin for SpacePlugin {
 #[derive(Component)]
 struct SpacesListSent;
 
-fn reset_spaces_sent_marker_on_ui_ready(
-    trigger: On<BinReceive<UiReady>>,
-    spaces_views: Query<(), With<SpacesView>>,
+fn reset_spaces_sent_marker_on_page_ready(
+    trigger: On<BinReceive<PageReady>>,
+    spaces_views: Query<(), With<Spaces>>,
     chrome_views: Query<(), With<vmux_layout::LayoutChrome>>,
     mut commands: Commands,
 ) {
@@ -125,13 +125,13 @@ struct PendingSpaceSwitch {
 
 fn broadcast_spaces_to_views(
     active: Res<ActiveSpace>,
-    pending_spaces: Query<Entity, (With<SpacesView>, With<UiReady>, Without<SpacesListSent>)>,
-    sent_spaces: Query<Entity, (With<SpacesView>, With<UiReady>, With<SpacesListSent>)>,
+    pending_spaces: Query<Entity, (With<Spaces>, With<PageReady>, Without<SpacesListSent>)>,
+    sent_spaces: Query<Entity, (With<Spaces>, With<PageReady>, With<SpacesListSent>)>,
     pending_chrome: Query<
         Entity,
         (
             With<vmux_layout::LayoutChrome>,
-            With<UiReady>,
+            With<PageReady>,
             Without<SpacesListSent>,
         ),
     >,
@@ -139,7 +139,7 @@ fn broadcast_spaces_to_views(
         Entity,
         (
             With<vmux_layout::LayoutChrome>,
-            With<UiReady>,
+            With<PageReady>,
             With<SpacesListSent>,
         ),
     >,
@@ -273,7 +273,7 @@ fn spawn_spaces_page_layout(
         favicon_url: String::new(),
         bg_color: None,
     });
-    commands.spawn((SpacesView::new(meshes, webview_mt), ChildOf(tab)));
+    commands.spawn((Spaces::new(meshes, webview_mt), ChildOf(tab)));
 }
 
 fn on_space_command(
@@ -618,7 +618,7 @@ mod tests {
                 ChildOf(pane),
             ))
             .id();
-        let webview = app.world_mut().spawn((SpacesView, ChildOf(tab))).id();
+        let webview = app.world_mut().spawn((Spaces, ChildOf(tab))).id();
 
         app.world_mut()
             .entity_mut(webview)
@@ -679,7 +679,7 @@ mod tests {
                 ChildOf(pane),
             ))
             .id();
-        let webview = app.world_mut().spawn((SpacesView, ChildOf(tab))).id();
+        let webview = app.world_mut().spawn((Spaces, ChildOf(tab))).id();
 
         app.world_mut()
             .entity_mut(webview)
@@ -751,7 +751,7 @@ mod tests {
                 ChildOf(pane),
             ))
             .id();
-        let webview = app.world_mut().spawn((SpacesView, ChildOf(tab))).id();
+        let webview = app.world_mut().spawn((Spaces, ChildOf(tab))).id();
         *app.world_mut()
             .resource_mut::<vmux_layout::stack::FocusedStack>() =
             vmux_layout::stack::FocusedStack {
@@ -789,7 +789,7 @@ mod tests {
                 .map(|(entity, meta, children)| {
                     let has_spaces_view = children
                         .iter()
-                        .any(|child| app.world().get::<SpacesView>(child).is_some());
+                        .any(|child| app.world().get::<Spaces>(child).is_some());
                     (entity, meta.url.clone(), has_spaces_view)
                 })
                 .collect::<Vec<_>>()
@@ -814,10 +814,12 @@ mod tests {
             },
         );
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(vmux_command::CommandPlugin);
-        app.add_plugins(bevy_cef::prelude::JsEmitEventPlugin::<SpaceCommandEvent>::default());
-        app.add_plugins(vmux_layout::stack::StackPlugin);
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_command::CommandPlugin,
+            bevy_cef::prelude::JsEmitEventPlugin::<SpaceCommandEvent>::default(),
+            vmux_layout::stack::StackPlugin,
+        ));
         app.add_message::<vmux_layout::LayoutSpawnRequest>();
         app.add_message::<SaveSpaceRequest>();
         app.add_observer(on_space_command);
@@ -855,7 +857,7 @@ mod tests {
                 ChildOf(pane),
             ))
             .id();
-        let webview = app.world_mut().spawn((SpacesView, ChildOf(tab))).id();
+        let webview = app.world_mut().spawn((Spaces, ChildOf(tab))).id();
         let payload = serde_json::to_string(&SpaceCommandEvent {
             command: "new".to_string(),
             space_id: None,

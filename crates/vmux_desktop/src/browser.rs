@@ -32,7 +32,7 @@ use vmux_layout::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
     },
 };
-use vmux_page::{PageRegistry, UiReady};
+use vmux_page::{PageReady, PageRegistry};
 use vmux_settings::AppSettings;
 use vmux_terminal::{self as terminal, PtyExited, RestartPty, Terminal};
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
@@ -44,14 +44,16 @@ impl Plugin for BrowserPlugin {
         let embedded_hosts = app.world().resource::<PageRegistry>().embedded_hosts();
         webview_debug_log(format!("BrowserPlugin embedded_hosts={embedded_hosts:?}"));
         app.configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
-            .add_plugins(CefPlugin {
-                root_cache_path: cef_root_cache_path(),
-                embedded_hosts,
-                ..default()
-            })
-            .add_plugins(BinJsEmitEventPlugin::<HeaderCommandEvent>::default())
-            .add_plugins(BinJsEmitEventPlugin::<SideSheetCommandEvent>::default())
-            .add_plugins(JsEmitEventPlugin::<PageBgColorEvent>::default())
+            .add_plugins((
+                CefPlugin {
+                    root_cache_path: cef_root_cache_path(),
+                    embedded_hosts,
+                    ..default()
+                },
+                BinJsEmitEventPlugin::<HeaderCommandEvent>::default(),
+                BinJsEmitEventPlugin::<SideSheetCommandEvent>::default(),
+                JsEmitEventPlugin::<PageBgColorEvent>::default(),
+            ))
             .add_observer(on_webview_ready_send_theme)
             .add_observer(on_header_command_emit)
             .add_observer(on_side_sheet_command_emit)
@@ -104,7 +106,7 @@ impl Plugin for BrowserPlugin {
 }
 
 fn on_webview_ready_send_theme(
-    trigger: On<Add, UiReady>,
+    trigger: On<Add, PageReady>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     chrome_q: Query<(), With<LayoutChrome>>,
@@ -132,7 +134,7 @@ fn on_webview_ready_send_theme(
 }
 
 fn sync_keyboard_target(
-    mode: Res<crate::scene::InteractionMode>,
+    mode: Res<vmux_layout::scene::InteractionMode>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
@@ -150,7 +152,7 @@ fn sync_keyboard_target(
     // In Player mode, only sync when a pane has been clicked (Focused sub-state).
     // In Roaming (no CefKeyboardTarget on any pane browser), skip sync to prevent
     // re-assigning the target to the previously active pane.
-    if *mode == crate::scene::InteractionMode::Player {
+    if *mode == vmux_layout::scene::InteractionMode::Player {
         let has_pane_target = content_q
             .iter()
             .any(|(e, has_kb)| has_kb && !status_q.contains(e) && !side_sheet_q.contains(e));
@@ -694,14 +696,14 @@ fn flush_pending_osr_textures(
 fn push_layout_state_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
+    chrome_q: Query<(Entity, Ref<PageReady>), With<LayoutChrome>>,
     header_q: Query<Has<Open>, With<Header>>,
     side_sheet_q: Query<(&SideSheetPosition, Has<Open>), With<SideSheet>>,
     side_sheet_width: Res<SideSheetWidth>,
     settings: Res<AppSettings>,
     mut last: Local<String>,
 ) {
-    let Ok((chrome_e, ui_ready)) = chrome_q.single() else {
+    let Ok((chrome_e, page_ready)) = chrome_q.single() else {
         return;
     };
     if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
@@ -719,7 +721,7 @@ fn push_layout_state_emit(
         radius: settings.layout.radius,
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !should_emit_cached_payload(&body, &last, ui_ready.is_changed()) {
+    if !should_emit_cached_payload(&body, &last, page_ready.is_changed()) {
         return;
     }
     commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -746,14 +748,14 @@ fn should_emit_new_stack_placeholder(
         .any(|row| row.is_active && !row.url.is_empty() && row.url != "about:blank")
 }
 
-fn should_emit_cached_payload(body: &str, last: &str, ui_ready_changed: bool) -> bool {
-    ui_ready_changed || body != last
+fn should_emit_cached_payload(body: &str, last: &str, page_ready_changed: bool) -> bool {
+    page_ready_changed || body != last
 }
 
 fn push_stacks_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
+    chrome_q: Query<(Entity, Ref<PageReady>), With<LayoutChrome>>,
     browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), With<Browser>>,
     stack_q: Query<(), With<Stack>>,
     zoomed_q: Query<(), With<vmux_layout::pane::Zoomed>>,
@@ -762,7 +764,7 @@ fn push_stacks_host_emit(
     child_of_q: Query<&ChildOf>,
     mut last: Local<String>,
 ) {
-    let Ok((chrome_e, ui_ready)) = chrome_q.single() else {
+    let Ok((chrome_e, page_ready)) = chrome_q.single() else {
         return;
     };
     if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
@@ -821,7 +823,7 @@ fn push_stacks_host_emit(
         is_zoomed,
     };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !should_emit_cached_payload(&ron_body, &last, ui_ready.is_changed()) {
+    if !should_emit_cached_payload(&ron_body, &last, page_ready.is_changed()) {
         return;
     }
     warn!(
@@ -840,7 +842,7 @@ fn push_stacks_host_emit(
 fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
+    chrome_q: Query<(Entity, Ref<PageReady>), With<LayoutChrome>>,
     new_stack_ctx: Res<crate::command_bar::NewStackContext>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     tab_q: Query<(), With<Space>>,
@@ -853,7 +855,7 @@ fn push_pane_tree_emit(
     browser_meta: Query<(&PageMetadata, Has<Loading>), With<Browser>>,
     mut last: Local<String>,
 ) {
-    let Ok((chrome_e, ui_ready)) = chrome_q.single() else {
+    let Ok((chrome_e, page_ready)) = chrome_q.single() else {
         return;
     };
     if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
@@ -936,7 +938,7 @@ fn push_pane_tree_emit(
     }
     let payload = PaneTreeEvent { panes };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !should_emit_cached_payload(&ron_body, &last, ui_ready.is_changed()) {
+    if !should_emit_cached_payload(&ron_body, &last, page_ready.is_changed()) {
         return;
     }
     commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -951,7 +953,7 @@ fn push_pane_tree_emit(
 fn push_tabs_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
+    chrome_q: Query<(Entity, Ref<PageReady>), With<LayoutChrome>>,
     tabs: Query<(Entity, &Space, &LastActivatedAt)>,
     tab_q: Query<Entity, With<Space>>,
     child_of_q: Query<&ChildOf>,
@@ -963,7 +965,7 @@ fn push_tabs_host_emit(
     browser_meta: Query<&PageMetadata, With<Browser>>,
     mut last: Local<String>,
 ) {
-    let Ok((chrome_e, ui_ready)) = chrome_q.single() else {
+    let Ok((chrome_e, page_ready)) = chrome_q.single() else {
         return;
     };
     if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
@@ -1012,7 +1014,7 @@ fn push_tabs_host_emit(
 
     let payload = TabsHostEvent { tabs: rows };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
-    if !ui_ready.is_changed() && body == *last {
+    if !page_ready.is_changed() && body == *last {
         return;
     }
     commands.trigger(BinHostEmitEvent::from_rkyv(chrome_e, TABS_EVENT, &payload));
@@ -1150,7 +1152,7 @@ fn on_header_command_emit(
 
 fn on_reload_notify_header(
     _trigger: On<RequestReload>,
-    chrome: Option<Single<Entity, (With<LayoutChrome>, With<UiReady>)>>,
+    chrome: Option<Single<Entity, (With<LayoutChrome>, With<PageReady>)>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -1167,7 +1169,7 @@ fn on_reload_notify_header(
 
 fn on_hard_reload_notify_header(
     _trigger: On<RequestReloadIgnoreCache>,
-    chrome: Option<Single<Entity, (With<LayoutChrome>, With<UiReady>)>>,
+    chrome: Option<Single<Entity, (With<LayoutChrome>, With<PageReady>)>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -1672,7 +1674,7 @@ mod tests {
     }
 
     #[test]
-    fn host_payload_emits_again_when_ui_ready_changes() {
+    fn host_payload_emits_again_when_page_ready_changes() {
         assert!(should_emit_cached_payload("tabs", "tabs", true));
         assert!(should_emit_cached_payload("tabs-2", "tabs", false));
         assert!(!should_emit_cached_payload("tabs", "tabs", false));
@@ -1741,9 +1743,7 @@ mod tests {
             use vmux_layout::Browser;
 
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins);
-            app.add_plugins(vmux_command::CommandPlugin);
-            app.add_plugins(AgentPlugin);
+            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>();
             app.insert_resource(FocusedStack::default());
@@ -1791,9 +1791,7 @@ mod tests {
             use vmux_layout::Browser;
 
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins);
-            app.add_plugins(vmux_command::CommandPlugin);
-            app.add_plugins(AgentPlugin);
+            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>();
             app.insert_resource(FocusedStack::default());
@@ -1849,9 +1847,7 @@ mod tests {
         #[test]
         fn browser_navigate_targets_specific_pane_when_id_provided() {
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins);
-            app.add_plugins(vmux_command::CommandPlugin);
-            app.add_plugins(AgentPlugin);
+            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>();
             app.insert_resource(FocusedStack::default());
@@ -1894,9 +1890,7 @@ mod tests {
         #[test]
         fn browser_navigate_with_terminal_url_spawns_terminal_in_focused_pane() {
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins);
-            app.add_plugins(vmux_command::CommandPlugin);
-            app.add_plugins(AgentPlugin);
+            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>();
             app.insert_resource(FocusedStack::default());
@@ -1931,9 +1925,7 @@ mod tests {
         #[test]
         fn browser_navigate_with_terminal_url_and_target_pane_uses_target() {
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins);
-            app.add_plugins(vmux_command::CommandPlugin);
-            app.add_plugins(AgentPlugin);
+            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>();
             app.insert_resource(FocusedStack::default());
@@ -1981,9 +1973,7 @@ mod tests {
             use vmux_layout::Browser;
 
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins);
-            app.add_plugins(vmux_command::CommandPlugin);
-            app.add_plugins(AgentPlugin);
+            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>();
             app.insert_resource(FocusedStack::default());
@@ -2025,9 +2015,7 @@ mod tests {
             use vmux_layout::Browser;
 
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins);
-            app.add_plugins(vmux_command::CommandPlugin);
-            app.add_plugins(AgentPlugin);
+            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>();
             app.insert_resource(FocusedStack::default());
@@ -2067,9 +2055,7 @@ mod tests {
             use vmux_layout::Browser;
 
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins);
-            app.add_plugins(vmux_command::CommandPlugin);
-            app.add_plugins(AgentPlugin);
+            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>();
             app.insert_resource(FocusedStack::default());

@@ -83,9 +83,9 @@ pub fn active_space_rows(active: &ActiveSpace, active_stack_count: usize) -> Vec
 }
 
 #[derive(Component)]
-pub struct SpacesView;
+pub struct Spaces;
 
-impl SpacesView {
+impl Spaces {
     pub fn new(
         meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,

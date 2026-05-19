@@ -8,7 +8,7 @@ use bevy_cef_core::prelude::{CefEmbeddedHost, CefEmbeddedHosts, webview_debug_lo
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-const UI_READY_BIN_EVENT_ID: &str = "vmux-ui-ready";
+const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 
 #[cfg(feature = "build")]
 pub mod build;
@@ -27,31 +27,31 @@ pub struct PageEmbedSet;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct UiReady {}
+pub struct PageReady {}
 
 #[cfg(test)]
-mod ui_ready_tests {
+mod page_ready_tests {
     use super::*;
 
     #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-    struct UiReadyPayloadProbe {}
+    struct PageReadyPayloadProbe {}
 
     #[test]
-    fn ui_ready_cross_type_rkyv_compat() {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&UiReadyPayloadProbe {}).expect("ser");
-        println!("UiReady archive byte length: {}", bytes.len());
-        println!("UiReady archive bytes: {:?}", &bytes[..]);
+    fn page_ready_cross_type_rkyv_compat() {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&PageReadyPayloadProbe {}).expect("ser");
+        println!("PageReady archive byte length: {}", bytes.len());
+        println!("PageReady archive bytes: {:?}", &bytes[..]);
         let _decoded =
-            rkyv::from_bytes::<UiReady, rkyv::rancor::Error>(&bytes).expect("cross-type decode");
+            rkyv::from_bytes::<PageReady, rkyv::rancor::Error>(&bytes).expect("cross-type decode");
     }
 
     #[test]
-    fn ui_ready_self_rkyv_roundtrip() {
-        let original = UiReady {};
+    fn page_ready_self_rkyv_roundtrip() {
+        let original = PageReady {};
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
-        println!("UiReady self archive byte length: {}", bytes.len());
+        println!("PageReady self archive byte length: {}", bytes.len());
         let _decoded =
-            rkyv::from_bytes::<UiReady, rkyv::rancor::Error>(&bytes).expect("self decode");
+            rkyv::from_bytes::<PageReady, rkyv::rancor::Error>(&bytes).expect("self decode");
     }
 }
 
@@ -131,19 +131,19 @@ impl Plugin for PageRegistryPlugin {
     }
 }
 
-pub struct JsEmitUiReadyPlugin;
+pub struct JsEmitPageReadyPlugin;
 
-impl Plugin for JsEmitUiReadyPlugin {
+impl Plugin for JsEmitPageReadyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinJsEmitEventPlugin::<UiReady>::with_id(
-            UI_READY_BIN_EVENT_ID,
+        app.add_plugins(BinJsEmitEventPlugin::<PageReady>::with_id(
+            PAGE_READY_BIN_EVENT_ID,
         ))
-        .add_observer(mark_webview_ui_ready_on_js_emit);
+        .add_observer(mark_webview_page_ready_on_js_emit);
     }
 }
 
-fn mark_webview_ui_ready_on_js_emit(trigger: On<BinReceive<UiReady>>, mut commands: Commands) {
-    webview_debug_log(format!("UiReady entity={:?}", trigger.event().webview));
+fn mark_webview_page_ready_on_js_emit(trigger: On<BinReceive<PageReady>>, mut commands: Commands) {
+    webview_debug_log(format!("PageReady entity={:?}", trigger.event().webview));
     commands
         .entity(trigger.event().webview)
         .insert(trigger.event().payload);

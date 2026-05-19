@@ -18,11 +18,11 @@ use vmux_layout::{
     window::Main,
 };
 use vmux_settings::AppSettings;
-use vmux_settings::SettingsView;
+use vmux_settings::Settings;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::SPACES_WEBVIEW_URL;
 use vmux_space::migration::migrate_legacy_session_files;
-use vmux_space::{ActiveSpace, SpacesView};
+use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
 
@@ -94,9 +94,14 @@ impl Plugin for PersistencePlugin {
                 .chain()
                 .run_if(resource_exists::<SpaceViewsNeedRebuild>),
         )
-        .add_systems(Update, (mark_dirty_on_change, auto_save_system).chain())
-        .add_systems(Update, sync_launch_to_stack)
-        .add_systems(Update, handle_save_space_requests);
+        .add_systems(
+            Update,
+            (
+                (mark_dirty_on_change, auto_save_system).chain(),
+                sync_launch_to_stack,
+                handle_save_space_requests,
+            ),
+        );
     }
 }
 
@@ -394,18 +399,12 @@ pub(crate) fn rebuild_space_views(
                 .url
                 .starts_with(SPACES_WEBVIEW_URL.trim_end_matches('/'))
             {
-                commands.spawn((
-                    SpacesView::new(&mut meshes, &mut webview_mt),
-                    ChildOf(entity),
-                ));
+                commands.spawn((Spaces::new(&mut meshes, &mut webview_mt), ChildOf(entity)));
             } else if meta
                 .url
                 .starts_with(SETTINGS_WEBVIEW_URL.trim_end_matches('/'))
             {
-                commands.spawn((
-                    SettingsView::new(&mut meshes, &mut webview_mt),
-                    ChildOf(entity),
-                ));
+                commands.spawn((Settings::new(&mut meshes, &mut webview_mt), ChildOf(entity)));
             } else {
                 commands.spawn((
                     Browser::new(&mut meshes, &mut webview_mt, &meta.url),

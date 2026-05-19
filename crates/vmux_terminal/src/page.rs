@@ -13,22 +13,6 @@ use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-// Tailwind safelist -- these classes are generated dynamically via format!() and
-// must appear as literal strings for Tailwind's content scanner to detect them.
-#[rustfmt::skip]
-const _TW_SAFELIST: &[&str] = &[
-    "text-ansi-0",  "text-ansi-1",  "text-ansi-2",  "text-ansi-3",
-    "text-ansi-4",  "text-ansi-5",  "text-ansi-6",  "text-ansi-7",
-    "text-ansi-8",  "text-ansi-9",  "text-ansi-10", "text-ansi-11",
-    "text-ansi-12", "text-ansi-13", "text-ansi-14", "text-ansi-15",
-    "bg-ansi-0",  "bg-ansi-1",  "bg-ansi-2",  "bg-ansi-3",
-    "bg-ansi-4",  "bg-ansi-5",  "bg-ansi-6",  "bg-ansi-7",
-    "bg-ansi-8",  "bg-ansi-9",  "bg-ansi-10", "bg-ansi-11",
-    "bg-ansi-12", "bg-ansi-13", "bg-ansi-14", "bg-ansi-15",
-    "text-term-bg", "bg-term-fg",
-    "border-ansi-1",
-];
-
 /// ID for the outermost terminal container div.
 const CONTAINER_ID: &str = "term-container";
 /// ID for the hidden measurement span used to compute character dimensions.
@@ -286,6 +270,22 @@ pub fn Page() -> Element {
         }
     }
 }
+
+// Tailwind safelist -- these classes are generated dynamically via format!() and
+// must appear as literal strings for Tailwind's content scanner to detect them.
+#[rustfmt::skip]
+const _TW_SAFELIST: &[&str] = &[
+    "text-ansi-0",  "text-ansi-1",  "text-ansi-2",  "text-ansi-3",
+    "text-ansi-4",  "text-ansi-5",  "text-ansi-6",  "text-ansi-7",
+    "text-ansi-8",  "text-ansi-9",  "text-ansi-10", "text-ansi-11",
+    "text-ansi-12", "text-ansi-13", "text-ansi-14", "text-ansi-15",
+    "bg-ansi-0",  "bg-ansi-1",  "bg-ansi-2",  "bg-ansi-3",
+    "bg-ansi-4",  "bg-ansi-5",  "bg-ansi-6",  "bg-ansi-7",
+    "bg-ansi-8",  "bg-ansi-9",  "bg-ansi-10", "bg-ansi-11",
+    "bg-ansi-12", "bg-ansi-13", "bg-ansi-14", "bg-ansi-15",
+    "text-term-bg", "bg-term-fg",
+    "border-ansi-1",
+];
 
 fn resize_row_signals(rows: &mut Signal<Vec<Signal<TermLine>>>, target_len: usize) {
     rows.with_mut(|row_signals| {

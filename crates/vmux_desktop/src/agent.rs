@@ -46,9 +46,7 @@ mod tests {
     #[test]
     fn terminal_send_writes_raw_text_to_active_terminal() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(vmux_command::CommandPlugin);
-        app.add_plugins(AgentPlugin);
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
         app.add_systems(Update, vmux_terminal::handle_terminal_send_requests);
         app.init_resource::<AgentStrategies>();
         app.insert_resource(FocusedStack::default());
