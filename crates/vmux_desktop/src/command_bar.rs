@@ -1491,7 +1491,7 @@ fn on_command_bar_action(
                 .p1()
                 .is_some_and(|providers| providers.contains(&evt.value))
             {
-                let cwd = vmux_agent::cwd::default_space_dir();
+                let cwd = vmux_space::cwd::default_space_dir();
                 if let Some(mut agent_launches) = writer_params.p1() {
                     agent_launches.write(AgentLaunchRequested {
                         provider_id: evt.value.clone(),

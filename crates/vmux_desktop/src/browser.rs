@@ -1502,7 +1502,7 @@ pub(crate) fn handle_browser_navigate_requests(
 
         let result = if url.starts_with("vmux://") {
             let target = match pane.as_deref() {
-                Some(s) => match vmux_agent::target::parse_pane_target(s, &panes) {
+                Some(s) => match vmux_layout::target::parse_pane_target(s, &panes) {
                     Some(t) => Some(t),
                     None => {
                         if let Some(service) = service.as_ref() {
@@ -1543,7 +1543,7 @@ pub(crate) fn handle_browser_navigate_requests(
                 )
             }
         } else if let Some(s) = pane.as_deref() {
-            if let Some(target) = vmux_agent::target::parse_pane_target(s, &panes) {
+            if let Some(target) = vmux_layout::target::parse_pane_target(s, &panes) {
                 crate::agent::spawn_browser_tab(
                     target,
                     &url,
@@ -1556,7 +1556,7 @@ pub(crate) fn handle_browser_navigate_requests(
                 AgentCommandResult::Error(format!("browser_navigate: invalid pane id '{s}'"))
             }
         } else if let Some(webview) =
-            vmux_agent::target::active_webview_for_tab(focus.stack, &browsers, &terminals)
+            vmux_layout::target::active_webview_for_tab(focus.stack, &browsers, &terminals)
         {
             commands.trigger(RequestNavigate {
                 webview,

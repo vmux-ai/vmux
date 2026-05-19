@@ -309,7 +309,7 @@ fn spawn_layout_requested_content(
     for request in reader.read() {
         match request {
             LayoutSpawnRequest::Terminal { stack } => {
-                let cwd = vmux_agent::cwd::space_dir(&active_space.record.id);
+                let cwd = vmux_space::cwd::space_dir(&active_space.record.id);
                 let terminal = commands
                     .spawn((
                         new_terminal_bundle_with_cwd(
@@ -868,8 +868,8 @@ fn try_connect_service(
 #[derive(bevy::ecs::system::SystemParam)]
 struct PollServiceWriters<'w> {
     app_commands: MessageWriter<'w, AppCommand>,
-    agent_commands: MessageWriter<'w, vmux_agent::events::AgentCommandRequest>,
-    agent_queries: MessageWriter<'w, vmux_agent::events::AgentQueryRequest>,
+    agent_commands: MessageWriter<'w, vmux_service::events::AgentCommandRequest>,
+    agent_queries: MessageWriter<'w, vmux_service::events::AgentQueryRequest>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
 }
 
@@ -1133,7 +1133,7 @@ fn poll_service_messages(
             } => {
                 writers
                     .agent_commands
-                    .write(vmux_agent::events::AgentCommandRequest {
+                    .write(vmux_service::events::AgentCommandRequest {
                         request_id,
                         command,
                     });
@@ -1141,7 +1141,7 @@ fn poll_service_messages(
             ServiceMessage::AgentQuery { request_id, query } => {
                 writers
                     .agent_queries
-                    .write(vmux_agent::events::AgentQueryRequest { request_id, query });
+                    .write(vmux_service::events::AgentQueryRequest { request_id, query });
             }
             _ => {}
         }
@@ -2095,7 +2095,7 @@ fn on_restart_pty(
         (Some(l), Some(session), Some(strategies)) => {
             let mut updated_args = l.args.clone();
             if let Some(strategy) = strategies.get_cli(session.kind) {
-                let mcp = vmux_agent::McpServerConfig {
+                let mcp = vmux_core::agent::McpServerConfig {
                     command: l.command.clone(),
                     args: vec![],
                     cwd: None,
@@ -2292,12 +2292,12 @@ pub fn handle_terminal_send_requests(
         let crate::TerminalSendRequest { text, terminal } = request.clone();
 
         let target = if let Some(s) = terminal.as_deref() {
-            match vmux_agent::target::parse_terminal_target(s, &terminals) {
+            match crate::target::parse_terminal_target(s, &terminals) {
                 Some(t) => Ok(Some(t)),
                 None => Err(format!("terminal_send: invalid terminal id '{s}'")),
             }
         } else {
-            Ok(vmux_agent::target::active_terminal_for_tab(
+            Ok(crate::target::active_terminal_for_tab(
                 focus.stack,
                 &terminals,
             ))
@@ -2335,16 +2335,15 @@ pub fn handle_run_shell_requests(
 ) {
     for request in reader.read() {
         let crate::RunShellRequest { command, cwd, mode } = request.clone();
-        let input = vmux_agent::shell_input::shell_command_input(&command);
+        let input = crate::shell_input::shell_command_input(&command);
         if matches!(mode, crate::ShellMode::Active)
-            && let Some(terminal) =
-                vmux_agent::target::active_terminal_for_tab(focus.stack, &terminals)
+            && let Some(terminal) = crate::target::active_terminal_for_tab(focus.stack, &terminals)
         {
             commands
                 .entity(terminal)
                 .insert(PendingTerminalInput { data: input });
         } else if let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane))
-            && let Ok(cwd_path) = vmux_agent::cwd::valid_cwd(&cwd)
+            && let Ok(cwd_path) = vmux_space::cwd::valid_cwd(&cwd)
         {
             spawn_terminal_tab(
                 pane,

@@ -13,12 +13,12 @@ pub fn space_dir(space_id: &str) -> PathBuf {
     dir
 }
 
-pub fn valid_cwd(cwd: &str) -> Result<Option<std::path::PathBuf>, String> {
+pub fn valid_cwd(cwd: &str) -> Result<Option<PathBuf>, String> {
     let trimmed = cwd.trim();
     if trimmed.is_empty() {
         return Ok(None);
     }
-    let path = std::path::PathBuf::from(trimmed);
+    let path = PathBuf::from(trimmed);
     if !path.exists() {
         return Err(format!("cwd does not exist: {}", path.display()));
     }

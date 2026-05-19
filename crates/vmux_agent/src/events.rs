@@ -1,18 +1,7 @@
 use bevy::prelude::*;
 use serde_json::Value;
-use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentQuery, AgentRequestId};
 
-#[derive(Message)]
-pub struct AgentCommandRequest {
-    pub request_id: AgentRequestId,
-    pub command: ServiceAgentCommand,
-}
-
-#[derive(Message)]
-pub struct AgentQueryRequest {
-    pub request_id: AgentRequestId,
-    pub query: AgentQuery,
-}
+pub use vmux_service::events::{AgentCommandRequest, AgentQueryRequest};
 
 #[derive(Event, Clone, Debug)]
 pub struct AgentInput {

@@ -7,6 +7,8 @@ pub mod cli;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod client;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod events;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod framing;
 #[cfg(all(target_os = "macos", not(target_arch = "wasm32")))]
 pub mod launchd;

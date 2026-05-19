@@ -1,13 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use crate::exec;
+pub use vmux_core::agent::McpServerConfig;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct McpServerConfig {
-    pub command: String,
-    pub args: Vec<String>,
-    pub cwd: Option<PathBuf>,
-}
+use crate::exec;
 
 pub fn resolve(cwd: &Path) -> Result<McpServerConfig, String> {
     let sidecar = vmux_sidecar_path()?;

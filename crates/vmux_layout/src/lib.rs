@@ -48,6 +48,8 @@ pub mod space;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod swap;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod target;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod toggle_layout;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod window;

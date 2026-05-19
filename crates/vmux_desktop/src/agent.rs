@@ -92,7 +92,7 @@ impl AgentProviders {
     }
 }
 
-pub(crate) use vmux_agent::cwd::{default_space_dir, space_dir};
+pub(crate) use vmux_space::cwd::{default_space_dir, space_dir};
 
 #[derive(Message)]
 pub(crate) struct AgentLaunchRequested {
@@ -226,7 +226,7 @@ impl Plugin for AgentPlugin {
 }
 
 pub(crate) use vmux_agent::build_agent_launch;
-pub(crate) use vmux_agent::cwd::valid_cwd;
+pub(crate) use vmux_space::cwd::valid_cwd;
 pub(crate) use vmux_terminal::spawn_terminal_tab;
 
 pub(crate) fn spawn_fresh_agent_tab(

@@ -82,6 +82,13 @@ pub struct PendingAgentSession {
     pub cwd: PathBuf,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpServerConfig {
+    pub command: String,
+    pub args: Vec<String>,
+    pub cwd: Option<PathBuf>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

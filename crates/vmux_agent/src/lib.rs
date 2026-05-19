@@ -4,7 +4,6 @@ pub mod claude;
 pub mod cli_trait;
 pub mod codex;
 pub mod components;
-pub mod cwd;
 pub mod echo;
 pub mod events;
 pub mod exec;
@@ -15,10 +14,8 @@ pub mod message;
 pub mod plugin;
 pub mod run_state;
 pub mod session;
-pub mod shell_input;
 pub mod strategy;
 pub mod stream;
-pub mod target;
 pub mod systems {
     pub mod approval;
     pub mod dispatch_tool;
@@ -32,7 +29,6 @@ pub use app::AppAgentStrategy;
 pub use app_plugin::AppAgentPlugin;
 pub use cli_trait::CliAgentStrategy;
 pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};
-pub use cwd::{default_space_dir, space_dir, valid_cwd};
 pub use echo::{EchoAppStrategy, synthetic_echo_stream};
 pub use events::{
     AgentApprovalReply, AgentApprovalRequest, AgentCommandRequest, AgentDelta, AgentInput,
