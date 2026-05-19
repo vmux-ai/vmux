@@ -16,7 +16,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "vmux_service_app"
-path = "src/webview/main.rs"
+path = "src/app_main.rs"
 required-features = ["web"]
 
 [lib]

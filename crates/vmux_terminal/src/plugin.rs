@@ -679,7 +679,7 @@ fn ensure_service_started() {
     #[cfg(target_os = "macos")]
     {
         let profile = vmux_service::current_profile();
-        if let Err(e) = vmux_service::service_registration::ensure_running(profile, &binary) {
+        if let Err(e) = vmux_service::registry::ensure_running(profile, &binary) {
             tracing::error!(error = ?e, "service registration failed");
         }
     }
@@ -809,8 +809,8 @@ fn try_connect_service(
 #[derive(bevy::ecs::system::SystemParam)]
 struct PollServiceWriters<'w> {
     app_commands: MessageWriter<'w, AppCommand>,
-    agent_commands: MessageWriter<'w, vmux_service::events::AgentCommandRequest>,
-    agent_queries: MessageWriter<'w, vmux_service::events::AgentQueryRequest>,
+    agent_commands: MessageWriter<'w, vmux_service::agent_events::AgentCommandRequest>,
+    agent_queries: MessageWriter<'w, vmux_service::agent_events::AgentQueryRequest>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
 }
 
@@ -1074,7 +1074,7 @@ fn poll_service_messages(
             } => {
                 writers
                     .agent_commands
-                    .write(vmux_service::events::AgentCommandRequest {
+                    .write(vmux_service::agent_events::AgentCommandRequest {
                         request_id,
                         command,
                     });
@@ -1082,7 +1082,7 @@ fn poll_service_messages(
             ServiceMessage::AgentQuery { request_id, query } => {
                 writers
                     .agent_queries
-                    .write(vmux_service::events::AgentQueryRequest { request_id, query });
+                    .write(vmux_service::agent_events::AgentQueryRequest { request_id, query });
             }
             _ => {}
         }

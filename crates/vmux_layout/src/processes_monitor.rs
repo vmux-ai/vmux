@@ -2,7 +2,7 @@ use bevy::{picking::Pickable, prelude::*, render::alpha::AlphaMode};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 
-use crate::chrome::Browser;
+use crate::cef::Browser;
 use crate::event::SERVICES_WEBVIEW_URL;
 use crate::window::WEBVIEW_MESH_DEPTH_BIAS;
 

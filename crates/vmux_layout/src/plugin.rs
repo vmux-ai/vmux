@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use vmux_page::JsEmitPageReadyPlugin;
 
-use crate::chrome::LayoutChromePlugin;
+use crate::cef::LayoutCefPlugin;
 use crate::focus_ring::FocusRingPlugin;
 use crate::glass::GlassMaterialPlugin;
 use crate::header::HeaderLayoutPlugin;
@@ -11,7 +11,7 @@ use crate::scene::ScenePlugin;
 use crate::side_sheet::SideSheetLayoutPlugin;
 use crate::space::SpacePlugin;
 use crate::stack::StackPlugin;
-use crate::toggle_layout::ToggleLayoutPlugin;
+use crate::toggle::TogglePlugin;
 use crate::webview_reveal::WebviewRevealPlugin;
 use crate::window::WindowPlugin;
 use crate::{
@@ -55,7 +55,7 @@ impl Plugin for LayoutPlugin {
             JsEmitPageReadyPlugin,
             ProfilePlugin,
             ScenePlugin,
-            LayoutChromePlugin,
+            LayoutCefPlugin,
             WindowPlugin,
             SpacePlugin,
             PanePlugin,
@@ -64,7 +64,7 @@ impl Plugin for LayoutPlugin {
             GlassMaterialPlugin,
             SideSheetLayoutPlugin,
             HeaderLayoutPlugin,
-            ToggleLayoutPlugin,
+            TogglePlugin,
             WebviewRevealPlugin,
         ));
     }

@@ -23,9 +23,8 @@ use std::time::Duration;
 use {
     browser::BrowserPlugin, command_bar::CommandBarInputPlugin, os_menu::OsMenuPlugin,
     persistence::PersistencePlugin, shortcut::ShortcutPlugin, vmux_command::CommandPlugin,
-    vmux_layout::LayoutPlugin, vmux_page::PageRegistryPlugin,
-    vmux_service::webview::ServicesPlugin, vmux_setting::SettingsPlugin, vmux_space::SpacePlugin,
-    vmux_terminal::TerminalPlugin,
+    vmux_layout::LayoutPlugin, vmux_page::PageRegistryPlugin, vmux_service::plugin::ServicePlugin,
+    vmux_setting::SettingsPlugin, vmux_space::SpacePlugin, vmux_terminal::TerminalPlugin,
 };
 
 use vmux_agent::AgentPlugin;
@@ -89,7 +88,7 @@ impl Plugin for VmuxPlugin {
             ShortcutPlugin,
             OsMenuPlugin,
             TerminalPlugin,
-            ServicesPlugin,
+            ServicePlugin,
             CommandBarInputPlugin,
             SpacePlugin,
             BrowserPlugin,

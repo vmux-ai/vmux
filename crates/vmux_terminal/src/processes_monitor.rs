@@ -2,8 +2,8 @@ use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_history::LastActivatedAt;
 use vmux_page::PageReady;
+use vmux_service::event::*;
 use vmux_service::protocol::{ClientMessage, ProcessId};
-use vmux_service::webview::event::*;
 
 use crate::Terminal;
 use crate::plugin::{ServiceClient, reattach_terminal_bundle};

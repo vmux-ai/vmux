@@ -41,7 +41,7 @@ pub fn ensure_running(profile: &str, exe: &Path) -> Result<(), RegistrationError
         Backend::SmAppService { .. } => {
             #[cfg(target_os = "macos")]
             {
-                match crate::legacy_plist_cleanup::cleanup_legacy_registrations() {
+                match crate::cleanup::cleanup_legacy_registrations() {
                     Ok(0) => {}
                     Ok(n) => tracing::info!(removed = n, "removed legacy launchd plists"),
                     Err(e) => {

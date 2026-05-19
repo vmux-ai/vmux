@@ -46,11 +46,11 @@ struct SpacesListSent;
 fn reset_spaces_sent_marker_on_page_ready(
     trigger: On<BinReceive<PageReady>>,
     spaces_views: Query<(), With<Spaces>>,
-    chrome_views: Query<(), With<vmux_layout::LayoutChrome>>,
+    cef_views: Query<(), With<vmux_layout::LayoutCef>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    if spaces_views.get(entity).is_err() && chrome_views.get(entity).is_err() {
+    if spaces_views.get(entity).is_err() && cef_views.get(entity).is_err() {
         return;
     }
     commands.entity(entity).remove::<SpacesListSent>();
@@ -127,18 +127,18 @@ fn broadcast_spaces_to_views(
     active: Res<ActiveSpace>,
     pending_spaces: Query<Entity, (With<Spaces>, With<PageReady>, Without<SpacesListSent>)>,
     sent_spaces: Query<Entity, (With<Spaces>, With<PageReady>, With<SpacesListSent>)>,
-    pending_chrome: Query<
+    pending_cef: Query<
         Entity,
         (
-            With<vmux_layout::LayoutChrome>,
+            With<vmux_layout::LayoutCef>,
             With<PageReady>,
             Without<SpacesListSent>,
         ),
     >,
-    sent_chrome: Query<
+    sent_cef: Query<
         Entity,
         (
-            With<vmux_layout::LayoutChrome>,
+            With<vmux_layout::LayoutCef>,
             With<PageReady>,
             With<SpacesListSent>,
         ),
@@ -148,8 +148,8 @@ fn broadcast_spaces_to_views(
     mut last_body: Local<String>,
     mut commands: Commands,
 ) {
-    let pending_total = pending_spaces.iter().count() + pending_chrome.iter().count();
-    let sent_total = sent_spaces.iter().count() + sent_chrome.iter().count();
+    let pending_total = pending_spaces.iter().count() + pending_cef.iter().count();
+    let sent_total = sent_spaces.iter().count() + sent_cef.iter().count();
     if pending_total == 0 && sent_total == 0 {
         return;
     }
@@ -159,7 +159,7 @@ fn broadcast_spaces_to_views(
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     let body_changed = body != *last_body;
-    for entity in pending_spaces.iter().chain(pending_chrome.iter()) {
+    for entity in pending_spaces.iter().chain(pending_cef.iter()) {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
@@ -171,7 +171,7 @@ fn broadcast_spaces_to_views(
         commands.entity(entity).insert(SpacesListSent);
     }
     if body_changed {
-        for entity in sent_spaces.iter().chain(sent_chrome.iter()) {
+        for entity in sent_spaces.iter().chain(sent_cef.iter()) {
             if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                 continue;
             }

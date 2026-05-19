@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use vmux_service::bundle::{EMBEDDED_AGENT_LABEL, EMBEDDED_AGENT_PLIST};
-use vmux_service::service_registration::{Backend, choose_backend};
+use vmux_service::registry::{Backend, choose_backend};
 
 #[test]
 fn bundled_path_chooses_sm_app_service() {
@@ -16,7 +16,7 @@ fn unbundled_path_chooses_launchctl() {
 
 #[test]
 fn ensure_running_calls_legacy_cleanup_for_sm_app_service_path() {
-    let source = include_str!("../src/service_registration.rs");
+    let source = include_str!("../src/registry.rs");
     assert!(
         source.contains("cleanup_legacy_registrations"),
         "SmAppService branch must invoke legacy cleanup"
@@ -25,7 +25,7 @@ fn ensure_running_calls_legacy_cleanup_for_sm_app_service_path() {
 
 #[test]
 fn ensure_running_kickstarts_after_register_for_sm_app_service_path() {
-    let source = include_str!("../src/service_registration.rs");
+    let source = include_str!("../src/registry.rs");
     assert!(
         source.contains("crate::launchd::kickstart(bundle::EMBEDDED_AGENT_LABEL)"),
         "SmAppService branch must kickstart the embedded agent so it actually runs after registration"

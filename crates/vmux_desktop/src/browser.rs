@@ -13,7 +13,7 @@ use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::event::SideSheetCommandEvent;
 pub(crate) use vmux_layout::{Browser, Loading};
 use vmux_layout::{
-    Header, LayoutChrome, NavigationState, Open, PendingWebviewReveal,
+    Header, LayoutCef, NavigationState, Open, PendingWebviewReveal,
     event::{
         HEADER_HEIGHT_PX, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent,
         PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT,
@@ -103,7 +103,7 @@ fn on_webview_ready_send_theme(
     trigger: On<Add, PageReady>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
-    chrome_q: Query<(), With<LayoutChrome>>,
+    cef_q: Query<(), With<LayoutCef>>,
     modal_q: Query<(), With<Modal>>,
     mut zoom_q: Query<&mut bevy_cef::prelude::ZoomLevel>,
     mut commands: Commands,
@@ -119,7 +119,7 @@ fn on_webview_ready_send_theme(
     // Chrome / modal must never carry a stale zoom (e.g. from a previous
     // session where pinch-zoom was allowed); force them to 0 once the
     // webview is ready, both on the component and on the CEF host.
-    if chrome_q.get(entity).is_ok() || modal_q.get(entity).is_ok() {
+    if cef_q.get(entity).is_ok() || modal_q.get(entity).is_ok() {
         if let Ok(mut zoom) = zoom_q.get_mut(entity) {
             zoom.0 = 0.0;
         }
@@ -396,7 +396,7 @@ fn pane_count_for_browser(
 
 fn sync_webview_pane_corner_clip(
     settings: Res<AppSettings>,
-    layout_hidden: Res<vmux_layout::toggle_layout::LayoutHidden>,
+    layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     tabs: Query<
         (
@@ -690,17 +690,17 @@ fn flush_pending_osr_textures(
 fn push_layout_state_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    chrome_q: Query<(Entity, Ref<PageReady>), With<LayoutChrome>>,
+    cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     header_q: Query<Has<Open>, With<Header>>,
     side_sheet_q: Query<(&SideSheetPosition, Has<Open>), With<SideSheet>>,
     side_sheet_width: Res<SideSheetWidth>,
     settings: Res<AppSettings>,
     mut last: Local<String>,
 ) {
-    let Ok((chrome_e, page_ready)) = chrome_q.single() else {
+    let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
     };
-    if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
+    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
         return;
     }
 
@@ -719,7 +719,7 @@ fn push_layout_state_emit(
         return;
     }
     commands.trigger(BinHostEmitEvent::from_rkyv(
-        chrome_e,
+        cef_e,
         LAYOUT_STATE_EVENT,
         &payload,
     ));
@@ -749,7 +749,7 @@ fn should_emit_cached_payload(body: &str, last: &str, page_ready_changed: bool) 
 fn push_stacks_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    chrome_q: Query<(Entity, Ref<PageReady>), With<LayoutChrome>>,
+    cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), With<Browser>>,
     stack_q: Query<(), With<Stack>>,
     zoomed_q: Query<(), With<vmux_layout::pane::Zoomed>>,
@@ -758,10 +758,10 @@ fn push_stacks_host_emit(
     child_of_q: Query<&ChildOf>,
     mut last: Local<String>,
 ) {
-    let Ok((chrome_e, page_ready)) = chrome_q.single() else {
+    let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
     };
-    if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
+    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
         return;
     }
     let active_pane = focus.pane;
@@ -825,18 +825,14 @@ fn push_stacks_host_emit(
         payload.stacks.len(),
         ron_body.len()
     );
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        chrome_e,
-        STACKS_EVENT,
-        &payload,
-    ));
+    commands.trigger(BinHostEmitEvent::from_rkyv(cef_e, STACKS_EVENT, &payload));
     *last = ron_body;
 }
 
 fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    chrome_q: Query<(Entity, Ref<PageReady>), With<LayoutChrome>>,
+    cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     new_stack_ctx: Res<crate::command_bar::NewStackContext>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     tab_q: Query<(), With<Space>>,
@@ -849,10 +845,10 @@ fn push_pane_tree_emit(
     browser_meta: Query<(&PageMetadata, Has<Loading>), With<Browser>>,
     mut last: Local<String>,
 ) {
-    let Ok((chrome_e, page_ready)) = chrome_q.single() else {
+    let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
     };
-    if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
+    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
         return;
     }
 
@@ -936,7 +932,7 @@ fn push_pane_tree_emit(
         return;
     }
     commands.trigger(BinHostEmitEvent::from_rkyv(
-        chrome_e,
+        cef_e,
         PANE_TREE_EVENT,
         &payload,
     ));
@@ -947,7 +943,7 @@ fn push_pane_tree_emit(
 fn push_tabs_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
-    chrome_q: Query<(Entity, Ref<PageReady>), With<LayoutChrome>>,
+    cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     tabs: Query<(Entity, &Space, &LastActivatedAt)>,
     tab_q: Query<Entity, With<Space>>,
     child_of_q: Query<&ChildOf>,
@@ -959,10 +955,10 @@ fn push_tabs_host_emit(
     browser_meta: Query<&PageMetadata, With<Browser>>,
     mut last: Local<String>,
 ) {
-    let Ok((chrome_e, page_ready)) = chrome_q.single() else {
+    let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
     };
-    if !browsers.has_browser(chrome_e) || !browsers.host_emit_ready(&chrome_e) {
+    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
         return;
     }
 
@@ -1011,7 +1007,7 @@ fn push_tabs_host_emit(
     if !page_ready.is_changed() && body == *last {
         return;
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(chrome_e, TABS_EVENT, &payload));
+    commands.trigger(BinHostEmitEvent::from_rkyv(cef_e, TABS_EVENT, &payload));
     *last = body;
 }
 
@@ -1146,15 +1142,15 @@ fn on_header_command_emit(
 
 fn on_reload_notify_header(
     _trigger: On<RequestReload>,
-    chrome: Option<Single<Entity, (With<LayoutChrome>, With<PageReady>)>>,
+    cef: Option<Single<Entity, (With<LayoutCef>, With<PageReady>)>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    let Some(chrome) = chrome else { return };
-    let chrome_e = *chrome;
-    if browsers.has_browser(chrome_e) && browsers.host_emit_ready(&chrome_e) {
+    let Some(cef) = cef else { return };
+    let cef_e = *cef;
+    if browsers.has_browser(cef_e) && browsers.host_emit_ready(&cef_e) {
         commands.trigger(BinHostEmitEvent::from_rkyv(
-            chrome_e,
+            cef_e,
             RELOAD_EVENT,
             &ReloadEvent,
         ));
@@ -1163,15 +1159,15 @@ fn on_reload_notify_header(
 
 fn on_hard_reload_notify_header(
     _trigger: On<RequestReloadIgnoreCache>,
-    chrome: Option<Single<Entity, (With<LayoutChrome>, With<PageReady>)>>,
+    cef: Option<Single<Entity, (With<LayoutCef>, With<PageReady>)>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    let Some(chrome) = chrome else { return };
-    let chrome_e = *chrome;
-    if browsers.has_browser(chrome_e) && browsers.host_emit_ready(&chrome_e) {
+    let Some(cef) = cef else { return };
+    let cef_e = *cef;
+    if browsers.has_browser(cef_e) && browsers.host_emit_ready(&cef_e) {
         commands.trigger(BinHostEmitEvent::from_rkyv(
-            chrome_e,
+            cef_e,
             RELOAD_EVENT,
             &ReloadEvent,
         ));

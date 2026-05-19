@@ -9,12 +9,12 @@ use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, ToggleLayoutComma
 #[derive(Resource, Default, Debug)]
 pub struct LayoutHidden(pub bool);
 
-pub struct ToggleLayoutPlugin;
+pub struct TogglePlugin;
 
-impl Plugin for ToggleLayoutPlugin {
+impl Plugin for TogglePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LayoutHidden>()
-            .add_systems(Update, handle_toggle_layout.in_set(ReadAppCommands))
+            .add_systems(Update, handle_toggle.in_set(ReadAppCommands))
             .add_systems(Update, sync_window_padding_to_layout_hidden);
     }
 }
@@ -39,7 +39,7 @@ fn sync_window_padding_to_layout_hidden(
     }
 }
 
-fn handle_toggle_layout(
+fn handle_toggle(
     mut reader: MessageReader<AppCommand>,
     mut hidden: ResMut<LayoutHidden>,
     header_q: Query<Entity, With<Header>>,

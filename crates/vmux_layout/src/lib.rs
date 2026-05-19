@@ -11,7 +11,7 @@ pub mod reconcile;
 pub mod snapshot;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub mod chrome;
+pub mod cef;
 #[cfg(not(target_arch = "wasm32"))]
 mod focus_ring;
 #[cfg(not(target_arch = "wasm32"))]
@@ -50,14 +50,14 @@ pub mod swap;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod target;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod toggle_layout;
+pub mod toggle;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod window;
 
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
-pub use chrome::{Browser, LayoutChrome, Loading, NavigationState, apply_chrome_state_from_cef};
+pub use cef::{Browser, LayoutCef, Loading, NavigationState, apply_chrome_state_from_cef};
 #[cfg(not(target_arch = "wasm32"))]
 pub use header::Header;
 #[cfg(not(target_arch = "wasm32"))]

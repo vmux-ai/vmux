@@ -1,7 +1,7 @@
 use crate::event::COMMAND_BAR_WEBVIEW_URL;
 use crate::{
     Header, LayoutStartupSet, SpaceFilePresent,
-    chrome::{Browser, layout_chrome_bundle},
+    cef::{Browser, layout_cef_bundle},
     glass::{GlassCorners, GlassMaterial},
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
     profile::Profile,
@@ -364,7 +364,7 @@ fn setup(
     ));
 
     commands.spawn((
-        layout_chrome_bundle(pw, &mut meshes, &mut webview_mt),
+        layout_cef_bundle(pw, &mut meshes, &mut webview_mt),
         ChildOf(root),
     ));
 }

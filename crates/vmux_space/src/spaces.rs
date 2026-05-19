@@ -4,7 +4,7 @@ use bevy::{picking::Pickable, prelude::*, render::alpha::AlphaMode};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::profile;
-use vmux_layout::chrome::Browser;
+use vmux_layout::cef::Browser;
 use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
 
 use crate::event::{SPACES_WEBVIEW_URL, SpaceRow};

@@ -13,7 +13,7 @@ use crate::window::WEBVIEW_MESH_DEPTH_BIAS;
 pub struct Browser;
 
 #[derive(Component)]
-pub struct LayoutChrome;
+pub struct LayoutCef;
 
 #[derive(Component)]
 pub struct Loading;
@@ -25,9 +25,9 @@ pub struct NavigationState {
     pub can_go_forward: bool,
 }
 
-pub struct LayoutChromePlugin;
+pub struct LayoutCefPlugin;
 
-impl Plugin for LayoutChromePlugin {
+impl Plugin for LayoutCefPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().resource_mut::<PageRegistry>().register(
             PathBuf::from(env!("CARGO_MANIFEST_DIR")),
@@ -103,13 +103,13 @@ impl Browser {
     }
 }
 
-pub fn layout_chrome_bundle(
+pub fn layout_cef_bundle(
     host_window: Entity,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> impl Bundle {
     (
-        LayoutChrome,
+        LayoutCef,
         Browser,
         HostWindow(host_window),
         WebviewTransparent,
@@ -149,27 +149,27 @@ pub fn layout_chrome_bundle(
 mod tests {
     use super::*;
 
-    fn spawn_test_chrome(
+    fn spawn_test_cef(
         mut commands: Commands,
         mut meshes: ResMut<Assets<Mesh>>,
         mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     ) {
         let host = commands.spawn_empty().id();
-        commands.spawn(layout_chrome_bundle(host, &mut meshes, &mut webview_mt));
+        commands.spawn(layout_cef_bundle(host, &mut meshes, &mut webview_mt));
     }
 
     #[test]
-    fn layout_chrome_does_not_block_pointer_events_below_it() {
+    fn layout_cef_does_not_block_pointer_events_below_it() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.add_systems(Startup, spawn_test_chrome);
+        app.add_systems(Startup, spawn_test_cef);
         app.update();
 
         let pickable = app
             .world_mut()
-            .query_filtered::<&Pickable, With<LayoutChrome>>()
+            .query_filtered::<&Pickable, With<LayoutCef>>()
             .single(app.world())
             .expect("layout chrome pickable");
 
