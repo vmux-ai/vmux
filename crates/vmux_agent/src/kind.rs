@@ -116,12 +116,12 @@ impl AgentUrl {
     }
 }
 
-impl From<AgentKind> for vmux_terminal::launch::TerminalKind {
+impl From<AgentKind> for vmux_core::terminal::TerminalKind {
     fn from(kind: AgentKind) -> Self {
         match kind {
-            AgentKind::Vibe => vmux_terminal::launch::TerminalKind::Vibe,
-            AgentKind::Claude => vmux_terminal::launch::TerminalKind::Claude,
-            AgentKind::Codex => vmux_terminal::launch::TerminalKind::Codex,
+            AgentKind::Vibe => vmux_core::terminal::TerminalKind::Vibe,
+            AgentKind::Claude => vmux_core::terminal::TerminalKind::Claude,
+            AgentKind::Codex => vmux_core::terminal::TerminalKind::Codex,
         }
     }
 }

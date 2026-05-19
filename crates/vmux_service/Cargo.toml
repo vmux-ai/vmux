@@ -43,7 +43,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
-vmux_terminal_proto = { path = "../vmux_terminal_proto" }
+
 vmux_webview_app = { path = "../vmux_webview_app" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

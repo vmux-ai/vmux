@@ -1,1 +1,1 @@
-pub use vmux_terminal_proto::*;
+pub use vmux_core::event::*;

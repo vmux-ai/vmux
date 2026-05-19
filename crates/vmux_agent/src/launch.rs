@@ -1,7 +1,7 @@
 use crate::strategy::AgentStrategies;
 use crate::{AgentKind, mcp};
 use std::path::Path;
-use vmux_terminal::launch::TerminalLaunch;
+use vmux_core::terminal::TerminalLaunch;
 
 pub fn build_agent_launch(
     kind: AgentKind,

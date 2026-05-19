@@ -1,7 +1,7 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
+use vmux_core::terminal::{ProcessExited, Terminal};
 use vmux_layout::pane::{Pane, PaneSplit};
-use vmux_terminal::{ProcessExited, Terminal};
 
 #[allow(clippy::type_complexity)]
 pub fn active_terminal_for_tab(
