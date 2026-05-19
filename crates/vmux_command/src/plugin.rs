@@ -13,11 +13,9 @@ impl Plugin for CommandPlugin {
             .add_message::<AppCommand>()
             .configure_sets(Update, ReadAppCommands.after(WriteAppCommands));
 
-        app.world_mut()
-            .resource_mut::<PageRegistry>()
-            .register(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-                &PageConfig::with_custom_host("command-bar"),
-            );
+        app.world_mut().resource_mut::<PageRegistry>().register(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+            &PageConfig::with_custom_host("command-bar"),
+        );
     }
 }

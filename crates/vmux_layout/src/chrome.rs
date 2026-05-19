@@ -29,12 +29,10 @@ pub struct LayoutChromePlugin;
 
 impl Plugin for LayoutChromePlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut()
-            .resource_mut::<PageRegistry>()
-            .register(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-                &PageConfig::with_custom_host("layout"),
-            );
+        app.world_mut().resource_mut::<PageRegistry>().register(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+            &PageConfig::with_custom_host("layout"),
+        );
     }
 }
 

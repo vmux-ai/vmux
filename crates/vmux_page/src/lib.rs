@@ -127,10 +127,7 @@ impl Plugin for PageRegistryPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PageRegistry>()
             .configure_sets(Startup, PageEmbedSet)
-            .add_systems(
-                Startup,
-                embed_page_static_assets.in_set(PageEmbedSet),
-            );
+            .add_systems(Startup, embed_page_static_assets.in_set(PageEmbedSet));
     }
 }
 
@@ -187,10 +184,7 @@ fn packaged_page_root(resources_dir: Option<&Path>, host: &str) -> Option<PathBu
     root.is_dir().then_some(root)
 }
 
-fn embed_page_static_assets(
-    registry: Res<PageRegistry>,
-    mut reg: ResMut<EmbeddedAssetRegistry>,
-) {
+fn embed_page_static_assets(registry: Res<PageRegistry>, mut reg: ResMut<EmbeddedAssetRegistry>) {
     let resources_dir = current_app_resources_dir();
     for entry in &registry.entries {
         let bundle_root = entry.bundle_root(resources_dir.as_deref());

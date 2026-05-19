@@ -11,7 +11,7 @@ use vmux_layout::{
     stack::{FocusedStack, stack_bundle},
     window::WEBVIEW_MESH_DEPTH_BIAS,
 };
-use vmux_page::{UiReady, PageConfig, PageRegistry};
+use vmux_page::{PageConfig, PageRegistry, UiReady};
 
 use crate::event::{
     SETTINGS_LIST_EVENT, SETTINGS_SCHEMA_EVENT, SETTINGS_WEBVIEW_URL, SettingsCommandEvent,
