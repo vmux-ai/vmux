@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 use serde_json::{Map, Value};
 
-use crate::cli_trait::CliAgentStrategy;
+use crate::client::cli::strategy::CliAgentStrategy;
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, McpServerConfig};
 

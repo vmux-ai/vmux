@@ -2,7 +2,7 @@ pub use vmux_core::agent::AgentKind;
 
 use crate::AgentVariant;
 
-pub fn app_url_prefix(provider: &str, model: &str) -> String {
+pub fn page_url_prefix(provider: &str, model: &str) -> String {
     format!("vmux://agent/{provider}/{model}/")
 }
 
@@ -12,7 +12,7 @@ pub enum AgentUrl {
         kind: AgentKind,
         sid: String,
     },
-    App {
+    Page {
         provider: String,
         model: String,
         sid: String,
@@ -31,7 +31,7 @@ impl AgentUrl {
                     sid: (*sid).to_string(),
                 })
             }
-            [provider, model, sid] => Some(AgentUrl::App {
+            [provider, model, sid] => Some(AgentUrl::Page {
                 provider: (*provider).to_string(),
                 model: (*model).to_string(),
                 sid: (*sid).to_string(),
@@ -43,25 +43,25 @@ impl AgentUrl {
     pub fn variant(&self) -> AgentVariant {
         match self {
             AgentUrl::Cli { .. } => AgentVariant::Cli,
-            AgentUrl::App { .. } => AgentVariant::App,
+            AgentUrl::Page { .. } => AgentVariant::Page,
         }
     }
 
     pub fn sid(&self) -> &str {
         match self {
             AgentUrl::Cli { sid, .. } => sid,
-            AgentUrl::App { sid, .. } => sid,
+            AgentUrl::Page { sid, .. } => sid,
         }
     }
 
     pub fn format(&self) -> String {
         match self {
             AgentUrl::Cli { kind, sid } => format!("{}{sid}", kind.cli_url_prefix()),
-            AgentUrl::App {
+            AgentUrl::Page {
                 provider,
                 model,
                 sid,
-            } => format!("{}{sid}", app_url_prefix(provider, model)),
+            } => format!("{}{sid}", page_url_prefix(provider, model)),
         }
     }
 }
@@ -71,9 +71,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn app_url_prefix_returns_four_segment_form() {
+    fn page_url_prefix_returns_four_segment_form() {
         assert_eq!(
-            app_url_prefix("openai", "gpt-5.5"),
+            page_url_prefix("openai", "gpt-5.5"),
             "vmux://agent/openai/gpt-5.5/"
         );
     }
@@ -91,11 +91,11 @@ mod tests {
     }
 
     #[test]
-    fn app_url_parses_four_segments() {
+    fn page_url_parses_four_segments() {
         let parsed = AgentUrl::parse("vmux://agent/openai/gpt-5.5/xHigh").unwrap();
         assert_eq!(
             parsed,
-            AgentUrl::App {
+            AgentUrl::Page {
                 provider: "openai".into(),
                 model: "gpt-5.5".into(),
                 sid: "xHigh".into(),
@@ -119,8 +119,8 @@ mod tests {
     }
 
     #[test]
-    fn url_format_round_trips_app() {
-        let u = AgentUrl::App {
+    fn url_format_round_trips_page() {
+        let u = AgentUrl::Page {
             provider: "anthropic".into(),
             model: "claude-opus-4.7".into(),
             sid: "xyz".into(),
@@ -148,11 +148,11 @@ mod tests {
             sid: "x".into(),
         };
         assert_eq!(cli.variant(), AgentVariant::Cli);
-        let app = AgentUrl::App {
+        let page = AgentUrl::Page {
             provider: "p".into(),
             model: "m".into(),
             sid: "x".into(),
         };
-        assert_eq!(app.variant(), AgentVariant::App);
+        assert_eq!(page.variant(), AgentVariant::Page);
     }
 }

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::cli_trait::CliAgentStrategy;
+use crate::client::cli::strategy::CliAgentStrategy;
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, McpServerConfig};
 

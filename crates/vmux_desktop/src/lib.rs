@@ -95,9 +95,7 @@ impl Plugin for VmuxPlugin {
         ))
         .add_plugins((
             AgentPlugin,
-            vmux_agent::AgentSessionPlugin,
-            vmux_agent::AppAgentPlugin,
-            vmux_agent::TerminalIntegrationPlugin,
+            vmux_agent::AgentPage,
             PersistencePlugin,
             LayoutPlugin,
             updater::VmuxUpdater::builder().build().plugin(),

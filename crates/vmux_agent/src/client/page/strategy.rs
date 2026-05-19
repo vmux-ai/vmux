@@ -2,7 +2,7 @@ use crate::message::Message;
 use crate::strategy::AgentStrategy;
 use crate::stream::{StreamEvent, ToolDef};
 
-pub trait AppAgentStrategy: AgentStrategy {
+pub trait AgentPageStrategy: AgentStrategy {
     fn provider(&self) -> &str;
     fn model(&self) -> &str;
     fn endpoint(&self) -> &str;

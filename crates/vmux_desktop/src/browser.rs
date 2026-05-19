@@ -1412,7 +1412,7 @@ pub(crate) fn handle_browser_navigate_requests(
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     child_of_q: Query<&ChildOf>,
-    lookups: vmux_agent::desktop_plugin::AgentLookups,
+    lookups: vmux_agent::plugin::AgentLookups,
     strategies: Res<vmux_agent::strategy::AgentStrategies>,
     settings: Res<AppSettings>,
     service: Option<Res<vmux_service::client::ServiceClient>>,
@@ -1447,7 +1447,7 @@ pub(crate) fn handle_browser_navigate_requests(
             };
 
             if let Some(pane_entity) = target {
-                match vmux_agent::desktop_plugin::spawn_vmux_tab(
+                match vmux_agent::plugin::spawn_vmux_tab(
                     &url,
                     pane_entity,
                     &mut commands,
@@ -1471,7 +1471,7 @@ pub(crate) fn handle_browser_navigate_requests(
             }
         } else if let Some(s) = pane.as_deref() {
             if let Some(target) = vmux_layout::target::parse_pane_target(s, &panes) {
-                vmux_agent::desktop_plugin::spawn_browser_tab(
+                vmux_agent::plugin::spawn_browser_tab(
                     target,
                     &url,
                     &mut commands,
@@ -1491,7 +1491,7 @@ pub(crate) fn handle_browser_navigate_requests(
             });
             AgentCommandResult::Ok
         } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
-            vmux_agent::desktop_plugin::spawn_browser_tab(
+            vmux_agent::plugin::spawn_browser_tab(
                 pane,
                 &url,
                 &mut commands,
@@ -1612,8 +1612,8 @@ mod tests {
         use bevy::ecs::relationship::Relationship;
         use bevy::prelude::*;
         use bevy_cef::prelude::WebviewExtendStandardMaterial;
-        use vmux_agent::desktop_plugin::AgentPlugin;
         use vmux_agent::events::AgentCommandRequest;
+        use vmux_agent::plugin::AgentPlugin;
         use vmux_agent::strategy::AgentStrategies;
         use vmux_core::PageMetadata;
         use vmux_layout::pane::Pane;

@@ -5,7 +5,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
-use vmux_agent::desktop_plugin::{AgentCommandEntry, AgentLaunchRequested, AgentProviders};
+use vmux_agent::plugin::{AgentCommandEntry, AgentLaunchRequested, AgentProviders};
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSpace, CommandBarTab,
@@ -422,7 +422,7 @@ fn handle_open_command_bar(
         .p3()
         .map(|strategies| {
             strategies
-                .app_strategies()
+                .page_strategies()
                 .map(|s| AppAgentEntry {
                     id: app_agent_id(s.provider(), s.model()),
                     name: format!("New {}/{} chat (App)", s.provider(), s.model()),
@@ -987,13 +987,13 @@ fn on_command_bar_action(
                             commands.entity(term_e).insert(CefKeyboardTarget);
                         }
                     } else if let Some((provider, model, sid_opt)) =
-                        vmux_agent::desktop_plugin::parse_app_agent_url(&url)
+                        vmux_agent::plugin::parse_page_agent_url(&url)
                     {
                         let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                         let strategies_ref = resource_params.p4();
                         let strategies = strategies_ref.as_deref();
                         if let Some(strategies) = strategies {
-                            let _ = vmux_agent::desktop_plugin::attach_app_agent_to_stack(
+                            let _ = vmux_agent::plugin::attach_page_agent_to_stack(
                                 stack_e,
                                 &provider,
                                 &model,
@@ -1106,7 +1106,7 @@ fn on_command_bar_action(
                             .p0()
                             .write(AppCommand::Terminal(TerminalCommand::New));
                     } else if let Some((provider, model, sid_opt)) =
-                        vmux_agent::desktop_plugin::parse_app_agent_url(&url)
+                        vmux_agent::plugin::parse_page_agent_url(&url)
                     {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
@@ -1120,7 +1120,7 @@ fn on_command_bar_action(
                             let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                             let strategies_ref = resource_params.p4();
                             if let Some(strategies) = strategies_ref.as_deref() {
-                                if vmux_agent::desktop_plugin::spawn_app_agent_tab(
+                                if vmux_agent::plugin::spawn_page_agent_tab(
                                     &provider,
                                     &model,
                                     pane_e,
@@ -1406,7 +1406,7 @@ fn on_command_bar_action(
                 let strategies = strategies_ref.as_deref();
                 if let Some(strategies) = strategies {
                     if let Some(stack_e) = empty_stack {
-                        let _ = vmux_agent::desktop_plugin::attach_app_agent_to_stack(
+                        let _ = vmux_agent::plugin::attach_page_agent_to_stack(
                             stack_e,
                             &provider,
                             &model,
@@ -1433,7 +1433,7 @@ fn on_command_bar_action(
                             &stack_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
-                            if vmux_agent::desktop_plugin::spawn_app_agent_tab(
+                            if vmux_agent::plugin::spawn_page_agent_tab(
                                 &provider,
                                 &model,
                                 pane_e,
