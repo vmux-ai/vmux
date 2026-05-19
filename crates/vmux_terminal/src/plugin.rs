@@ -301,7 +301,7 @@ fn spawn_layout_requested_content(
     mut reader: MessageReader<LayoutSpawnRequest>,
     settings: Res<AppSettings>,
     active_space: Res<vmux_layout::spaces::ActiveSpace>,
-    strategies: Option<Res<vmux_agent::strategy::AgentStrategies>>,
+    mut spawn_agent: MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -333,7 +333,7 @@ fn spawn_layout_requested_content(
                 spawn_url_into_stack(
                     *stack,
                     url,
-                    strategies.as_deref(),
+                    &mut spawn_agent,
                     &mut commands,
                     &mut meshes,
                     &mut webview_mt,
@@ -347,7 +347,7 @@ fn spawn_layout_requested_content(
 fn spawn_url_into_stack(
     stack: Entity,
     url: &str,
-    strategies: Option<&vmux_agent::strategy::AgentStrategies>,
+    spawn_agent: &mut MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -368,32 +368,12 @@ fn spawn_url_into_stack(
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
         let id_part = url.strip_prefix(&kind.cli_url_prefix()).unwrap_or("");
         let session_id = (!id_part.is_empty()).then(|| id_part.to_string());
-        let strats = match strategies {
-            Some(s) => s,
-            None => {
-                bevy::log::warn!("agent strategies not registered; falling back to terminal");
-                let terminal = commands
-                    .spawn((
-                        new_terminal_bundle(meshes, webview_mt, settings),
-                        ChildOf(stack),
-                    ))
-                    .id();
-                commands.entity(terminal).insert(CefKeyboardTarget);
-                return;
-            }
-        };
-        if let Err(e) = spawn_agent_into_stack(
-            kind, stack, cwd, session_id, strats, commands, meshes, webview_mt, settings,
-        ) {
-            bevy::log::warn!("agent spawn ({kind:?}) failed: {e}; falling back to terminal");
-            let terminal = commands
-                .spawn((
-                    new_terminal_bundle(meshes, webview_mt, settings),
-                    ChildOf(stack),
-                ))
-                .id();
-            commands.entity(terminal).insert(CefKeyboardTarget);
-        }
+        spawn_agent.write(vmux_core::agent::SpawnAgentInStackRequest {
+            kind,
+            cwd,
+            session_id,
+            stack,
+        });
     } else if url.starts_with(vmux_layout::event::SERVICES_WEBVIEW_URL) {
         commands.spawn((ProcessesMonitor::new(meshes, webview_mt), ChildOf(stack)));
     } else if url.starts_with(vmux_space::event::SPACES_WEBVIEW_URL) {
@@ -407,44 +387,6 @@ fn spawn_url_into_stack(
             .id();
         commands.entity(browser_e).insert(CefKeyboardTarget);
     }
-}
-
-pub fn spawn_agent_into_stack(
-    kind: vmux_core::agent::AgentKind,
-    stack: Entity,
-    cwd: std::path::PathBuf,
-    session_id: Option<String>,
-    strategies: &vmux_agent::strategy::AgentStrategies,
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) -> Result<(), String> {
-    let launch = vmux_agent::build_agent_launch(kind, &cwd, session_id.as_deref(), strategies)?;
-    let terminal = commands
-        .spawn((
-            new_terminal_bundle_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
-            ChildOf(stack),
-        ))
-        .id();
-    commands.entity(terminal).insert(CefKeyboardTarget);
-    commands
-        .entity(terminal)
-        .insert((launch, vmux_core::agent::AgentSession { kind }));
-    if let Some(id) = session_id {
-        commands
-            .entity(terminal)
-            .insert(vmux_core::agent::SessionId(id));
-    } else {
-        commands
-            .entity(terminal)
-            .insert(vmux_core::agent::PendingAgentSession {
-                kind,
-                spawn_time: std::time::SystemTime::now(),
-                cwd,
-            });
-    }
-    Ok(())
 }
 
 fn service_wake_callback(app: &App) -> Option<ServiceWake> {
@@ -2074,48 +2016,34 @@ fn on_restart_pty(
         &mut PageMetadata,
         Option<&mut crate::launch::TerminalLaunch>,
         Option<&vmux_core::agent::AgentSession>,
-        Option<&vmux_core::agent::SessionId>,
     )>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
-    strategies: Option<Res<vmux_agent::strategy::AgentStrategies>>,
+    mut restart_agent: MessageWriter<vmux_core::agent::RestartAgentPty>,
 ) {
     let entity = trigger.event().entity;
     let Some(service) = service else { return };
-    let Ok((mut pid, mut meta, mut launch, agent_session, session_id)) = q.get_mut(entity) else {
+    let Ok((mut pid, mut meta, mut launch, agent_session)) = q.get_mut(entity) else {
         return;
     };
+
+    if agent_session.is_some() {
+        restart_agent.write(vmux_core::agent::RestartAgentPty { entity });
+        return;
+    }
 
     service
         .0
         .send(ClientMessage::KillProcess { process_id: *pid });
 
-    let (command, args, cwd, env) = match (launch.as_deref(), agent_session, strategies.as_deref())
-    {
-        (Some(l), Some(session), Some(strategies)) => {
-            let mut updated_args = l.args.clone();
-            if let Some(strategy) = strategies.get_cli(session.kind) {
-                let mcp = vmux_core::agent::McpServerConfig {
-                    command: l.command.clone(),
-                    args: vec![],
-                    cwd: None,
-                };
-                updated_args = strategy.build_args(&mcp, session_id.map(|s| s.0.as_str()));
-            }
-            (
-                l.command.clone(),
-                updated_args,
-                l.cwd.clone(),
-                l.env.clone(),
-            )
-        }
-        (Some(l), _, _) => (
+    let (command, args, cwd, env) = match launch.as_deref() {
+        Some(l) => (
             l.command.clone(),
             l.args.clone(),
             l.cwd.clone(),
             l.env.clone(),
         ),
-        _ => {
+        None => {
             let shell = settings
                 .terminal
                 .as_ref()

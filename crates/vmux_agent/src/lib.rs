@@ -22,6 +22,7 @@ pub mod systems {
     pub mod drain_stream;
     pub mod process_input;
 }
+pub mod terminal_integration;
 pub mod variant;
 pub mod vibe;
 
@@ -43,4 +44,5 @@ pub use plugin::AgentSessionPlugin;
 pub use run_state::{AgentRunState, ToolDispatchOutput};
 pub use session::AgentSessionExited;
 pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
+pub use terminal_integration::TerminalIntegrationPlugin;
 pub use variant::AgentVariant;

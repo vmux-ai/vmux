@@ -33,7 +33,6 @@ bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 rfd = { workspace = true }
 tracing = "0.1"
-vmux_agent = { path = "../vmux_agent" }
 vmux_command = { path = "../vmux_command" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }

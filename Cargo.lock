@@ -9072,6 +9072,7 @@ name = "vmux_agent"
 version = "0.0.9"
 dependencies = [
  "bevy",
+ "bevy_cef",
  "chrono",
  "crossbeam-channel",
  "futures-lite",
@@ -9082,6 +9083,8 @@ dependencies = [
  "vmux_core",
  "vmux_layout",
  "vmux_service",
+ "vmux_settings",
+ "vmux_terminal",
 ]
 
 [[package]]
@@ -9283,7 +9286,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "vmux_agent",
  "vmux_command",
  "vmux_core",
  "vmux_history",
@@ -9323,7 +9325,6 @@ dependencies = [
  "serde",
  "tracing",
  "unicode-width",
- "vmux_agent",
  "vmux_command",
  "vmux_core",
  "vmux_history",

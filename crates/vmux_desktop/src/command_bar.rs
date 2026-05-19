@@ -76,6 +76,7 @@ impl Plugin for CommandBarInputPlugin {
         app.init_resource::<NewStackContext>()
             .init_resource::<AgentProviders>()
             .init_resource::<Messages<AgentLaunchRequested>>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_plugins(BinJsEmitEventPlugin::<CommandBarActionEvent>::default())
             .add_plugins(BinJsEmitEventPlugin::<PathCompleteRequest>::default())
             .add_plugins(BinJsEmitEventPlugin::<CommandBarReadyEvent>::default())
@@ -880,6 +881,7 @@ fn on_command_bar_action(
     mut writer_params: ParamSet<(
         MessageWriter<AppCommand>,
         Option<MessageWriter<AgentLaunchRequested>>,
+        MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
     )>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -1031,37 +1033,14 @@ fn on_command_bar_action(
                             });
                             let cwd = std::env::current_dir()
                                 .unwrap_or_else(|_| std::path::PathBuf::from("/"));
-                            let strategies_ref = resource_params.p4();
-                            if let Some(strategies) = strategies_ref.as_deref() {
-                                if let Err(e) = vmux_terminal::spawn_agent_into_stack(
+                            writer_params
+                                .p2()
+                                .write(vmux_core::agent::SpawnAgentInStackRequest {
                                     kind,
-                                    stack_e,
                                     cwd,
-                                    id_part,
-                                    strategies,
-                                    &mut commands,
-                                    &mut meshes,
-                                    &mut webview_mt,
-                                    &settings,
-                                ) {
-                                    bevy::log::warn!(
-                                        "agent spawn ({kind:?}) failed: {e}; falling back to terminal"
-                                    );
-                                    let term_e = commands
-                                        .spawn((
-                                            new_terminal_bundle(
-                                                &mut meshes,
-                                                &mut webview_mt,
-                                                &settings,
-                                            ),
-                                            ChildOf(stack_e),
-                                        ))
-                                        .id();
-                                    commands.entity(term_e).insert(CefKeyboardTarget);
-                                }
-                            } else {
-                                bevy::log::warn!("agent strategies not registered; skipping spawn");
-                            }
+                                    session_id: id_part,
+                                    stack: stack_e,
+                                });
                         }
                     } else if url.starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/')) {
                         commands.entity(stack_e).insert(PageMetadata {
@@ -1200,24 +1179,14 @@ fn on_command_bar_action(
                                 .map(|s| s.to_string());
                             let cwd = std::env::current_dir()
                                 .unwrap_or_else(|_| std::path::PathBuf::from("/"));
-                            let strategies_ref = resource_params.p4();
-                            if let Some(strategies) = strategies_ref.as_deref() {
-                                if let Err(e) = vmux_terminal::spawn_agent_into_stack(
+                            writer_params
+                                .p2()
+                                .write(vmux_core::agent::SpawnAgentInStackRequest {
                                     kind,
-                                    stack_e,
                                     cwd,
                                     session_id,
-                                    strategies,
-                                    &mut commands,
-                                    &mut meshes,
-                                    &mut webview_mt,
-                                    &settings,
-                                ) {
-                                    bevy::log::warn!("agent spawn ({kind:?}) failed: {e}");
-                                }
-                            } else {
-                                bevy::log::warn!("agent strategies not registered; skipping spawn");
-                            }
+                                    stack: stack_e,
+                                });
                             custom_keyboard_restore = true;
                         }
                     } else if url.starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/')) {
@@ -2383,6 +2352,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
+        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
@@ -2433,6 +2403,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
+        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(vmux_layout::stack::FocusedStack::default());
@@ -2514,6 +2485,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
+        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_observer(on_command_bar_action);
         app.add_observer(capture_space_command);
         app.init_resource::<NewStackContext>();
@@ -2570,6 +2542,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
+        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
@@ -2620,6 +2593,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
+        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
@@ -2671,6 +2645,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_plugins(CommandPlugin);
+        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());

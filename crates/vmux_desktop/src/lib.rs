@@ -115,6 +115,7 @@ impl Plugin for VmuxPlugin {
             AgentPlugin,
             vmux_agent::AgentSessionPlugin,
             vmux_agent::AppAgentPlugin,
+            vmux_agent::TerminalIntegrationPlugin,
             ProcessesMonitorPlugin,
             layout_response::LayoutResponseForwarderPlugin,
             PersistencePlugin,

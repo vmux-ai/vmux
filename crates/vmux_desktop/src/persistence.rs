@@ -80,6 +80,7 @@ impl Plugin for PersistencePlugin {
             periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
             dirty: false,
         })
+        .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
         .add_observer(save_on_default_event)
         .add_observer(load_on_default_event)
         .add_systems(Startup, run_legacy_migration.before(load_space_on_startup))
@@ -229,7 +230,7 @@ pub(crate) fn rebuild_space_views(
     browser_q: Query<(), With<Browser>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     settings: Res<AppSettings>,
-    strategies: Res<vmux_agent::strategy::AgentStrategies>,
+    mut spawn_agent: MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -375,19 +376,12 @@ pub(crate) fn rebuild_space_views(
                     .unwrap_or_else(|| {
                         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
                     });
-                if let Err(e) = vmux_terminal::spawn_agent_into_stack(
+                spawn_agent.write(vmux_core::agent::SpawnAgentInStackRequest {
                     kind,
-                    entity,
                     cwd,
                     session_id,
-                    &strategies,
-                    &mut commands,
-                    &mut meshes,
-                    &mut webview_mt,
-                    &settings,
-                ) {
-                    bevy::log::warn!("restore agent tab failed: {e}");
-                }
+                    stack: entity,
+                });
             } else if meta
                 .url
                 .starts_with(SPACES_WEBVIEW_URL.trim_end_matches('/'))
@@ -552,6 +546,7 @@ mod tests {
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
         app.init_resource::<vmux_agent::strategy::AgentStrategies>();
+        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_systems(Update, rebuild_space_views);
 
         let main = app.world_mut().spawn(Main).id();

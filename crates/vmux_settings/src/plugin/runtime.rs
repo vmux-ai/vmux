@@ -10,37 +10,6 @@ pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
 };
 
-pub(crate) fn register_app_agents_from_settings(
-    settings: Option<Res<AppSettings>>,
-    strategies: Option<ResMut<vmux_agent::strategy::AgentStrategies>>,
-) {
-    let Some(settings) = settings else { return };
-    let Some(mut strategies) = strategies else {
-        return;
-    };
-    for provider_settings in &settings.agent.app_providers {
-        let kind = match provider_settings.kind.as_str() {
-            "vibe" => vmux_agent::AgentKind::Vibe,
-            "claude" => vmux_agent::AgentKind::Claude,
-            "codex" => vmux_agent::AgentKind::Codex,
-            other => {
-                bevy::log::warn!(
-                    "agent.app_providers: unknown kind '{other}' for provider '{}'; defaulting to vibe",
-                    provider_settings.provider
-                );
-                vmux_agent::AgentKind::Vibe
-            }
-        };
-        for model in &provider_settings.models {
-            strategies.register_app(Box::new(vmux_agent::EchoAppStrategy::new(
-                provider_settings.provider.clone(),
-                model.clone(),
-                kind,
-            )));
-        }
-    }
-}
-
 pub(crate) fn update_effective_startup_url(
     settings: Option<Res<AppSettings>>,
     mut effective: ResMut<vmux_layout::settings::EffectiveStartupUrl>,
@@ -111,7 +80,7 @@ pub fn resolve_startup_url(settings: &AppSettings) -> String {
     settings
         .startup_url
         .clone()
-        .unwrap_or_else(|| vmux_agent::AgentKind::Vibe.cli_url_prefix())
+        .unwrap_or_else(|| vmux_core::agent::AgentKind::Vibe.cli_url_prefix())
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

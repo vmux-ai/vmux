@@ -9,8 +9,7 @@ use vmux_webview_app::WebviewAppRegistry;
 use crate::event::SettingsCommandEvent;
 use runtime::{
     LastSelfWriteHash, SettingsLoadSet, SettingsWriteRequest, load_settings,
-    persist_settings_to_disk, register_app_agents_from_settings, reload_settings_on_change,
-    update_effective_startup_url,
+    persist_settings_to_disk, reload_settings_on_change, update_effective_startup_url,
 };
 use view::{
     broadcast_schema_to_views, broadcast_settings_to_views, handle_open_settings_command,
@@ -34,10 +33,6 @@ impl Plugin for SettingsPlugin {
                 update_effective_startup_url
                     .after(SettingsLoadSet)
                     .before(vmux_layout::LayoutStartupSet::Post),
-            )
-            .add_systems(
-                Startup,
-                register_app_agents_from_settings.after(SettingsLoadSet),
             )
             .add_systems(
                 Update,

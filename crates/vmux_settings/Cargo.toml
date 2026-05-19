@@ -33,7 +33,6 @@ notify = { workspace = true }
 ron = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"
-vmux_agent = { path = "../vmux_agent" }
 vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_history = { path = "../vmux_history" }

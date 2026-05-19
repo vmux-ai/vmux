@@ -89,6 +89,19 @@ pub struct McpServerConfig {
     pub cwd: Option<PathBuf>,
 }
 
+#[derive(Message, Debug, Clone)]
+pub struct SpawnAgentInStackRequest {
+    pub kind: AgentKind,
+    pub cwd: PathBuf,
+    pub session_id: Option<String>,
+    pub stack: Entity,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct RestartAgentPty {
+    pub entity: Entity,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

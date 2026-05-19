@@ -147,6 +147,8 @@ impl Plugin for LayoutPlugin {
         app.init_resource::<NewStackContext>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .add_message::<LayoutSpawnRequest>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+            .add_message::<vmux_core::agent::RestartAgentPty>()
             .add_message::<BrowserNavigateRequest>()
             .add_message::<reconcile::LayoutApplyRequest>()
             .add_message::<reconcile::LayoutApplyResponse>()
