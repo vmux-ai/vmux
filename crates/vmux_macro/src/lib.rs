@@ -1166,6 +1166,10 @@ fn impl_mcp_tool_root(
     let mut id_clauses = Vec::new();
 
     for variant in &data.variants {
+        let mcp_props = McpProps::from_attrs(&variant.attrs)?;
+        if mcp_props.skip {
+            continue;
+        }
         let Fields::Unnamed(fields) = &variant.fields else {
             return Err(syn::Error::new_spanned(
                 &variant.fields,

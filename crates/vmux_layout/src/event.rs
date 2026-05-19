@@ -91,7 +91,7 @@ fn default_pane_gap() -> f32 {
     8.0
 }
 
-pub const HEADER_HEIGHT_PX: f32 = 60.0;
+pub const HEADER_HEIGHT_PX: f32 = 72.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
 /// Left padding (px) reserved on the tab row for the macOS traffic

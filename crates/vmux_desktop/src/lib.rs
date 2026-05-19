@@ -12,7 +12,7 @@ mod browser;
 mod clipboard;
 mod command;
 mod command_bar;
-mod layout;
+mod layout_response;
 mod os_menu;
 mod persistence;
 mod processes_monitor;
@@ -37,7 +37,6 @@ use {
     browser::BrowserPlugin,
     command::CommandPlugin,
     command_bar::CommandBarInputPlugin,
-    layout::LayoutPlugin,
     os_menu::OsMenuPlugin,
     persistence::PersistencePlugin,
     processes_monitor::ProcessesMonitorPlugin,
@@ -45,6 +44,7 @@ use {
     shortcut::ShortcutPlugin,
     spaces::SpacesPlugin,
     terminal::TerminalInputPlugin,
+    vmux_layout::LayoutPlugin,
     vmux_layout::{LayoutChromePlugin, profile::ProfilePlugin, scene::ScenePlugin},
     vmux_service::webview::ServicesPlugin,
     vmux_terminal::TerminalPlugin,
@@ -123,6 +123,7 @@ impl Plugin for VmuxPlugin {
             vmux_agent::AgentSessionPlugin,
             vmux_agent::AppAgentPlugin,
             ProcessesMonitorPlugin,
+            layout_response::LayoutResponseForwarderPlugin,
             PersistencePlugin,
             ProfilePlugin,
             LayoutPlugin,

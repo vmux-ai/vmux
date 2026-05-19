@@ -10,13 +10,13 @@ use vmux_webview_app::UiReady;
 
 use crate::{
     browser::Browser,
-    layout::{
-        pane::{Pane, PaneSplit},
-        stack::{Stack, focused_stack, stack_bundle},
-        tab::Tab,
-        window::WEBVIEW_MESH_DEPTH_BIAS,
-    },
     terminal::{ServiceClient, Terminal},
+};
+use vmux_layout::{
+    pane::{Pane, PaneSplit},
+    stack::{Stack, focused_stack, stack_bundle},
+    tab::Tab,
+    window::WEBVIEW_MESH_DEPTH_BIAS,
 };
 
 /// Marker for the processes monitor webview entity.

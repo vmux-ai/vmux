@@ -419,9 +419,9 @@ fn Tab(tab: TabRow) -> Element {
             (
                 format!("--tab-bg:{color};"),
                 format!(
-                    "{skirt_classes} group flex h-7 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-1.5 rounded-t-md pl-2 pr-2 bg-[var(--tab-bg)] {text_class}"
+                    "{skirt_classes} group flex h-10 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-2 rounded-t-md px-3.5 bg-[var(--tab-bg)] {text_class}"
                 ),
-                format!("min-w-0 truncate text-ui-xs font-medium {text_class}"),
+                format!("min-w-0 truncate text-ui font-medium {text_class}"),
                 format!(
                     "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/20 {text_class}"
                 ),
@@ -430,17 +430,17 @@ fn Tab(tab: TabRow) -> Element {
             (
                 "--tab-bg:var(--glass);".to_string(),
                 format!(
-                    "{skirt_classes} glass group flex h-7 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-1.5 rounded-t-md border-b-0 pl-2 pr-2"
+                    "{skirt_classes} glass group flex h-10 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-2 rounded-t-md border-b-0 px-3.5"
                 ),
-                "min-w-0 truncate text-ui-xs font-medium text-foreground".to_string(),
+                "min-w-0 truncate text-ui font-medium text-foreground".to_string(),
                 "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
             )
         }
     } else {
         (
             String::new(),
-            "group flex h-7 min-w-0 max-w-[200px] items-center gap-1.5 rounded-md pl-2 pr-2 text-muted-foreground hover:bg-glass-hover hover:text-foreground".to_string(),
-            "min-w-0 truncate text-ui-xs".to_string(),
+            "group flex h-10 min-w-0 max-w-[200px] items-center gap-2 rounded-md px-3.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground".to_string(),
+            "min-w-0 truncate text-ui".to_string(),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
     };
@@ -452,7 +452,7 @@ fn Tab(tab: TabRow) -> Element {
             button {
                 r#type: "button",
                 title: "{tooltip}",
-                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-1.5",
+                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2.5",
                 onclick: move |_| {
                     let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
                         command: "switch".to_string(),
@@ -526,15 +526,13 @@ fn SideSheetView() -> Element {
     );
 
     let PaneTreeEvent { panes } = tree_state();
-    let spaces = spaces_state().spaces;
+    let active_space = spaces_state().spaces.into_iter().find(|s| s.is_active);
 
     rsx! {
         div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3 pt-2 text-foreground",
-            if !spaces.is_empty() {
+            if let Some(space) = active_space {
                 div { class: "mb-2 flex flex-col gap-px",
-                    for space in spaces.iter() {
-                        SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
-                    }
+                    SideSheetSpaceRow { key: "{space.id}", space }
                 }
             }
             if (listener.is_loading)() {
@@ -560,19 +558,14 @@ fn SideSheetView() -> Element {
 
 #[component]
 fn SideSheetSpaceRow(space: vmux_space::event::SpaceRow) -> Element {
-    let is_active = space.is_active;
     rsx! {
         button {
             r#type: "button",
-            class: if is_active {
-                "glass group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-foreground"
-            } else {
-                "group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground"
-            },
+            class: "glass group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-foreground",
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&vmux_space::event::SpaceCommandEvent {
                     command: "open_page".to_string(),
-                    space_id: None,
+                    space_id: Some(space.id.clone()),
                     name: None,
                 });
             },
@@ -583,11 +576,7 @@ fn SideSheetSpaceRow(space: vmux_space::event::SpaceRow) -> Element {
                 path { d: "M14 14h7v7h-7z" }
             }
             span {
-                class: if is_active {
-                    "min-w-0 flex-1 truncate text-ui font-medium text-foreground text-left"
-                } else {
-                    "min-w-0 flex-1 truncate text-ui text-left"
-                },
+                class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground text-left",
                 "{space.name}"
             }
         }
@@ -596,7 +585,7 @@ fn SideSheetSpaceRow(space: vmux_space::event::SpaceRow) -> Element {
 
 #[component]
 fn PaneSection(pane: PaneNode, index: usize) -> Element {
-    let label = format!("Pane {}", index + 1);
+    let label = format!("Stack {}", index + 1);
     let pane_id = pane.id;
     let any_loading = pane.stacks.iter().any(|s| s.is_loading);
 

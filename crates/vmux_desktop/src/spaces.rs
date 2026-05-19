@@ -13,12 +13,8 @@ use vmux_space::{
 };
 use vmux_webview_app::{UiReady, WebviewAppConfig, WebviewAppRegistry};
 
-use crate::{
-    browser::Browser,
-    command_bar::NewStackContext,
-    layout::{stack::Stack, window::WEBVIEW_MESH_DEPTH_BIAS},
-    profile,
-};
+use crate::{browser::Browser, command_bar::NewStackContext, profile};
+use vmux_layout::{stack::Stack, window::WEBVIEW_MESH_DEPTH_BIAS};
 
 #[derive(Resource, Clone, Debug)]
 pub(crate) struct ActiveSpace {
@@ -114,11 +110,28 @@ impl Plugin for SpacesPlugin {
         );
         app.add_plugins(BinJsEmitEventPlugin::<SpaceCommandEvent>::default())
             .add_observer(on_space_command)
+            .add_observer(reset_spaces_sent_marker_on_ui_ready)
             .add_systems(
                 Update,
                 (apply_pending_space_switch, broadcast_spaces_to_views).chain(),
             );
     }
+}
+
+#[derive(Component)]
+struct SpacesListSent;
+
+fn reset_spaces_sent_marker_on_ui_ready(
+    trigger: On<BinReceive<UiReady>>,
+    spaces_views: Query<(), With<SpacesView>>,
+    chrome_views: Query<(), With<vmux_layout::LayoutChrome>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    if spaces_views.get(entity).is_err() && chrome_views.get(entity).is_err() {
+        return;
+    }
+    commands.entity(entity).remove::<SpacesListSent>();
 }
 
 fn register_spaces_webview_app(registry: &mut WebviewAppRegistry) {
@@ -204,12 +217,6 @@ pub(crate) fn active_space_rows(active: &ActiveSpace, active_stack_count: usize)
     space_rows(active, &registry, active_stack_count)
 }
 
-#[derive(Default)]
-struct SpaceBroadcastCache {
-    body: String,
-    sent: std::collections::HashSet<Entity>,
-}
-
 #[derive(Resource)]
 struct PendingSpaceSwitch {
     from_id: String,
@@ -217,32 +224,34 @@ struct PendingSpaceSwitch {
     delay_frames: u8,
 }
 
-fn space_emit_targets(
-    ready_views: &[Entity],
-    body: &str,
-    cache: &mut SpaceBroadcastCache,
-) -> Vec<Entity> {
-    if body != cache.body {
-        cache.body = body.to_string();
-        cache.sent.clear();
-    }
-    ready_views
-        .iter()
-        .copied()
-        .filter(|entity| cache.sent.insert(*entity))
-        .collect()
-}
-
 fn broadcast_spaces_to_views(
     active: Res<ActiveSpace>,
-    spaces_views: Query<Entity, (With<SpacesView>, With<UiReady>)>,
-    chrome_views: Query<Entity, (With<vmux_layout::LayoutChrome>, With<UiReady>)>,
+    pending_spaces: Query<Entity, (With<SpacesView>, With<UiReady>, Without<SpacesListSent>)>,
+    sent_spaces: Query<Entity, (With<SpacesView>, With<UiReady>, With<SpacesListSent>)>,
+    pending_chrome: Query<
+        Entity,
+        (
+            With<vmux_layout::LayoutChrome>,
+            With<UiReady>,
+            Without<SpacesListSent>,
+        ),
+    >,
+    sent_chrome: Query<
+        Entity,
+        (
+            With<vmux_layout::LayoutChrome>,
+            With<UiReady>,
+            With<SpacesListSent>,
+        ),
+    >,
     browsers: NonSend<Browsers>,
     tabs: Query<(), With<Stack>>,
-    mut cache: Local<SpaceBroadcastCache>,
+    mut last_body: Local<String>,
     mut commands: Commands,
 ) {
-    if spaces_views.is_empty() && chrome_views.is_empty() {
+    let pending_total = pending_spaces.iter().count() + pending_chrome.iter().count();
+    let sent_total = sent_spaces.iter().count() + sent_chrome.iter().count();
+    if pending_total == 0 && sent_total == 0 {
         return;
     }
     let registry = read_space_registry_from(&profile::shared_data_dir());
@@ -250,18 +259,30 @@ fn broadcast_spaces_to_views(
         spaces: space_rows(&active, &registry, tabs.iter().count()),
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
-    let mut ready = Vec::new();
-    for entity in spaces_views.iter().chain(chrome_views.iter()) {
-        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
-            ready.push(entity);
+    let body_changed = body != *last_body;
+    for entity in pending_spaces.iter().chain(pending_chrome.iter()) {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
         }
-    }
-    for entity in space_emit_targets(&ready, &body, &mut cache) {
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             SPACES_LIST_EVENT,
             &payload,
         ));
+        commands.entity(entity).insert(SpacesListSent);
+    }
+    if body_changed {
+        for entity in sent_spaces.iter().chain(sent_chrome.iter()) {
+            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                continue;
+            }
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                SPACES_LIST_EVENT,
+                &payload,
+            ));
+        }
+        *last_body = body;
     }
 }
 
@@ -272,14 +293,14 @@ fn apply_pending_space_switch(
         Entity,
         Or<(
             With<crate::profile::Profile>,
-            With<crate::layout::tab::Tab>,
+            With<vmux_layout::tab::Tab>,
             With<vmux_history::Visit>,
         )>,
     >,
-    main_q: Query<Entity, With<crate::layout::window::Main>>,
+    main_q: Query<Entity, With<vmux_layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     mut new_stack_ctx: ResMut<NewStackContext>,
-    focus: Option<ResMut<crate::layout::stack::FocusedStack>>,
+    focus: Option<ResMut<vmux_layout::stack::FocusedStack>>,
     mut commands: Commands,
 ) {
     let Some(mut pending) = pending else {
@@ -307,7 +328,7 @@ fn apply_pending_space_switch(
             commands.entity(entity).try_despawn();
         }
         let Ok(main) = main_q.single() else { return };
-        let spawned = crate::layout::window::spawn_default_space_layout(
+        let spawned = vmux_layout::window::spawn_default_space_layout(
             main,
             *primary_window,
             &mut new_stack_ctx,
@@ -327,10 +348,10 @@ fn spawn_spaces_page_layout(
     new_stack_ctx: &mut NewStackContext,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    focus: Option<&mut crate::layout::stack::FocusedStack>,
+    focus: Option<&mut vmux_layout::stack::FocusedStack>,
     commands: &mut Commands,
 ) {
-    let spawned = crate::layout::window::spawn_default_space_layout(
+    let spawned = vmux_layout::window::spawn_default_space_layout(
         main,
         primary_window,
         new_stack_ctx,
@@ -363,23 +384,32 @@ fn on_space_command(
         Entity,
         Or<(
             With<crate::profile::Profile>,
-            With<crate::layout::tab::Tab>,
+            With<vmux_layout::tab::Tab>,
             With<vmux_history::Visit>,
         )>,
     >,
-    main_q: Query<Entity, With<crate::layout::window::Main>>,
+    main_q: Query<Entity, With<vmux_layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     mut new_stack_ctx: ResMut<NewStackContext>,
-    mut focus: Option<ResMut<crate::layout::stack::FocusedStack>>,
+    mut focus: Option<ResMut<vmux_layout::stack::FocusedStack>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut spawn_requests: Option<MessageWriter<vmux_layout::LayoutSpawnRequest>>,
+    stack_q: Query<(Entity, &PageMetadata), With<Stack>>,
+    child_of_q: Query<&ChildOf>,
     mut commands: Commands,
 ) {
     let root = profile::shared_data_dir();
     let mut registry = read_space_registry_from(&root);
     let evt = &trigger.event().payload;
     if evt.command == "open_page" {
+        if let Some((existing, _)) = stack_q
+            .iter()
+            .find(|(_, meta)| meta.url == SPACES_WEBVIEW_URL)
+        {
+            crate::terminal::pid::focus_pane_entity(existing, &mut commands, &child_of_q);
+            return;
+        }
         let Some(focus_res) = focus.as_deref() else {
             return;
         };
@@ -391,7 +421,7 @@ fn on_space_command(
         };
         let stack = commands
             .spawn((
-                crate::layout::stack::stack_bundle(),
+                vmux_layout::stack::stack_bundle(),
                 vmux_history::LastActivatedAt::now(),
                 ChildOf(pane),
             ))
@@ -485,7 +515,7 @@ fn on_space_command(
                 &mut commands,
             );
         } else {
-            let spawned = crate::layout::window::spawn_default_space_layout(
+            let spawned = vmux_layout::window::spawn_default_space_layout(
                 main,
                 *primary_window,
                 &mut new_stack_ctx,
@@ -503,14 +533,12 @@ fn on_space_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        layout::{pane::Pane, stack::Stack, tab::Tab, window::Main},
-        settings::{
-            AppSettings, BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings,
-            ShortcutSettings, SideSheetSettings, WindowSettings,
-        },
+    use crate::settings::{
+        AppSettings, BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings,
+        ShortcutSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_history::LastActivatedAt;
+    use vmux_layout::{pane::Pane, stack::Stack, tab::Tab, window::Main};
     use vmux_space::model::DEFAULT_PROFILE_ID;
     use vmux_webview_app::WebviewAppRegistry;
 
@@ -612,22 +640,6 @@ mod tests {
         let hosts = registry.embedded_hosts();
         let entry = hosts.entry_for_host("spaces").unwrap();
         assert_eq!(entry.default_document, "spaces/index.html");
-    }
-
-    #[test]
-    fn unchanged_payload_is_sent_to_new_spaces_view() {
-        let first = Entity::from_bits(1);
-        let second = Entity::from_bits(2);
-        let mut cache = SpaceBroadcastCache::default();
-
-        assert_eq!(
-            space_emit_targets(&[first], "same", &mut cache),
-            vec![first]
-        );
-        assert_eq!(
-            space_emit_targets(&[first, second], "same", &mut cache),
-            vec![second]
-        );
     }
 
     #[test]
@@ -798,7 +810,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.add_observer(on_space_command);
-        app.insert_resource(crate::layout::stack::FocusedStack::default());
+        app.insert_resource(vmux_layout::stack::FocusedStack::default());
         app.insert_resource(ActiveSpace {
             record: default_space_record(),
         });
@@ -826,8 +838,8 @@ mod tests {
             .id();
         let webview = app.world_mut().spawn((SpacesView, ChildOf(tab))).id();
         *app.world_mut()
-            .resource_mut::<crate::layout::stack::FocusedStack>() =
-            crate::layout::stack::FocusedStack {
+            .resource_mut::<vmux_layout::stack::FocusedStack>() =
+            vmux_layout::stack::FocusedStack {
                 tab: Some(old_tab),
                 pane: Some(pane),
                 stack: Some(tab),
@@ -870,7 +882,7 @@ mod tests {
         assert_eq!(tabs.len(), 1);
         assert_eq!(tabs[0].1, SPACES_WEBVIEW_URL);
         assert!(tabs[0].2);
-        let focus = app.world().resource::<crate::layout::stack::FocusedStack>();
+        let focus = app.world().resource::<vmux_layout::stack::FocusedStack>();
         assert_ne!(focus.tab, Some(old_tab));
         assert!(focus.tab.is_some());
         assert!(focus.pane.is_some());
@@ -890,10 +902,10 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(crate::command::CommandPlugin);
         app.add_plugins(bevy_cef::prelude::JsEmitEventPlugin::<SpaceCommandEvent>::default());
-        app.add_plugins(crate::layout::stack::StackPlugin);
+        app.add_plugins(vmux_layout::stack::StackPlugin);
         app.add_message::<vmux_layout::LayoutSpawnRequest>();
         app.add_observer(on_space_command);
-        app.init_resource::<crate::layout::pane::PendingCursorWarp>();
+        app.init_resource::<vmux_layout::pane::PendingCursorWarp>();
         app.init_resource::<bevy_cef::prelude::IpcEventRawBuffer>();
         app.insert_resource(ActiveSpace {
             record: default_space_record(),
@@ -941,7 +953,7 @@ mod tests {
 
         app.update();
 
-        let focus = app.world().resource::<crate::layout::stack::FocusedStack>();
+        let focus = app.world().resource::<vmux_layout::stack::FocusedStack>();
         assert!(focus.tab.is_some());
         assert!(focus.pane.is_some());
         assert!(focus.stack.is_some());

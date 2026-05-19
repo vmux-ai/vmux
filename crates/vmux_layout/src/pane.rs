@@ -2,8 +2,8 @@ use crate::{
     CloseRequiresConfirmation, NewStackContext,
     settings::{ConfirmCloseSettings, LayoutSettings},
     stack::{
-        CloseConfirmed, Stack, active_among, active_pane_in_tab, active_stack_in_pane,
-        focused_stack, stack_bundle,
+        CloseConfirmed, PendingStackClose, Stack, active_among, active_pane_in_tab,
+        active_stack_in_pane, focused_stack, stack_bundle,
     },
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     tab::Tab,
@@ -59,6 +59,7 @@ impl Plugin for PanePlugin {
             .add_systems(Update, click_pane_in_player_mode)
             .add_systems(Update, pane_gap_drag_resize)
             .add_systems(Update, process_pending_pane_closes)
+            .add_systems(Update, process_pending_stack_closes)
             .add_systems(PostUpdate, sync_pane_split_gaps_to_settings)
             .add_systems(
                 PostUpdate,
@@ -344,6 +345,30 @@ pub fn leaf_pane_bundle() -> impl Bundle {
     )
 }
 
+pub fn split_root_bundle(direction: PaneSplitDirection) -> impl Bundle {
+    let flex_direction = match direction {
+        PaneSplitDirection::Row => FlexDirection::Row,
+        PaneSplitDirection::Column => FlexDirection::Column,
+    };
+    let gap = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
+    (
+        Pane,
+        PaneSplit { direction },
+        PaneSize::default(),
+        Transform::default(),
+        GlobalTransform::default(),
+        Visibility::default(),
+        Node {
+            flex_grow: 1.0,
+            flex_direction,
+            column_gap: gap.column_gap,
+            row_gap: gap.row_gap,
+            align_items: AlignItems::Stretch,
+            ..default()
+        },
+    )
+}
+
 fn spawn_leaf_pane(commands: &mut Commands, parent: Entity) -> Entity {
     commands
         .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
@@ -364,20 +389,7 @@ pub fn split_pane_in_two(
         commands.entity(*tab).insert(ChildOf(pane1));
     }
 
-    let flex_direction = match direction {
-        PaneSplitDirection::Row => FlexDirection::Row,
-        PaneSplitDirection::Column => FlexDirection::Column,
-    };
-    let gap = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
-    commands.entity(active).insert(PaneSplit { direction });
-    commands.entity(active).insert(Node {
-        flex_grow: 1.0,
-        flex_direction,
-        column_gap: gap.column_gap,
-        row_gap: gap.row_gap,
-        align_items: AlignItems::Stretch,
-        ..default()
-    });
+    commands.entity(active).insert(split_root_bundle(direction));
     commands.entity(pane2).insert(LastActivatedAt::now());
 
     (pane1, pane2)
@@ -1323,6 +1335,72 @@ fn process_pending_pane_closes(world: &mut World) {
             world
                 .resource_mut::<Messages<AppCommand>>()
                 .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
+        }
+    }
+}
+
+fn process_pending_stack_closes(world: &mut World) {
+    let pending: Vec<Entity> = world
+        .query_filtered::<Entity, (With<PendingStackClose>, With<Stack>)>()
+        .iter(world)
+        .collect();
+
+    if pending.is_empty() {
+        return;
+    }
+
+    for stack in pending {
+        let confirmed = show_close_dialog();
+
+        if let Ok(mut entity_mut) = world.get_entity_mut(stack) {
+            entity_mut.remove::<PendingStackClose>();
+        }
+
+        if !confirmed {
+            continue;
+        }
+
+        let Some(parent_pane) = world.get::<ChildOf>(stack).map(|c| c.get()) else {
+            continue;
+        };
+
+        let sibling_stacks: Vec<Entity> = world
+            .get::<Children>(parent_pane)
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|&e| e != stack && world.get::<Stack>(e).is_some())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let was_active = {
+            let mut q = world.query::<(Entity, &LastActivatedAt)>();
+            let stacks_with_ts: Vec<(Entity, LastActivatedAt)> = world
+                .get::<Children>(parent_pane)
+                .map(|children| {
+                    children
+                        .iter()
+                        .filter_map(|e| q.get(world, e).ok())
+                        .filter(|(e, _)| world.get::<Stack>(*e).is_some())
+                        .map(|(e, ts)| (e, *ts))
+                        .collect()
+                })
+                .unwrap_or_default();
+            stacks_with_ts
+                .iter()
+                .max_by_key(|(_, ts)| ts.0)
+                .map(|(e, _)| *e)
+                == Some(stack)
+        };
+
+        world.despawn(stack);
+
+        if was_active
+            && let Some(&next) = sibling_stacks.first()
+            && let Ok(mut entity_mut) = world.get_entity_mut(next)
+        {
+            entity_mut.insert(LastActivatedAt::now());
         }
     }
 }

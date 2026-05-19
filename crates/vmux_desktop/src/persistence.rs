@@ -8,13 +8,6 @@ use std::path::PathBuf;
 
 use crate::{
     browser::Browser,
-    layout::{
-        LayoutStartupSet, Open, SpaceFilePresent,
-        pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
-        stack::Stack,
-        tab::Tab,
-        window::Main,
-    },
     profile::Profile,
     settings::AppSettings,
     settings_view::SettingsView,
@@ -23,6 +16,13 @@ use crate::{
 };
 use vmux_core::PageMetadata;
 use vmux_layout::event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
+use vmux_layout::{
+    LayoutStartupSet, Open, SpaceFilePresent,
+    pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
+    stack::Stack,
+    tab::Tab,
+    window::Main,
+};
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::SPACES_WEBVIEW_URL;
 use vmux_space::migration::migrate_legacy_session_files;

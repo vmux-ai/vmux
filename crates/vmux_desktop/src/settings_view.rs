@@ -15,14 +15,14 @@ use vmux_webview_app::{UiReady, WebviewAppConfig, WebviewAppRegistry};
 
 use crate::{
     browser::Browser,
-    layout::{
-        pane::{Pane, PaneSplit},
-        stack::{FocusedStack, stack_bundle},
-        window::WEBVIEW_MESH_DEPTH_BIAS,
-    },
     settings::{
         AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json,
     },
+};
+use vmux_layout::{
+    pane::{Pane, PaneSplit},
+    stack::{FocusedStack, stack_bundle},
+    window::WEBVIEW_MESH_DEPTH_BIAS,
 };
 
 #[derive(Component)]

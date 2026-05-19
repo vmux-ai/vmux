@@ -5,15 +5,15 @@ use std::{
 
 use crate::{
     command::{AppCommand, WriteAppCommands},
-    layout::{
-        pane::{Pane, PaneSplit},
-        stack::FocusedStack,
-    },
     settings::AppSettings,
     terminal::{PendingTerminalInput, ProcessExited, ServiceMessageSet, Terminal},
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::{CefKeyboardTarget, RequestNavigate, WebviewExtendStandardMaterial};
+use vmux_layout::{
+    pane::{Pane, PaneSplit},
+    stack::FocusedStack,
+};
 
 use crate::browser::Browser;
 use vmux_agent::session::{AgentSession, PendingAgentSession, SessionId};
@@ -174,6 +174,8 @@ impl Plugin for AgentPlugin {
             .add_message::<AgentLaunchRequested>()
             .add_message::<vmux_agent::AgentSessionExited>()
             .add_message::<crate::settings::SettingsWriteRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
             .add_systems(
                 Update,
                 (
@@ -276,7 +278,7 @@ pub(crate) fn spawn_terminal_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::stack::stack_bundle(),
+            vmux_layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -402,7 +404,7 @@ pub(crate) fn spawn_process_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::stack::stack_bundle(),
+            vmux_layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -444,7 +446,7 @@ pub(crate) fn spawn_browser_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::stack::stack_bundle(),
+            vmux_layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -473,7 +475,7 @@ pub(crate) fn spawn_app_agent_tab(
 ) -> Option<Entity> {
     let tab = commands
         .spawn((
-            crate::layout::stack::stack_bundle(),
+            vmux_layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -598,7 +600,7 @@ pub(crate) fn spawn_sessions_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::stack::stack_bundle(),
+            vmux_layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -623,7 +625,7 @@ pub(crate) fn spawn_processes_tab(
 ) -> Entity {
     let tab = commands
         .spawn((
-            crate::layout::stack::stack_bundle(),
+            vmux_layout::stack::stack_bundle(),
             LastActivatedAt::now(),
             ChildOf(pane),
         ))
@@ -856,14 +858,13 @@ fn handle_agent_commands(
     focus: Res<FocusedStack>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    pane_children: Query<&Children, With<Pane>>,
-    tab_filter: Query<(), With<crate::layout::stack::Stack>>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     child_of_q: Query<&ChildOf>,
     lookups: AgentLookups,
     strategies: Res<AgentStrategies>,
     mut sp: SettingsParams,
     service: Option<Res<crate::terminal::ServiceClient>>,
+    mut layout_apply_writer: MessageWriter<vmux_layout::reconcile::LayoutApplyRequest>,
     mut commands: Commands,
     mut assets: SpawnAssets,
 ) {
@@ -1078,64 +1079,12 @@ fn handle_agent_commands(
                     )),
                 }
             }
-            ServiceAgentCommand::SplitAndNavigate { direction, url } => {
-                let split_dir_result = match direction.as_str() {
-                    "right" => Ok(vmux_layout::pane::PaneSplitDirection::Row),
-                    "down" => Ok(vmux_layout::pane::PaneSplitDirection::Column),
-                    other => Err(format!("split_and_navigate: invalid direction '{other}'")),
-                };
-
-                match split_dir_result {
-                    Err(message) => AgentCommandResult::Error(message),
-                    Ok(split_dir) => {
-                        if let Some(active_pane) = focus.pane.filter(|p| panes.contains(*p)) {
-                            let existing_tabs: Vec<Entity> = pane_children
-                                .get(active_pane)
-                                .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
-                                .unwrap_or_default();
-
-                            let (_pane1, pane2) = vmux_layout::pane::split_pane_in_two(
-                                &mut commands,
-                                active_pane,
-                                split_dir,
-                                &sp.settings.layout.pane,
-                                &existing_tabs,
-                            );
-                            if url.starts_with("vmux://") {
-                                match spawn_vmux_tab(
-                                    url,
-                                    pane2,
-                                    &mut commands,
-                                    &mut assets.meshes,
-                                    &mut assets.webview_mt,
-                                    &sp.settings,
-                                    pid_to_entity,
-                                    agent_to_entity,
-                                    &strategies,
-                                    &child_of_q,
-                                ) {
-                                    Ok(()) => AgentCommandResult::Ok,
-                                    Err(message) => AgentCommandResult::Error(format!(
-                                        "split_and_navigate: {message}"
-                                    )),
-                                }
-                            } else {
-                                spawn_browser_tab(
-                                    pane2,
-                                    url,
-                                    &mut commands,
-                                    &mut assets.meshes,
-                                    &mut assets.webview_mt,
-                                );
-                                AgentCommandResult::Ok
-                            }
-                        } else {
-                            AgentCommandResult::Error(
-                                "split_and_navigate: no focused pane".to_string(),
-                            )
-                        }
-                    }
-                }
+            ServiceAgentCommand::UpdateLayout { layout } => {
+                layout_apply_writer.write(vmux_layout::reconcile::LayoutApplyRequest {
+                    request_id: request.request_id.0,
+                    snapshot: layout.clone(),
+                });
+                continue;
             }
         };
         if let Some(service) = service.as_ref() {
@@ -1308,7 +1257,7 @@ mod tests {
         let pane = app.world_mut().spawn(Pane).id();
         let stack = app
             .world_mut()
-            .spawn(crate::layout::stack::stack_bundle())
+            .spawn(vmux_layout::stack::stack_bundle())
             .insert(ChildOf(pane))
             .id();
         app.world_mut().spawn(Browser).insert(ChildOf(stack));
@@ -1385,11 +1334,7 @@ mod tests {
         assert_eq!(rows[0].0, "echo");
 
         let tab = rows[0].1;
-        assert!(
-            app.world()
-                .get::<crate::layout::stack::Stack>(tab)
-                .is_some()
-        );
+        assert!(app.world().get::<vmux_layout::stack::Stack>(tab).is_some());
         assert_eq!(
             app.world().get::<PageMetadata>(tab).unwrap().url,
             TERMINAL_WEBVIEW_URL
@@ -1411,7 +1356,7 @@ mod tests {
         let pane = app.world_mut().spawn(Pane).id();
         let stack = app
             .world_mut()
-            .spawn(crate::layout::stack::stack_bundle())
+            .spawn(vmux_layout::stack::stack_bundle())
             .insert(ChildOf(pane))
             .id();
         let terminal = app.world_mut().spawn(Terminal).insert(ChildOf(stack)).id();
@@ -1470,7 +1415,7 @@ mod tests {
         app.update();
 
         let world = app.world_mut();
-        let mut tabs = world.query_filtered::<&ChildOf, With<crate::layout::stack::Stack>>();
+        let mut tabs = world.query_filtered::<&ChildOf, With<vmux_layout::stack::Stack>>();
         let tab_count_under_pane = tabs
             .iter(world)
             .filter(|child_of| child_of.get() == pane)
@@ -1481,7 +1426,7 @@ mod tests {
         );
 
         let mut tab_metadata =
-            world.query_filtered::<&PageMetadata, With<crate::layout::stack::Stack>>();
+            world.query_filtered::<&PageMetadata, With<vmux_layout::stack::Stack>>();
         let tab_urls: Vec<String> = tab_metadata.iter(world).map(|p| p.url.clone()).collect();
         assert!(
             tab_urls.contains(&"https://example.com".to_string()),
@@ -1526,7 +1471,7 @@ mod tests {
         app.update();
 
         let world = app.world_mut();
-        let mut tabs = world.query_filtered::<&ChildOf, With<crate::layout::stack::Stack>>();
+        let mut tabs = world.query_filtered::<&ChildOf, With<vmux_layout::stack::Stack>>();
         let tabs_in_b = tabs
             .iter(world)
             .filter(|child_of| child_of.get() == pane_b)
@@ -1537,219 +1482,6 @@ mod tests {
             .count();
         assert_eq!(tabs_in_b, 1, "tab should be spawned in target pane B");
         assert_eq!(tabs_in_a, 0, "no tab should be spawned in focused pane A");
-    }
-
-    #[test]
-    fn split_and_navigate_with_terminal_url_spawns_terminal() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
-        app.add_plugins(AgentPlugin);
-        app.init_resource::<AgentStrategies>();
-        app.insert_resource(FocusedStack::default());
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
-
-        app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
-                request_id: AgentRequestId::new(),
-                command: ServiceAgentCommand::SplitAndNavigate {
-                    direction: "right".to_string(),
-                    url: "vmux://terminal/".to_string(),
-                },
-            });
-
-        app.update();
-
-        let world = app.world_mut();
-        let terminal_count = world.query::<&Terminal>().iter(world).count();
-        assert!(terminal_count >= 1, "expected at least one Terminal entity");
-    }
-
-    #[test]
-    fn split_and_navigate_with_terminal_url_and_cwd_query_uses_cwd() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
-        app.add_plugins(AgentPlugin);
-        app.init_resource::<AgentStrategies>();
-        app.insert_resource(FocusedStack::default());
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
-
-        let cwd = std::env::current_dir().unwrap().display().to_string();
-        app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
-                request_id: AgentRequestId::new(),
-                command: ServiceAgentCommand::SplitAndNavigate {
-                    direction: "right".to_string(),
-                    url: format!("vmux://terminal/?cwd={cwd}"),
-                },
-            });
-
-        app.update();
-
-        let world = app.world_mut();
-        let terminal_count = world.query::<&Terminal>().iter(world).count();
-        assert!(
-            terminal_count >= 1,
-            "expected at least one Terminal entity (cwd path was valid)"
-        );
-    }
-
-    #[test]
-    fn split_and_navigate_with_terminal_url_and_invalid_cwd_errors() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
-        app.add_plugins(AgentPlugin);
-        app.init_resource::<AgentStrategies>();
-        app.insert_resource(FocusedStack::default());
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
-
-        app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
-                request_id: AgentRequestId::new(),
-                command: ServiceAgentCommand::SplitAndNavigate {
-                    direction: "right".to_string(),
-                    url: "vmux://terminal/?cwd=/this/does/not/exist".to_string(),
-                },
-            });
-
-        app.update();
-
-        let world = app.world_mut();
-        let terminal_count = world.query::<&Terminal>().iter(world).count();
-        assert_eq!(
-            terminal_count, 0,
-            "no terminal should be spawned with invalid cwd"
-        );
-    }
-
-    #[test]
-    fn split_and_navigate_with_sessions_url_spawns_sessions_view() {
-        use crate::spaces::SpacesView;
-
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
-        app.add_plugins(AgentPlugin);
-        app.init_resource::<AgentStrategies>();
-        app.insert_resource(FocusedStack::default());
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
-
-        app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
-                request_id: AgentRequestId::new(),
-                command: ServiceAgentCommand::SplitAndNavigate {
-                    direction: "right".to_string(),
-                    url: "vmux://sessions/".to_string(),
-                },
-            });
-
-        app.update();
-
-        let world = app.world_mut();
-        let count = world.query::<&SpacesView>().iter(world).count();
-        assert!(count >= 1, "expected at least one SpacesView entity");
-    }
-
-    #[test]
-    fn split_and_navigate_with_processes_url_spawns_processes_monitor() {
-        use crate::processes_monitor::ProcessesMonitor;
-
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
-        app.add_plugins(AgentPlugin);
-        app.init_resource::<AgentStrategies>();
-        app.insert_resource(FocusedStack::default());
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
-
-        app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
-                request_id: AgentRequestId::new(),
-                command: ServiceAgentCommand::SplitAndNavigate {
-                    direction: "right".to_string(),
-                    url: "vmux://services/".to_string(),
-                },
-            });
-
-        app.update();
-
-        let world = app.world_mut();
-        let count = world.query::<&ProcessesMonitor>().iter(world).count();
-        assert!(count >= 1, "expected at least one ProcessesMonitor entity");
-    }
-
-    #[test]
-    fn split_and_navigate_with_unknown_vmux_url_errors() {
-        use crate::browser::Browser;
-
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
-        app.add_plugins(AgentPlugin);
-        app.init_resource::<AgentStrategies>();
-        app.insert_resource(FocusedStack::default());
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
-
-        app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
-                request_id: AgentRequestId::new(),
-                command: ServiceAgentCommand::SplitAndNavigate {
-                    direction: "right".to_string(),
-                    url: "vmux://nonsense/".to_string(),
-                },
-            });
-
-        app.update();
-
-        let world = app.world_mut();
-        let browser_count = world.query::<&Browser>().iter(world).count();
-        let terminal_count = world.query::<&Terminal>().iter(world).count();
-        assert_eq!(
-            browser_count, 0,
-            "no browser should be spawned for unknown vmux URL"
-        );
-        assert_eq!(
-            terminal_count, 0,
-            "no terminal should be spawned for unknown vmux URL"
-        );
     }
 
     #[test]
@@ -1872,50 +1604,6 @@ mod tests {
         assert_eq!(
             terminal_count, 0,
             "no terminal should be spawned for unknown vmux URL"
-        );
-    }
-
-    #[test]
-    fn split_and_navigate_creates_split_and_browser_tab() {
-        use crate::browser::Browser;
-        use vmux_layout::pane::PaneSplit;
-
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(crate::command::CommandPlugin);
-        app.add_plugins(AgentPlugin);
-        app.init_resource::<AgentStrategies>();
-        app.insert_resource(FocusedStack::default());
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let pane = app.world_mut().spawn(Pane).id();
-        app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
-
-        app.world_mut()
-            .resource_mut::<Messages<AgentCommandRequest>>()
-            .write(AgentCommandRequest {
-                request_id: AgentRequestId::new(),
-                command: ServiceAgentCommand::SplitAndNavigate {
-                    direction: "right".to_string(),
-                    url: "https://example.com".to_string(),
-                },
-            });
-
-        app.update();
-
-        let world = app.world_mut();
-        assert!(
-            world.get::<PaneSplit>(pane).is_some(),
-            "active pane should now be a PaneSplit"
-        );
-
-        let mut browsers = world.query::<(&Browser, &PageMetadata)>();
-        let urls: Vec<String> = browsers.iter(world).map(|(_, p)| p.url.clone()).collect();
-        assert!(
-            urls.contains(&"https://example.com".to_string()),
-            "browser entity with the URL should exist; found {urls:?}"
         );
     }
 

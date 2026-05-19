@@ -1,20 +1,6 @@
 use crate::{
     command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand},
     command_bar::PendingCommandBarReveal,
-    layout::{
-        PendingWebviewReveal,
-        pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_stack_in_pane},
-        side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
-        stack::{
-            CloseConfirmed, PendingStackClose, Stack, active_stack_in_pane, collect_leaf_panes,
-            focused_stack, stack_bundle,
-        },
-        tab::Tab,
-        window::{
-            Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL,
-            WEBVIEW_Z_SIDE_SHEET,
-        },
-    },
     settings::AppSettings,
     terminal::{self, PtyExited, RestartPty, Terminal},
 };
@@ -31,11 +17,21 @@ use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::event::{PageBgColorEvent, SideSheetCommandEvent};
 pub(crate) use vmux_layout::{Browser, Loading};
 use vmux_layout::{
-    Header, LayoutChrome, NavigationState, Open,
+    Header, LayoutChrome, NavigationState, Open, PendingWebviewReveal,
     event::{
         HEADER_HEIGHT_PX, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent,
         PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT,
         StackNode, StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsHostEvent,
+    },
+    pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_stack_in_pane},
+    side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
+    stack::{
+        CloseConfirmed, PendingStackClose, Stack, active_stack_in_pane, collect_leaf_panes,
+        focused_stack, stack_bundle,
+    },
+    tab::Tab,
+    window::{
+        Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
     },
 };
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
@@ -90,7 +86,7 @@ impl Plugin for BrowserPlugin {
                     push_tabs_host_emit,
                 )
                     .after(vmux_layout::apply_chrome_state_from_cef)
-                    .after(crate::layout::stack::ComputeFocusSet),
+                    .after(vmux_layout::stack::ComputeFocusSet),
             )
             .add_systems(
                 PostUpdate,
@@ -139,7 +135,7 @@ fn on_webview_ready_send_theme(
 
 fn sync_keyboard_target(
     mode: Res<crate::scene::InteractionMode>,
-    focus: Res<crate::layout::stack::FocusedStack>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
@@ -485,7 +481,7 @@ fn sync_osr_webview_focus(
         With<WebviewSource>,
     >,
     primary_window: Single<&Window, With<PrimaryWindow>>,
-    focus: Res<crate::layout::stack::FocusedStack>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
     new_stack_ctx: Res<crate::command_bar::NewStackContext>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children_q: Query<&Children, With<Pane>>,
@@ -764,7 +760,7 @@ fn push_stacks_host_emit(
     stack_q: Query<(), With<Stack>>,
     zoomed_q: Query<(), With<vmux_layout::pane::Zoomed>>,
     new_stack_ctx: Res<crate::command_bar::NewStackContext>,
-    focus: Res<crate::layout::stack::FocusedStack>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
     mut last: Local<String>,
 ) {
@@ -848,7 +844,7 @@ fn push_pane_tree_emit(
     browsers: NonSend<Browsers>,
     chrome_q: Query<(Entity, Ref<UiReady>), With<LayoutChrome>>,
     new_stack_ctx: Res<crate::command_bar::NewStackContext>,
-    focus: Res<crate::layout::stack::FocusedStack>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
     tab_q: Query<(), With<Tab>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,

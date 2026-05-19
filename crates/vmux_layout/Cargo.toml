@@ -28,6 +28,9 @@ serde = { workspace = true }
 vmux_core = { path = "../vmux_core" }
 vmux_space = { path = "../vmux_space" }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true, features = [
     "bevy_camera_controller",

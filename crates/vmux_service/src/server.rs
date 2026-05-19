@@ -601,9 +601,7 @@ async fn handle_client(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{
-        AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, FocusedInfo,
-    };
+    use crate::protocol::{AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId};
     use tokio::sync::oneshot;
 
     #[test]
@@ -627,11 +625,7 @@ mod tests {
         let (tx, rx) = oneshot::channel::<AgentQueryResult>();
         pending.lock().await.insert(request_id, tx);
 
-        let result = AgentQueryResult::Focused(FocusedInfo {
-            space: None,
-            pane: None,
-            tab: None,
-        });
+        let result = AgentQueryResult::Settings("{}".into());
         let resp_tx = pending.lock().await.remove(&request_id).expect("entry");
         resp_tx.send(result.clone()).expect("send");
 
@@ -645,7 +639,7 @@ mod tests {
         let request_id = AgentRequestId::new();
         assert!(pending.lock().await.remove(&request_id).is_none());
 
-        let _ = AgentQuery::ListTabs;
+        let _ = AgentQuery::ReadLayout;
     }
 
     #[tokio::test]

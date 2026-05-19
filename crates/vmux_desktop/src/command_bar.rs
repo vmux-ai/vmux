@@ -5,13 +5,6 @@ use crate::{
         AppCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands, SpaceCommand,
         StackCommand, TerminalCommand,
     },
-    layout::{
-        pane::{Pane, PaneSplit},
-        side_sheet::SideSheet,
-        stack::{Stack, active_among, collect_leaf_panes, focused_stack},
-        tab::Tab,
-        window::{Main, Modal},
-    },
     processes_monitor::ProcessesMonitor,
     settings::AppSettings,
     settings_view::SettingsView,
@@ -35,6 +28,13 @@ pub(crate) use vmux_layout::NewStackContext;
 use vmux_layout::{
     Header,
     event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL},
+};
+use vmux_layout::{
+    pane::{Pane, PaneSplit},
+    side_sheet::SideSheet,
+    stack::{Stack, active_among, collect_leaf_panes, focused_stack},
+    tab::Tab,
+    window::{Main, Modal},
 };
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::{SPACES_WEBVIEW_URL, SpaceCommandEvent};
@@ -94,8 +94,8 @@ impl Plugin for CommandBarInputPlugin {
                 handle_open_command_bar
                     .in_set(ReadAppCommands)
                     .after(prewarm_command_bar_modal)
-                    .after(crate::layout::tab::TabCommandSet)
-                    .after(crate::layout::stack::StackCommandSet),
+                    .after(vmux_layout::tab::TabCommandSet)
+                    .after(vmux_layout::stack::StackCommandSet),
             )
             .add_systems(
                 Update,
@@ -105,7 +105,7 @@ impl Plugin for CommandBarInputPlugin {
                 Update,
                 deferred_dismiss_modal
                     .after(ReadAppCommands)
-                    .before(crate::layout::stack::ComputeFocusSet),
+                    .before(vmux_layout::stack::ComputeFocusSet),
             )
             .add_systems(
                 PostUpdate,
@@ -812,7 +812,7 @@ fn spawn_spaces_page_layout_from_command_bar(
     main: Option<Entity>,
     primary_window: Option<Entity>,
     new_stack_ctx: &mut NewStackContext,
-    focus: Option<&mut crate::layout::stack::FocusedStack>,
+    focus: Option<&mut vmux_layout::stack::FocusedStack>,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -823,7 +823,7 @@ fn spawn_spaces_page_layout_from_command_bar(
     let Some(primary_window) = primary_window else {
         return false;
     };
-    let spawned = crate::layout::window::spawn_default_space_layout(
+    let spawned = vmux_layout::window::spawn_default_space_layout(
         main,
         primary_window,
         new_stack_ctx,
@@ -857,7 +857,8 @@ fn on_command_bar_action(
         Query<Entity, With<Stack>>,
         Query<Entity, With<Main>>,
         Query<Entity, With<PrimaryWindow>>,
-        Option<ResMut<crate::layout::stack::FocusedStack>>,
+        Option<ResMut<vmux_layout::stack::FocusedStack>>,
+        Query<(), With<crate::terminal::Terminal>>,
     )>,
     child_of_q: Query<&ChildOf>,
     content_browsers: Query<
@@ -1180,7 +1181,7 @@ fn on_command_bar_action(
                             };
                             let stack_e = commands
                                 .spawn((
-                                    crate::layout::stack::stack_bundle(),
+                                    vmux_layout::stack::stack_bundle(),
                                     LastActivatedAt::now(),
                                     ChildOf(pane_e),
                                 ))
@@ -1233,7 +1234,7 @@ fn on_command_bar_action(
                         if let Some(pane_e) = active_pane_opt {
                             let stack_e = commands
                                 .spawn((
-                                    crate::layout::stack::stack_bundle(),
+                                    vmux_layout::stack::stack_bundle(),
                                     LastActivatedAt::now(),
                                     ChildOf(pane_e),
                                 ))
@@ -1273,7 +1274,7 @@ fn on_command_bar_action(
                         if let Some(pane_e) = active_pane_opt {
                             let stack_e = commands
                                 .spawn((
-                                    crate::layout::stack::stack_bundle(),
+                                    vmux_layout::stack::stack_bundle(),
                                     LastActivatedAt::now(),
                                     ChildOf(pane_e),
                                 ))
@@ -1303,7 +1304,7 @@ fn on_command_bar_action(
                                     .ok()
                                     .map(|co| co.get() == tab)
                                     .unwrap_or(false);
-                                if is_child {
+                                if is_child && !stack_params.p4().contains(browser_e) {
                                     commands.entity(browser_e).insert(WebviewSource::new(&url));
                                     updated_existing = true;
                                 }
@@ -1312,7 +1313,7 @@ fn on_command_bar_action(
                         if !updated_existing && let Some(pane_e) = active_pane_opt {
                             let stack_e = commands
                                 .spawn((
-                                    crate::layout::stack::stack_bundle(),
+                                    vmux_layout::stack::stack_bundle(),
                                     LastActivatedAt::now(),
                                     ChildOf(pane_e),
                                 ))
@@ -1396,7 +1397,7 @@ fn on_command_bar_action(
                     if let Some(pane_e) = active_pane_opt {
                         let stack_e = commands
                             .spawn((
-                                crate::layout::stack::stack_bundle(),
+                                vmux_layout::stack::stack_bundle(),
                                 LastActivatedAt::now(),
                                 ChildOf(pane_e),
                             ))
@@ -2433,7 +2434,7 @@ mod tests {
         app.add_plugins(CommandPlugin);
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
-        app.insert_resource(crate::layout::stack::FocusedStack::default());
+        app.insert_resource(vmux_layout::stack::FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
@@ -2450,7 +2451,7 @@ mod tests {
             ))
             .id();
         app.world_mut().spawn(PrimaryWindow);
-        app.world_mut().spawn(crate::layout::window::Main);
+        app.world_mut().spawn(vmux_layout::window::Main);
 
         app.world_mut()
             .entity_mut(modal)
@@ -2491,7 +2492,7 @@ mod tests {
         assert!(!ctx.needs_open);
         assert!(ctx.stack.is_none());
 
-        let focus = app.world().resource::<crate::layout::stack::FocusedStack>();
+        let focus = app.world().resource::<vmux_layout::stack::FocusedStack>();
         assert!(focus.tab.is_some());
         assert!(focus.pane.is_some());
         assert!(focus.stack.is_some());
