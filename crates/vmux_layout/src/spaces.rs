@@ -67,14 +67,19 @@ pub fn active_space_rows(active: &ActiveSpace, active_stack_count: usize) -> Vec
     registry
         .spaces
         .into_iter()
-        .map(|s| SpaceRow {
-            active: s.id == active.record.id,
-            stack_count: if s.id == active.record.id {
-                active_stack_count
-            } else {
-                0
-            },
-            record: s,
+        .map(|space| {
+            let is_active = space.id == active.record.id;
+            SpaceRow {
+                id: space.id.clone(),
+                name: space.name.clone(),
+                profile: space.profile.clone(),
+                is_active,
+                tab_count: if is_active {
+                    active_stack_count as u32
+                } else {
+                    0
+                },
+            }
         })
         .collect()
 }

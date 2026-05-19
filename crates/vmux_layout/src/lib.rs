@@ -19,11 +19,15 @@ pub mod glass;
 #[cfg(not(target_arch = "wasm32"))]
 mod header;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod processes_monitor;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod profile;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod scene;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod settings;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod spaces;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod stack;
 #[cfg(not(target_arch = "wasm32"))]

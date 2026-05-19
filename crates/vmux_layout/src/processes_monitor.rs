@@ -58,8 +58,3 @@ impl ProcessesMonitor {
         )
     }
 }
-
-#[derive(Resource, Default)]
-pub struct ServiceProcessList {
-    pub processes: Vec<vmux_service::protocol::ProcessInfo>,
-}
