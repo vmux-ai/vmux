@@ -9,7 +9,6 @@ use std::path::PathBuf;
 use crate::{
     browser::Browser,
     profile::Profile,
-    settings::AppSettings,
     settings_view::SettingsView,
     spaces::{ActiveSpace, SpacesView},
     terminal::Terminal,
@@ -24,6 +23,7 @@ use vmux_layout::{
     stack::Stack,
     window::Main,
 };
+use vmux_settings::AppSettings;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::SPACES_WEBVIEW_URL;
 use vmux_space::migration::migrate_legacy_session_files;
@@ -437,11 +437,11 @@ fn sync_launch_to_stack(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{
-        AppSettings, BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings,
-        ShortcutSettings, SideSheetSettings, WindowSettings,
-    };
     use bevy::ecs::entity::EntityHashMap;
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
 
     struct HomeEnvGuard {
         _guard: std::sync::MutexGuard<'static, ()>,
@@ -500,7 +500,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: crate::settings::AgentSettings::default(),
+            agent: vmux_settings::AgentSettings::default(),
         }
     }
 

@@ -1,7 +1,6 @@
 use crate::{
     command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand},
     command_bar::PendingCommandBarReveal,
-    settings::AppSettings,
     terminal::{self, PtyExited, RestartPty, Terminal},
 };
 use bevy::{
@@ -34,6 +33,7 @@ use vmux_layout::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
     },
 };
+use vmux_settings::AppSettings;
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
 use vmux_webview_app::{UiReady, WebviewAppRegistry};
 

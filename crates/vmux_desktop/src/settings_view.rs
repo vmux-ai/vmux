@@ -13,16 +13,14 @@ use vmux_settings::event::{
 use vmux_settings::schema::{FieldSpec, SectionSpec, SettingsSchema, WidgetKind};
 use vmux_webview_app::{UiReady, WebviewAppConfig, WebviewAppRegistry};
 
-use crate::{
-    browser::Browser,
-    settings::{
-        AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json,
-    },
-};
+use crate::browser::Browser;
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::{FocusedStack, stack_bundle},
     window::WEBVIEW_MESH_DEPTH_BIAS,
+};
+use vmux_settings::{
+    AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json,
 };
 
 #[derive(Component)]
@@ -83,7 +81,7 @@ pub(crate) struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(crate::settings::SettingsCorePlugin);
+        app.add_plugins(vmux_settings::SettingsCorePlugin);
         register_settings_webview_app(
             app.world_mut()
                 .resource_mut::<WebviewAppRegistry>()

@@ -533,12 +533,12 @@ fn on_space_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{
-        AppSettings, BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings,
-        ShortcutSettings, SideSheetSettings, WindowSettings,
-    };
     use vmux_history::LastActivatedAt;
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
     use vmux_layout::{pane::Pane, space::Space, stack::Stack, window::Main};
+    use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
     use vmux_space::model::DEFAULT_PROFILE_ID;
     use vmux_webview_app::WebviewAppRegistry;
 
@@ -601,7 +601,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: crate::settings::AgentSettings::default(),
+            agent: vmux_settings::AgentSettings::default(),
         }
     }
 

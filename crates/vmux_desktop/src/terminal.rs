@@ -2,7 +2,6 @@ use crate::{
     browser::Browser,
     command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands},
     processes_monitor::ProcessesMonitor,
-    settings::AppSettings,
 };
 use bevy::{
     ecs::relationship::Relationship,
@@ -24,6 +23,7 @@ use vmux_service::{
     client::{ServiceHandle, ServiceWake},
     protocol::{ClientMessage, ProcessId, ServiceMessage},
 };
+use vmux_settings::AppSettings;
 use vmux_terminal::event::*;
 use vmux_webview_app::UiReady;
 

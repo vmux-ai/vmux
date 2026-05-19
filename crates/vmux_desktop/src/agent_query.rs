@@ -5,7 +5,7 @@ use vmux_service::protocol::{AgentQuery, AgentQueryResult, ClientMessage};
 pub(crate) fn handle_agent_queries(
     mut reader: MessageReader<AgentQueryRequest>,
     service: Option<Res<ServiceClient>>,
-    settings: Res<crate::settings::AppSettings>,
+    settings: Res<vmux_settings::AppSettings>,
     mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
 ) {
     let Some(service) = service else { return };
@@ -18,9 +18,9 @@ pub(crate) fn handle_agent_queries(
                 });
             }
             AgentQuery::GetSettings => {
-                let result = AgentQueryResult::Settings(
-                    crate::settings::serialize_settings_to_json(&settings),
-                );
+                let result = AgentQueryResult::Settings(vmux_settings::serialize_settings_to_json(
+                    &settings,
+                ));
                 service.0.send(ClientMessage::AgentQueryResponse {
                     request_id: request.request_id,
                     result,

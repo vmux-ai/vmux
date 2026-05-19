@@ -18,7 +18,6 @@ mod persistence;
 mod processes_monitor;
 pub mod profile;
 mod scene;
-mod settings;
 mod settings_view;
 pub(crate) mod shortcut;
 mod spaces;

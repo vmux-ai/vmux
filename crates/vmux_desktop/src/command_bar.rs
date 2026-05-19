@@ -6,7 +6,6 @@ use crate::{
         StackCommand, TerminalCommand,
     },
     processes_monitor::ProcessesMonitor,
-    settings::AppSettings,
     settings_view::SettingsView,
     spaces::{ActiveSpace, SpacesView},
     terminal::Terminal,
@@ -34,6 +33,7 @@ use vmux_layout::{
     stack::{Stack, active_among, collect_leaf_panes, focused_stack},
     window::{Main, Modal},
 };
+use vmux_settings::AppSettings;
 use vmux_settings::event::SETTINGS_WEBVIEW_URL;
 use vmux_space::event::{SPACES_WEBVIEW_URL, SpaceCommandEvent};
 
@@ -1893,17 +1893,15 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        command::CommandPlugin,
-        settings::{
-            AppSettings, BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings,
-            ShortcutSettings, SideSheetSettings, WindowSettings,
-        },
-    };
+    use crate::command::CommandPlugin;
     use bevy::{
         ecs::schedule::{NodeId, Schedules, SystemSet},
         window::PrimaryWindow,
     };
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
 
     fn test_settings() -> AppSettings {
         AppSettings {
@@ -1927,7 +1925,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: crate::settings::AgentSettings::default(),
+            agent: vmux_settings::AgentSettings::default(),
         }
     }
 

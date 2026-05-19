@@ -1,9 +1,9 @@
 use crate::command::{AppCommand, WriteAppCommands};
-use crate::settings::{AppSettings, load_settings};
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use std::time::Instant;
-pub(crate) use vmux_command::shortcut::{KeyCombo, Modifiers, Shortcut, resolve_key};
+pub(crate) use vmux_command::shortcut::{KeyCombo, Modifiers, Shortcut};
+use vmux_settings::{AppSettings, load_settings};
 
 pub struct ShortcutPlugin;
 
@@ -221,11 +221,11 @@ fn is_modifier_key(key: KeyCode) -> bool {
 mod tests {
     use super::*;
     use crate::command::{CommandPlugin, LayoutCommand, SpaceCommand};
-    use crate::settings::{
-        AppSettings, BrowserSettings, FocusRingSettings, KeyComboDef, LayoutSettings, PaneSettings,
-        ShortcutSettings, SideSheetSettings, WindowSettings,
-    };
     use bevy::ecs::message::Messages;
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use vmux_settings::{AppSettings, BrowserSettings, KeyComboDef, ShortcutSettings};
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -281,7 +281,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: crate::settings::AgentSettings::default(),
+            agent: vmux_settings::AgentSettings::default(),
         }
     }
 

@@ -5,7 +5,6 @@ use std::{
 
 use crate::{
     command::{AppCommand, WriteAppCommands},
-    settings::AppSettings,
     terminal::{PendingTerminalInput, ProcessExited, ServiceMessageSet, Terminal},
 };
 use bevy::{ecs::relationship::Relationship, prelude::*};
@@ -14,6 +13,7 @@ use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
 };
+use vmux_settings::AppSettings;
 
 use crate::browser::Browser;
 use vmux_agent::session::{AgentSession, PendingAgentSession, SessionId};
@@ -173,7 +173,7 @@ impl Plugin for AgentPlugin {
             .add_message::<AgentQueryRequest>()
             .add_message::<AgentLaunchRequested>()
             .add_message::<vmux_agent::AgentSessionExited>()
-            .add_message::<crate::settings::SettingsWriteRequest>()
+            .add_message::<vmux_settings::SettingsWriteRequest>()
             .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
             .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
             .add_systems(
@@ -842,7 +842,7 @@ struct SpawnAssets<'w> {
 #[derive(bevy::ecs::system::SystemParam)]
 struct SettingsParams<'w> {
     settings: ResMut<'w, AppSettings>,
-    writes: MessageWriter<'w, crate::settings::SettingsWriteRequest>,
+    writes: MessageWriter<'w, vmux_settings::SettingsWriteRequest>,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -1062,14 +1062,14 @@ fn handle_agent_commands(
             }
             ServiceAgentCommand::UpdateSettings { path, value_json } => {
                 match serde_json::from_str::<serde_json::Value>(value_json) {
-                    Ok(value) => match crate::settings::apply_settings_update(
+                    Ok(value) => match vmux_settings::apply_settings_update(
                         sp.settings.as_mut(),
                         path,
                         value,
                     ) {
                         Ok(ron_bytes) => {
                             sp.writes
-                                .write(crate::settings::SettingsWriteRequest { ron_bytes });
+                                .write(vmux_settings::SettingsWriteRequest { ron_bytes });
                             AgentCommandResult::Ok
                         }
                         Err(message) => AgentCommandResult::Error(message),
@@ -1180,10 +1180,10 @@ fn handle_agent_launch_requests(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{
-        BrowserSettings, FocusRingSettings, LayoutSettings, PaneSettings, ShortcutSettings,
-        SideSheetSettings, WindowSettings,
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
+    use vmux_settings::{BrowserSettings, ShortcutSettings};
 
     fn test_settings() -> AppSettings {
         AppSettings {
@@ -1207,7 +1207,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: crate::settings::AgentSettings::default(),
+            agent: vmux_settings::AgentSettings::default(),
         }
     }
 
@@ -1734,7 +1734,7 @@ mod tests {
     fn update_settings_via_apply_mutates_resource_and_returns_ron() {
         let mut settings = test_settings();
         assert!(!settings.auto_update);
-        let ron_bytes = crate::settings::apply_settings_update(
+        let ron_bytes = vmux_settings::apply_settings_update(
             &mut settings,
             "auto_update",
             serde_json::json!(true),
