@@ -188,7 +188,7 @@ pub fn format_terminal_url(
         (Option<&Pid>, &mut PageMetadata),
         (
             With<Terminal>,
-            Without<vmux_agent::session::AgentSession>,
+            Without<vmux_core::agent::AgentSession>,
             Or<(Changed<Pid>, Added<PageMetadata>)>,
         ),
     >,
@@ -361,7 +361,7 @@ fn spawn_url_into_stack(
             ))
             .id();
         commands.entity(terminal).insert(CefKeyboardTarget);
-    } else if let Some(kind) = vmux_agent::AgentKind::all()
+    } else if let Some(kind) = vmux_core::agent::AgentKind::all()
         .into_iter()
         .find(|k| url.starts_with(&k.cli_url_prefix()))
     {
@@ -410,7 +410,7 @@ fn spawn_url_into_stack(
 }
 
 pub fn spawn_agent_into_stack(
-    kind: vmux_agent::AgentKind,
+    kind: vmux_core::agent::AgentKind,
     stack: Entity,
     cwd: std::path::PathBuf,
     session_id: Option<String>,
@@ -430,15 +430,15 @@ pub fn spawn_agent_into_stack(
     commands.entity(terminal).insert(CefKeyboardTarget);
     commands
         .entity(terminal)
-        .insert((launch, vmux_agent::session::AgentSession { kind }));
+        .insert((launch, vmux_core::agent::AgentSession { kind }));
     if let Some(id) = session_id {
         commands
             .entity(terminal)
-            .insert(vmux_agent::session::SessionId(id));
+            .insert(vmux_core::agent::SessionId(id));
     } else {
         commands
             .entity(terminal)
-            .insert(vmux_agent::session::PendingAgentSession {
+            .insert(vmux_core::agent::PendingAgentSession {
                 kind,
                 spawn_time: std::time::SystemTime::now(),
                 cwd,
@@ -671,7 +671,7 @@ struct MissingTerminalRestart {
     new_id: ProcessId,
     command: ClientMessage,
     cwd: String,
-    agent_kind: Option<vmux_agent::AgentKind>,
+    agent_kind: Option<vmux_core::agent::AgentKind>,
 }
 
 fn terminal_shell(settings: &AppSettings) -> String {
@@ -689,7 +689,7 @@ fn missing_terminal_restart(
             Entity,
             ProcessId,
             crate::launch::TerminalLaunch,
-            Option<vmux_agent::AgentKind>,
+            Option<vmux_core::agent::AgentKind>,
         ),
     >,
 ) -> Option<MissingTerminalRestart> {
@@ -900,7 +900,7 @@ fn poll_service_messages(
     mut mouse_state: ResMut<MouseSelectionState>,
     settings: Res<AppSettings>,
     launches: Query<&crate::launch::TerminalLaunch>,
-    agent_sessions: Query<&vmux_agent::session::AgentSession>,
+    agent_sessions: Query<&vmux_core::agent::AgentSession>,
 ) {
     let Some(service) = service else { return };
 
@@ -1097,7 +1097,7 @@ fn poll_service_messages(
                         ec.insert(new_id);
                         ec.insert(AwaitingProcessCreated);
                         if let Some(kind) = agent_kind {
-                            ec.insert(vmux_agent::session::PendingAgentSession {
+                            ec.insert(vmux_core::agent::PendingAgentSession {
                                 kind,
                                 spawn_time: std::time::SystemTime::now(),
                                 cwd: std::path::PathBuf::from(&cwd),
@@ -2073,8 +2073,8 @@ fn on_restart_pty(
         &mut ProcessId,
         &mut PageMetadata,
         Option<&mut crate::launch::TerminalLaunch>,
-        Option<&vmux_agent::session::AgentSession>,
-        Option<&vmux_agent::session::SessionId>,
+        Option<&vmux_core::agent::AgentSession>,
+        Option<&vmux_core::agent::SessionId>,
     )>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
@@ -2232,9 +2232,9 @@ fn respawn_shell_on_agent_exit_for_entity(
 ) {
     let new_id = ProcessId::new();
     let mut ec = commands.entity(entity);
-    ec.remove::<vmux_agent::session::AgentSession>();
-    ec.remove::<vmux_agent::session::SessionId>();
-    ec.remove::<vmux_agent::session::PendingAgentSession>();
+    ec.remove::<vmux_core::agent::AgentSession>();
+    ec.remove::<vmux_core::agent::SessionId>();
+    ec.remove::<vmux_core::agent::PendingAgentSession>();
     ec.insert(new_id);
     ec.insert(PendingServiceCreate);
     ec.insert(crate::launch::TerminalLaunch {
@@ -2251,7 +2251,7 @@ pub fn respawn_shell_on_vibe_exit(
     mut exited: MessageReader<ProcessExitedEvent>,
     q: Query<
         (Entity, &ProcessId, &crate::launch::TerminalLaunch),
-        With<vmux_agent::session::AgentSession>,
+        With<vmux_core::agent::AgentSession>,
     >,
     settings: Res<AppSettings>,
 ) {
@@ -2884,10 +2884,10 @@ mod tests {
             .spawn((
                 Terminal,
                 original_id,
-                vmux_agent::session::AgentSession {
-                    kind: vmux_agent::AgentKind::Vibe,
+                vmux_core::agent::AgentSession {
+                    kind: vmux_core::agent::AgentKind::Vibe,
                 },
-                vmux_agent::session::SessionId("abc-123".into()),
+                vmux_core::agent::SessionId("abc-123".into()),
                 TerminalLaunch {
                     command: "/usr/local/bin/vibe".into(),
                     args: vec!["--trust".into()],
@@ -2910,14 +2910,10 @@ mod tests {
         let world = app.world();
         assert!(
             world
-                .get::<vmux_agent::session::AgentSession>(entity)
+                .get::<vmux_core::agent::AgentSession>(entity)
                 .is_none()
         );
-        assert!(
-            world
-                .get::<vmux_agent::session::SessionId>(entity)
-                .is_none()
-        );
+        assert!(world.get::<vmux_core::agent::SessionId>(entity).is_none());
         let launch = world.get::<TerminalLaunch>(entity).unwrap();
         assert_eq!(launch.kind, TerminalKind::Plain);
         assert_eq!(launch.command, "/bin/zsh");

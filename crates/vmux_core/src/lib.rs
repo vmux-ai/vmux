@@ -6,6 +6,9 @@ pub use process_id::ProcessId;
 pub mod terminal;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod agent;
+
+#[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use moonshine_save::prelude::*;
