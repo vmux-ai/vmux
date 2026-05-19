@@ -27,7 +27,6 @@ use vmux_settings::AppSettings;
 use vmux_terminal::event::*;
 use vmux_webview_app::UiReady;
 
-pub(crate) mod launch;
 pub(crate) mod pid;
 
 /// Maximum interval between consecutive mouse-down events that count as a
@@ -439,12 +438,12 @@ impl Terminal {
             .map(|d| d.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let launch = crate::terminal::launch::TerminalLaunch {
+        let launch = vmux_terminal::launch::TerminalLaunch {
             command: shell,
             args: vec![],
             cwd: cwd_str,
             env: vec![],
-            kind: crate::terminal::launch::TerminalKind::Plain,
+            kind: vmux_terminal::launch::TerminalKind::Plain,
         };
 
         let process_id = ProcessId::new();
@@ -606,7 +605,7 @@ fn missing_terminal_restart(
         Item = (
             Entity,
             ProcessId,
-            crate::terminal::launch::TerminalLaunch,
+            vmux_terminal::launch::TerminalLaunch,
             Option<vmux_agent::AgentKind>,
         ),
     >,
@@ -793,7 +792,7 @@ struct PollServiceWriters<'w> {
 
 fn poll_service_messages(
     pending_create: Query<
-        (Entity, &ProcessId, &crate::terminal::launch::TerminalLaunch),
+        (Entity, &ProcessId, &vmux_terminal::launch::TerminalLaunch),
         (With<Terminal>, With<PendingServiceCreate>),
     >,
     pending_attach: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingServiceAttach>)>,
@@ -817,7 +816,7 @@ fn poll_service_messages(
     mut local_copy_mode: ResMut<LocalCopyModeState>,
     mut mouse_state: ResMut<MouseSelectionState>,
     settings: Res<AppSettings>,
-    launches: Query<&crate::terminal::launch::TerminalLaunch>,
+    launches: Query<&vmux_terminal::launch::TerminalLaunch>,
     agent_sessions: Query<&vmux_agent::session::AgentSession>,
 ) {
     let Some(service) = service else { return };
@@ -993,12 +992,12 @@ fn poll_service_messages(
                 {
                     let candidates = terminals.iter().map(|(entity, terminal_pid, _)| {
                         let launch = launches.get(entity).cloned().unwrap_or_else(|_| {
-                            crate::terminal::launch::TerminalLaunch {
+                            vmux_terminal::launch::TerminalLaunch {
                                 command: terminal_shell(&settings),
                                 args: vec![],
                                 cwd: String::new(),
                                 env: vec![],
-                                kind: crate::terminal::launch::TerminalKind::Plain,
+                                kind: vmux_terminal::launch::TerminalKind::Plain,
                             }
                         });
                         let agent_kind = agent_sessions.get(entity).ok().map(|s| s.kind);
@@ -1990,7 +1989,7 @@ fn on_restart_pty(
     mut q: Query<(
         &mut ProcessId,
         &mut PageMetadata,
-        Option<&mut crate::terminal::launch::TerminalLaunch>,
+        Option<&mut vmux_terminal::launch::TerminalLaunch>,
         Option<&vmux_agent::session::AgentSession>,
         Option<&vmux_agent::session::SessionId>,
     )>,
@@ -2155,12 +2154,12 @@ fn respawn_shell_on_agent_exit_for_entity(
     ec.remove::<vmux_agent::session::PendingAgentSession>();
     ec.insert(new_id);
     ec.insert(PendingServiceCreate);
-    ec.insert(crate::terminal::launch::TerminalLaunch {
+    ec.insert(vmux_terminal::launch::TerminalLaunch {
         command: shell.to_string(),
         args: vec![],
         cwd,
         env: vec![],
-        kind: crate::terminal::launch::TerminalKind::Plain,
+        kind: vmux_terminal::launch::TerminalKind::Plain,
     });
 }
 
@@ -2168,7 +2167,7 @@ pub(crate) fn respawn_shell_on_vibe_exit(
     mut commands: Commands,
     mut exited: MessageReader<ProcessExitedEvent>,
     q: Query<
-        (Entity, &ProcessId, &crate::terminal::launch::TerminalLaunch),
+        (Entity, &ProcessId, &vmux_terminal::launch::TerminalLaunch),
         With<vmux_agent::session::AgentSession>,
     >,
     settings: Res<AppSettings>,
@@ -2289,12 +2288,12 @@ mod tests {
     fn missing_service_process_restarts_matching_terminal() {
         let missing = process_id(7);
         let target = Entity::from_bits(1);
-        let plain_launch = || crate::terminal::launch::TerminalLaunch {
+        let plain_launch = || vmux_terminal::launch::TerminalLaunch {
             command: default_shell(),
             args: vec![],
             cwd: String::new(),
             env: vec![],
-            kind: crate::terminal::launch::TerminalKind::Plain,
+            kind: vmux_terminal::launch::TerminalKind::Plain,
         };
         let restart = missing_terminal_restart(
             missing,
@@ -2685,7 +2684,7 @@ mod tests {
 
     #[test]
     fn process_created_matches_by_id_not_by_position() {
-        use crate::terminal::launch::{TerminalKind, TerminalLaunch};
+        use vmux_terminal::launch::{TerminalKind, TerminalLaunch};
 
         let mut app = bevy::prelude::App::new();
         let id1 = ProcessId::new();
@@ -2801,7 +2800,7 @@ mod tests {
 
     #[test]
     fn respawn_shell_on_agent_exit_swaps_kind_and_drops_agent() {
-        use crate::terminal::launch::{TerminalKind, TerminalLaunch};
+        use vmux_terminal::launch::{TerminalKind, TerminalLaunch};
 
         let mut app = bevy::prelude::App::new();
         let original_id = ProcessId::new();

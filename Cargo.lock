@@ -9080,6 +9080,7 @@ dependencies = [
  "serde",
  "serde_json",
  "vmux_core",
+ "vmux_terminal",
 ]
 
 [[package]]
@@ -9313,6 +9314,7 @@ dependencies = [
  "bevy",
  "bevy_cef",
  "bevy_ecs",
+ "bevy_reflect",
  "dioxus",
  "js-sys",
  "rkyv",

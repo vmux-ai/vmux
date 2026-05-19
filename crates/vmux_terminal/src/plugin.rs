@@ -26,7 +26,9 @@ pub struct TerminalPlugin;
 
 impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<TerminalSendRequest>()
+        app.register_type::<launch::TerminalLaunch>()
+            .register_type::<launch::TerminalKind>()
+            .add_message::<TerminalSendRequest>()
             .add_message::<RunShellRequest>();
         app.world_mut()
             .resource_mut::<WebviewAppRegistry>()

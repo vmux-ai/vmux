@@ -49,7 +49,7 @@ pub(crate) struct AgentProvider {
 pub(crate) struct PreparedAgentLaunch {
     pub(crate) kind: AgentKind,
     pub(crate) cwd: PathBuf,
-    pub(crate) launch: crate::terminal::launch::TerminalLaunch,
+    pub(crate) launch: vmux_terminal::launch::TerminalLaunch,
 }
 
 pub(crate) struct AgentCommandEntry {
@@ -315,7 +315,7 @@ pub(crate) fn build_agent_launch(
     cwd: &Path,
     session_id: Option<&str>,
     strategies: &AgentStrategies,
-) -> Result<crate::terminal::launch::TerminalLaunch, String> {
+) -> Result<vmux_terminal::launch::TerminalLaunch, String> {
     let strategy = strategies
         .get_cli(kind)
         .ok_or_else(|| format!("CLI strategy not registered for {:?}", kind))?;
@@ -326,7 +326,7 @@ pub(crate) fn build_agent_launch(
     let args = strategy.build_args(&mcp_cfg, session_id);
     let mut env: Vec<(String, String)> = std::env::vars().collect();
     env.extend(strategy.build_env(&mcp_cfg));
-    Ok(crate::terminal::launch::TerminalLaunch {
+    Ok(vmux_terminal::launch::TerminalLaunch {
         command: exe_path.to_string_lossy().to_string(),
         args,
         cwd: cwd.to_string_lossy().to_string(),
@@ -423,12 +423,12 @@ pub(crate) fn spawn_process_tab(
         bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
         ..default()
     });
-    let launch = crate::terminal::launch::TerminalLaunch {
+    let launch = vmux_terminal::launch::TerminalLaunch {
         command,
         args,
         cwd: cwd.to_string_lossy().to_string(),
         env,
-        kind: crate::terminal::launch::TerminalKind::Plain,
+        kind: vmux_terminal::launch::TerminalKind::Plain,
     };
     let term = commands
         .spawn((
@@ -1117,12 +1117,12 @@ mod tests {
         Ok(PreparedAgentLaunch {
             kind: AgentKind::Vibe,
             cwd: cwd.to_path_buf(),
-            launch: crate::terminal::launch::TerminalLaunch {
+            launch: vmux_terminal::launch::TerminalLaunch {
                 command: "echo".to_string(),
                 args: vec!["agent".to_string()],
                 cwd: cwd.to_string_lossy().to_string(),
                 env: vec![],
-                kind: crate::terminal::launch::TerminalKind::Vibe,
+                kind: vmux_terminal::launch::TerminalKind::Vibe,
             },
         })
     }
@@ -1226,11 +1226,9 @@ mod tests {
 
         app.update();
 
-        let mut terminals = app.world_mut().query::<(
-            &Terminal,
-            &crate::terminal::launch::TerminalLaunch,
-            &ChildOf,
-        )>();
+        let mut terminals =
+            app.world_mut()
+                .query::<(&Terminal, &vmux_terminal::launch::TerminalLaunch, &ChildOf)>();
         let rows: Vec<_> = terminals
             .iter(app.world())
             .map(|(_, launch, child_of)| (launch.command.clone(), child_of.get()))

@@ -18,16 +18,6 @@ pub enum TerminalKind {
     Codex,
 }
 
-impl From<vmux_agent::AgentKind> for TerminalKind {
-    fn from(kind: vmux_agent::AgentKind) -> Self {
-        match kind {
-            vmux_agent::AgentKind::Vibe => TerminalKind::Vibe,
-            vmux_agent::AgentKind::Claude => TerminalKind::Claude,
-            vmux_agent::AgentKind::Codex => TerminalKind::Codex,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -43,22 +33,6 @@ mod tests {
         };
         assert_eq!(launch.kind, TerminalKind::Plain);
         assert!(launch.args.is_empty());
-    }
-
-    #[test]
-    fn terminal_kind_from_agent_kind_maps_each_variant() {
-        assert_eq!(
-            TerminalKind::from(vmux_agent::AgentKind::Vibe),
-            TerminalKind::Vibe
-        );
-        assert_eq!(
-            TerminalKind::from(vmux_agent::AgentKind::Claude),
-            TerminalKind::Claude
-        );
-        assert_eq!(
-            TerminalKind::from(vmux_agent::AgentKind::Codex),
-            TerminalKind::Codex
-        );
     }
 
     #[test]

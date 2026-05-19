@@ -116,6 +116,16 @@ impl AgentUrl {
     }
 }
 
+impl From<AgentKind> for vmux_terminal::launch::TerminalKind {
+    fn from(kind: AgentKind) -> Self {
+        match kind {
+            AgentKind::Vibe => vmux_terminal::launch::TerminalKind::Vibe,
+            AgentKind::Claude => vmux_terminal::launch::TerminalKind::Claude,
+            AgentKind::Codex => vmux_terminal::launch::TerminalKind::Codex,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

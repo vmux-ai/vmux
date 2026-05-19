@@ -74,8 +74,6 @@ pub(crate) struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<crate::terminal::launch::TerminalLaunch>()
-            .register_type::<crate::terminal::launch::TerminalKind>();
         app.insert_resource(AutoSave {
             debounce: Timer::from_seconds(0.5, TimerMode::Once),
             periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
@@ -192,7 +190,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<vmux_history::CreatedAt>()
         .allow::<vmux_history::LastActivatedAt>()
         .allow::<vmux_history::Visit>()
-        .allow::<crate::terminal::launch::TerminalLaunch>();
+        .allow::<vmux_terminal::launch::TerminalLaunch>();
     commands.trigger_save(save);
 }
 
@@ -219,7 +217,7 @@ pub(crate) fn rebuild_space_views(
         (
             Entity,
             &PageMetadata,
-            Option<&crate::terminal::launch::TerminalLaunch>,
+            Option<&vmux_terminal::launch::TerminalLaunch>,
         ),
         (With<Stack>, Without<Node>),
     >,
@@ -455,10 +453,10 @@ pub(crate) fn rebuild_space_views(
 
 fn sync_launch_to_stack(
     terminals: Query<
-        (&ChildOf, &crate::terminal::launch::TerminalLaunch),
+        (&ChildOf, &vmux_terminal::launch::TerminalLaunch),
         (
             With<Terminal>,
-            Changed<crate::terminal::launch::TerminalLaunch>,
+            Changed<vmux_terminal::launch::TerminalLaunch>,
         ),
     >,
     stacks: Query<(), With<Stack>>,
