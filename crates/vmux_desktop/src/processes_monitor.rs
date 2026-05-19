@@ -13,6 +13,7 @@ use crate::{
     terminal::{ServiceClient, Terminal},
 };
 use vmux_layout::{
+    event::SERVICES_WEBVIEW_URL,
     pane::{Pane, PaneSplit},
     stack::{Stack, focused_stack, stack_bundle},
     tab::Tab,
@@ -33,11 +34,11 @@ impl ProcessesMonitor {
             (
                 Self,
                 Browser,
-                WebviewSource::new(PROCESSES_WEBVIEW_URL),
-                ResolvedWebviewUri(PROCESSES_WEBVIEW_URL.to_string()),
+                WebviewSource::new(SERVICES_WEBVIEW_URL),
+                ResolvedWebviewUri(SERVICES_WEBVIEW_URL.to_string()),
                 PageMetadata {
                     title: "Background Services".to_string(),
-                    url: PROCESSES_WEBVIEW_URL.to_string(),
+                    url: SERVICES_WEBVIEW_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },

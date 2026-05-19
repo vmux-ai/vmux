@@ -25,10 +25,8 @@ use vmux_command::event::{
 use vmux_core::PageMetadata;
 use vmux_history::{LastActivatedAt, now_millis};
 pub(crate) use vmux_layout::NewStackContext;
-use vmux_layout::{
-    Header,
-    event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL},
-};
+use vmux_layout::event::SERVICES_WEBVIEW_URL;
+use vmux_layout::{Header, event::TERMINAL_WEBVIEW_URL};
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
@@ -1060,9 +1058,9 @@ fn on_command_bar_action(
                                 bevy::log::warn!("agent strategies not registered; skipping spawn");
                             }
                         }
-                    } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/')) {
                         commands.entity(stack_e).insert(PageMetadata {
-                            url: PROCESSES_WEBVIEW_URL.to_string(),
+                            url: SERVICES_WEBVIEW_URL.to_string(),
                             title: "Background Services".to_string(),
                             ..default()
                         });
@@ -1217,7 +1215,7 @@ fn on_command_bar_action(
                             }
                             custom_keyboard_restore = true;
                         }
-                    } else if url.starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/')) {
                         use crate::command::ServiceCommand;
                         writer_params
                             .p0()

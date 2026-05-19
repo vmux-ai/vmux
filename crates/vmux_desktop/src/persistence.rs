@@ -15,7 +15,8 @@ use crate::{
     terminal::Terminal,
 };
 use vmux_core::PageMetadata;
-use vmux_layout::event::{PROCESSES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
+use vmux_layout::event::SERVICES_WEBVIEW_URL;
+use vmux_layout::event::TERMINAL_WEBVIEW_URL;
 use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
@@ -298,7 +299,7 @@ pub(crate) fn rebuild_space_views(
         if !has_browser {
             if meta
                 .url
-                .starts_with(PROCESSES_WEBVIEW_URL.trim_end_matches('/'))
+                .starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/'))
             {
                 commands.spawn((
                     crate::processes_monitor::ProcessesMonitor::new(&mut meshes, &mut webview_mt),

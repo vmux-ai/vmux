@@ -345,7 +345,7 @@ fn spawn_url_into_stack(
                 .id();
             commands.entity(terminal).insert(CefKeyboardTarget);
         }
-    } else if url.starts_with(vmux_service::webview::event::PROCESSES_WEBVIEW_URL) {
+    } else if url.starts_with(vmux_layout::event::SERVICES_WEBVIEW_URL) {
         commands.spawn((ProcessesMonitor::new(meshes, webview_mt), ChildOf(stack)));
     } else if url.starts_with(vmux_space::event::SPACES_WEBVIEW_URL) {
         commands.spawn((
