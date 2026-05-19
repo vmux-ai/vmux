@@ -10,37 +10,7 @@ pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
 };
 
-pub struct SettingsCorePlugin;
-
-impl Plugin for SettingsCorePlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<LastSelfWriteHash>()
-            .add_message::<SettingsWriteRequest>()
-            .configure_sets(
-                Startup,
-                SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
-            )
-            .init_resource::<vmux_layout::settings::EffectiveStartupUrl>()
-            .add_systems(Startup, load_settings.in_set(SettingsLoadSet))
-            .add_systems(
-                Startup,
-                update_effective_startup_url
-                    .after(SettingsLoadSet)
-                    .before(vmux_layout::LayoutStartupSet::Post),
-            )
-            .add_systems(
-                Startup,
-                register_app_agents_from_settings.after(SettingsLoadSet),
-            )
-            .add_systems(
-                Update,
-                (persist_settings_to_disk, reload_settings_on_change).chain(),
-            )
-            .add_systems(Update, update_effective_startup_url);
-    }
-}
-
-fn register_app_agents_from_settings(
+pub(crate) fn register_app_agents_from_settings(
     settings: Option<Res<AppSettings>>,
     strategies: Option<ResMut<vmux_agent::strategy::AgentStrategies>>,
 ) {
@@ -71,7 +41,7 @@ fn register_app_agents_from_settings(
     }
 }
 
-fn update_effective_startup_url(
+pub(crate) fn update_effective_startup_url(
     settings: Option<Res<AppSettings>>,
     mut effective: ResMut<vmux_layout::settings::EffectiveStartupUrl>,
 ) {
@@ -364,10 +334,10 @@ impl TerminalSettings {
     }
 }
 
-const DEFAULT_SETTINGS: &str = include_str!("settings.ron");
+const DEFAULT_SETTINGS: &str = include_str!("../settings.ron");
 
 #[derive(Resource)]
-struct SettingsWatcher {
+pub(crate) struct SettingsWatcher {
     rx: Mutex<mpsc::Receiver<()>>,
     path: std::path::PathBuf,
     _watcher: RecommendedWatcher,
@@ -448,7 +418,7 @@ pub fn load_settings(mut commands: Commands) {
     }
 }
 
-fn reload_settings_on_change(
+pub(crate) fn reload_settings_on_change(
     watcher: Option<Res<SettingsWatcher>>,
     mut settings: ResMut<AppSettings>,
     mut layout_settings: ResMut<LayoutSettings>,
@@ -669,7 +639,7 @@ fn settings_content_hash(bytes: &[u8]) -> u64 {
     hasher.finish()
 }
 
-fn persist_settings_to_disk(
+pub(crate) fn persist_settings_to_disk(
     mut reader: MessageReader<SettingsWriteRequest>,
     watcher: Option<Res<SettingsWatcher>>,
     mut last_hash: ResMut<LastSelfWriteHash>,
@@ -733,7 +703,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: crate::runtime::AgentSettings::default(),
+            agent: crate::plugin::runtime::AgentSettings::default(),
         }
     }
 

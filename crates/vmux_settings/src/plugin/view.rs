@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use bevy::{picking::Pickable, prelude::*, render::alpha::AlphaMode};
 use bevy_cef::prelude::*;
 use vmux_command::command::{AppCommand, LayoutCommand, WindowCommand};
-use vmux_command::{ReadAppCommands, WriteAppCommands};
 use vmux_core::PageMetadata;
 use vmux_history::{CreatedAt, LastActivatedAt};
 use vmux_layout::{
@@ -74,33 +73,7 @@ impl SettingsView {
     }
 }
 
-pub struct SettingsPlugin;
-
-impl Plugin for SettingsPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins(crate::SettingsCorePlugin);
-        register_settings_webview_app(
-            app.world_mut()
-                .resource_mut::<WebviewAppRegistry>()
-                .as_mut(),
-        );
-        app.add_plugins(BinJsEmitEventPlugin::<SettingsCommandEvent>::default())
-            .add_observer(on_settings_command)
-            .add_observer(reset_sent_markers_on_ui_ready)
-            .add_systems(
-                Update,
-                (broadcast_schema_to_views, broadcast_settings_to_views),
-            )
-            .add_systems(
-                Update,
-                handle_open_settings_command
-                    .in_set(ReadAppCommands)
-                    .after(WriteAppCommands),
-            );
-    }
-}
-
-fn reset_sent_markers_on_ui_ready(
+pub(crate) fn reset_sent_markers_on_ui_ready(
     trigger: On<BinReceive<UiReady>>,
     views: Query<Entity, With<SettingsView>>,
     mut commands: Commands,
@@ -115,7 +88,7 @@ fn reset_sent_markers_on_ui_ready(
         .remove::<SettingsSchemaSent>();
 }
 
-fn register_settings_webview_app(registry: &mut WebviewAppRegistry) {
+pub(crate) fn register_settings_webview_app(registry: &mut WebviewAppRegistry) {
     registry.register(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")),
         &WebviewAppConfig::with_custom_host("settings"),
@@ -123,12 +96,12 @@ fn register_settings_webview_app(registry: &mut WebviewAppRegistry) {
 }
 
 #[derive(Component)]
-struct SettingsListSent;
+pub(crate) struct SettingsListSent;
 
 #[derive(Component)]
-struct SettingsSchemaSent;
+pub(crate) struct SettingsSchemaSent;
 
-fn broadcast_settings_to_views(
+pub(crate) fn broadcast_settings_to_views(
     settings: Res<AppSettings>,
     pending: Query<Entity, (With<SettingsView>, With<UiReady>, Without<SettingsListSent>)>,
     sent: Query<Entity, (With<SettingsView>, With<UiReady>, With<SettingsListSent>)>,
@@ -163,7 +136,7 @@ fn broadcast_settings_to_views(
     }
 }
 
-fn broadcast_schema_to_views(
+pub(crate) fn broadcast_schema_to_views(
     pending: Query<
         Entity,
         (
@@ -194,7 +167,7 @@ fn broadcast_schema_to_views(
     }
 }
 
-fn on_settings_command(
+pub(crate) fn on_settings_command(
     trigger: On<BinReceive<SettingsCommandEvent>>,
     mut settings: ResMut<AppSettings>,
     mut writes: MessageWriter<SettingsWriteRequest>,
@@ -215,7 +188,7 @@ fn on_settings_command(
     }
 }
 
-fn handle_open_settings_command(
+pub(crate) fn handle_open_settings_command(
     mut reader: MessageReader<AppCommand>,
     focus: Option<Res<FocusedStack>>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
