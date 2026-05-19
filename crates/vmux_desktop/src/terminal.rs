@@ -2260,7 +2260,7 @@ pub(crate) fn handle_run_shell_requests(
 ) {
     for request in reader.read() {
         let vmux_terminal::RunShellRequest { command, cwd, mode } = request.clone();
-        let input = crate::agent::shell_command_input(&command);
+        let input = vmux_agent::shell_input::shell_command_input(&command);
         if matches!(mode, vmux_terminal::ShellMode::Active)
             && let Some(terminal) =
                 vmux_agent::target::active_terminal_for_tab(focus.stack, &terminals)
