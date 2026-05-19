@@ -1058,7 +1058,7 @@ fn poll_service_messages(
             } => {
                 writers
                     .agent_commands
-                    .write(crate::agent::AgentCommandRequest {
+                    .write(vmux_agent::events::AgentCommandRequest {
                         request_id,
                         command,
                     });
@@ -1066,7 +1066,7 @@ fn poll_service_messages(
             ServiceMessage::AgentQuery { request_id, query } => {
                 writers
                     .agent_queries
-                    .write(crate::agent::AgentQueryRequest { request_id, query });
+                    .write(vmux_agent::events::AgentQueryRequest { request_id, query });
             }
             _ => {}
         }

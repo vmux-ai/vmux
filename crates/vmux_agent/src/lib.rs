@@ -33,8 +33,8 @@ pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUs
 pub use cwd::{default_space_dir, space_dir, valid_cwd};
 pub use echo::{EchoAppStrategy, synthetic_echo_stream};
 pub use events::{
-    AgentApprovalReply, AgentApprovalRequest, AgentDelta, AgentInput, AgentToolStatus,
-    ApprovalDecision, ToolStatus,
+    AgentApprovalReply, AgentApprovalRequest, AgentCommandRequest, AgentDelta, AgentInput,
+    AgentQueryRequest, AgentToolStatus, ApprovalDecision, ToolStatus,
 };
 pub use kind::AgentKind;
 pub use kind::AgentUrl;

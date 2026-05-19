@@ -23,19 +23,9 @@ use vmux_agent::{AgentKind, AgentVariant};
 use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
 use vmux_layout::event::TERMINAL_WEBVIEW_URL;
-use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentRequestId, AgentShellMode};
+use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentShellMode};
 
-#[derive(Message)]
-pub(crate) struct AgentCommandRequest {
-    pub(crate) request_id: AgentRequestId,
-    pub(crate) command: ServiceAgentCommand,
-}
-
-#[derive(Message)]
-pub(crate) struct AgentQueryRequest {
-    pub(crate) request_id: AgentRequestId,
-    pub(crate) query: vmux_service::protocol::AgentQuery,
-}
+pub(crate) use vmux_agent::events::{AgentCommandRequest, AgentQueryRequest};
 
 #[derive(Clone)]
 pub(crate) struct AgentProvider {
@@ -1025,6 +1015,7 @@ mod tests {
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
+    use vmux_service::protocol::AgentRequestId;
     use vmux_settings::{BrowserSettings, ShortcutSettings};
 
     fn test_settings() -> AppSettings {
