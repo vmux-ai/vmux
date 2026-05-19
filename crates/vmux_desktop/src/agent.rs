@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     command::{AppCommand, WriteAppCommands},
-    terminal::{PendingTerminalInput, ServiceMessageSet, new_terminal_bundle_with_cwd},
+    terminal::{ServiceMessageSet, new_terminal_bundle_with_cwd},
 };
 use bevy::prelude::*;
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
@@ -227,49 +227,9 @@ impl Plugin for AgentPlugin {
     }
 }
 
-pub(crate) use vmux_agent::cwd::valid_cwd;
-
-pub(crate) fn spawn_terminal_tab(
-    pane: Entity,
-    cwd: Option<&std::path::Path>,
-    pending_input: Option<Vec<u8>>,
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) -> Entity {
-    let tab = commands
-        .spawn((
-            vmux_layout::stack::stack_bundle(),
-            LastActivatedAt::now(),
-            ChildOf(pane),
-        ))
-        .id();
-    let title = cwd
-        .map(|cwd| format!("Terminal ({})", cwd.display()))
-        .unwrap_or_else(|| "Terminal".to_string());
-    commands.entity(tab).insert(PageMetadata {
-        url: TERMINAL_WEBVIEW_URL.to_string(),
-        title,
-        bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
-        ..default()
-    });
-    let terminal = commands
-        .spawn((
-            new_terminal_bundle_with_cwd(meshes, webview_mt, settings, cwd),
-            ChildOf(tab),
-        ))
-        .id();
-    commands.entity(terminal).insert(CefKeyboardTarget);
-    if let Some(data) = pending_input {
-        commands
-            .entity(terminal)
-            .insert(PendingTerminalInput { data });
-    }
-    terminal
-}
-
+pub(crate) use crate::terminal::spawn_terminal_tab;
 pub(crate) use vmux_agent::build_agent_launch;
+pub(crate) use vmux_agent::cwd::valid_cwd;
 
 pub(crate) fn spawn_fresh_agent_tab(
     kind: AgentKind,
@@ -960,6 +920,7 @@ fn handle_agent_launch_requests(
 mod tests {
     use super::*;
     use crate::browser::Browser;
+    use crate::terminal::PendingTerminalInput;
     use bevy::ecs::relationship::Relationship;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,

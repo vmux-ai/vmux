@@ -506,6 +506,46 @@ pub(crate) fn new_terminal_bundle_with_cwd(
     )
 }
 
+pub(crate) fn spawn_terminal_tab(
+    pane: Entity,
+    cwd: Option<&std::path::Path>,
+    pending_input: Option<Vec<u8>>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+) -> Entity {
+    let tab = commands
+        .spawn((
+            vmux_layout::stack::stack_bundle(),
+            LastActivatedAt::now(),
+            ChildOf(pane),
+        ))
+        .id();
+    let title = cwd
+        .map(|cwd| format!("Terminal ({})", cwd.display()))
+        .unwrap_or_else(|| "Terminal".to_string());
+    commands.entity(tab).insert(PageMetadata {
+        url: TERMINAL_WEBVIEW_URL.to_string(),
+        title,
+        bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+        ..default()
+    });
+    let terminal = commands
+        .spawn((
+            new_terminal_bundle_with_cwd(meshes, webview_mt, settings, cwd),
+            ChildOf(tab),
+        ))
+        .id();
+    commands.entity(terminal).insert(CefKeyboardTarget);
+    if let Some(data) = pending_input {
+        commands
+            .entity(terminal)
+            .insert(PendingTerminalInput { data });
+    }
+    terminal
+}
+
 pub(crate) fn reattach_terminal_bundle(
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -793,8 +833,8 @@ fn try_connect_service(
 #[derive(bevy::ecs::system::SystemParam)]
 struct PollServiceWriters<'w> {
     app_commands: MessageWriter<'w, AppCommand>,
-    agent_commands: MessageWriter<'w, crate::agent::AgentCommandRequest>,
-    agent_queries: MessageWriter<'w, crate::agent::AgentQueryRequest>,
+    agent_commands: MessageWriter<'w, vmux_agent::events::AgentCommandRequest>,
+    agent_queries: MessageWriter<'w, vmux_agent::events::AgentQueryRequest>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
 }
 
@@ -2271,7 +2311,7 @@ pub(crate) fn handle_run_shell_requests(
         } else if let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane))
             && let Ok(cwd_path) = vmux_agent::cwd::valid_cwd(&cwd)
         {
-            crate::agent::spawn_terminal_tab(
+            spawn_terminal_tab(
                 pane,
                 cwd_path.as_deref(),
                 Some(input),
