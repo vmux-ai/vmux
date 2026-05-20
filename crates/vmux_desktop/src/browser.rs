@@ -1652,6 +1652,14 @@ mod tests {
         }
 
         fn add_consumer_systems(app: &mut App) {
+            app.add_message::<vmux_layout::BrowserNavigateRequest>();
+            app.add_message::<vmux_layout::reconcile::LayoutApplyRequest>();
+            app.add_message::<vmux_layout::reconcile::LayoutApplyResponse>();
+            app.add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>();
+            app.add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>();
+            app.add_message::<vmux_terminal::TerminalSendRequest>();
+            app.add_message::<vmux_terminal::RunShellRequest>();
+            app.add_message::<vmux_setting::SettingsWriteRequest>();
             app.add_systems(
                 Update,
                 (

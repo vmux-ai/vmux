@@ -25,9 +25,10 @@ pub mod variant;
 
 pub use client::cli::strategy::CliAgentStrategy;
 pub use client::page::agent::AgentPage;
-pub use components::{AgentApprovalPolicy, AgentMessages};
+pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};
 pub use launch::build_agent_launch;
 pub use mcp::McpServerConfig;
+pub use message::AssistantBlock;
 pub use plugin::AgentPlugin;
 pub use run_state::AgentRunState;
 pub use url::{AgentKind, AgentUrl};

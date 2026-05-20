@@ -1210,11 +1210,19 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
             vmux_page::PageRegistryPlugin,
             vmux_command::CommandPlugin,
-            vmux_layout::LayoutPlugin,
             AgentPlugin,
         ));
+        app.add_message::<vmux_layout::BrowserNavigateRequest>();
+        app.add_message::<vmux_layout::reconcile::LayoutApplyRequest>();
+        app.add_message::<vmux_layout::reconcile::LayoutApplyResponse>();
+        app.add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>();
+        app.add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>();
+        app.add_message::<vmux_terminal::TerminalSendRequest>();
+        app.add_message::<vmux_terminal::RunShellRequest>();
+        app.add_message::<vmux_setting::SettingsWriteRequest>();
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -1333,6 +1341,14 @@ mod tests {
     fn terminal_send_writes_raw_text_to_active_terminal() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+        app.add_message::<vmux_layout::BrowserNavigateRequest>();
+        app.add_message::<vmux_layout::reconcile::LayoutApplyRequest>();
+        app.add_message::<vmux_layout::reconcile::LayoutApplyResponse>();
+        app.add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>();
+        app.add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>();
+        app.add_message::<vmux_terminal::TerminalSendRequest>();
+        app.add_message::<vmux_terminal::RunShellRequest>();
+        app.add_message::<vmux_setting::SettingsWriteRequest>();
         app.add_systems(Update, vmux_terminal::handle_terminal_send_requests);
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());

@@ -9085,6 +9085,7 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_layout",
+ "vmux_page",
  "vmux_service",
  "vmux_setting",
  "vmux_space",

@@ -27,3 +27,6 @@ vmux_service = { path = "../vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
+
+[dev-dependencies]
+vmux_page = { path = "../vmux_page" }
