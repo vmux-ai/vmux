@@ -23,6 +23,8 @@ use vmux_core::agent::{
     AgentKind, AgentLaunchRequested, PageAgentAttachRequest, PageAgentSpawnTabRequest,
     parse_page_agent_url,
 };
+use vmux_core::event::space::SpaceCommandEvent;
+use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
 use vmux_history::{LastActivatedAt, now_millis};
 pub(crate) use vmux_layout::NewStackContext;
@@ -35,9 +37,6 @@ use vmux_layout::{
     stack::{Stack, active_among, collect_leaf_panes, focused_stack},
     window::{Main, Modal},
 };
-use vmux_setting::Settings;
-use vmux_space::Spaces;
-use vmux_space::event::SpaceCommandEvent;
 
 pub(crate) use vmux_core::focus_pane_entity;
 
@@ -79,6 +78,8 @@ impl Plugin for CommandBarInputPlugin {
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<PageAgentAttachRequest>()
             .add_message::<PageAgentSpawnTabRequest>()
+            .add_message::<SettingsPageSpawnRequest>()
+            .add_message::<SpacesPageSpawnRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
                 CommandBarActionEvent,
                 PathCompleteRequest,
@@ -790,30 +791,28 @@ fn attach_spaces_page_to_tab(
     tab: Entity,
     spaces_page_url: &str,
     commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    spawn_writer: &mut MessageWriter<SpacesPageSpawnRequest>,
 ) {
     commands.entity(tab).insert(PageMetadata {
         url: spaces_page_url.to_string(),
         title: "Spaces".to_string(),
         ..default()
     });
-    commands.spawn((Spaces::new(meshes, webview_mt), ChildOf(tab)));
+    spawn_writer.write(SpacesPageSpawnRequest { target_stack: tab });
 }
 
 fn attach_settings_page_to_tab(
     tab: Entity,
     settings_page_url: &str,
     commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    spawn_writer: &mut MessageWriter<SettingsPageSpawnRequest>,
 ) {
     commands.entity(tab).insert(PageMetadata {
         url: settings_page_url.to_string(),
         title: "Settings".to_string(),
         ..default()
     });
-    commands.spawn((Settings::new(meshes, webview_mt), ChildOf(tab)));
+    spawn_writer.write(SettingsPageSpawnRequest { target_stack: tab });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -824,8 +823,7 @@ fn spawn_spaces_page_layout_from_command_bar(
     focus: Option<&mut vmux_layout::stack::FocusedStack>,
     spaces_page_url: &str,
     commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    spawn_writer: &mut MessageWriter<SpacesPageSpawnRequest>,
 ) -> bool {
     let Some(main) = main else {
         return false;
@@ -850,7 +848,7 @@ fn spawn_spaces_page_layout_from_command_bar(
     new_stack_ctx.previous_stack = None;
     new_stack_ctx.needs_open = false;
     new_stack_ctx.dismiss_modal = false;
-    attach_spaces_page_to_tab(tab, spaces_page_url, commands, meshes, webview_mt);
+    attach_spaces_page_to_tab(tab, spaces_page_url, commands, spawn_writer);
     true
 }
 
@@ -896,6 +894,8 @@ fn on_command_bar_action(
         Option<MessageWriter<PageAgentSpawnTabRequest>>,
         MessageWriter<ProcessesMonitorSpawnRequest>,
     )>,
+    mut spaces_page_spawn_writer: MessageWriter<SpacesPageSpawnRequest>,
+    mut settings_page_spawn_writer: MessageWriter<SettingsPageSpawnRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -1043,8 +1043,7 @@ fn on_command_bar_action(
                             stack_e,
                             &spaces_url,
                             &mut commands,
-                            &mut meshes,
-                            &mut webview_mt,
+                            &mut spaces_page_spawn_writer,
                         );
                     } else if url
                         .starts_with(settings_snapshot.settings_page_url.trim_end_matches('/'))
@@ -1053,8 +1052,7 @@ fn on_command_bar_action(
                             stack_e,
                             &settings_snapshot.settings_page_url,
                             &mut commands,
-                            &mut meshes,
-                            &mut webview_mt,
+                            &mut settings_page_spawn_writer,
                         );
                     } else {
                         let browser_e = commands
@@ -1189,8 +1187,7 @@ fn on_command_bar_action(
                                 stack_e,
                                 &spaces_url,
                                 &mut commands,
-                                &mut meshes,
-                                &mut webview_mt,
+                                &mut spaces_page_spawn_writer,
                             );
                             custom_keyboard_restore = true;
                         } else {
@@ -1204,8 +1201,7 @@ fn on_command_bar_action(
                                 focus.as_deref_mut(),
                                 &spaces_url,
                                 &mut commands,
-                                &mut meshes,
-                                &mut webview_mt,
+                                &mut spaces_page_spawn_writer,
                             ) {
                                 custom_keyboard_restore = true;
                             }
@@ -1233,8 +1229,7 @@ fn on_command_bar_action(
                                 stack_e,
                                 &settings_snapshot.settings_page_url,
                                 &mut commands,
-                                &mut meshes,
-                                &mut webview_mt,
+                                &mut settings_page_spawn_writer,
                             );
                             custom_keyboard_restore = true;
                         }
@@ -1408,7 +1403,7 @@ fn on_command_bar_action(
                 .iter()
                 .any(|p| p.id == evt.value)
             {
-                let cwd = vmux_space::cwd::default_space_dir();
+                let cwd = vmux_core::profile::default_space_dir();
                 if let Some(mut agent_launches) = writer_params.p1() {
                     agent_launches.write(AgentLaunchRequested {
                         provider_id: evt.value.clone(),
@@ -2313,6 +2308,8 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_message::<TerminalSpawnRequest>();
+        app.add_message::<SpacesPageSpawnRequest>();
+        app.add_message::<SettingsPageSpawnRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
@@ -2353,10 +2350,9 @@ mod tests {
             });
         app.update();
 
-        let mut spaces_query = app.world_mut().query::<&Spaces>();
-        let spaces_count = spaces_query.iter(app.world()).count();
-
-        assert_eq!(spaces_count, 1);
+        let msgs = app.world().resource::<Messages<SpacesPageSpawnRequest>>();
+        let mut cursor = msgs.get_cursor();
+        assert_eq!(cursor.read(&msgs).count(), 1);
     }
 
     #[test]
@@ -2365,6 +2361,8 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_message::<TerminalSpawnRequest>();
+        app.add_message::<SpacesPageSpawnRequest>();
+        app.add_message::<SettingsPageSpawnRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(vmux_layout::stack::FocusedStack::default());
@@ -2398,8 +2396,9 @@ mod tests {
             });
         app.update();
 
-        let mut spaces_query = app.world_mut().query::<&Spaces>();
-        assert_eq!(spaces_query.iter(app.world()).count(), 1);
+        let msgs = app.world().resource::<Messages<SpacesPageSpawnRequest>>();
+        let mut cursor = msgs.get_cursor();
+        assert_eq!(cursor.read(&msgs).count(), 1);
 
         let mut tabs = app.world_mut().query::<&Space>();
         assert_eq!(tabs.iter(app.world()).count(), 1);
@@ -2407,20 +2406,14 @@ mod tests {
         let tabs = {
             let mut tab_q = app
                 .world_mut()
-                .query_filtered::<(Entity, &PageMetadata, &Children), With<Stack>>();
+                .query_filtered::<(Entity, &PageMetadata), With<Stack>>();
             tab_q
                 .iter(app.world())
-                .map(|(entity, meta, children)| {
-                    let has_spaces_view = children
-                        .iter()
-                        .any(|child| app.world().get::<Spaces>(child).is_some());
-                    (entity, meta.url.clone(), has_spaces_view)
-                })
+                .map(|(entity, meta)| (entity, meta.url.clone()))
                 .collect::<Vec<_>>()
         };
         assert_eq!(tabs.len(), 1);
         assert_eq!(tabs[0].1, SPACES_PAGE_URL);
-        assert!(tabs[0].2);
 
         let ctx = app.world().resource::<NewStackContext>();
         assert!(!ctx.needs_open);
@@ -2448,6 +2441,8 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_message::<TerminalSpawnRequest>();
+        app.add_message::<SpacesPageSpawnRequest>();
+        app.add_message::<SettingsPageSpawnRequest>();
         app.add_observer(on_command_bar_action);
         app.add_observer(capture_space_command);
         app.init_resource::<NewStackContext>();
@@ -2506,6 +2501,8 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_message::<TerminalSpawnRequest>();
+        app.add_message::<SpacesPageSpawnRequest>();
+        app.add_message::<SettingsPageSpawnRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
@@ -2558,6 +2555,8 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_message::<TerminalSpawnRequest>();
+        app.add_message::<SpacesPageSpawnRequest>();
+        app.add_message::<SettingsPageSpawnRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
@@ -2611,6 +2610,8 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_message::<TerminalSpawnRequest>();
+        app.add_message::<SpacesPageSpawnRequest>();
+        app.add_message::<SettingsPageSpawnRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());

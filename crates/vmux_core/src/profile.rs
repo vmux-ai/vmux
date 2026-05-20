@@ -29,3 +29,16 @@ pub fn session_path() -> PathBuf {
 pub fn cef_cache_path() -> Option<String> {
     profile_dir().to_str().map(|s| s.to_owned())
 }
+
+pub fn default_space_dir() -> PathBuf {
+    space_dir("default")
+}
+
+pub fn space_dir(space_id: &str) -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"));
+    let dir = home.join(".vmux").join(space_id);
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}

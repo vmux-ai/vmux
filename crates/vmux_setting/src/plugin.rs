@@ -1,8 +1,8 @@
 pub mod runtime;
 pub mod view;
 
-use bevy::prelude::*;
-use bevy_cef::prelude::BinEventEmitterPlugin;
+use bevy::{ecs::message::MessageReader, prelude::*};
+use bevy_cef::prelude::{BinEventEmitterPlugin, WebviewExtendStandardMaterial};
 use vmux_command::{ReadAppCommands, WriteAppCommands};
 use vmux_page::PageRegistry;
 
@@ -47,6 +47,9 @@ impl Plugin for SettingsPlugin {
                 .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
         );
 
+        app.add_message::<vmux_core::page::SettingsPageSpawnRequest>()
+            .add_systems(Update, respond_settings_spawn.in_set(ReadAppCommands));
+
         app.add_plugins(BinEventEmitterPlugin::<(SettingsCommandEvent,)>::default())
             .add_observer(on_settings_command)
             .add_observer(reset_sent_markers_on_page_ready)
@@ -60,5 +63,19 @@ impl Plugin for SettingsPlugin {
                     .in_set(ReadAppCommands)
                     .after(WriteAppCommands),
             );
+    }
+}
+
+fn respond_settings_spawn(
+    mut reader: MessageReader<vmux_core::page::SettingsPageSpawnRequest>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for req in reader.read() {
+        let entity = commands
+            .spawn(view::Settings::new(&mut meshes, &mut webview_mt))
+            .id();
+        commands.entity(entity).insert(ChildOf(req.target_stack));
     }
 }

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{ecs::message::MessageReader, prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::TriggerLoad;
 use vmux_core::PageMetadata;
@@ -30,6 +30,12 @@ impl Plugin for SpacePlugin {
         app.init_resource::<ActiveSpace>();
         app.add_message::<SaveSpaceRequest>();
         register_spaces_page(app.world_mut().resource_mut::<PageRegistry>().as_mut());
+        app.add_message::<vmux_core::page::SpacesPageSpawnRequest>()
+            .add_systems(
+                Update,
+                respond_spaces_spawn.in_set(vmux_command::ReadAppCommands),
+            );
+
         app.add_plugins(BinEventEmitterPlugin::<(SpaceCommandEvent,)>::default())
             .add_observer(on_space_command)
             .add_observer(reset_spaces_sent_marker_on_page_ready)
@@ -429,6 +435,20 @@ fn on_space_command(
                 focus.stack = Some(spawned.stack);
             }
         }
+    }
+}
+
+fn respond_spaces_spawn(
+    mut reader: MessageReader<vmux_core::page::SpacesPageSpawnRequest>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for req in reader.read() {
+        let entity = commands
+            .spawn(crate::spaces::Spaces::new(&mut meshes, &mut webview_mt))
+            .id();
+        commands.entity(entity).insert(ChildOf(req.target_stack));
     }
 }
 

@@ -3,6 +3,8 @@ pub mod process_id;
 pub use process_id::ProcessId;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod page;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod profile;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod terminal;
