@@ -8,6 +8,8 @@ pub mod command;
 pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod shortcut;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod snapshot;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use bundle::COMMAND_BAR_PAGE_URL;
@@ -15,3 +17,5 @@ pub use bundle::COMMAND_BAR_PAGE_URL;
 pub use command::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::CommandPlugin;
+#[cfg(not(target_arch = "wasm32"))]
+pub use snapshot::*;
