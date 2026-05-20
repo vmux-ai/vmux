@@ -256,6 +256,12 @@ impl Plugin for TerminalPlugin {
             .add_observer(on_terminal_removed);
 
         app.add_plugins(crate::processes_monitor::ProcessesMonitorPlugin);
+
+        app.add_systems(
+            Update,
+            crate::snapshot_updater::update_terminals_snapshot
+                .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+        );
     }
 }
 

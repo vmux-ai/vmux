@@ -53,6 +53,23 @@ pub fn update_agents_snapshot(
         .unwrap_or_default();
 }
 
+use crate::session::AgentSessionToEntity;
+use vmux_command::snapshot::CommandBarTerminalsSnapshot;
+
+pub fn update_agent_sessions_snapshot(
+    sessions: Option<Res<AgentSessionToEntity>>,
+    mut snapshot: ResMut<CommandBarTerminalsSnapshot>,
+) {
+    let changed = sessions
+        .as_ref()
+        .map(|r| r.is_changed() || r.is_added())
+        .unwrap_or(false);
+    if !changed && !snapshot.agent_session_to_entity.is_empty() {
+        return;
+    }
+    snapshot.agent_session_to_entity = sessions.as_deref().map(|m| m.0.clone()).unwrap_or_default();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +83,15 @@ mod tests {
         let snap = app.world().resource::<CommandBarAgentsSnapshot>();
         assert!(snap.providers.is_empty());
         assert!(snap.strategies.is_empty());
+    }
+
+    #[test]
+    fn agent_sessions_snapshot_starts_empty() {
+        let mut app = App::new();
+        app.init_resource::<CommandBarTerminalsSnapshot>();
+        app.add_systems(Update, update_agent_sessions_snapshot);
+        app.update();
+        let snap = app.world().resource::<CommandBarTerminalsSnapshot>();
+        assert!(snap.agent_session_to_entity.is_empty());
     }
 }
