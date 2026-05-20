@@ -4,8 +4,8 @@ use bevy::prelude::Resource;
 
 use crate::AgentKind;
 use crate::AgentVariant;
-use crate::app::AppAgentStrategy;
-use crate::cli_trait::CliAgentStrategy;
+use crate::client::cli::strategy::CliAgentStrategy;
+use crate::client::page::strategy::AgentPageStrategy;
 
 pub trait AgentStrategy: Send + Sync + 'static {
     fn kind(&self) -> AgentKind;
@@ -15,7 +15,7 @@ pub trait AgentStrategy: Send + Sync + 'static {
 #[derive(Resource, Default)]
 pub struct AgentStrategies {
     cli: HashMap<AgentKind, Box<dyn CliAgentStrategy>>,
-    app: HashMap<(String, String), Box<dyn AppAgentStrategy>>,
+    page: HashMap<(String, String), Box<dyn AgentPageStrategy>>,
 }
 
 impl AgentStrategies {
@@ -27,26 +27,26 @@ impl AgentStrategies {
         self.cli.get(&kind).map(|b| b.as_ref())
     }
 
-    pub fn register_app(&mut self, strategy: Box<dyn AppAgentStrategy>) {
+    pub fn register_page(&mut self, strategy: Box<dyn AgentPageStrategy>) {
         let key = (
             strategy.provider().to_string(),
             strategy.model().to_string(),
         );
-        self.app.insert(key, strategy);
+        self.page.insert(key, strategy);
     }
 
-    pub fn get_app_by_provider_model(
+    pub fn get_page_by_provider_model(
         &self,
         provider: &str,
         model: &str,
-    ) -> Option<&dyn AppAgentStrategy> {
-        self.app
+    ) -> Option<&dyn AgentPageStrategy> {
+        self.page
             .get(&(provider.to_string(), model.to_string()))
             .map(|b| b.as_ref())
     }
 
-    pub fn app_strategies(&self) -> impl Iterator<Item = &dyn AppAgentStrategy> {
-        self.app.values().map(|b| b.as_ref())
+    pub fn page_strategies(&self) -> impl Iterator<Item = &dyn AgentPageStrategy> {
+        self.page.values().map(|b| b.as_ref())
     }
 
     pub fn cli_strategies(&self) -> impl Iterator<Item = &dyn CliAgentStrategy> {
@@ -99,20 +99,20 @@ mod tests {
     }
 
     #[test]
-    fn register_app_lookup_by_provider_model() {
-        struct StubApp {
+    fn register_page_lookup_by_provider_model() {
+        struct StubPage {
             provider: String,
             model: String,
         }
-        impl AgentStrategy for StubApp {
+        impl AgentStrategy for StubPage {
             fn kind(&self) -> AgentKind {
                 AgentKind::Vibe
             }
             fn variant(&self) -> AgentVariant {
-                AgentVariant::App
+                AgentVariant::Page
             }
         }
-        impl crate::app::AppAgentStrategy for StubApp {
+        impl crate::client::page::strategy::AgentPageStrategy for StubPage {
             fn provider(&self) -> &str {
                 &self.provider
             }
@@ -140,36 +140,36 @@ mod tests {
         }
 
         let mut s = AgentStrategies::default();
-        s.register_app(Box::new(StubApp {
+        s.register_page(Box::new(StubPage {
             provider: "openai".into(),
             model: "gpt-5.5".into(),
         }));
-        s.register_app(Box::new(StubApp {
+        s.register_page(Box::new(StubPage {
             provider: "anthropic".into(),
             model: "claude-opus-4.7".into(),
         }));
 
-        assert!(s.get_app_by_provider_model("openai", "gpt-5.5").is_some());
+        assert!(s.get_page_by_provider_model("openai", "gpt-5.5").is_some());
         assert!(
-            s.get_app_by_provider_model("anthropic", "claude-opus-4.7")
+            s.get_page_by_provider_model("anthropic", "claude-opus-4.7")
                 .is_some()
         );
-        assert!(s.get_app_by_provider_model("nope", "nope").is_none());
-        assert_eq!(s.app_strategies().count(), 2);
+        assert!(s.get_page_by_provider_model("nope", "nope").is_none());
+        assert_eq!(s.page_strategies().count(), 2);
     }
 
     #[test]
-    fn cli_and_app_coexist() {
-        struct App;
-        impl AgentStrategy for App {
+    fn cli_and_page_coexist() {
+        struct Page;
+        impl AgentStrategy for Page {
             fn kind(&self) -> AgentKind {
                 AgentKind::Vibe
             }
             fn variant(&self) -> AgentVariant {
-                AgentVariant::App
+                AgentVariant::Page
             }
         }
-        impl crate::app::AppAgentStrategy for App {
+        impl crate::client::page::strategy::AgentPageStrategy for Page {
             fn provider(&self) -> &str {
                 "p"
             }
@@ -197,8 +197,8 @@ mod tests {
         }
         let mut s = AgentStrategies::default();
         s.register_cli(Box::new(StubStrategy));
-        s.register_app(Box::new(App));
+        s.register_page(Box::new(Page));
         assert!(s.get_cli(AgentKind::Claude).is_some());
-        assert!(s.get_app_by_provider_model("p", "m").is_some());
+        assert!(s.get_page_by_provider_model("p", "m").is_some());
     }
 }

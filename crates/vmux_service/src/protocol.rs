@@ -3,7 +3,7 @@ pub use layout::{
     Focus, LayoutNode, LayoutSnapshot, NodeKind, Space, SplitDirection, Tab, format_id, parse_id,
 };
 
-use vmux_terminal::event::{TermCursor, TermLine, TermSelectionRange};
+use vmux_core::event::{TermCursor, TermLine, TermSelectionRange};
 
 pub use vmux_core::ProcessId;
 

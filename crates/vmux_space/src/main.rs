@@ -1,5 +1,5 @@
-mod app;
+mod page;
 
 fn main() {
-    dioxus::launch(app::App);
+    dioxus::launch(page::Page);
 }

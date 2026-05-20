@@ -1,11 +1,14 @@
 use std::collections::{HashMap, HashSet};
+#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::{Mutex, mpsc};
+#[cfg(test)]
 use std::time::SystemTime;
 
 use bevy::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::PageMetadata;
+pub use vmux_core::agent::{AgentSession, PendingAgentSession, SessionId};
 
 use crate::AgentKind;
 use crate::strategy::AgentStrategies;
@@ -13,21 +16,6 @@ use crate::strategy::AgentStrategies;
 #[derive(Message, Debug, Clone, Copy)]
 pub struct AgentSessionExited {
     pub entity: Entity,
-}
-
-#[derive(Component, Debug, Clone)]
-pub struct AgentSession {
-    pub kind: AgentKind,
-}
-
-#[derive(Component, Debug, Clone)]
-pub struct SessionId(pub String);
-
-#[derive(Component, Debug, Clone)]
-pub struct PendingAgentSession {
-    pub kind: AgentKind,
-    pub spawn_time: SystemTime,
-    pub cwd: PathBuf,
 }
 
 #[derive(Resource, Default, Debug)]
@@ -84,7 +72,7 @@ mod tests {
 #[cfg(test)]
 mod url_tests {
     use super::*;
-    use crate::vibe::VibeStrategy;
+    use crate::client::cli::vibe::VibeStrategy;
 
     fn empty_meta() -> PageMetadata {
         PageMetadata {
@@ -345,7 +333,7 @@ pub fn detect_file_end_time_exit(
 #[cfg(test)]
 mod discovery_tests {
     use super::*;
-    use crate::vibe::VibeStrategy;
+    use crate::client::cli::vibe::VibeStrategy;
 
     #[test]
     fn pending_with_no_match_within_timeout_keeps_pending() {

@@ -19,11 +19,23 @@ required-features = ["web"]
 path = "src/lib.rs"
 
 [build-dependencies]
-vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
+vmux_server = { path = "../vmux_server", features = ["build"] }
 
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
+vmux_core = { path = "../vmux_core" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+bevy_ecs = { workspace = true }
+moonshine-save = { workspace = true }
+ron = { workspace = true }
+vmux_command = { path = "../vmux_command" }
+vmux_history = { path = "../vmux_history" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_server = { path = "../vmux_server" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
@@ -33,3 +45,8 @@ web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlE
 
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+bevy_cef_core = { workspace = true }
+serde_json = { workspace = true }
+vmux_setting = { path = "../vmux_setting" }

@@ -1,0 +1,50 @@
+[package]
+name = "vmux_setting"
+description = "Settings webview app"
+version.workspace = true
+edition.workspace = true
+publish = false
+build = "build.rs"
+
+[features]
+default = []
+web = []
+
+[[bin]]
+name = "vmux_setting_app"
+path = "src/main.rs"
+required-features = ["web"]
+
+[lib]
+path = "src/lib.rs"
+
+[build-dependencies]
+vmux_server = { path = "../vmux_server", features = ["build"] }
+
+[dependencies]
+rkyv = { workspace = true }
+serde = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+bevy_ecs = { workspace = true }
+notify = { workspace = true }
+ron = { workspace = true }
+serde_json = { workspace = true }
+tempfile = "3"
+vmux_command = { path = "../vmux_command" }
+vmux_core = { path = "../vmux_core" }
+vmux_history = { path = "../vmux_history" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_server = { path = "../vmux_server" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+vmux_ui = { path = "../vmux_ui", default-features = false }
+wasm-bindgen = { workspace = true }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement"] }
+
+[dev-dependencies]
+tempfile = "3"

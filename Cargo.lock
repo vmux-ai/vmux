@@ -9072,6 +9072,7 @@ name = "vmux_agent"
 version = "0.0.9"
 dependencies = [
  "bevy",
+ "bevy_cef",
  "chrono",
  "crossbeam-channel",
  "futures-lite",
@@ -9079,7 +9080,16 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "url",
+ "uuid",
+ "vmux_command",
  "vmux_core",
+ "vmux_layout",
+ "vmux_server",
+ "vmux_service",
+ "vmux_setting",
+ "vmux_space",
+ "vmux_terminal",
 ]
 
 [[package]]
@@ -9100,17 +9110,12 @@ version = "0.0.9"
 dependencies = [
  "bevy",
  "bevy_ecs",
- "dioxus",
- "js-sys",
  "muda",
  "rkyv",
  "serde",
  "serde_json",
+ "vmux_core",
  "vmux_macro",
- "vmux_ui",
- "vmux_webview_app",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -9158,12 +9163,12 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_macro",
+ "vmux_server",
  "vmux_service",
- "vmux_settings",
+ "vmux_setting",
  "vmux_space",
  "vmux_terminal",
  "vmux_ui",
- "vmux_webview_app",
 ]
 
 [[package]]
@@ -9180,8 +9185,8 @@ dependencies = [
  "ron 0.8.1",
  "serde",
  "vmux_core",
+ "vmux_server",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
 ]
 
@@ -9198,6 +9203,7 @@ dependencies = [
  "bevy_render",
  "bevy_winit",
  "dioxus",
+ "js-sys",
  "libc",
  "moonshine-save",
  "raw-window-handle",
@@ -9206,12 +9212,12 @@ dependencies = [
  "ron 0.8.1",
  "serde",
  "serde_json",
+ "uuid",
  "vmux_command",
  "vmux_core",
  "vmux_history",
- "vmux_space",
+ "vmux_server",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -9238,11 +9244,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_server"
+version = "0.0.9"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_cef_core",
+ "regex",
+ "rkyv",
+ "serde",
+]
+
+[[package]]
 name = "vmux_service"
 version = "0.0.9"
 dependencies = [
  "alacritty_terminal",
  "bevy",
+ "bevy_ecs",
  "dioxus",
  "libc",
  "objc2 0.6.4",
@@ -9260,15 +9279,14 @@ dependencies = [
  "uuid",
  "vmux_core",
  "vmux_layout",
- "vmux_terminal",
+ "vmux_server",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
 ]
 
 [[package]]
-name = "vmux_settings"
+name = "vmux_setting"
 version = "0.0.9"
 dependencies = [
  "bevy",
@@ -9281,13 +9299,12 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "vmux_agent",
  "vmux_command",
  "vmux_core",
  "vmux_history",
  "vmux_layout",
+ "vmux_server",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -9296,12 +9313,24 @@ dependencies = [
 name = "vmux_space"
 version = "0.0.9"
 dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_cef_core",
+ "bevy_ecs",
  "dioxus",
+ "moonshine-save",
  "rkyv",
+ "ron 0.8.1",
  "serde",
+ "serde_json",
  "tempfile",
+ "vmux_command",
+ "vmux_core",
+ "vmux_history",
+ "vmux_layout",
+ "vmux_server",
+ "vmux_setting",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -9313,13 +9342,24 @@ dependencies = [
  "bevy",
  "bevy_cef",
  "bevy_ecs",
+ "bevy_reflect",
  "dioxus",
  "js-sys",
+ "libc",
+ "rfd",
  "rkyv",
  "serde",
+ "tracing",
  "unicode-width",
+ "vmux_command",
+ "vmux_core",
+ "vmux_history",
+ "vmux_layout",
+ "vmux_server",
+ "vmux_service",
+ "vmux_setting",
+ "vmux_space",
  "vmux_ui",
- "vmux_webview_app",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -9336,21 +9376,9 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
- "vmux_webview_app",
+ "vmux_server",
  "wasm-bindgen",
  "web-sys",
-]
-
-[[package]]
-name = "vmux_webview_app"
-version = "0.0.9"
-dependencies = [
- "bevy",
- "bevy_cef",
- "bevy_cef_core",
- "regex",
- "rkyv",
- "serde",
 ]
 
 [[package]]

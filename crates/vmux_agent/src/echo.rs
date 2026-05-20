@@ -1,16 +1,16 @@
-use crate::app::AppAgentStrategy;
+use crate::client::page::strategy::AgentPageStrategy;
 use crate::message::Message;
 use crate::strategy::AgentStrategy;
 use crate::stream::{StopReason, StreamEvent, ToolDef};
 use crate::{AgentKind, AgentVariant};
 
-pub struct EchoAppStrategy {
+pub struct EchoPageStrategy {
     provider: String,
     model: String,
     kind: AgentKind,
 }
 
-impl EchoAppStrategy {
+impl EchoPageStrategy {
     pub fn new(provider: impl Into<String>, model: impl Into<String>, kind: AgentKind) -> Self {
         Self {
             provider: provider.into(),
@@ -20,16 +20,16 @@ impl EchoAppStrategy {
     }
 }
 
-impl AgentStrategy for EchoAppStrategy {
+impl AgentStrategy for EchoPageStrategy {
     fn kind(&self) -> AgentKind {
         self.kind
     }
     fn variant(&self) -> AgentVariant {
-        AgentVariant::App
+        AgentVariant::Page
     }
 }
 
-impl AppAgentStrategy for EchoAppStrategy {
+impl AgentPageStrategy for EchoPageStrategy {
     fn provider(&self) -> &str {
         &self.provider
     }

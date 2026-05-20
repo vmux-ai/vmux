@@ -6,15 +6,11 @@ use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use std::path::PathBuf;
 
-use crate::{
-    browser::Browser,
-    profile::Profile,
-    spaces::{ActiveSpace, SpacesView},
-    terminal::Terminal,
-};
+use crate::browser::Browser;
 use vmux_core::PageMetadata;
-use vmux_layout::event::SERVICES_WEBVIEW_URL;
-use vmux_layout::event::TERMINAL_WEBVIEW_URL;
+use vmux_layout::event::SERVICES_PAGE_URL;
+use vmux_layout::event::TERMINAL_PAGE_URL;
+use vmux_layout::profile::Profile;
 use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
@@ -22,15 +18,16 @@ use vmux_layout::{
     stack::Stack,
     window::Main,
 };
-use vmux_settings::AppSettings;
-use vmux_settings::SettingsView;
-use vmux_settings::event::SETTINGS_WEBVIEW_URL;
-use vmux_space::event::SPACES_WEBVIEW_URL;
-use vmux_space::migration::migrate_legacy_session_files;
+use vmux_setting::AppSettings;
+use vmux_setting::Settings;
+use vmux_setting::event::SETTINGS_PAGE_URL;
+use vmux_space::event::SPACES_PAGE_URL;
+use vmux_space::{ActiveSpace, Spaces};
+use vmux_terminal::Terminal;
+use vmux_terminal::new_terminal_bundle_with_cwd;
 
 fn run_legacy_migration() {
-    migrate_legacy_session_files(crate::profile::shared_data_dir());
-    migrate_tab_to_space_type_name(crate::profile::shared_data_dir());
+    migrate_tab_to_space_type_name(vmux_core::profile::shared_data_dir());
 }
 
 fn migrate_tab_to_space_type_name(root: std::path::PathBuf) {
@@ -74,13 +71,13 @@ pub(crate) struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<crate::terminal::launch::TerminalLaunch>()
-            .register_type::<crate::terminal::launch::TerminalKind>();
         app.insert_resource(AutoSave {
             debounce: Timer::from_seconds(0.5, TimerMode::Once),
             periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
             dirty: false,
         })
+        .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+        .add_message::<vmux_space::SaveSpaceRequest>()
         .add_observer(save_on_default_event)
         .add_observer(load_on_default_event)
         .add_systems(Startup, run_legacy_migration.before(load_space_on_startup))
@@ -96,8 +93,23 @@ impl Plugin for PersistencePlugin {
                 .chain()
                 .run_if(resource_exists::<SpaceViewsNeedRebuild>),
         )
-        .add_systems(Update, (mark_dirty_on_change, auto_save_system).chain())
-        .add_systems(Update, sync_launch_to_stack);
+        .add_systems(
+            Update,
+            (
+                (mark_dirty_on_change, auto_save_system).chain(),
+                sync_launch_to_stack,
+                handle_save_space_requests,
+            ),
+        );
+    }
+}
+
+fn handle_save_space_requests(
+    mut requests: MessageReader<vmux_space::SaveSpaceRequest>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        save_space_to_path(&mut commands, request.path.clone());
     }
 }
 
@@ -192,7 +204,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<vmux_history::CreatedAt>()
         .allow::<vmux_history::LastActivatedAt>()
         .allow::<vmux_history::Visit>()
-        .allow::<crate::terminal::launch::TerminalLaunch>();
+        .allow::<vmux_terminal::launch::TerminalLaunch>();
     commands.trigger_save(save);
 }
 
@@ -219,7 +231,7 @@ pub(crate) fn rebuild_space_views(
         (
             Entity,
             &PageMetadata,
-            Option<&crate::terminal::launch::TerminalLaunch>,
+            Option<&vmux_terminal::launch::TerminalLaunch>,
         ),
         (With<Stack>, Without<Node>),
     >,
@@ -230,7 +242,7 @@ pub(crate) fn rebuild_space_views(
     browser_q: Query<(), With<Browser>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     settings: Res<AppSettings>,
-    strategies: Res<vmux_agent::strategy::AgentStrategies>,
+    mut spawn_agent: MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -337,20 +349,23 @@ pub(crate) fn rebuild_space_views(
         if !has_browser {
             if meta
                 .url
-                .starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/'))
+                .starts_with(SERVICES_PAGE_URL.trim_end_matches('/'))
             {
                 commands.spawn((
-                    crate::processes_monitor::ProcessesMonitor::new(&mut meshes, &mut webview_mt),
+                    vmux_terminal::processes_monitor::ProcessesMonitor::new(
+                        &mut meshes,
+                        &mut webview_mt,
+                    ),
                     ChildOf(entity),
                 ));
             } else if meta
                 .url
-                .starts_with(TERMINAL_WEBVIEW_URL.trim_end_matches('/'))
+                .starts_with(TERMINAL_PAGE_URL.trim_end_matches('/'))
             {
                 let cwd = saved_launch.map(|l| std::path::PathBuf::from(&l.cwd));
                 let term = commands
                     .spawn((
-                        Terminal::new_with_cwd(
+                        new_terminal_bundle_with_cwd(
                             &mut meshes,
                             &mut webview_mt,
                             &settings,
@@ -373,35 +388,19 @@ pub(crate) fn rebuild_space_views(
                     .unwrap_or_else(|| {
                         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
                     });
-                if let Err(e) = crate::terminal::spawn_agent_into_stack(
+                spawn_agent.write(vmux_core::agent::SpawnAgentInStackRequest {
                     kind,
-                    entity,
                     cwd,
                     session_id,
-                    &strategies,
-                    &mut commands,
-                    &mut meshes,
-                    &mut webview_mt,
-                    &settings,
-                ) {
-                    bevy::log::warn!("restore agent tab failed: {e}");
-                }
+                    stack: entity,
+                });
+            } else if meta.url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
+                commands.spawn((Spaces::new(&mut meshes, &mut webview_mt), ChildOf(entity)));
             } else if meta
                 .url
-                .starts_with(SPACES_WEBVIEW_URL.trim_end_matches('/'))
+                .starts_with(SETTINGS_PAGE_URL.trim_end_matches('/'))
             {
-                commands.spawn((
-                    SpacesView::new(&mut meshes, &mut webview_mt),
-                    ChildOf(entity),
-                ));
-            } else if meta
-                .url
-                .starts_with(SETTINGS_WEBVIEW_URL.trim_end_matches('/'))
-            {
-                commands.spawn((
-                    SettingsView::new(&mut meshes, &mut webview_mt),
-                    ChildOf(entity),
-                ));
+                commands.spawn((Settings::new(&mut meshes, &mut webview_mt), ChildOf(entity)));
             } else {
                 commands.spawn((
                     Browser::new(&mut meshes, &mut webview_mt, &meta.url),
@@ -455,10 +454,10 @@ pub(crate) fn rebuild_space_views(
 
 fn sync_launch_to_stack(
     terminals: Query<
-        (&ChildOf, &crate::terminal::launch::TerminalLaunch),
+        (&ChildOf, &vmux_terminal::launch::TerminalLaunch),
         (
             With<Terminal>,
-            Changed<crate::terminal::launch::TerminalLaunch>,
+            Changed<vmux_terminal::launch::TerminalLaunch>,
         ),
     >,
     stacks: Query<(), With<Stack>>,
@@ -479,7 +478,9 @@ mod tests {
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_settings::{AppSettings, BrowserSettings, ShortcutSettings};
+    use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     struct HomeEnvGuard {
         _guard: std::sync::MutexGuard<'static, ()>,
@@ -488,7 +489,7 @@ mod tests {
 
     impl HomeEnvGuard {
         fn use_temp_home(name: &str) -> Self {
-            let guard = crate::profile::ENV_LOCK.lock().expect("env lock");
+            let guard = ENV_LOCK.lock().expect("env lock");
             let old_home = std::env::var_os("HOME");
             let home =
                 std::env::temp_dir().join(format!("vmux-test-{name}-{}", std::process::id()));
@@ -538,7 +539,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             startup_url: None,
-            agent: vmux_settings::AgentSettings::default(),
+            agent: vmux_setting::AgentSettings::default(),
         }
     }
 
@@ -550,6 +551,7 @@ mod tests {
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
         app.init_resource::<vmux_agent::strategy::AgentStrategies>();
+        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
         app.add_systems(Update, rebuild_space_views);
 
         let main = app.world_mut().spawn(Main).id();
@@ -561,7 +563,7 @@ mod tests {
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let saved_url = format!(
             "{}{}",
-            TERMINAL_WEBVIEW_URL,
+            TERMINAL_PAGE_URL,
             uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap()
         );
         let tab = app
@@ -588,7 +590,7 @@ mod tests {
         let meta = app.world().get::<PageMetadata>(terminal).unwrap();
 
         let _ = saved_url;
-        assert_eq!(meta.url, TERMINAL_WEBVIEW_URL);
+        assert_eq!(meta.url, TERMINAL_PAGE_URL);
     }
 
     #[test]

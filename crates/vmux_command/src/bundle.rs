@@ -1,1 +1,1 @@
-pub const COMMAND_BAR_WEBVIEW_URL: &str = "vmux://command-bar/";
+pub const COMMAND_BAR_PAGE_URL: &str = "vmux://command-bar/";

@@ -1,7 +1,7 @@
-pub const LAYOUT_WEBVIEW_URL: &str = "vmux://layout/";
-pub const COMMAND_BAR_WEBVIEW_URL: &str = "vmux://command-bar/";
-pub const TERMINAL_WEBVIEW_URL: &str = "vmux://terminal/";
-pub const SERVICES_WEBVIEW_URL: &str = "vmux://services/";
+pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
+pub const COMMAND_BAR_PAGE_URL: &str = "vmux://command-bar/";
+pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
+pub const SERVICES_PAGE_URL: &str = "vmux://services/";
 pub const LAYOUT_STATE_EVENT: &str = "layout-state";
 pub const STACKS_EVENT: &str = "stacks";
 pub const RELOAD_EVENT: &str = "reload";
@@ -431,11 +431,6 @@ pub enum LayoutNode {
         is_active: bool,
         stacks: Vec<StackNode>,
     },
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct PageBgColorEvent {
-    pub color: String,
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), derive(bevy_ecs::message::Message))]

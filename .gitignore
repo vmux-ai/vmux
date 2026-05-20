@@ -5,6 +5,7 @@ patches/**/target/
 *.bak
 .claude/
 **/dist/
+**/dist-*/
 
 # Tailwind output (run `npm run build:css` in crates/vmux_header)
 crates/vmux_header/assets/status.css

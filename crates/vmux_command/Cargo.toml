@@ -1,6 +1,6 @@
 [package]
 name = "vmux_command"
-description = "Bevy + CEF + Dioxus command bar webview"
+description = "Command vocab + command-bar wire events"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -9,18 +9,9 @@ build = "build.rs"
 [features]
 default = []
 debug = []
-web = []
-
-[[bin]]
-name = "vmux_command_app"
-path = "src/main.rs"
-required-features = ["web"]
 
 [lib]
 path = "src/lib.rs"
-
-[build-dependencies]
-vmux_webview_app = { path = "../vmux_webview_app", features = ["build"] }
 
 [dependencies]
 rkyv = { workspace = true }
@@ -31,18 +22,5 @@ serde_json = { workspace = true }
 bevy = { workspace = true }
 bevy_ecs = { workspace = true }
 muda = "0.19"
+vmux_core = { path = "../vmux_core" }
 vmux_macro = { path = "../vmux_macro" }
-vmux_webview_app = { path = "../vmux_webview_app" }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-dioxus = { workspace = true }
-js-sys = "0.3"
-vmux_ui = { path = "../vmux_ui", default-features = false }
-wasm-bindgen = "0.2.115"
-web-sys = { version = "0.3", features = [
-    "Window", "Document", "Element", "HtmlElement", "HtmlInputElement",
-    "EventTarget", "Event", "EventInit",
-    "KeyboardEvent", "KeyboardEventInit",
-    "AddEventListenerOptions",
-    "ScrollIntoViewOptions", "ScrollLogicalPosition",
-] }

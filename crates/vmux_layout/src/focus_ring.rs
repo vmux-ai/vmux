@@ -1,5 +1,5 @@
 use crate::{
-    chrome::Loading,
+    cef::Loading,
     pane::{Pane, PaneSplit},
     settings::LayoutSettings,
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},

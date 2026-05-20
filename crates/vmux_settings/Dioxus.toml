@@ -1,6 +1,0 @@
-[application]
-name = "vmux_settings"
-default_platform = "web"
-
-[web.app]
-title = "Settings"

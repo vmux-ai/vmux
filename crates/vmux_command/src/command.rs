@@ -1,31 +1,11 @@
-use std::path::PathBuf;
-
 use bevy::prelude::*;
 use vmux_macro::{CommandBar, DefaultShortcuts, McpTool, OsMenu, OsSubMenu, OsSubMenuGroup};
-use vmux_webview_app::{WebviewAppConfig, WebviewAppRegistry};
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WriteAppCommands;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ReadAppCommands;
-
-pub struct CommandPlugin;
-
-impl Plugin for CommandPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<WebviewAppRegistry>()
-            .add_message::<AppCommand>()
-            .configure_sets(Update, ReadAppCommands.after(WriteAppCommands));
-
-        app.world_mut()
-            .resource_mut::<WebviewAppRegistry>()
-            .register(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-                &WebviewAppConfig::with_custom_host("command-bar"),
-            );
-    }
-}
 
 pub fn build_native_root_menu(menu: &mut muda::Menu) -> Result<(), muda::Error> {
     AppCommand::build_native_root_menu(menu)

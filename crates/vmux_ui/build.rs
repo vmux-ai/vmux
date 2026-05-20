@@ -3,7 +3,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use vmux_webview_app::build::{
+use vmux_server::build::{
     dx_web_public_dir, replace_dist_from_dx_public, run_dx_web_bundle,
     workspace_root_from_manifest_dir,
 };
@@ -68,8 +68,6 @@ fn tracked_paths(manifest_dir: &Path) -> Vec<PathBuf> {
     let mut v = vec![
         manifest_dir.join("Cargo.toml"),
         manifest_dir.join("Dioxus.toml"),
-        manifest_dir.join("tailwind.config.js"),
-        manifest_dir.join("tailwind.preset.js"),
         manifest_dir.join("assets/index.html"),
         manifest_dir.join("assets/input.css"),
         manifest_dir.join("assets/theme.css"),

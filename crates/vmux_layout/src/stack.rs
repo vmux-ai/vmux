@@ -1,4 +1,4 @@
-use crate::event::{SERVICES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
+use crate::event::{SERVICES_PAGE_URL, TERMINAL_PAGE_URL};
 use crate::{
     LayoutSpawnRequest, NewStackContext,
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
@@ -220,7 +220,7 @@ fn handle_stack_commands(
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
                     commands.entity(stack).insert(vmux_core::PageMetadata {
-                        url: TERMINAL_WEBVIEW_URL.to_string(),
+                        url: TERMINAL_PAGE_URL.to_string(),
                         title: "Terminal".to_string(),
                         bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
                         ..default()
@@ -231,12 +231,15 @@ fn handle_stack_commands(
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
                     commands.entity(stack).insert(vmux_core::PageMetadata {
-                        url: SERVICES_WEBVIEW_URL.to_string(),
+                        url: SERVICES_PAGE_URL.to_string(),
                         title: "Background Services".to_string(),
                         bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
                         ..default()
                     });
-                    spawn_requests.write(LayoutSpawnRequest::ProcessesMonitor { stack });
+                    spawn_requests.write(LayoutSpawnRequest::OpenUrl {
+                        stack,
+                        url: SERVICES_PAGE_URL.to_string(),
+                    });
                 } else {
                     if new_stack_ctx.stack.is_some() {
                         new_stack_ctx.needs_open = true;
@@ -636,8 +639,7 @@ mod tests {
     #[test]
     fn closing_last_tab_opens_command_bar_with_replacement_tab() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<LayoutSpawnRequest>();
         app.init_resource::<NewStackContext>();
         app.add_message::<crate::LayoutSpawnRequest>();
@@ -688,8 +690,7 @@ mod tests {
     #[test]
     fn closing_last_stack_in_tab_closes_tab_when_another_tab_exists() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<LayoutSpawnRequest>();
         app.init_resource::<NewStackContext>();
         app.add_message::<crate::LayoutSpawnRequest>();
