@@ -32,6 +32,11 @@ pub struct TerminalSpawnRequest {
     pub target_stack: Option<Entity>,
 }
 
+#[derive(Message, Debug, Clone)]
+pub struct ProcessesMonitorSpawnRequest {
+    pub target_stack: Entity,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

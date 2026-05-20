@@ -1208,7 +1208,13 @@ mod tests {
     fn agent_launch_request_uses_registered_provider_to_spawn_terminal_tab() {
         use bevy::ecs::relationship::Relationship;
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_page::PageRegistryPlugin,
+            vmux_command::CommandPlugin,
+            vmux_layout::LayoutPlugin,
+            AgentPlugin,
+        ));
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();

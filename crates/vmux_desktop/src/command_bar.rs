@@ -23,7 +23,7 @@ use vmux_core::agent::{
     AgentKind, AgentLaunchRequested, PageAgentAttachRequest, PageAgentSpawnTabRequest,
     parse_page_agent_url,
 };
-use vmux_core::terminal::{Terminal, TerminalSpawnRequest};
+use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
 use vmux_history::{LastActivatedAt, now_millis};
 pub(crate) use vmux_layout::NewStackContext;
 use vmux_layout::event::SERVICES_PAGE_URL;
@@ -38,9 +38,8 @@ use vmux_layout::{
 use vmux_setting::Settings;
 use vmux_space::Spaces;
 use vmux_space::event::SpaceCommandEvent;
-use vmux_terminal::processes_monitor::ProcessesMonitor;
 
-pub(crate) use vmux_terminal::pid::focus_pane_entity;
+pub(crate) use vmux_core::focus_pane_entity;
 
 pub(crate) fn parse_pid_from_url(url: &str, terminal_page_url: &str) -> Option<u32> {
     let suffix = url.strip_prefix(terminal_page_url)?;
@@ -895,6 +894,7 @@ fn on_command_bar_action(
         MessageWriter<TerminalSpawnRequest>,
         Option<MessageWriter<PageAgentAttachRequest>>,
         Option<MessageWriter<PageAgentSpawnTabRequest>>,
+        MessageWriter<ProcessesMonitorSpawnRequest>,
     )>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -1035,10 +1035,9 @@ fn on_command_bar_action(
                             title: "Background Services".to_string(),
                             ..default()
                         });
-                        commands.spawn((
-                            ProcessesMonitor::new(&mut meshes, &mut webview_mt),
-                            ChildOf(stack_e),
-                        ));
+                        writer_params.p6().write(ProcessesMonitorSpawnRequest {
+                            target_stack: stack_e,
+                        });
                     } else if url.starts_with(spaces_url.trim_end_matches('/')) {
                         attach_spaces_page_to_tab(
                             stack_e,

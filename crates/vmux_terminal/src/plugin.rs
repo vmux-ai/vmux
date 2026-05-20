@@ -14,7 +14,7 @@ use bevy::{
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands};
 use vmux_core::PageMetadata;
-use vmux_core::terminal::TerminalSpawnRequest;
+use vmux_core::terminal::{ProcessesMonitorSpawnRequest, TerminalSpawnRequest};
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
@@ -212,6 +212,7 @@ impl Plugin for TerminalPlugin {
             .add_message::<TerminalSendRequest>()
             .add_message::<RunShellRequest>()
             .add_message::<TerminalSpawnRequest>()
+            .add_message::<ProcessesMonitorSpawnRequest>()
             .init_resource::<pid::PidToEntity>()
             .add_systems(
                 Update,
@@ -253,7 +254,8 @@ impl Plugin for TerminalPlugin {
             )
             .add_systems(
                 Update,
-                respond_terminal_spawn.in_set(vmux_command::ReadAppCommands),
+                (respond_terminal_spawn, respond_processes_monitor_spawn)
+                    .in_set(vmux_command::ReadAppCommands),
             )
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
@@ -419,6 +421,23 @@ fn respond_terminal_spawn(
                 commands.entity(parent.0).insert(LastActivatedAt::now());
             }
         }
+    }
+}
+
+fn respond_processes_monitor_spawn(
+    mut reader: MessageReader<ProcessesMonitorSpawnRequest>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for req in reader.read() {
+        let entity = commands
+            .spawn(crate::processes_monitor::ProcessesMonitor::new(
+                &mut meshes,
+                &mut webview_mt,
+            ))
+            .id();
+        commands.entity(entity).insert(ChildOf(req.target_stack));
     }
 }
 
