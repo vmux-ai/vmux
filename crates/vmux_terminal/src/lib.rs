@@ -19,9 +19,6 @@ pub mod pid;
 #[cfg(not(target_arch = "wasm32"))]
 pub use component::{ProcessExited, PtyExited, Terminal};
 #[cfg(not(target_arch = "wasm32"))]
-pub use launch::{TerminalKind, TerminalLaunch};
-
-#[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod processes_monitor;

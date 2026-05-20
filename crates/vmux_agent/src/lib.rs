@@ -25,19 +25,10 @@ pub mod variant;
 
 pub use client::cli::strategy::CliAgentStrategy;
 pub use client::page::agent::AgentPage;
-pub use client::page::strategy::AgentPageStrategy;
-pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};
-pub use echo::{EchoPageStrategy, synthetic_echo_stream};
-pub use events::{
-    AgentApprovalReply, AgentApprovalRequest, AgentCommandRequest, AgentDelta, AgentInput,
-    AgentQueryRequest, AgentToolStatus, ApprovalDecision, ToolStatus,
-};
+pub use components::{AgentApprovalPolicy, AgentMessages};
 pub use launch::build_agent_launch;
 pub use mcp::McpServerConfig;
-pub use message::{AssistantBlock, Message};
 pub use plugin::AgentPlugin;
-pub use run_state::{AgentRunState, ToolDispatchOutput};
-pub use session::AgentSessionExited;
-pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
+pub use run_state::AgentRunState;
 pub use url::{AgentKind, AgentUrl};
 pub use variant::AgentVariant;
