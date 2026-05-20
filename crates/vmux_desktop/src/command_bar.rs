@@ -13,7 +13,7 @@ use vmux_command::event::{
 };
 use vmux_command::snapshot::{
     AgentProviderSummary, CommandBarAgentsSnapshot, CommandBarSettingsSnapshot,
-    CommandBarSpacesSnapshot,
+    CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
 };
 use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands, SpaceCommand,
@@ -23,8 +23,8 @@ use vmux_core::PageMetadata;
 use vmux_history::{LastActivatedAt, now_millis};
 pub(crate) use vmux_layout::NewStackContext;
 use vmux_layout::event::SERVICES_PAGE_URL;
-use vmux_layout::{Header, event::TERMINAL_PAGE_URL};
 use vmux_layout::{
+    Header,
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
     space::Space,
@@ -41,8 +41,8 @@ use vmux_terminal::{new_terminal_bundle, new_terminal_bundle_with_cwd};
 
 pub(crate) use vmux_terminal::pid::focus_pane_entity;
 
-pub(crate) fn parse_pid_from_url(url: &str) -> Option<u32> {
-    let suffix = url.strip_prefix(TERMINAL_PAGE_URL)?;
+pub(crate) fn parse_pid_from_url(url: &str, terminal_page_url: &str) -> Option<u32> {
+    let suffix = url.strip_prefix(terminal_page_url)?;
     if suffix.is_empty() {
         return None;
     }
@@ -882,11 +882,10 @@ fn on_command_bar_action(
     mut resource_params: ParamSet<(
         Res<AppSettings>,
         Option<Res<vmux_agent::plugin::AgentProviders>>,
-        Option<Res<vmux_terminal::pid::PidToEntity>>,
-        Option<Res<vmux_agent::session::AgentSessionToEntity>>,
         Option<Res<vmux_agent::strategy::AgentStrategies>>,
         Res<CommandBarSpacesSnapshot>,
         Res<CommandBarSettingsSnapshot>,
+        Res<CommandBarTerminalsSnapshot>,
     )>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut writer_params: ParamSet<(
@@ -901,14 +900,12 @@ fn on_command_bar_action(
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
     let settings = resource_params.p0().clone();
-    let settings_snapshot = resource_params.p6().clone();
-    let spaces_url = resource_params.p5().spaces_page_url.clone();
-    let pid_to_entity = resource_params
-        .p2()
-        .as_deref()
-        .map(|map| map.0.clone())
-        .unwrap_or_default();
-    let agent_to_entity = resource_params.p3().as_deref().map(|map| map.0.clone());
+    let settings_snapshot = resource_params.p4().clone();
+    let spaces_url = resource_params.p3().spaces_page_url.clone();
+    let terminals_snapshot = resource_params.p5().clone();
+    let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
+    let pid_to_entity = terminals_snapshot.pid_to_entity.clone();
+    let agent_to_entity = Some(terminals_snapshot.agent_session_to_entity.clone());
     let empty_stack = new_stack_ctx.stack;
     let previous_stack = new_stack_ctx.previous_stack;
     // Track whether we handle keyboard restore ourselves
@@ -942,7 +939,7 @@ fn on_command_bar_action(
                 };
                 if let Some(stack_e) = empty_stack {
                     commands.entity(stack_e).insert(PageMetadata {
-                        url: TERMINAL_PAGE_URL.to_string(),
+                        url: terminal_page_url.clone(),
                         title: format!("Terminal ({})", dir.display()),
                         ..default()
                     });
@@ -978,16 +975,16 @@ fn on_command_bar_action(
                 if let Some(stack_e) = empty_stack {
                     // New tab mode: attach content to the empty tab
                     if url.starts_with("vmux://terminal") {
-                        let known =
-                            parse_pid_from_url(&url).and_then(|p| pid_to_entity.get(&p).copied());
+                        let known = parse_pid_from_url(&url, &terminal_page_url)
+                            .and_then(|p| pid_to_entity.get(&p).copied());
                         if let Some(entity) = known {
                             focus_pane_entity(entity, &mut commands, &child_of_q);
                         } else {
-                            if let Some(pid) = parse_pid_from_url(&url) {
+                            if let Some(pid) = parse_pid_from_url(&url, &terminal_page_url) {
                                 bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
                             }
                             commands.entity(stack_e).insert(PageMetadata {
-                                url: TERMINAL_PAGE_URL.to_string(),
+                                url: terminal_page_url.clone(),
                                 title: "Terminal".to_string(),
                                 ..default()
                             });
@@ -1003,7 +1000,7 @@ fn on_command_bar_action(
                         vmux_agent::plugin::parse_page_agent_url(&url)
                     {
                         let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                        let strategies_ref = resource_params.p4();
+                        let strategies_ref = resource_params.p2();
                         let strategies = strategies_ref.as_deref();
                         if let Some(strategies) = strategies {
                             let _ = vmux_agent::plugin::attach_page_agent_to_stack(
@@ -1101,8 +1098,8 @@ fn on_command_bar_action(
                     custom_keyboard_restore = true;
                 } else {
                     // Normal mode: navigate or spawn terminal in current tab
-                    let known_terminal =
-                        parse_pid_from_url(&url).and_then(|p| pid_to_entity.get(&p).copied());
+                    let known_terminal = parse_pid_from_url(&url, &terminal_page_url)
+                        .and_then(|p| pid_to_entity.get(&p).copied());
                     let known_agent = vmux_agent::AgentKind::all().into_iter().find_map(|k| {
                         let id = url
                             .strip_prefix(&k.cli_url_prefix())
@@ -1116,7 +1113,7 @@ fn on_command_bar_action(
                     } else if let Some(entity) = known_agent {
                         focus_pane_entity(entity, &mut commands, &child_of_q);
                     } else if url.starts_with("vmux://terminal") {
-                        if let Some(pid) = parse_pid_from_url(&url) {
+                        if let Some(pid) = parse_pid_from_url(&url, &terminal_page_url) {
                             bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
                         }
                         writer_params
@@ -1135,7 +1132,7 @@ fn on_command_bar_action(
                         );
                         if let Some(pane_e) = active_pane_opt {
                             let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                            let strategies_ref = resource_params.p4();
+                            let strategies_ref = resource_params.p2();
                             if let Some(strategies) = strategies_ref.as_deref() {
                                 if vmux_agent::plugin::spawn_page_agent_tab(
                                     &provider,
@@ -1331,15 +1328,15 @@ fn on_command_bar_action(
             }
         }
         "terminal" => {
-            let known_terminal =
-                parse_pid_from_url(&evt.value).and_then(|p| pid_to_entity.get(&p).copied());
+            let known_terminal = parse_pid_from_url(&evt.value, &terminal_page_url)
+                .and_then(|p| pid_to_entity.get(&p).copied());
             if let Some(entity) = known_terminal {
                 focus_pane_entity(entity, &mut commands, &child_of_q);
                 new_stack_ctx.stack = None;
                 new_stack_ctx.previous_stack = None;
                 custom_keyboard_restore = true;
             } else {
-                if let Some(pid) = parse_pid_from_url(&evt.value) {
+                if let Some(pid) = parse_pid_from_url(&evt.value, &terminal_page_url) {
                     bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
                 }
                 let cwd = if evt.value.is_empty() || evt.value.contains("://") {
@@ -1360,7 +1357,7 @@ fn on_command_bar_action(
                 };
                 if let Some(stack_e) = empty_stack {
                     commands.entity(stack_e).insert(PageMetadata {
-                        url: TERMINAL_PAGE_URL.to_string(),
+                        url: terminal_page_url.clone(),
                         title: "Terminal".to_string(),
                         ..default()
                     });
@@ -1397,7 +1394,7 @@ fn on_command_bar_action(
                             ))
                             .id();
                         commands.entity(stack_e).insert(PageMetadata {
-                            url: TERMINAL_PAGE_URL.to_string(),
+                            url: terminal_page_url.clone(),
                             title: "Terminal".to_string(),
                             ..default()
                         });
@@ -1424,7 +1421,7 @@ fn on_command_bar_action(
         "command" => {
             if let Some((provider, model)) = parse_app_agent_id(&evt.value) {
                 let sid = uuid::Uuid::new_v4().to_string();
-                let strategies_ref = resource_params.p4();
+                let strategies_ref = resource_params.p2();
                 let strategies = strategies_ref.as_deref();
                 if let Some(strategies) = strategies {
                     if let Some(stack_e) = empty_stack {
@@ -2741,27 +2738,38 @@ mod tests {
         assert_eq!(app.world().resource::<NewStackContext>().stack, None);
     }
 
+    const TEST_TERMINAL_URL: &str = "vmux://terminal/";
+
     #[test]
     fn parse_pid_from_url_accepts_numeric() {
-        assert_eq!(parse_pid_from_url("vmux://terminal/12345"), Some(12345));
-        assert_eq!(parse_pid_from_url("vmux://terminal/0"), Some(0));
+        assert_eq!(
+            parse_pid_from_url("vmux://terminal/12345", TEST_TERMINAL_URL),
+            Some(12345)
+        );
+        assert_eq!(
+            parse_pid_from_url("vmux://terminal/0", TEST_TERMINAL_URL),
+            Some(0)
+        );
     }
 
     #[test]
     fn parse_pid_from_url_rejects_uuid_form() {
         let uuid_url = "vmux://terminal/ae724a54-c387-5359-0687-ccfc155558b6";
-        assert_eq!(parse_pid_from_url(uuid_url), None);
+        assert_eq!(parse_pid_from_url(uuid_url, TEST_TERMINAL_URL), None);
     }
 
     #[test]
     fn parse_pid_from_url_rejects_empty_path() {
-        assert_eq!(parse_pid_from_url("vmux://terminal/"), None);
+        assert_eq!(
+            parse_pid_from_url("vmux://terminal/", TEST_TERMINAL_URL),
+            None
+        );
     }
 
     #[test]
     fn parse_pid_from_url_rejects_overflow() {
         assert_eq!(
-            parse_pid_from_url("vmux://terminal/99999999999999999"),
+            parse_pid_from_url("vmux://terminal/99999999999999999", TEST_TERMINAL_URL),
             None
         );
     }
