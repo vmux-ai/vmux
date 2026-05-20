@@ -20,6 +20,7 @@ use vmux_command::{
 };
 use vmux_core::PageMetadata;
 use vmux_core::agent::AgentLaunchRequested;
+use vmux_core::terminal::TerminalSpawnRequest;
 use vmux_history::{LastActivatedAt, now_millis};
 pub(crate) use vmux_layout::NewStackContext;
 use vmux_layout::event::SERVICES_PAGE_URL;
@@ -37,7 +38,6 @@ use vmux_space::Spaces;
 use vmux_space::event::SpaceCommandEvent;
 use vmux_terminal::Terminal;
 use vmux_terminal::processes_monitor::ProcessesMonitor;
-use vmux_terminal::{new_terminal_bundle, new_terminal_bundle_with_cwd};
 
 pub(crate) use vmux_terminal::pid::focus_pane_entity;
 
@@ -892,6 +892,7 @@ fn on_command_bar_action(
         MessageWriter<AppCommand>,
         Option<MessageWriter<AgentLaunchRequested>>,
         MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
+        MessageWriter<TerminalSpawnRequest>,
     )>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -899,7 +900,6 @@ fn on_command_bar_action(
 ) {
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let settings = resource_params.p0().clone();
     let settings_snapshot = resource_params.p4().clone();
     let spaces_url = resource_params.p3().spaces_page_url.clone();
     let terminals_snapshot = resource_params.p5().clone();
@@ -943,22 +943,10 @@ fn on_command_bar_action(
                         title: format!("Terminal ({})", dir.display()),
                         ..default()
                     });
-                    let term_e = commands
-                        .spawn((
-                            new_terminal_bundle_with_cwd(
-                                &mut meshes,
-                                &mut webview_mt,
-                                &settings,
-                                Some(dir),
-                            ),
-                            ChildOf(stack_e),
-                        ))
-                        .id();
-                    commands.entity(term_e).insert(CefKeyboardTarget);
-                    commands.entity(stack_e).insert(LastActivatedAt::now());
-                    if let Ok(parent) = child_of_q.get(stack_e) {
-                        commands.entity(parent.0).insert(LastActivatedAt::now());
-                    }
+                    writer_params.p3().write(TerminalSpawnRequest {
+                        cwd: Some(dir.to_path_buf()),
+                        target_stack: Some(stack_e),
+                    });
                     new_stack_ctx.stack = None;
                     new_stack_ctx.previous_stack = None;
                     custom_keyboard_restore = true;
@@ -988,13 +976,10 @@ fn on_command_bar_action(
                                 title: "Terminal".to_string(),
                                 ..default()
                             });
-                            let term_e = commands
-                                .spawn((
-                                    new_terminal_bundle(&mut meshes, &mut webview_mt, &settings),
-                                    ChildOf(stack_e),
-                                ))
-                                .id();
-                            commands.entity(term_e).insert(CefKeyboardTarget);
+                            writer_params.p3().write(TerminalSpawnRequest {
+                                cwd: None,
+                                target_stack: Some(stack_e),
+                            });
                         }
                     } else if let Some((provider, model, sid_opt)) =
                         vmux_agent::plugin::parse_page_agent_url(&url)
@@ -1361,18 +1346,10 @@ fn on_command_bar_action(
                         title: "Terminal".to_string(),
                         ..default()
                     });
-                    let term_e = commands
-                        .spawn((
-                            new_terminal_bundle_with_cwd(
-                                &mut meshes,
-                                &mut webview_mt,
-                                &settings,
-                                cwd.as_deref(),
-                            ),
-                            ChildOf(stack_e),
-                        ))
-                        .id();
-                    commands.entity(term_e).insert(CefKeyboardTarget);
+                    writer_params.p3().write(TerminalSpawnRequest {
+                        cwd: cwd.clone(),
+                        target_stack: Some(stack_e),
+                    });
                     new_stack_ctx.stack = None;
                     new_stack_ctx.previous_stack = None;
                     custom_keyboard_restore = true;
@@ -1398,18 +1375,10 @@ fn on_command_bar_action(
                             title: "Terminal".to_string(),
                             ..default()
                         });
-                        let term_e = commands
-                            .spawn((
-                                new_terminal_bundle_with_cwd(
-                                    &mut meshes,
-                                    &mut webview_mt,
-                                    &settings,
-                                    cwd.as_deref(),
-                                ),
-                                ChildOf(stack_e),
-                            ))
-                            .id();
-                        commands.entity(term_e).insert(CefKeyboardTarget);
+                        writer_params.p3().write(TerminalSpawnRequest {
+                            cwd: cwd.clone(),
+                            target_stack: Some(stack_e),
+                        });
                     } else {
                         writer_params
                             .p0()
@@ -2383,6 +2352,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
+        app.add_message::<TerminalSpawnRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
@@ -2434,6 +2404,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
+        app.add_message::<TerminalSpawnRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(vmux_layout::stack::FocusedStack::default());
@@ -2516,6 +2487,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
+        app.add_message::<TerminalSpawnRequest>();
         app.add_observer(on_command_bar_action);
         app.add_observer(capture_space_command);
         app.init_resource::<NewStackContext>();
@@ -2573,6 +2545,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
+        app.add_message::<TerminalSpawnRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
@@ -2624,6 +2597,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
+        app.add_message::<TerminalSpawnRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
@@ -2676,6 +2650,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
+        app.add_message::<TerminalSpawnRequest>();
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());

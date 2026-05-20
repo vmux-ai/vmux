@@ -26,6 +26,12 @@ pub enum TerminalKind {
     Codex,
 }
 
+#[derive(Message, Debug, Clone)]
+pub struct TerminalSpawnRequest {
+    pub cwd: Option<std::path::PathBuf>,
+    pub target_stack: Option<Entity>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

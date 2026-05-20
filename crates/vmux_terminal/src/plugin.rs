@@ -14,6 +14,7 @@ use bevy::{
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands};
 use vmux_core::PageMetadata;
+use vmux_core::terminal::TerminalSpawnRequest;
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
@@ -210,6 +211,7 @@ impl Plugin for TerminalPlugin {
             .register_type::<crate::launch::TerminalKind>()
             .add_message::<TerminalSendRequest>()
             .add_message::<RunShellRequest>()
+            .add_message::<TerminalSpawnRequest>()
             .init_resource::<pid::PidToEntity>()
             .add_systems(
                 Update,
@@ -248,6 +250,10 @@ impl Plugin for TerminalPlugin {
             .add_systems(
                 Update,
                 (handle_terminal_send_requests, handle_run_shell_requests).after(ServiceMessageSet),
+            )
+            .add_systems(
+                Update,
+                respond_terminal_spawn.in_set(vmux_command::ReadAppCommands),
             )
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
@@ -385,6 +391,34 @@ fn spawn_url_into_stack(
             .spawn((Browser::new(meshes, webview_mt, url), ChildOf(stack)))
             .id();
         commands.entity(browser_e).insert(CefKeyboardTarget);
+    }
+}
+
+fn respond_terminal_spawn(
+    mut reader: MessageReader<TerminalSpawnRequest>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: Res<AppSettings>,
+    child_of_q: Query<&ChildOf>,
+) {
+    for req in reader.read() {
+        let term_e = commands
+            .spawn(new_terminal_bundle_with_cwd(
+                &mut meshes,
+                &mut webview_mt,
+                &settings,
+                req.cwd.as_deref(),
+            ))
+            .id();
+        commands.entity(term_e).insert(CefKeyboardTarget);
+        if let Some(stack_e) = req.target_stack {
+            commands.entity(term_e).insert(ChildOf(stack_e));
+            commands.entity(stack_e).insert(LastActivatedAt::now());
+            if let Ok(parent) = child_of_q.get(stack_e) {
+                commands.entity(parent.0).insert(LastActivatedAt::now());
+            }
+        }
     }
 }
 
