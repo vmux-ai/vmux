@@ -52,6 +52,7 @@ moonshine-save = { workspace = true }
 raw-window-handle = "0.6"
 rfd = { workspace = true }
 ron = { workspace = true }
+uuid = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_history = { path = "../vmux_history" }
 vmux_page = { path = "../vmux_page" }

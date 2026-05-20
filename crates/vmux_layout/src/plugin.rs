@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use vmux_page::JsEmitPageReadyPlugin;
 
 use crate::cef::LayoutCefPlugin;
+use crate::command_bar::handler::CommandBarInputPlugin;
 use crate::command_bar::plugin::CommandBarPagePlugin;
 use crate::focus_ring::FocusRingPlugin;
 use crate::glass::GlassMaterialPlugin;
@@ -65,7 +66,10 @@ impl Plugin for LayoutPlugin {
             GlassMaterialPlugin,
             SideSheetLayoutPlugin,
             HeaderLayoutPlugin,
+        ))
+        .add_plugins((
             CommandBarPagePlugin,
+            CommandBarInputPlugin,
             TogglePlugin,
             WebviewRevealPlugin,
         ));

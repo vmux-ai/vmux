@@ -1,4 +1,3 @@
-use crate::command_bar::PendingCommandBarReveal;
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     prelude::*,
@@ -10,6 +9,7 @@ use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
 use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand};
 use vmux_core::PageMetadata;
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
+use vmux_layout::command_bar::handler::PendingCommandBarReveal;
 use vmux_layout::event::SideSheetCommandEvent;
 pub(crate) use vmux_layout::{Browser, Loading};
 use vmux_layout::{
@@ -139,7 +139,7 @@ fn sync_keyboard_target(
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
     mut commands: Commands,
 ) {
-    if crate::command_bar::is_command_bar_open(&modal_q) {
+    if vmux_layout::command_bar::handler::is_command_bar_open(&modal_q) {
         return;
     }
 
@@ -204,7 +204,7 @@ fn sync_children_to_ui(
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    new_stack_ctx: Res<crate::command_bar::NewStackContext>,
+    new_stack_ctx: Res<vmux_layout::NewStackContext>,
     glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<VmuxWindow>>,
 ) {
     let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
@@ -476,7 +476,7 @@ fn sync_osr_webview_focus(
     >,
     primary_window: Single<&Window, With<PrimaryWindow>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    new_stack_ctx: Res<crate::command_bar::NewStackContext>,
+    new_stack_ctx: Res<vmux_layout::NewStackContext>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children_q: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
@@ -753,7 +753,7 @@ fn push_stacks_host_emit(
     browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), With<Browser>>,
     stack_q: Query<(), With<Stack>>,
     zoomed_q: Query<(), With<vmux_layout::pane::Zoomed>>,
-    new_stack_ctx: Res<crate::command_bar::NewStackContext>,
+    new_stack_ctx: Res<vmux_layout::NewStackContext>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
     mut last: Local<String>,
@@ -833,7 +833,7 @@ fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    new_stack_ctx: Res<crate::command_bar::NewStackContext>,
+    new_stack_ctx: Res<vmux_layout::NewStackContext>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     tab_q: Query<(), With<Space>>,
     all_children: Query<&Children>,

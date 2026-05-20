@@ -9211,6 +9211,7 @@ dependencies = [
  "ron 0.8.1",
  "serde",
  "serde_json",
+ "uuid",
  "vmux_command",
  "vmux_core",
  "vmux_history",

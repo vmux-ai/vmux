@@ -1,7 +1,17 @@
-use crate::browser::Browser;
+pub(crate) use crate::NewStackContext;
+use crate::cef::Browser;
+use crate::event::SERVICES_PAGE_URL;
+use crate::{
+    Header,
+    pane::{Pane, PaneSplit},
+    side_sheet::SideSheet,
+    space::Space,
+    stack::{Stack, active_among, collect_leaf_panes, focused_stack},
+    window::{Main, Modal},
+};
 use bevy::{
-    ecs::message::MessageReader, ecs::relationship::Relationship, picking::Pickable, prelude::*,
-    ui::UiSystems, window::PrimaryWindow,
+    ecs::message::MessageReader, ecs::relationship::Relationship, ecs::system::SystemParam,
+    picking::Pickable, prelude::*, ui::UiSystems, window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
@@ -27,16 +37,6 @@ use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
 use vmux_history::{LastActivatedAt, now_millis};
-pub(crate) use vmux_layout::NewStackContext;
-use vmux_layout::event::SERVICES_PAGE_URL;
-use vmux_layout::{
-    Header,
-    pane::{Pane, PaneSplit},
-    side_sheet::SideSheet,
-    space::Space,
-    stack::{Stack, active_among, collect_leaf_panes, focused_stack},
-    window::{Main, Modal},
-};
 
 pub(crate) use vmux_core::focus_pane_entity;
 
@@ -48,8 +48,6 @@ pub(crate) fn parse_pid_from_url(url: &str, terminal_page_url: &str) -> Option<u
     suffix.parse::<u32>().ok()
 }
 
-/// Deferred visibility for the command bar modal. Counts frames after Display::Flex
-/// so CEF can resize the webview before the modal becomes visible.
 #[derive(Component)]
 struct CommandBarReady;
 
@@ -60,7 +58,7 @@ struct CommandBarRenderedOpen(u64);
 struct CommandBarPaintedOpen(u64);
 
 #[derive(Component)]
-pub(crate) struct PendingCommandBarReveal {
+pub struct PendingCommandBarReveal {
     frames: u8,
     open_id: u64,
     payload: Option<String>,
@@ -99,8 +97,8 @@ impl Plugin for CommandBarInputPlugin {
                 handle_open_command_bar
                     .in_set(ReadAppCommands)
                     .after(prewarm_command_bar_modal)
-                    .after(vmux_layout::space::SpaceCommandSet)
-                    .after(vmux_layout::stack::StackCommandSet),
+                    .after(crate::space::SpaceCommandSet)
+                    .after(crate::stack::StackCommandSet),
             )
             .add_systems(
                 Update,
@@ -110,7 +108,7 @@ impl Plugin for CommandBarInputPlugin {
                 Update,
                 deferred_dismiss_modal
                     .after(ReadAppCommands)
-                    .before(vmux_layout::stack::ComputeFocusSet),
+                    .before(crate::stack::ComputeFocusSet),
             )
             .add_systems(
                 PostUpdate,
@@ -178,7 +176,6 @@ pub fn match_command(id: &str) -> Option<AppCommand> {
     AppCommand::from_menu_id(id)
 }
 
-/// Returns true when the command bar modal is currently visible.
 pub fn is_command_bar_open(modal_q: &Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>) -> bool {
     modal_q
         .iter()
@@ -801,26 +798,12 @@ fn attach_spaces_page_to_tab(
     spawn_writer.write(SpacesPageSpawnRequest { target_stack: tab });
 }
 
-fn attach_settings_page_to_tab(
-    tab: Entity,
-    settings_page_url: &str,
-    commands: &mut Commands,
-    spawn_writer: &mut MessageWriter<SettingsPageSpawnRequest>,
-) {
-    commands.entity(tab).insert(PageMetadata {
-        url: settings_page_url.to_string(),
-        title: "Settings".to_string(),
-        ..default()
-    });
-    spawn_writer.write(SettingsPageSpawnRequest { target_stack: tab });
-}
-
 #[allow(clippy::too_many_arguments)]
 fn spawn_spaces_page_layout_from_command_bar(
     main: Option<Entity>,
     primary_window: Option<Entity>,
     new_stack_ctx: &mut NewStackContext,
-    focus: Option<&mut vmux_layout::stack::FocusedStack>,
+    focus: Option<&mut crate::stack::FocusedStack>,
     spaces_page_url: &str,
     commands: &mut Commands,
     spawn_writer: &mut MessageWriter<SpacesPageSpawnRequest>,
@@ -831,12 +814,8 @@ fn spawn_spaces_page_layout_from_command_bar(
     let Some(primary_window) = primary_window else {
         return false;
     };
-    let spawned = vmux_layout::window::spawn_default_space_layout(
-        main,
-        primary_window,
-        new_stack_ctx,
-        commands,
-    );
+    let spawned =
+        crate::window::spawn_default_space_layout(main, primary_window, new_stack_ctx, commands);
     if let Some(focus) = focus {
         focus.tab = Some(spawned.tab);
         focus.pane = Some(spawned.pane);
@@ -852,24 +831,18 @@ fn spawn_spaces_page_layout_from_command_bar(
     true
 }
 
-fn on_command_bar_action(
-    trigger: On<BinReceive<CommandBarActionEvent>>,
-    mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
-    tab_q: Query<(Entity, &LastActivatedAt), With<Space>>,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    mut stack_params: ParamSet<(
-        Query<Entity, With<Stack>>,
-        Query<Entity, With<Main>>,
-        Query<Entity, With<PrimaryWindow>>,
-        Option<ResMut<vmux_layout::stack::FocusedStack>>,
-        Query<(), With<Terminal>>,
-    )>,
-    child_of_q: Query<&ChildOf>,
+#[derive(SystemParam)]
+struct CommandBarActionQueries<'w, 's> {
+    tab_q: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Space>>,
+    all_children: Query<'w, 's, &'static Children>,
+    leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
+    child_of_q: Query<'w, 's, &'static ChildOf>,
     content_browsers: Query<
+        'w,
+        's,
         Entity,
         (
             With<Browser>,
@@ -878,6 +851,19 @@ fn on_command_bar_action(
             Without<Modal>,
         ),
     >,
+}
+
+fn on_command_bar_action(
+    trigger: On<BinReceive<CommandBarActionEvent>>,
+    mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
+    queries: CommandBarActionQueries,
+    mut stack_params: ParamSet<(
+        Query<Entity, With<Stack>>,
+        Query<Entity, With<Main>>,
+        Query<Entity, With<PrimaryWindow>>,
+        Option<ResMut<crate::stack::FocusedStack>>,
+        Query<(), With<Terminal>>,
+    )>,
     mut resource_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
         Res<CommandBarSettingsSnapshot>,
@@ -893,8 +879,8 @@ fn on_command_bar_action(
         Option<MessageWriter<PageAgentAttachRequest>>,
         Option<MessageWriter<PageAgentSpawnTabRequest>>,
         MessageWriter<ProcessesMonitorSpawnRequest>,
+        MessageWriter<SpacesPageSpawnRequest>,
     )>,
-    mut spaces_page_spawn_writer: MessageWriter<SpacesPageSpawnRequest>,
     mut settings_page_spawn_writer: MessageWriter<SettingsPageSpawnRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -968,7 +954,7 @@ fn on_command_bar_action(
                         let known = parse_pid_from_url(&url, &terminal_page_url)
                             .and_then(|p| pid_to_entity.get(&p).copied());
                         if let Some(entity) = known {
-                            focus_pane_entity(entity, &mut commands, &child_of_q);
+                            focus_pane_entity(entity, &mut commands, &queries.child_of_q);
                         } else {
                             if let Some(pid) = parse_pid_from_url(&url, &terminal_page_url) {
                                 bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
@@ -1011,7 +997,7 @@ fn on_command_bar_action(
                             && let Some(map) = agent_to_entity.as_ref()
                             && let Some(&entity) = map.get(&(kind, id.clone()))
                         {
-                            focus_pane_entity(entity, &mut commands, &child_of_q);
+                            focus_pane_entity(entity, &mut commands, &queries.child_of_q);
                         } else {
                             commands.entity(stack_e).insert(PageMetadata {
                                 url: prefix.clone(),
@@ -1039,21 +1025,25 @@ fn on_command_bar_action(
                             target_stack: stack_e,
                         });
                     } else if url.starts_with(spaces_url.trim_end_matches('/')) {
-                        attach_spaces_page_to_tab(
-                            stack_e,
-                            &spaces_url,
-                            &mut commands,
-                            &mut spaces_page_spawn_writer,
-                        );
+                        commands.entity(stack_e).insert(PageMetadata {
+                            url: spaces_url.to_string(),
+                            title: "Spaces".to_string(),
+                            ..default()
+                        });
+                        writer_params.p7().write(SpacesPageSpawnRequest {
+                            target_stack: stack_e,
+                        });
                     } else if url
                         .starts_with(settings_snapshot.settings_page_url.trim_end_matches('/'))
                     {
-                        attach_settings_page_to_tab(
-                            stack_e,
-                            &settings_snapshot.settings_page_url,
-                            &mut commands,
-                            &mut settings_page_spawn_writer,
-                        );
+                        commands.entity(stack_e).insert(PageMetadata {
+                            url: settings_snapshot.settings_page_url.to_string(),
+                            title: "Settings".to_string(),
+                            ..default()
+                        });
+                        settings_page_spawn_writer.write(SettingsPageSpawnRequest {
+                            target_stack: stack_e,
+                        });
                     } else {
                         let browser_e = commands
                             .spawn((
@@ -1064,7 +1054,7 @@ fn on_command_bar_action(
                         commands.entity(browser_e).insert(CefKeyboardTarget);
                     }
                     commands.entity(stack_e).insert(LastActivatedAt::now());
-                    if let Ok(parent) = child_of_q.get(stack_e) {
+                    if let Ok(parent) = queries.child_of_q.get(stack_e) {
                         commands.entity(parent.0).insert(LastActivatedAt::now());
                     }
                     new_stack_ctx.stack = None;
@@ -1083,9 +1073,9 @@ fn on_command_bar_action(
                             .and_then(|map| map.get(&(k, id.to_string())).copied())
                     });
                     if let Some(entity) = known_terminal {
-                        focus_pane_entity(entity, &mut commands, &child_of_q);
+                        focus_pane_entity(entity, &mut commands, &queries.child_of_q);
                     } else if let Some(entity) = known_agent {
-                        focus_pane_entity(entity, &mut commands, &child_of_q);
+                        focus_pane_entity(entity, &mut commands, &queries.child_of_q);
                     } else if url.starts_with("vmux://terminal") {
                         if let Some(pid) = parse_pid_from_url(&url, &terminal_page_url) {
                             bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
@@ -1095,12 +1085,12 @@ fn on_command_bar_action(
                             .write(AppCommand::Terminal(TerminalCommand::New));
                     } else if let Some((provider, model, sid_opt)) = parse_page_agent_url(&url) {
                         let (_, active_pane_opt, _) = focused_stack(
-                            &tab_q,
-                            &all_children,
-                            &leaf_panes,
-                            &pane_ts,
-                            &pane_children,
-                            &stack_ts,
+                            &queries.tab_q,
+                            &queries.all_children,
+                            &queries.leaf_panes,
+                            &queries.pane_ts,
+                            &queries.pane_children,
+                            &queries.stack_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
                             let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -1119,12 +1109,12 @@ fn on_command_bar_action(
                         .find(|k| url.starts_with(k.cli_url_prefix().trim_end_matches('/')))
                     {
                         let (_, active_pane_opt, _) = focused_stack(
-                            &tab_q,
-                            &all_children,
-                            &leaf_panes,
-                            &pane_ts,
-                            &pane_children,
-                            &stack_ts,
+                            &queries.tab_q,
+                            &queries.all_children,
+                            &queries.leaf_panes,
+                            &queries.pane_ts,
+                            &queries.pane_children,
+                            &queries.stack_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
                             let prefix = kind.cli_url_prefix();
@@ -1135,7 +1125,7 @@ fn on_command_bar_action(
                             };
                             let stack_e = commands
                                 .spawn((
-                                    vmux_layout::stack::stack_bundle(),
+                                    crate::stack::stack_bundle(),
                                     LastActivatedAt::now(),
                                     ChildOf(pane_e),
                                 ))
@@ -1168,27 +1158,29 @@ fn on_command_bar_action(
                             .write(AppCommand::Service(ServiceCommand::Open));
                     } else if url.starts_with(spaces_url.trim_end_matches('/')) {
                         let (_, active_pane_opt, _) = focused_stack(
-                            &tab_q,
-                            &all_children,
-                            &leaf_panes,
-                            &pane_ts,
-                            &pane_children,
-                            &stack_ts,
+                            &queries.tab_q,
+                            &queries.all_children,
+                            &queries.leaf_panes,
+                            &queries.pane_ts,
+                            &queries.pane_children,
+                            &queries.stack_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
                             let stack_e = commands
                                 .spawn((
-                                    vmux_layout::stack::stack_bundle(),
+                                    crate::stack::stack_bundle(),
                                     LastActivatedAt::now(),
                                     ChildOf(pane_e),
                                 ))
                                 .id();
-                            attach_spaces_page_to_tab(
-                                stack_e,
-                                &spaces_url,
-                                &mut commands,
-                                &mut spaces_page_spawn_writer,
-                            );
+                            commands.entity(stack_e).insert(PageMetadata {
+                                url: spaces_url.to_string(),
+                                title: "Spaces".to_string(),
+                                ..default()
+                            });
+                            writer_params.p7().write(SpacesPageSpawnRequest {
+                                target_stack: stack_e,
+                            });
                             custom_keyboard_restore = true;
                         } else {
                             let main = stack_params.p1().single().ok();
@@ -1201,7 +1193,7 @@ fn on_command_bar_action(
                                 focus.as_deref_mut(),
                                 &spaces_url,
                                 &mut commands,
-                                &mut spaces_page_spawn_writer,
+                                &mut writer_params.p7(),
                             ) {
                                 custom_keyboard_restore = true;
                             }
@@ -1210,42 +1202,45 @@ fn on_command_bar_action(
                         .starts_with(settings_snapshot.settings_page_url.trim_end_matches('/'))
                     {
                         let (_, active_pane_opt, _) = focused_stack(
-                            &tab_q,
-                            &all_children,
-                            &leaf_panes,
-                            &pane_ts,
-                            &pane_children,
-                            &stack_ts,
+                            &queries.tab_q,
+                            &queries.all_children,
+                            &queries.leaf_panes,
+                            &queries.pane_ts,
+                            &queries.pane_children,
+                            &queries.stack_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
                             let stack_e = commands
                                 .spawn((
-                                    vmux_layout::stack::stack_bundle(),
+                                    crate::stack::stack_bundle(),
                                     LastActivatedAt::now(),
                                     ChildOf(pane_e),
                                 ))
                                 .id();
-                            attach_settings_page_to_tab(
-                                stack_e,
-                                &settings_snapshot.settings_page_url,
-                                &mut commands,
-                                &mut settings_page_spawn_writer,
-                            );
+                            commands.entity(stack_e).insert(PageMetadata {
+                                url: settings_snapshot.settings_page_url.to_string(),
+                                title: "Settings".to_string(),
+                                ..default()
+                            });
+                            settings_page_spawn_writer.write(SettingsPageSpawnRequest {
+                                target_stack: stack_e,
+                            });
                             custom_keyboard_restore = true;
                         }
                     } else {
                         let (_, active_pane_opt, active_stack) = focused_stack(
-                            &tab_q,
-                            &all_children,
-                            &leaf_panes,
-                            &pane_ts,
-                            &pane_children,
-                            &stack_ts,
+                            &queries.tab_q,
+                            &queries.all_children,
+                            &queries.leaf_panes,
+                            &queries.pane_ts,
+                            &queries.pane_children,
+                            &queries.stack_ts,
                         );
                         let mut updated_existing = false;
                         if let Some(tab) = active_stack {
-                            for browser_e in &content_browsers {
-                                let is_child = child_of_q
+                            for browser_e in &queries.content_browsers {
+                                let is_child = queries
+                                    .child_of_q
                                     .get(browser_e)
                                     .ok()
                                     .map(|co| co.get() == tab)
@@ -1259,7 +1254,7 @@ fn on_command_bar_action(
                         if !updated_existing && let Some(pane_e) = active_pane_opt {
                             let stack_e = commands
                                 .spawn((
-                                    vmux_layout::stack::stack_bundle(),
+                                    crate::stack::stack_bundle(),
                                     LastActivatedAt::now(),
                                     ChildOf(pane_e),
                                 ))
@@ -1286,7 +1281,7 @@ fn on_command_bar_action(
             let known_terminal = parse_pid_from_url(&evt.value, &terminal_page_url)
                 .and_then(|p| pid_to_entity.get(&p).copied());
             if let Some(entity) = known_terminal {
-                focus_pane_entity(entity, &mut commands, &child_of_q);
+                focus_pane_entity(entity, &mut commands, &queries.child_of_q);
                 new_stack_ctx.stack = None;
                 new_stack_ctx.previous_stack = None;
                 custom_keyboard_restore = true;
@@ -1325,17 +1320,17 @@ fn on_command_bar_action(
                     custom_keyboard_restore = true;
                 } else {
                     let (_, active_pane_opt, _) = focused_stack(
-                        &tab_q,
-                        &all_children,
-                        &leaf_panes,
-                        &pane_ts,
-                        &pane_children,
-                        &stack_ts,
+                        &queries.tab_q,
+                        &queries.all_children,
+                        &queries.leaf_panes,
+                        &queries.pane_ts,
+                        &queries.pane_children,
+                        &queries.stack_ts,
                     );
                     if let Some(pane_e) = active_pane_opt {
                         let stack_e = commands
                             .spawn((
-                                vmux_layout::stack::stack_bundle(),
+                                crate::stack::stack_bundle(),
                                 LastActivatedAt::now(),
                                 ChildOf(pane_e),
                             ))
@@ -1370,7 +1365,7 @@ fn on_command_bar_action(
                         });
                     }
                     commands.entity(stack_e).insert(LastActivatedAt::now());
-                    if let Ok(parent) = child_of_q.get(stack_e) {
+                    if let Ok(parent) = queries.child_of_q.get(stack_e) {
                         commands.entity(parent.0).insert(LastActivatedAt::now());
                     }
                     new_stack_ctx.stack = None;
@@ -1378,12 +1373,12 @@ fn on_command_bar_action(
                     custom_keyboard_restore = true;
                 } else {
                     let (_, active_pane_opt, _) = focused_stack(
-                        &tab_q,
-                        &all_children,
-                        &leaf_panes,
-                        &pane_ts,
-                        &pane_children,
-                        &stack_ts,
+                        &queries.tab_q,
+                        &queries.all_children,
+                        &queries.leaf_panes,
+                        &queries.pane_ts,
+                        &queries.pane_children,
+                        &queries.stack_ts,
                     );
                     if let Some(pane_e) = active_pane_opt {
                         if let Some(mut w) = writer_params.p5() {
@@ -1449,10 +1444,11 @@ fn on_command_bar_action(
             if let Some((pane_bits, tab_idx)) = evt.value.split_once(':')
                 && let (Ok(pane_id), Ok(tab_index)) =
                     (pane_bits.parse::<u64>(), tab_idx.parse::<usize>())
-                && let Some(target_pane) = leaf_panes.iter().find(|e| e.to_bits() == pane_id)
+                && let Some(target_pane) =
+                    queries.leaf_panes.iter().find(|e| e.to_bits() == pane_id)
             {
                 commands.entity(target_pane).insert(LastActivatedAt::now());
-                if let Ok(children) = pane_children.get(target_pane) {
+                if let Ok(children) = queries.pane_children.get(target_pane) {
                     let stack_q = stack_params.p0();
                     let stacks: Vec<Entity> =
                         children.iter().filter(|&e| stack_q.contains(e)).collect();
@@ -1468,9 +1464,9 @@ fn on_command_bar_action(
                 let stack_q = stack_params.p0();
                 let closed_tab = close_tab_if_only_pending_stack(
                     stack_e,
-                    &tab_q,
-                    &child_of_q,
-                    &all_children,
+                    &queries.tab_q,
+                    &queries.child_of_q,
+                    &queries.all_children,
                     &stack_q,
                     &mut commands,
                 );
@@ -1481,10 +1477,10 @@ fn on_command_bar_action(
                 if !closed_tab {
                     // Restore keyboard to previous tab's browser
                     if let Some(prev) = previous_stack
-                        && let Ok(children) = all_children.get(prev)
+                        && let Ok(children) = queries.all_children.get(prev)
                     {
                         for child in children.iter() {
-                            if content_browsers.contains(child) {
+                            if queries.content_browsers.contains(child) {
                                 commands.entity(child).insert(CefKeyboardTarget);
                             }
                         }
@@ -1511,16 +1507,17 @@ fn on_command_bar_action(
     }
     if !custom_keyboard_restore {
         let (_, _, active_stack) = focused_stack(
-            &tab_q,
-            &all_children,
-            &leaf_panes,
-            &pane_ts,
-            &pane_children,
-            &stack_ts,
+            &queries.tab_q,
+            &queries.all_children,
+            &queries.leaf_panes,
+            &queries.pane_ts,
+            &queries.pane_children,
+            &queries.stack_ts,
         );
         if let Some(tab) = active_stack {
-            for browser_e in &content_browsers {
-                let is_child = child_of_q
+            for browser_e in &queries.content_browsers {
+                let is_child = queries
+                    .child_of_q
                     .get(browser_e)
                     .ok()
                     .map(|co| co.get() == tab)
@@ -1612,9 +1609,6 @@ fn pick_tab_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
     if target == active { None } else { Some(target) }
 }
 
-/// Closes the command bar modal when `NewStackContext::dismiss_modal` is set.
-/// Runs after `ReadAppCommands` so that `handle_tab_commands` can validate
-/// the target index before requesting a dismiss.
 fn deferred_dismiss_modal(
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
@@ -1810,51 +1804,9 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::{
-        ecs::schedule::{NodeId, Schedules, SystemSet},
-        window::PrimaryWindow,
-    };
-    use vmux_command::CommandPlugin;
-    use vmux_command::snapshot::CommandBarSpacesSnapshot;
-    use vmux_layout::settings::{
-        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
-    };
-    use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
-    use vmux_space::ActiveSpace;
-    use vmux_space::event::SPACES_PAGE_URL;
-
-    fn test_settings() -> AppSettings {
-        AppSettings {
-            browser: BrowserSettings {
-                startup_url: "about:blank".to_string(),
-            },
-            layout: LayoutSettings {
-                radius: 0.0,
-                window: WindowSettings {
-                    padding: 0.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
-                },
-                pane: PaneSettings { gap: 0.0 },
-                side_sheet: SideSheetSettings::default(),
-                focus_ring: FocusRingSettings::default(),
-            },
-            shortcuts: ShortcutSettings::default(),
-            terminal: None,
-            auto_update: false,
-            startup_url: None,
-            agent: vmux_setting::AgentSettings::default(),
-        }
-    }
-
-    fn test_spaces_snapshot() -> CommandBarSpacesSnapshot {
-        CommandBarSpacesSnapshot {
-            spaces_page_url: SPACES_PAGE_URL.to_string(),
-            ..Default::default()
-        }
-    }
+    use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
+    use vmux_command::event::CommandBarSpace;
+    use vmux_command::{CommandPlugin, ReadAppCommands};
 
     #[test]
     fn command_bar_open_does_not_block_on_command_bar_listener() {
@@ -2181,20 +2133,21 @@ mod tests {
 
     #[test]
     fn space_open_command_prefills_spaces_url() {
+        let spaces_url = "vmux://spaces/";
         let request = command_bar_open_request(
             [AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))],
-            SPACES_PAGE_URL,
+            spaces_url,
         );
 
         assert!(request.should_toggle);
-        assert_eq!(request.url_override, Some(SPACES_PAGE_URL.to_string()));
+        assert_eq!(request.url_override, Some(spaces_url.to_string()));
     }
 
     #[test]
     fn tab_new_command_does_not_dismiss_command_bar() {
         let request = command_bar_open_request(
             [AppCommand::Layout(LayoutCommand::Stack(StackCommand::New))],
-            SPACES_PAGE_URL,
+            "vmux://spaces/",
         );
 
         assert!(!request.should_dismiss);
@@ -2204,7 +2157,7 @@ mod tests {
     fn command_bar_open_runs_after_tab_commands() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_plugins(vmux_layout::stack::StackPlugin);
+        app.add_plugins(crate::stack::StackPlugin);
         app.add_plugins(CommandBarInputPlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
@@ -2213,11 +2166,11 @@ mod tests {
         let graph = update.graph();
         let tab_command_set = graph
             .system_sets
-            .get_key(vmux_layout::stack::StackCommandSet.intern())
+            .get_key(crate::stack::StackCommandSet.intern())
             .unwrap();
         let read_command_systems = graph.systems_in_set(ReadAppCommands.intern()).unwrap();
         let tab_command_systems = graph
-            .systems_in_set(vmux_layout::stack::StackCommandSet.intern())
+            .systems_in_set(crate::stack::StackCommandSet.intern())
             .unwrap();
         let command_bar_open_system = read_command_systems
             .iter()
@@ -2229,449 +2182,6 @@ mod tests {
             NodeId::Set(tab_command_set),
             NodeId::System(command_bar_open_system)
         ));
-    }
-
-    #[test]
-    fn command_bar_open_bootstraps_hidden_modal_before_js_ready() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<ActiveSpace>();
-        app.insert_resource(test_spaces_snapshot());
-        app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
-        app.insert_non_send_resource(Browsers::default());
-        app.add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands));
-
-        let modal = app
-            .world_mut()
-            .spawn((
-                Modal,
-                Node {
-                    display: Display::None,
-                    ..default()
-                },
-                Visibility::Hidden,
-            ))
-            .id();
-        app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::FocusAddressBar));
-
-        app.update();
-
-        let node = app.world().get::<Node>(modal).unwrap();
-        let reveal = app.world().get::<PendingCommandBarReveal>(modal).unwrap();
-
-        assert_eq!(node.display, Display::Flex);
-        assert_eq!(reveal.open_id, 0);
-        assert!(app.world().resource::<NewStackContext>().needs_open);
-    }
-
-    #[test]
-    fn command_bar_open_retries_hidden_keyboard_targeted_modal() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<ActiveSpace>();
-        app.insert_resource(test_spaces_snapshot());
-        app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
-        app.insert_non_send_resource(Browsers::default());
-        app.add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands));
-
-        app.world_mut().spawn((
-            Modal,
-            Node {
-                display: Display::Flex,
-                ..default()
-            },
-            Visibility::Hidden,
-            CefKeyboardTarget,
-            CefPointerTarget,
-            PendingCommandBarReveal {
-                frames: 0,
-                open_id: 0,
-                payload: None,
-            },
-        ));
-        app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)));
-
-        app.update();
-
-        assert!(app.world().resource::<NewStackContext>().needs_open);
-    }
-
-    #[test]
-    fn spaces_url_from_command_bar_opens_spaces_tab() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
-        app.add_message::<TerminalSpawnRequest>();
-        app.add_message::<SpacesPageSpawnRequest>();
-        app.add_message::<SettingsPageSpawnRequest>();
-        app.add_observer(on_command_bar_action);
-        app.init_resource::<NewStackContext>();
-        app.insert_resource(test_settings());
-        app.insert_resource(test_spaces_snapshot());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let modal = app
-            .world_mut()
-            .spawn((
-                Modal,
-                Node {
-                    display: Display::Flex,
-                    ..default()
-                },
-                Visibility::Inherited,
-            ))
-            .id();
-        let space = app
-            .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
-            .id();
-        let pane = app
-            .world_mut()
-            .spawn((Pane, LastActivatedAt::now(), ChildOf(space)))
-            .id();
-        app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
-
-        app.world_mut()
-            .entity_mut(modal)
-            .trigger(|webview| BinReceive {
-                webview,
-                payload: CommandBarActionEvent {
-                    action: "navigate".to_string(),
-                    value: SPACES_PAGE_URL.to_string(),
-                },
-            });
-        app.update();
-
-        let msgs = app.world().resource::<Messages<SpacesPageSpawnRequest>>();
-        let mut cursor = msgs.get_cursor();
-        assert_eq!(cursor.read(&msgs).count(), 1);
-    }
-
-    #[test]
-    fn spaces_url_without_active_pane_spawns_spaces_page_layout() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
-        app.add_message::<TerminalSpawnRequest>();
-        app.add_message::<SpacesPageSpawnRequest>();
-        app.add_message::<SettingsPageSpawnRequest>();
-        app.add_observer(on_command_bar_action);
-        app.init_resource::<NewStackContext>();
-        app.insert_resource(vmux_layout::stack::FocusedStack::default());
-        app.insert_resource(test_settings());
-        app.insert_resource(test_spaces_snapshot());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let modal = app
-            .world_mut()
-            .spawn((
-                Modal,
-                Node {
-                    display: Display::Flex,
-                    ..default()
-                },
-                Visibility::Inherited,
-            ))
-            .id();
-        app.world_mut().spawn(PrimaryWindow);
-        app.world_mut().spawn(vmux_layout::window::Main);
-
-        app.world_mut()
-            .entity_mut(modal)
-            .trigger(|webview| BinReceive {
-                webview,
-                payload: CommandBarActionEvent {
-                    action: "navigate".to_string(),
-                    value: SPACES_PAGE_URL.to_string(),
-                },
-            });
-        app.update();
-
-        let msgs = app.world().resource::<Messages<SpacesPageSpawnRequest>>();
-        let mut cursor = msgs.get_cursor();
-        assert_eq!(cursor.read(&msgs).count(), 1);
-
-        let mut tabs = app.world_mut().query::<&Space>();
-        assert_eq!(tabs.iter(app.world()).count(), 1);
-
-        let tabs = {
-            let mut tab_q = app
-                .world_mut()
-                .query_filtered::<(Entity, &PageMetadata), With<Stack>>();
-            tab_q
-                .iter(app.world())
-                .map(|(entity, meta)| (entity, meta.url.clone()))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(tabs.len(), 1);
-        assert_eq!(tabs[0].1, SPACES_PAGE_URL);
-
-        let ctx = app.world().resource::<NewStackContext>();
-        assert!(!ctx.needs_open);
-        assert!(ctx.stack.is_none());
-
-        let focus = app.world().resource::<vmux_layout::stack::FocusedStack>();
-        assert!(focus.tab.is_some());
-        assert!(focus.pane.is_some());
-        assert!(focus.stack.is_some());
-    }
-
-    #[derive(Resource, Default)]
-    struct CapturedSpaceCommand(Option<SpaceCommandEvent>);
-
-    fn capture_space_command(
-        trigger: On<BinReceive<SpaceCommandEvent>>,
-        mut captured: ResMut<CapturedSpaceCommand>,
-    ) {
-        captured.0 = Some(trigger.event().payload.clone());
-    }
-
-    #[test]
-    fn space_action_forwards_attach_event() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
-        app.add_message::<TerminalSpawnRequest>();
-        app.add_message::<SpacesPageSpawnRequest>();
-        app.add_message::<SettingsPageSpawnRequest>();
-        app.add_observer(on_command_bar_action);
-        app.add_observer(capture_space_command);
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<CapturedSpaceCommand>();
-        app.insert_resource(test_settings());
-        app.insert_resource(test_spaces_snapshot());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let modal = app
-            .world_mut()
-            .spawn((
-                Modal,
-                Node {
-                    display: Display::Flex,
-                    ..default()
-                },
-                Visibility::Inherited,
-            ))
-            .id();
-        let space = app
-            .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
-            .id();
-        let pane = app
-            .world_mut()
-            .spawn((Pane, LastActivatedAt::now(), ChildOf(space)))
-            .id();
-        app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
-
-        app.world_mut()
-            .entity_mut(modal)
-            .trigger(|webview| BinReceive {
-                webview,
-                payload: CommandBarActionEvent {
-                    action: "space".to_string(),
-                    value: "work".to_string(),
-                },
-            });
-        app.update();
-
-        let captured = app
-            .world()
-            .resource::<CapturedSpaceCommand>()
-            .0
-            .clone()
-            .unwrap();
-        assert_eq!(captured.command, "attach");
-        assert_eq!(captured.space_id.as_deref(), Some("work"));
-    }
-
-    #[test]
-    fn space_action_does_not_restore_keyboard_to_old_browser() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
-        app.add_message::<TerminalSpawnRequest>();
-        app.add_message::<SpacesPageSpawnRequest>();
-        app.add_message::<SettingsPageSpawnRequest>();
-        app.add_observer(on_command_bar_action);
-        app.init_resource::<NewStackContext>();
-        app.insert_resource(test_settings());
-        app.insert_resource(test_spaces_snapshot());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let modal = app
-            .world_mut()
-            .spawn((
-                Modal,
-                Node {
-                    display: Display::Flex,
-                    ..default()
-                },
-                Visibility::Inherited,
-            ))
-            .id();
-        let space = app
-            .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
-            .id();
-        let pane = app
-            .world_mut()
-            .spawn((Pane, LastActivatedAt::now(), ChildOf(space)))
-            .id();
-        let tab = app
-            .world_mut()
-            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)))
-            .id();
-        let browser = app.world_mut().spawn((Browser, ChildOf(tab))).id();
-
-        app.world_mut()
-            .entity_mut(modal)
-            .trigger(|webview| BinReceive {
-                webview,
-                payload: CommandBarActionEvent {
-                    action: "space".to_string(),
-                    value: "work".to_string(),
-                },
-            });
-        app.update();
-
-        assert!(app.world().get::<CefKeyboardTarget>(browser).is_none());
-    }
-
-    #[test]
-    fn space_action_disables_modal_picking() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
-        app.add_message::<TerminalSpawnRequest>();
-        app.add_message::<SpacesPageSpawnRequest>();
-        app.add_message::<SettingsPageSpawnRequest>();
-        app.add_observer(on_command_bar_action);
-        app.init_resource::<NewStackContext>();
-        app.insert_resource(test_settings());
-        app.insert_resource(test_spaces_snapshot());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let modal = app
-            .world_mut()
-            .spawn((
-                Modal,
-                Node {
-                    display: Display::Flex,
-                    ..default()
-                },
-                Visibility::Inherited,
-                bevy::picking::Pickable::default(),
-            ))
-            .id();
-        let space = app
-            .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
-            .id();
-        let pane = app
-            .world_mut()
-            .spawn((Pane, LastActivatedAt::now(), ChildOf(space)))
-            .id();
-        app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
-
-        app.world_mut()
-            .entity_mut(modal)
-            .trigger(|webview| BinReceive {
-                webview,
-                payload: CommandBarActionEvent {
-                    action: "space".to_string(),
-                    value: "work".to_string(),
-                },
-            });
-        app.update();
-
-        assert_eq!(
-            app.world().get::<bevy::picking::Pickable>(modal),
-            Some(&bevy::picking::Pickable::IGNORE)
-        );
-    }
-
-    #[test]
-    fn dismissing_only_pending_stack_in_new_space_closes_space() {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
-        app.add_message::<TerminalSpawnRequest>();
-        app.add_message::<SpacesPageSpawnRequest>();
-        app.add_message::<SettingsPageSpawnRequest>();
-        app.add_observer(on_command_bar_action);
-        app.init_resource::<NewStackContext>();
-        app.insert_resource(test_settings());
-        app.insert_resource(test_spaces_snapshot());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        let modal = app
-            .world_mut()
-            .spawn((
-                Modal,
-                Node {
-                    display: Display::Flex,
-                    ..default()
-                },
-                Visibility::Inherited,
-            ))
-            .id();
-        let root = app.world_mut().spawn_empty().id();
-        let old_space = app
-            .world_mut()
-            .spawn((Space::default(), LastActivatedAt(1), ChildOf(root)))
-            .id();
-        let old_pane = app
-            .world_mut()
-            .spawn((Pane, LastActivatedAt(1), ChildOf(old_space)))
-            .id();
-        let old_tab = app
-            .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(old_pane)))
-            .id();
-        let new_space = app
-            .world_mut()
-            .spawn((Space::default(), LastActivatedAt(2), ChildOf(root)))
-            .id();
-        let new_pane = app
-            .world_mut()
-            .spawn((Pane, LastActivatedAt(2), ChildOf(new_space)))
-            .id();
-        let pending_stack = app
-            .world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(new_pane)))
-            .id();
-        app.world_mut().resource_mut::<NewStackContext>().stack = Some(pending_stack);
-
-        app.world_mut()
-            .entity_mut(modal)
-            .trigger(|webview| BinReceive {
-                webview,
-                payload: CommandBarActionEvent {
-                    action: "dismiss".to_string(),
-                    value: String::new(),
-                },
-            });
-        app.update();
-
-        assert!(app.world().get_entity(new_space).is_err());
-        assert!(app.world().get_entity(old_space).is_ok());
-        assert!(app.world().get_entity(old_tab).is_ok());
-        assert_eq!(app.world().resource::<NewStackContext>().stack, None);
     }
 
     const TEST_TERMINAL_URL: &str = "vmux://terminal/";
