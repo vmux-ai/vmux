@@ -41,6 +41,12 @@ impl Plugin for SettingsPlugin {
             .add_systems(Update, update_effective_startup_url);
 
         register_settings_page(app.world_mut().resource_mut::<PageRegistry>().as_mut());
+        app.add_systems(
+            Update,
+            crate::snapshot_updater::update_settings_snapshot
+                .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+        );
+
         app.add_plugins(BinEventEmitterPlugin::<(SettingsCommandEvent,)>::default())
             .add_observer(on_settings_command)
             .add_observer(reset_sent_markers_on_page_ready)

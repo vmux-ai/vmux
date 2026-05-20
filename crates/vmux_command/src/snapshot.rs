@@ -25,7 +25,6 @@ pub struct AgentStrategySummary {
 
 #[derive(Resource, Default, Clone, Debug)]
 pub struct CommandBarSettingsSnapshot {
-    pub recent_paths: Vec<String>,
     pub settings_page_url: String,
 }
 
