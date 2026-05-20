@@ -11,7 +11,9 @@ use vmux_command::event::{
     CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSpace, CommandBarTab,
     PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
 };
-use vmux_command::snapshot::{AgentProviderSummary, CommandBarAgentsSnapshot};
+use vmux_command::snapshot::{
+    AgentProviderSummary, CommandBarAgentsSnapshot, CommandBarSpacesSnapshot,
+};
 use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands, SpaceCommand,
     StackCommand, TerminalCommand,
@@ -31,8 +33,8 @@ use vmux_layout::{
 use vmux_setting::AppSettings;
 use vmux_setting::Settings;
 use vmux_setting::event::SETTINGS_PAGE_URL;
-use vmux_space::event::{SPACES_PAGE_URL, SpaceCommandEvent};
-use vmux_space::{ActiveSpace, Spaces};
+use vmux_space::Spaces;
+use vmux_space::event::SpaceCommandEvent;
 use vmux_terminal::Terminal;
 use vmux_terminal::processes_monitor::ProcessesMonitor;
 use vmux_terminal::{new_terminal_bundle, new_terminal_bundle_with_cwd};
@@ -327,6 +329,7 @@ struct CommandBarOpenRequest {
 
 fn command_bar_open_request(
     commands: impl IntoIterator<Item = AppCommand>,
+    spaces_page_url: &str,
 ) -> CommandBarOpenRequest {
     let mut request = CommandBarOpenRequest::default();
     for cmd in commands {
@@ -348,7 +351,7 @@ fn command_bar_open_request(
             }
             AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)) => {
                 request.should_toggle = true;
-                request.url_override = Some(SPACES_PAGE_URL.to_string());
+                request.url_override = Some(spaces_page_url.to_string());
             }
             AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)) => {
                 request.should_dismiss = true;
@@ -404,17 +407,17 @@ fn handle_open_command_bar(
             Without<Modal>,
         ),
     >,
-    mut space_params: ParamSet<(
-        Res<ActiveSpace>,
-        ResMut<NewStackContext>,
+    mut snapshot_params: ParamSet<(
         Res<CommandBarAgentsSnapshot>,
+        Res<CommandBarSpacesSnapshot>,
+        ResMut<NewStackContext>,
     )>,
     mut commands: Commands,
 ) {
     let active_stack_count = stack_q.iter().count();
-    let active_space = space_params.p0().clone();
-    let space_name = active_space.record.name.clone();
-    let agents_snap = space_params.p2().clone();
+    let spaces_snapshot = snapshot_params.p1().clone();
+    let space_name = spaces_snapshot.active_space_name.clone();
+    let agents_snap = snapshot_params.p0().clone();
     let agent_entries: Vec<AgentProviderSummary> = agents_snap.providers;
     let app_agent_entries: Vec<AppAgentEntry> = agents_snap
         .strategies
@@ -426,9 +429,10 @@ fn handle_open_command_bar(
             model: s.model.clone(),
         })
         .collect();
-    let mut new_stack_ctx = space_params.p1();
+    let mut new_stack_ctx = snapshot_params.p2();
 
-    let request = command_bar_open_request(reader.read().copied());
+    let request =
+        command_bar_open_request(reader.read().copied(), &spaces_snapshot.spaces_page_url);
     let mut should_open = false;
     let should_toggle = request.should_toggle;
     let should_dismiss = request.should_dismiss;
@@ -684,14 +688,22 @@ fn handle_open_command_bar(
         return;
     }
 
-    let bar_spaces = vmux_space::active_space_rows(&active_space, active_stack_count)
-        .into_iter()
-        .map(|space| CommandBarSpace {
-            id: space.id,
-            name: space.name,
-            profile: space.profile,
-            is_active: space.is_active,
-            tab_count: space.tab_count,
+    let bar_spaces = spaces_snapshot
+        .spaces
+        .iter()
+        .map(|s| {
+            let is_active = s.id == spaces_snapshot.active_space_id;
+            CommandBarSpace {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                profile: s.profile.clone(),
+                is_active,
+                tab_count: if is_active {
+                    active_stack_count as u32
+                } else {
+                    0
+                },
+            }
         })
         .collect();
 
@@ -775,12 +787,13 @@ fn command_bar_open_payload(
 
 fn attach_spaces_page_to_tab(
     tab: Entity,
+    spaces_page_url: &str,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     commands.entity(tab).insert(PageMetadata {
-        url: SPACES_PAGE_URL.to_string(),
+        url: spaces_page_url.to_string(),
         title: "Spaces".to_string(),
         ..default()
     });
@@ -807,6 +820,7 @@ fn spawn_spaces_page_layout_from_command_bar(
     primary_window: Option<Entity>,
     new_stack_ctx: &mut NewStackContext,
     focus: Option<&mut vmux_layout::stack::FocusedStack>,
+    spaces_page_url: &str,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -834,7 +848,7 @@ fn spawn_spaces_page_layout_from_command_bar(
     new_stack_ctx.previous_stack = None;
     new_stack_ctx.needs_open = false;
     new_stack_ctx.dismiss_modal = false;
-    attach_spaces_page_to_tab(tab, commands, meshes, webview_mt);
+    attach_spaces_page_to_tab(tab, spaces_page_url, commands, meshes, webview_mt);
     true
 }
 
@@ -870,6 +884,7 @@ fn on_command_bar_action(
         Option<Res<vmux_terminal::pid::PidToEntity>>,
         Option<Res<vmux_agent::session::AgentSessionToEntity>>,
         Option<Res<vmux_agent::strategy::AgentStrategies>>,
+        Res<CommandBarSpacesSnapshot>,
     )>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut writer_params: ParamSet<(
@@ -884,6 +899,7 @@ fn on_command_bar_action(
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
     let settings = resource_params.p0().clone();
+    let spaces_url = resource_params.p5().spaces_page_url.clone();
     let pid_to_entity = resource_params
         .p2()
         .as_deref()
@@ -1046,9 +1062,10 @@ fn on_command_bar_action(
                             ProcessesMonitor::new(&mut meshes, &mut webview_mt),
                             ChildOf(stack_e),
                         ));
-                    } else if url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(spaces_url.trim_end_matches('/')) {
                         attach_spaces_page_to_tab(
                             stack_e,
+                            &spaces_url,
                             &mut commands,
                             &mut meshes,
                             &mut webview_mt,
@@ -1188,7 +1205,7 @@ fn on_command_bar_action(
                         writer_params
                             .p0()
                             .write(AppCommand::Service(ServiceCommand::Open));
-                    } else if url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(spaces_url.trim_end_matches('/')) {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
                             &all_children,
@@ -1207,6 +1224,7 @@ fn on_command_bar_action(
                                 .id();
                             attach_spaces_page_to_tab(
                                 stack_e,
+                                &spaces_url,
                                 &mut commands,
                                 &mut meshes,
                                 &mut webview_mt,
@@ -1221,6 +1239,7 @@ fn on_command_bar_action(
                                 primary_window,
                                 &mut new_stack_ctx,
                                 focus.as_deref_mut(),
+                                &spaces_url,
                                 &mut commands,
                                 &mut meshes,
                                 &mut webview_mt,
@@ -1866,10 +1885,13 @@ mod tests {
         window::PrimaryWindow,
     };
     use vmux_command::CommandPlugin;
+    use vmux_command::snapshot::CommandBarSpacesSnapshot;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
+    use vmux_space::ActiveSpace;
+    use vmux_space::event::SPACES_PAGE_URL;
 
     fn test_settings() -> AppSettings {
         AppSettings {
@@ -1894,6 +1916,13 @@ mod tests {
             auto_update: false,
             startup_url: None,
             agent: vmux_setting::AgentSettings::default(),
+        }
+    }
+
+    fn test_spaces_snapshot() -> CommandBarSpacesSnapshot {
+        CommandBarSpacesSnapshot {
+            spaces_page_url: SPACES_PAGE_URL.to_string(),
+            ..Default::default()
         }
     }
 
@@ -2222,9 +2251,10 @@ mod tests {
 
     #[test]
     fn space_open_command_prefills_spaces_url() {
-        let request = command_bar_open_request([AppCommand::Layout(LayoutCommand::Space(
-            SpaceCommand::Open,
-        ))]);
+        let request = command_bar_open_request(
+            [AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))],
+            SPACES_PAGE_URL,
+        );
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, Some(SPACES_PAGE_URL.to_string()));
@@ -2232,8 +2262,10 @@ mod tests {
 
     #[test]
     fn tab_new_command_does_not_dismiss_command_bar() {
-        let request =
-            command_bar_open_request([AppCommand::Layout(LayoutCommand::Stack(StackCommand::New))]);
+        let request = command_bar_open_request(
+            [AppCommand::Layout(LayoutCommand::Stack(StackCommand::New))],
+            SPACES_PAGE_URL,
+        );
 
         assert!(!request.should_dismiss);
     }
@@ -2275,6 +2307,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<NewStackContext>();
         app.init_resource::<ActiveSpace>();
+        app.insert_resource(test_spaces_snapshot());
         app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
         app.insert_non_send_resource(Browsers::default());
         app.add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands));
@@ -2310,6 +2343,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<NewStackContext>();
         app.init_resource::<ActiveSpace>();
+        app.insert_resource(test_spaces_snapshot());
         app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
         app.insert_non_send_resource(Browsers::default());
         app.add_systems(Update, handle_open_command_bar.in_set(ReadAppCommands));
@@ -2346,6 +2380,7 @@ mod tests {
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
+        app.insert_resource(test_spaces_snapshot());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
@@ -2397,6 +2432,7 @@ mod tests {
         app.init_resource::<NewStackContext>();
         app.insert_resource(vmux_layout::stack::FocusedStack::default());
         app.insert_resource(test_settings());
+        app.insert_resource(test_spaces_snapshot());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
@@ -2479,6 +2515,7 @@ mod tests {
         app.init_resource::<NewStackContext>();
         app.init_resource::<CapturedSpaceCommand>();
         app.insert_resource(test_settings());
+        app.insert_resource(test_spaces_snapshot());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
@@ -2533,6 +2570,7 @@ mod tests {
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
+        app.insert_resource(test_spaces_snapshot());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
@@ -2583,6 +2621,7 @@ mod tests {
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
+        app.insert_resource(test_spaces_snapshot());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
@@ -2634,6 +2673,7 @@ mod tests {
         app.add_observer(on_command_bar_action);
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
+        app.insert_resource(test_spaces_snapshot());
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
