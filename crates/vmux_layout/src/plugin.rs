@@ -2,9 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::BinEventEmitterPlugin;
 use vmux_server::{PAGE_READY_BIN_EVENT_ID, PageReady, mark_webview_page_ready_on_js_emit};
 
-use crate::cef::LayoutCefPlugin;
 use crate::command_bar::handler::CommandBarInputPlugin;
-use crate::command_bar::plugin::CommandBarPagePlugin;
 use crate::focus_ring::FocusRingPlugin;
 use crate::glass::GlassMaterialPlugin;
 use crate::header::HeaderLayoutPlugin;
@@ -61,7 +59,6 @@ impl Plugin for LayoutPlugin {
         app.add_plugins((
             ProfilePlugin,
             ScenePlugin,
-            LayoutCefPlugin,
             WindowPlugin,
             SpacePlugin,
             PanePlugin,
@@ -71,11 +68,6 @@ impl Plugin for LayoutPlugin {
             SideSheetLayoutPlugin,
             HeaderLayoutPlugin,
         ))
-        .add_plugins((
-            CommandBarPagePlugin,
-            CommandBarInputPlugin,
-            TogglePlugin,
-            WebviewRevealPlugin,
-        ));
+        .add_plugins((CommandBarInputPlugin, TogglePlugin, WebviewRevealPlugin));
     }
 }

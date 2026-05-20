@@ -72,6 +72,11 @@ impl PageConfig {
             index_file_path: "index.html",
         }
     }
+
+    pub const fn with_bundle_dir(mut self, bundle_dir: &'static str) -> Self {
+        self.bundle_dir = bundle_dir;
+        self
+    }
 }
 
 #[derive(Clone, Debug)]

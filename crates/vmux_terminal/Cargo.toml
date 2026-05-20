@@ -41,6 +41,9 @@ vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 vmux_server = { path = "../vmux_server" }
 
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
 js-sys = "0.3"

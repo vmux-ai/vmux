@@ -9345,6 +9345,7 @@ dependencies = [
  "bevy_reflect",
  "dioxus",
  "js-sys",
+ "libc",
  "rfd",
  "rkyv",
  "serde",

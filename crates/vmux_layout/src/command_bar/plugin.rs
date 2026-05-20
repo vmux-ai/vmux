@@ -10,7 +10,7 @@ impl Plugin for CommandBarPagePlugin {
         app.init_resource::<Server>();
         app.world_mut().resource_mut::<Server>().register(
             PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-            &PageConfig::with_custom_host("command-bar"),
+            &PageConfig::with_custom_host("command-bar").with_bundle_dir("dist-command-bar"),
         );
     }
 }

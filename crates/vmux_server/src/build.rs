@@ -29,6 +29,7 @@ pub struct PageBuilder {
     pub cef_finalize: CefEmbeddedPageFinalize,
     pub extra_tracked: Vec<PathBuf>,
     pub tailwind_postprocess_stale_prefixes: Option<&'static [&'static str]>,
+    pub dist_subdir: &'static str,
 }
 
 impl PageBuilder {
@@ -41,7 +42,13 @@ impl PageBuilder {
             cef_finalize: CefEmbeddedPageFinalize::default(),
             extra_tracked: Vec::new(),
             tailwind_postprocess_stale_prefixes: None,
+            dist_subdir: "dist",
         }
+    }
+
+    pub fn dist_subdir(mut self, name: &'static str) -> Self {
+        self.dist_subdir = name;
+        self
     }
 
     pub fn dx_extra_args(mut self, args: &'static [&'static str]) -> Self {
@@ -88,7 +95,7 @@ impl PageBuilder {
         }
 
         let release = std::env::var("PROFILE").unwrap_or_default() == "release";
-        let dist = self.manifest_dir.join("dist");
+        let dist = self.manifest_dir.join(self.dist_subdir);
         let shell = self.manifest_dir.join("assets/index.html");
         if self.needs_dist_rebuild(release, &workspace_root) {
             run_dx_web_bundle(
@@ -155,7 +162,7 @@ impl PageBuilder {
     }
 
     fn needs_dist_rebuild(&self, release: bool, workspace_root: &Path) -> bool {
-        let dist = self.manifest_dir.join("dist");
+        let dist = self.manifest_dir.join(self.dist_subdir);
         let index = dist.join("index.html");
         let Some(wasm_mtime) = newest_bg_wasm_mtime(&dist) else {
             return true;
@@ -398,7 +405,7 @@ pub fn strip_dx_uncompiled_tailwind_css_assets(dist: &Path, keep_css_names: &[&s
         let Ok(s) = fs::read_to_string(&p) else {
             continue;
         };
-        if s.contains("@tailwind") {
+        if s.contains("@tailwind") || s.contains("@import \"tailwindcss\"") {
             let _ = fs::remove_file(&p);
         }
     }
