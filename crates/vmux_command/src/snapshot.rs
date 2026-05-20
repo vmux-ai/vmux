@@ -14,8 +14,7 @@ pub struct CommandBarAgentsSnapshot {
 pub struct AgentProviderSummary {
     pub id: String,
     pub name: String,
-    pub provider: String,
-    pub model: String,
+    pub shortcut: String,
 }
 
 #[derive(Clone, Debug)]

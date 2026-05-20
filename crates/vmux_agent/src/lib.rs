@@ -11,6 +11,7 @@ pub mod message;
 pub mod plugin;
 pub mod run_state;
 pub mod session;
+pub mod snapshot_updater;
 pub mod strategy;
 pub mod stream;
 pub mod systems {

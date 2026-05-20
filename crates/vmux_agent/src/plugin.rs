@@ -231,6 +231,11 @@ impl Plugin for AgentPlugin {
             .add_systems(
                 Update,
                 (handle_spawn_agent_requests, handle_restart_agent_pty),
+            )
+            .add_systems(
+                Update,
+                crate::snapshot_updater::update_agents_snapshot
+                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
             );
 
         let mut providers = app.world_mut().resource_mut::<AgentProviders>();
