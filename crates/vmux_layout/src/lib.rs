@@ -22,8 +22,6 @@ mod header;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod processes_monitor;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod profile;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod scene;
@@ -104,7 +102,6 @@ pub struct SpaceFilePresent(pub bool);
 #[derive(Message, Clone)]
 pub enum LayoutSpawnRequest {
     Terminal { stack: Entity },
-    ProcessesMonitor { stack: Entity },
     OpenUrl { stack: Entity, url: String },
 }
 

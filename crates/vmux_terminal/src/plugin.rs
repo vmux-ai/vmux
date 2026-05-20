@@ -328,12 +328,6 @@ fn spawn_layout_requested_content(
                     .id();
                 commands.entity(terminal).insert(CefKeyboardTarget);
             }
-            LayoutSpawnRequest::ProcessesMonitor { stack } => {
-                commands.spawn((
-                    ProcessesMonitor::new(&mut meshes, &mut webview_mt),
-                    ChildOf(*stack),
-                ));
-            }
             LayoutSpawnRequest::OpenUrl { stack, url } => {
                 spawn_url_into_stack(
                     *stack,

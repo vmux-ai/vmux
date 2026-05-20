@@ -5,12 +5,13 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
-use vmux_agent::plugin::{AgentCommandEntry, AgentLaunchRequested, AgentProviders};
+use vmux_agent::plugin::AgentLaunchRequested;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSpace, CommandBarTab,
     PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
 };
+use vmux_command::snapshot::{AgentProviderSummary, CommandBarAgentsSnapshot};
 use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands, SpaceCommand,
     StackCommand, TerminalCommand,
@@ -72,7 +73,7 @@ pub(crate) struct CommandBarInputPlugin;
 impl Plugin for CommandBarInputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NewStackContext>()
-            .init_resource::<AgentProviders>()
+            .init_resource::<vmux_agent::plugin::AgentProviders>()
             .init_resource::<Messages<AgentLaunchRequested>>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
@@ -145,7 +146,7 @@ pub fn parse_app_agent_id(id: &str) -> Option<(String, String)> {
 }
 
 pub fn command_list(
-    cli_agent_entries: Vec<AgentCommandEntry>,
+    cli_agent_entries: Vec<AgentProviderSummary>,
     app_agent_entries: Vec<AppAgentEntry>,
 ) -> Vec<CommandBarEntry> {
     let mut entries: Vec<CommandBarEntry> = AppCommand::command_bar_entries()
@@ -157,9 +158,9 @@ pub fn command_list(
         })
         .collect();
     entries.extend(cli_agent_entries.into_iter().map(|entry| CommandBarEntry {
-        id: entry.id.to_string(),
-        name: entry.name.to_string(),
-        shortcut: entry.shortcut.to_string(),
+        id: entry.id,
+        name: entry.name,
+        shortcut: entry.shortcut,
     }));
     entries.extend(app_agent_entries.into_iter().map(|entry| CommandBarEntry {
         id: entry.id,
@@ -405,34 +406,27 @@ fn handle_open_command_bar(
     >,
     mut space_params: ParamSet<(
         Res<ActiveSpace>,
-        Option<Res<AgentProviders>>,
         ResMut<NewStackContext>,
-        Option<Res<vmux_agent::strategy::AgentStrategies>>,
+        Res<CommandBarAgentsSnapshot>,
     )>,
     mut commands: Commands,
 ) {
     let active_stack_count = stack_q.iter().count();
     let active_space = space_params.p0().clone();
     let space_name = active_space.record.name.clone();
-    let agent_entries = space_params
-        .p1()
-        .map(|providers| providers.command_entries())
-        .unwrap_or_default();
-    let app_agent_entries = space_params
-        .p3()
-        .map(|strategies| {
-            strategies
-                .page_strategies()
-                .map(|s| AppAgentEntry {
-                    id: app_agent_id(s.provider(), s.model()),
-                    name: format!("New {}/{} chat (App)", s.provider(), s.model()),
-                    provider: s.provider().to_string(),
-                    model: s.model().to_string(),
-                })
-                .collect()
+    let agents_snap = space_params.p2().clone();
+    let agent_entries: Vec<AgentProviderSummary> = agents_snap.providers;
+    let app_agent_entries: Vec<AppAgentEntry> = agents_snap
+        .strategies
+        .iter()
+        .map(|s| AppAgentEntry {
+            id: app_agent_id(&s.provider, &s.model),
+            name: format!("New {}/{} chat (App)", s.provider, s.model),
+            provider: s.provider.clone(),
+            model: s.model.clone(),
         })
-        .unwrap_or_default();
-    let mut new_stack_ctx = space_params.p2();
+        .collect();
+    let mut new_stack_ctx = space_params.p1();
 
     let request = command_bar_open_request(reader.read().copied());
     let mut should_open = false;
@@ -872,7 +866,7 @@ fn on_command_bar_action(
     >,
     mut resource_params: ParamSet<(
         Res<AppSettings>,
-        Option<Res<AgentProviders>>,
+        Option<Res<vmux_agent::plugin::AgentProviders>>,
         Option<Res<vmux_terminal::pid::PidToEntity>>,
         Option<Res<vmux_agent::session::AgentSessionToEntity>>,
         Option<Res<vmux_agent::strategy::AgentStrategies>>,

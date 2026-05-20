@@ -236,7 +236,10 @@ fn handle_stack_commands(
                         bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
                         ..default()
                     });
-                    spawn_requests.write(LayoutSpawnRequest::ProcessesMonitor { stack });
+                    spawn_requests.write(LayoutSpawnRequest::OpenUrl {
+                        stack,
+                        url: SERVICES_PAGE_URL.to_string(),
+                    });
                 } else {
                     if new_stack_ctx.stack.is_some() {
                         new_stack_ctx.needs_open = true;
