@@ -23,7 +23,7 @@ fn main() {
     println!("cargo::rerun-if-changed=../../.git/refs");
     println!("cargo::rerun-if-env-changed=VMUX_BUILD_PROFILE");
 
-    use vmux_page::build::{CefEmbeddedPageFinalize, PageBuilder};
+    use vmux_server::build::{CefEmbeddedPageFinalize, PageBuilder};
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     PageBuilder::new(manifest_dir, "vmux_service", "vmux_service_app")
         .track_manifest_rel_paths(&["../vmux_ui/assets/theme.css"])

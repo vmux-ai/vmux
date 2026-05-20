@@ -30,7 +30,7 @@ use vmux_layout::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
     },
 };
-use vmux_page::{PageReady, PageRegistry};
+use vmux_server::{PageReady, Server};
 use vmux_setting::AppSettings;
 use vmux_terminal::{self as terminal, PtyExited, RestartPty, Terminal};
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
@@ -39,7 +39,7 @@ pub(crate) struct BrowserPlugin;
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
-        let embedded_hosts = app.world().resource::<PageRegistry>().embedded_hosts();
+        let embedded_hosts = app.world().resource::<Server>().embedded_hosts();
         webview_debug_log(format!("BrowserPlugin embedded_hosts={embedded_hosts:?}"));
         app.configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
             .add_plugins((

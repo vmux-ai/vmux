@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use vmux_page::build::{CefEmbeddedPageFinalize, PageBuilder};
+use vmux_server::build::{CefEmbeddedPageFinalize, PageBuilder};
 
 fn main() {
     let hash = Command::new("git")

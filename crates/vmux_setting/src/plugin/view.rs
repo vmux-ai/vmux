@@ -11,7 +11,7 @@ use vmux_layout::{
     stack::{FocusedStack, stack_bundle},
     window::WEBVIEW_MESH_DEPTH_BIAS,
 };
-use vmux_page::{PageConfig, PageReady, PageRegistry};
+use vmux_server::{PageConfig, PageReady, Server};
 
 use crate::event::{
     SETTINGS_LIST_EVENT, SETTINGS_PAGE_URL, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent,
@@ -88,7 +88,7 @@ pub(crate) fn reset_sent_markers_on_page_ready(
         .remove::<SettingsSchemaSent>();
 }
 
-pub(crate) fn register_settings_page(registry: &mut PageRegistry) {
+pub(crate) fn register_settings_page(registry: &mut Server) {
     registry.register(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")),
         &PageConfig::with_custom_host("settings"),

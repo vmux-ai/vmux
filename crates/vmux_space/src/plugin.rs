@@ -7,7 +7,7 @@ use vmux_core::PageMetadata;
 use vmux_core::profile;
 use vmux_layout::NewStackContext;
 use vmux_layout::stack::Stack;
-use vmux_page::{PageConfig, PageReady, PageRegistry};
+use vmux_server::{PageConfig, PageReady, Server};
 
 use crate::event::{
     SPACES_LIST_EVENT, SPACES_PAGE_URL, SpaceCommandEvent, SpaceRow, SpacesListEvent,
@@ -29,7 +29,7 @@ impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActiveSpace>();
         app.add_message::<SaveSpaceRequest>();
-        register_spaces_page(app.world_mut().resource_mut::<PageRegistry>().as_mut());
+        register_spaces_page(app.world_mut().resource_mut::<Server>().as_mut());
         app.add_message::<vmux_core::page::SpacesPageSpawnRequest>()
             .add_systems(
                 Update,
@@ -67,7 +67,7 @@ fn reset_spaces_sent_marker_on_page_ready(
     commands.entity(entity).remove::<SpacesListSent>();
 }
 
-fn register_spaces_page(registry: &mut PageRegistry) {
+fn register_spaces_page(registry: &mut Server) {
     registry.register(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")),
         &PageConfig::with_custom_host("spaces"),
@@ -464,7 +464,7 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_layout::{pane::Pane, space::Space, stack::Stack, window::Main};
-    use vmux_page::PageRegistry;
+    use vmux_server::Server;
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
     struct HomeEnvGuard {
@@ -559,7 +559,7 @@ mod tests {
 
     #[test]
     fn registers_spaces_host_before_cef_embedded_hosts_are_read() {
-        let mut registry = PageRegistry::default();
+        let mut registry = Server::default();
         register_spaces_page(&mut registry);
 
         let hosts = registry.embedded_hosts();

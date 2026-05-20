@@ -1,5 +1,6 @@
 use bevy::prelude::*;
-use vmux_page::JsEmitPageReadyPlugin;
+use bevy_cef::prelude::BinEventEmitterPlugin;
+use vmux_server::{PAGE_READY_BIN_EVENT_ID, PageReady, mark_webview_page_ready_on_js_emit};
 
 use crate::cef::LayoutCefPlugin;
 use crate::command_bar::handler::CommandBarInputPlugin;
@@ -53,8 +54,11 @@ impl Plugin for LayoutPlugin {
                     reconcile::serve_snapshot_requests,
                 ),
             );
+        app.add_plugins(BinEventEmitterPlugin::<(PageReady,)>::with_id(
+            PAGE_READY_BIN_EVENT_ID,
+        ))
+        .add_observer(mark_webview_page_ready_on_js_emit);
         app.add_plugins((
-            JsEmitPageReadyPlugin,
             ProfilePlugin,
             ScenePlugin,
             LayoutCefPlugin,

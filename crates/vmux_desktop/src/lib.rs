@@ -22,8 +22,8 @@ use std::time::Duration;
 use {
     browser::BrowserPlugin, os_menu::OsMenuPlugin, persistence::PersistencePlugin,
     shortcut::ShortcutPlugin, vmux_command::CommandPlugin, vmux_layout::LayoutPlugin,
-    vmux_page::PageRegistryPlugin, vmux_service::plugin::ServicePlugin,
-    vmux_setting::SettingsPlugin, vmux_space::SpacePlugin, vmux_terminal::TerminalPlugin,
+    vmux_server::ServerPlugin, vmux_service::plugin::ServicePlugin, vmux_setting::SettingsPlugin,
+    vmux_space::SpacePlugin, vmux_terminal::TerminalPlugin,
 };
 
 use vmux_agent::AgentPlugin;
@@ -81,7 +81,7 @@ impl Plugin for VmuxPlugin {
                     filter: "bevy_camera_controller=warn".into(),
                     ..default()
                 }),
-            PageRegistryPlugin,
+            ServerPlugin,
             SettingsPlugin,
             CommandPlugin,
             ShortcutPlugin,

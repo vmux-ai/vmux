@@ -19,7 +19,7 @@ use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
 use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
-use vmux_page::{PageConfig, PageReady, PageRegistry};
+use vmux_server::{PageConfig, PageReady, Server};
 use vmux_service::{
     client::{ServiceHandle, ServiceWake},
     protocol::{ClientMessage, ProcessId, ServiceMessage},
@@ -218,7 +218,7 @@ impl Plugin for TerminalPlugin {
                 Update,
                 (pid::track_pid_inserts, pid::track_pid_removals).chain(),
             );
-        app.world_mut().resource_mut::<PageRegistry>().register(
+        app.world_mut().resource_mut::<Server>().register(
             PathBuf::from(env!("CARGO_MANIFEST_DIR")),
             &PageConfig::with_custom_host("terminal"),
         );

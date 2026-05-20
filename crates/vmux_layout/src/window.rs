@@ -24,7 +24,7 @@ use bevy::{
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
 use vmux_history::{CreatedAt, LastActivatedAt};
-use vmux_page::PageEmbedSet;
+use vmux_server::ServerEmbedSet;
 
 pub const SIDE_SHEET_TOP_PADDING_PX: f32 = 22.0;
 
@@ -57,7 +57,7 @@ impl Plugin for WindowPlugin {
             setup
                 .in_set(LayoutStartupSet::Window)
                 .after(crate::scene::setup)
-                .after(PageEmbedSet),
+                .after(ServerEmbedSet),
         )
         .add_systems(
             Startup,

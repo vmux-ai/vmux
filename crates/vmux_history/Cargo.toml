@@ -20,7 +20,7 @@ required-features = ["web"]
 path = "src/lib.rs"
 
 [build-dependencies]
-vmux_page = { path = "../vmux_page", features = ["build"] }
+vmux_server = { path = "../vmux_server", features = ["build"] }
 
 [dependencies]
 rkyv = { workspace = true }
@@ -34,7 +34,7 @@ moonshine-save = { workspace = true }
 bevy_ecs = { workspace = true }
 ron = { workspace = true }
 vmux_core = { path = "../vmux_core" }
-vmux_page = { path = "../vmux_page" }
+vmux_server = { path = "../vmux_server" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 bevy = { workspace = true }

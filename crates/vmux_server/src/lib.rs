@@ -3,18 +3,18 @@ use bevy::prelude::{
     App, Commands, Component, IntoScheduleConfigs, On, Plugin, Res, ResMut, Resource, Startup,
     SystemSet,
 };
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::BinReceive;
 use bevy_cef_core::prelude::{CefEmbeddedHost, CefEmbeddedHosts, webview_debug_log};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
+pub const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 
 #[cfg(feature = "build")]
 pub mod build;
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PageEmbedSet;
+pub struct ServerEmbedSet;
 
 #[derive(
     Clone,
@@ -90,11 +90,11 @@ impl PageEntry {
 }
 
 #[derive(Clone, Debug, Resource, Default)]
-pub struct PageRegistry {
+pub struct Server {
     entries: Vec<PageEntry>,
 }
 
-impl PageRegistry {
+impl Server {
     pub fn register(&mut self, manifest_dir: impl Into<PathBuf>, config: &PageConfig) {
         self.entries.push(PageEntry {
             manifest_dir: manifest_dir.into(),
@@ -121,28 +121,20 @@ impl PageRegistry {
     }
 }
 
-pub struct PageRegistryPlugin;
+pub struct ServerPlugin;
 
-impl Plugin for PageRegistryPlugin {
+impl Plugin for ServerPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PageRegistry>()
-            .configure_sets(Startup, PageEmbedSet)
-            .add_systems(Startup, embed_page_static_assets.in_set(PageEmbedSet));
+        app.init_resource::<Server>()
+            .configure_sets(Startup, ServerEmbedSet)
+            .add_systems(Startup, embed_page_static_assets.in_set(ServerEmbedSet));
     }
 }
 
-pub struct JsEmitPageReadyPlugin;
-
-impl Plugin for JsEmitPageReadyPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(PageReady,)>::with_id(
-            PAGE_READY_BIN_EVENT_ID,
-        ))
-        .add_observer(mark_webview_page_ready_on_js_emit);
-    }
-}
-
-fn mark_webview_page_ready_on_js_emit(trigger: On<BinReceive<PageReady>>, mut commands: Commands) {
+pub fn mark_webview_page_ready_on_js_emit(
+    trigger: On<BinReceive<PageReady>>,
+    mut commands: Commands,
+) {
     webview_debug_log(format!("PageReady entity={:?}", trigger.event().webview));
     commands
         .entity(trigger.event().webview)
@@ -184,7 +176,7 @@ fn packaged_page_root(resources_dir: Option<&Path>, host: &str) -> Option<PathBu
     root.is_dir().then_some(root)
 }
 
-fn embed_page_static_assets(registry: Res<PageRegistry>, mut reg: ResMut<EmbeddedAssetRegistry>) {
+fn embed_page_static_assets(registry: Res<Server>, mut reg: ResMut<EmbeddedAssetRegistry>) {
     let resources_dir = current_app_resources_dir();
     for entry in &registry.entries {
         let bundle_root = entry.bundle_root(resources_dir.as_deref());

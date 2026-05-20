@@ -3,7 +3,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use vmux_page::build::{
+use vmux_server::build::{
     dx_web_public_dir, replace_dist_from_dx_public, run_dx_web_bundle,
     workspace_root_from_manifest_dir,
 };

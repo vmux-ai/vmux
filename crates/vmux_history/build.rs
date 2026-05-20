@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use vmux_page::build::PageBuilder;
+use vmux_server::build::PageBuilder;
 
 fn main() {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());

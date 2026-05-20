@@ -24,7 +24,7 @@ name = "vmux_service"
 path = "src/lib.rs"
 
 [build-dependencies]
-vmux_page = { path = "../vmux_page", features = ["build"] }
+vmux_server = { path = "../vmux_server", features = ["build"] }
 
 [dependencies]
 rkyv = { workspace = true }
@@ -44,7 +44,7 @@ tracing-appender = "0.2"
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
 
-vmux_page = { path = "../vmux_page" }
+vmux_server = { path = "../vmux_server" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }

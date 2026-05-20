@@ -43,7 +43,7 @@ vmux_service = { path = "../vmux_service" }
 vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_setting = { path = "../vmux_setting" }
-vmux_page = { path = "../vmux_page" }
+vmux_server = { path = "../vmux_server" }
 url = { workspace = true }
 
 rfd = { workspace = true }

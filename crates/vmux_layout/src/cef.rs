@@ -4,7 +4,7 @@ use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy::render::alpha::AlphaMode;
 use bevy_cef::prelude::*;
-use vmux_page::{PageConfig, PageRegistry};
+use vmux_server::{PageConfig, Server};
 
 use crate::event::LAYOUT_PAGE_URL;
 use crate::window::WEBVIEW_MESH_DEPTH_BIAS;
@@ -29,7 +29,7 @@ pub struct LayoutCefPlugin;
 
 impl Plugin for LayoutCefPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().resource_mut::<PageRegistry>().register(
+        app.world_mut().resource_mut::<Server>().register(
             PathBuf::from(env!("CARGO_MANIFEST_DIR")),
             &PageConfig::with_custom_host("layout"),
         );

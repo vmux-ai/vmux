@@ -1211,7 +1211,7 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             bevy::asset::AssetPlugin::default(),
-            vmux_page::PageRegistryPlugin,
+            vmux_server::ServerPlugin,
             vmux_command::CommandPlugin,
             AgentPlugin,
         ));

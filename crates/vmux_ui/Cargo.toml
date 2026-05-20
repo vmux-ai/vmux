@@ -11,7 +11,7 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 
 [build-dependencies]
-vmux_page = { path = "../vmux_page", features = ["build"] }
+vmux_server = { path = "../vmux_server", features = ["build"] }
 
 [lib]
 path = "src/lib.rs"

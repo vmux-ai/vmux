@@ -9085,7 +9085,7 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_layout",
- "vmux_page",
+ "vmux_server",
  "vmux_service",
  "vmux_setting",
  "vmux_space",
@@ -9163,7 +9163,7 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_macro",
- "vmux_page",
+ "vmux_server",
  "vmux_service",
  "vmux_setting",
  "vmux_space",
@@ -9185,7 +9185,7 @@ dependencies = [
  "ron 0.8.1",
  "serde",
  "vmux_core",
- "vmux_page",
+ "vmux_server",
  "vmux_ui",
  "wasm-bindgen",
 ]
@@ -9216,7 +9216,7 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_history",
- "vmux_page",
+ "vmux_server",
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",
@@ -9244,7 +9244,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vmux_page"
+name = "vmux_server"
 version = "0.0.9"
 dependencies = [
  "bevy",
@@ -9279,7 +9279,7 @@ dependencies = [
  "uuid",
  "vmux_core",
  "vmux_layout",
- "vmux_page",
+ "vmux_server",
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",
@@ -9303,7 +9303,7 @@ dependencies = [
  "vmux_core",
  "vmux_history",
  "vmux_layout",
- "vmux_page",
+ "vmux_server",
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",
@@ -9328,7 +9328,7 @@ dependencies = [
  "vmux_core",
  "vmux_history",
  "vmux_layout",
- "vmux_page",
+ "vmux_server",
  "vmux_setting",
  "vmux_ui",
  "wasm-bindgen",
@@ -9354,7 +9354,7 @@ dependencies = [
  "vmux_core",
  "vmux_history",
  "vmux_layout",
- "vmux_page",
+ "vmux_server",
  "vmux_service",
  "vmux_setting",
  "vmux_space",
@@ -9375,7 +9375,7 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
- "vmux_page",
+ "vmux_server",
  "wasm-bindgen",
  "web-sys",
 ]
