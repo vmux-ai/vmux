@@ -5,7 +5,6 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
-use vmux_agent::plugin::AgentLaunchRequested;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSpace, CommandBarTab,
@@ -20,6 +19,7 @@ use vmux_command::{
     StackCommand, TerminalCommand,
 };
 use vmux_core::PageMetadata;
+use vmux_core::agent::AgentLaunchRequested;
 use vmux_history::{LastActivatedAt, now_millis};
 pub(crate) use vmux_layout::NewStackContext;
 use vmux_layout::event::SERVICES_PAGE_URL;

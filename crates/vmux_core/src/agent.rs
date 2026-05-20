@@ -97,6 +97,12 @@ pub struct SpawnAgentInStackRequest {
     pub stack: Entity,
 }
 
+#[derive(Message, Debug, Clone)]
+pub struct AgentLaunchRequested {
+    pub provider_id: String,
+    pub cwd: PathBuf,
+}
+
 #[derive(Message, Debug, Clone, Copy)]
 pub struct RestartAgentPty {
     pub entity: Entity,

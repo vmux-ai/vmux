@@ -8,7 +8,9 @@ use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
 use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_core::LastActivatedAt;
 use vmux_core::PageMetadata;
-use vmux_core::agent::{AgentKind, McpServerConfig, RestartAgentPty, SpawnAgentInStackRequest};
+use vmux_core::agent::{
+    AgentKind, AgentLaunchRequested, McpServerConfig, RestartAgentPty, SpawnAgentInStackRequest,
+};
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::{
     pane::{Pane, PaneSplit},
@@ -105,12 +107,6 @@ impl AgentProviders {
         }
         (provider.prepare)(cwd).map(Some)
     }
-}
-
-#[derive(Message)]
-pub struct AgentLaunchRequested {
-    pub provider_id: String,
-    pub cwd: PathBuf,
 }
 
 fn vibe_available() -> bool {
