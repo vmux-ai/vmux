@@ -5,22 +5,13 @@
     clippy::new_ret_no_self
 )]
 
-mod agent;
-mod agent_query;
 mod background_lifecycle;
 mod browser;
-mod clipboard;
-mod command;
 mod command_bar;
-mod layout_response;
 mod os_menu;
 mod persistence;
-mod processes_monitor;
-pub mod profile;
-mod scene;
+
 pub(crate) mod shortcut;
-mod spaces;
-mod terminal;
 mod tray;
 pub mod updater;
 use bevy::asset::io::web::WebAssetPlugin;
@@ -30,23 +21,13 @@ use bevy::winit::WinitSettings;
 use std::time::Duration;
 
 use {
-    agent::AgentPlugin,
-    browser::BrowserPlugin,
-    command::CommandPlugin,
-    command_bar::CommandBarInputPlugin,
-    os_menu::OsMenuPlugin,
-    persistence::PersistencePlugin,
-    processes_monitor::ProcessesMonitorPlugin,
-    shortcut::ShortcutPlugin,
-    spaces::SpacesPlugin,
-    terminal::TerminalInputPlugin,
-    vmux_layout::LayoutPlugin,
-    vmux_layout::{LayoutChromePlugin, profile::ProfilePlugin, scene::ScenePlugin},
-    vmux_service::webview::ServicesPlugin,
-    vmux_settings::SettingsPlugin,
-    vmux_terminal::TerminalPlugin,
-    vmux_webview_app::WebviewAppRegistryPlugin,
+    browser::BrowserPlugin, command_bar::CommandBarInputPlugin, os_menu::OsMenuPlugin,
+    persistence::PersistencePlugin, shortcut::ShortcutPlugin, vmux_command::CommandPlugin,
+    vmux_layout::LayoutPlugin, vmux_page::PageRegistryPlugin, vmux_service::plugin::ServicePlugin,
+    vmux_setting::SettingsPlugin, vmux_space::SpacePlugin, vmux_terminal::TerminalPlugin,
 };
+
+use vmux_agent::AgentPlugin;
 
 pub struct VmuxPlugin;
 
@@ -90,8 +71,8 @@ impl Plugin for VmuxPlugin {
             focused_mode: bevy::winit::UpdateMode::Continuous,
             unfocused_mode: bevy::winit::UpdateMode::reactive_low_power(Duration::from_secs(1)),
         })
-        .add_plugins(vmux_core::CorePlugin)
         .add_plugins((
+            vmux_core::CorePlugin,
             DefaultPlugins
                 .set(WebAssetPlugin {
                     silence_startup_warning: true,
@@ -101,28 +82,21 @@ impl Plugin for VmuxPlugin {
                     filter: "bevy_camera_controller=warn".into(),
                     ..default()
                 }),
-            WebviewAppRegistryPlugin,
+            PageRegistryPlugin,
             SettingsPlugin,
             CommandPlugin,
             ShortcutPlugin,
-            ScenePlugin,
             OsMenuPlugin,
-            LayoutChromePlugin,
             TerminalPlugin,
-            ServicesPlugin,
+            ServicePlugin,
             CommandBarInputPlugin,
+            SpacePlugin,
+            BrowserPlugin,
         ))
-        .add_plugins(SpacesPlugin)
-        .add_plugins(BrowserPlugin)
         .add_plugins((
-            TerminalInputPlugin,
             AgentPlugin,
-            vmux_agent::AgentSessionPlugin,
-            vmux_agent::AppAgentPlugin,
-            ProcessesMonitorPlugin,
-            layout_response::LayoutResponseForwarderPlugin,
+            vmux_agent::AgentPage,
             PersistencePlugin,
-            ProfilePlugin,
             LayoutPlugin,
             updater::VmuxUpdater::builder().build().plugin(),
             background_lifecycle::BackgroundLifecyclePlugin,

@@ -1,9 +1,13 @@
 use crate::protocol::{ClientMessage, ServiceMessage};
 use crate::{read_message, socket_path, write_message};
+use bevy::ecs::resource::Resource;
 use std::sync::Arc;
 use tokio::io::BufReader;
 use tokio::net::UnixStream;
 use tokio::sync::Mutex;
+
+#[derive(Resource)]
+pub struct ServiceClient(pub ServiceHandle);
 
 const MAX_SERVICE_MESSAGES_PER_DRAIN: usize = 128;
 

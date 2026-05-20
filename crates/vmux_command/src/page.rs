@@ -1,0 +1,671 @@
+#![allow(non_snake_case)]
+
+use dioxus::prelude::*;
+use vmux_command::event::{
+    COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarOpenEvent, CommandBarReadyEvent,
+    CommandBarRenderedEvent, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
+    PathEntry, command_bar_open_should_ack, command_bar_open_should_reset_input, looks_like_url,
+};
+use vmux_command::keyboard::{
+    CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code,
+    ignore_physical_rerouted_ctrl_keydown,
+};
+use vmux_command::results::{
+    CommandBarResultItem as ResultItem, SETTINGS_PAGE_URL, SPACES_PAGE_URL, filter_results,
+};
+use vmux_command::style::{command_bar_shell_class, result_item_class};
+use vmux_ui::components::icon::Icon;
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
+
+#[component]
+pub fn Page() -> Element {
+    use_theme();
+    let mut state = use_signal(CommandBarOpenEvent::default);
+    let mut query = use_signal(String::new);
+    let mut selected = use_signal(|| 0usize);
+    let mut new_tab = use_signal(|| false);
+    let mut is_open = use_signal(|| false);
+    let mut nav_mode = use_signal(|| false);
+    let mut current_open_id = use_signal(|| 0u64);
+    let mut last_rendered_open_id = use_signal(|| 0u64);
+    let mut ready_sent = use_signal(|| false);
+
+    let mut path_completions = use_signal(Vec::<PathEntry>::new);
+
+    let open_listener =
+        use_bin_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
+            let open_id = data.open_id;
+            let should_reset_input =
+                command_bar_open_should_reset_input(current_open_id(), open_id);
+            if !should_reset_input {
+                if command_bar_open_should_ack(open_id) {
+                    let _ = try_cef_bin_emit_rkyv(&CommandBarRenderedEvent { open_id });
+                }
+                return;
+            }
+            current_open_id.set(open_id);
+            path_completions.set(Vec::new());
+            query.set(data.url.clone());
+            selected.set(0);
+            nav_mode.set(false);
+            new_tab.set(data.new_tab);
+            state.set(data);
+            is_open.set(true);
+            if command_bar_open_should_ack(open_id) {
+                last_rendered_open_id.set(0);
+            }
+        });
+
+    use_effect(move || {
+        if !(open_listener.is_loading)()
+            && !ready_sent()
+            && try_cef_bin_emit_rkyv(&CommandBarReadyEvent).is_ok()
+        {
+            ready_sent.set(true);
+        }
+    });
+
+    use_effect(move || {
+        let open = is_open();
+        let open_id = current_open_id();
+        if open
+            && open_id != 0
+            && last_rendered_open_id() != open_id
+            && try_cef_bin_emit_rkyv(&CommandBarRenderedEvent { open_id }).is_ok()
+        {
+            last_rendered_open_id.set(open_id);
+        }
+    });
+
+    let _path_listener =
+        use_bin_event_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
+            path_completions.set(data.completions);
+        });
+
+    use_effect(move || {
+        let q = query();
+        if !looks_like_path(q.trim()) {
+            path_completions.set(Vec::new());
+            return;
+        }
+        let _ = try_cef_bin_emit_rkyv(&PathCompleteRequest {
+            query: q.trim().to_string(),
+        });
+    });
+
+    // Focus input and install emacs-style Ctrl shortcuts AFTER Dioxus renders
+    // the input element. Running in the event listener above is too early --
+    // Dioxus hasn't created the DOM element yet.
+    use_effect(move || {
+        if is_open() {
+            focus_and_install_ctrl_bindings();
+        }
+    });
+
+    let CommandBarOpenEvent {
+        url: _,
+        space_name,
+        spaces,
+        tabs,
+        commands,
+        new_tab: _,
+        ..
+    } = state();
+    let q = query();
+    let is_new_tab = new_tab();
+    let results = {
+        let mut r = filter_results(&q, &tabs, &commands, &spaces, is_new_tab);
+        let completions = if looks_like_path(q.trim()) {
+            path_completions()
+        } else {
+            Vec::new()
+        };
+        if !completions.is_empty() {
+            let path_items: Vec<ResultItem> = completions
+                .iter()
+                .filter(|e| e.is_dir)
+                .take(5)
+                .map(|e| ResultItem::Terminal {
+                    path: e.full_path.clone(),
+                })
+                .collect();
+            let typed_terminal = r
+                .iter()
+                .find(|item| matches!(item, ResultItem::Terminal { path } if !path.is_empty()))
+                .cloned();
+            r.retain(|item| !matches!(item, ResultItem::Terminal { path } if !path.is_empty()));
+            let mut combined = Vec::new();
+            if let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
+                && !path_items
+                    .iter()
+                    .any(|item| matches!(item, ResultItem::Terminal { path } if path == tp))
+            {
+                combined.push(entry.clone());
+            }
+            combined.extend(path_items);
+            combined.extend(r);
+            combined
+        } else {
+            r
+        }
+    };
+    let sel = selected().min(results.len().saturating_sub(1));
+    let active_item = results.get(sel).cloned();
+    let nav = nav_mode();
+    let display_text = if nav {
+        match &active_item {
+            Some(ResultItem::Command { name, .. }) => format!("> {name}"),
+            Some(ResultItem::Navigate { url }) => url.clone(),
+            Some(ResultItem::Stack { url, .. }) => url.clone(),
+            Some(ResultItem::Space { name, .. }) => name.clone(),
+            Some(ResultItem::Terminal { path }) if path.is_empty() => "Terminal".to_string(),
+            Some(ResultItem::Terminal { path }) => path.clone(),
+            None => q.clone(),
+        }
+    } else {
+        q.clone()
+    };
+
+    let ghost_text = {
+        let q_trimmed = q.trim();
+        let completions = if looks_like_path(q_trimmed) {
+            path_completions()
+        } else {
+            Vec::new()
+        };
+        if let Some(first) = completions.first() {
+            let full = &first.full_path;
+            if full.to_lowercase().starts_with(&q_trimmed.to_lowercase()) {
+                full[q_trimmed.len()..].to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    };
+
+    // Auto-scroll selected item into view when selection changes.
+    use_effect(move || {
+        let s = selected();
+        if let Some(el) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id(&format!("command-bar-item-{s}")))
+        {
+            let opts = web_sys::ScrollIntoViewOptions::new();
+            opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
+            el.scroll_into_view_with_scroll_into_view_options(&opts);
+        }
+    });
+
+    let mut execute = move |item: &ResultItem| {
+        is_open.set(false);
+        match item {
+            ResultItem::Terminal { path } => {
+                emit_action("terminal", path);
+            }
+            ResultItem::Stack {
+                pane_id, tab_index, ..
+            } => {
+                emit_action("switch_tab", &format!("{pane_id}:{tab_index}"));
+            }
+            ResultItem::Command { id, .. } => {
+                emit_action("command", id);
+            }
+            ResultItem::Space { id, .. } => {
+                emit_action("space", id);
+            }
+            ResultItem::Navigate { url } => {
+                if !url.is_empty() {
+                    emit_action("navigate", url);
+                }
+            }
+        }
+    };
+
+    if !is_open() {
+        return rsx! { div { class: "h-full w-full" } };
+    }
+
+    rsx! {
+        div {
+            class: "flex h-full w-full items-start justify-center pt-[15%]",
+            onclick: move |_| { is_open.set(false); emit_action("dismiss", ""); },
+            div {
+                class: command_bar_shell_class(),
+                onclick: move |e| { e.stop_propagation(); },
+                // Inner glow overlay
+                div { class: "pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-white/20 to-transparent" }
+                div { class: "p-2",
+                    div { class: "flex items-center gap-2 rounded-lg bg-white/5 px-3",
+                        if !space_name.is_empty() {
+                            span {
+                                title: "{space_name}",
+                                class: "max-w-36 shrink-0 truncate rounded-md bg-glass-hover px-2 py-1 text-ui-xs font-medium text-muted-foreground",
+                                "{space_name}"
+                            }
+                        }
+                        {
+                            let icon_class = "h-4 w-4 shrink-0 text-muted-foreground";
+                            let (is_command, is_path, is_url) = if nav {
+                                match &active_item {
+                                    Some(ResultItem::Command { .. }) => (true, false, false),
+                                    Some(ResultItem::Terminal { path }) if path.is_empty() => (true, false, false),
+                                    Some(ResultItem::Terminal { .. }) => (false, true, false),
+                                    Some(ResultItem::Stack { .. }) => (false, false, true),
+                                    Some(ResultItem::Space { .. }) => (false, false, false),
+                                    Some(ResultItem::Navigate { url }) => {
+                                        let is_u = url.contains("://") || (url.contains('.') && !url.contains(' '));
+                                        (false, false, is_u)
+                                    }
+                                    None => (false, false, false),
+                                }
+                            } else {
+                                let trimmed = q.trim();
+                                let cmd = trimmed.starts_with('>');
+                                let pth = !cmd && (trimmed.starts_with('/') || trimmed.starts_with('~'));
+                                let url = !cmd && !pth && (trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')));
+                                (cmd, pth, url)
+                            };
+                            if is_command {
+                                rsx! { span { class: "select-none font-mono text-base text-muted-foreground", ">_" } }
+                            } else if is_path {
+                                rsx! { Icon { class: icon_class,
+                                    path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+                                    path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+                                } }
+                            } else if is_url {
+                                rsx! { Icon { class: icon_class,
+                                    path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }
+                                    path { d: "M2 12h20" }
+                                    path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" }
+                                } }
+                            } else {
+                                rsx! { Icon { class: icon_class,
+                                    circle { cx: "11", cy: "11", r: "8" }
+                                    path { d: "m21 21-4.3-4.3" }
+                                } }
+                            }
+                        }
+                        div { class: "relative flex-1",
+                            if !ghost_text.is_empty() {
+                                div {
+                                    class: "pointer-events-none absolute inset-0 flex items-center",
+                                    span { class: "invisible text-base", "{q}" }
+                                    span { class: "text-base text-muted-foreground/40", "{ghost_text}" }
+                                }
+                            }
+                            input {
+                                id: "command-bar-input",
+                                r#type: "text",
+                                "data-ghost": "{ghost_text}",
+                                class: "w-full py-2.5 text-base text-foreground bg-transparent outline-none placeholder:text-muted-foreground",
+                                placeholder: if is_new_tab {
+                                    "Search or type a URL, or select Terminal..."
+                                } else {
+                                    "Type a URL, search tabs, or > for commands..."
+                                },
+                                value: "{display_text}",
+                                autofocus: true,
+                                oninput: move |e| {
+                                    query.set(e.value());
+                                    selected.set(0);
+                                    nav_mode.set(false);
+                                },
+                                onkeydown: move |e| {
+                                    if e.key() == Key::Tab {
+                                        e.prevent_default();
+                                        let gt = ghost_text.clone();
+                                        if !gt.is_empty() {
+                                            let new_val = format!("{}{}", q, gt);
+                                            query.set(new_val.clone());
+                                            selected.set(0);
+                                            if let Some(el) = web_sys::window()
+                                                .and_then(|w| w.document())
+                                                .and_then(|d| d.get_element_by_id("command-bar-input"))
+                                            {
+                                                let input: web_sys::HtmlInputElement = el.unchecked_into();
+                                                input.set_value(&new_val);
+                                                let len = new_val.len() as u32;
+                                                let _ = input.set_selection_range(len, len);
+                                            }
+                                        }
+                                        return;
+                                    }
+
+                                    let ctrl = e.modifiers().contains(Modifiers::CONTROL);
+                                    let vmux_synthetic = is_vmux_synthetic_dioxus_keydown(&e);
+                                    if ctrl
+                                        && ignore_physical_rerouted_ctrl_keydown(
+                                            &e.code().to_string(),
+                                            vmux_synthetic,
+                                        )
+                                    {
+                                        e.prevent_default();
+                                        return;
+                                    }
+                                    let go_down = (e.key() == Key::ArrowDown && !ctrl)
+                                        || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
+                                    let go_up = (e.key() == Key::ArrowUp && !ctrl)
+                                        || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
+
+                                    if go_down {
+                                        e.prevent_default();
+                                        let max = results.len().saturating_sub(1);
+                                        selected.set((sel + 1).min(max));
+                                        nav_mode.set(true);
+                                    } else if go_up {
+                                        e.prevent_default();
+                                        selected.set(sel.saturating_sub(1));
+                                        nav_mode.set(true);
+                                    } else if e.key() == Key::Escape
+                                        || (ctrl && e.code() == Code::KeyC)
+                                    {
+                                        is_open.set(false);
+                                        emit_action("dismiss", "");
+                                    } else if e.key() == Key::Enter {
+                                        if let Some(item) = results.get(sel) {
+                                            execute(item);
+                                        } else if !q.is_empty() {
+                                            emit_action("navigate", &q);
+                                        }
+                                    }
+                                },
+                            }
+                        }
+                    }
+                }
+                if !results.is_empty() {
+                    div { class: "max-h-80 overflow-y-auto border-t border-border",
+                        for (i, item) in results.iter().enumerate() {
+                            div {
+                                key: "{i}",
+                                id: "command-bar-item-{i}",
+                                class: result_item_class(i == sel),
+                                onclick: {
+                                    let item = item.clone();
+                                    move |_| { execute(&item); }
+                                },
+                                match item {
+                                    ResultItem::Terminal { path } => rsx! {
+                                        div { class: "flex items-center gap-2",
+                                            span { class: "shrink-0 text-base text-muted-foreground", ">_" }
+                                            if path.is_empty() {
+                                                span { class: "text-base text-foreground", "Terminal" }
+                                            } else {
+                                                span { class: "text-base text-foreground", "Open in Terminal" }
+                                                span { class: "ml-1 text-sm text-muted-foreground", "{path}" }
+                                            }
+                                        }
+                                    },
+                                    ResultItem::Stack { title, url, .. } => rsx! {
+                                        div { class: "flex min-w-0 flex-col",
+                                            span { class: "truncate text-base text-foreground", "{title}" }
+                                            span { class: "truncate text-sm text-muted-foreground", "{url}" }
+                                        }
+                                        span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "Stack" }
+                                    },
+                                    ResultItem::Space { name, profile, is_active, tab_count, .. } => rsx! {
+                                        div { class: "flex min-w-0 flex-col",
+                                            div { class: "flex min-w-0 items-center gap-2",
+                                                span { class: "truncate text-base text-foreground", "{name}" }
+                                                if *is_active {
+                                                    span { class: "rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300", "active" }
+                                                }
+                                            }
+                                            span { class: "truncate text-sm text-muted-foreground", "{profile}" }
+                                        }
+                                        span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "{tab_count} tabs" }
+                                    },
+                                    ResultItem::Command { name, shortcut, .. } => rsx! {
+                                        div { class: "flex items-center gap-2",
+                                            span { class: "shrink-0 text-base text-muted-foreground", ">_" }
+                                            span { class: "text-base text-foreground", "{name}" }
+                                        }
+                                        span { class: "ml-2 shrink-0 rounded bg-muted px-1.5 py-0.5 text-sm text-muted-foreground", "{shortcut}" }
+                                    },
+                                    ResultItem::Navigate { url } => rsx! {
+                                        div { class: "flex items-center gap-2",
+                                            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                                                circle { cx: "11", cy: "11", r: "8" }
+                                                path { d: "m21 21-4.3-4.3" }
+                                            }
+                                            if url == SPACES_PAGE_URL {
+                                                div { class: "flex min-w-0 flex-col",
+                                                    span { class: "truncate text-base text-foreground", "Spaces Page" }
+                                                    span { class: "truncate text-sm text-muted-foreground", "{url}" }
+                                                }
+                                            } else if url == SETTINGS_PAGE_URL {
+                                                div { class: "flex min-w-0 flex-col",
+                                                    span { class: "truncate text-base text-foreground", "Settings" }
+                                                    span { class: "truncate text-sm text-muted-foreground", "{url}" }
+                                                }
+                                            } else if url.is_empty() {
+                                                span { class: "text-base text-foreground", "Search" }
+                                            } else if looks_like_url(url) {
+                                                span { class: "min-w-0 break-all text-base text-foreground", "Open \"{url}\"" }
+                                            } else {
+                                                span { class: "min-w-0 break-all text-base text-foreground", "Search \"{url}\"" }
+                                            }
+                                        }
+                                        if url == SPACES_PAGE_URL || url == SETTINGS_PAGE_URL {
+                                            span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "New tab" }
+                                        } else if !url.is_empty() {
+                                            span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "\u{21b5}" }
+                                        }
+                                    },
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn looks_like_path(s: &str) -> bool {
+    s.starts_with('/')
+        || s.starts_with("~/")
+        || s.starts_with("./")
+        || s.starts_with("../")
+        || s.contains('/') && !s.contains(' ') && !s.contains("://")
+}
+
+fn emit_action(action: &str, value: &str) {
+    let _ = try_cef_bin_emit_rkyv(&CommandBarActionEvent {
+        action: action.to_string(),
+        value: value.to_string(),
+    });
+}
+
+fn focus_and_install_ctrl_bindings() {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(el) = document.get_element_by_id("command-bar-input") else {
+        return;
+    };
+    let input: web_sys::HtmlInputElement = el.unchecked_into();
+    input.focus().ok();
+    let len = input.value().len() as u32;
+    let _ = input.set_selection_range(0, len);
+
+    // Guard against double-binding.
+    if js_sys::Reflect::get(&input, &JsValue::from_str("_ctrlBound"))
+        .map(|v| v.is_truthy())
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let _ = js_sys::Reflect::set(&input, &JsValue::from_str("_ctrlBound"), &JsValue::TRUE);
+
+    let input2 = input.clone();
+    let closure = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
+        if !e.ctrl_key() {
+            return;
+        }
+        if is_vmux_synthetic_keydown(&e) {
+            return;
+        }
+        let code = e.code();
+        let action = match ctrl_key_capture_for_code(&code) {
+            CtrlKeyCapture::Ignore => return,
+            CtrlKeyCapture::PassToDioxus => {
+                e.prevent_default();
+                return;
+            }
+            CtrlKeyCapture::RerouteToDioxus => {
+                e.prevent_default();
+                e.stop_immediate_propagation();
+                dispatch_ctrl_keydown(&input2, &code);
+                return;
+            }
+            CtrlKeyCapture::Edit(action) => action,
+        };
+        e.prevent_default();
+        e.stop_immediate_propagation();
+
+        match action {
+            CtrlEditAction::Home => {
+                let _ = input2.set_selection_range(0, 0);
+            }
+            CtrlEditAction::End => {
+                let ghost = input2.get_attribute("data-ghost").unwrap_or_default();
+                if !ghost.is_empty() {
+                    let new_val = format!("{}{}", input2.value(), ghost);
+                    input2.set_value(&new_val);
+                    let len = new_val.len() as u32;
+                    let _ = input2.set_selection_range(len, len);
+                    dispatch_input_event(&input2);
+                } else {
+                    let len = input2.value().len() as u32;
+                    let _ = input2.set_selection_range(len, len);
+                }
+            }
+            CtrlEditAction::Forward => {
+                let p = (input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) + 1)
+                    .min(input2.value().len() as u32);
+                let _ = input2.set_selection_range(p, p);
+            }
+            CtrlEditAction::Back => {
+                let p = input2
+                    .selection_start()
+                    .unwrap_or(Some(0))
+                    .unwrap_or(0)
+                    .saturating_sub(1);
+                let _ = input2.set_selection_range(p, p);
+            }
+            CtrlEditAction::Delete => {
+                let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
+                let v = input2.value();
+                let new_val = format!("{}{}", &v[..s], &v[(s + 1).min(v.len())..]);
+                input2.set_value(&new_val);
+                let _ = input2.set_selection_range(s as u32, s as u32);
+                dispatch_input_event(&input2);
+            }
+            CtrlEditAction::Backspace => {
+                let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
+                if s > 0 {
+                    let v = input2.value();
+                    let new_val = format!("{}{}", &v[..s - 1], &v[s..]);
+                    input2.set_value(&new_val);
+                    let _ = input2.set_selection_range((s - 1) as u32, (s - 1) as u32);
+                    dispatch_input_event(&input2);
+                }
+            }
+            CtrlEditAction::DeleteWord => {
+                let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
+                let v = input2.value();
+                let bytes = v.as_bytes();
+                let mut i = s.saturating_sub(1);
+                while i > 0 && bytes[i - 1] == b' ' {
+                    i -= 1;
+                }
+                while i > 0 && bytes[i - 1] != b' ' {
+                    i -= 1;
+                }
+                let new_val = format!("{}{}", &v[..i], &v[s..]);
+                input2.set_value(&new_val);
+                let _ = input2.set_selection_range(i as u32, i as u32);
+                dispatch_input_event(&input2);
+            }
+            CtrlEditAction::DeleteToBeginning => {
+                let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
+                let v = input2.value();
+                input2.set_value(&v[s..]);
+                let _ = input2.set_selection_range(0, 0);
+                dispatch_input_event(&input2);
+            }
+        }
+    }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+    let target: &web_sys::EventTarget = input.as_ref();
+    let opts = web_sys::AddEventListenerOptions::new();
+    opts.set_capture(true);
+    let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
+        "keydown",
+        closure.as_ref().unchecked_ref(),
+        &opts,
+    );
+    closure.forget();
+}
+
+fn is_vmux_synthetic_dioxus_keydown(e: &KeyboardEvent) -> bool {
+    e.data()
+        .downcast::<web_sys::KeyboardEvent>()
+        .map(is_vmux_synthetic_keydown)
+        .unwrap_or(false)
+}
+
+fn is_vmux_synthetic_keydown(e: &web_sys::KeyboardEvent) -> bool {
+    js_sys::Reflect::get(e.as_ref(), &JsValue::from_str("_vmuxSyntheticKeydown"))
+        .map(|v| v.is_truthy())
+        .unwrap_or(false)
+}
+
+fn key_for_code(code: &str) -> &str {
+    match code {
+        "KeyA" => "a",
+        "KeyB" => "b",
+        "KeyC" => "c",
+        "KeyD" => "d",
+        "KeyE" => "e",
+        "KeyF" => "f",
+        "KeyH" => "h",
+        "KeyJ" => "j",
+        "KeyK" => "k",
+        "KeyN" => "n",
+        "KeyP" => "p",
+        "KeyU" => "u",
+        "KeyW" => "w",
+        _ => "",
+    }
+}
+
+fn dispatch_ctrl_keydown(el: &web_sys::HtmlInputElement, code: &str) {
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_bubbles(true);
+    init.set_ctrl_key(true);
+    init.set_code(code);
+    init.set_key(key_for_code(code));
+    if let Ok(evt) = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init) {
+        let _ = js_sys::Reflect::set(
+            evt.as_ref(),
+            &JsValue::from_str("_vmuxSyntheticKeydown"),
+            &JsValue::TRUE,
+        );
+        let _ = el.dispatch_event(&evt);
+    }
+}
+
+/// Dispatch a synthetic "input" event so Dioxus picks up value changes.
+fn dispatch_input_event(el: &web_sys::HtmlInputElement) {
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    if let Ok(evt) = web_sys::Event::new_with_event_init_dict("input", &init) {
+        let _ = el.dispatch_event(&evt);
+    }
+}

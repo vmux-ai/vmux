@@ -55,18 +55,25 @@ impl Plugin for PanePlugin {
                     .in_set(ReadAppCommands)
                     .before(handle_pane_commands),
             )
-            .add_systems(Update, poll_cursor_pane_focus)
-            .add_systems(Update, click_pane_in_player_mode)
-            .add_systems(Update, pane_gap_drag_resize)
-            .add_systems(Update, process_pending_pane_closes)
-            .add_systems(Update, process_pending_stack_closes)
-            .add_systems(PostUpdate, sync_pane_split_gaps_to_settings)
+            .add_systems(
+                Update,
+                (
+                    poll_cursor_pane_focus,
+                    click_pane_in_player_mode,
+                    pane_gap_drag_resize,
+                    process_pending_pane_closes,
+                    process_pending_stack_closes,
+                ),
+            )
             .add_systems(
                 PostUpdate,
-                sync_zoom_visibility.before(bevy::ui::UiSystems::Layout),
-            )
-            .add_systems(PostUpdate, clear_zoom_on_pane_removal)
-            .add_systems(PostUpdate, warp_cursor_to_active_pane);
+                (
+                    sync_pane_split_gaps_to_settings,
+                    sync_zoom_visibility.before(bevy::ui::UiSystems::Layout),
+                    clear_zoom_on_pane_removal,
+                    warp_cursor_to_active_pane,
+                ),
+            );
         register_zoom_hooks(app);
     }
 }
@@ -1462,8 +1469,7 @@ mod tests {
         // active most recently (B in this test).
         use bevy::ui::{ComputedNode, UiGlobalTransform};
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<PaneHoverIntent>();
         app.init_resource::<PendingCursorWarp>();
         app.init_resource::<NewStackContext>();
@@ -1551,8 +1557,7 @@ mod tests {
         // From B, pressing 'h' should navigate to A (their bounding boxes overlap on Y).
         use bevy::ui::{ComputedNode, UiGlobalTransform};
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<PaneHoverIntent>();
         app.init_resource::<PendingCursorWarp>();
         app.init_resource::<NewStackContext>();
@@ -1633,8 +1638,7 @@ mod tests {
     fn select_left_picks_left_neighbor_in_horizontal_split() {
         use bevy::ui::{ComputedNode, UiGlobalTransform};
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<PaneHoverIntent>();
         app.init_resource::<PendingCursorWarp>();
         app.init_resource::<NewStackContext>();
@@ -1713,8 +1717,7 @@ mod tests {
     #[test]
     fn closing_last_pane_marks_window_closing() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<PaneHoverIntent>();
         app.init_resource::<PendingCursorWarp>();
         app.init_resource::<NewStackContext>();
@@ -1779,8 +1782,7 @@ mod tests {
     #[test]
     fn zoom_command_inserts_zoomed_with_correct_hidden_set() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<PaneHoverIntent>();
         app.init_resource::<PendingCursorWarp>();
         app.init_resource::<NewStackContext>();
@@ -1847,8 +1849,7 @@ mod tests {
     #[test]
     fn zoom_command_on_zoomed_tab_removes_zoomed() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<PaneHoverIntent>();
         app.init_resource::<PendingCursorWarp>();
         app.init_resource::<NewStackContext>();
@@ -1914,8 +1915,7 @@ mod tests {
     #[test]
     fn zoom_command_on_single_pane_tab_is_noop() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<PaneHoverIntent>();
         app.init_resource::<PendingCursorWarp>();
         app.init_resource::<NewStackContext>();
@@ -1978,8 +1978,7 @@ mod tests {
     #[test]
     fn split_command_auto_unzooms_first() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<PaneHoverIntent>();
         app.init_resource::<PendingCursorWarp>();
         app.init_resource::<NewStackContext>();
@@ -2049,8 +2048,7 @@ mod tests {
     #[test]
     fn select_command_auto_unzooms() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.init_resource::<PaneHoverIntent>();
         app.init_resource::<PendingCursorWarp>();
         app.init_resource::<NewStackContext>();

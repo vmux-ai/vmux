@@ -636,8 +636,7 @@ mod tests {
     #[test]
     fn closing_last_tab_opens_command_bar_with_replacement_tab() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<LayoutSpawnRequest>();
         app.init_resource::<NewStackContext>();
         app.add_message::<crate::LayoutSpawnRequest>();
@@ -688,8 +687,7 @@ mod tests {
     #[test]
     fn closing_last_stack_in_tab_closes_tab_when_another_tab_exists() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CommandPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<LayoutSpawnRequest>();
         app.init_resource::<NewStackContext>();
         app.add_message::<crate::LayoutSpawnRequest>();

@@ -45,43 +45,93 @@ where
     }
 }
 
-pub struct BinJsEmitEventPlugin<E> {
-    id: &'static str,
-    marker: PhantomData<E>,
+pub trait BinEventList {
+    fn register_events(app: &mut App, id_override: Option<&'static str>);
 }
 
-impl<E> BinJsEmitEventPlugin<E> {
+pub struct BinEventEmitterPlugin<T> {
+    id: Option<&'static str>,
+    marker: PhantomData<T>,
+}
+
+impl<E> BinEventEmitterPlugin<(E,)> {
     pub const fn with_id(id: &'static str) -> Self {
         Self {
-            id,
+            id: Some(id),
             marker: PhantomData,
         }
     }
 }
 
-impl<E> Plugin for BinJsEmitEventPlugin<E>
+impl<T> Default for BinEventEmitterPlugin<T> {
+    fn default() -> Self {
+        Self {
+            id: None,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<T> Plugin for BinEventEmitterPlugin<T>
+where
+    T: BinEventList + Send + Sync + 'static,
+{
+    fn build(&self, app: &mut App) {
+        T::register_events(app, self.id);
+    }
+}
+
+fn register_event<E>(app: &mut App, id: &'static str)
 where
     E: rkyv::Archive + Send + Sync + 'static,
     E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
-    fn build(&self, app: &mut App) {
-        let id = self.id;
-        app.add_systems(
-            Update,
-            (move |commands: Commands, buffer: Res<BinIpcEventRawBuffer>| {
-                receive_bin_events::<E>(commands, buffer, id);
-            })
-            .after(drain_bin_ipc_events),
-        );
-    }
+    app.add_systems(
+        Update,
+        (move |commands: Commands, buffer: Res<BinIpcEventRawBuffer>| {
+            receive_bin_events::<E>(commands, buffer, id);
+        })
+        .after(drain_bin_ipc_events),
+    );
 }
 
-impl<E> Default for BinJsEmitEventPlugin<E> {
-    fn default() -> Self {
-        Self::with_id(bin_ipc_event_id::<E>())
-    }
+macro_rules! impl_bin_event_list {
+    ($head:ident $(, $tail:ident)*) => {
+        impl<$head $(, $tail)*> BinEventList for ($head, $($tail,)*)
+        where
+            $head: rkyv::Archive + Send + Sync + 'static,
+            $head::Archived: rkyv::Deserialize<$head, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+                + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+            $(
+                $tail: rkyv::Archive + Send + Sync + 'static,
+                $tail::Archived: rkyv::Deserialize<$tail, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+                    + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+            )*
+        {
+            fn register_events(app: &mut App, id_override: Option<&'static str>) {
+                let head_id = id_override.unwrap_or_else(bin_ipc_event_id::<$head>);
+                register_event::<$head>(app, head_id);
+                $(
+                    register_event::<$tail>(app, bin_ipc_event_id::<$tail>());
+                )*
+            }
+        }
+    };
 }
+
+impl_bin_event_list!(T0);
+impl_bin_event_list!(T0, T1);
+impl_bin_event_list!(T0, T1, T2);
+impl_bin_event_list!(T0, T1, T2, T3);
+impl_bin_event_list!(T0, T1, T2, T3, T4);
+impl_bin_event_list!(T0, T1, T2, T3, T4, T5);
+impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6);
+impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7);
+impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8);
+impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9);
+impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
+impl_bin_event_list!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11);
 
 fn bin_ipc_event_id<E>() -> &'static str {
     std::any::type_name::<E>()

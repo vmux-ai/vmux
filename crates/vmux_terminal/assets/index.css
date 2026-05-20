@@ -1,8 +1,11 @@
 @import "../../vmux_ui/assets/theme.css";
-@config "../tailwind.config.js";
 @import "tailwindcss";
 @source "../src";
 @source ".";
+
+@theme {
+  --font-mono: "JetBrainsMono NF", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
 
 @font-face {
   font-family: "JetBrainsMono NF";

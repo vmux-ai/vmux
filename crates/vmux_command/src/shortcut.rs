@@ -1,4 +1,11 @@
+use bevy::ecs::resource::Resource;
 use bevy::input::keyboard::KeyCode;
+use std::time::Instant;
+
+#[derive(Resource, Default)]
+pub struct ChordState {
+    pub pending_prefix: Option<(KeyCombo, Instant)>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Modifiers {

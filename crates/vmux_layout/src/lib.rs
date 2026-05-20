@@ -11,13 +11,17 @@ pub mod reconcile;
 pub mod snapshot;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub mod chrome;
+pub mod cef;
 #[cfg(not(target_arch = "wasm32"))]
 mod focus_ring;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod glass;
 #[cfg(not(target_arch = "wasm32"))]
 mod header;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod plugin;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod processes_monitor;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod profile;
 #[cfg(not(target_arch = "wasm32"))]
@@ -44,43 +48,22 @@ pub mod space;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod swap;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod toggle_layout;
+pub mod target;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod toggle;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod window;
 
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
-pub use chrome::{
-    Browser, LayoutChrome, LayoutChromePlugin, Loading, NavigationState,
-    apply_chrome_state_from_cef,
-};
-#[cfg(not(target_arch = "wasm32"))]
-use focus_ring::FocusRingPlugin;
-#[cfg(not(target_arch = "wasm32"))]
-use glass::GlassMaterialPlugin;
+pub use cef::{Browser, LayoutCef, Loading, NavigationState, apply_chrome_state_from_cef};
 #[cfg(not(target_arch = "wasm32"))]
 pub use header::Header;
 #[cfg(not(target_arch = "wasm32"))]
-use header::HeaderLayoutPlugin;
-#[cfg(not(target_arch = "wasm32"))]
-use pane::PanePlugin;
-#[cfg(not(target_arch = "wasm32"))]
-use side_sheet::SideSheetLayoutPlugin;
-#[cfg(not(target_arch = "wasm32"))]
-use space::SpacePlugin;
-#[cfg(not(target_arch = "wasm32"))]
-use stack::StackPlugin;
-#[cfg(not(target_arch = "wasm32"))]
-use toggle_layout::ToggleLayoutPlugin;
-#[cfg(not(target_arch = "wasm32"))]
-use vmux_webview_app::JsEmitUiReadyPlugin;
+pub use plugin::LayoutPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use webview_reveal::PendingWebviewReveal;
-#[cfg(not(target_arch = "wasm32"))]
-use webview_reveal::WebviewRevealPlugin;
-#[cfg(not(target_arch = "wasm32"))]
-use window::WindowPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use window::fit_window_to_screen;
 
@@ -129,54 +112,6 @@ pub enum LayoutSpawnRequest {
 pub struct BrowserNavigateRequest {
     pub url: String,
     pub pane: Option<String>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub struct LayoutPlugin;
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Plugin for LayoutPlugin {
-    fn build(&self, app: &mut App) {
-        app.register_type::<Open>();
-        app.init_resource::<NewStackContext>()
-            .init_resource::<settings::ConfirmCloseSettings>()
-            .add_message::<LayoutSpawnRequest>()
-            .add_message::<BrowserNavigateRequest>()
-            .add_message::<reconcile::LayoutApplyRequest>()
-            .add_message::<reconcile::LayoutApplyResponse>()
-            .add_message::<reconcile::LayoutSnapshotRequest>()
-            .add_message::<reconcile::LayoutSnapshotResponse>()
-            .configure_sets(
-                Startup,
-                (
-                    LayoutStartupSet::Window,
-                    LayoutStartupSet::Persistence,
-                    LayoutStartupSet::DefaultSpace,
-                    LayoutStartupSet::Post,
-                )
-                    .chain(),
-            )
-            .add_systems(
-                Update,
-                (
-                    reconcile::apply_layout_requests,
-                    reconcile::serve_snapshot_requests,
-                ),
-            );
-        app.add_plugins((
-            JsEmitUiReadyPlugin,
-            WindowPlugin,
-            SpacePlugin,
-            PanePlugin,
-            StackPlugin,
-            FocusRingPlugin,
-            GlassMaterialPlugin,
-            SideSheetLayoutPlugin,
-            HeaderLayoutPlugin,
-            ToggleLayoutPlugin,
-            WebviewRevealPlugin,
-        ));
-    }
 }
 
 #[cfg(test)]

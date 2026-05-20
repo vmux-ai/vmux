@@ -1,7 +1,7 @@
 use crate::event::COMMAND_BAR_WEBVIEW_URL;
 use crate::{
     Header, LayoutStartupSet, SpaceFilePresent,
-    chrome::{Browser, layout_chrome_bundle},
+    cef::{Browser, layout_cef_bundle},
     glass::{GlassCorners, GlassMaterial},
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
     profile::Profile,
@@ -24,7 +24,7 @@ use bevy::{
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
 use vmux_history::{CreatedAt, LastActivatedAt};
-use vmux_webview_app::WebviewAppEmbedSet;
+use vmux_page::PageEmbedSet;
 
 pub const SIDE_SHEET_TOP_PADDING_PX: f32 = 22.0;
 
@@ -57,7 +57,7 @@ impl Plugin for WindowPlugin {
             setup
                 .in_set(LayoutStartupSet::Window)
                 .after(crate::scene::setup)
-                .after(WebviewAppEmbedSet),
+                .after(PageEmbedSet),
         )
         .add_systems(
             Startup,
@@ -364,7 +364,7 @@ fn setup(
     ));
 
     commands.spawn((
-        layout_chrome_bundle(pw, &mut meshes, &mut webview_mt),
+        layout_cef_bundle(pw, &mut meshes, &mut webview_mt),
         ChildOf(root),
     ));
 }

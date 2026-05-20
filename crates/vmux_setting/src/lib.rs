@@ -1,0 +1,23 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::new_ret_no_self
+)]
+
+pub mod event;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod plugin;
+pub mod schema;
+pub mod themes;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use plugin::SettingsPlugin;
+#[cfg(not(target_arch = "wasm32"))]
+pub use plugin::runtime::{
+    AgentSettings, AppProviderSettings, AppSettings, BrowserSettings, KeyComboDef,
+    LastSelfWriteHash, SettingsLoadSet, SettingsWriteRequest, ShortcutDef, ShortcutEntry,
+    ShortcutSettings, TerminalSettings, TerminalTheme, apply_settings_update, load_settings,
+    resolve_startup_url, serialize_settings_to_json, set_at_path,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use plugin::view::Settings;
