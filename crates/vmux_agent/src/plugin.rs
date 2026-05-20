@@ -9,7 +9,8 @@ use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_core::LastActivatedAt;
 use vmux_core::PageMetadata;
 use vmux_core::agent::{
-    AgentKind, AgentLaunchRequested, McpServerConfig, RestartAgentPty, SpawnAgentInStackRequest,
+    AgentKind, AgentLaunchRequested, McpServerConfig, PageAgentAttachRequest,
+    PageAgentSpawnTabRequest, RestartAgentPty, SpawnAgentInStackRequest,
 };
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::{
@@ -163,15 +164,9 @@ impl Plugin for AgentPlugin {
             .add_message::<AgentQueryRequest>()
             .add_message::<AgentLaunchRequested>()
             .add_message::<AgentSessionExited>()
-            .add_message::<vmux_setting::SettingsWriteRequest>()
-            .add_message::<vmux_layout::BrowserNavigateRequest>()
-            .add_message::<vmux_terminal::TerminalSendRequest>()
-            .add_message::<vmux_terminal::RunShellRequest>()
-            .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
-            .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
-            .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
-            .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
             .add_message::<SpawnAgentInStackRequest>()
+            .add_message::<PageAgentAttachRequest>()
+            .add_message::<PageAgentSpawnTabRequest>()
             .add_message::<RestartAgentPty>()
             .add_systems(Startup, session::start_agent_session_watchers)
             .add_systems(
@@ -226,7 +221,12 @@ impl Plugin for AgentPlugin {
             )
             .add_systems(
                 Update,
-                (handle_spawn_agent_requests, handle_restart_agent_pty),
+                (
+                    handle_spawn_agent_requests,
+                    handle_restart_agent_pty,
+                    respond_page_agent_attach,
+                    respond_page_agent_spawn_tab,
+                ),
             )
             .add_systems(
                 Update,
@@ -1030,6 +1030,56 @@ fn handle_spawn_agent_requests(
                 bevy::log::warn!("agent spawn ({:?}) failed: {e}", req.kind);
             }
         }
+    }
+}
+
+fn respond_page_agent_attach(
+    mut reader: MessageReader<PageAgentAttachRequest>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    strategies: Option<Res<AgentStrategies>>,
+) {
+    for req in reader.read() {
+        let Some(strategies) = strategies.as_deref() else {
+            bevy::log::warn!("agent strategies not registered; skipping page attach");
+            continue;
+        };
+        let _ = attach_page_agent_to_stack(
+            req.stack,
+            &req.provider,
+            &req.model,
+            &req.sid,
+            &mut commands,
+            &mut meshes,
+            &mut webview_mt,
+            strategies,
+        );
+    }
+}
+
+fn respond_page_agent_spawn_tab(
+    mut reader: MessageReader<PageAgentSpawnTabRequest>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    strategies: Option<Res<AgentStrategies>>,
+) {
+    for req in reader.read() {
+        let Some(strategies) = strategies.as_deref() else {
+            bevy::log::warn!("agent strategies not registered; skipping page spawn");
+            continue;
+        };
+        let _ = spawn_page_agent_tab(
+            &req.provider,
+            &req.model,
+            req.pane,
+            &req.sid,
+            &mut commands,
+            &mut meshes,
+            &mut webview_mt,
+            strategies,
+        );
     }
 }
 

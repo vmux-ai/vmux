@@ -103,6 +103,22 @@ pub struct AgentLaunchRequested {
     pub cwd: PathBuf,
 }
 
+#[derive(Message, Debug, Clone)]
+pub struct PageAgentAttachRequest {
+    pub stack: Entity,
+    pub provider: String,
+    pub model: String,
+    pub sid: String,
+}
+
+#[derive(Message, Debug, Clone)]
+pub struct PageAgentSpawnTabRequest {
+    pub pane: Entity,
+    pub provider: String,
+    pub model: String,
+    pub sid: String,
+}
+
 #[derive(Message, Debug, Clone, Copy)]
 pub struct RestartAgentPty {
     pub entity: Entity,

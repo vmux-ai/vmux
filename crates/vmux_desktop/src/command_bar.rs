@@ -19,7 +19,10 @@ use vmux_command::{
     StackCommand, TerminalCommand,
 };
 use vmux_core::PageMetadata;
-use vmux_core::agent::{AgentKind, AgentLaunchRequested, parse_page_agent_url};
+use vmux_core::agent::{
+    AgentKind, AgentLaunchRequested, PageAgentAttachRequest, PageAgentSpawnTabRequest,
+    parse_page_agent_url,
+};
 use vmux_core::terminal::{Terminal, TerminalSpawnRequest};
 use vmux_history::{LastActivatedAt, now_millis};
 pub(crate) use vmux_layout::NewStackContext;
@@ -32,7 +35,6 @@ use vmux_layout::{
     stack::{Stack, active_among, collect_leaf_panes, focused_stack},
     window::{Main, Modal},
 };
-use vmux_setting::AppSettings;
 use vmux_setting::Settings;
 use vmux_space::Spaces;
 use vmux_space::event::SpaceCommandEvent;
@@ -76,6 +78,8 @@ impl Plugin for CommandBarInputPlugin {
         app.init_resource::<NewStackContext>()
             .init_resource::<Messages<AgentLaunchRequested>>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+            .add_message::<PageAgentAttachRequest>()
+            .add_message::<PageAgentSpawnTabRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
                 CommandBarActionEvent,
                 PathCompleteRequest,
@@ -878,12 +882,10 @@ fn on_command_bar_action(
         ),
     >,
     mut resource_params: ParamSet<(
-        Res<AppSettings>,
-        Option<Res<vmux_agent::plugin::AgentProviders>>,
-        Option<Res<vmux_agent::strategy::AgentStrategies>>,
         Res<CommandBarSpacesSnapshot>,
         Res<CommandBarSettingsSnapshot>,
         Res<CommandBarTerminalsSnapshot>,
+        Res<CommandBarAgentsSnapshot>,
     )>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut writer_params: ParamSet<(
@@ -891,6 +893,8 @@ fn on_command_bar_action(
         Option<MessageWriter<AgentLaunchRequested>>,
         MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
         MessageWriter<TerminalSpawnRequest>,
+        Option<MessageWriter<PageAgentAttachRequest>>,
+        Option<MessageWriter<PageAgentSpawnTabRequest>>,
     )>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -898,9 +902,9 @@ fn on_command_bar_action(
 ) {
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let settings_snapshot = resource_params.p4().clone();
-    let spaces_url = resource_params.p3().spaces_page_url.clone();
-    let terminals_snapshot = resource_params.p5().clone();
+    let settings_snapshot = resource_params.p1().clone();
+    let spaces_url = resource_params.p0().spaces_page_url.clone();
+    let terminals_snapshot = resource_params.p2().clone();
     let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
     let pid_to_entity = terminals_snapshot.pid_to_entity.clone();
     let agent_to_entity = Some(terminals_snapshot.agent_session_to_entity.clone());
@@ -981,21 +985,13 @@ fn on_command_bar_action(
                         }
                     } else if let Some((provider, model, sid_opt)) = parse_page_agent_url(&url) {
                         let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                        let strategies_ref = resource_params.p2();
-                        let strategies = strategies_ref.as_deref();
-                        if let Some(strategies) = strategies {
-                            let _ = vmux_agent::plugin::attach_page_agent_to_stack(
-                                stack_e,
-                                &provider,
-                                &model,
-                                &sid,
-                                &mut commands,
-                                &mut meshes,
-                                &mut webview_mt,
-                                strategies,
-                            );
-                        } else {
-                            bevy::log::warn!("agent strategies not registered; skipping spawn");
+                        if let Some(mut w) = writer_params.p4() {
+                            w.write(PageAgentAttachRequest {
+                                stack: stack_e,
+                                provider,
+                                model,
+                                sid,
+                            });
                         }
                     } else if let Some(kind) = AgentKind::all()
                         .into_iter()
@@ -1111,29 +1107,15 @@ fn on_command_bar_action(
                         );
                         if let Some(pane_e) = active_pane_opt {
                             let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                            let strategies_ref = resource_params.p2();
-                            if let Some(strategies) = strategies_ref.as_deref() {
-                                if vmux_agent::plugin::spawn_page_agent_tab(
-                                    &provider,
-                                    &model,
-                                    pane_e,
-                                    &sid,
-                                    &mut commands,
-                                    &mut meshes,
-                                    &mut webview_mt,
-                                    strategies,
-                                )
-                                .is_some()
-                                {
-                                    custom_keyboard_restore = true;
-                                } else {
-                                    bevy::log::warn!(
-                                        "no App agent strategy registered for {provider}/{model}"
-                                    );
-                                }
-                            } else {
-                                bevy::log::warn!("agent strategies not registered; skipping spawn");
+                            if let Some(mut w) = writer_params.p5() {
+                                w.write(PageAgentSpawnTabRequest {
+                                    pane: pane_e,
+                                    provider,
+                                    model,
+                                    sid,
+                                });
                             }
+                            custom_keyboard_restore = true;
                         }
                     } else if let Some(kind) = AgentKind::all()
                         .into_iter()
@@ -1384,63 +1366,48 @@ fn on_command_bar_action(
         "command" => {
             if let Some((provider, model)) = parse_app_agent_id(&evt.value) {
                 let sid = uuid::Uuid::new_v4().to_string();
-                let strategies_ref = resource_params.p2();
-                let strategies = strategies_ref.as_deref();
-                if let Some(strategies) = strategies {
-                    if let Some(stack_e) = empty_stack {
-                        let _ = vmux_agent::plugin::attach_page_agent_to_stack(
-                            stack_e,
-                            &provider,
-                            &model,
-                            &sid,
-                            &mut commands,
-                            &mut meshes,
-                            &mut webview_mt,
-                            strategies,
-                        );
-                        commands.entity(stack_e).insert(LastActivatedAt::now());
-                        if let Ok(parent) = child_of_q.get(stack_e) {
-                            commands.entity(parent.0).insert(LastActivatedAt::now());
-                        }
-                        new_stack_ctx.stack = None;
-                        new_stack_ctx.previous_stack = None;
-                        custom_keyboard_restore = true;
-                    } else {
-                        let (_, active_pane_opt, _) = focused_stack(
-                            &tab_q,
-                            &all_children,
-                            &leaf_panes,
-                            &pane_ts,
-                            &pane_children,
-                            &stack_ts,
-                        );
-                        if let Some(pane_e) = active_pane_opt {
-                            if vmux_agent::plugin::spawn_page_agent_tab(
-                                &provider,
-                                &model,
-                                pane_e,
-                                &sid,
-                                &mut commands,
-                                &mut meshes,
-                                &mut webview_mt,
-                                strategies,
-                            )
-                            .is_some()
-                            {
-                                custom_keyboard_restore = true;
-                            } else {
-                                bevy::log::warn!(
-                                    "no App agent strategy registered for {provider}/{model}"
-                                );
-                            }
-                        }
+                if let Some(stack_e) = empty_stack {
+                    if let Some(mut w) = writer_params.p4() {
+                        w.write(PageAgentAttachRequest {
+                            stack: stack_e,
+                            provider,
+                            model,
+                            sid,
+                        });
                     }
+                    commands.entity(stack_e).insert(LastActivatedAt::now());
+                    if let Ok(parent) = child_of_q.get(stack_e) {
+                        commands.entity(parent.0).insert(LastActivatedAt::now());
+                    }
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.previous_stack = None;
+                    custom_keyboard_restore = true;
                 } else {
-                    bevy::log::warn!("agent strategies not registered; skipping spawn");
+                    let (_, active_pane_opt, _) = focused_stack(
+                        &tab_q,
+                        &all_children,
+                        &leaf_panes,
+                        &pane_ts,
+                        &pane_children,
+                        &stack_ts,
+                    );
+                    if let Some(pane_e) = active_pane_opt {
+                        if let Some(mut w) = writer_params.p5() {
+                            w.write(PageAgentSpawnTabRequest {
+                                pane: pane_e,
+                                provider,
+                                model,
+                                sid,
+                            });
+                        }
+                        custom_keyboard_restore = true;
+                    }
                 }
             } else if resource_params
-                .p1()
-                .is_some_and(|providers| providers.contains(&evt.value))
+                .p3()
+                .providers
+                .iter()
+                .any(|p| p.id == evt.value)
             {
                 let cwd = vmux_space::cwd::default_space_dir();
                 if let Some(mut agent_launches) = writer_params.p1() {
