@@ -12,7 +12,8 @@ use vmux_command::event::{
     PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
 };
 use vmux_command::snapshot::{
-    AgentProviderSummary, CommandBarAgentsSnapshot, CommandBarSpacesSnapshot,
+    AgentProviderSummary, CommandBarAgentsSnapshot, CommandBarSettingsSnapshot,
+    CommandBarSpacesSnapshot,
 };
 use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands, SpaceCommand,
@@ -32,7 +33,6 @@ use vmux_layout::{
 };
 use vmux_setting::AppSettings;
 use vmux_setting::Settings;
-use vmux_setting::event::SETTINGS_PAGE_URL;
 use vmux_space::Spaces;
 use vmux_space::event::SpaceCommandEvent;
 use vmux_terminal::Terminal;
@@ -802,12 +802,13 @@ fn attach_spaces_page_to_tab(
 
 fn attach_settings_page_to_tab(
     tab: Entity,
+    settings_page_url: &str,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     commands.entity(tab).insert(PageMetadata {
-        url: SETTINGS_PAGE_URL.to_string(),
+        url: settings_page_url.to_string(),
         title: "Settings".to_string(),
         ..default()
     });
@@ -885,6 +886,7 @@ fn on_command_bar_action(
         Option<Res<vmux_agent::session::AgentSessionToEntity>>,
         Option<Res<vmux_agent::strategy::AgentStrategies>>,
         Res<CommandBarSpacesSnapshot>,
+        Res<CommandBarSettingsSnapshot>,
     )>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut writer_params: ParamSet<(
@@ -899,6 +901,7 @@ fn on_command_bar_action(
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
     let settings = resource_params.p0().clone();
+    let settings_snapshot = resource_params.p6().clone();
     let spaces_url = resource_params.p5().spaces_page_url.clone();
     let pid_to_entity = resource_params
         .p2()
@@ -1070,9 +1073,12 @@ fn on_command_bar_action(
                             &mut meshes,
                             &mut webview_mt,
                         );
-                    } else if url.starts_with(SETTINGS_PAGE_URL.trim_end_matches('/')) {
+                    } else if url
+                        .starts_with(settings_snapshot.settings_page_url.trim_end_matches('/'))
+                    {
                         attach_settings_page_to_tab(
                             stack_e,
+                            &settings_snapshot.settings_page_url,
                             &mut commands,
                             &mut meshes,
                             &mut webview_mt,
@@ -1247,7 +1253,9 @@ fn on_command_bar_action(
                                 custom_keyboard_restore = true;
                             }
                         }
-                    } else if url.starts_with(SETTINGS_PAGE_URL.trim_end_matches('/')) {
+                    } else if url
+                        .starts_with(settings_snapshot.settings_page_url.trim_end_matches('/'))
+                    {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
                             &all_children,
@@ -1266,6 +1274,7 @@ fn on_command_bar_action(
                                 .id();
                             attach_settings_page_to_tab(
                                 stack_e,
+                                &settings_snapshot.settings_page_url,
                                 &mut commands,
                                 &mut meshes,
                                 &mut webview_mt,
