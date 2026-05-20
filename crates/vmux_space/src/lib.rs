@@ -13,6 +13,8 @@ pub mod cwd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod snapshot_updater;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod spaces;
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -9113,6 +9113,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "vmux_core",
  "vmux_macro",
 ]
 

@@ -31,14 +31,16 @@ pub struct CommandBarSettingsSnapshot {
 #[derive(Resource, Default, Clone, Debug)]
 pub struct CommandBarSpacesSnapshot {
     pub spaces: Vec<SpaceSummary>,
+    pub active_space_id: String,
     pub active_space_name: String,
     pub spaces_page_url: String,
 }
 
 #[derive(Clone, Debug)]
 pub struct SpaceSummary {
-    pub entity: Entity,
+    pub id: String,
     pub name: String,
+    pub profile: String,
 }
 
 #[derive(Resource, Default, Clone, Debug)]

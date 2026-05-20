@@ -36,6 +36,11 @@ impl Plugin for SpacePlugin {
             .add_systems(
                 Update,
                 (apply_pending_space_switch, broadcast_spaces_to_views).chain(),
+            )
+            .add_systems(
+                Update,
+                crate::snapshot_updater::update_spaces_snapshot
+                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
             );
     }
 }

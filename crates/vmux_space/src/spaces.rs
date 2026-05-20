@@ -60,6 +60,15 @@ pub fn read_space_registry_from(root: &Path) -> SpaceRegistry {
     registry
 }
 
+pub fn registry_space_summaries() -> Vec<(String, String, String)> {
+    let registry = read_space_registry_from(&profile::shared_data_dir());
+    registry
+        .spaces
+        .into_iter()
+        .map(|space| (space.id, space.name, space.profile))
+        .collect()
+}
+
 pub fn active_space_rows(active: &ActiveSpace, active_stack_count: usize) -> Vec<SpaceRow> {
     let registry = read_space_registry_from(&profile::shared_data_dir());
     registry

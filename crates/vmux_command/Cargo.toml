@@ -22,4 +22,5 @@ serde_json = { workspace = true }
 bevy = { workspace = true }
 bevy_ecs = { workspace = true }
 muda = "0.19"
+vmux_core = { path = "../vmux_core" }
 vmux_macro = { path = "../vmux_macro" }
