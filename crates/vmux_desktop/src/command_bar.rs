@@ -19,8 +19,8 @@ use vmux_command::{
     StackCommand, TerminalCommand,
 };
 use vmux_core::PageMetadata;
-use vmux_core::agent::AgentLaunchRequested;
-use vmux_core::terminal::TerminalSpawnRequest;
+use vmux_core::agent::{AgentKind, AgentLaunchRequested, parse_page_agent_url};
+use vmux_core::terminal::{Terminal, TerminalSpawnRequest};
 use vmux_history::{LastActivatedAt, now_millis};
 pub(crate) use vmux_layout::NewStackContext;
 use vmux_layout::event::SERVICES_PAGE_URL;
@@ -36,7 +36,6 @@ use vmux_setting::AppSettings;
 use vmux_setting::Settings;
 use vmux_space::Spaces;
 use vmux_space::event::SpaceCommandEvent;
-use vmux_terminal::Terminal;
 use vmux_terminal::processes_monitor::ProcessesMonitor;
 
 pub(crate) use vmux_terminal::pid::focus_pane_entity;
@@ -75,7 +74,6 @@ pub(crate) struct CommandBarInputPlugin;
 impl Plugin for CommandBarInputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NewStackContext>()
-            .init_resource::<vmux_agent::plugin::AgentProviders>()
             .init_resource::<Messages<AgentLaunchRequested>>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
@@ -981,9 +979,7 @@ fn on_command_bar_action(
                                 target_stack: Some(stack_e),
                             });
                         }
-                    } else if let Some((provider, model, sid_opt)) =
-                        vmux_agent::plugin::parse_page_agent_url(&url)
-                    {
+                    } else if let Some((provider, model, sid_opt)) = parse_page_agent_url(&url) {
                         let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                         let strategies_ref = resource_params.p2();
                         let strategies = strategies_ref.as_deref();
@@ -1001,7 +997,7 @@ fn on_command_bar_action(
                         } else {
                             bevy::log::warn!("agent strategies not registered; skipping spawn");
                         }
-                    } else if let Some(kind) = vmux_agent::AgentKind::all()
+                    } else if let Some(kind) = AgentKind::all()
                         .into_iter()
                         .find(|k| url.starts_with(k.cli_url_prefix().trim_end_matches('/')))
                     {
@@ -1011,9 +1007,9 @@ fn on_command_bar_action(
                             .filter(|s| !s.is_empty())
                             .map(|s| s.to_string());
                         let title = match kind {
-                            vmux_agent::AgentKind::Vibe => "Vibe",
-                            vmux_agent::AgentKind::Claude => "Claude",
-                            vmux_agent::AgentKind::Codex => "Codex",
+                            AgentKind::Vibe => "Vibe",
+                            AgentKind::Claude => "Claude",
+                            AgentKind::Codex => "Codex",
                         };
                         if let Some(ref id) = id_part
                             && let Some(map) = agent_to_entity.as_ref()
@@ -1085,7 +1081,7 @@ fn on_command_bar_action(
                     // Normal mode: navigate or spawn terminal in current tab
                     let known_terminal = parse_pid_from_url(&url, &terminal_page_url)
                         .and_then(|p| pid_to_entity.get(&p).copied());
-                    let known_agent = vmux_agent::AgentKind::all().into_iter().find_map(|k| {
+                    let known_agent = AgentKind::all().into_iter().find_map(|k| {
                         let id = url
                             .strip_prefix(&k.cli_url_prefix())
                             .filter(|s| !s.is_empty())?;
@@ -1104,9 +1100,7 @@ fn on_command_bar_action(
                         writer_params
                             .p0()
                             .write(AppCommand::Terminal(TerminalCommand::New));
-                    } else if let Some((provider, model, sid_opt)) =
-                        vmux_agent::plugin::parse_page_agent_url(&url)
-                    {
+                    } else if let Some((provider, model, sid_opt)) = parse_page_agent_url(&url) {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
                             &all_children,
@@ -1141,7 +1135,7 @@ fn on_command_bar_action(
                                 bevy::log::warn!("agent strategies not registered; skipping spawn");
                             }
                         }
-                    } else if let Some(kind) = vmux_agent::AgentKind::all()
+                    } else if let Some(kind) = AgentKind::all()
                         .into_iter()
                         .find(|k| url.starts_with(k.cli_url_prefix().trim_end_matches('/')))
                     {
@@ -1156,9 +1150,9 @@ fn on_command_bar_action(
                         if let Some(pane_e) = active_pane_opt {
                             let prefix = kind.cli_url_prefix();
                             let title = match kind {
-                                vmux_agent::AgentKind::Vibe => "Vibe",
-                                vmux_agent::AgentKind::Claude => "Claude",
-                                vmux_agent::AgentKind::Codex => "Codex",
+                                AgentKind::Vibe => "Vibe",
+                                AgentKind::Claude => "Claude",
+                                AgentKind::Codex => "Codex",
                             };
                             let stack_e = commands
                                 .spawn((
