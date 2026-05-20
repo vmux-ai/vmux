@@ -10,7 +10,7 @@ pub const TERM_RESIZE_EVENT: &str = "term_resize";
 pub const TERM_THEME_EVENT: &str = "term_theme";
 pub const TERM_TITLE_EVENT: &str = "term_title";
 pub const SERVICE_UNAVAILABLE_EVENT: &str = "service_unavailable";
-pub const TERMINAL_WEBVIEW_URL: &str = "vmux://terminal/";
+pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
 #[derive(
     Debug,

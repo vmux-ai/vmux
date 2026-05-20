@@ -14,7 +14,7 @@ use vmux_layout::{
 use vmux_page::{PageConfig, PageReady, PageRegistry};
 
 use crate::event::{
-    SETTINGS_LIST_EVENT, SETTINGS_SCHEMA_EVENT, SETTINGS_WEBVIEW_URL, SettingsCommandEvent,
+    SETTINGS_LIST_EVENT, SETTINGS_PAGE_URL, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent,
     SettingsListEvent, SettingsSchemaEvent,
 };
 use crate::schema::{FieldSpec, SectionSpec, SettingsSchema, WidgetKind};
@@ -32,11 +32,11 @@ impl Settings {
             (
                 Self,
                 Browser,
-                WebviewSource::new(SETTINGS_WEBVIEW_URL),
-                ResolvedWebviewUri(SETTINGS_WEBVIEW_URL.to_string()),
+                WebviewSource::new(SETTINGS_PAGE_URL),
+                ResolvedWebviewUri(SETTINGS_PAGE_URL.to_string()),
                 PageMetadata {
                     title: "Settings".to_string(),
-                    url: SETTINGS_WEBVIEW_URL.to_string(),
+                    url: SETTINGS_PAGE_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },
@@ -211,7 +211,7 @@ pub(crate) fn handle_open_settings_command(
             ))
             .id();
         commands.entity(tab).insert(PageMetadata {
-            url: SETTINGS_WEBVIEW_URL.to_string(),
+            url: SETTINGS_PAGE_URL.to_string(),
             title: "Settings".to_string(),
             ..default()
         });

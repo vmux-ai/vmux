@@ -9,7 +9,7 @@ use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_core::LastActivatedAt;
 use vmux_core::PageMetadata;
 use vmux_core::agent::{AgentKind, McpServerConfig, RestartAgentPty, SpawnAgentInStackRequest};
-use vmux_layout::event::TERMINAL_WEBVIEW_URL;
+use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
@@ -376,7 +376,7 @@ pub fn spawn_process_tab(
         .unwrap_or(&command)
         .to_string();
     commands.entity(tab).insert(PageMetadata {
-        url: TERMINAL_WEBVIEW_URL.to_string(),
+        url: TERMINAL_PAGE_URL.to_string(),
         title,
         bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
         ..default()
@@ -567,7 +567,7 @@ pub fn spawn_sessions_tab(
         ))
         .id();
     commands.entity(tab).insert(PageMetadata {
-        url: vmux_space::event::SPACES_WEBVIEW_URL.to_string(),
+        url: vmux_space::event::SPACES_PAGE_URL.to_string(),
         title: "Sessions".to_string(),
         ..default()
     });
@@ -589,7 +589,7 @@ pub fn spawn_processes_tab(
         ))
         .id();
     commands.entity(tab).insert(PageMetadata {
-        url: vmux_layout::event::SERVICES_WEBVIEW_URL.to_string(),
+        url: vmux_layout::event::SERVICES_PAGE_URL.to_string(),
         title: "Background Services".to_string(),
         bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
         ..default()
@@ -914,9 +914,9 @@ pub fn detect_agent_session_process_exit(
             .remove::<PendingAgentSession>();
         let next = match pid {
             Some(vmux_terminal::pid::Pid(p)) => {
-                format!("{}{p}", vmux_terminal::event::TERMINAL_WEBVIEW_URL)
+                format!("{}{p}", vmux_terminal::event::TERMINAL_PAGE_URL)
             }
-            None => vmux_terminal::event::TERMINAL_WEBVIEW_URL.to_string(),
+            None => vmux_terminal::event::TERMINAL_PAGE_URL.to_string(),
         };
         if meta.url != next {
             meta.url = next;
@@ -1245,7 +1245,7 @@ mod tests {
         assert!(app.world().get::<vmux_layout::stack::Stack>(tab).is_some());
         assert_eq!(
             app.world().get::<PageMetadata>(tab).unwrap().url,
-            TERMINAL_WEBVIEW_URL
+            TERMINAL_PAGE_URL
         );
     }
 

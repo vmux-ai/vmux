@@ -6,7 +6,7 @@ use bevy::render::alpha::AlphaMode;
 use bevy_cef::prelude::*;
 use vmux_page::{PageConfig, PageRegistry};
 
-use crate::event::LAYOUT_WEBVIEW_URL;
+use crate::event::LAYOUT_PAGE_URL;
 use crate::window::WEBVIEW_MESH_DEPTH_BIAS;
 
 #[derive(Component)]
@@ -123,7 +123,7 @@ pub fn layout_cef_bundle(
             ..default()
         },
         ZIndex(2),
-        WebviewSource::new(LAYOUT_WEBVIEW_URL),
+        WebviewSource::new(LAYOUT_PAGE_URL),
         Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
         MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
             base: StandardMaterial {

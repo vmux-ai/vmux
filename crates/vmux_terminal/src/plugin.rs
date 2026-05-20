@@ -195,8 +195,8 @@ pub fn format_terminal_url(
 ) {
     for (pid, mut meta) in &mut q {
         let next = match pid {
-            Some(Pid(p)) => format!("{TERMINAL_WEBVIEW_URL}{p}"),
-            None => TERMINAL_WEBVIEW_URL.to_string(),
+            Some(Pid(p)) => format!("{TERMINAL_PAGE_URL}{p}"),
+            None => TERMINAL_PAGE_URL.to_string(),
         };
         if meta.url != next {
             meta.url = next;
@@ -352,7 +352,7 @@ fn spawn_url_into_stack(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
 ) {
-    if url.starts_with(crate::event::TERMINAL_WEBVIEW_URL) {
+    if url.starts_with(crate::event::TERMINAL_PAGE_URL) {
         let terminal = commands
             .spawn((
                 new_terminal_bundle(meshes, webview_mt, settings),
@@ -373,9 +373,9 @@ fn spawn_url_into_stack(
             session_id,
             stack,
         });
-    } else if url.starts_with(vmux_layout::event::SERVICES_WEBVIEW_URL) {
+    } else if url.starts_with(vmux_layout::event::SERVICES_PAGE_URL) {
         commands.spawn((ProcessesMonitor::new(meshes, webview_mt), ChildOf(stack)));
-    } else if url.starts_with(vmux_space::event::SPACES_WEBVIEW_URL) {
+    } else if url.starts_with(vmux_space::event::SPACES_PAGE_URL) {
         commands.spawn((
             vmux_space::spaces::Spaces::new(meshes, webview_mt),
             ChildOf(stack),
@@ -444,12 +444,12 @@ pub fn new_terminal_bundle_with_cwd(
             PendingServiceCreate,
             PageMetadata {
                 title: format!("Terminal ({})", &process_id.to_string()[..8]),
-                url: TERMINAL_WEBVIEW_URL.to_string(),
+                url: TERMINAL_PAGE_URL.to_string(),
                 favicon_url: String::new(),
                 bg_color: None,
             },
-            WebviewSource::new(TERMINAL_WEBVIEW_URL),
-            ResolvedWebviewUri(TERMINAL_WEBVIEW_URL.to_string()),
+            WebviewSource::new(TERMINAL_PAGE_URL),
+            ResolvedWebviewUri(TERMINAL_PAGE_URL.to_string()),
             Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
                 Vec3::Z,
                 Vec2::splat(0.5),
@@ -502,7 +502,7 @@ pub fn spawn_terminal_tab(
         .map(|cwd| format!("Terminal ({})", cwd.display()))
         .unwrap_or_else(|| "Terminal".to_string());
     commands.entity(tab).insert(PageMetadata {
-        url: TERMINAL_WEBVIEW_URL.to_string(),
+        url: TERMINAL_PAGE_URL.to_string(),
         title,
         bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
         ..default()
@@ -536,12 +536,12 @@ pub fn reattach_terminal_bundle(
             PendingServiceAttach,
             PageMetadata {
                 title: format!("Terminal ({})", &process_id.to_string()[..8]),
-                url: TERMINAL_WEBVIEW_URL.to_string(),
+                url: TERMINAL_PAGE_URL.to_string(),
                 favicon_url: String::new(),
                 bg_color: None,
             },
-            WebviewSource::new(TERMINAL_WEBVIEW_URL),
-            ResolvedWebviewUri(TERMINAL_WEBVIEW_URL.to_string()),
+            WebviewSource::new(TERMINAL_PAGE_URL),
+            ResolvedWebviewUri(TERMINAL_PAGE_URL.to_string()),
             Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
                 Vec3::Z,
                 Vec2::splat(0.5),
@@ -2070,7 +2070,7 @@ fn on_restart_pty(
     if let Some(l) = launch.as_mut() {
         l.args = args;
     } else {
-        meta.url = TERMINAL_WEBVIEW_URL.to_string();
+        meta.url = TERMINAL_PAGE_URL.to_string();
         meta.title = format!("Terminal ({})", &new_id.to_string()[..8]);
     }
 }

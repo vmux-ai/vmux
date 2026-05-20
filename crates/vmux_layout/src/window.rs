@@ -1,4 +1,4 @@
-use crate::event::COMMAND_BAR_WEBVIEW_URL;
+use crate::event::COMMAND_BAR_PAGE_URL;
 use crate::{
     Header, LayoutStartupSet, SpaceFilePresent,
     cef::{Browser, layout_cef_bundle},
@@ -344,7 +344,7 @@ fn setup(
             ..default()
         },
         ZIndex(3),
-        WebviewSource::new(COMMAND_BAR_WEBVIEW_URL),
+        WebviewSource::new(COMMAND_BAR_PAGE_URL),
         Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
         MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
             base: StandardMaterial {

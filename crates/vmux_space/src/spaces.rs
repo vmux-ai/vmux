@@ -7,7 +7,7 @@ use vmux_core::profile;
 use vmux_layout::cef::Browser;
 use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
 
-use crate::event::{SPACES_WEBVIEW_URL, SpaceRow};
+use crate::event::{SPACES_PAGE_URL, SpaceRow};
 use crate::model::{
     DEFAULT_SPACE_ID, SpaceRecord, SpaceRegistry, default_space_record, registry_path,
     space_layout_path_for,
@@ -94,11 +94,11 @@ impl Spaces {
             (
                 Self,
                 Browser,
-                WebviewSource::new(SPACES_WEBVIEW_URL),
-                ResolvedWebviewUri(SPACES_WEBVIEW_URL.to_string()),
+                WebviewSource::new(SPACES_PAGE_URL),
+                ResolvedWebviewUri(SPACES_PAGE_URL.to_string()),
                 PageMetadata {
                     title: "Spaces".to_string(),
-                    url: SPACES_WEBVIEW_URL.to_string(),
+                    url: SPACES_PAGE_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },

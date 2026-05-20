@@ -13,7 +13,7 @@ pub mod plugin;
 pub mod shortcut;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use bundle::COMMAND_BAR_WEBVIEW_URL;
+pub use bundle::COMMAND_BAR_PAGE_URL;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use command::*;

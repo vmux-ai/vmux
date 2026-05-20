@@ -18,8 +18,8 @@ use vmux_command::{
 use vmux_core::PageMetadata;
 use vmux_history::{LastActivatedAt, now_millis};
 pub(crate) use vmux_layout::NewStackContext;
-use vmux_layout::event::SERVICES_WEBVIEW_URL;
-use vmux_layout::{Header, event::TERMINAL_WEBVIEW_URL};
+use vmux_layout::event::SERVICES_PAGE_URL;
+use vmux_layout::{Header, event::TERMINAL_PAGE_URL};
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
@@ -29,8 +29,8 @@ use vmux_layout::{
 };
 use vmux_setting::AppSettings;
 use vmux_setting::Settings;
-use vmux_setting::event::SETTINGS_WEBVIEW_URL;
-use vmux_space::event::{SPACES_WEBVIEW_URL, SpaceCommandEvent};
+use vmux_setting::event::SETTINGS_PAGE_URL;
+use vmux_space::event::{SPACES_PAGE_URL, SpaceCommandEvent};
 use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::Terminal;
 use vmux_terminal::processes_monitor::ProcessesMonitor;
@@ -39,7 +39,7 @@ use vmux_terminal::{new_terminal_bundle, new_terminal_bundle_with_cwd};
 pub(crate) use vmux_terminal::pid::focus_pane_entity;
 
 pub(crate) fn parse_pid_from_url(url: &str) -> Option<u32> {
-    let suffix = url.strip_prefix(TERMINAL_WEBVIEW_URL)?;
+    let suffix = url.strip_prefix(TERMINAL_PAGE_URL)?;
     if suffix.is_empty() {
         return None;
     }
@@ -347,7 +347,7 @@ fn command_bar_open_request(
             }
             AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)) => {
                 request.should_toggle = true;
-                request.url_override = Some(SPACES_WEBVIEW_URL.to_string());
+                request.url_override = Some(SPACES_PAGE_URL.to_string());
             }
             AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)) => {
                 request.should_dismiss = true;
@@ -786,7 +786,7 @@ fn attach_spaces_page_to_tab(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     commands.entity(tab).insert(PageMetadata {
-        url: SPACES_WEBVIEW_URL.to_string(),
+        url: SPACES_PAGE_URL.to_string(),
         title: "Spaces".to_string(),
         ..default()
     });
@@ -800,7 +800,7 @@ fn attach_settings_page_to_tab(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     commands.entity(tab).insert(PageMetadata {
-        url: SETTINGS_WEBVIEW_URL.to_string(),
+        url: SETTINGS_PAGE_URL.to_string(),
         title: "Settings".to_string(),
         ..default()
     });
@@ -929,7 +929,7 @@ fn on_command_bar_action(
                 };
                 if let Some(stack_e) = empty_stack {
                     commands.entity(stack_e).insert(PageMetadata {
-                        url: TERMINAL_WEBVIEW_URL.to_string(),
+                        url: TERMINAL_PAGE_URL.to_string(),
                         title: format!("Terminal ({})", dir.display()),
                         ..default()
                     });
@@ -974,7 +974,7 @@ fn on_command_bar_action(
                                 bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
                             }
                             commands.entity(stack_e).insert(PageMetadata {
-                                url: TERMINAL_WEBVIEW_URL.to_string(),
+                                url: TERMINAL_PAGE_URL.to_string(),
                                 title: "Terminal".to_string(),
                                 ..default()
                             });
@@ -1042,9 +1042,9 @@ fn on_command_bar_action(
                                     stack: stack_e,
                                 });
                         }
-                    } else if url.starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(SERVICES_PAGE_URL.trim_end_matches('/')) {
                         commands.entity(stack_e).insert(PageMetadata {
-                            url: SERVICES_WEBVIEW_URL.to_string(),
+                            url: SERVICES_PAGE_URL.to_string(),
                             title: "Background Services".to_string(),
                             ..default()
                         });
@@ -1052,14 +1052,14 @@ fn on_command_bar_action(
                             ProcessesMonitor::new(&mut meshes, &mut webview_mt),
                             ChildOf(stack_e),
                         ));
-                    } else if url.starts_with(SPACES_WEBVIEW_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
                         attach_spaces_page_to_tab(
                             stack_e,
                             &mut commands,
                             &mut meshes,
                             &mut webview_mt,
                         );
-                    } else if url.starts_with(SETTINGS_WEBVIEW_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(SETTINGS_PAGE_URL.trim_end_matches('/')) {
                         attach_settings_page_to_tab(
                             stack_e,
                             &mut commands,
@@ -1189,12 +1189,12 @@ fn on_command_bar_action(
                                 });
                             custom_keyboard_restore = true;
                         }
-                    } else if url.starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(SERVICES_PAGE_URL.trim_end_matches('/')) {
                         use vmux_command::ServiceCommand;
                         writer_params
                             .p0()
                             .write(AppCommand::Service(ServiceCommand::Open));
-                    } else if url.starts_with(SPACES_WEBVIEW_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
                             &all_children,
@@ -1234,7 +1234,7 @@ fn on_command_bar_action(
                                 custom_keyboard_restore = true;
                             }
                         }
-                    } else if url.starts_with(SETTINGS_WEBVIEW_URL.trim_end_matches('/')) {
+                    } else if url.starts_with(SETTINGS_PAGE_URL.trim_end_matches('/')) {
                         let (_, active_pane_opt, _) = focused_stack(
                             &tab_q,
                             &all_children,
@@ -1338,7 +1338,7 @@ fn on_command_bar_action(
                 };
                 if let Some(stack_e) = empty_stack {
                     commands.entity(stack_e).insert(PageMetadata {
-                        url: TERMINAL_WEBVIEW_URL.to_string(),
+                        url: TERMINAL_PAGE_URL.to_string(),
                         title: "Terminal".to_string(),
                         ..default()
                     });
@@ -1375,7 +1375,7 @@ fn on_command_bar_action(
                             ))
                             .id();
                         commands.entity(stack_e).insert(PageMetadata {
-                            url: TERMINAL_WEBVIEW_URL.to_string(),
+                            url: TERMINAL_PAGE_URL.to_string(),
                             title: "Terminal".to_string(),
                             ..default()
                         });
@@ -2233,7 +2233,7 @@ mod tests {
         ))]);
 
         assert!(request.should_toggle);
-        assert_eq!(request.url_override, Some(SPACES_WEBVIEW_URL.to_string()));
+        assert_eq!(request.url_override, Some(SPACES_PAGE_URL.to_string()));
     }
 
     #[test]
@@ -2383,7 +2383,7 @@ mod tests {
                 webview,
                 payload: CommandBarActionEvent {
                     action: "navigate".to_string(),
-                    value: SPACES_WEBVIEW_URL.to_string(),
+                    value: SPACES_PAGE_URL.to_string(),
                 },
             });
         app.update();
@@ -2426,7 +2426,7 @@ mod tests {
                 webview,
                 payload: CommandBarActionEvent {
                     action: "navigate".to_string(),
-                    value: SPACES_WEBVIEW_URL.to_string(),
+                    value: SPACES_PAGE_URL.to_string(),
                 },
             });
         app.update();
@@ -2452,7 +2452,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(tabs.len(), 1);
-        assert_eq!(tabs[0].1, SPACES_WEBVIEW_URL);
+        assert_eq!(tabs[0].1, SPACES_PAGE_URL);
         assert!(tabs[0].2);
 
         let ctx = app.world().resource::<NewStackContext>();

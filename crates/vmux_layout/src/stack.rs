@@ -1,4 +1,4 @@
-use crate::event::{SERVICES_WEBVIEW_URL, TERMINAL_WEBVIEW_URL};
+use crate::event::{SERVICES_PAGE_URL, TERMINAL_PAGE_URL};
 use crate::{
     LayoutSpawnRequest, NewStackContext,
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
@@ -220,7 +220,7 @@ fn handle_stack_commands(
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
                     commands.entity(stack).insert(vmux_core::PageMetadata {
-                        url: TERMINAL_WEBVIEW_URL.to_string(),
+                        url: TERMINAL_PAGE_URL.to_string(),
                         title: "Terminal".to_string(),
                         bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
                         ..default()
@@ -231,7 +231,7 @@ fn handle_stack_commands(
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
                     commands.entity(stack).insert(vmux_core::PageMetadata {
-                        url: SERVICES_WEBVIEW_URL.to_string(),
+                        url: SERVICES_PAGE_URL.to_string(),
                         title: "Background Services".to_string(),
                         bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
                         ..default()

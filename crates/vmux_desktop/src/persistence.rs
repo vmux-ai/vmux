@@ -8,8 +8,8 @@ use std::path::PathBuf;
 
 use crate::browser::Browser;
 use vmux_core::PageMetadata;
-use vmux_layout::event::SERVICES_WEBVIEW_URL;
-use vmux_layout::event::TERMINAL_WEBVIEW_URL;
+use vmux_layout::event::SERVICES_PAGE_URL;
+use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
 use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
@@ -20,8 +20,8 @@ use vmux_layout::{
 };
 use vmux_setting::AppSettings;
 use vmux_setting::Settings;
-use vmux_setting::event::SETTINGS_WEBVIEW_URL;
-use vmux_space::event::SPACES_WEBVIEW_URL;
+use vmux_setting::event::SETTINGS_PAGE_URL;
+use vmux_space::event::SPACES_PAGE_URL;
 use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
@@ -349,7 +349,7 @@ pub(crate) fn rebuild_space_views(
         if !has_browser {
             if meta
                 .url
-                .starts_with(SERVICES_WEBVIEW_URL.trim_end_matches('/'))
+                .starts_with(SERVICES_PAGE_URL.trim_end_matches('/'))
             {
                 commands.spawn((
                     vmux_terminal::processes_monitor::ProcessesMonitor::new(
@@ -360,7 +360,7 @@ pub(crate) fn rebuild_space_views(
                 ));
             } else if meta
                 .url
-                .starts_with(TERMINAL_WEBVIEW_URL.trim_end_matches('/'))
+                .starts_with(TERMINAL_PAGE_URL.trim_end_matches('/'))
             {
                 let cwd = saved_launch.map(|l| std::path::PathBuf::from(&l.cwd));
                 let term = commands
@@ -394,14 +394,11 @@ pub(crate) fn rebuild_space_views(
                     session_id,
                     stack: entity,
                 });
-            } else if meta
-                .url
-                .starts_with(SPACES_WEBVIEW_URL.trim_end_matches('/'))
-            {
+            } else if meta.url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
                 commands.spawn((Spaces::new(&mut meshes, &mut webview_mt), ChildOf(entity)));
             } else if meta
                 .url
-                .starts_with(SETTINGS_WEBVIEW_URL.trim_end_matches('/'))
+                .starts_with(SETTINGS_PAGE_URL.trim_end_matches('/'))
             {
                 commands.spawn((Settings::new(&mut meshes, &mut webview_mt), ChildOf(entity)));
             } else {
@@ -566,7 +563,7 @@ mod tests {
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let saved_url = format!(
             "{}{}",
-            TERMINAL_WEBVIEW_URL,
+            TERMINAL_PAGE_URL,
             uuid::Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap()
         );
         let tab = app
@@ -593,7 +590,7 @@ mod tests {
         let meta = app.world().get::<PageMetadata>(terminal).unwrap();
 
         let _ = saved_url;
-        assert_eq!(meta.url, TERMINAL_WEBVIEW_URL);
+        assert_eq!(meta.url, TERMINAL_PAGE_URL);
     }
 
     #[test]

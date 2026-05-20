@@ -10,7 +10,7 @@ use vmux_layout::stack::Stack;
 use vmux_page::{PageConfig, PageReady, PageRegistry};
 
 use crate::event::{
-    SPACES_LIST_EVENT, SPACES_WEBVIEW_URL, SpaceCommandEvent, SpaceRow, SpacesListEvent,
+    SPACES_LIST_EVENT, SPACES_PAGE_URL, SpaceCommandEvent, SpaceRow, SpacesListEvent,
 };
 use crate::model::{
     DEFAULT_SPACE_ID, SpaceRecord, SpaceRegistry, default_space_record, registry_path,
@@ -269,7 +269,7 @@ fn spawn_spaces_page_layout(
     new_stack_ctx.dismiss_modal = false;
     commands.entity(tab).insert(PageMetadata {
         title: "Spaces".to_string(),
-        url: SPACES_WEBVIEW_URL.to_string(),
+        url: SPACES_PAGE_URL.to_string(),
         favicon_url: String::new(),
         bg_color: None,
     });
@@ -303,10 +303,7 @@ fn on_space_command(
     let mut registry = read_space_registry_from(&root);
     let evt = &trigger.event().payload;
     if evt.command == "open_page" {
-        if let Some((existing, _)) = stack_q
-            .iter()
-            .find(|(_, meta)| meta.url == SPACES_WEBVIEW_URL)
-        {
+        if let Some((existing, _)) = stack_q.iter().find(|(_, meta)| meta.url == SPACES_PAGE_URL) {
             vmux_core::focus_pane_entity(existing, &mut commands, &child_of_q);
             return;
         }
@@ -328,7 +325,7 @@ fn on_space_command(
             .id();
         spawn_requests.write(vmux_layout::LayoutSpawnRequest::OpenUrl {
             stack,
-            url: SPACES_WEBVIEW_URL.to_string(),
+            url: SPACES_PAGE_URL.to_string(),
         });
         return;
     }
@@ -611,7 +608,7 @@ mod tests {
                 Stack::default(),
                 PageMetadata {
                     title: "Spaces".to_string(),
-                    url: SPACES_WEBVIEW_URL.to_string(),
+                    url: SPACES_PAGE_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },
@@ -672,7 +669,7 @@ mod tests {
                 Stack::default(),
                 PageMetadata {
                     title: "Spaces".to_string(),
-                    url: SPACES_WEBVIEW_URL.to_string(),
+                    url: SPACES_PAGE_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },
@@ -744,7 +741,7 @@ mod tests {
                 Stack::default(),
                 PageMetadata {
                     title: "Spaces".to_string(),
-                    url: SPACES_WEBVIEW_URL.to_string(),
+                    url: SPACES_PAGE_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },
@@ -795,7 +792,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(tabs.len(), 1);
-        assert_eq!(tabs[0].1, SPACES_WEBVIEW_URL);
+        assert_eq!(tabs[0].1, SPACES_PAGE_URL);
         assert!(tabs[0].2);
         let focus = app.world().resource::<vmux_layout::stack::FocusedStack>();
         assert_ne!(focus.tab, Some(old_tab));
@@ -850,7 +847,7 @@ mod tests {
                 LastActivatedAt::now(),
                 PageMetadata {
                     title: "Spaces".to_string(),
-                    url: SPACES_WEBVIEW_URL.to_string(),
+                    url: SPACES_PAGE_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },

@@ -3,7 +3,7 @@ use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 
 use crate::cef::Browser;
-use crate::event::SERVICES_WEBVIEW_URL;
+use crate::event::SERVICES_PAGE_URL;
 use crate::window::WEBVIEW_MESH_DEPTH_BIAS;
 
 #[derive(Component)]
@@ -18,11 +18,11 @@ impl ProcessesMonitor {
             (
                 Self,
                 Browser,
-                WebviewSource::new(SERVICES_WEBVIEW_URL),
-                ResolvedWebviewUri(SERVICES_WEBVIEW_URL.to_string()),
+                WebviewSource::new(SERVICES_PAGE_URL),
+                ResolvedWebviewUri(SERVICES_PAGE_URL.to_string()),
                 PageMetadata {
                     title: "Background Services".to_string(),
-                    url: SERVICES_WEBVIEW_URL.to_string(),
+                    url: SERVICES_PAGE_URL.to_string(),
                     favicon_url: String::new(),
                     bg_color: None,
                 },

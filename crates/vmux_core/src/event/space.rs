@@ -1,4 +1,4 @@
-pub const SPACES_WEBVIEW_URL: &str = "vmux://spaces/";
+pub const SPACES_PAGE_URL: &str = "vmux://spaces/";
 pub const SPACES_LIST_EVENT: &str = "spaces_list";
 
 #[derive(

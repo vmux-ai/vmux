@@ -1,4 +1,4 @@
-pub const SETTINGS_WEBVIEW_URL: &str = "vmux://settings/";
+pub const SETTINGS_PAGE_URL: &str = "vmux://settings/";
 pub const SETTINGS_LIST_EVENT: &str = "settings_list";
 pub const SETTINGS_SCHEMA_EVENT: &str = "settings_schema";
 
