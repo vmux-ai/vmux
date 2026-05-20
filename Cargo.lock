@@ -9109,17 +9109,11 @@ version = "0.0.9"
 dependencies = [
  "bevy",
  "bevy_ecs",
- "dioxus",
- "js-sys",
  "muda",
  "rkyv",
  "serde",
  "serde_json",
  "vmux_macro",
- "vmux_page",
- "vmux_ui",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -9207,6 +9201,7 @@ dependencies = [
  "bevy_render",
  "bevy_winit",
  "dioxus",
+ "js-sys",
  "libc",
  "moonshine-save",
  "raw-window-handle",

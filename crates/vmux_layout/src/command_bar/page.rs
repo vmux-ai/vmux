@@ -1,19 +1,19 @@
 #![allow(non_snake_case)]
 
+use crate::command_bar::keyboard::{
+    CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code,
+    ignore_physical_rerouted_ctrl_keydown,
+};
+use crate::command_bar::results::{
+    CommandBarResultItem as ResultItem, SETTINGS_PAGE_URL, SPACES_PAGE_URL, filter_results,
+};
+use crate::command_bar::style::{command_bar_shell_class, result_item_class};
 use dioxus::prelude::*;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarOpenEvent, CommandBarReadyEvent,
     CommandBarRenderedEvent, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
     PathEntry, command_bar_open_should_ack, command_bar_open_should_reset_input, looks_like_url,
 };
-use vmux_command::keyboard::{
-    CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code,
-    ignore_physical_rerouted_ctrl_keydown,
-};
-use vmux_command::results::{
-    CommandBarResultItem as ResultItem, SETTINGS_PAGE_URL, SPACES_PAGE_URL, filter_results,
-};
-use vmux_command::style::{command_bar_shell_class, result_item_class};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
@@ -140,7 +140,7 @@ pub fn Page() -> Element {
             if let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
                 && !path_items
                     .iter()
-                    .any(|item| matches!(item, ResultItem::Terminal { path } if path == tp))
+                    .any(|item| matches!(item, ResultItem::Terminal { path } if *path == *tp))
             {
                 combined.push(entry.clone());
             }

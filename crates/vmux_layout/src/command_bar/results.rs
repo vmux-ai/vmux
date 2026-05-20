@@ -1,4 +1,4 @@
-use crate::event::{CommandBarCommandEntry, CommandBarSpace, CommandBarTab};
+use vmux_command::event::{CommandBarCommandEntry, CommandBarSpace, CommandBarTab};
 
 const SPACES_QUERY: &str = "vmux://spaces";
 pub const SPACES_PAGE_URL: &str = "vmux://spaces/";
@@ -242,7 +242,7 @@ pub fn filter_results(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{CommandBarCommandEntry, CommandBarTab};
+    use vmux_command::event::{CommandBarCommandEntry, CommandBarTab};
 
     fn space(id: &str, name: &str, active: bool) -> CommandBarSpace {
         CommandBarSpace {

@@ -4,6 +4,7 @@
     clippy::new_ret_no_self
 )]
 
+pub mod command_bar;
 pub mod event;
 pub mod protocol;
 pub mod reconcile;

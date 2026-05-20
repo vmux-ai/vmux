@@ -33,7 +33,7 @@ mod tests {
 
     #[test]
     fn command_bar_document_keeps_backdrop_transparent() {
-        let css = include_str!("../assets/index.css");
+        let css = include_str!("../../../vmux_command/assets/index.css");
 
         assert!(!css.contains("background-color: var(--chrome-surface)"));
     }

@@ -16,6 +16,11 @@ name = "vmux_layout_app"
 path = "src/main.rs"
 required-features = ["web"]
 
+[[bin]]
+name = "vmux_command_bar_app"
+path = "src/command_bar_app.rs"
+required-features = ["web"]
+
 [lib]
 path = "src/lib.rs"
 
@@ -53,6 +58,23 @@ vmux_page = { path = "../vmux_page" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
+js-sys = "0.3"
+vmux_command = { path = "../vmux_command" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = "0.2.115"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "CssStyleDeclaration"] }
+web-sys = { version = "0.3", features = [
+    "AddEventListenerOptions",
+    "CssStyleDeclaration",
+    "Document",
+    "Element",
+    "Event",
+    "EventInit",
+    "EventTarget",
+    "HtmlElement",
+    "HtmlInputElement",
+    "KeyboardEvent",
+    "KeyboardEventInit",
+    "ScrollIntoViewOptions",
+    "ScrollLogicalPosition",
+    "Window",
+] }
