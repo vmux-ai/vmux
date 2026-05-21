@@ -639,6 +639,33 @@ pub fn spawn_vmux_tab(
                     }
                     Ok(())
                 }
+                Some(crate::AgentUrl::PageDefault) => {
+                    let Some(p) = crate::providers::resolve_default_app_provider() else {
+                        return Err(
+                            "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
+                                .to_string(),
+                        );
+                    };
+                    let sid = uuid::Uuid::new_v4().to_string();
+                    if spawn_page_agent_tab(
+                        p.provider,
+                        p.default_model,
+                        pane,
+                        &sid,
+                        commands,
+                        meshes,
+                        webview_mt,
+                        strategies,
+                    )
+                    .is_none()
+                    {
+                        return Err(format!(
+                            "no Page agent strategy registered for {}/{}",
+                            p.provider, p.default_model
+                        ));
+                    }
+                    Ok(())
+                }
                 Some(crate::AgentUrl::Cli { kind, sid }) => {
                     let cwd =
                         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));

@@ -17,6 +17,7 @@ pub enum AgentUrl {
         model: String,
         sid: String,
     },
+    PageDefault,
 }
 
 impl AgentUrl {
@@ -24,6 +25,7 @@ impl AgentUrl {
         let body = url.strip_prefix("vmux://agent/")?;
         let segs: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
         match segs.as_slice() {
+            [] => Some(AgentUrl::PageDefault),
             [kind_seg, sid] => {
                 let kind = AgentKind::from_url_segment(kind_seg)?;
                 Some(AgentUrl::Cli {
@@ -43,7 +45,7 @@ impl AgentUrl {
     pub fn variant(&self) -> AgentVariant {
         match self {
             AgentUrl::Cli { .. } => AgentVariant::Cli,
-            AgentUrl::Page { .. } => AgentVariant::Page,
+            AgentUrl::Page { .. } | AgentUrl::PageDefault => AgentVariant::Page,
         }
     }
 
@@ -51,6 +53,7 @@ impl AgentUrl {
         match self {
             AgentUrl::Cli { sid, .. } => sid,
             AgentUrl::Page { sid, .. } => sid,
+            AgentUrl::PageDefault => "",
         }
     }
 
@@ -62,6 +65,7 @@ impl AgentUrl {
                 model,
                 sid,
             } => format!("{}{sid}", page_url_prefix(provider, model)),
+            AgentUrl::PageDefault => "vmux://agent/".to_string(),
         }
     }
 }
@@ -139,6 +143,30 @@ mod tests {
     fn prefix_only_url_rejected() {
         assert_eq!(AgentUrl::parse("vmux://agent/vibe/"), None);
         assert_eq!(AgentUrl::parse("vmux://agent/openai/gpt-5.5/"), None);
+    }
+
+    #[test]
+    fn bare_agent_url_parses_to_page_default() {
+        assert_eq!(
+            AgentUrl::parse("vmux://agent/"),
+            Some(AgentUrl::PageDefault)
+        );
+    }
+
+    #[test]
+    fn page_default_formats_back_to_bare() {
+        assert_eq!(AgentUrl::PageDefault.format(), "vmux://agent/");
+    }
+
+    #[test]
+    fn page_default_round_trip() {
+        let url = AgentUrl::PageDefault.format();
+        assert_eq!(AgentUrl::parse(&url), Some(AgentUrl::PageDefault));
+    }
+
+    #[test]
+    fn page_default_variant_is_page() {
+        assert_eq!(AgentUrl::PageDefault.variant(), AgentVariant::Page);
     }
 
     #[test]
