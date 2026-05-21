@@ -3,19 +3,19 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::BinIpcEventRawBuffer;
-use vmux_agent::message::Message;
 use vmux_agent::{
     AgentApprovalPolicy, AgentKind, AgentMessages, AgentPageStrategy, AgentRunState, AgentSession,
-    AgentVariant, AssistantBlock, LastRunStateKind, PageAgentPlugin, PendingUserInput,
+    AgentVariant, AssistantBlock, LastRunStateKind, Message, PageAgentPlugin, PendingUserInput,
+    providers::openai_shared::parse_chat_completions_sse,
     strategy::{AgentStrategies, AgentStrategy},
-    stream::{StopReason, StreamEvent, ToolDef},
+    stream::{StreamEvent, ToolDef},
 };
 
-struct EchoMock {
+struct MockMistral {
     url: String,
 }
 
-impl AgentStrategy for EchoMock {
+impl AgentStrategy for MockMistral {
     fn kind(&self) -> AgentKind {
         AgentKind::Vibe
     }
@@ -24,12 +24,12 @@ impl AgentStrategy for EchoMock {
     }
 }
 
-impl AgentPageStrategy for EchoMock {
+impl AgentPageStrategy for MockMistral {
     fn provider(&self) -> &str {
-        "vibe"
+        "mistral"
     }
     fn model(&self) -> &str {
-        "echo-stub"
+        "devstral-2"
     }
     fn endpoint(&self) -> &str {
         &self.url
@@ -45,29 +45,19 @@ impl AgentPageStrategy for EchoMock {
             .unwrap()
     }
     fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
-        for line in payload.lines() {
-            if let Some(data) = line.strip_prefix("data: ") {
-                if data == "[STOP]" {
-                    return Some(StreamEvent::StopTurn {
-                        reason: StopReason::EndTurn,
-                    });
-                }
-                return Some(StreamEvent::TextDelta(data.to_string()));
-            }
-        }
-        None
+        parse_chat_completions_sse(payload)
     }
 }
 
 #[test]
-fn echo_session_streams_to_assistant_message() {
+fn single_text_turn_streams_into_assistant_message() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
 
     let mut server = mockito::Server::new();
-    let body = "data: echo: hello\n\ndata: [STOP]\n\n";
+    let body = include_str!("fixtures/mistral/text.sse");
     let _m = server
-        .mock("POST", "/echo")
+        .mock("POST", "/chat")
         .with_status(200)
         .with_header("content-type", "text/event-stream")
         .with_body(body)
@@ -78,8 +68,8 @@ fn echo_session_streams_to_assistant_message() {
     app.init_resource::<BinIpcEventRawBuffer>();
     app.add_plugins(PageAgentPlugin);
     let mut strategies = AgentStrategies::default();
-    strategies.register_page(Arc::new(EchoMock {
-        url: format!("{}/echo", server.url()),
+    strategies.register_page(Arc::new(MockMistral {
+        url: format!("{}/chat", server.url()),
     }));
     app.insert_resource(strategies);
 
@@ -90,42 +80,40 @@ fn echo_session_streams_to_assistant_message() {
                 kind: AgentKind::Vibe,
                 variant: AgentVariant::Page,
                 sid: "smoke".into(),
-                provider: "vibe".into(),
-                model: "echo-stub".into(),
+                provider: "mistral".into(),
+                model: "devstral-2".into(),
             },
             AgentMessages::default(),
             AgentApprovalPolicy::default(),
             AgentRunState::Idle,
             LastRunStateKind::default(),
-            PendingUserInput("hello".into()),
+            PendingUserInput("hi".into()),
         ))
         .id();
 
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while std::time::Instant::now() < deadline {
         app.update();
-        let state = app.world().get::<AgentRunState>(entity).unwrap();
-        if matches!(state, AgentRunState::Idle) {
+        if matches!(
+            app.world().get::<AgentRunState>(entity),
+            Some(AgentRunState::Idle)
+        ) {
             let msgs = app.world().get::<AgentMessages>(entity).unwrap();
-            if msgs.0.len() >= 2 {
-                break;
+            let last = msgs.0.last();
+            if let Some(Message::Assistant { blocks }) = last {
+                let text: String = blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        AssistantBlock::Text(t) => Some(t.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                if text == "hello world" {
+                    return;
+                }
             }
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-
-    let msgs = app.world().get::<AgentMessages>(entity).unwrap();
-    assert_eq!(msgs.0.len(), 2, "expected user + assistant messages");
-    assert!(matches!(&msgs.0[0], Message::User { text } if text == "hello"));
-    let assistant_text = match &msgs.0[1] {
-        Message::Assistant { blocks } => blocks
-            .iter()
-            .filter_map(|b| match b {
-                AssistantBlock::Text(t) => Some(t.as_str()),
-                _ => None,
-            })
-            .collect::<String>(),
-        _ => panic!("expected assistant message"),
-    };
-    assert_eq!(assistant_text, "echo: hello");
+    panic!("did not reach Idle with assistant 'hello world' within 5s");
 }
