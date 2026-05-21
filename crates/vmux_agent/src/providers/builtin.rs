@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::AgentKind;
 use crate::client::page::strategy::AgentPageStrategy;
+use crate::echo::EchoPageStrategy;
 use crate::providers::anthropic::AnthropicStrategy;
 use crate::providers::mistral::MistralStrategy;
 use crate::providers::openai::OpenAiResponsesStrategy;
@@ -13,6 +14,13 @@ pub struct BuiltinProvider {
     pub default_model: &'static str,
     pub env_var: &'static str,
 }
+
+pub const ECHO_DEFAULT: BuiltinProvider = BuiltinProvider {
+    provider: "echo",
+    kind: AgentKind::Vibe,
+    default_model: "echo",
+    env_var: "",
+};
 
 pub const BUILTIN_PROVIDERS: &[BuiltinProvider] = &[
     BuiltinProvider {
@@ -39,6 +47,7 @@ pub fn resolve_default_app_provider() -> Option<&'static BuiltinProvider> {
     BUILTIN_PROVIDERS
         .iter()
         .find(|p| std::env::var(p.env_var).is_ok())
+        .or(Some(&ECHO_DEFAULT))
 }
 
 pub fn instantiate_builtin(p: &BuiltinProvider, model: &str) -> Arc<dyn AgentPageStrategy> {
@@ -46,6 +55,7 @@ pub fn instantiate_builtin(p: &BuiltinProvider, model: &str) -> Arc<dyn AgentPag
         "mistral" => Arc::new(MistralStrategy::new(p.provider, model.to_string())),
         "anthropic" => Arc::new(AnthropicStrategy::new(p.provider, model.to_string())),
         "openai" => Arc::new(OpenAiResponsesStrategy::new(p.provider, model.to_string())),
+        "echo" => Arc::new(EchoPageStrategy::new(p.provider, model.to_string(), p.kind)),
         other => panic!("instantiate_builtin: unknown provider '{other}'"),
     }
 }
@@ -86,9 +96,10 @@ mod tests {
 
     #[test]
     #[serial]
-    fn no_keys_returns_none() {
+    fn no_keys_returns_echo_fallback() {
         clear_all_keys();
-        assert!(resolve_default_app_provider().is_none());
+        let p = resolve_default_app_provider().unwrap();
+        assert_eq!(p.provider, "echo");
     }
 
     #[test]

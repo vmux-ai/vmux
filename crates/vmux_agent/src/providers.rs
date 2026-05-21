@@ -6,7 +6,8 @@ pub mod openai_shared;
 
 pub use anthropic::AnthropicStrategy;
 pub use builtin::{
-    BUILTIN_PROVIDERS, BuiltinProvider, instantiate_builtin, resolve_default_app_provider,
+    BUILTIN_PROVIDERS, BuiltinProvider, ECHO_DEFAULT, instantiate_builtin,
+    resolve_default_app_provider,
 };
 pub use mistral::MistralStrategy;
 pub use openai::OpenAiResponsesStrategy;

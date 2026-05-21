@@ -6,7 +6,7 @@ use vmux_setting::{AppSettings, SettingsLoadSet};
 
 use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession};
 use crate::echo::EchoPageStrategy;
-use crate::providers::{BUILTIN_PROVIDERS, instantiate_builtin};
+use crate::providers::{BUILTIN_PROVIDERS, ECHO_DEFAULT, instantiate_builtin};
 use crate::run_state_kind::LastRunStateKind;
 use crate::strategy::AgentStrategies;
 use crate::systems::{
@@ -87,12 +87,20 @@ fn register_builtin_providers(strategies: Option<ResMut<AgentStrategies>>) {
     let Some(mut strategies) = strategies else {
         return;
     };
+    let mut registered: Vec<&'static str> = Vec::new();
     for p in BUILTIN_PROVIDERS {
         if std::env::var(p.env_var).is_err() {
             continue;
         }
         strategies.register_page_if_absent(instantiate_builtin(p, p.default_model));
+        registered.push(p.provider);
     }
+    strategies.register_page_if_absent(instantiate_builtin(
+        &ECHO_DEFAULT,
+        ECHO_DEFAULT.default_model,
+    ));
+    registered.push(ECHO_DEFAULT.provider);
+    bevy::log::info!("registered built-in Page agent providers: {registered:?}");
 }
 
 fn attach_last_run_state_kind(
