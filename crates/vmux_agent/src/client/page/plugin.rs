@@ -49,6 +49,16 @@ impl Plugin for PageAgentPlugin {
         if app.world().get_resource::<AgentStrategies>().is_none() {
             app.insert_resource(AgentStrategies::default());
         }
+
+        if app
+            .world()
+            .get_resource::<crate::client::page::strategy_index::PageStrategyIndex>()
+            .is_none()
+        {
+            app.insert_resource(crate::client::page::strategy_index::PageStrategyIndex::default());
+        }
+        app.add_observer(crate::client::page::strategy_indexer::on_strategy_added);
+        app.add_observer(crate::client::page::strategy_indexer::on_strategy_removed);
     }
 }
 
