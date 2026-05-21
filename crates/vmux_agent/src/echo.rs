@@ -57,8 +57,16 @@ impl AgentPageStrategy for EchoPageStrategy {
     }
 
     fn parse_sse_event(&self, _payload: &str) -> Option<StreamEvent> {
-        None
+        parse_sse(_payload)
     }
+
+    fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
+        parse_sse
+    }
+}
+
+pub fn parse_sse(_payload: &str) -> Option<StreamEvent> {
+    None
 }
 
 pub fn synthetic_echo_stream(text: &str) -> Vec<StreamEvent> {

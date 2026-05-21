@@ -56,14 +56,14 @@ pub fn process_user_input(
 
         let tools = mcp_tool_defs();
         let request = strategy.build_request(&session.model, &messages.0, &tools, &api_key);
+        let parse_sse = strategy.parse_sse_fn();
         let (tx, rx) = unbounded::<StreamEvent>();
-        let strat_arc = strategy.clone();
         let task = IoTaskPool::get().spawn(async move {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("tokio runtime");
-            rt.block_on(drive_sse(request, strat_arc, tx));
+            rt.block_on(drive_sse(request, parse_sse, tx));
         });
 
         *state = AgentRunState::Streaming {
@@ -120,6 +120,12 @@ mod tests {
         }
         fn parse_sse_event(&self, _: &str) -> Option<StreamEvent> {
             None
+        }
+        fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
+            fn mock_parse(_: &str) -> Option<crate::stream::StreamEvent> {
+                None
+            }
+            mock_parse
         }
     }
 

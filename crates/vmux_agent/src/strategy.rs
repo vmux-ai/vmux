@@ -149,6 +149,12 @@ mod tests {
             fn parse_sse_event(&self, _: &str) -> Option<crate::stream::StreamEvent> {
                 None
             }
+            fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
+                fn stub_parse(_: &str) -> Option<crate::stream::StreamEvent> {
+                    None
+                }
+                stub_parse
+            }
         }
 
         let mut s = AgentStrategies::default();
@@ -208,6 +214,12 @@ mod tests {
             }
             fn parse_sse_event(&self, _: &str) -> Option<crate::stream::StreamEvent> {
                 None
+            }
+            fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
+                fn stub_parse(_: &str) -> Option<crate::stream::StreamEvent> {
+                    None
+                }
+                stub_parse
             }
         }
         let mut s = AgentStrategies::default();

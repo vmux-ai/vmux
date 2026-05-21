@@ -1,16 +1,10 @@
-use std::sync::Arc;
-
 use crossbeam_channel::Sender;
 use futures_util::StreamExt;
 
-use crate::client::page::strategy::AgentPageStrategy;
+use crate::client::page::strategy_components::ParseSse;
 use crate::stream::StreamEvent;
 
-pub async fn drive_sse(
-    request: reqwest::Request,
-    strategy: Arc<dyn AgentPageStrategy>,
-    tx: Sender<StreamEvent>,
-) {
+pub async fn drive_sse(request: reqwest::Request, parse_sse: ParseSse, tx: Sender<StreamEvent>) {
     let client = reqwest::Client::new();
     let response = match client.execute(request).await {
         Ok(r) => r,
@@ -43,7 +37,7 @@ pub async fn drive_sse(
             if frame.is_empty() {
                 continue;
             }
-            if let Some(event) = strategy.parse_sse_event(frame)
+            if let Some(event) = parse_sse(frame)
                 && tx.send(event).is_err()
             {
                 return;
@@ -55,47 +49,12 @@ pub async fn drive_sse(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::strategy::AgentStrategy;
-    use crate::stream::ToolDef;
-    use crate::{AgentKind, AgentVariant};
     use crossbeam_channel::unbounded;
 
-    struct EchoTextStrategy;
-    impl AgentStrategy for EchoTextStrategy {
-        fn kind(&self) -> AgentKind {
-            AgentKind::Vibe
-        }
-        fn variant(&self) -> AgentVariant {
-            AgentVariant::Page
-        }
-    }
-    impl AgentPageStrategy for EchoTextStrategy {
-        fn provider(&self) -> &str {
-            "echo"
-        }
-        fn model(&self) -> &str {
-            "echo"
-        }
-        fn endpoint(&self) -> &str {
-            "stub://"
-        }
-        fn env_var(&self) -> &'static str {
-            ""
-        }
-        fn build_request(
-            &self,
-            _: &str,
-            _: &[crate::message::Message],
-            _: &[ToolDef],
-            _: &str,
-        ) -> reqwest::Request {
-            unreachable!("test builds request manually")
-        }
-        fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
-            payload
-                .strip_prefix("data: ")
-                .map(|s| StreamEvent::TextDelta(s.to_string()))
-        }
+    fn echo_parse(payload: &str) -> Option<StreamEvent> {
+        payload
+            .strip_prefix("data: ")
+            .map(|s| StreamEvent::TextDelta(s.to_string()))
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -114,7 +73,7 @@ mod tests {
             .build()
             .unwrap();
         let (tx, rx) = unbounded::<StreamEvent>();
-        drive_sse(req, Arc::new(EchoTextStrategy), tx).await;
+        drive_sse(req, echo_parse, tx).await;
         let collected: Vec<StreamEvent> = rx.try_iter().collect();
         assert_eq!(
             collected,
@@ -139,7 +98,7 @@ mod tests {
             .build()
             .unwrap();
         let (tx, rx) = unbounded::<StreamEvent>();
-        drive_sse(req, Arc::new(EchoTextStrategy), tx).await;
+        drive_sse(req, echo_parse, tx).await;
         let collected: Vec<StreamEvent> = rx.try_iter().collect();
         assert_eq!(collected.len(), 1);
         match &collected[0] {

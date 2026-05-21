@@ -47,6 +47,9 @@ impl AgentPageStrategy for MockMistral {
     fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
         parse_chat_completions_sse(payload)
     }
+    fn parse_sse_fn(&self) -> vmux_agent::client::page::strategy_components::ParseSse {
+        vmux_agent::providers::mistral::parse_sse
+    }
 }
 
 #[test]

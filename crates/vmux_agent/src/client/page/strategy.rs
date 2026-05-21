@@ -1,3 +1,4 @@
+use crate::client::page::strategy_components::ParseSse;
 use crate::message::Message;
 use crate::strategy::AgentStrategy;
 use crate::stream::{StreamEvent, ToolDef};
@@ -17,4 +18,6 @@ pub trait AgentPageStrategy: AgentStrategy {
     ) -> reqwest::Request;
 
     fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent>;
+
+    fn parse_sse_fn(&self) -> ParseSse;
 }

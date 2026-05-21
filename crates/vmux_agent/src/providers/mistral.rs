@@ -73,8 +73,16 @@ impl AgentPageStrategy for MistralStrategy {
     }
 
     fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
-        parse_chat_completions_sse(payload)
+        parse_sse(payload)
     }
+
+    fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
+        parse_sse
+    }
+}
+
+pub fn parse_sse(payload: &str) -> Option<StreamEvent> {
+    parse_chat_completions_sse(payload)
 }
 
 #[cfg(test)]

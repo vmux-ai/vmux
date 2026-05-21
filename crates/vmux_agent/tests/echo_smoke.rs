@@ -45,18 +45,25 @@ impl AgentPageStrategy for EchoMock {
             .unwrap()
     }
     fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
-        for line in payload.lines() {
-            if let Some(data) = line.strip_prefix("data: ") {
-                if data == "[STOP]" {
-                    return Some(StreamEvent::StopTurn {
-                        reason: StopReason::EndTurn,
-                    });
-                }
-                return Some(StreamEvent::TextDelta(data.to_string()));
-            }
-        }
-        None
+        echo_mock_parse_sse(payload)
     }
+    fn parse_sse_fn(&self) -> vmux_agent::client::page::strategy_components::ParseSse {
+        echo_mock_parse_sse
+    }
+}
+
+fn echo_mock_parse_sse(payload: &str) -> Option<StreamEvent> {
+    for line in payload.lines() {
+        if let Some(data) = line.strip_prefix("data: ") {
+            if data == "[STOP]" {
+                return Some(StreamEvent::StopTurn {
+                    reason: StopReason::EndTurn,
+                });
+            }
+            return Some(StreamEvent::TextDelta(data.to_string()));
+        }
+    }
+    None
 }
 
 #[test]

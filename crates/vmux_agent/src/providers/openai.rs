@@ -71,8 +71,16 @@ impl AgentPageStrategy for OpenAiResponsesStrategy {
     }
 
     fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
-        parse_responses_sse(payload)
+        parse_sse(payload)
     }
+
+    fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
+        parse_sse
+    }
+}
+
+pub fn parse_sse(payload: &str) -> Option<StreamEvent> {
+    parse_responses_sse(payload)
 }
 
 fn messages_to_responses_input(messages: &[Message]) -> Vec<Value> {
