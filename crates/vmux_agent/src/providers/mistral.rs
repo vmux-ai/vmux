@@ -9,6 +9,11 @@ use crate::strategy::AgentStrategy;
 use crate::stream::{StreamEvent, ToolDef};
 use crate::{AgentKind, AgentVariant};
 
+pub const PROVIDER: &str = "mistral";
+pub const ENDPOINT: &str = "https://api.mistral.ai/v1/chat/completions";
+pub const ENV_VAR: &str = "MISTRAL_API_KEY";
+pub const DEFAULT_MODEL: &str = "devstral-2";
+
 pub struct MistralStrategy {
     provider: String,
     model: String,
@@ -40,10 +45,10 @@ impl AgentPageStrategy for MistralStrategy {
         &self.model
     }
     fn endpoint(&self) -> &str {
-        "https://api.mistral.ai/v1/chat/completions"
+        ENDPOINT
     }
     fn env_var(&self) -> &'static str {
-        "MISTRAL_API_KEY"
+        ENV_VAR
     }
 
     fn build_request(
@@ -53,23 +58,7 @@ impl AgentPageStrategy for MistralStrategy {
         tools: &[ToolDef],
         api_key: &str,
     ) -> reqwest::Request {
-        let mut body = json!({
-            "model": model,
-            "messages": messages_to_chat_completions(messages),
-            "stream": true,
-        });
-        if !tools.is_empty() {
-            body["tools"] = json!(tools_to_function_specs(tools));
-            body["tool_choice"] = json!("auto");
-        }
-        reqwest::Client::new()
-            .post(self.endpoint())
-            .bearer_auth(api_key)
-            .header("Accept", "text/event-stream")
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .build()
-            .expect("MistralStrategy: build_request")
+        build_request(model, messages, tools, api_key)
     }
 
     fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
@@ -79,6 +68,31 @@ impl AgentPageStrategy for MistralStrategy {
     fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
         parse_sse
     }
+}
+
+pub fn build_request(
+    model: &str,
+    messages: &[Message],
+    tools: &[ToolDef],
+    api_key: &str,
+) -> reqwest::Request {
+    let mut body = json!({
+        "model": model,
+        "messages": messages_to_chat_completions(messages),
+        "stream": true,
+    });
+    if !tools.is_empty() {
+        body["tools"] = json!(tools_to_function_specs(tools));
+        body["tool_choice"] = json!("auto");
+    }
+    reqwest::Client::new()
+        .post(ENDPOINT)
+        .bearer_auth(api_key)
+        .header("Accept", "text/event-stream")
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .build()
+        .expect("MistralStrategy: build_request")
 }
 
 pub fn parse_sse(payload: &str) -> Option<StreamEvent> {
