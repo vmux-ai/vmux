@@ -1,0 +1,11 @@
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"call_1","name":"list_spaces"}}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","item_id":"call_1","delta":"{\"filter\":\"all\"}"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"call_1","name":"list_spaces","arguments":"{\"filter\":\"all\"}"}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","stop_reason":"tool_use"}}

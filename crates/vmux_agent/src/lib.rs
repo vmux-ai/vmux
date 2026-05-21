@@ -10,6 +10,7 @@ pub mod launch;
 pub mod mcp;
 pub mod message;
 pub mod plugin;
+pub mod providers;
 pub mod run_state;
 pub mod session;
 pub mod snapshot_updater;
