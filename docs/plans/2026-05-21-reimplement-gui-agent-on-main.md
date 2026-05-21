@@ -45,10 +45,12 @@ Goal: real LLM provider strategies (Mistral, Anthropic, OpenAI) hitting SSE endp
 - A6. New `crate::providers::builtin`: `BUILTIN_PROVIDERS` array + `resolve_default_app_provider`
   (priority: mistral → anthropic → openai based on env vars) + `instantiate_builtin`.
 - A7. SSE fixture files under `tests/fixtures/{anthropic,mistral,openai}/{text,tools}.sse`.
-- A8. New `tests/streaming_smoke.rs`: end-to-end SSE streaming with `mockito` server.
-- A9. Rewrite `tests/echo_smoke.rs` to use mock server + strategy registry.
+- ~~A8. New `tests/streaming_smoke.rs`~~ → **moved to C5** (depends on `AppAgentPlugin` +
+  `AgentMessages`/`AgentRunState`/`PendingUserInput` components that land in Group C).
+- ~~A9. Rewrite `tests/echo_smoke.rs`~~ → **moved to C6** (same dependency).
 
-Verify: `cargo test -p vmux_agent` passes. New tests cover SSE parsing for all three providers.
+Verify: `cargo test -p vmux_agent` passes. New tests cover SSE parsing for all three providers
+at the unit level (provider modules + `openai_shared` + `http::drive_sse`).
 
 ### Group B — MCP tool dispatch in `vmux_agent`
 
@@ -73,8 +75,13 @@ Goal: surface agent run-state transitions to UI + toast notifications on errors.
   fires `AgentToast`.
 - C4. Update `systems/process_input` to drive real SSE via strategy + IoTaskPool (not just
   echo). Errors when no strategy registered for the resolved provider/model.
+- C5. (moved from A8) New `tests/streaming_smoke.rs`: end-to-end SSE streaming with `mockito`
+  server, driving a real `AppAgentPlugin` against a mock `AgentPageStrategy`.
+- C6. (moved from A9) Rewrite `tests/echo_smoke.rs` to use mock server + strategy registry
+  instead of in-process echo.
 
-Verify: tests pass; `surface_errors` smoke tests check toast emission shape.
+Verify: tests pass; `surface_errors` smoke tests check toast emission shape; streaming +
+echo smoke tests reach `Idle` with expected assistant content.
 
 ### Group D — URL routing additions in `vmux_agent`
 
