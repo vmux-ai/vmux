@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bevy::prelude::*;
 use vmux_setting::{AppSettings, SettingsLoadSet};
 
@@ -55,7 +57,7 @@ fn register_page_agents_from_settings(
             }
         };
         for model in &provider_settings.models {
-            strategies.register_page(Box::new(EchoPageStrategy::new(
+            strategies.register_page(Arc::new(EchoPageStrategy::new(
                 provider_settings.provider.clone(),
                 model.clone(),
                 kind,

@@ -39,6 +39,9 @@ impl AgentPageStrategy for EchoPageStrategy {
     fn endpoint(&self) -> &str {
         "stub://echo"
     }
+    fn env_var(&self) -> &'static str {
+        ""
+    }
 
     fn build_request(
         &self,

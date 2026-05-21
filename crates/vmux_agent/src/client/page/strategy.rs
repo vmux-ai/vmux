@@ -6,6 +6,7 @@ pub trait AgentPageStrategy: AgentStrategy {
     fn provider(&self) -> &str;
     fn model(&self) -> &str;
     fn endpoint(&self) -> &str;
+    fn env_var(&self) -> &'static str;
 
     fn build_request(
         &self,

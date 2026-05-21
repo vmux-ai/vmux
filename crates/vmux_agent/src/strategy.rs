@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use bevy::prelude::Resource;
 
@@ -15,7 +16,7 @@ pub trait AgentStrategy: Send + Sync + 'static {
 #[derive(Resource, Default)]
 pub struct AgentStrategies {
     cli: HashMap<AgentKind, Box<dyn CliAgentStrategy>>,
-    page: HashMap<(String, String), Box<dyn AgentPageStrategy>>,
+    page: HashMap<(String, String), Arc<dyn AgentPageStrategy>>,
 }
 
 impl AgentStrategies {
@@ -27,7 +28,7 @@ impl AgentStrategies {
         self.cli.get(&kind).map(|b| b.as_ref())
     }
 
-    pub fn register_page(&mut self, strategy: Box<dyn AgentPageStrategy>) {
+    pub fn register_page(&mut self, strategy: Arc<dyn AgentPageStrategy>) {
         let key = (
             strategy.provider().to_string(),
             strategy.model().to_string(),
@@ -39,14 +40,14 @@ impl AgentStrategies {
         &self,
         provider: &str,
         model: &str,
-    ) -> Option<&dyn AgentPageStrategy> {
+    ) -> Option<Arc<dyn AgentPageStrategy>> {
         self.page
             .get(&(provider.to_string(), model.to_string()))
-            .map(|b| b.as_ref())
+            .cloned()
     }
 
-    pub fn page_strategies(&self) -> impl Iterator<Item = &dyn AgentPageStrategy> {
-        self.page.values().map(|b| b.as_ref())
+    pub fn page_strategies(&self) -> impl Iterator<Item = &Arc<dyn AgentPageStrategy>> {
+        self.page.values()
     }
 
     pub fn cli_strategies(&self) -> impl Iterator<Item = &dyn CliAgentStrategy> {
@@ -122,6 +123,9 @@ mod tests {
             fn endpoint(&self) -> &str {
                 "stub://"
             }
+            fn env_var(&self) -> &'static str {
+                ""
+            }
             fn build_request(
                 &self,
                 _: &str,
@@ -140,11 +144,11 @@ mod tests {
         }
 
         let mut s = AgentStrategies::default();
-        s.register_page(Box::new(StubPage {
+        s.register_page(Arc::new(StubPage {
             provider: "openai".into(),
             model: "gpt-5.5".into(),
         }));
-        s.register_page(Box::new(StubPage {
+        s.register_page(Arc::new(StubPage {
             provider: "anthropic".into(),
             model: "claude-opus-4.7".into(),
         }));
@@ -179,6 +183,9 @@ mod tests {
             fn endpoint(&self) -> &str {
                 "stub://"
             }
+            fn env_var(&self) -> &'static str {
+                ""
+            }
             fn build_request(
                 &self,
                 _: &str,
@@ -197,7 +204,7 @@ mod tests {
         }
         let mut s = AgentStrategies::default();
         s.register_cli(Box::new(StubStrategy));
-        s.register_page(Box::new(Page));
+        s.register_page(Arc::new(Page));
         assert!(s.get_cli(AgentKind::Claude).is_some());
         assert!(s.get_page_by_provider_model("p", "m").is_some());
     }
