@@ -32,7 +32,6 @@ pub mod url;
 pub mod variant;
 
 pub use client::cli::strategy::CliAgentStrategy;
-pub use client::page::agent::AgentPage;
 pub use client::page::plugin::PageAgentPlugin;
 pub use client::page::strategy::AgentPageStrategy;
 pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};

@@ -36,6 +36,14 @@ impl AgentStrategies {
         self.page.insert(key, strategy);
     }
 
+    pub fn register_page_if_absent(&mut self, strategy: Arc<dyn AgentPageStrategy>) {
+        let key = (
+            strategy.provider().to_string(),
+            strategy.model().to_string(),
+        );
+        self.page.entry(key).or_insert(strategy);
+    }
+
     pub fn get_page_by_provider_model(
         &self,
         provider: &str,
