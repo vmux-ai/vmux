@@ -22,6 +22,7 @@ pub enum ValidationError {
         weights: usize,
     },
     FocusReferencesUnknownId(String),
+    MissingReferencedEntity(Vec<String>),
 }
 
 pub fn validate(snapshot: &LayoutSnapshot) -> Result<(), ValidationError> {
@@ -195,6 +196,12 @@ pub fn plan_diff(
             );
         }
         plan_node(&space.root, &mut actions_by_id, &mut referenced);
+    }
+
+    let mut missing: Vec<String> = referenced.difference(existing_ids).cloned().collect();
+    if !missing.is_empty() {
+        missing.sort();
+        return Err(ValidationError::MissingReferencedEntity(missing));
     }
 
     let closes: Vec<String> = existing_ids.difference(&referenced).cloned().collect();
@@ -644,8 +651,10 @@ fn apply_structure(
         }
         return;
     };
-    if let Some(parent) = parent {
-        world.entity_mut(entity).insert(ChildOf(parent));
+    if let Some(parent) = parent
+        && let Ok(mut e) = world.get_entity_mut(entity)
+    {
+        e.insert(ChildOf(parent));
     }
     match node {
         proto::LayoutNode::Split { children, .. } => {
@@ -659,7 +668,9 @@ fn apply_structure(
                     && let Ok((_, value)) = parse_id(tid)
                 {
                     let tab_entity = Entity::from_bits(value);
-                    world.entity_mut(tab_entity).insert(ChildOf(entity));
+                    if let Ok(mut e) = world.get_entity_mut(tab_entity) {
+                        e.insert(ChildOf(entity));
+                    }
                 }
             }
         }
@@ -1011,6 +1022,47 @@ mod tests {
         assert_eq!(plan.actions_by_id.len(), 1);
     }
 
+    #[test]
+    fn plan_rejects_referenced_tab_id_not_in_existing() {
+        let snap = snapshot(
+            pane(
+                Some("pane:2"),
+                vec![Tab {
+                    id: Some("tab:99".into()),
+                    ..Default::default()
+                }],
+            ),
+            Focus {
+                space: Some("space:1".into()),
+                pane: Some("pane:2".into()),
+                tab: Some("tab:99".into()),
+            },
+        );
+        let existing: HashSet<String> = ["space:1", "pane:2"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        match plan_diff(&snap, &existing) {
+            Err(ValidationError::MissingReferencedEntity(ids)) => {
+                assert!(
+                    ids.contains(&"tab:99".to_string()),
+                    "expected stale tab:99 in error, got {ids:?}"
+                );
+            }
+            other => panic!("expected MissingReferencedEntity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plan_rejects_referenced_pane_id_not_in_existing() {
+        let snap = snapshot(pane(Some("pane:42"), vec![]), Focus::default());
+        let existing: HashSet<String> = ["space:1"].into_iter().map(String::from).collect();
+        assert!(matches!(
+            plan_diff(&snap, &existing),
+            Err(ValidationError::MissingReferencedEntity(_))
+        ));
+    }
+
     use crate::pane::{Pane, PaneSplitDirection};
     use crate::space::Space;
 
@@ -1216,6 +1268,44 @@ mod tests {
             "drop_me should be despawned"
         );
         assert!(app.world().get_entity(keep).is_ok(), "keep should survive");
+    }
+
+    #[test]
+    fn apply_returns_error_for_stale_tab_id_does_not_panic() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<crate::LayoutSpawnRequest>();
+
+        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let pane_e = app.world_mut().spawn((Pane, ChildOf(space))).id();
+        let dead_stack = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(pane_e)))
+            .id();
+        app.world_mut().entity_mut(dead_stack).despawn();
+
+        let snap = LayoutSnapshot {
+            spaces: vec![proto::Space {
+                id: Some(format_id(NodeKind::Space, space.to_bits())),
+                name: "S".into(),
+                is_active: true,
+                root: proto::LayoutNode::Pane {
+                    id: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
+                    is_zoomed: false,
+                    tabs: vec![proto::Tab {
+                        id: Some(format_id(NodeKind::Tab, dead_stack.to_bits())),
+                        ..Default::default()
+                    }],
+                },
+            }],
+            focused: proto::Focus::default(),
+        };
+
+        let result = apply(app.world_mut(), &snap);
+        assert!(
+            matches!(result, Err(ValidationError::MissingReferencedEntity(_))),
+            "expected MissingReferencedEntity, got {result:?}"
+        );
     }
 
     #[test]
