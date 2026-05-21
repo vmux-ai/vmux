@@ -74,6 +74,8 @@ impl Plugin for CommandBarInputPlugin {
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<PageAgentAttachRequest>()
             .add_message::<PageAgentSpawnTabRequest>()
+            .add_message::<vmux_core::agent::PageAgentSpawnDefaultRequest>()
+            .add_message::<vmux_core::agent::PageAgentAttachDefaultRequest>()
             .add_message::<SettingsPageSpawnRequest>()
             .add_message::<SpacesPageSpawnRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
@@ -863,6 +865,8 @@ fn on_command_bar_action(
         MessageWriter<ProcessesMonitorSpawnRequest>,
         MessageWriter<SpacesPageSpawnRequest>,
     )>,
+    mut page_default_spawn_writer: MessageWriter<vmux_core::agent::PageAgentSpawnDefaultRequest>,
+    mut page_default_attach_writer: MessageWriter<vmux_core::agent::PageAgentAttachDefaultRequest>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -915,14 +919,40 @@ fn on_command_bar_action(
                 }
             } else {
                 let url = normalize_url(&evt.value);
-                let target = evt.target;
-                let open_cmd = build_open_command(target, url);
-                writer_params
-                    .p0()
-                    .write(AppCommand::Browser(BrowserCommand::Open(open_cmd)));
-                if empty_stack.is_some() {
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.previous_stack = None;
+                if matches!(url.as_str(), "vmux://agent/" | "vmux://agent") {
+                    if let Some(stack_e) = empty_stack {
+                        page_default_attach_writer.write(
+                            vmux_core::agent::PageAgentAttachDefaultRequest { stack: stack_e },
+                        );
+                        new_stack_ctx.stack = None;
+                        new_stack_ctx.previous_stack = None;
+                        custom_keyboard_restore = true;
+                    } else {
+                        let (_, active_pane_opt, _) = focused_stack(
+                            &queries.tab_q,
+                            &queries.all_children,
+                            &queries.leaf_panes,
+                            &queries.pane_ts,
+                            &queries.pane_children,
+                            &queries.stack_ts,
+                        );
+                        if let Some(pane_e) = active_pane_opt {
+                            page_default_spawn_writer.write(
+                                vmux_core::agent::PageAgentSpawnDefaultRequest { pane: pane_e },
+                            );
+                            custom_keyboard_restore = true;
+                        }
+                    }
+                } else {
+                    let target = evt.target;
+                    let open_cmd = build_open_command(target, url);
+                    writer_params
+                        .p0()
+                        .write(AppCommand::Browser(BrowserCommand::Open(open_cmd)));
+                    if empty_stack.is_some() {
+                        new_stack_ctx.stack = None;
+                        new_stack_ctx.previous_stack = None;
+                    }
                 }
             }
         }

@@ -120,6 +120,16 @@ pub struct PageAgentSpawnTabRequest {
 }
 
 #[derive(Message, Debug, Clone, Copy)]
+pub struct PageAgentSpawnDefaultRequest {
+    pub pane: Entity,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct PageAgentAttachDefaultRequest {
+    pub stack: Entity,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
 pub struct RestartAgentPty {
     pub entity: Entity,
 }

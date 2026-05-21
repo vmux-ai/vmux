@@ -9,8 +9,9 @@ use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_core::LastActivatedAt;
 use vmux_core::PageMetadata;
 use vmux_core::agent::{
-    AgentKind, AgentLaunchRequested, McpServerConfig, PageAgentAttachRequest,
-    PageAgentSpawnTabRequest, RestartAgentPty, SpawnAgentInStackRequest,
+    AgentKind, AgentLaunchRequested, McpServerConfig, PageAgentAttachDefaultRequest,
+    PageAgentAttachRequest, PageAgentSpawnDefaultRequest, PageAgentSpawnTabRequest,
+    RestartAgentPty, SpawnAgentInStackRequest,
 };
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::{
@@ -167,6 +168,8 @@ impl Plugin for AgentPlugin {
             .add_message::<SpawnAgentInStackRequest>()
             .add_message::<PageAgentAttachRequest>()
             .add_message::<PageAgentSpawnTabRequest>()
+            .add_message::<PageAgentSpawnDefaultRequest>()
+            .add_message::<PageAgentAttachDefaultRequest>()
             .add_message::<RestartAgentPty>()
             .add_systems(Startup, session::start_agent_session_watchers)
             .add_systems(
@@ -226,6 +229,8 @@ impl Plugin for AgentPlugin {
                     handle_restart_agent_pty,
                     respond_page_agent_attach,
                     respond_page_agent_spawn_tab,
+                    respond_page_agent_spawn_default,
+                    respond_page_agent_attach_default,
                 ),
             )
             .add_systems(
@@ -1115,6 +1120,70 @@ fn respond_page_agent_spawn_tab(
             &req.model,
             req.pane,
             &req.sid,
+            &mut commands,
+            &mut meshes,
+            &mut webview_mt,
+            strategies,
+        );
+    }
+}
+
+fn respond_page_agent_spawn_default(
+    mut reader: MessageReader<PageAgentSpawnDefaultRequest>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    strategies: Option<Res<AgentStrategies>>,
+) {
+    for req in reader.read() {
+        let Some(strategies) = strategies.as_deref() else {
+            bevy::log::warn!("agent strategies not registered; skipping default page spawn");
+            continue;
+        };
+        let Some(p) = crate::providers::resolve_default_app_provider() else {
+            bevy::log::warn!(
+                "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
+            );
+            continue;
+        };
+        let sid = uuid::Uuid::new_v4().to_string();
+        let _ = spawn_page_agent_tab(
+            p.provider,
+            p.default_model,
+            req.pane,
+            &sid,
+            &mut commands,
+            &mut meshes,
+            &mut webview_mt,
+            strategies,
+        );
+    }
+}
+
+fn respond_page_agent_attach_default(
+    mut reader: MessageReader<PageAgentAttachDefaultRequest>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    strategies: Option<Res<AgentStrategies>>,
+) {
+    for req in reader.read() {
+        let Some(strategies) = strategies.as_deref() else {
+            bevy::log::warn!("agent strategies not registered; skipping default page attach");
+            continue;
+        };
+        let Some(p) = crate::providers::resolve_default_app_provider() else {
+            bevy::log::warn!(
+                "no default Page agent provider available (set MISTRAL_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
+            );
+            continue;
+        };
+        let sid = uuid::Uuid::new_v4().to_string();
+        let _ = attach_page_agent_to_stack(
+            req.stack,
+            p.provider,
+            p.default_model,
+            &sid,
             &mut commands,
             &mut meshes,
             &mut webview_mt,
