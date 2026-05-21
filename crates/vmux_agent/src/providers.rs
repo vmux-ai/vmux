@@ -1,6 +1,7 @@
 pub mod anthropic;
 pub mod builtin;
 pub mod mistral;
+pub mod mistral_plugin;
 pub mod openai;
 pub mod openai_shared;
 

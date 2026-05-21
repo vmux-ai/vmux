@@ -59,6 +59,7 @@ impl Plugin for PageAgentPlugin {
         }
         app.add_observer(crate::client::page::strategy_indexer::on_strategy_added);
         app.add_observer(crate::client::page::strategy_indexer::on_strategy_removed);
+        app.add_plugins(crate::providers::mistral_plugin::MistralPlugin);
     }
 }
 
