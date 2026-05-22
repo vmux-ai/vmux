@@ -1,72 +1,13 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::client::page::strategy::AgentPageStrategy;
 use crate::message::{AssistantBlock, Message};
-use crate::strategy::AgentStrategy;
 use crate::stream::{StopReason, StreamEvent, ToolDef};
-use crate::{AgentKind, AgentVariant};
 
 pub const PROVIDER: &str = "anthropic";
 pub const ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
 pub const ENV_VAR: &str = "ANTHROPIC_API_KEY";
 pub const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
-
-pub struct AnthropicStrategy {
-    provider: String,
-    model: String,
-}
-
-impl AnthropicStrategy {
-    pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
-        Self {
-            provider: provider.into(),
-            model: model.into(),
-        }
-    }
-}
-
-impl AgentStrategy for AnthropicStrategy {
-    fn kind(&self) -> AgentKind {
-        AgentKind::Claude
-    }
-    fn variant(&self) -> AgentVariant {
-        AgentVariant::Page
-    }
-}
-
-impl AgentPageStrategy for AnthropicStrategy {
-    fn provider(&self) -> &str {
-        &self.provider
-    }
-    fn model(&self) -> &str {
-        &self.model
-    }
-    fn endpoint(&self) -> &str {
-        ENDPOINT
-    }
-    fn env_var(&self) -> &'static str {
-        ENV_VAR
-    }
-
-    fn build_request(
-        &self,
-        model: &str,
-        messages: &[Message],
-        tools: &[ToolDef],
-        api_key: &str,
-    ) -> reqwest::Request {
-        build_request(model, messages, tools, api_key)
-    }
-
-    fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
-        parse_sse(payload)
-    }
-
-    fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
-        parse_sse
-    }
-}
 
 pub fn build_request(
     model: &str,
@@ -91,7 +32,7 @@ pub fn build_request(
         .header("Content-Type", "application/json")
         .json(&body)
         .build()
-        .expect("AnthropicStrategy: build_request")
+        .expect("anthropic: build_request")
 }
 
 pub fn parse_sse(payload: &str) -> Option<StreamEvent> {
@@ -304,10 +245,9 @@ mod tests {
 
     #[test]
     fn build_request_sets_x_api_key_and_version_header() {
-        let s = AnthropicStrategy::new("anthropic", "claude-sonnet-4-6");
         let msgs = vec![Message::User { text: "hi".into() }];
-        let req = s.build_request("claude-sonnet-4-6", &msgs, &[], "test-key");
-        assert_eq!(req.url().as_str(), s.endpoint());
+        let req = build_request("claude-sonnet-4-6", &msgs, &[], "test-key");
+        assert_eq!(req.url().as_str(), ENDPOINT);
         assert_eq!(req.headers().get("x-api-key").unwrap(), "test-key");
         assert_eq!(
             req.headers().get("anthropic-version").unwrap(),

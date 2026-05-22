@@ -441,7 +441,8 @@ pub fn spawn_page_agent_tab(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    strategies: &AgentStrategies,
+    idx: &crate::client::page::strategy_index::PageStrategyIndex,
+    kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
 ) -> Option<Entity> {
     let tab = commands
         .spawn((
@@ -451,7 +452,7 @@ pub fn spawn_page_agent_tab(
         ))
         .id();
     attach_page_agent_to_stack(
-        tab, provider, model, sid, commands, meshes, webview_mt, strategies,
+        tab, provider, model, sid, commands, meshes, webview_mt, idx, kind_q,
     )?;
     Some(tab)
 }
@@ -464,10 +465,11 @@ pub fn attach_page_agent_to_stack(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    strategies: &AgentStrategies,
+    idx: &crate::client::page::strategy_index::PageStrategyIndex,
+    kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
 ) -> Option<()> {
-    let strategy = strategies.get_page_by_provider_model(provider, model)?;
-    let kind = strategy.kind();
+    let entity = idx.get_by_strs(provider, model)?;
+    let kind = kind_q.get(entity).ok()?.0;
     let url = format!("{}{sid}", crate::url::page_url_prefix(provider, model));
     commands.entity(stack).insert(PageMetadata {
         url: url.clone(),
@@ -572,6 +574,8 @@ pub fn spawn_vmux_tab(
     agent_to_entity: Option<&crate::session::AgentSessionToEntity>,
     strategies: &AgentStrategies,
     child_of_q: &Query<&ChildOf>,
+    idx: &crate::client::page::strategy_index::PageStrategyIndex,
+    kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
 ) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| format!("invalid vmux URL '{url}': {e}"))?;
     let host = parsed.host_str().unwrap_or("");
@@ -634,7 +638,7 @@ pub fn spawn_vmux_tab(
                     sid,
                 }) => {
                     if spawn_page_agent_tab(
-                        &provider, &model, pane, &sid, commands, meshes, webview_mt, strategies,
+                        &provider, &model, pane, &sid, commands, meshes, webview_mt, idx, kind_q,
                     )
                     .is_none()
                     {
@@ -660,7 +664,8 @@ pub fn spawn_vmux_tab(
                         commands,
                         meshes,
                         webview_mt,
-                        strategies,
+                        idx,
+                        kind_q,
                     )
                     .is_none()
                     {
@@ -715,7 +720,7 @@ pub fn spawn_vmux_tab(
                         let model = segs[1];
                         let sid = uuid::Uuid::new_v4().to_string();
                         if spawn_page_agent_tab(
-                            provider, model, pane, &sid, commands, meshes, webview_mt, strategies,
+                            provider, model, pane, &sid, commands, meshes, webview_mt, idx, kind_q,
                         )
                         .is_none()
                         {
@@ -1083,11 +1088,12 @@ fn respond_page_agent_attach(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    strategies: Option<Res<AgentStrategies>>,
+    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
+    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
 ) {
     for req in reader.read() {
-        let Some(strategies) = strategies.as_deref() else {
-            bevy::log::warn!("agent strategies not registered; skipping page attach");
+        let Some(idx) = idx.as_deref() else {
+            bevy::log::warn!("page strategy index not registered; skipping page attach");
             continue;
         };
         let _ = attach_page_agent_to_stack(
@@ -1098,7 +1104,8 @@ fn respond_page_agent_attach(
             &mut commands,
             &mut meshes,
             &mut webview_mt,
-            strategies,
+            idx,
+            &kind_q,
         );
     }
 }
@@ -1108,11 +1115,12 @@ fn respond_page_agent_spawn_tab(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    strategies: Option<Res<AgentStrategies>>,
+    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
+    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
 ) {
     for req in reader.read() {
-        let Some(strategies) = strategies.as_deref() else {
-            bevy::log::warn!("agent strategies not registered; skipping page spawn");
+        let Some(idx) = idx.as_deref() else {
+            bevy::log::warn!("page strategy index not registered; skipping page spawn");
             continue;
         };
         let _ = spawn_page_agent_tab(
@@ -1123,7 +1131,8 @@ fn respond_page_agent_spawn_tab(
             &mut commands,
             &mut meshes,
             &mut webview_mt,
-            strategies,
+            idx,
+            &kind_q,
         );
     }
 }
@@ -1133,11 +1142,12 @@ fn respond_page_agent_spawn_default(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    strategies: Option<Res<AgentStrategies>>,
+    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
+    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
 ) {
     for req in reader.read() {
-        let Some(strategies) = strategies.as_deref() else {
-            bevy::log::warn!("agent strategies not registered; skipping default page spawn");
+        let Some(idx) = idx.as_deref() else {
+            bevy::log::warn!("page strategy index not registered; skipping default page spawn");
             continue;
         };
         let Some(p) = crate::providers::resolve_default_app_provider() else {
@@ -1147,7 +1157,7 @@ fn respond_page_agent_spawn_default(
             continue;
         };
         let sid = uuid::Uuid::new_v4().to_string();
-        let _ = spawn_page_agent_tab(
+        if spawn_page_agent_tab(
             p.provider,
             p.default_model,
             req.pane,
@@ -1155,8 +1165,17 @@ fn respond_page_agent_spawn_default(
             &mut commands,
             &mut meshes,
             &mut webview_mt,
-            strategies,
-        );
+            idx,
+            &kind_q,
+        )
+        .is_none()
+        {
+            bevy::log::warn!(
+                "spawn_page_agent_tab returned None: no strategy registered for {}/{}",
+                p.provider,
+                p.default_model
+            );
+        }
     }
 }
 
@@ -1165,11 +1184,12 @@ fn respond_page_agent_attach_default(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    strategies: Option<Res<AgentStrategies>>,
+    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
+    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
 ) {
     for req in reader.read() {
-        let Some(strategies) = strategies.as_deref() else {
-            bevy::log::warn!("agent strategies not registered; skipping default page attach");
+        let Some(idx) = idx.as_deref() else {
+            bevy::log::warn!("page strategy index not registered; skipping default page attach");
             continue;
         };
         let Some(p) = crate::providers::resolve_default_app_provider() else {
@@ -1179,7 +1199,7 @@ fn respond_page_agent_attach_default(
             continue;
         };
         let sid = uuid::Uuid::new_v4().to_string();
-        let _ = attach_page_agent_to_stack(
+        if attach_page_agent_to_stack(
             req.stack,
             p.provider,
             p.default_model,
@@ -1187,8 +1207,17 @@ fn respond_page_agent_attach_default(
             &mut commands,
             &mut meshes,
             &mut webview_mt,
-            strategies,
-        );
+            idx,
+            &kind_q,
+        )
+        .is_none()
+        {
+            bevy::log::warn!(
+                "attach_page_agent_to_stack returned None: no strategy registered for {}/{}",
+                p.provider,
+                p.default_model
+            );
+        }
     }
 }
 

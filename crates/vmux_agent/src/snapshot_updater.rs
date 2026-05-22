@@ -3,24 +3,24 @@ use vmux_command::snapshot::{
     AgentProviderSummary, AgentStrategySummary, CommandBarAgentsSnapshot,
 };
 
+use crate::client::page::strategy_index::PageStrategyIndex;
 use crate::plugin::AgentProviders;
-use crate::strategy::AgentStrategies;
 
 pub fn update_agents_snapshot(
     providers: Option<Res<AgentProviders>>,
-    strategies: Option<Res<AgentStrategies>>,
+    page_idx: Option<Res<PageStrategyIndex>>,
     mut snapshot: ResMut<CommandBarAgentsSnapshot>,
 ) {
     let providers_changed = providers
         .as_ref()
         .map(|r| r.is_changed() || r.is_added())
         .unwrap_or(false);
-    let strategies_changed = strategies
+    let idx_changed = page_idx
         .as_ref()
         .map(|r| r.is_changed() || r.is_added())
         .unwrap_or(false);
     if !providers_changed
-        && !strategies_changed
+        && !idx_changed
         && (!snapshot.providers.is_empty() || !snapshot.strategies.is_empty())
     {
         return;
@@ -40,13 +40,13 @@ pub fn update_agents_snapshot(
         })
         .unwrap_or_default();
 
-    snapshot.strategies = strategies
+    snapshot.strategies = page_idx
         .as_ref()
-        .map(|s| {
-            s.page_strategies()
-                .map(|st| AgentStrategySummary {
-                    provider: st.provider().to_string(),
-                    model: st.model().to_string(),
+        .map(|idx| {
+            idx.keys()
+                .map(|key| AgentStrategySummary {
+                    provider: key.provider.clone(),
+                    model: key.model.clone(),
                 })
                 .collect()
         })

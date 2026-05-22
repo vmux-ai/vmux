@@ -1,8 +1,5 @@
-use crate::client::page::strategy::AgentPageStrategy;
 use crate::message::Message;
-use crate::strategy::AgentStrategy;
 use crate::stream::{StopReason, StreamEvent, ToolDef};
-use crate::{AgentKind, AgentVariant};
 
 pub const PROVIDER: &str = "echo";
 pub const ENDPOINT: &str = "stub://echo";
@@ -19,64 +16,6 @@ pub fn build_request(
         .get("http://localhost/echo-stub-unused")
         .build()
         .unwrap()
-}
-
-pub struct EchoPageStrategy {
-    provider: String,
-    model: String,
-    kind: AgentKind,
-}
-
-impl EchoPageStrategy {
-    pub fn new(provider: impl Into<String>, model: impl Into<String>, kind: AgentKind) -> Self {
-        Self {
-            provider: provider.into(),
-            model: model.into(),
-            kind,
-        }
-    }
-}
-
-impl AgentStrategy for EchoPageStrategy {
-    fn kind(&self) -> AgentKind {
-        self.kind
-    }
-    fn variant(&self) -> AgentVariant {
-        AgentVariant::Page
-    }
-}
-
-impl AgentPageStrategy for EchoPageStrategy {
-    fn provider(&self) -> &str {
-        &self.provider
-    }
-    fn model(&self) -> &str {
-        &self.model
-    }
-    fn endpoint(&self) -> &str {
-        ENDPOINT
-    }
-    fn env_var(&self) -> &'static str {
-        ENV_VAR
-    }
-
-    fn build_request(
-        &self,
-        model: &str,
-        messages: &[Message],
-        tools: &[ToolDef],
-        api_key: &str,
-    ) -> reqwest::Request {
-        build_request(model, messages, tools, api_key)
-    }
-
-    fn parse_sse_event(&self, _payload: &str) -> Option<StreamEvent> {
-        parse_sse(_payload)
-    }
-
-    fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
-        parse_sse
-    }
 }
 
 pub fn parse_sse(_payload: &str) -> Option<StreamEvent> {

@@ -39,6 +39,10 @@ impl PageStrategyIndex {
         self.by_key.is_empty()
     }
 
+    pub fn keys(&self) -> impl Iterator<Item = &StrategyKey> {
+        self.by_key.keys()
+    }
+
     pub fn lookup_fns(
         &self,
         provider: &str,

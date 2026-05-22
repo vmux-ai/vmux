@@ -1,73 +1,14 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::client::page::strategy::AgentPageStrategy;
 use crate::message::{AssistantBlock, Message};
 use crate::providers::openai_shared::tools_to_function_specs;
-use crate::strategy::AgentStrategy;
 use crate::stream::{StopReason, StreamEvent, ToolDef};
-use crate::{AgentKind, AgentVariant};
 
 pub const PROVIDER: &str = "openai";
 pub const ENDPOINT: &str = "https://api.openai.com/v1/responses";
 pub const ENV_VAR: &str = "OPENAI_API_KEY";
 pub const DEFAULT_MODEL: &str = "gpt-5";
-
-pub struct OpenAiResponsesStrategy {
-    provider: String,
-    model: String,
-}
-
-impl OpenAiResponsesStrategy {
-    pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
-        Self {
-            provider: provider.into(),
-            model: model.into(),
-        }
-    }
-}
-
-impl AgentStrategy for OpenAiResponsesStrategy {
-    fn kind(&self) -> AgentKind {
-        AgentKind::Codex
-    }
-    fn variant(&self) -> AgentVariant {
-        AgentVariant::Page
-    }
-}
-
-impl AgentPageStrategy for OpenAiResponsesStrategy {
-    fn provider(&self) -> &str {
-        &self.provider
-    }
-    fn model(&self) -> &str {
-        &self.model
-    }
-    fn endpoint(&self) -> &str {
-        ENDPOINT
-    }
-    fn env_var(&self) -> &'static str {
-        ENV_VAR
-    }
-
-    fn build_request(
-        &self,
-        model: &str,
-        messages: &[Message],
-        tools: &[ToolDef],
-        api_key: &str,
-    ) -> reqwest::Request {
-        build_request(model, messages, tools, api_key)
-    }
-
-    fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
-        parse_sse(payload)
-    }
-
-    fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
-        parse_sse
-    }
-}
 
 pub fn build_request(
     model: &str,
@@ -90,7 +31,7 @@ pub fn build_request(
         .header("Content-Type", "application/json")
         .json(&body)
         .build()
-        .expect("OpenAiResponsesStrategy: build_request")
+        .expect("openai: build_request")
 }
 
 pub fn parse_sse(payload: &str) -> Option<StreamEvent> {
@@ -285,10 +226,9 @@ mod tests {
 
     #[test]
     fn build_request_uses_responses_endpoint_and_bearer_auth() {
-        let s = OpenAiResponsesStrategy::new("openai", "gpt-5");
         let msgs = vec![Message::User { text: "hi".into() }];
-        let req = s.build_request("gpt-5", &msgs, &[], "test-key");
-        assert_eq!(req.url().as_str(), s.endpoint());
+        let req = build_request("gpt-5", &msgs, &[], "test-key");
+        assert_eq!(req.url().as_str(), ENDPOINT);
         assert_eq!(
             req.headers().get("authorization").unwrap(),
             "Bearer test-key"

@@ -1,74 +1,15 @@
 use serde_json::json;
 
-use crate::client::page::strategy::AgentPageStrategy;
 use crate::message::Message;
 use crate::providers::openai_shared::{
     messages_to_chat_completions, parse_chat_completions_sse, tools_to_function_specs,
 };
-use crate::strategy::AgentStrategy;
 use crate::stream::{StreamEvent, ToolDef};
-use crate::{AgentKind, AgentVariant};
 
 pub const PROVIDER: &str = "mistral";
 pub const ENDPOINT: &str = "https://api.mistral.ai/v1/chat/completions";
 pub const ENV_VAR: &str = "MISTRAL_API_KEY";
 pub const DEFAULT_MODEL: &str = "devstral-2";
-
-pub struct MistralStrategy {
-    provider: String,
-    model: String,
-}
-
-impl MistralStrategy {
-    pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
-        Self {
-            provider: provider.into(),
-            model: model.into(),
-        }
-    }
-}
-
-impl AgentStrategy for MistralStrategy {
-    fn kind(&self) -> AgentKind {
-        AgentKind::Vibe
-    }
-    fn variant(&self) -> AgentVariant {
-        AgentVariant::Page
-    }
-}
-
-impl AgentPageStrategy for MistralStrategy {
-    fn provider(&self) -> &str {
-        &self.provider
-    }
-    fn model(&self) -> &str {
-        &self.model
-    }
-    fn endpoint(&self) -> &str {
-        ENDPOINT
-    }
-    fn env_var(&self) -> &'static str {
-        ENV_VAR
-    }
-
-    fn build_request(
-        &self,
-        model: &str,
-        messages: &[Message],
-        tools: &[ToolDef],
-        api_key: &str,
-    ) -> reqwest::Request {
-        build_request(model, messages, tools, api_key)
-    }
-
-    fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
-        parse_sse(payload)
-    }
-
-    fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
-        parse_sse
-    }
-}
 
 pub fn build_request(
     model: &str,
@@ -92,7 +33,7 @@ pub fn build_request(
         .header("Content-Type", "application/json")
         .json(&body)
         .build()
-        .expect("MistralStrategy: build_request")
+        .expect("mistral: build_request")
 }
 
 pub fn parse_sse(payload: &str) -> Option<StreamEvent> {
@@ -105,10 +46,9 @@ mod tests {
 
     #[test]
     fn build_request_sets_headers_and_url() {
-        let s = MistralStrategy::new("mistral", "devstral-2");
         let msgs = vec![Message::User { text: "hi".into() }];
-        let req = s.build_request("devstral-2", &msgs, &[], "test-key");
-        assert_eq!(req.url().as_str(), s.endpoint());
+        let req = build_request("devstral-2", &msgs, &[], "test-key");
+        assert_eq!(req.url().as_str(), ENDPOINT);
         let auth = req
             .headers()
             .get("authorization")
@@ -124,11 +64,7 @@ mod tests {
 
     #[test]
     fn parse_sse_event_delegates_to_shared_parser() {
-        let s = MistralStrategy::new("mistral", "devstral-2");
         let frame = r#"data: {"id":"c1","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}"#;
-        assert_eq!(
-            s.parse_sse_event(frame),
-            Some(StreamEvent::TextDelta("hi".into()))
-        );
+        assert_eq!(parse_sse(frame), Some(StreamEvent::TextDelta("hi".into())));
     }
 }

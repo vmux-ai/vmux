@@ -1449,6 +1449,8 @@ pub(crate) fn handle_browser_navigate_requests(
     strategies: Res<vmux_agent::strategy::AgentStrategies>,
     settings: Res<AppSettings>,
     service: Option<Res<vmux_service::client::ServiceClient>>,
+    page_idx: Option<Res<vmux_agent::client::page::strategy_index::PageStrategyIndex>>,
+    kind_q: Query<&vmux_agent::client::page::strategy_components::StrategyKind>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -1480,6 +1482,9 @@ pub(crate) fn handle_browser_navigate_requests(
             };
 
             if let Some(pane_entity) = target {
+                let empty_idx =
+                    vmux_agent::client::page::strategy_index::PageStrategyIndex::default();
+                let idx_ref = page_idx.as_deref().unwrap_or(&empty_idx);
                 match vmux_agent::plugin::spawn_vmux_tab(
                     &url,
                     pane_entity,
@@ -1491,6 +1496,8 @@ pub(crate) fn handle_browser_navigate_requests(
                     agent_to_entity,
                     &strategies,
                     &child_of_q,
+                    idx_ref,
+                    &kind_q,
                 ) {
                     Ok(()) => AgentCommandResult::Ok,
                     Err(message) => {

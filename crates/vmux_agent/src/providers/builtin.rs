@@ -1,11 +1,4 @@
-use std::sync::Arc;
-
 use crate::AgentKind;
-use crate::client::page::strategy::AgentPageStrategy;
-use crate::echo::EchoPageStrategy;
-use crate::providers::anthropic::AnthropicStrategy;
-use crate::providers::mistral::MistralStrategy;
-use crate::providers::openai::OpenAiResponsesStrategy;
 
 #[derive(Copy, Clone, Debug)]
 pub struct BuiltinProvider {
@@ -50,16 +43,6 @@ pub fn resolve_default_app_provider() -> Option<&'static BuiltinProvider> {
         .or(Some(&ECHO_DEFAULT))
 }
 
-pub fn instantiate_builtin(p: &BuiltinProvider, model: &str) -> Arc<dyn AgentPageStrategy> {
-    match p.provider {
-        "mistral" => Arc::new(MistralStrategy::new(p.provider, model.to_string())),
-        "anthropic" => Arc::new(AnthropicStrategy::new(p.provider, model.to_string())),
-        "openai" => Arc::new(OpenAiResponsesStrategy::new(p.provider, model.to_string())),
-        "echo" => Arc::new(EchoPageStrategy::new(p.provider, model.to_string(), p.kind)),
-        other => panic!("instantiate_builtin: unknown provider '{other}'"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,13 +83,5 @@ mod tests {
         clear_all_keys();
         let p = resolve_default_app_provider().unwrap();
         assert_eq!(p.provider, "echo");
-    }
-
-    #[test]
-    fn instantiate_returns_correct_strategy_type() {
-        let bp = &BUILTIN_PROVIDERS[0];
-        let s = instantiate_builtin(bp, "devstral-2");
-        assert_eq!(s.provider(), "mistral");
-        assert_eq!(s.model(), "devstral-2");
     }
 }
