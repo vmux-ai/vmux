@@ -1,4 +1,5 @@
 pub mod anthropic;
+pub mod anthropic_plugin;
 pub mod builtin;
 pub mod mistral;
 pub mod mistral_plugin;

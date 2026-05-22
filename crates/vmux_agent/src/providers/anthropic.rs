@@ -7,6 +7,11 @@ use crate::strategy::AgentStrategy;
 use crate::stream::{StopReason, StreamEvent, ToolDef};
 use crate::{AgentKind, AgentVariant};
 
+pub const PROVIDER: &str = "anthropic";
+pub const ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
+pub const ENV_VAR: &str = "ANTHROPIC_API_KEY";
+pub const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
+
 pub struct AnthropicStrategy {
     provider: String,
     model: String,
@@ -38,10 +43,10 @@ impl AgentPageStrategy for AnthropicStrategy {
         &self.model
     }
     fn endpoint(&self) -> &str {
-        "https://api.anthropic.com/v1/messages"
+        ENDPOINT
     }
     fn env_var(&self) -> &'static str {
-        "ANTHROPIC_API_KEY"
+        ENV_VAR
     }
 
     fn build_request(
@@ -51,24 +56,7 @@ impl AgentPageStrategy for AnthropicStrategy {
         tools: &[ToolDef],
         api_key: &str,
     ) -> reqwest::Request {
-        let mut body = json!({
-            "model": model,
-            "max_tokens": 8192,
-            "messages": messages_to_anthropic_blocks(messages),
-            "stream": true,
-        });
-        if !tools.is_empty() {
-            body["tools"] = json!(tools_to_anthropic(tools));
-        }
-        reqwest::Client::new()
-            .post(self.endpoint())
-            .header("x-api-key", api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("Accept", "text/event-stream")
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .build()
-            .expect("AnthropicStrategy: build_request")
+        build_request(model, messages, tools, api_key)
     }
 
     fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
@@ -78,6 +66,32 @@ impl AgentPageStrategy for AnthropicStrategy {
     fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
         parse_sse
     }
+}
+
+pub fn build_request(
+    model: &str,
+    messages: &[Message],
+    tools: &[ToolDef],
+    api_key: &str,
+) -> reqwest::Request {
+    let mut body = json!({
+        "model": model,
+        "max_tokens": 8192,
+        "messages": messages_to_anthropic_blocks(messages),
+        "stream": true,
+    });
+    if !tools.is_empty() {
+        body["tools"] = json!(tools_to_anthropic(tools));
+    }
+    reqwest::Client::new()
+        .post(ENDPOINT)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("Accept", "text/event-stream")
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .build()
+        .expect("AnthropicStrategy: build_request")
 }
 
 pub fn parse_sse(payload: &str) -> Option<StreamEvent> {
