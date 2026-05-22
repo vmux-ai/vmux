@@ -504,6 +504,7 @@ fn impl_root_shortcuts(
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut extend_calls = Vec::new();
+    let mut extra_extend_calls = Vec::new();
 
     for variant in &data.variants {
         let Fields::Unnamed(fields) = &variant.fields else {
@@ -519,8 +520,16 @@ fn impl_root_shortcuts(
             ));
         };
         let inner_ty = &field.ty;
+        let var_ident = &variant.ident;
         extend_calls.push(quote! {
             bindings.extend(<#inner_ty>::default_shortcuts());
+        });
+        extra_extend_calls.push(quote! {
+            extras.extend(
+                <#inner_ty>::extra_chord_bindings()
+                    .into_iter()
+                    .map(|(shortcut, child)| (shortcut, #ident::#var_ident(child)))
+            );
         });
     }
 
@@ -530,6 +539,12 @@ fn impl_root_shortcuts(
                 let mut bindings = ::std::vec::Vec::new();
                 #(#extend_calls)*
                 bindings
+            }
+
+            pub fn extra_chord_bindings() -> ::std::vec::Vec<(crate::shortcut::Shortcut, Self)> {
+                let mut extras = ::std::vec::Vec::new();
+                #(#extra_extend_calls)*
+                extras
             }
         }
     })
@@ -687,7 +702,13 @@ impl BindProps {
             match (chord_val, variant_val) {
                 (Some(c), Some(v)) => extra_chords.push((c, v)),
                 (Some(c), None) => bindings.push(Binding::Chord(c)),
-                _ => {}
+                (None, Some(_)) => {
+                    return Err(syn::Error::new_spanned(
+                        attr,
+                        "#[shortcut(variant = ...)] requires chord = \"...\" in the same attribute",
+                    ));
+                }
+                (None, None) => {}
             }
         }
         Ok(BindProps {

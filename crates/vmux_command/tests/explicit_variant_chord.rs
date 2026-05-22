@@ -56,3 +56,40 @@ fn default_shortcuts_is_empty_when_only_extra_chords() {
     let defaults = Sample::default_shortcuts();
     assert!(defaults.is_empty());
 }
+
+#[derive(DefaultShortcuts, Debug, Clone, PartialEq, Eq)]
+enum Root {
+    Inner(Sample),
+}
+
+#[test]
+fn root_extra_chord_bindings_aggregates_children() {
+    let bindings = Root::extra_chord_bindings();
+    assert_eq!(bindings.len(), 1);
+    let (shortcut, variant) = &bindings[0];
+    assert!(matches!(
+        variant,
+        Root::Inner(Sample::Pane {
+            direction: Direction::Right
+        })
+    ));
+    assert_eq!(
+        *shortcut,
+        Shortcut::Chord(
+            KeyCombo {
+                key: KeyCode::KeyG,
+                modifiers: Modifiers {
+                    ctrl: true,
+                    ..Default::default()
+                },
+            },
+            KeyCombo {
+                key: KeyCode::Digit5,
+                modifiers: Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+            },
+        )
+    );
+}
