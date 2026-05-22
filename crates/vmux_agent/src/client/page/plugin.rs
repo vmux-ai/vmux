@@ -61,6 +61,7 @@ impl Plugin for PageAgentPlugin {
         app.add_observer(crate::client::page::strategy_indexer::on_strategy_removed);
         app.add_plugins(crate::providers::anthropic_plugin::AnthropicPlugin);
         app.add_plugins(crate::providers::mistral_plugin::MistralPlugin);
+        app.add_plugins(crate::providers::openai_plugin::OpenAiPlugin);
     }
 }
 

@@ -8,6 +8,11 @@ use crate::strategy::AgentStrategy;
 use crate::stream::{StopReason, StreamEvent, ToolDef};
 use crate::{AgentKind, AgentVariant};
 
+pub const PROVIDER: &str = "openai";
+pub const ENDPOINT: &str = "https://api.openai.com/v1/responses";
+pub const ENV_VAR: &str = "OPENAI_API_KEY";
+pub const DEFAULT_MODEL: &str = "gpt-5";
+
 pub struct OpenAiResponsesStrategy {
     provider: String,
     model: String,
@@ -39,10 +44,10 @@ impl AgentPageStrategy for OpenAiResponsesStrategy {
         &self.model
     }
     fn endpoint(&self) -> &str {
-        "https://api.openai.com/v1/responses"
+        ENDPOINT
     }
     fn env_var(&self) -> &'static str {
-        "OPENAI_API_KEY"
+        ENV_VAR
     }
 
     fn build_request(
@@ -52,22 +57,7 @@ impl AgentPageStrategy for OpenAiResponsesStrategy {
         tools: &[ToolDef],
         api_key: &str,
     ) -> reqwest::Request {
-        let mut body = json!({
-            "model": model,
-            "input": messages_to_responses_input(messages),
-            "stream": true,
-        });
-        if !tools.is_empty() {
-            body["tools"] = json!(tools_to_responses_tools(tools));
-        }
-        reqwest::Client::new()
-            .post(self.endpoint())
-            .bearer_auth(api_key)
-            .header("Accept", "text/event-stream")
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .build()
-            .expect("OpenAiResponsesStrategy: build_request")
+        build_request(model, messages, tools, api_key)
     }
 
     fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
@@ -77,6 +67,30 @@ impl AgentPageStrategy for OpenAiResponsesStrategy {
     fn parse_sse_fn(&self) -> crate::client::page::strategy_components::ParseSse {
         parse_sse
     }
+}
+
+pub fn build_request(
+    model: &str,
+    messages: &[Message],
+    tools: &[ToolDef],
+    api_key: &str,
+) -> reqwest::Request {
+    let mut body = json!({
+        "model": model,
+        "input": messages_to_responses_input(messages),
+        "stream": true,
+    });
+    if !tools.is_empty() {
+        body["tools"] = json!(tools_to_responses_tools(tools));
+    }
+    reqwest::Client::new()
+        .post(ENDPOINT)
+        .bearer_auth(api_key)
+        .header("Accept", "text/event-stream")
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .build()
+        .expect("OpenAiResponsesStrategy: build_request")
 }
 
 pub fn parse_sse(payload: &str) -> Option<StreamEvent> {
