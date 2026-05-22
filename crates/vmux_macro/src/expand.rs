@@ -8,13 +8,13 @@ pub fn variants_for(field_type: &Ident) -> Option<&'static [&'static str]> {
 }
 
 pub fn format_id_template(template: &str, variant_pascal: &str) -> String {
-    template.replace("{dir}", &to_snake_case(variant_pascal))
+    template.replace("{dir}", &crate::heck_variant_snake_case(variant_pascal))
 }
 
 pub fn format_label_template(template: &str, variant_pascal: &str) -> String {
     template
         .replace("{Dir}", variant_pascal)
-        .replace("{dir}", &to_snake_case(variant_pascal))
+        .replace("{dir}", &crate::heck_variant_snake_case(variant_pascal))
 }
 
 pub fn lookup_field_type<'a>(fields: &'a Fields, field_name: &str) -> Option<&'a Ident> {
@@ -29,15 +29,4 @@ pub fn lookup_field_type<'a>(fields: &'a Fields, field_name: &str) -> Option<&'a
         }
     }
     None
-}
-
-fn to_snake_case(s: &str) -> String {
-    let mut out = String::new();
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_uppercase() && i > 0 {
-            out.push('_');
-        }
-        out.push(ch.to_ascii_lowercase());
-    }
-    out
 }

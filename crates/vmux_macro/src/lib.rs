@@ -474,7 +474,7 @@ impl MenuProps {
     }
 }
 
-fn heck_variant_snake_case(s: &str) -> String {
+pub(crate) fn heck_variant_snake_case(s: &str) -> String {
     let mut out = String::new();
     for (i, ch) in s.chars().enumerate() {
         if ch.is_uppercase() && i > 0 {
@@ -543,6 +543,23 @@ fn impl_leaf_shortcuts(
                     "#[shortcut(expand)] requires #[menu(id_template)]",
                 )
             })?;
+
+            let valid_dir_names: Vec<String> = dir_variants
+                .iter()
+                .map(|v| heck_variant_snake_case(v))
+                .collect();
+            for (k, _) in &bind_props.direction_keys {
+                if !valid_dir_names.contains(k) {
+                    return Err(syn::Error::new_spanned(
+                        variant,
+                        format!(
+                            "unknown #[shortcut(...)] key '{}'; expected one of: {}",
+                            k,
+                            valid_dir_names.join(", ")
+                        ),
+                    ));
+                }
+            }
 
             for dir_variant_str in dir_variants {
                 let dir_lower = heck_variant_snake_case(dir_variant_str);
@@ -853,11 +870,8 @@ impl BindProps {
                         .get_ident()
                         .map(|i| i.to_string())
                         .unwrap_or_default();
-                    let dir_names = ["top", "right", "bottom", "left"];
-                    if dir_names.contains(&key.as_str()) {
-                        let v: LitStr = meta.value()?.parse()?;
-                        direction_keys.push((key, v.value()));
-                    }
+                    let v: LitStr = meta.value()?.parse()?;
+                    direction_keys.push((key, v.value()));
                 }
                 Ok(())
             })?;
