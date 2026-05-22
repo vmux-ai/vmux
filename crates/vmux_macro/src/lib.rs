@@ -1254,7 +1254,7 @@ fn impl_mcp_tool_leaf_fielded(
                 if kind != "string" && kind != "enum_string" {
                     return Err(syn::Error::new_spanned(
                         &field.ty,
-                        "#[mcp(enum_values = ...)] requires String/Option<String>",
+                        "#[mcp(enum_values = ...)] requires String, Option<String>, or an enum type with #[serde(rename_all = ...)]",
                     ));
                 }
                 let values = &field_props.enum_values;
@@ -1264,10 +1264,6 @@ fn impl_mcp_tool_leaf_fielded(
             } else if kind == "json" {
                 quote! {
                     ::serde_json::json!({"description": #field_desc})
-                }
-            } else if kind == "enum_string" {
-                quote! {
-                    ::serde_json::json!({"type": "string", "description": #field_desc})
                 }
             } else {
                 quote! {
