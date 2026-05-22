@@ -1,4 +1,6 @@
 pub mod event;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod open;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bundle;
@@ -15,6 +17,8 @@ pub mod snapshot;
 pub use bundle::COMMAND_BAR_PAGE_URL;
 #[cfg(not(target_arch = "wasm32"))]
 pub use command::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use open::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::CommandPlugin;
 #[cfg(not(target_arch = "wasm32"))]

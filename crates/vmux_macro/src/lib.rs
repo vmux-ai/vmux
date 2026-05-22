@@ -517,6 +517,31 @@ fn impl_leaf_shortcuts(
         let bind_props = BindProps::from_attrs(&variant.attrs)?;
         let menu_props = MenuProps::from_attrs(&variant.attrs)?;
 
+        for (chord_str, variant_expr_str) in &bind_props.extra_chords {
+            let parts: Vec<&str> = chord_str.split(',').collect();
+            if parts.len() != 2 {
+                return Err(syn::Error::new_spanned(
+                    variant,
+                    "chord binding must have exactly two parts separated by comma",
+                ));
+            }
+            let prefix_tokens = parse_key_combo_tokens(parts[0].trim(), variant)?;
+            let second_tokens = parse_key_combo_tokens(parts[1].trim(), variant)?;
+            let variant_expr: proc_macro2::TokenStream =
+                syn::parse_str(variant_expr_str).map_err(|e| {
+                    syn::Error::new_spanned(
+                        variant,
+                        format!("invalid variant expression in #[shortcut(variant = ...)]: {e}"),
+                    )
+                })?;
+            extra_entries.push(quote! {
+                (
+                    crate::shortcut::Shortcut::Chord(#prefix_tokens, #second_tokens),
+                    #ident::#variant_expr
+                )
+            });
+        }
+
         if let Some(ref expand_field) = bind_props.expand {
             let field_type =
                 expand::lookup_field_type(&variant.fields, expand_field).ok_or_else(|| {
@@ -578,31 +603,6 @@ fn impl_leaf_shortcuts(
                 });
             }
             continue;
-        }
-
-        for (chord_str, variant_expr_str) in &bind_props.extra_chords {
-            let parts: Vec<&str> = chord_str.split(',').collect();
-            if parts.len() != 2 {
-                return Err(syn::Error::new_spanned(
-                    variant,
-                    "chord binding must have exactly two parts separated by comma",
-                ));
-            }
-            let prefix_tokens = parse_key_combo_tokens(parts[0].trim(), variant)?;
-            let second_tokens = parse_key_combo_tokens(parts[1].trim(), variant)?;
-            let variant_expr: proc_macro2::TokenStream =
-                syn::parse_str(variant_expr_str).map_err(|e| {
-                    syn::Error::new_spanned(
-                        variant,
-                        format!("invalid variant expression in #[shortcut(variant = ...)]: {e}"),
-                    )
-                })?;
-            extra_entries.push(quote! {
-                (
-                    crate::shortcut::Shortcut::Chord(#prefix_tokens, #second_tokens),
-                    #ident::#variant_expr
-                )
-            });
         }
 
         if bind_props.bindings.is_empty() {
@@ -1090,18 +1090,23 @@ impl McpProps {
 }
 
 struct McpFieldProps {
+    description: Option<String>,
     enum_values: Vec<String>,
 }
 
 impl McpFieldProps {
     fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
+        let mut description = None;
         let mut enum_values = Vec::new();
         for attr in attrs {
             if !attr.path().is_ident("mcp") {
                 continue;
             }
             attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("enum_values") {
+                if meta.path.is_ident("description") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    description = Some(v.value());
+                } else if meta.path.is_ident("enum_values") {
                     let value: syn::ExprArray = meta.value()?.parse()?;
                     for el in value.elems {
                         if let syn::Expr::Lit(syn::ExprLit {
@@ -1118,7 +1123,10 @@ impl McpFieldProps {
                 Ok(())
             })?;
         }
-        Ok(McpFieldProps { enum_values })
+        Ok(McpFieldProps {
+            description,
+            enum_values,
+        })
     }
 }
 
@@ -1228,15 +1236,22 @@ fn impl_mcp_tool_leaf_fielded(
                 (field.ty.clone(), false)
             };
 
-            let kind = type_schema_kind(&effective_ty).ok_or_else(|| {
-                syn::Error::new_spanned(
-                    &field.ty,
-                    "unsupported McpTool field type (use String, integer types, bool, or Option<T>)",
-                )
-            })?;
+            let kind = if !field_props.enum_values.is_empty()
+                && type_schema_kind(&effective_ty).is_none()
+            {
+                "enum_string"
+            } else {
+                type_schema_kind(&effective_ty).ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        &field.ty,
+                        "unsupported McpTool field type (use String, integer types, bool, or Option<T>)",
+                    )
+                })?
+            };
 
+            let field_desc = field_props.description.as_deref().unwrap_or("");
             let schema_fragment = if !field_props.enum_values.is_empty() {
-                if kind != "string" {
+                if kind != "string" && kind != "enum_string" {
                     return Err(syn::Error::new_spanned(
                         &field.ty,
                         "#[mcp(enum_values = ...)] requires String/Option<String>",
@@ -1244,15 +1259,19 @@ fn impl_mcp_tool_leaf_fielded(
                 }
                 let values = &field_props.enum_values;
                 quote! {
-                    ::serde_json::json!({"type": "string", "enum": [ #(#values),* ]})
+                    ::serde_json::json!({"type": "string", "description": #field_desc, "enum": [ #(#values),* ]})
                 }
             } else if kind == "json" {
                 quote! {
-                    ::serde_json::json!({})
+                    ::serde_json::json!({"description": #field_desc})
+                }
+            } else if kind == "enum_string" {
+                quote! {
+                    ::serde_json::json!({"type": "string", "description": #field_desc})
                 }
             } else {
                 quote! {
-                    ::serde_json::json!({"type": #kind})
+                    ::serde_json::json!({"type": #kind, "description": #field_desc})
                 }
             };
 
@@ -1336,6 +1355,27 @@ fn impl_mcp_tool_leaf_fielded(
                     } else {
                         quote! {
                             let #field_ident: ::serde_json::Value = match #extract {
+                                ::core::option::Option::Some(v) => v,
+                                ::core::option::Option::None => {
+                                    return ::core::option::Option::Some(
+                                        ::core::result::Result::Err(format!("{} is required", #field_name))
+                                    );
+                                }
+                            };
+                        }
+                    }
+                }
+                "enum_string" => {
+                    let ty = &effective_ty;
+                    let extract = quote! {
+                        args.get(#field_name)
+                            .and_then(|v| ::serde_json::from_value::<#ty>(v.clone()).ok())
+                    };
+                    if is_optional {
+                        quote! { let #field_ident: ::core::option::Option<#ty> = #extract; }
+                    } else {
+                        quote! {
+                            let #field_ident: #ty = match #extract {
                                 ::core::option::Option::Some(v) => v,
                                 ::core::option::Option::None => {
                                     return ::core::option::Option::Some(
