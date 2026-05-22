@@ -1,3 +1,5 @@
+pub mod handler;
+
 use vmux_macro::{CommandBar, DefaultShortcuts, McpTool, OsSubMenu};
 
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, PartialEq, Eq)]
