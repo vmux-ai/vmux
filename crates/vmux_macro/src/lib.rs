@@ -413,10 +413,36 @@ fn impl_leaf_shortcuts(
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut binding_entries = Vec::new();
+    let mut extra_entries = Vec::new();
 
     for variant in &data.variants {
         let bind_props = BindProps::from_attrs(&variant.attrs)?;
         let menu_props = MenuProps::from_attrs(&variant.attrs)?;
+
+        for (chord_str, variant_expr_str) in &bind_props.extra_chords {
+            let parts: Vec<&str> = chord_str.split(',').collect();
+            if parts.len() != 2 {
+                return Err(syn::Error::new_spanned(
+                    variant,
+                    "chord binding must have exactly two parts separated by comma",
+                ));
+            }
+            let prefix_tokens = parse_key_combo_tokens(parts[0].trim(), variant)?;
+            let second_tokens = parse_key_combo_tokens(parts[1].trim(), variant)?;
+            let variant_expr: proc_macro2::TokenStream =
+                syn::parse_str(variant_expr_str).map_err(|e| {
+                    syn::Error::new_spanned(
+                        variant,
+                        format!("invalid variant expression in #[shortcut(variant = ...)]: {e}"),
+                    )
+                })?;
+            extra_entries.push(quote! {
+                (
+                    crate::shortcut::Shortcut::Chord(#prefix_tokens, #second_tokens),
+                    #ident::#variant_expr
+                )
+            });
+        }
 
         if bind_props.bindings.is_empty() {
             continue;
@@ -464,6 +490,10 @@ fn impl_leaf_shortcuts(
         impl #ident {
             pub fn default_shortcuts() -> ::std::vec::Vec<(crate::shortcut::Shortcut, ::std::string::String)> {
                 ::std::vec![#(#binding_entries),*]
+            }
+
+            pub fn extra_chord_bindings() -> ::std::vec::Vec<(crate::shortcut::Shortcut, Self)> {
+                ::std::vec![#(#extra_entries),*]
             }
         }
     })
@@ -628,27 +658,42 @@ enum Binding {
 
 struct BindProps {
     bindings: Vec<Binding>,
+    extra_chords: Vec<(String, String)>,
 }
 
 impl BindProps {
     fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
         let mut bindings = Vec::new();
+        let mut extra_chords = Vec::new();
         for attr in attrs {
             if !attr.path().is_ident("shortcut") {
                 continue;
             }
+            let mut chord_val: Option<String> = None;
+            let mut variant_val: Option<String> = None;
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("direct") {
                     let v: LitStr = meta.value()?.parse()?;
                     bindings.push(Binding::Direct(v.value()));
                 } else if meta.path.is_ident("chord") {
                     let v: LitStr = meta.value()?.parse()?;
-                    bindings.push(Binding::Chord(v.value()));
+                    chord_val = Some(v.value());
+                } else if meta.path.is_ident("variant") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    variant_val = Some(v.value());
                 }
                 Ok(())
             })?;
+            match (chord_val, variant_val) {
+                (Some(c), Some(v)) => extra_chords.push((c, v)),
+                (Some(c), None) => bindings.push(Binding::Chord(c)),
+                _ => {}
+            }
         }
-        Ok(BindProps { bindings })
+        Ok(BindProps {
+            bindings,
+            extra_chords,
+        })
     }
 }
 
