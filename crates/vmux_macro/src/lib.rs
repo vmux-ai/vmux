@@ -667,7 +667,7 @@ fn impl_command_bar(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
 
     let first_variant = data.variants.first();
     let is_leaf = first_variant
-        .map(|v| matches!(v.fields, Fields::Unit))
+        .map(|v| matches!(v.fields, Fields::Unit | Fields::Named(_)))
         .unwrap_or(true);
 
     if is_leaf {
