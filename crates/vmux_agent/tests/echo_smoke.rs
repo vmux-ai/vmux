@@ -1,55 +1,28 @@
-use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::BinIpcEventRawBuffer;
+use vmux_agent::client::page::strategy_components::{
+    BuildRequestFn, Endpoint, EnvVarName, ParseSseFn, Strategy, StrategyKey, StrategyKind,
+    StrategyVariant,
+};
 use vmux_agent::message::Message;
+use vmux_agent::stream::{StopReason, StreamEvent, ToolDef};
 use vmux_agent::{
-    AgentApprovalPolicy, AgentKind, AgentMessages, AgentPageStrategy, AgentRunState, AgentSession,
-    AgentVariant, AssistantBlock, LastRunStateKind, PageAgentPlugin, PendingUserInput,
-    strategy::{AgentStrategies, AgentStrategy},
-    stream::{StopReason, StreamEvent, ToolDef},
+    AgentApprovalPolicy, AgentKind, AgentMessages, AgentRunState, AgentSession, AgentVariant,
+    AssistantBlock, LastRunStateKind, PageAgentPlugin, PendingUserInput,
 };
 
-struct EchoMock {
-    url: String,
-}
+static MOCK_URL: Mutex<Option<String>> = Mutex::new(None);
 
-impl AgentStrategy for EchoMock {
-    fn kind(&self) -> AgentKind {
-        AgentKind::Vibe
-    }
-    fn variant(&self) -> AgentVariant {
-        AgentVariant::Page
-    }
-}
-
-impl AgentPageStrategy for EchoMock {
-    fn provider(&self) -> &str {
-        "vibe"
-    }
-    fn model(&self) -> &str {
-        "echo-stub"
-    }
-    fn endpoint(&self) -> &str {
-        &self.url
-    }
-    fn env_var(&self) -> &'static str {
-        ""
-    }
-    fn build_request(&self, _: &str, _: &[Message], _: &[ToolDef], _: &str) -> reqwest::Request {
-        reqwest::Client::new()
-            .post(&self.url)
-            .body("{}")
-            .build()
-            .unwrap()
-    }
-    fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
-        echo_mock_parse_sse(payload)
-    }
-    fn parse_sse_fn(&self) -> vmux_agent::client::page::strategy_components::ParseSse {
-        echo_mock_parse_sse
-    }
+fn mock_build_request(_: &str, _: &[Message], _: &[ToolDef], _: &str) -> reqwest::Request {
+    let url = MOCK_URL.lock().unwrap().clone().expect("MOCK_URL not set");
+    reqwest::Client::new()
+        .post(&url)
+        .body("{}")
+        .build()
+        .unwrap()
 }
 
 fn echo_mock_parse_sse(payload: &str) -> Option<StreamEvent> {
@@ -80,15 +53,27 @@ fn echo_session_streams_to_assistant_message() {
         .with_body(body)
         .create();
 
+    *MOCK_URL.lock().unwrap() = Some(format!("{}/echo", server.url()));
+
     let mut app = App::new();
     app.add_plugins(bevy::app::TaskPoolPlugin::default());
     app.init_resource::<BinIpcEventRawBuffer>();
     app.add_plugins(PageAgentPlugin);
-    let mut strategies = AgentStrategies::default();
-    strategies.register_page(Arc::new(EchoMock {
-        url: format!("{}/echo", server.url()),
-    }));
-    app.insert_resource(strategies);
+
+    app.world_mut().spawn((
+        Strategy,
+        StrategyKey {
+            provider: "vibe".into(),
+            model: "echo-stub".into(),
+        },
+        Endpoint("http://mock/".into()),
+        EnvVarName(""),
+        StrategyKind(AgentKind::Vibe),
+        StrategyVariant(AgentVariant::Page),
+        BuildRequestFn(mock_build_request),
+        ParseSseFn(echo_mock_parse_sse),
+    ));
+    app.update();
 
     let entity = app
         .world_mut()
@@ -135,4 +120,6 @@ fn echo_session_streams_to_assistant_message() {
         _ => panic!("expected assistant message"),
     };
     assert_eq!(assistant_text, "echo: hello");
+
+    *MOCK_URL.lock().unwrap() = None;
 }

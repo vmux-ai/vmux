@@ -38,6 +38,25 @@ impl PageStrategyIndex {
     pub fn is_empty(&self) -> bool {
         self.by_key.is_empty()
     }
+
+    pub fn lookup_fns(
+        &self,
+        provider: &str,
+        model: &str,
+        build_q: &Query<&crate::client::page::strategy_components::BuildRequestFn>,
+        parse_q: &Query<&crate::client::page::strategy_components::ParseSseFn>,
+        env_q: &Query<&crate::client::page::strategy_components::EnvVarName>,
+    ) -> Option<(
+        crate::client::page::strategy_components::BuildRequest,
+        crate::client::page::strategy_components::ParseSse,
+        &'static str,
+    )> {
+        let e = self.get_by_strs(provider, model)?;
+        let build = build_q.get(e).ok()?.0;
+        let parse = parse_q.get(e).ok()?.0;
+        let env = env_q.get(e).ok()?.0;
+        Some((build, parse, env))
+    }
 }
 
 #[cfg(test)]

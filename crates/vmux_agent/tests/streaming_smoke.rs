@@ -1,59 +1,35 @@
-use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::BinIpcEventRawBuffer;
+use serial_test::serial;
+use vmux_agent::client::page::strategy_components::{
+    BuildRequestFn, Endpoint, EnvVarName, ParseSseFn, Strategy, StrategyKey, StrategyKind,
+    StrategyVariant,
+};
+use vmux_agent::stream::ToolDef;
 use vmux_agent::{
-    AgentApprovalPolicy, AgentKind, AgentMessages, AgentPageStrategy, AgentRunState, AgentSession,
-    AgentVariant, AssistantBlock, LastRunStateKind, Message, PageAgentPlugin, PendingUserInput,
-    providers::openai_shared::parse_chat_completions_sse,
-    strategy::{AgentStrategies, AgentStrategy},
-    stream::{StreamEvent, ToolDef},
+    AgentApprovalPolicy, AgentKind, AgentMessages, AgentRunState, AgentSession, AgentVariant,
+    AssistantBlock, LastRunStateKind, Message, PageAgentPlugin, PendingUserInput,
 };
 
-struct MockMistral {
-    url: String,
-}
+static MOCK_URL: Mutex<Option<String>> = Mutex::new(None);
 
-impl AgentStrategy for MockMistral {
-    fn kind(&self) -> AgentKind {
-        AgentKind::Vibe
-    }
-    fn variant(&self) -> AgentVariant {
-        AgentVariant::Page
-    }
-}
-
-impl AgentPageStrategy for MockMistral {
-    fn provider(&self) -> &str {
-        "mistral"
-    }
-    fn model(&self) -> &str {
-        "devstral-2"
-    }
-    fn endpoint(&self) -> &str {
-        &self.url
-    }
-    fn env_var(&self) -> &'static str {
-        ""
-    }
-    fn build_request(&self, _: &str, _: &[Message], _: &[ToolDef], _: &str) -> reqwest::Request {
-        reqwest::Client::new()
-            .post(&self.url)
-            .body("{}")
-            .build()
-            .unwrap()
-    }
-    fn parse_sse_event(&self, payload: &str) -> Option<StreamEvent> {
-        parse_chat_completions_sse(payload)
-    }
-    fn parse_sse_fn(&self) -> vmux_agent::client::page::strategy_components::ParseSse {
-        vmux_agent::providers::mistral::parse_sse
-    }
+fn mock_build_request(_: &str, _: &[Message], _: &[ToolDef], _: &str) -> reqwest::Request {
+    let url = MOCK_URL.lock().unwrap().clone().expect("MOCK_URL not set");
+    reqwest::Client::new()
+        .post(&url)
+        .body("{}")
+        .build()
+        .unwrap()
 }
 
 #[test]
+#[serial]
 fn single_text_turn_streams_into_assistant_message() {
+    unsafe { std::env::remove_var("MISTRAL_API_KEY") };
+
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
 
@@ -66,15 +42,27 @@ fn single_text_turn_streams_into_assistant_message() {
         .with_body(body)
         .create();
 
+    *MOCK_URL.lock().unwrap() = Some(format!("{}/chat", server.url()));
+
     let mut app = App::new();
     app.add_plugins(bevy::app::TaskPoolPlugin::default());
     app.init_resource::<BinIpcEventRawBuffer>();
     app.add_plugins(PageAgentPlugin);
-    let mut strategies = AgentStrategies::default();
-    strategies.register_page(Arc::new(MockMistral {
-        url: format!("{}/chat", server.url()),
-    }));
-    app.insert_resource(strategies);
+
+    app.world_mut().spawn((
+        Strategy,
+        StrategyKey {
+            provider: "mistral".into(),
+            model: "devstral-2".into(),
+        },
+        Endpoint("http://mock/".into()),
+        EnvVarName(""),
+        StrategyKind(AgentKind::Vibe),
+        StrategyVariant(AgentVariant::Page),
+        BuildRequestFn(mock_build_request),
+        ParseSseFn(vmux_agent::providers::mistral::parse_sse),
+    ));
+    app.update();
 
     let entity = app
         .world_mut()
@@ -112,11 +100,14 @@ fn single_text_turn_streams_into_assistant_message() {
                     })
                     .collect();
                 if text == "hello world" {
+                    *MOCK_URL.lock().unwrap() = None;
                     return;
                 }
             }
         }
         std::thread::sleep(Duration::from_millis(20));
     }
+
+    *MOCK_URL.lock().unwrap() = None;
     panic!("did not reach Idle with assistant 'hello world' within 5s");
 }
