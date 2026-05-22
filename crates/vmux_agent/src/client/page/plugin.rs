@@ -62,6 +62,7 @@ impl Plugin for PageAgentPlugin {
         app.add_plugins(crate::providers::anthropic_plugin::AnthropicPlugin);
         app.add_plugins(crate::providers::mistral_plugin::MistralPlugin);
         app.add_plugins(crate::providers::openai_plugin::OpenAiPlugin);
+        app.add_plugins(crate::echo_plugin::EchoPlugin);
     }
 }
 

@@ -4,6 +4,23 @@ use crate::strategy::AgentStrategy;
 use crate::stream::{StopReason, StreamEvent, ToolDef};
 use crate::{AgentKind, AgentVariant};
 
+pub const PROVIDER: &str = "echo";
+pub const ENDPOINT: &str = "stub://echo";
+pub const ENV_VAR: &str = "";
+pub const DEFAULT_MODEL: &str = "echo";
+
+pub fn build_request(
+    _model: &str,
+    _messages: &[Message],
+    _tools: &[ToolDef],
+    _api_key: &str,
+) -> reqwest::Request {
+    reqwest::Client::new()
+        .get("http://localhost/echo-stub-unused")
+        .build()
+        .unwrap()
+}
+
 pub struct EchoPageStrategy {
     provider: String,
     model: String,
@@ -37,23 +54,20 @@ impl AgentPageStrategy for EchoPageStrategy {
         &self.model
     }
     fn endpoint(&self) -> &str {
-        "stub://echo"
+        ENDPOINT
     }
     fn env_var(&self) -> &'static str {
-        ""
+        ENV_VAR
     }
 
     fn build_request(
         &self,
-        _model: &str,
-        _messages: &[Message],
-        _tools: &[ToolDef],
-        _api_key: &str,
+        model: &str,
+        messages: &[Message],
+        tools: &[ToolDef],
+        api_key: &str,
     ) -> reqwest::Request {
-        reqwest::Client::new()
-            .get("http://localhost/echo-stub-unused")
-            .build()
-            .unwrap()
+        build_request(model, messages, tools, api_key)
     }
 
     fn parse_sse_event(&self, _payload: &str) -> Option<StreamEvent> {

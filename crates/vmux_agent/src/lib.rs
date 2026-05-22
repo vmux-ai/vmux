@@ -3,6 +3,7 @@
 pub mod client;
 pub mod components;
 pub mod echo;
+pub mod echo_plugin;
 pub mod events;
 pub mod exec;
 pub mod http;
