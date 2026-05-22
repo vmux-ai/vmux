@@ -1,3 +1,5 @@
+mod named_fields;
+
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Fields, LitStr, parse_macro_input};
@@ -70,12 +72,15 @@ fn impl_os_sub_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
     let mut from_menu_arms = Vec::new();
 
     for (idx, variant) in data.variants.iter().enumerate() {
-        let Fields::Unit = &variant.fields else {
-            return Err(syn::Error::new_spanned(
-                &variant.fields,
-                "OsSubMenu only supports unit enum variants",
-            ));
-        };
+        match &variant.fields {
+            Fields::Unit | Fields::Named(_) => {}
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    &variant.fields,
+                    "OsSubMenu only supports unit or named-field enum variants",
+                ));
+            }
+        }
         let props = MenuProps::from_attrs(&variant.attrs)?;
         let Some(id) = &props.id else {
             return Err(syn::Error::new_spanned(
@@ -85,8 +90,10 @@ fn impl_os_sub_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
         };
         let id_lit = id.as_str();
         let variant_ident = &variant.ident;
+        let constructor =
+            named_fields::build_default_named_constructor(ident, variant_ident, &variant.fields);
         from_menu_arms.push(quote! {
-            #id_lit => ::core::option::Option::Some(#ident::#variant_ident),
+            #id_lit => ::core::option::Option::Some(#constructor),
         });
 
         if props.hidden {
