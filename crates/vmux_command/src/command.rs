@@ -234,12 +234,6 @@ pub enum SpaceCommand {
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaneCommand {
     #[default]
-    #[menu(id = "split_v", label = "Split Vertically\t<leader> %")]
-    #[shortcut(chord = "Ctrl+g, %")]
-    SplitV,
-    #[menu(id = "split_h", label = "Split Horizontally\t<leader> \"")]
-    #[shortcut(chord = "Ctrl+g, \"")]
-    SplitH,
     #[menu(id = "toggle_pane", label = "Next Pane\t<leader> o", hidden)]
     #[shortcut(chord = "Ctrl+g, o")]
     Toggle,
@@ -532,8 +526,8 @@ mod tests {
     #[test]
     fn layout_menu_id_resolves_through_nested_chain() {
         assert_eq!(
-            AppCommand::from_menu_id("split_v"),
-            Some(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SplitV)))
+            AppCommand::from_menu_id("toggle_pane"),
+            Some(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Toggle)))
         );
         assert_eq!(
             AppCommand::from_menu_id("toggle_layout"),

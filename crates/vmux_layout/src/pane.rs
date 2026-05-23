@@ -187,21 +187,17 @@ fn handle_zoom_command(
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let AppCommand::Layout(LayoutCommand::Pane(pane_cmd)) = *cmd else {
-            continue;
-        };
-        let unzoom_only = matches!(
-            pane_cmd,
-            PaneCommand::SelectLeft
+        let unzoom_only = match cmd {
+            AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::SelectLeft
                 | PaneCommand::SelectRight
                 | PaneCommand::SelectUp
-                | PaneCommand::SelectDown
-                | PaneCommand::SplitH
-                | PaneCommand::SplitV
-        );
-        if !unzoom_only && !matches!(pane_cmd, PaneCommand::Zoom) {
-            continue;
-        }
+                | PaneCommand::SelectDown,
+            )) => true,
+            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InPane { .. })) => true,
+            AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Zoom)) => false,
+            _ => continue,
+        };
         let (_, active_pane_opt, _) = focused_stack(
             &tabs,
             &all_children,
@@ -516,45 +512,6 @@ fn handle_pane_commands(
         };
 
         match pane_cmd {
-            PaneCommand::SplitV | PaneCommand::SplitH => {
-                let split_dir = if pane_cmd == PaneCommand::SplitV {
-                    PaneSplitDirection::Row
-                } else {
-                    PaneSplitDirection::Column
-                };
-
-                let existing_tabs: Vec<Entity> = pane_children
-                    .get(active)
-                    .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
-                    .unwrap_or_default();
-
-                let (_pane1, pane2) = split_pane_in_two(
-                    &mut commands,
-                    active,
-                    split_dir,
-                    &settings.pane,
-                    &existing_tabs,
-                );
-
-                let new_stack = commands
-                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane2)))
-                    .id();
-                let url = startup.url();
-                if url.is_empty() {
-                    startup.new_stack_ctx.stack = Some(new_stack);
-                    startup.new_stack_ctx.previous_stack = active_stack_opt;
-                    startup.new_stack_ctx.needs_open = true;
-                } else {
-                    startup.requests.write(crate::LayoutSpawnRequest::OpenUrl {
-                        stack: new_stack,
-                        url,
-                    });
-                }
-
-                startup.hover_intent.target = None;
-                startup.hover_intent.last_activation = Some(Instant::now());
-                resize_q.p3().target = Some(pane2);
-            }
             PaneCommand::Close => {
                 let confirm_enabled = resize_q.p7().enabled;
                 let needs_confirm = confirm_enabled
@@ -2217,12 +2174,19 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SplitH)));
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InPane {
+                    direction: PaneDirection::Bottom,
+                    target: PaneTarget::NewSplit,
+                    mode: PaneOpenMode::NewStack,
+                    url: None,
+                },
+            )));
         app.update();
 
         assert!(
             app.world().get::<Zoomed>(tab).is_none(),
-            "split should auto-unzoom"
+            "open-in-pane should auto-unzoom"
         );
     }
 
