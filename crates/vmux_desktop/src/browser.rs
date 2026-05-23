@@ -1052,7 +1052,6 @@ fn handle_browser_commands(
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     terminal_q: Query<(), With<Terminal>>,
     effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
-    mut spawn_requests: Option<ResMut<Messages<vmux_layout::LayoutSpawnRequest>>>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -1114,25 +1113,20 @@ fn handle_browser_commands(
                         effective_startup_url.as_ref().map(|s| s.0.as_str()),
                     );
                     if is_terminal {
-                        // Terminal/agent webviews are thin frontends over a PTY
-                        // owned by vmux_service — they cannot navigate in place via
-                        // CEF. Despawn the webview entity (the on_terminal_removed
-                        // observer fires KillProcess so the PTY exits cleanly) and
-                        // queue a fresh Browser into the same stack via the
-                        // existing OpenUrl spawn path.
-                        commands.entity(webview).despawn();
-                        if let Some(spawn_requests) = spawn_requests.as_mut() {
-                            spawn_requests.write(vmux_layout::LayoutSpawnRequest::OpenUrl {
-                                stack: active,
-                                url: resolved,
-                            });
-                        }
-                    } else {
-                        commands.trigger(RequestNavigate {
-                            webview,
-                            url: resolved,
-                        });
+                        // Strip the Terminal/agent markers + ProcessId so the
+                        // on_terminal_removed observer fires KillProcess — the PTY
+                        // (vibe etc.) in vmux_service exits cleanly. The entity
+                        // keeps Browser so CEF can navigate it like any page.
+                        commands
+                            .entity(webview)
+                            .remove::<Terminal>()
+                            .remove::<vmux_service::protocol::ProcessId>()
+                            .remove::<vmux_agent::components::AgentSession>();
                     }
+                    commands.trigger(RequestNavigate {
+                        webview,
+                        url: resolved,
+                    });
                 }
                 _ => {}
             },
