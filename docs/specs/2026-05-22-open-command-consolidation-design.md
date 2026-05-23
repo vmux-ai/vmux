@@ -270,3 +270,40 @@ Each `OpenCommand` variant gets a handler test that exercises both URL paths (`S
 The `InPane` handler additionally needs tests for all four `(target, mode)` combinations and for the `Existing → NewSplit` fallback when no sibling pane exists.
 
 The IPC change is exercised by the existing `command_bar_open_event_*` rkyv round-trip tests, extended to assert the new `target: Option<OpenTarget>` field round-trips correctly.
+
+### Per-variant test coverage
+
+**InPlace** — `crates/vmux_desktop/src/browser.rs` `tests::open_in_place_flow`:
+- `in_place_with_explicit_url_triggers_request_navigate`
+- `in_place_with_none_url_uses_startup_setting`
+- `in_place_with_none_url_and_no_startup_uses_default`
+
+**InNewStack** — `crates/vmux_layout/src/stack.rs` `tests`:
+- `open_in_new_stack_with_explicit_url`
+- `open_in_new_stack_none_url_with_startup`
+- `open_in_new_stack_none_url_no_startup_falls_back`
+- `in_new_stack_with_no_url_uses_startup_url`
+
+**InPane** — `crates/vmux_layout/src/pane.rs` `tests`:
+- `in_pane_new_split_right_creates_pane_to_the_right`
+- `in_pane_existing_in_place_navigates_neighbor_active_stack`
+- `in_pane_existing_new_stack_adds_stack_to_neighbor`
+- `in_pane_existing_falls_back_to_new_split_when_no_sibling`
+
+**InNewTab** — `crates/vmux_layout/src/space.rs` `tests`:
+- `open_in_new_tab_explicit_url_spawns_new_space_with_url`
+- `open_in_new_tab_none_url_falls_back_to_startup`
+- `open_in_new_tab_none_url_no_startup_falls_back_to_default`
+
+**InNewSpace** — `crates/vmux_layout/src/profile.rs` `tests`:
+- `open_in_new_space_explicit_url_spawns_new_profile_with_url`
+- `open_in_new_space_none_url_falls_back_to_startup`
+- `open_in_new_space_none_url_no_startup_falls_back_to_default`
+
+**Derive / macro coverage** — `crates/vmux_command/tests/open_command_derives.rs`:
+- `default_pane_target_is_new_split` / `default_pane_open_mode_is_new_stack`
+- `open_command_in_place_has_none_url_default` / `open_command_in_pane_carries_all_four_fields`
+- `from_menu_id_resolves_all_expanded_pane_directions` / `from_menu_id_resolves_non_expanded_variants`
+- `default_shortcuts_contains_expected_ids` / `extra_chord_bindings_has_two_tmux_chords`
+- `command_bar_entries_has_eight_entries` / `mcp_tool_entries_has_all_variants`
+- `open_target_default_is_in_place` / `open_target_in_pane_variant`
