@@ -179,15 +179,23 @@ fn handle_space_commands(
                 let Ok(main) = main_q.single() else { continue };
                 let count = spaces.iter().count();
                 let name = format!("Tab {}", count + 1);
-                let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
-                let resolved = vmux_command::open::handler::resolve_url(url.as_deref(), startup);
-                let override_startup = crate::settings::EffectiveStartupUrl(resolved);
+                let startup_for_spawn = match url.as_deref() {
+                    Some(u) if !u.is_empty() => {
+                        let startup = effective_startup_url.as_deref().map(|s| s.0.as_str());
+                        Some(crate::settings::EffectiveStartupUrl(
+                            vmux_command::open::handler::resolve_url(Some(u), startup),
+                        ))
+                    }
+                    _ => None,
+                };
                 spawn_new_space(
                     main,
                     *primary_window,
                     name,
                     &settings,
-                    Some(&override_startup),
+                    startup_for_spawn
+                        .as_ref()
+                        .or(effective_startup_url.as_deref()),
                     &mut new_stack_ctx,
                     &mut spawn_requests,
                     &mut commands,
@@ -595,7 +603,10 @@ mod tests {
     }
 
     #[test]
-    fn open_in_new_tab_none_url_no_startup_falls_back_to_default() {
+    fn open_in_new_tab_none_url_no_startup_queues_command_bar_prompt() {
+        // url: None + no startup URL -> spawn_new_space queues the new stack in
+        // NewStackContext so the command bar can open pre-filled. No spawn
+        // request emitted until the user submits a URL.
         let mut app = build_app();
         spawn_main_and_space(&mut app);
 
@@ -608,12 +619,9 @@ mod tests {
         app.update();
 
         let collected = app.world().resource::<CollectedSpawns>();
-        assert_eq!(collected.0.len(), 1, "expected one spawn request");
-        match &collected.0[0] {
-            crate::LayoutSpawnRequest::OpenUrl { url, .. } => {
-                assert_eq!(url, vmux_command::open::handler::DEFAULT_NEW_PAGE_URL);
-            }
-            other => panic!("expected OpenUrl, got {other:?}"),
-        }
+        assert!(collected.0.is_empty(), "no spawn until URL is provided");
+        let ctx = app.world().resource::<NewStackContext>();
+        assert!(ctx.stack.is_some(), "an empty stack should be queued");
+        assert!(ctx.needs_open, "command bar should be requested");
     }
 }

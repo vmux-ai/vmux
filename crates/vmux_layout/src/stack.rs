@@ -242,14 +242,28 @@ fn handle_stack_commands(
                 let Some(pane) = active_pane else {
                     continue;
                 };
-                let _ = active_stack;
-                let stack = commands
-                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                    .id();
-                let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
-                let url =
-                    vmux_command::open::handler::resolve_url(override_url.as_deref(), startup);
-                spawn_requests.write(LayoutSpawnRequest::OpenUrl { stack, url });
+                let startup = effective_startup_url
+                    .as_deref()
+                    .map(|u| u.0.clone())
+                    .filter(|u| !u.is_empty());
+                let resolved = override_url.filter(|u| !u.is_empty()).or(startup);
+                if let Some(url) = resolved {
+                    let stack = commands
+                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                        .id();
+                    spawn_requests.write(LayoutSpawnRequest::OpenUrl { stack, url });
+                } else {
+                    if new_stack_ctx.stack.is_some() {
+                        new_stack_ctx.needs_open = true;
+                        continue;
+                    }
+                    let stack = commands
+                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                        .id();
+                    new_stack_ctx.stack = Some(stack);
+                    new_stack_ctx.previous_stack = active_stack;
+                    new_stack_ctx.needs_open = true;
+                }
             }
             Dispatch::Stack(StackCommand::Close) => {
                 let Some(pane) = active_pane else {
@@ -908,37 +922,12 @@ mod tests {
     }
 
     #[test]
-    fn open_in_new_stack_none_url_with_startup() {
-        let mut app = build_app_with_collector();
-        app.insert_resource(crate::settings::EffectiveStartupUrl(
-            "https://startup.test".into(),
-        ));
-        let (_tab, pane) = spawn_hierarchy(&mut app);
-
-        app.world_mut()
-            .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewStack { url: None },
-            )));
-
-        app.update();
-
-        let collected = app.world().resource::<CollectedSpawns>();
-        assert_eq!(collected.0.len(), 1, "expected one spawn request");
-        match &collected.0[0] {
-            LayoutSpawnRequest::OpenUrl { stack, url } => {
-                assert_eq!(url, "https://startup.test");
-                assert_eq!(
-                    app.world().get::<ChildOf>(*stack).map(Relationship::get),
-                    Some(pane),
-                );
-            }
-            other => panic!("expected OpenUrl, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn open_in_new_stack_none_url_no_startup_falls_back() {
+    fn open_in_new_stack_none_url_queues_empty_stack_for_command_bar() {
+        // url: None means the user invoked the shortcut without typing a URL.
+        // Handler spawns an empty stack and stashes it in NewStackContext so the
+        // command bar can open pre-filled. No LayoutSpawnRequest::OpenUrl is
+        // emitted until the user submits a URL (which produces a second
+        // OpenCommand::InNewStack { url: Some(...) } invocation).
         let mut app = build_app_with_collector();
         let (_tab, pane) = spawn_hierarchy(&mut app);
 
@@ -951,17 +940,17 @@ mod tests {
         app.update();
 
         let collected = app.world().resource::<CollectedSpawns>();
-        assert_eq!(collected.0.len(), 1, "expected one spawn request");
-        match &collected.0[0] {
-            LayoutSpawnRequest::OpenUrl { stack, url } => {
-                assert_eq!(url, vmux_command::open::handler::DEFAULT_NEW_PAGE_URL,);
-                assert_eq!(
-                    app.world().get::<ChildOf>(*stack).map(Relationship::get),
-                    Some(pane),
-                );
-            }
-            other => panic!("expected OpenUrl, got {other:?}"),
-        }
+        assert!(
+            collected.0.is_empty(),
+            "no spawn request until URL is provided"
+        );
+        let ctx = app.world().resource::<NewStackContext>();
+        let queued = ctx.stack.expect("an empty stack should be queued");
+        assert_eq!(
+            app.world().get::<ChildOf>(queued).map(Relationship::get),
+            Some(pane),
+        );
+        assert!(ctx.needs_open, "command bar should be requested");
     }
 
     #[test]
