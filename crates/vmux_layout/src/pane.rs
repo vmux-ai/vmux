@@ -20,7 +20,10 @@ use bevy::{
 use bevy_cef::prelude::CefKeyboardTarget;
 use moonshine_save::prelude::*;
 use std::time::Instant;
-use vmux_command::{AppCommand, LayoutCommand, PaneCommand, ReadAppCommands};
+use vmux_command::{
+    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand, ReadAppCommands,
+    open::{PaneDirection, PaneOpenMode, PaneTarget},
+};
 use vmux_history::LastActivatedAt;
 
 /// Marker: pane is waiting for close confirmation dialog.
@@ -49,6 +52,7 @@ impl Plugin for PanePlugin {
             .init_resource::<PendingCursorWarp>()
             .add_systems(Update, on_pane_select.in_set(ReadAppCommands))
             .add_systems(Update, handle_pane_commands.in_set(ReadAppCommands))
+            .add_systems(Update, handle_open_in_pane.in_set(ReadAppCommands))
             .add_systems(
                 Update,
                 handle_zoom_command
@@ -806,6 +810,183 @@ fn handle_pane_commands(
                     if let Ok(mut ps) = sq.get_mut(sibling_entity) {
                         ps.flex_grow = sg;
                     }
+                }
+            }
+        }
+    }
+}
+
+fn direction_to_split(direction: &PaneDirection) -> PaneSplitDirection {
+    match direction {
+        PaneDirection::Left | PaneDirection::Right => PaneSplitDirection::Row,
+        PaneDirection::Top | PaneDirection::Bottom => PaneSplitDirection::Column,
+    }
+}
+
+fn is_after_direction(direction: &PaneDirection) -> bool {
+    matches!(direction, PaneDirection::Right | PaneDirection::Bottom)
+}
+
+fn find_sibling_pane(
+    active: Entity,
+    direction: &PaneDirection,
+    child_of_q: &Query<&ChildOf>,
+    split_dir_q: &Query<&PaneSplit>,
+    pane_children: &Query<&Children, With<Pane>>,
+    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+) -> Option<Entity> {
+    let target_split = direction_to_split(direction);
+    let after = is_after_direction(direction);
+
+    let mut cur = active;
+    for _ in 0..20 {
+        let Ok(co) = child_of_q.get(cur) else {
+            return None;
+        };
+        let parent = co.get();
+        let Ok(ps) = split_dir_q.get(parent) else {
+            cur = parent;
+            continue;
+        };
+        if ps.direction != target_split {
+            cur = parent;
+            continue;
+        }
+        let Ok(children) = pane_children.get(parent) else {
+            cur = parent;
+            continue;
+        };
+        let sibs: Vec<Entity> = children.iter().collect();
+        let Some(idx) = sibs.iter().position(|&e| e == cur) else {
+            cur = parent;
+            continue;
+        };
+        let sibling_idx = if after { idx + 1 } else { idx.wrapping_sub(1) };
+        let sibling = sibs.get(sibling_idx).copied()?;
+        return Some(first_leaf_descendant(sibling, pane_children, leaf_panes));
+    }
+    None
+}
+
+fn handle_open_in_pane(
+    mut reader: MessageReader<AppCommand>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_children: Query<&Children, With<Pane>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    child_of_q: Query<&ChildOf>,
+    split_dir_q: Query<&PaneSplit>,
+    tab_filter: Query<Entity, With<Stack>>,
+    settings: Res<LayoutSettings>,
+    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
+    mut commands: Commands,
+    mut spawn_requests: MessageWriter<crate::LayoutSpawnRequest>,
+    mut pending_warp: ResMut<PendingCursorWarp>,
+) {
+    for cmd in reader.read() {
+        let AppCommand::Browser(BrowserCommand::Open(OpenCommand::InPane {
+            direction,
+            target,
+            mode,
+            url,
+        })) = cmd
+        else {
+            continue;
+        };
+
+        let (_, active_pane_opt, _) = focused_stack(
+            &tabs,
+            &all_children,
+            &leaf_panes,
+            &pane_ts,
+            &pane_children,
+            &stack_ts,
+        );
+        let Some(active) = active_pane_opt else {
+            continue;
+        };
+
+        let resolved = vmux_command::open::handler::resolve_url(
+            url.as_deref(),
+            effective_startup_url.as_ref().map(|s| s.0.as_str()),
+        );
+
+        let split_dir = direction_to_split(direction);
+
+        let (target_pane, was_split) = match target {
+            PaneTarget::Existing => {
+                match find_sibling_pane(
+                    active,
+                    direction,
+                    &child_of_q,
+                    &split_dir_q,
+                    &pane_children,
+                    &leaf_panes,
+                ) {
+                    Some(sibling) => (sibling, false),
+                    None => {
+                        let existing_tabs: Vec<Entity> = pane_children
+                            .get(active)
+                            .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+                            .unwrap_or_default();
+                        let (_p1, p2) = split_pane_in_two(
+                            &mut commands,
+                            active,
+                            split_dir,
+                            &settings.pane,
+                            &existing_tabs,
+                        );
+                        (p2, true)
+                    }
+                }
+            }
+            PaneTarget::NewSplit => {
+                let existing_tabs: Vec<Entity> = pane_children
+                    .get(active)
+                    .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+                    .unwrap_or_default();
+                let (_p1, p2) = split_pane_in_two(
+                    &mut commands,
+                    active,
+                    split_dir,
+                    &settings.pane,
+                    &existing_tabs,
+                );
+                (p2, true)
+            }
+        };
+
+        if was_split {
+            let new_stack = commands
+                .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
+                .id();
+            spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl {
+                stack: new_stack,
+                url: resolved,
+            });
+            pending_warp.target = Some(target_pane);
+        } else {
+            match mode {
+                PaneOpenMode::InPlace => {
+                    let active_stack = active_stack_in_pane(target_pane, &pane_children, &stack_ts)
+                        .or_else(|| first_stack_in_pane(target_pane, &pane_children, &tab_filter));
+                    if let Some(stack) = active_stack {
+                        spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl {
+                            stack,
+                            url: resolved,
+                        });
+                    }
+                }
+                PaneOpenMode::NewStack => {
+                    let new_stack = commands
+                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
+                        .id();
+                    spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl {
+                        stack: new_stack,
+                        url: resolved,
+                    });
                 }
             }
         }
@@ -2263,5 +2444,350 @@ mod tests {
 
         assert_eq!(node.column_gap, Val::Px(8.0));
         assert_eq!(node.row_gap, Val::Px(0.0));
+    }
+
+    #[derive(Resource, Default)]
+    struct InPaneCollectedSpawns(Vec<crate::LayoutSpawnRequest>);
+
+    fn collect_in_pane_spawns(
+        mut reader: MessageReader<crate::LayoutSpawnRequest>,
+        mut collected: ResMut<InPaneCollectedSpawns>,
+    ) {
+        for req in reader.read() {
+            collected.0.push(req.clone());
+        }
+    }
+
+    fn build_in_pane_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin));
+        app.add_message::<crate::LayoutSpawnRequest>();
+        app.init_resource::<NewStackContext>();
+        app.init_resource::<PendingCursorWarp>();
+        app.init_resource::<InPaneCollectedSpawns>();
+        app.insert_resource(test_settings());
+        app.add_systems(
+            Update,
+            (
+                handle_open_in_pane.in_set(WriteAppCommands),
+                collect_in_pane_spawns.after(handle_open_in_pane),
+            ),
+        );
+        let _window = app.world_mut().spawn(PrimaryWindow).id();
+        app
+    }
+
+    fn spawn_single_pane(app: &mut App) -> (Entity, Entity, Entity) {
+        let tab = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)))
+            .id();
+        (tab, pane, stack)
+    }
+
+    fn spawn_pre_split(app: &mut App) -> (Entity, Entity, Entity, Entity) {
+        let tab = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt(1)))
+            .id();
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                PaneSize::default(),
+                Node {
+                    flex_grow: 1.0,
+                    flex_direction: bevy::ui::FlexDirection::Row,
+                    ..default()
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let left = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt(10), ChildOf(split)))
+            .id();
+        let right = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt(5), ChildOf(split)))
+            .id();
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt(10), ChildOf(left)));
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt(5), ChildOf(right)));
+        (tab, split, left, right)
+    }
+
+    #[test]
+    fn find_sibling_pane_returns_right_neighbor() {
+        use bevy_ecs::system::RunSystemOnce;
+        use vmux_command::open::PaneDirection;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        let tab = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt::now()))
+            .id();
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                PaneSize::default(),
+                Node::default(),
+                ChildOf(tab),
+            ))
+            .id();
+        let left = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(split)))
+            .id();
+        let right = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(split)))
+            .id();
+
+        app.update();
+
+        let has_children = app.world().get::<Children>(split).is_some();
+        assert!(has_children, "split entity should have Children component");
+        let children: Vec<Entity> = app.world().get::<Children>(split).unwrap().iter().collect();
+        assert!(
+            children.contains(&left),
+            "split children should contain left"
+        );
+        assert!(
+            children.contains(&right),
+            "split children should contain right"
+        );
+
+        let result = app.world_mut().run_system_once(
+            move |child_of_q: Query<&ChildOf>,
+                  split_dir_q: Query<&PaneSplit>,
+                  pane_children: Query<&Children, With<Pane>>,
+                  leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>| {
+                find_sibling_pane(
+                    left,
+                    &PaneDirection::Right,
+                    &child_of_q,
+                    &split_dir_q,
+                    &pane_children,
+                    &leaf_panes,
+                )
+            },
+        );
+
+        assert_eq!(result.unwrap(), Some(right));
+    }
+
+    #[test]
+    fn find_sibling_pane_returns_none_for_single_pane() {
+        use bevy_ecs::system::RunSystemOnce;
+        use vmux_command::open::PaneDirection;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        let tab = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+
+        app.update();
+
+        let result = app.world_mut().run_system_once(
+            move |child_of_q: Query<&ChildOf>,
+                  split_dir_q: Query<&PaneSplit>,
+                  pane_children: Query<&Children, With<Pane>>,
+                  leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>| {
+                find_sibling_pane(
+                    pane,
+                    &PaneDirection::Right,
+                    &child_of_q,
+                    &split_dir_q,
+                    &pane_children,
+                    &leaf_panes,
+                )
+            },
+        );
+
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn in_pane_new_split_right_creates_pane_to_the_right() {
+        use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
+        let mut app = build_in_pane_app();
+        let (_tab, pane, _stack) = spawn_single_pane(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InPane {
+                    direction: PaneDirection::Right,
+                    target: PaneTarget::NewSplit,
+                    mode: PaneOpenMode::NewStack,
+                    url: Some("https://x".into()),
+                },
+            )));
+        app.update();
+
+        assert!(
+            app.world().get::<PaneSplit>(pane).is_some(),
+            "original pane should now be a split"
+        );
+        let ps = app.world().get::<PaneSplit>(pane).unwrap();
+        assert_eq!(ps.direction, PaneSplitDirection::Row);
+
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(pane)
+            .unwrap()
+            .iter()
+            .filter(|e| app.world().get::<Pane>(*e).is_some())
+            .collect();
+        assert_eq!(children.len(), 2, "should have two child panes");
+
+        let collected = app.world().resource::<InPaneCollectedSpawns>();
+        assert_eq!(collected.0.len(), 1);
+        match &collected.0[0] {
+            crate::LayoutSpawnRequest::OpenUrl { stack, url } => {
+                assert_eq!(url, "https://x");
+                let stack_parent = app.world().get::<ChildOf>(*stack).map(|c| c.get()).unwrap();
+                assert_eq!(
+                    stack_parent, children[1],
+                    "new stack should be in the second (right) pane"
+                );
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn in_pane_existing_in_place_navigates_neighbor_active_stack() {
+        use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
+        let mut app = build_in_pane_app();
+        let (_tab, _split, _left, right) = spawn_pre_split(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InPane {
+                    direction: PaneDirection::Right,
+                    target: PaneTarget::Existing,
+                    mode: PaneOpenMode::InPlace,
+                    url: Some("https://new".into()),
+                },
+            )));
+        app.update();
+
+        let collected = app.world().resource::<InPaneCollectedSpawns>();
+        assert_eq!(collected.0.len(), 1);
+        match &collected.0[0] {
+            crate::LayoutSpawnRequest::OpenUrl { stack, url } => {
+                assert_eq!(url, "https://new");
+                let stack_parent = app.world().get::<ChildOf>(*stack).map(|c| c.get()).unwrap();
+                assert_eq!(
+                    stack_parent, right,
+                    "should navigate the existing right pane's stack"
+                );
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn in_pane_existing_new_stack_adds_stack_to_neighbor() {
+        use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
+        let mut app = build_in_pane_app();
+        let (_tab, _split, _left, right) = spawn_pre_split(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InPane {
+                    direction: PaneDirection::Right,
+                    target: PaneTarget::Existing,
+                    mode: PaneOpenMode::NewStack,
+                    url: Some("https://x".into()),
+                },
+            )));
+        app.update();
+
+        let collected = app.world().resource::<InPaneCollectedSpawns>();
+        assert_eq!(collected.0.len(), 1);
+        let new_stack = match &collected.0[0] {
+            crate::LayoutSpawnRequest::OpenUrl { stack, url } => {
+                assert_eq!(url, "https://x");
+                let stack_parent = app.world().get::<ChildOf>(*stack).map(|c| c.get()).unwrap();
+                assert_eq!(stack_parent, right);
+                *stack
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        };
+
+        app.update();
+
+        let right_stacks: Vec<Entity> = app
+            .world()
+            .get::<Children>(right)
+            .map(|c| {
+                c.iter()
+                    .filter(|e| app.world().get::<Stack>(*e).is_some())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert_eq!(right_stacks.len(), 2, "right pane should now have 2 stacks");
+        assert!(right_stacks.contains(&new_stack));
+    }
+
+    #[test]
+    fn in_pane_existing_falls_back_to_new_split_when_no_sibling() {
+        use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
+        let mut app = build_in_pane_app();
+        let (_tab, pane, _stack) = spawn_single_pane(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InPane {
+                    direction: PaneDirection::Right,
+                    target: PaneTarget::Existing,
+                    mode: PaneOpenMode::InPlace,
+                    url: Some("https://x".into()),
+                },
+            )));
+        app.update();
+
+        assert!(
+            app.world().get::<PaneSplit>(pane).is_some(),
+            "should have fallen back to splitting"
+        );
+
+        let collected = app.world().resource::<InPaneCollectedSpawns>();
+        assert_eq!(collected.0.len(), 1);
+        match &collected.0[0] {
+            crate::LayoutSpawnRequest::OpenUrl { url, .. } => {
+                assert_eq!(url, "https://x");
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
     }
 }
