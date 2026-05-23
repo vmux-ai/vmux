@@ -18,6 +18,10 @@ pub enum OpenCommand {
         label = "Open in New Stack",
         accel = "super+n"
     )]
+    #[shortcut(
+        chord = "Ctrl+`",
+        variant = "InNewStack { url: Some(::std::string::String::from(\"vmux://terminal/\")) }"
+    )]
     #[mcp(
         description = "Open the URL as a new stack inside the currently focused pane. Stacks are the in-pane tab strip: the current stack stays alive and a new one is added next to it, becoming active. Use when the user wants to preserve the current page and view a new one alongside, in the same pane."
     )]

@@ -27,7 +27,7 @@ use vmux_command::snapshot::{
 };
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
-    SpaceCommand, StackCommand, TerminalCommand,
+    SpaceCommand, StackCommand,
 };
 use vmux_core::PageMetadata;
 use vmux_core::agent::{AgentLaunchRequested, PageAgentAttachRequest, PageAgentSpawnTabRequest};
@@ -994,9 +994,11 @@ fn on_command_bar_action(
                             target_stack: Some(stack_e),
                         });
                     } else {
-                        writer_params
-                            .p0()
-                            .write(AppCommand::Terminal(TerminalCommand::New));
+                        writer_params.p0().write(AppCommand::Browser(
+                            BrowserCommand::Open(OpenCommand::InNewStack {
+                                url: Some("vmux://terminal/".into()),
+                            }),
+                        ));
                     }
                 }
             } // end reattach else

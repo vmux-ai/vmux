@@ -1,4 +1,4 @@
-use crate::event::{SERVICES_PAGE_URL, TERMINAL_PAGE_URL};
+use crate::event::SERVICES_PAGE_URL;
 use crate::{
     LayoutSpawnRequest, NewStackContext,
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
@@ -13,7 +13,7 @@ use bevy::{
 use moonshine_save::prelude::*;
 use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, ReadAppCommands, ServiceCommand,
-    StackCommand, TerminalCommand,
+    StackCommand,
 };
 use vmux_history::LastActivatedAt;
 
@@ -197,14 +197,12 @@ fn handle_stack_commands(
     for cmd in reader.read() {
         enum Dispatch {
             Stack(StackCommand),
-            NewStackTerminal,
             NewStackServices,
             NewStackUrl(Option<String>),
         }
 
         let dispatch = match cmd {
             AppCommand::Layout(LayoutCommand::Stack(t)) => Dispatch::Stack(*t),
-            AppCommand::Terminal(TerminalCommand::New) => Dispatch::NewStackTerminal,
             AppCommand::Service(ServiceCommand::Open) => Dispatch::NewStackServices,
             AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack { url })) => {
                 Dispatch::NewStackUrl(url.clone())
@@ -222,21 +220,6 @@ fn handle_stack_commands(
         );
 
         match dispatch {
-            Dispatch::NewStackTerminal => {
-                let Some(pane) = active_pane else {
-                    continue;
-                };
-                let stack = commands
-                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                    .id();
-                commands.entity(stack).insert(vmux_core::PageMetadata {
-                    url: TERMINAL_PAGE_URL.to_string(),
-                    title: "Terminal".to_string(),
-                    bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
-                    ..default()
-                });
-                spawn_requests.write(LayoutSpawnRequest::Terminal { stack });
-            }
             Dispatch::NewStackServices => {
                 let Some(pane) = active_pane else {
                     continue;
