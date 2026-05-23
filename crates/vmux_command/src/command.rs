@@ -305,8 +305,6 @@ pub enum PaneCommand {
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TabCommand {
     #[default]
-    #[menu(id = "new_tab", label = "New Tab", accel = "super+t")]
-    New,
     #[menu(id = "close_tab", label = "Close Tab")]
     Close,
     #[menu(id = "next_tab", label = "Next Tab", accel = "super+shift+]")]
