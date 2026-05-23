@@ -395,13 +395,13 @@ pub struct SpawnedSessionLayout {
     pub stack: Entity,
 }
 
-pub fn spawn_default_space_layout(
+pub fn spawn_space_layout(
     main: Entity,
     pw: Entity,
-    new_stack_ctx: &mut crate::NewStackContext,
+    profile: Profile,
     commands: &mut Commands,
 ) -> SpawnedSessionLayout {
-    commands.spawn(Profile::default_profile());
+    commands.spawn(profile);
     let tab_e = commands
         .spawn((
             space_bundle(),
@@ -449,14 +449,24 @@ pub fn spawn_default_space_layout(
             ChildOf(leaf),
         ))
         .id();
-    new_stack_ctx.stack = Some(stack);
-    new_stack_ctx.previous_stack = None;
-    new_stack_ctx.needs_open = true;
     SpawnedSessionLayout {
         tab: tab_e,
         pane: leaf,
         stack,
     }
+}
+
+pub fn spawn_default_space_layout(
+    main: Entity,
+    pw: Entity,
+    new_stack_ctx: &mut crate::NewStackContext,
+    commands: &mut Commands,
+) -> SpawnedSessionLayout {
+    let layout = spawn_space_layout(main, pw, Profile::default_profile(), commands);
+    new_stack_ctx.stack = Some(layout.stack);
+    new_stack_ctx.previous_stack = None;
+    new_stack_ctx.needs_open = true;
+    layout
 }
 
 fn spawn_glass_panes() {}
