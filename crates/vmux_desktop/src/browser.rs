@@ -1041,7 +1041,7 @@ fn first_browser_meta<'a>(
 }
 
 fn handle_browser_commands(
-    mut reader: MessageReader<AppCommand>,
+    mut message_param: ParamSet<(MessageReader<AppCommand>, MessageWriter<AppCommand>)>,
     tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -1051,10 +1051,13 @@ fn handle_browser_commands(
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     terminal_q: Query<(), With<Terminal>>,
+    agent_q: Query<(), With<vmux_agent::components::AgentSession>>,
     effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
     mut commands: Commands,
 ) {
-    for cmd in reader.read() {
+    let pending_messages: Vec<AppCommand> = message_param.p0().read().cloned().collect();
+    let mut deferred_writes: Vec<AppCommand> = Vec::new();
+    for cmd in &pending_messages {
         let AppCommand::Browser(browser_cmd) = cmd else {
             continue;
         };
@@ -1112,10 +1115,18 @@ fn handle_browser_commands(
                         url.as_deref(),
                         effective_startup_url.as_ref().map(|s| s.0.as_str()),
                     );
-                    commands.trigger(RequestNavigate {
-                        webview,
-                        url: resolved,
-                    });
+                    if is_terminal || agent_q.contains(webview) {
+                        deferred_writes.push(AppCommand::Browser(BrowserCommand::Open(
+                            OpenCommand::InNewStack {
+                                url: Some(resolved),
+                            },
+                        )));
+                    } else {
+                        commands.trigger(RequestNavigate {
+                            webview,
+                            url: resolved,
+                        });
+                    }
                 }
                 _ => {}
             },
@@ -1142,6 +1153,12 @@ fn handle_browser_commands(
                 BrowserViewCommand::Print => {}
             },
             BrowserCommand::Bar(_) => {}
+        }
+    }
+    if !deferred_writes.is_empty() {
+        let mut writer = message_param.p1();
+        for cmd in deferred_writes {
+            writer.write(cmd);
         }
     }
 }
