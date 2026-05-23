@@ -34,6 +34,8 @@ pub enum AgentShellMode {
 pub enum AgentCommand {
     AppCommand {
         id: String,
+        #[rkyv(attr(allow(dead_code)))]
+        args_json: String,
     },
     NewTerminalTab {
         cwd: String,
@@ -89,7 +91,9 @@ pub enum AgentQueryResult {
 
 pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str> {
     match command {
-        AgentCommand::AppCommand { id } if id.trim().is_empty() => Err("app_command.id is empty"),
+        AgentCommand::AppCommand { id, .. } if id.trim().is_empty() => {
+            Err("app_command.id is empty")
+        }
         AgentCommand::RunShell { command, .. } if command.trim().is_empty() => {
             Err("run_shell.command is empty")
         }

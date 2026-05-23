@@ -740,12 +740,25 @@ fn handle_agent_commands(
 
     for request in reader.read() {
         let result = match &request.command {
-            ServiceAgentCommand::AppCommand { id } => {
-                if let Some(command) = AppCommand::from_mcp_id(id) {
-                    app_commands.write(command);
-                    AgentCommandResult::Ok
+            ServiceAgentCommand::AppCommand { id, args_json } => {
+                let args: serde_json::Value = if args_json.is_empty() {
+                    serde_json::json!({})
                 } else {
-                    AgentCommandResult::Error(format!("unknown app command: {id}"))
+                    serde_json::from_str(args_json).unwrap_or(serde_json::json!({}))
+                };
+                match AppCommand::from_mcp_call(id, args) {
+                    Some(Ok(command)) => {
+                        app_commands.write(command);
+                        AgentCommandResult::Ok
+                    }
+                    Some(Err(message)) => AgentCommandResult::Error(message),
+                    None => match AppCommand::from_mcp_id(id) {
+                        Some(command) => {
+                            app_commands.write(command);
+                            AgentCommandResult::Ok
+                        }
+                        None => AgentCommandResult::Error(format!("unknown app command: {id}")),
+                    },
                 }
             }
             ServiceAgentCommand::NewTerminalTab {
