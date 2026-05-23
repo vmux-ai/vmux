@@ -598,4 +598,51 @@ mod tests {
             DispatchTarget::Query(AgentQuery::GetSettings)
         ));
     }
+
+    #[test]
+    fn open_command_tools_are_exposed() {
+        let names = tool_names();
+        for expected in [
+            "in_place",
+            "in_new_stack",
+            "in_pane",
+            "in_new_tab",
+            "in_new_space",
+        ] {
+            assert!(
+                names.contains(&expected.to_string()),
+                "missing OpenCommand tool: {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn in_pane_tool_has_direction_enum() {
+        let defs = tool_definitions();
+        let in_pane = defs
+            .iter()
+            .find(|d| d.name == "in_pane")
+            .expect("in_pane tool present");
+        let props = in_pane
+            .input_schema
+            .get("properties")
+            .expect("properties key");
+        let dir = props.get("direction").expect("direction property");
+        let enum_vals = dir.get("enum").expect("direction has enum constraint");
+        assert_eq!(
+            enum_vals,
+            &serde_json::json!(["top", "right", "bottom", "left"])
+        );
+        let required = in_pane
+            .input_schema
+            .get("required")
+            .expect("required key");
+        let required_arr = required.as_array().expect("required is array");
+        assert!(
+            required_arr
+                .iter()
+                .any(|v| v.as_str() == Some("direction")),
+            "direction must be required"
+        );
+    }
 }
