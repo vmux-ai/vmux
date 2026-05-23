@@ -6,7 +6,10 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
-use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand};
+use vmux_command::{
+    AppCommand, BrowserBarCommand, BrowserCommand, BrowserNavigationCommand, BrowserViewCommand,
+    ReadAppCommands, open::OpenCommand,
+};
 use vmux_core::PageMetadata;
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::command_bar::handler::PendingCommandBarReveal;
@@ -1048,10 +1051,11 @@ fn handle_browser_commands(
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     terminal_q: Query<(), With<Terminal>>,
+    effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let AppCommand::Browser(browser_cmd) = *cmd else {
+        let AppCommand::Browser(browser_cmd) = cmd else {
             continue;
         };
         let (_, _, active_stack_opt) = focused_stack(
@@ -1074,54 +1078,81 @@ fn handle_browser_commands(
         };
         let is_terminal = terminal_q.contains(webview);
         match browser_cmd {
-            BrowserCommand::PrevPage => {
-                if !is_terminal {
-                    commands.trigger(RequestGoBack { webview });
+            BrowserCommand::Navigation(nav) => match nav {
+                BrowserNavigationCommand::PrevPage => {
+                    if !is_terminal {
+                        commands.trigger(RequestGoBack { webview });
+                    }
                 }
-            }
-            BrowserCommand::NextPage => {
-                if !is_terminal {
-                    commands.trigger(RequestGoForward { webview });
+                BrowserNavigationCommand::NextPage => {
+                    if !is_terminal {
+                        commands.trigger(RequestGoForward { webview });
+                    }
                 }
-            }
-            BrowserCommand::Reload => {
-                if is_terminal {
-                    commands.trigger(RestartPty { entity: webview });
-                } else {
-                    commands.trigger(RequestReload { webview });
+                BrowserNavigationCommand::Reload => {
+                    if is_terminal {
+                        commands.trigger(RestartPty { entity: webview });
+                    } else {
+                        commands.trigger(RequestReload { webview });
+                    }
                 }
-            }
-            BrowserCommand::HardReload => {
-                if is_terminal {
-                    commands.trigger(RestartPty { entity: webview });
-                } else {
-                    commands.trigger(RequestReloadIgnoreCache { webview });
+                BrowserNavigationCommand::HardReload => {
+                    if is_terminal {
+                        commands.trigger(RestartPty { entity: webview });
+                    } else {
+                        commands.trigger(RequestReloadIgnoreCache { webview });
+                    }
                 }
-            }
-            BrowserCommand::Stop => {}
-            BrowserCommand::FocusAddressBar
-            | BrowserCommand::OpenCommandBar
-            | BrowserCommand::OpenPathBar
-            | BrowserCommand::OpenCommands => {}
-            BrowserCommand::Find => {}
-            BrowserCommand::ZoomIn => {
-                if let Ok(mut z) = zoom_q.get_mut(webview) {
-                    z.0 += 0.5;
+                BrowserNavigationCommand::Stop => {}
+            },
+            #[allow(clippy::single_match)]
+            BrowserCommand::Open(open_cmd) => match open_cmd {
+                OpenCommand::InPlace { url } => {
+                    let resolved = vmux_command::open::handler::resolve_url(
+                        url.as_deref(),
+                        effective_startup_url.as_ref().map(|s| s.0.as_str()),
+                    );
+                    if is_terminal {
+                        // Strip the Terminal/agent markers + ProcessId so the
+                        // on_terminal_removed observer fires KillProcess — the PTY
+                        // (vibe etc.) in vmux_service exits cleanly. The entity
+                        // keeps Browser so CEF can navigate it like any page.
+                        commands
+                            .entity(webview)
+                            .remove::<Terminal>()
+                            .remove::<vmux_service::protocol::ProcessId>()
+                            .remove::<vmux_agent::components::AgentSession>();
+                    }
+                    commands.trigger(RequestNavigate {
+                        webview,
+                        url: resolved,
+                    });
                 }
-            }
-            BrowserCommand::ZoomOut => {
-                if let Ok(mut z) = zoom_q.get_mut(webview) {
-                    z.0 -= 0.5;
+                _ => {}
+            },
+            BrowserCommand::View(view) => match view {
+                BrowserViewCommand::ZoomIn => {
+                    if let Ok(mut z) = zoom_q.get_mut(webview) {
+                        z.0 += 0.5;
+                    }
                 }
-            }
-            BrowserCommand::ZoomReset => {
-                if let Ok(mut z) = zoom_q.get_mut(webview) {
-                    z.0 = 0.0;
+                BrowserViewCommand::ZoomOut => {
+                    if let Ok(mut z) = zoom_q.get_mut(webview) {
+                        z.0 -= 0.5;
+                    }
                 }
-            }
-            BrowserCommand::DevTools => commands.trigger(RequestShowDevTool { webview }),
-            BrowserCommand::ViewSource => {}
-            BrowserCommand::Print => {}
+                BrowserViewCommand::ZoomReset => {
+                    if let Ok(mut z) = zoom_q.get_mut(webview) {
+                        z.0 = 0.0;
+                    }
+                }
+                BrowserViewCommand::DevTools => {
+                    commands.trigger(RequestShowDevTool { webview });
+                }
+                BrowserViewCommand::ViewSource => {}
+                BrowserViewCommand::Print => {}
+            },
+            BrowserCommand::Bar(_) => {}
         }
     }
 }
@@ -1131,10 +1162,10 @@ fn on_header_command_emit(
     mut messages: ResMut<Messages<AppCommand>>,
 ) {
     let cmd = match trigger.event().payload.header_command.as_str() {
-        "prev_page" => BrowserCommand::PrevPage,
-        "next_page" => BrowserCommand::NextPage,
-        "reload" => BrowserCommand::Reload,
-        "focus_address_bar" => BrowserCommand::FocusAddressBar,
+        "prev_page" => BrowserCommand::Navigation(BrowserNavigationCommand::PrevPage),
+        "next_page" => BrowserCommand::Navigation(BrowserNavigationCommand::NextPage),
+        "reload" => BrowserCommand::Navigation(BrowserNavigationCommand::Reload),
+        "focus_address_bar" => BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar),
         _ => return,
     };
     messages.write(AppCommand::Browser(cmd));
@@ -1340,7 +1371,9 @@ fn on_side_sheet_command_emit(
         }
         "new_stack" => {
             commands.entity(target_pane).insert(LastActivatedAt::now());
-            messages.write(AppCommand::Layout(LayoutCommand::Stack(StackCommand::New)));
+            messages.write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewStack { url: None },
+            )));
         }
         _ => {}
     }
@@ -2023,6 +2056,116 @@ mod tests {
             assert_eq!(
                 standalone_browser_count, 0,
                 "codex URL should never spawn a standalone browser tab"
+            );
+        }
+    }
+
+    mod open_in_place_flow {
+        use bevy::ecs::message::Messages;
+        use bevy::prelude::*;
+        use bevy_cef::prelude::{RequestNavigate, WebviewExtendStandardMaterial};
+        use vmux_command::open::OpenCommand;
+        use vmux_command::{AppCommand, BrowserCommand};
+        use vmux_history::LastActivatedAt;
+        use vmux_layout::Browser;
+        use vmux_layout::pane::Pane;
+        use vmux_layout::space::Space;
+        use vmux_layout::stack::stack_bundle;
+
+        #[derive(Resource, Default)]
+        struct CapturedNavigateUrls(Vec<String>);
+
+        fn build_app() -> App {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin));
+            app.add_systems(
+                Update,
+                super::super::handle_browser_commands.in_set(vmux_command::ReadAppCommands),
+            );
+            app.init_resource::<Assets<Mesh>>();
+            app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            app.init_resource::<CapturedNavigateUrls>();
+            app.add_observer(
+                |trigger: On<RequestNavigate>, mut captured: ResMut<CapturedNavigateUrls>| {
+                    captured.0.push(trigger.url.clone());
+                },
+            );
+            app
+        }
+
+        fn spawn_focused_stack(app: &mut App) {
+            let space = app
+                .world_mut()
+                .spawn((Space::default(), LastActivatedAt(1)))
+                .id();
+            let pane = app
+                .world_mut()
+                .spawn((Pane, LastActivatedAt(1), ChildOf(space)))
+                .id();
+            let stack = app
+                .world_mut()
+                .spawn(stack_bundle())
+                .insert((ChildOf(pane), LastActivatedAt(1)))
+                .id();
+            app.world_mut().spawn(Browser).insert(ChildOf(stack));
+        }
+
+        #[test]
+        fn in_place_with_explicit_url_triggers_request_navigate() {
+            let mut app = build_app();
+            spawn_focused_stack(&mut app);
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace {
+                        url: Some("https://example.com".into()),
+                    },
+                )));
+
+            app.update();
+
+            let captured = app.world().resource::<CapturedNavigateUrls>();
+            assert_eq!(captured.0, vec!["https://example.com".to_string()]);
+        }
+
+        #[test]
+        fn in_place_with_none_url_uses_startup_setting() {
+            let mut app = build_app();
+            app.insert_resource(vmux_layout::settings::EffectiveStartupUrl(
+                "https://startup.example".into(),
+            ));
+            spawn_focused_stack(&mut app);
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace { url: None },
+                )));
+
+            app.update();
+
+            let captured = app.world().resource::<CapturedNavigateUrls>();
+            assert_eq!(captured.0, vec!["https://startup.example".to_string()]);
+        }
+
+        #[test]
+        fn in_place_with_none_url_and_no_startup_uses_default() {
+            let mut app = build_app();
+            spawn_focused_stack(&mut app);
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace { url: None },
+                )));
+
+            app.update();
+
+            let captured = app.world().resource::<CapturedNavigateUrls>();
+            assert_eq!(
+                captured.0,
+                vec![vmux_command::open::handler::DEFAULT_NEW_PAGE_URL.to_string()]
             );
         }
     }

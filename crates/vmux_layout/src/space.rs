@@ -14,7 +14,8 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, TabCommand};
+use vmux_command::open::OpenCommand;
+use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, TabCommand};
 use vmux_history::{CreatedAt, LastActivatedAt};
 
 pub struct SpacePlugin;
@@ -171,127 +172,140 @@ fn handle_space_commands(
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) = *cmd else {
-            continue;
-        };
-
         let active_space = spaces.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
 
-        match tab_cmd {
-            TabCommand::New => {
+        match cmd {
+            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewTab { url })) => {
                 let Ok(main) = main_q.single() else { continue };
                 let count = spaces.iter().count();
                 let name = format!("Tab {}", count + 1);
+                let startup_for_spawn = match url.as_deref() {
+                    Some(u) if !u.is_empty() => {
+                        let startup = effective_startup_url.as_deref().map(|s| s.0.as_str());
+                        Some(crate::settings::EffectiveStartupUrl(
+                            vmux_command::open::handler::resolve_url(Some(u), startup),
+                        ))
+                    }
+                    _ => None,
+                };
                 spawn_new_space(
                     main,
                     *primary_window,
                     name,
                     &settings,
-                    effective_startup_url.as_deref(),
+                    startup_for_spawn
+                        .as_ref()
+                        .or(effective_startup_url.as_deref()),
                     &mut new_stack_ctx,
                     &mut spawn_requests,
                     &mut commands,
                 );
             }
-            TabCommand::Close => {
-                let Some(active) = active_space else { continue };
-                close_space_entity(
-                    active,
-                    active_space,
-                    spaces.iter().count(),
-                    &space_q,
-                    &main_q,
-                    *primary_window,
-                    &child_of_q,
-                    &all_children,
-                    &settings,
-                    effective_startup_url.as_deref(),
-                    &mut new_stack_ctx,
-                    &mut spawn_requests,
-                    &mut commands,
-                );
-            }
-            TabCommand::Next | TabCommand::Previous => {
-                let Some(active) = active_space else { continue };
-                let siblings = active_space_siblings(active, &child_of_q, &all_children, &space_q);
-                if siblings.len() <= 1 {
-                    continue;
+            AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) => match tab_cmd {
+                TabCommand::Close => {
+                    let Some(active) = active_space else { continue };
+                    close_space_entity(
+                        active,
+                        active_space,
+                        spaces.iter().count(),
+                        &space_q,
+                        &main_q,
+                        *primary_window,
+                        &child_of_q,
+                        &all_children,
+                        &settings,
+                        effective_startup_url.as_deref(),
+                        &mut new_stack_ctx,
+                        &mut spawn_requests,
+                        &mut commands,
+                    );
                 }
-                let Some(idx) = siblings.iter().position(|e| *e == active) else {
-                    continue;
-                };
-                let target_idx = if tab_cmd == TabCommand::Next {
-                    (idx + 1) % siblings.len()
-                } else {
-                    (idx + siblings.len() - 1) % siblings.len()
-                };
-                let target = siblings[target_idx];
-                if target != active {
-                    commands.entity(target).insert(LastActivatedAt::now());
+                TabCommand::Next | TabCommand::Previous => {
+                    let Some(active) = active_space else { continue };
+                    let siblings =
+                        active_space_siblings(active, &child_of_q, &all_children, &space_q);
+                    if siblings.len() <= 1 {
+                        continue;
+                    }
+                    let Some(idx) = siblings.iter().position(|e| *e == active) else {
+                        continue;
+                    };
+                    let target_idx = if *tab_cmd == TabCommand::Next {
+                        (idx + 1) % siblings.len()
+                    } else {
+                        (idx + siblings.len() - 1) % siblings.len()
+                    };
+                    let target = siblings[target_idx];
+                    if target != active {
+                        commands.entity(target).insert(LastActivatedAt::now());
+                    }
                 }
-            }
-            TabCommand::Rename => {}
-            TabCommand::SelectIndex1
-            | TabCommand::SelectIndex2
-            | TabCommand::SelectIndex3
-            | TabCommand::SelectIndex4
-            | TabCommand::SelectIndex5
-            | TabCommand::SelectIndex6
-            | TabCommand::SelectIndex7
-            | TabCommand::SelectIndex8
-            | TabCommand::SelectLast => {
-                let Some(active) = active_space else { continue };
-                let siblings = active_space_siblings(active, &child_of_q, &all_children, &space_q);
-                if siblings.is_empty() {
-                    continue;
+                TabCommand::Rename => {}
+                TabCommand::SelectIndex1
+                | TabCommand::SelectIndex2
+                | TabCommand::SelectIndex3
+                | TabCommand::SelectIndex4
+                | TabCommand::SelectIndex5
+                | TabCommand::SelectIndex6
+                | TabCommand::SelectIndex7
+                | TabCommand::SelectIndex8
+                | TabCommand::SelectLast => {
+                    let Some(active) = active_space else { continue };
+                    let siblings =
+                        active_space_siblings(active, &child_of_q, &all_children, &space_q);
+                    if siblings.is_empty() {
+                        continue;
+                    }
+                    let target_idx = match tab_cmd {
+                        TabCommand::SelectIndex1 => 0,
+                        TabCommand::SelectIndex2 => 1,
+                        TabCommand::SelectIndex3 => 2,
+                        TabCommand::SelectIndex4 => 3,
+                        TabCommand::SelectIndex5 => 4,
+                        TabCommand::SelectIndex6 => 5,
+                        TabCommand::SelectIndex7 => 6,
+                        TabCommand::SelectIndex8 => 7,
+                        TabCommand::SelectLast => siblings.len() - 1,
+                        _ => continue,
+                    };
+                    if target_idx >= siblings.len() {
+                        continue;
+                    }
+                    let target = siblings[target_idx];
+                    if target != active {
+                        commands.entity(target).insert(LastActivatedAt::now());
+                    }
                 }
-                let target_idx = match tab_cmd {
-                    TabCommand::SelectIndex1 => 0,
-                    TabCommand::SelectIndex2 => 1,
-                    TabCommand::SelectIndex3 => 2,
-                    TabCommand::SelectIndex4 => 3,
-                    TabCommand::SelectIndex5 => 4,
-                    TabCommand::SelectIndex6 => 5,
-                    TabCommand::SelectIndex7 => 6,
-                    TabCommand::SelectIndex8 => 7,
-                    TabCommand::SelectLast => siblings.len() - 1,
-                    _ => continue,
-                };
-                if target_idx >= siblings.len() {
-                    continue;
+                TabCommand::SwapPrev | TabCommand::SwapNext => {
+                    let Some(active) = active_space else { continue };
+                    let Ok(co) = child_of_q.get(active) else {
+                        continue;
+                    };
+                    let parent = co.get();
+                    let Ok(children) = all_children.get(parent) else {
+                        continue;
+                    };
+                    let kind_positions: Vec<usize> = children
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, e)| space_q.contains(*e))
+                        .map(|(i, _)| i)
+                        .collect();
+                    let Some(active_idx) = find_kind_index(active, children, &kind_positions)
+                    else {
+                        continue;
+                    };
+                    let pair = if *tab_cmd == TabCommand::SwapPrev {
+                        resolve_prev(active_idx)
+                    } else {
+                        resolve_next(active_idx, kind_positions.len())
+                    };
+                    if let Some((a, b)) = pair {
+                        swap_siblings(&mut commands, parent, children, &kind_positions, a, b);
+                    }
                 }
-                let target = siblings[target_idx];
-                if target != active {
-                    commands.entity(target).insert(LastActivatedAt::now());
-                }
-            }
-            TabCommand::SwapPrev | TabCommand::SwapNext => {
-                let Some(active) = active_space else { continue };
-                let Ok(co) = child_of_q.get(active) else {
-                    continue;
-                };
-                let parent = co.get();
-                let Ok(children) = all_children.get(parent) else {
-                    continue;
-                };
-                let kind_positions: Vec<usize> = children
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, e)| space_q.contains(*e))
-                    .map(|(i, _)| i)
-                    .collect();
-                let Some(active_idx) = find_kind_index(active, children, &kind_positions) else {
-                    continue;
-                };
-                let pair = if tab_cmd == TabCommand::SwapPrev {
-                    resolve_prev(active_idx)
-                } else {
-                    resolve_next(active_idx, kind_positions.len())
-                };
-                if let Some((a, b)) = pair {
-                    swap_siblings(&mut commands, parent, children, &kind_positions, a, b);
-                }
-            }
+            },
+            _ => continue,
         }
     }
 }
@@ -410,7 +424,9 @@ fn on_tabs_command_emit(
     let active_space = spaces.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
     match evt.command.as_str() {
         "new" => {
-            messages.write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::New)));
+            messages.write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewTab { url: None },
+            )));
         }
         "close" => {
             let target = space_target(
@@ -459,6 +475,10 @@ fn space_target(id: Option<&str>, spaces: impl IntoIterator<Item = Entity>) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use vmux_command::CommandPlugin;
 
     #[test]
     fn space_target_uses_event_tab_id() {
@@ -467,5 +487,141 @@ mod tests {
         let id = target.to_bits().to_string();
 
         assert_eq!(space_target(Some(&id), [other, target]), Some(target));
+    }
+
+    fn test_settings() -> LayoutSettings {
+        LayoutSettings {
+            radius: 0.0,
+            window: WindowSettings {
+                padding: 0.0,
+                padding_top: None,
+                padding_right: None,
+                padding_bottom: None,
+                padding_left: None,
+            },
+            pane: PaneSettings { gap: 0.0 },
+            side_sheet: SideSheetSettings::default(),
+            focus_ring: FocusRingSettings::default(),
+        }
+    }
+
+    #[derive(Resource, Default)]
+    struct CollectedSpawns(Vec<crate::LayoutSpawnRequest>);
+
+    fn collect_spawn_requests(
+        mut reader: MessageReader<crate::LayoutSpawnRequest>,
+        mut collected: ResMut<CollectedSpawns>,
+    ) {
+        for req in reader.read() {
+            collected.0.push(req.clone());
+        }
+    }
+
+    fn build_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin));
+        app.add_message::<crate::LayoutSpawnRequest>();
+        app.init_resource::<NewStackContext>();
+        app.insert_resource(test_settings());
+        app.init_resource::<CollectedSpawns>();
+        app.add_systems(
+            Update,
+            (
+                handle_space_commands.in_set(ReadAppCommands),
+                collect_spawn_requests.after(handle_space_commands),
+            ),
+        );
+        app
+    }
+
+    fn spawn_main_and_space(app: &mut App) -> Entity {
+        let window = app.world_mut().spawn(PrimaryWindow).id();
+        let main = app.world_mut().spawn(MainNode).id();
+        app.world_mut().spawn((
+            Space {
+                name: "Tab 1".into(),
+            },
+            LastActivatedAt::now(),
+            ChildOf(main),
+        ));
+        let _ = window;
+        main
+    }
+
+    #[test]
+    fn open_in_new_tab_explicit_url_spawns_new_space_with_url() {
+        let mut app = build_app();
+        spawn_main_and_space(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewTab {
+                    url: Some("https://example.com".into()),
+                },
+            )));
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1, "expected one spawn request");
+        match &collected.0[0] {
+            crate::LayoutSpawnRequest::OpenUrl { url, .. } => {
+                assert_eq!(url, "https://example.com");
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
+
+        let space_count = app.world_mut().query::<&Space>().iter(app.world()).count();
+        assert_eq!(space_count, 2, "expected two spaces after InNewTab");
+    }
+
+    #[test]
+    fn open_in_new_tab_none_url_falls_back_to_startup() {
+        let mut app = build_app();
+        app.insert_resource(crate::settings::EffectiveStartupUrl(
+            "https://startup.test".into(),
+        ));
+        spawn_main_and_space(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewTab { url: None },
+            )));
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1, "expected one spawn request");
+        match &collected.0[0] {
+            crate::LayoutSpawnRequest::OpenUrl { url, .. } => {
+                assert_eq!(url, "https://startup.test");
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_in_new_tab_none_url_no_startup_queues_command_bar_prompt() {
+        // url: None + no startup URL -> spawn_new_space queues the new stack in
+        // NewStackContext so the command bar can open pre-filled. No spawn
+        // request emitted until the user submits a URL.
+        let mut app = build_app();
+        spawn_main_and_space(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewTab { url: None },
+            )));
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert!(collected.0.is_empty(), "no spawn until URL is provided");
+        let ctx = app.world().resource::<NewStackContext>();
+        assert!(ctx.stack.is_some(), "an empty stack should be queued");
+        assert!(ctx.needs_open, "command bar should be requested");
     }
 }

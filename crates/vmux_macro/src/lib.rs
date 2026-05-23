@@ -1,3 +1,6 @@
+mod expand;
+mod named_fields;
+
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Fields, LitStr, parse_macro_input};
@@ -70,13 +73,96 @@ fn impl_os_sub_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
     let mut from_menu_arms = Vec::new();
 
     for (idx, variant) in data.variants.iter().enumerate() {
-        let Fields::Unit = &variant.fields else {
-            return Err(syn::Error::new_spanned(
-                &variant.fields,
-                "OsSubMenu only supports unit enum variants",
-            ));
-        };
+        match &variant.fields {
+            Fields::Unit | Fields::Named(_) => {}
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    &variant.fields,
+                    "OsSubMenu only supports unit or named-field enum variants",
+                ));
+            }
+        }
         let props = MenuProps::from_attrs(&variant.attrs)?;
+        let variant_ident = &variant.ident;
+
+        if let Some(ref expand_field) = props.expand {
+            let field_type =
+                expand::lookup_field_type(&variant.fields, expand_field).ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        variant,
+                        format!(
+                            "expand field '{}' not found or not a simple type ident",
+                            expand_field
+                        ),
+                    )
+                })?;
+            let dir_variants = expand::variants_for(field_type).ok_or_else(|| {
+                syn::Error::new_spanned(
+                    variant,
+                    format!(
+                        "expand type '{}' not registered in expand::variants_for",
+                        field_type
+                    ),
+                )
+            })?;
+            let id_tmpl = props.id_template.as_deref().ok_or_else(|| {
+                syn::Error::new_spanned(variant, "#[menu(expand)] requires id_template")
+            })?;
+            let label_tmpl = props.label_template.as_deref().ok_or_else(|| {
+                syn::Error::new_spanned(variant, "#[menu(expand)] requires label_template")
+            })?;
+
+            let Fields::Named(named) = &variant.fields else {
+                return Err(syn::Error::new_spanned(
+                    variant,
+                    "expand requires named fields",
+                ));
+            };
+
+            for (sub_idx, dir_variant_str) in dir_variants.iter().enumerate() {
+                let id_str = expand::format_id_template(id_tmpl, dir_variant_str);
+                let label_str = expand::format_label_template(label_tmpl, dir_variant_str);
+                let dir_ident = syn::Ident::new(dir_variant_str, variant_ident.span());
+                let field_ident_expand = syn::Ident::new(expand_field, variant_ident.span());
+
+                let field_inits: Vec<proc_macro2::TokenStream> = named
+                    .named
+                    .iter()
+                    .map(|f| {
+                        let fname = f.ident.as_ref().unwrap();
+                        if *fname == field_ident_expand {
+                            quote! { #fname: #field_type::#dir_ident }
+                        } else {
+                            quote! { #fname: ::core::default::Default::default() }
+                        }
+                    })
+                    .collect();
+
+                from_menu_arms.push(quote! {
+                    #id_str => ::core::option::Option::Some(#ident::#variant_ident {
+                        #(#field_inits),*
+                    }),
+                });
+
+                if !props.hidden {
+                    let item_ident = format_ident!("os_menu_item_{}_{}", idx, sub_idx);
+                    let accel_tokens = if let Some(ref accel) = props.accel {
+                        let accel_str = accel.as_str();
+                        quote! { Some(#accel_str.parse::<::muda::accelerator::Accelerator>().unwrap()) }
+                    } else {
+                        quote! { None }
+                    };
+                    let id_str_ref = id_str.as_str();
+                    let label_str_ref = label_str.as_str();
+                    items.push(quote! {
+                        let #item_ident = ::muda::MenuItem::with_id(#id_str_ref, #label_str_ref, true, #accel_tokens);
+                    });
+                    item_refs.push(quote! { &#item_ident });
+                }
+            }
+            continue;
+        }
+
         let Some(id) = &props.id else {
             return Err(syn::Error::new_spanned(
                 variant,
@@ -84,9 +170,10 @@ fn impl_os_sub_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
             ));
         };
         let id_lit = id.as_str();
-        let variant_ident = &variant.ident;
+        let constructor =
+            named_fields::build_default_named_constructor(ident, variant_ident, &variant.fields);
         from_menu_arms.push(quote! {
-            #id_lit => ::core::option::Option::Some(#ident::#variant_ident),
+            #id_lit => ::core::option::Option::Some(#constructor),
         });
 
         if props.hidden {
@@ -332,6 +419,9 @@ struct MenuProps {
     label: Option<String>,
     accel: Option<String>,
     hidden: bool,
+    expand: Option<String>,
+    id_template: Option<String>,
+    label_template: Option<String>,
 }
 
 impl MenuProps {
@@ -340,6 +430,9 @@ impl MenuProps {
         let mut label = None;
         let mut accel = None;
         let mut hidden = false;
+        let mut expand = None;
+        let mut id_template = None;
+        let mut label_template = None;
         for attr in attrs {
             if !attr.path().is_ident("menu") {
                 continue;
@@ -356,6 +449,15 @@ impl MenuProps {
                     accel = Some(v.value());
                 } else if meta.path.is_ident("hidden") {
                     hidden = true;
+                } else if meta.path.is_ident("expand") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    expand = Some(v.value());
+                } else if meta.path.is_ident("id_template") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    id_template = Some(v.value());
+                } else if meta.path.is_ident("label_template") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    label_template = Some(v.value());
                 }
                 Ok(())
             })?;
@@ -365,11 +467,14 @@ impl MenuProps {
             label,
             accel,
             hidden,
+            expand,
+            id_template,
+            label_template,
         })
     }
 }
 
-fn heck_variant_snake_case(s: &str) -> String {
+pub(crate) fn heck_variant_snake_case(s: &str) -> String {
     let mut out = String::new();
     for (i, ch) in s.chars().enumerate() {
         if ch.is_uppercase() && i > 0 {
@@ -391,7 +496,7 @@ fn impl_default_shortcuts(input: DeriveInput) -> syn::Result<proc_macro2::TokenS
 
     let first_variant = data.variants.first();
     let is_leaf = first_variant
-        .map(|v| matches!(v.fields, Fields::Unit))
+        .map(|v| matches!(v.fields, Fields::Unit | Fields::Named(_)))
         .unwrap_or(true);
 
     if is_leaf {
@@ -406,10 +511,99 @@ fn impl_leaf_shortcuts(
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut binding_entries = Vec::new();
+    let mut extra_entries = Vec::new();
 
     for variant in &data.variants {
         let bind_props = BindProps::from_attrs(&variant.attrs)?;
         let menu_props = MenuProps::from_attrs(&variant.attrs)?;
+
+        for (chord_str, variant_expr_str) in &bind_props.extra_chords {
+            let parts: Vec<&str> = chord_str.split(',').collect();
+            if parts.len() != 2 {
+                return Err(syn::Error::new_spanned(
+                    variant,
+                    "chord binding must have exactly two parts separated by comma",
+                ));
+            }
+            let prefix_tokens = parse_key_combo_tokens(parts[0].trim(), variant)?;
+            let second_tokens = parse_key_combo_tokens(parts[1].trim(), variant)?;
+            let variant_expr: proc_macro2::TokenStream =
+                syn::parse_str(variant_expr_str).map_err(|e| {
+                    syn::Error::new_spanned(
+                        variant,
+                        format!("invalid variant expression in #[shortcut(variant = ...)]: {e}"),
+                    )
+                })?;
+            extra_entries.push(quote! {
+                (
+                    crate::shortcut::Shortcut::Chord(#prefix_tokens, #second_tokens),
+                    #ident::#variant_expr
+                )
+            });
+        }
+
+        if let Some(ref expand_field) = bind_props.expand {
+            let field_type =
+                expand::lookup_field_type(&variant.fields, expand_field).ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        variant,
+                        format!(
+                            "expand field '{}' not found or not a simple type ident",
+                            expand_field
+                        ),
+                    )
+                })?;
+            let dir_variants = expand::variants_for(field_type).ok_or_else(|| {
+                syn::Error::new_spanned(
+                    variant,
+                    format!(
+                        "expand type '{}' not registered in expand::variants_for",
+                        field_type
+                    ),
+                )
+            })?;
+            let id_tmpl = menu_props.id_template.as_deref().ok_or_else(|| {
+                syn::Error::new_spanned(
+                    variant,
+                    "#[shortcut(expand)] requires #[menu(id_template)]",
+                )
+            })?;
+
+            let valid_dir_names: Vec<String> = dir_variants
+                .iter()
+                .map(|v| heck_variant_snake_case(v))
+                .collect();
+            for (k, _) in &bind_props.direction_keys {
+                if !valid_dir_names.contains(k) {
+                    return Err(syn::Error::new_spanned(
+                        variant,
+                        format!(
+                            "unknown #[shortcut(...)] key '{}'; expected one of: {}",
+                            k,
+                            valid_dir_names.join(", ")
+                        ),
+                    ));
+                }
+            }
+
+            for dir_variant_str in dir_variants {
+                let dir_lower = heck_variant_snake_case(dir_variant_str);
+                let key_spec = bind_props
+                    .direction_keys
+                    .iter()
+                    .find(|(k, _)| *k == dir_lower)
+                    .map(|(_, v)| v.as_str());
+                let Some(key_spec) = key_spec else {
+                    continue;
+                };
+                let id_str = expand::format_id_template(id_tmpl, dir_variant_str);
+                let combo_tokens = parse_key_combo_tokens(key_spec, variant)?;
+                binding_entries.push(quote! {
+                    (crate::shortcut::Shortcut::Direct(#combo_tokens), ::std::string::String::from(#id_str))
+                });
+            }
+            continue;
+        }
 
         if bind_props.bindings.is_empty() {
             continue;
@@ -458,6 +652,10 @@ fn impl_leaf_shortcuts(
             pub fn default_shortcuts() -> ::std::vec::Vec<(crate::shortcut::Shortcut, ::std::string::String)> {
                 ::std::vec![#(#binding_entries),*]
             }
+
+            pub fn extra_chord_bindings() -> ::std::vec::Vec<(crate::shortcut::Shortcut, Self)> {
+                ::std::vec![#(#extra_entries),*]
+            }
         }
     })
 }
@@ -467,6 +665,7 @@ fn impl_root_shortcuts(
     data: &syn::DataEnum,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut extend_calls = Vec::new();
+    let mut extra_extend_calls = Vec::new();
 
     for variant in &data.variants {
         let Fields::Unnamed(fields) = &variant.fields else {
@@ -482,8 +681,16 @@ fn impl_root_shortcuts(
             ));
         };
         let inner_ty = &field.ty;
+        let var_ident = &variant.ident;
         extend_calls.push(quote! {
             bindings.extend(<#inner_ty>::default_shortcuts());
+        });
+        extra_extend_calls.push(quote! {
+            extras.extend(
+                <#inner_ty>::extra_chord_bindings()
+                    .into_iter()
+                    .map(|(shortcut, child)| (shortcut, #ident::#var_ident(child)))
+            );
         });
     }
 
@@ -493,6 +700,12 @@ fn impl_root_shortcuts(
                 let mut bindings = ::std::vec::Vec::new();
                 #(#extend_calls)*
                 bindings
+            }
+
+            pub fn extra_chord_bindings() -> ::std::vec::Vec<(crate::shortcut::Shortcut, Self)> {
+                let mut extras = ::std::vec::Vec::new();
+                #(#extra_extend_calls)*
+                extras
             }
         }
     })
@@ -621,27 +834,65 @@ enum Binding {
 
 struct BindProps {
     bindings: Vec<Binding>,
+    extra_chords: Vec<(String, String)>,
+    expand: Option<String>,
+    direction_keys: Vec<(String, String)>,
 }
 
 impl BindProps {
     fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
         let mut bindings = Vec::new();
+        let mut extra_chords = Vec::new();
+        let mut expand = None;
+        let mut direction_keys = Vec::new();
         for attr in attrs {
             if !attr.path().is_ident("shortcut") {
                 continue;
             }
+            let mut chord_val: Option<String> = None;
+            let mut variant_val: Option<String> = None;
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("direct") {
                     let v: LitStr = meta.value()?.parse()?;
                     bindings.push(Binding::Direct(v.value()));
                 } else if meta.path.is_ident("chord") {
                     let v: LitStr = meta.value()?.parse()?;
-                    bindings.push(Binding::Chord(v.value()));
+                    chord_val = Some(v.value());
+                } else if meta.path.is_ident("variant") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    variant_val = Some(v.value());
+                } else if meta.path.is_ident("expand") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    expand = Some(v.value());
+                } else {
+                    let key = meta
+                        .path
+                        .get_ident()
+                        .map(|i| i.to_string())
+                        .unwrap_or_default();
+                    let v: LitStr = meta.value()?.parse()?;
+                    direction_keys.push((key, v.value()));
                 }
                 Ok(())
             })?;
+            match (chord_val, variant_val) {
+                (Some(c), Some(v)) => extra_chords.push((c, v)),
+                (Some(c), None) => bindings.push(Binding::Chord(c)),
+                (None, Some(_)) => {
+                    return Err(syn::Error::new_spanned(
+                        attr,
+                        "#[shortcut(variant = ...)] requires chord = \"...\" in the same attribute",
+                    ));
+                }
+                (None, None) => {}
+            }
         }
-        Ok(BindProps { bindings })
+        Ok(BindProps {
+            bindings,
+            extra_chords,
+            expand,
+            direction_keys,
+        })
     }
 }
 
@@ -660,7 +911,7 @@ fn impl_command_bar(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream>
 
     let first_variant = data.variants.first();
     let is_leaf = first_variant
-        .map(|v| matches!(v.fields, Fields::Unit))
+        .map(|v| matches!(v.fields, Fields::Unit | Fields::Named(_)))
         .unwrap_or(true);
 
     if is_leaf {
@@ -678,6 +929,60 @@ fn impl_command_bar_leaf(
 
     for variant in &data.variants {
         let props = MenuProps::from_attrs(&variant.attrs)?;
+
+        if let Some(ref expand_field) = props.expand {
+            if props.hidden {
+                continue;
+            }
+            let field_type =
+                expand::lookup_field_type(&variant.fields, expand_field).ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        variant,
+                        format!(
+                            "expand field '{}' not found or not a simple type ident",
+                            expand_field
+                        ),
+                    )
+                })?;
+            let dir_variants = expand::variants_for(field_type).ok_or_else(|| {
+                syn::Error::new_spanned(
+                    variant,
+                    format!(
+                        "expand type '{}' not registered in expand::variants_for",
+                        field_type
+                    ),
+                )
+            })?;
+            let id_tmpl = props.id_template.as_deref().ok_or_else(|| {
+                syn::Error::new_spanned(variant, "#[menu(expand)] requires id_template")
+            })?;
+            let label_tmpl = props.label_template.as_deref().ok_or_else(|| {
+                syn::Error::new_spanned(variant, "#[menu(expand)] requires label_template")
+            })?;
+
+            let bind_props = BindProps::from_attrs(&variant.attrs)?;
+
+            for dir_variant_str in dir_variants {
+                let id_str = expand::format_id_template(id_tmpl, dir_variant_str);
+                let label_str = expand::format_label_template(label_tmpl, dir_variant_str);
+
+                let dir_lower = heck_variant_snake_case(dir_variant_str);
+                let shortcut_display = bind_props
+                    .direction_keys
+                    .iter()
+                    .find(|(k, _)| *k == dir_lower)
+                    .map(|(_, v)| accel_to_display(v))
+                    .unwrap_or_default();
+
+                let id_ref = id_str.as_str();
+                let label_ref = label_str.as_str();
+                let shortcut_ref = shortcut_display.as_str();
+                entries.push(quote! {
+                    (#id_ref, #label_ref, #shortcut_ref)
+                });
+            }
+            continue;
+        }
 
         let Some(id) = &props.id else {
             continue;
@@ -785,18 +1090,23 @@ impl McpProps {
 }
 
 struct McpFieldProps {
+    description: Option<String>,
     enum_values: Vec<String>,
 }
 
 impl McpFieldProps {
     fn from_attrs(attrs: &[Attribute]) -> syn::Result<Self> {
+        let mut description = None;
         let mut enum_values = Vec::new();
         for attr in attrs {
             if !attr.path().is_ident("mcp") {
                 continue;
             }
             attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("enum_values") {
+                if meta.path.is_ident("description") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    description = Some(v.value());
+                } else if meta.path.is_ident("enum_values") {
                     let value: syn::ExprArray = meta.value()?.parse()?;
                     for el in value.elems {
                         if let syn::Expr::Lit(syn::ExprLit {
@@ -813,7 +1123,10 @@ impl McpFieldProps {
                 Ok(())
             })?;
         }
-        Ok(McpFieldProps { enum_values })
+        Ok(McpFieldProps {
+            description,
+            enum_values,
+        })
     }
 }
 
@@ -923,31 +1236,38 @@ fn impl_mcp_tool_leaf_fielded(
                 (field.ty.clone(), false)
             };
 
-            let kind = type_schema_kind(&effective_ty).ok_or_else(|| {
-                syn::Error::new_spanned(
-                    &field.ty,
-                    "unsupported McpTool field type (use String, integer types, bool, or Option<T>)",
-                )
-            })?;
+            let kind = if !field_props.enum_values.is_empty()
+                && type_schema_kind(&effective_ty).is_none()
+            {
+                "enum_string"
+            } else {
+                type_schema_kind(&effective_ty).ok_or_else(|| {
+                    syn::Error::new_spanned(
+                        &field.ty,
+                        "unsupported McpTool field type (use String, integer types, bool, or Option<T>)",
+                    )
+                })?
+            };
 
+            let field_desc = field_props.description.as_deref().unwrap_or("");
             let schema_fragment = if !field_props.enum_values.is_empty() {
-                if kind != "string" {
+                if kind != "string" && kind != "enum_string" {
                     return Err(syn::Error::new_spanned(
                         &field.ty,
-                        "#[mcp(enum_values = ...)] requires String/Option<String>",
+                        "#[mcp(enum_values = ...)] requires String, Option<String>, or an enum type with #[serde(rename_all = ...)]",
                     ));
                 }
                 let values = &field_props.enum_values;
                 quote! {
-                    ::serde_json::json!({"type": "string", "enum": [ #(#values),* ]})
+                    ::serde_json::json!({"type": "string", "description": #field_desc, "enum": [ #(#values),* ]})
                 }
             } else if kind == "json" {
                 quote! {
-                    ::serde_json::json!({})
+                    ::serde_json::json!({"description": #field_desc})
                 }
             } else {
                 quote! {
-                    ::serde_json::json!({"type": #kind})
+                    ::serde_json::json!({"type": #kind, "description": #field_desc})
                 }
             };
 
@@ -1041,6 +1361,27 @@ fn impl_mcp_tool_leaf_fielded(
                         }
                     }
                 }
+                "enum_string" => {
+                    let ty = &effective_ty;
+                    let extract = quote! {
+                        args.get(#field_name)
+                            .and_then(|v| ::serde_json::from_value::<#ty>(v.clone()).ok())
+                    };
+                    if is_optional {
+                        quote! { let #field_ident: ::core::option::Option<#ty> = #extract; }
+                    } else {
+                        quote! {
+                            let #field_ident: #ty = match #extract {
+                                ::core::option::Option::Some(v) => v,
+                                ::core::option::Option::None => {
+                                    return ::core::option::Option::Some(
+                                        ::core::result::Result::Err(format!("{} is required", #field_name))
+                                    );
+                                }
+                            };
+                        }
+                    }
+                }
                 _ => unreachable!(),
             };
 
@@ -1082,6 +1423,10 @@ fn impl_mcp_tool_leaf_fielded(
         impl #ident {
             pub fn mcp_tool_entries() -> ::std::vec::Vec<(&'static str, &'static str, ::serde_json::Value)> {
                 ::std::vec![#(#entries),*]
+            }
+
+            pub fn from_mcp_id(_id: &str) -> ::core::option::Option<Self> {
+                ::core::option::Option::None
             }
 
             pub fn from_mcp_call(
@@ -1154,6 +1499,13 @@ fn impl_mcp_tool_leaf_unit(
                     _ => ::core::option::Option::None,
                 }
             }
+
+            pub fn from_mcp_call(
+                name: &str,
+                _args: ::serde_json::Value,
+            ) -> ::core::option::Option<::core::result::Result<Self, ::std::string::String>> {
+                Self::from_mcp_id(name).map(::core::result::Result::Ok)
+            }
         }
     })
 }
@@ -1164,6 +1516,7 @@ fn impl_mcp_tool_root(
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut extend_calls = Vec::new();
     let mut id_clauses = Vec::new();
+    let mut call_clauses = Vec::new();
 
     for variant in &data.variants {
         let mcp_props = McpProps::from_attrs(&variant.attrs)?;
@@ -1190,6 +1543,10 @@ fn impl_mcp_tool_root(
         id_clauses.push(quote! {
             <#inner_ty>::from_mcp_id(id).map(#ident::#variant_ident)
         });
+        call_clauses.push(quote! {
+            <#inner_ty>::from_mcp_call(name, args.clone())
+                .map(|r| r.map(#ident::#variant_ident))
+        });
     }
 
     let from_id_body = if id_clauses.is_empty() {
@@ -1197,6 +1554,16 @@ fn impl_mcp_tool_root(
     } else {
         let first = &id_clauses[0];
         let chained = id_clauses[1..]
+            .iter()
+            .fold(quote! { #first }, |acc, c| quote! { #acc.or_else(|| #c) });
+        quote! { #chained }
+    };
+
+    let from_call_body = if call_clauses.is_empty() {
+        quote! { ::core::option::Option::None }
+    } else {
+        let first = &call_clauses[0];
+        let chained = call_clauses[1..]
             .iter()
             .fold(quote! { #first }, |acc, c| quote! { #acc.or_else(|| #c) });
         quote! { #chained }
@@ -1212,6 +1579,13 @@ fn impl_mcp_tool_root(
 
             pub fn from_mcp_id(id: &str) -> ::core::option::Option<Self> {
                 #from_id_body
+            }
+
+            pub fn from_mcp_call(
+                name: &str,
+                args: ::serde_json::Value,
+            ) -> ::core::option::Option<::core::result::Result<Self, ::std::string::String>> {
+                #from_call_body
             }
         }
     })

@@ -1,0 +1,32 @@
+use syn::{Fields, Ident, Type};
+
+pub fn variants_for(field_type: &Ident) -> Option<&'static [&'static str]> {
+    match field_type.to_string().as_str() {
+        "PaneDirection" => Some(&["Top", "Right", "Bottom", "Left"]),
+        _ => None,
+    }
+}
+
+pub fn format_id_template(template: &str, variant_pascal: &str) -> String {
+    template.replace("{dir}", &crate::heck_variant_snake_case(variant_pascal))
+}
+
+pub fn format_label_template(template: &str, variant_pascal: &str) -> String {
+    template
+        .replace("{Dir}", variant_pascal)
+        .replace("{dir}", &crate::heck_variant_snake_case(variant_pascal))
+}
+
+pub fn lookup_field_type<'a>(fields: &'a Fields, field_name: &str) -> Option<&'a Ident> {
+    let Fields::Named(named) = fields else {
+        return None;
+    };
+    for field in &named.named {
+        if field.ident.as_ref().map(|i| i.to_string()).as_deref() == Some(field_name)
+            && let Type::Path(type_path) = &field.ty
+        {
+            return type_path.path.get_ident();
+        }
+    }
+    None
+}

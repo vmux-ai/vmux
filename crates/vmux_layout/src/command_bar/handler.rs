@@ -1,6 +1,5 @@
 pub(crate) use crate::NewStackContext;
 use crate::cef::Browser;
-use crate::event::SERVICES_PAGE_URL;
 use crate::{
     Header,
     pane::{Pane, PaneSplit},
@@ -20,19 +19,18 @@ use vmux_command::event::{
     CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSpace, CommandBarTab,
     PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
 };
+use vmux_command::open::OpenCommand;
+use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
     AgentProviderSummary, CommandBarAgentsSnapshot, CommandBarSettingsSnapshot,
     CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
 };
 use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands, SpaceCommand,
-    StackCommand, TerminalCommand,
+    AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
+    SpaceCommand, StackCommand,
 };
 use vmux_core::PageMetadata;
-use vmux_core::agent::{
-    AgentKind, AgentLaunchRequested, PageAgentAttachRequest, PageAgentSpawnTabRequest,
-    parse_page_agent_url,
-};
+use vmux_core::agent::{AgentLaunchRequested, PageAgentAttachRequest, PageAgentSpawnTabRequest};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
@@ -333,18 +331,15 @@ fn command_bar_open_request(
     let mut request = CommandBarOpenRequest::default();
     for cmd in commands {
         match cmd {
-            AppCommand::Browser(BrowserCommand::FocusAddressBar) => {
-                request.should_toggle = true;
-            }
-            AppCommand::Browser(BrowserCommand::OpenCommandBar) => {
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)) => {
                 request.should_toggle = true;
                 request.url_override = Some(String::new());
             }
-            AppCommand::Browser(BrowserCommand::OpenPathBar) => {
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPathBar)) => {
                 request.should_toggle = true;
                 request.url_override = Some("/".to_string());
             }
-            AppCommand::Browser(BrowserCommand::OpenCommands) => {
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommands)) => {
                 request.should_toggle = true;
                 request.url_override = Some(">".to_string());
             }
@@ -431,7 +426,7 @@ fn handle_open_command_bar(
     let mut new_stack_ctx = snapshot_params.p2();
 
     let request =
-        command_bar_open_request(reader.read().copied(), &spaces_snapshot.spaces_page_url);
+        command_bar_open_request(reader.read().cloned(), &spaces_snapshot.spaces_page_url);
     let mut should_open = false;
     let should_toggle = request.should_toggle;
     let should_dismiss = request.should_dismiss;
@@ -669,7 +664,7 @@ fn handle_open_command_bar(
     let host_emit_ready = browsers.host_emit_ready(&modal_e);
     let rendered_matches = rendered_open.is_some_and(|rendered| rendered.0 != 0);
     webview_debug_log(format!(
-        "command_bar open entity={modal_e:?} was_open={was_open} has_browser={has_browser} host_emit_ready={host_emit_ready} command_bar_ready={command_bar_ready} rendered={rendered_matches} pending_reveal={} visibility={:?} new_tab={is_new_stack}",
+        "command_bar open entity={modal_e:?} was_open={was_open} has_browser={has_browser} host_emit_ready={host_emit_ready} command_bar_ready={command_bar_ready} rendered={rendered_matches} pending_reveal={} visibility={:?} is_new_stack={is_new_stack}",
         modal_pending_reveal.is_some(),
         *modal_vis
     ));
@@ -710,6 +705,11 @@ fn handle_open_command_bar(
     let reveal_start_frames = command_bar_reveal_start_frames(
         modal_pending_reveal.is_some_and(|pending| pending.open_id == 0),
     );
+    let target = if is_new_stack {
+        Some(vmux_command::open_target::OpenTarget::InNewStack)
+    } else {
+        None
+    };
     let payload = command_bar_open_payload(
         open_id,
         space_name,
@@ -717,7 +717,7 @@ fn handle_open_command_bar(
         bar_spaces,
         bar_tabs,
         bar_commands,
-        is_new_stack,
+        target,
     );
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
     let ron_body_len = ron_body.len();
@@ -771,7 +771,7 @@ fn command_bar_open_payload(
     spaces: Vec<CommandBarSpace>,
     tabs: Vec<CommandBarTab>,
     commands: Vec<CommandBarCommandEntry>,
-    new_tab: bool,
+    target: Option<vmux_command::open_target::OpenTarget>,
 ) -> CommandBarOpenEvent {
     CommandBarOpenEvent {
         open_id,
@@ -780,55 +780,8 @@ fn command_bar_open_payload(
         spaces,
         tabs,
         commands,
-        new_tab,
+        target,
     }
-}
-
-fn attach_spaces_page_to_tab(
-    tab: Entity,
-    spaces_page_url: &str,
-    commands: &mut Commands,
-    spawn_writer: &mut MessageWriter<SpacesPageSpawnRequest>,
-) {
-    commands.entity(tab).insert(PageMetadata {
-        url: spaces_page_url.to_string(),
-        title: "Spaces".to_string(),
-        ..default()
-    });
-    spawn_writer.write(SpacesPageSpawnRequest { target_stack: tab });
-}
-
-#[allow(clippy::too_many_arguments)]
-fn spawn_spaces_page_layout_from_command_bar(
-    main: Option<Entity>,
-    primary_window: Option<Entity>,
-    new_stack_ctx: &mut NewStackContext,
-    focus: Option<&mut crate::stack::FocusedStack>,
-    spaces_page_url: &str,
-    commands: &mut Commands,
-    spawn_writer: &mut MessageWriter<SpacesPageSpawnRequest>,
-) -> bool {
-    let Some(main) = main else {
-        return false;
-    };
-    let Some(primary_window) = primary_window else {
-        return false;
-    };
-    let spawned =
-        crate::window::spawn_default_space_layout(main, primary_window, new_stack_ctx, commands);
-    if let Some(focus) = focus {
-        focus.tab = Some(spawned.tab);
-        focus.pane = Some(spawned.pane);
-        focus.stack = Some(spawned.stack);
-    }
-    let Some(tab) = new_stack_ctx.stack.take() else {
-        return false;
-    };
-    new_stack_ctx.previous_stack = None;
-    new_stack_ctx.needs_open = false;
-    new_stack_ctx.dismiss_modal = false;
-    attach_spaces_page_to_tab(tab, spaces_page_url, commands, spawn_writer);
-    true
 }
 
 #[derive(SystemParam)]
@@ -851,6 +804,35 @@ struct CommandBarActionQueries<'w, 's> {
             Without<Modal>,
         ),
     >,
+}
+
+fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
+    match target {
+        Some(OpenTarget::InPlace) | None => OpenCommand::InPlace { url: Some(url) },
+        Some(OpenTarget::InNewStack) => OpenCommand::InNewStack { url: Some(url) },
+        Some(OpenTarget::InPane {
+            direction,
+            target,
+            mode,
+        }) => OpenCommand::InPane {
+            direction,
+            target,
+            mode,
+            url: Some(url),
+        },
+        Some(OpenTarget::InNewTab) => OpenCommand::InNewTab { url: Some(url) },
+        Some(OpenTarget::InNewSpace) => OpenCommand::InNewSpace { url: Some(url) },
+    }
+}
+
+fn normalize_url(value: &str) -> String {
+    if value.contains("://") {
+        value.to_string()
+    } else if value.contains('.') && !value.contains(' ') {
+        format!("https://{}", value)
+    } else {
+        format!("https://www.google.com/search?q={}", value)
+    }
 }
 
 fn on_command_bar_action(
@@ -881,27 +863,19 @@ fn on_command_bar_action(
         MessageWriter<ProcessesMonitorSpawnRequest>,
         MessageWriter<SpacesPageSpawnRequest>,
     )>,
-    mut settings_page_spawn_writer: MessageWriter<SettingsPageSpawnRequest>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let settings_snapshot = resource_params.p1().clone();
-    let spaces_url = resource_params.p0().spaces_page_url.clone();
     let terminals_snapshot = resource_params.p2().clone();
     let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
     let pid_to_entity = terminals_snapshot.pid_to_entity.clone();
-    let agent_to_entity = Some(terminals_snapshot.agent_session_to_entity.clone());
     let empty_stack = new_stack_ctx.stack;
     let previous_stack = new_stack_ctx.previous_stack;
-    // Track whether we handle keyboard restore ourselves
     let mut custom_keyboard_restore = false;
 
     match evt.action.as_str() {
-        "navigate" => {
-            // Detect filesystem paths — open terminal with cwd instead of browser
+        "open" => {
             let expanded = if evt.value.starts_with('~') {
                 std::env::var("HOME")
                     .ok()
@@ -940,340 +914,15 @@ fn on_command_bar_action(
                     custom_keyboard_restore = true;
                 }
             } else {
-                let url = if evt.value.contains("://") {
-                    evt.value.clone()
-                } else if evt.value.contains('.') && !evt.value.contains(' ') {
-                    format!("https://{}", evt.value)
-                } else {
-                    format!("https://www.google.com/search?q={}", evt.value)
-                };
-
-                if let Some(stack_e) = empty_stack {
-                    // New tab mode: attach content to the empty tab
-                    if url.starts_with("vmux://terminal") {
-                        let known = parse_pid_from_url(&url, &terminal_page_url)
-                            .and_then(|p| pid_to_entity.get(&p).copied());
-                        if let Some(entity) = known {
-                            focus_pane_entity(entity, &mut commands, &queries.child_of_q);
-                        } else {
-                            if let Some(pid) = parse_pid_from_url(&url, &terminal_page_url) {
-                                bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
-                            }
-                            commands.entity(stack_e).insert(PageMetadata {
-                                url: terminal_page_url.clone(),
-                                title: "Terminal".to_string(),
-                                ..default()
-                            });
-                            writer_params.p3().write(TerminalSpawnRequest {
-                                cwd: None,
-                                target_stack: Some(stack_e),
-                            });
-                        }
-                    } else if let Some((provider, model, sid_opt)) = parse_page_agent_url(&url) {
-                        let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                        if let Some(mut w) = writer_params.p4() {
-                            w.write(PageAgentAttachRequest {
-                                stack: stack_e,
-                                provider,
-                                model,
-                                sid,
-                            });
-                        }
-                    } else if let Some(kind) = AgentKind::all()
-                        .into_iter()
-                        .find(|k| url.starts_with(k.cli_url_prefix().trim_end_matches('/')))
-                    {
-                        let prefix = kind.cli_url_prefix();
-                        let id_part = url
-                            .strip_prefix(&prefix)
-                            .filter(|s| !s.is_empty())
-                            .map(|s| s.to_string());
-                        let title = match kind {
-                            AgentKind::Vibe => "Vibe",
-                            AgentKind::Claude => "Claude",
-                            AgentKind::Codex => "Codex",
-                        };
-                        if let Some(ref id) = id_part
-                            && let Some(map) = agent_to_entity.as_ref()
-                            && let Some(&entity) = map.get(&(kind, id.clone()))
-                        {
-                            focus_pane_entity(entity, &mut commands, &queries.child_of_q);
-                        } else {
-                            commands.entity(stack_e).insert(PageMetadata {
-                                url: prefix.clone(),
-                                title: title.to_string(),
-                                ..default()
-                            });
-                            let cwd = std::env::current_dir()
-                                .unwrap_or_else(|_| std::path::PathBuf::from("/"));
-                            writer_params
-                                .p2()
-                                .write(vmux_core::agent::SpawnAgentInStackRequest {
-                                    kind,
-                                    cwd,
-                                    session_id: id_part,
-                                    stack: stack_e,
-                                });
-                        }
-                    } else if url.starts_with(SERVICES_PAGE_URL.trim_end_matches('/')) {
-                        commands.entity(stack_e).insert(PageMetadata {
-                            url: SERVICES_PAGE_URL.to_string(),
-                            title: "Background Services".to_string(),
-                            ..default()
-                        });
-                        writer_params.p6().write(ProcessesMonitorSpawnRequest {
-                            target_stack: stack_e,
-                        });
-                    } else if url.starts_with(spaces_url.trim_end_matches('/')) {
-                        commands.entity(stack_e).insert(PageMetadata {
-                            url: spaces_url.to_string(),
-                            title: "Spaces".to_string(),
-                            ..default()
-                        });
-                        writer_params.p7().write(SpacesPageSpawnRequest {
-                            target_stack: stack_e,
-                        });
-                    } else if url
-                        .starts_with(settings_snapshot.settings_page_url.trim_end_matches('/'))
-                    {
-                        commands.entity(stack_e).insert(PageMetadata {
-                            url: settings_snapshot.settings_page_url.to_string(),
-                            title: "Settings".to_string(),
-                            ..default()
-                        });
-                        settings_page_spawn_writer.write(SettingsPageSpawnRequest {
-                            target_stack: stack_e,
-                        });
-                    } else {
-                        let browser_e = commands
-                            .spawn((
-                                Browser::new(&mut meshes, &mut webview_mt, &url),
-                                ChildOf(stack_e),
-                            ))
-                            .id();
-                        commands.entity(browser_e).insert(CefKeyboardTarget);
-                    }
-                    commands.entity(stack_e).insert(LastActivatedAt::now());
-                    if let Ok(parent) = queries.child_of_q.get(stack_e) {
-                        commands.entity(parent.0).insert(LastActivatedAt::now());
-                    }
+                let url = normalize_url(&evt.value);
+                let target = evt.target;
+                let open_cmd = build_open_command(target, url);
+                writer_params
+                    .p0()
+                    .write(AppCommand::Browser(BrowserCommand::Open(open_cmd)));
+                if empty_stack.is_some() {
                     new_stack_ctx.stack = None;
                     new_stack_ctx.previous_stack = None;
-                    custom_keyboard_restore = true;
-                } else {
-                    // Normal mode: navigate or spawn terminal in current tab
-                    let known_terminal = parse_pid_from_url(&url, &terminal_page_url)
-                        .and_then(|p| pid_to_entity.get(&p).copied());
-                    let known_agent = AgentKind::all().into_iter().find_map(|k| {
-                        let id = url
-                            .strip_prefix(&k.cli_url_prefix())
-                            .filter(|s| !s.is_empty())?;
-                        agent_to_entity
-                            .as_ref()
-                            .and_then(|map| map.get(&(k, id.to_string())).copied())
-                    });
-                    if let Some(entity) = known_terminal {
-                        focus_pane_entity(entity, &mut commands, &queries.child_of_q);
-                    } else if let Some(entity) = known_agent {
-                        focus_pane_entity(entity, &mut commands, &queries.child_of_q);
-                    } else if url.starts_with("vmux://terminal") {
-                        if let Some(pid) = parse_pid_from_url(&url, &terminal_page_url) {
-                            bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
-                        }
-                        writer_params
-                            .p0()
-                            .write(AppCommand::Terminal(TerminalCommand::New));
-                    } else if let Some((provider, model, sid_opt)) = parse_page_agent_url(&url) {
-                        let (_, active_pane_opt, _) = focused_stack(
-                            &queries.tab_q,
-                            &queries.all_children,
-                            &queries.leaf_panes,
-                            &queries.pane_ts,
-                            &queries.pane_children,
-                            &queries.stack_ts,
-                        );
-                        if let Some(pane_e) = active_pane_opt {
-                            let sid = sid_opt.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                            if let Some(mut w) = writer_params.p5() {
-                                w.write(PageAgentSpawnTabRequest {
-                                    pane: pane_e,
-                                    provider,
-                                    model,
-                                    sid,
-                                });
-                            }
-                            custom_keyboard_restore = true;
-                        }
-                    } else if let Some(kind) = AgentKind::all()
-                        .into_iter()
-                        .find(|k| url.starts_with(k.cli_url_prefix().trim_end_matches('/')))
-                    {
-                        let (_, active_pane_opt, _) = focused_stack(
-                            &queries.tab_q,
-                            &queries.all_children,
-                            &queries.leaf_panes,
-                            &queries.pane_ts,
-                            &queries.pane_children,
-                            &queries.stack_ts,
-                        );
-                        if let Some(pane_e) = active_pane_opt {
-                            let prefix = kind.cli_url_prefix();
-                            let title = match kind {
-                                AgentKind::Vibe => "Vibe",
-                                AgentKind::Claude => "Claude",
-                                AgentKind::Codex => "Codex",
-                            };
-                            let stack_e = commands
-                                .spawn((
-                                    crate::stack::stack_bundle(),
-                                    LastActivatedAt::now(),
-                                    ChildOf(pane_e),
-                                ))
-                                .id();
-                            commands.entity(stack_e).insert(PageMetadata {
-                                url: prefix.clone(),
-                                title: title.to_string(),
-                                ..default()
-                            });
-                            let session_id = url
-                                .strip_prefix(&prefix)
-                                .filter(|s| !s.is_empty())
-                                .map(|s| s.to_string());
-                            let cwd = std::env::current_dir()
-                                .unwrap_or_else(|_| std::path::PathBuf::from("/"));
-                            writer_params
-                                .p2()
-                                .write(vmux_core::agent::SpawnAgentInStackRequest {
-                                    kind,
-                                    cwd,
-                                    session_id,
-                                    stack: stack_e,
-                                });
-                            custom_keyboard_restore = true;
-                        }
-                    } else if url.starts_with(SERVICES_PAGE_URL.trim_end_matches('/')) {
-                        use vmux_command::ServiceCommand;
-                        writer_params
-                            .p0()
-                            .write(AppCommand::Service(ServiceCommand::Open));
-                    } else if url.starts_with(spaces_url.trim_end_matches('/')) {
-                        let (_, active_pane_opt, _) = focused_stack(
-                            &queries.tab_q,
-                            &queries.all_children,
-                            &queries.leaf_panes,
-                            &queries.pane_ts,
-                            &queries.pane_children,
-                            &queries.stack_ts,
-                        );
-                        if let Some(pane_e) = active_pane_opt {
-                            let stack_e = commands
-                                .spawn((
-                                    crate::stack::stack_bundle(),
-                                    LastActivatedAt::now(),
-                                    ChildOf(pane_e),
-                                ))
-                                .id();
-                            commands.entity(stack_e).insert(PageMetadata {
-                                url: spaces_url.to_string(),
-                                title: "Spaces".to_string(),
-                                ..default()
-                            });
-                            writer_params.p7().write(SpacesPageSpawnRequest {
-                                target_stack: stack_e,
-                            });
-                            custom_keyboard_restore = true;
-                        } else {
-                            let main = stack_params.p1().single().ok();
-                            let primary_window = stack_params.p2().single().ok();
-                            let mut focus = stack_params.p3();
-                            if spawn_spaces_page_layout_from_command_bar(
-                                main,
-                                primary_window,
-                                &mut new_stack_ctx,
-                                focus.as_deref_mut(),
-                                &spaces_url,
-                                &mut commands,
-                                &mut writer_params.p7(),
-                            ) {
-                                custom_keyboard_restore = true;
-                            }
-                        }
-                    } else if url
-                        .starts_with(settings_snapshot.settings_page_url.trim_end_matches('/'))
-                    {
-                        let (_, active_pane_opt, _) = focused_stack(
-                            &queries.tab_q,
-                            &queries.all_children,
-                            &queries.leaf_panes,
-                            &queries.pane_ts,
-                            &queries.pane_children,
-                            &queries.stack_ts,
-                        );
-                        if let Some(pane_e) = active_pane_opt {
-                            let stack_e = commands
-                                .spawn((
-                                    crate::stack::stack_bundle(),
-                                    LastActivatedAt::now(),
-                                    ChildOf(pane_e),
-                                ))
-                                .id();
-                            commands.entity(stack_e).insert(PageMetadata {
-                                url: settings_snapshot.settings_page_url.to_string(),
-                                title: "Settings".to_string(),
-                                ..default()
-                            });
-                            settings_page_spawn_writer.write(SettingsPageSpawnRequest {
-                                target_stack: stack_e,
-                            });
-                            custom_keyboard_restore = true;
-                        }
-                    } else {
-                        let (_, active_pane_opt, active_stack) = focused_stack(
-                            &queries.tab_q,
-                            &queries.all_children,
-                            &queries.leaf_panes,
-                            &queries.pane_ts,
-                            &queries.pane_children,
-                            &queries.stack_ts,
-                        );
-                        let mut updated_existing = false;
-                        if let Some(tab) = active_stack {
-                            for browser_e in &queries.content_browsers {
-                                let is_child = queries
-                                    .child_of_q
-                                    .get(browser_e)
-                                    .ok()
-                                    .map(|co| co.get() == tab)
-                                    .unwrap_or(false);
-                                if is_child && !stack_params.p4().contains(browser_e) {
-                                    commands.entity(browser_e).insert(WebviewSource::new(&url));
-                                    updated_existing = true;
-                                }
-                            }
-                        }
-                        if !updated_existing && let Some(pane_e) = active_pane_opt {
-                            let stack_e = commands
-                                .spawn((
-                                    crate::stack::stack_bundle(),
-                                    LastActivatedAt::now(),
-                                    ChildOf(pane_e),
-                                ))
-                                .id();
-                            commands.entity(stack_e).insert(PageMetadata {
-                                url: url.clone(),
-                                title: url.clone(),
-                                ..default()
-                            });
-                            let browser_e = commands
-                                .spawn((
-                                    Browser::new(&mut meshes, &mut webview_mt, &url),
-                                    ChildOf(stack_e),
-                                ))
-                                .id();
-                            commands.entity(browser_e).insert(CefKeyboardTarget);
-                            custom_keyboard_restore = true;
-                        }
-                    }
                 }
             }
         }
@@ -1347,7 +996,11 @@ fn on_command_bar_action(
                     } else {
                         writer_params
                             .p0()
-                            .write(AppCommand::Terminal(TerminalCommand::New));
+                            .write(AppCommand::Browser(BrowserCommand::Open(
+                                OpenCommand::InNewStack {
+                                    url: Some("vmux://terminal/".into()),
+                                },
+                            )));
                     }
                 }
             } // end reattach else
@@ -2101,7 +1754,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Vec::new(),
-            false,
+            None,
         );
 
         assert_eq!(payload.space_name, "Work");
@@ -2125,7 +1778,7 @@ mod tests {
             spaces.clone(),
             Vec::new(),
             Vec::new(),
-            false,
+            None,
         );
 
         assert_eq!(payload.spaces, spaces);
@@ -2144,9 +1797,11 @@ mod tests {
     }
 
     #[test]
-    fn tab_new_command_does_not_dismiss_command_bar() {
+    fn open_in_new_stack_does_not_dismiss_command_bar() {
         let request = command_bar_open_request(
-            [AppCommand::Layout(LayoutCommand::Stack(StackCommand::New))],
+            [AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewStack { url: None },
+            ))],
             "vmux://spaces/",
         );
 
@@ -2218,5 +1873,114 @@ mod tests {
             parse_pid_from_url("vmux://terminal/99999999999999999", TEST_TERMINAL_URL),
             None
         );
+    }
+
+    #[test]
+    fn build_open_command_none_target_yields_in_place() {
+        let cmd = build_open_command(None, "https://example.com".to_string());
+        assert_eq!(
+            cmd,
+            OpenCommand::InPlace {
+                url: Some("https://example.com".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn build_open_command_in_place_target_yields_in_place() {
+        let cmd = build_open_command(Some(OpenTarget::InPlace), "https://example.com".to_string());
+        assert_eq!(
+            cmd,
+            OpenCommand::InPlace {
+                url: Some("https://example.com".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn build_open_command_in_new_stack_target() {
+        let cmd = build_open_command(
+            Some(OpenTarget::InNewStack),
+            "https://example.com".to_string(),
+        );
+        assert_eq!(
+            cmd,
+            OpenCommand::InNewStack {
+                url: Some("https://example.com".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn build_open_command_in_new_tab_target() {
+        let cmd = build_open_command(
+            Some(OpenTarget::InNewTab),
+            "https://example.com".to_string(),
+        );
+        assert_eq!(
+            cmd,
+            OpenCommand::InNewTab {
+                url: Some("https://example.com".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn build_open_command_in_new_space_target() {
+        let cmd = build_open_command(
+            Some(OpenTarget::InNewSpace),
+            "https://example.com".to_string(),
+        );
+        assert_eq!(
+            cmd,
+            OpenCommand::InNewSpace {
+                url: Some("https://example.com".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn build_open_command_in_pane_target() {
+        use vmux_command::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
+        let cmd = build_open_command(
+            Some(OpenTarget::InPane {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+            }),
+            "https://example.com".to_string(),
+        );
+        assert_eq!(
+            cmd,
+            OpenCommand::InPane {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: Some("https://example.com".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn normalize_url_adds_https_for_domain() {
+        assert_eq!(normalize_url("google.com"), "https://google.com");
+    }
+
+    #[test]
+    fn normalize_url_preserves_explicit_protocol() {
+        assert_eq!(normalize_url("http://example.com"), "http://example.com");
+        assert_eq!(normalize_url("https://example.com"), "https://example.com");
+    }
+
+    #[test]
+    fn normalize_url_search_query_becomes_google() {
+        let result = normalize_url("hello world");
+        assert!(result.starts_with("https://www.google.com/search?q="));
+        assert!(result.contains("hello world"));
+    }
+
+    #[test]
+    fn normalize_url_preserves_vmux_protocol() {
+        assert_eq!(normalize_url("vmux://terminal/123"), "vmux://terminal/123");
     }
 }

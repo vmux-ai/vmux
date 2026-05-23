@@ -65,7 +65,10 @@ impl McpParamTool {
                     "path" => "browser_open_path_bar",
                     other => return Err(format!("unknown command bar mode: {other}")),
                 };
-                Ok(AgentCommand::AppCommand { id: id.to_string() })
+                Ok(AgentCommand::AppCommand {
+                    id: id.to_string(),
+                    args_json: String::new(),
+                })
             }
             McpParamTool::NewTerminalTab { cwd, command, args } => {
                 let args_vec = args
@@ -115,6 +118,7 @@ impl McpParamTool {
                 }
                 Ok(AgentCommand::AppCommand {
                     id: format!("tab_select_{index}"),
+                    args_json: String::new(),
                 })
             }
             McpParamTool::UpdateSettings { path, value } => {
@@ -280,7 +284,7 @@ pub fn dispatch_from_tool_call(name: &str, arguments: Value) -> Result<DispatchT
             vmux_service::protocol::AgentQuery::GetSettings,
         ));
     }
-    if let Some(parsed) = McpParamTool::from_mcp_call(name, arguments) {
+    if let Some(parsed) = McpParamTool::from_mcp_call(name, arguments.clone()) {
         return parsed
             .and_then(McpParamTool::to_agent_command)
             .map(DispatchTarget::Command);
@@ -288,6 +292,14 @@ pub fn dispatch_from_tool_call(name: &str, arguments: Value) -> Result<DispatchT
     if AppCommand::from_mcp_id(name).is_some() {
         return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
             id: name.to_string(),
+            args_json: String::new(),
+        }));
+    }
+    if AppCommand::from_mcp_call(name, arguments.clone()).is_some() {
+        let args_json = serde_json::to_string(&arguments).unwrap_or_default();
+        return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
+            id: name.to_string(),
+            args_json,
         }));
     }
     Err(format!("unknown tool: {name}"))
@@ -342,7 +354,8 @@ mod tests {
         assert_eq!(
             command,
             AgentCommand::AppCommand {
-                id: "terminal_clear".to_string()
+                id: "terminal_clear".to_string(),
+                args_json: String::new(),
             }
         );
     }
@@ -420,6 +433,7 @@ mod tests {
             command,
             AgentCommand::AppCommand {
                 id: "tab_select_3".to_string(),
+                args_json: String::new(),
             }
         );
     }
@@ -501,7 +515,7 @@ mod tests {
         let target = dispatch_from_tool_call("terminal_clear", serde_json::json!({})).unwrap();
         assert!(matches!(
             target,
-            DispatchTarget::Command(AgentCommand::AppCommand { id }) if id == "terminal_clear"
+            DispatchTarget::Command(AgentCommand::AppCommand { id, .. }) if id == "terminal_clear"
         ));
     }
 
@@ -597,5 +611,47 @@ mod tests {
             target,
             DispatchTarget::Query(AgentQuery::GetSettings)
         ));
+    }
+
+    #[test]
+    fn open_command_tools_are_exposed() {
+        let names = tool_names();
+        for expected in [
+            "in_place",
+            "in_new_stack",
+            "in_pane",
+            "in_new_tab",
+            "in_new_space",
+        ] {
+            assert!(
+                names.contains(&expected.to_string()),
+                "missing OpenCommand tool: {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn in_pane_tool_has_direction_enum() {
+        let defs = tool_definitions();
+        let in_pane = defs
+            .iter()
+            .find(|d| d.name == "in_pane")
+            .expect("in_pane tool present");
+        let props = in_pane
+            .input_schema
+            .get("properties")
+            .expect("properties key");
+        let dir = props.get("direction").expect("direction property");
+        let enum_vals = dir.get("enum").expect("direction has enum constraint");
+        assert_eq!(
+            enum_vals,
+            &serde_json::json!(["top", "right", "bottom", "left"])
+        );
+        let required = in_pane.input_schema.get("required").expect("required key");
+        let required_arr = required.as_array().expect("required is array");
+        assert!(
+            required_arr.iter().any(|v| v.as_str() == Some("direction")),
+            "direction must be required"
+        );
     }
 }

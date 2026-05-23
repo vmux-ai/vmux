@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 use vmux_macro::{CommandBar, DefaultShortcuts, McpTool, OsMenu, OsSubMenu, OsSubMenuGroup};
 
+use crate::open::OpenCommand;
+
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WriteAppCommands;
 
@@ -11,9 +13,7 @@ pub fn build_native_root_menu(menu: &mut muda::Menu) -> Result<(), muda::Error> 
     AppCommand::build_native_root_menu(menu)
 }
 
-#[derive(
-    Message, OsMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq,
-)]
+#[derive(Message, OsMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, PartialEq, Eq)]
 pub enum AppCommand {
     #[menu(label = "Scene")]
     Scene(SceneCommand),
@@ -57,8 +57,6 @@ pub enum LayoutCommand {
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StackCommand {
     #[default]
-    #[menu(id = "stack_new", label = "New Stack", accel = "super+n")]
-    New,
     #[menu(id = "stack_close", label = "Close Stack", accel = "super+w")]
     Close,
     #[menu(id = "stack_next", label = "Next Stack", accel = "super+shift+n")]
@@ -105,11 +103,6 @@ pub enum StackCommand {
 )]
 pub enum TerminalCommand {
     #[default]
-    #[menu(id = "terminal_new", label = "New Terminal")]
-    New,
-    #[menu(id = "terminal_new_tab", label = "New Terminal Tab", accel = "ctrl+`")]
-    #[shortcut(direct = "Ctrl+`")]
-    NewTab,
     #[menu(id = "terminal_close", label = "Close Terminal")]
     Close,
     #[menu(id = "terminal_next", label = "Next Terminal")]
@@ -123,11 +116,26 @@ pub enum TerminalCommand {
     CopyMode,
 }
 
+#[derive(OsSubMenuGroup, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, PartialEq, Eq)]
+pub enum BrowserCommand {
+    #[menu(label = "Navigation")]
+    Navigation(BrowserNavigationCommand),
+
+    #[menu(label = "Open")]
+    Open(OpenCommand),
+
+    #[menu(label = "View")]
+    View(BrowserViewCommand),
+
+    #[menu(label = "Bar")]
+    Bar(BrowserBarCommand),
+}
+
 #[allow(dead_code)]
 #[derive(
     OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
 )]
-pub enum BrowserCommand {
+pub enum BrowserNavigationCommand {
     #[default]
     #[menu(id = "browser_prev_page", label = "Back", accel = "super+[")]
     PrevPage,
@@ -143,29 +151,14 @@ pub enum BrowserCommand {
     HardReload,
     #[menu(id = "browser_stop", label = "Stop Loading", accel = "super+.", hidden)]
     Stop,
-    #[menu(
-        id = "browser_focus_address_bar",
-        label = "Open Location",
-        accel = "super+l"
-    )]
-    FocusAddressBar,
-    #[menu(
-        id = "browser_open_command_bar",
-        label = "Command Bar",
-        accel = "super+k"
-    )]
-    OpenCommandBar,
-    #[menu(
-        id = "browser_open_path_bar",
-        label = "Path Navigator",
-        accel = "super+/"
-    )]
-    OpenPathBar,
-    #[menu(id = "browser_open_commands", label = "Commands")]
-    #[shortcut(direct = ">")]
-    OpenCommands,
-    #[menu(id = "browser_find", label = "Find", accel = "super+f", hidden)]
-    Find,
+}
+
+#[allow(dead_code)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
+pub enum BrowserViewCommand {
+    #[default]
     #[menu(id = "browser_zoom_in", label = "Zoom In", accel = "super+=")]
     ZoomIn,
     #[menu(id = "browser_zoom_out", label = "Zoom Out", accel = "super+-")]
@@ -193,6 +186,31 @@ pub enum BrowserCommand {
 #[derive(
     OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
 )]
+pub enum BrowserBarCommand {
+    #[default]
+    #[menu(
+        id = "browser_open_command_bar",
+        label = "Command Bar",
+        accel = "super+k"
+    )]
+    OpenCommandBar,
+    #[menu(
+        id = "browser_open_path_bar",
+        label = "Path Navigator",
+        accel = "super+/"
+    )]
+    OpenPathBar,
+    #[menu(id = "browser_open_commands", label = "Commands")]
+    #[shortcut(direct = ">")]
+    OpenCommands,
+    #[menu(id = "browser_find", label = "Find", accel = "super+f", hidden)]
+    Find,
+}
+
+#[allow(dead_code)]
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
 pub enum ServiceCommand {
     #[default]
     #[menu(id = "service_open", label = "Open Service Monitor")]
@@ -211,12 +229,6 @@ pub enum SpaceCommand {
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PaneCommand {
     #[default]
-    #[menu(id = "split_v", label = "Split Vertically\t<leader> %")]
-    #[shortcut(chord = "Ctrl+g, %")]
-    SplitV,
-    #[menu(id = "split_h", label = "Split Horizontally\t<leader> \"")]
-    #[shortcut(chord = "Ctrl+g, \"")]
-    SplitH,
     #[menu(id = "toggle_pane", label = "Next Pane\t<leader> o", hidden)]
     #[shortcut(chord = "Ctrl+g, o")]
     Toggle,
@@ -282,8 +294,6 @@ pub enum PaneCommand {
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TabCommand {
     #[default]
-    #[menu(id = "new_tab", label = "New Tab", accel = "super+t")]
-    New,
     #[menu(id = "close_tab", label = "Close Tab")]
     Close,
     #[menu(id = "next_tab", label = "Next Tab", accel = "super+shift+]")]
@@ -406,11 +416,26 @@ mod tests {
         let entries = AppCommand::mcp_tool_entries();
         assert!(!entries.is_empty(), "mcp_tool_entries should not be empty");
 
-        for (id, _description, _schema) in &entries {
-            assert!(
-                AppCommand::from_mcp_id(id).is_some(),
-                "from_mcp_id failed to resolve {id}"
-            );
+        for (id, _description, schema) in &entries {
+            let has_required_params = schema
+                .get("required")
+                .and_then(|v| v.as_array())
+                .map(|a| !a.is_empty())
+                .unwrap_or(false);
+            if has_required_params {
+                assert!(
+                    AppCommand::from_mcp_call(id, serde_json::json!({})).is_some(),
+                    "from_mcp_call failed to resolve {id}"
+                );
+            } else {
+                let resolved_by_id = AppCommand::from_mcp_id(id).is_some();
+                let resolved_by_call =
+                    AppCommand::from_mcp_call(id, serde_json::json!({})).is_some();
+                assert!(
+                    resolved_by_id || resolved_by_call,
+                    "neither from_mcp_id nor from_mcp_call resolved {id}"
+                );
+            }
         }
 
         assert_eq!(
@@ -419,8 +444,50 @@ mod tests {
         );
         assert_eq!(
             AppCommand::from_mcp_id("browser_reload"),
-            Some(AppCommand::Browser(BrowserCommand::Reload))
+            Some(AppCommand::Browser(BrowserCommand::Navigation(
+                BrowserNavigationCommand::Reload
+            )))
         );
+    }
+
+    #[test]
+    fn browser_open_in_new_stack_resolves_through_nested_chain() {
+        assert!(matches!(
+            AppCommand::from_menu_id("open_in_new_stack"),
+            Some(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewStack { url: None }
+            )))
+        ));
+    }
+
+    #[test]
+    fn browser_navigation_back_still_resolves() {
+        assert!(matches!(
+            AppCommand::from_menu_id("browser_prev_page"),
+            Some(AppCommand::Browser(BrowserCommand::Navigation(
+                BrowserNavigationCommand::PrevPage
+            )))
+        ));
+    }
+
+    #[test]
+    fn browser_view_zoom_still_resolves() {
+        assert!(matches!(
+            AppCommand::from_menu_id("browser_zoom_in"),
+            Some(AppCommand::Browser(BrowserCommand::View(
+                BrowserViewCommand::ZoomIn
+            )))
+        ));
+    }
+
+    #[test]
+    fn browser_bar_command_bar_still_resolves() {
+        assert!(matches!(
+            AppCommand::from_menu_id("browser_open_command_bar"),
+            Some(AppCommand::Browser(BrowserCommand::Bar(
+                BrowserBarCommand::OpenCommandBar
+            )))
+        ));
     }
 
     #[test]
@@ -454,8 +521,8 @@ mod tests {
     #[test]
     fn layout_menu_id_resolves_through_nested_chain() {
         assert_eq!(
-            AppCommand::from_menu_id("split_v"),
-            Some(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::SplitV)))
+            AppCommand::from_menu_id("toggle_pane"),
+            Some(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Toggle)))
         );
         assert_eq!(
             AppCommand::from_menu_id("toggle_layout"),
