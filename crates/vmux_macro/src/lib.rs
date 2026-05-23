@@ -1425,6 +1425,10 @@ fn impl_mcp_tool_leaf_fielded(
                 ::std::vec![#(#entries),*]
             }
 
+            pub fn from_mcp_id(_id: &str) -> ::core::option::Option<Self> {
+                ::core::option::Option::None
+            }
+
             pub fn from_mcp_call(
                 name: &str,
                 args: ::serde_json::Value,
@@ -1495,6 +1499,13 @@ fn impl_mcp_tool_leaf_unit(
                     _ => ::core::option::Option::None,
                 }
             }
+
+            pub fn from_mcp_call(
+                name: &str,
+                _args: ::serde_json::Value,
+            ) -> ::core::option::Option<::core::result::Result<Self, ::std::string::String>> {
+                Self::from_mcp_id(name).map(::core::result::Result::Ok)
+            }
         }
     })
 }
@@ -1505,6 +1516,7 @@ fn impl_mcp_tool_root(
 ) -> syn::Result<proc_macro2::TokenStream> {
     let mut extend_calls = Vec::new();
     let mut id_clauses = Vec::new();
+    let mut call_clauses = Vec::new();
 
     for variant in &data.variants {
         let mcp_props = McpProps::from_attrs(&variant.attrs)?;
@@ -1531,6 +1543,10 @@ fn impl_mcp_tool_root(
         id_clauses.push(quote! {
             <#inner_ty>::from_mcp_id(id).map(#ident::#variant_ident)
         });
+        call_clauses.push(quote! {
+            <#inner_ty>::from_mcp_call(name, args.clone())
+                .map(|r| r.map(#ident::#variant_ident))
+        });
     }
 
     let from_id_body = if id_clauses.is_empty() {
@@ -1538,6 +1554,16 @@ fn impl_mcp_tool_root(
     } else {
         let first = &id_clauses[0];
         let chained = id_clauses[1..]
+            .iter()
+            .fold(quote! { #first }, |acc, c| quote! { #acc.or_else(|| #c) });
+        quote! { #chained }
+    };
+
+    let from_call_body = if call_clauses.is_empty() {
+        quote! { ::core::option::Option::None }
+    } else {
+        let first = &call_clauses[0];
+        let chained = call_clauses[1..]
             .iter()
             .fold(quote! { #first }, |acc, c| quote! { #acc.or_else(|| #c) });
         quote! { #chained }
@@ -1553,6 +1579,13 @@ fn impl_mcp_tool_root(
 
             pub fn from_mcp_id(id: &str) -> ::core::option::Option<Self> {
                 #from_id_body
+            }
+
+            pub fn from_mcp_call(
+                name: &str,
+                args: ::serde_json::Value,
+            ) -> ::core::option::Option<::core::result::Result<Self, ::std::string::String>> {
+                #from_call_body
             }
         }
     })

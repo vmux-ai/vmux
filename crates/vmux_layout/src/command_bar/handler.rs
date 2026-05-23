@@ -25,8 +25,8 @@ use vmux_command::snapshot::{
     CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
 };
 use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands, SpaceCommand,
-    StackCommand, TerminalCommand,
+    AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
+    SpaceCommand, StackCommand, TerminalCommand,
 };
 use vmux_core::PageMetadata;
 use vmux_core::agent::{
@@ -333,18 +333,15 @@ fn command_bar_open_request(
     let mut request = CommandBarOpenRequest::default();
     for cmd in commands {
         match cmd {
-            AppCommand::Browser(BrowserCommand::FocusAddressBar) => {
-                request.should_toggle = true;
-            }
-            AppCommand::Browser(BrowserCommand::OpenCommandBar) => {
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)) => {
                 request.should_toggle = true;
                 request.url_override = Some(String::new());
             }
-            AppCommand::Browser(BrowserCommand::OpenPathBar) => {
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPathBar)) => {
                 request.should_toggle = true;
                 request.url_override = Some("/".to_string());
             }
-            AppCommand::Browser(BrowserCommand::OpenCommands) => {
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommands)) => {
                 request.should_toggle = true;
                 request.url_override = Some(">".to_string());
             }
@@ -431,7 +428,7 @@ fn handle_open_command_bar(
     let mut new_stack_ctx = snapshot_params.p2();
 
     let request =
-        command_bar_open_request(reader.read().copied(), &spaces_snapshot.spaces_page_url);
+        command_bar_open_request(reader.read().cloned(), &spaces_snapshot.spaces_page_url);
     let mut should_open = false;
     let should_toggle = request.should_toggle;
     let should_dismiss = request.should_dismiss;

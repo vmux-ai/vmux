@@ -6,7 +6,10 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
-use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand};
+use vmux_command::{
+    AppCommand, BrowserBarCommand, BrowserCommand, BrowserNavigationCommand, BrowserViewCommand,
+    LayoutCommand, ReadAppCommands, StackCommand,
+};
 use vmux_core::PageMetadata;
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::command_bar::handler::PendingCommandBarReveal;
@@ -1051,7 +1054,7 @@ fn handle_browser_commands(
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let AppCommand::Browser(browser_cmd) = *cmd else {
+        let AppCommand::Browser(browser_cmd) = cmd else {
             continue;
         };
         let (_, _, active_stack_opt) = focused_stack(
@@ -1074,54 +1077,57 @@ fn handle_browser_commands(
         };
         let is_terminal = terminal_q.contains(webview);
         match browser_cmd {
-            BrowserCommand::PrevPage => {
-                if !is_terminal {
-                    commands.trigger(RequestGoBack { webview });
+            BrowserCommand::Navigation(nav) => match nav {
+                BrowserNavigationCommand::PrevPage => {
+                    if !is_terminal {
+                        commands.trigger(RequestGoBack { webview });
+                    }
                 }
-            }
-            BrowserCommand::NextPage => {
-                if !is_terminal {
-                    commands.trigger(RequestGoForward { webview });
+                BrowserNavigationCommand::NextPage => {
+                    if !is_terminal {
+                        commands.trigger(RequestGoForward { webview });
+                    }
                 }
-            }
-            BrowserCommand::Reload => {
-                if is_terminal {
-                    commands.trigger(RestartPty { entity: webview });
-                } else {
-                    commands.trigger(RequestReload { webview });
+                BrowserNavigationCommand::Reload => {
+                    if is_terminal {
+                        commands.trigger(RestartPty { entity: webview });
+                    } else {
+                        commands.trigger(RequestReload { webview });
+                    }
                 }
-            }
-            BrowserCommand::HardReload => {
-                if is_terminal {
-                    commands.trigger(RestartPty { entity: webview });
-                } else {
-                    commands.trigger(RequestReloadIgnoreCache { webview });
+                BrowserNavigationCommand::HardReload => {
+                    if is_terminal {
+                        commands.trigger(RestartPty { entity: webview });
+                    } else {
+                        commands.trigger(RequestReloadIgnoreCache { webview });
+                    }
                 }
-            }
-            BrowserCommand::Stop => {}
-            BrowserCommand::FocusAddressBar
-            | BrowserCommand::OpenCommandBar
-            | BrowserCommand::OpenPathBar
-            | BrowserCommand::OpenCommands => {}
-            BrowserCommand::Find => {}
-            BrowserCommand::ZoomIn => {
-                if let Ok(mut z) = zoom_q.get_mut(webview) {
-                    z.0 += 0.5;
+                BrowserNavigationCommand::Stop => {}
+            },
+            BrowserCommand::Open(_) => {}
+            BrowserCommand::View(view) => match view {
+                BrowserViewCommand::ZoomIn => {
+                    if let Ok(mut z) = zoom_q.get_mut(webview) {
+                        z.0 += 0.5;
+                    }
                 }
-            }
-            BrowserCommand::ZoomOut => {
-                if let Ok(mut z) = zoom_q.get_mut(webview) {
-                    z.0 -= 0.5;
+                BrowserViewCommand::ZoomOut => {
+                    if let Ok(mut z) = zoom_q.get_mut(webview) {
+                        z.0 -= 0.5;
+                    }
                 }
-            }
-            BrowserCommand::ZoomReset => {
-                if let Ok(mut z) = zoom_q.get_mut(webview) {
-                    z.0 = 0.0;
+                BrowserViewCommand::ZoomReset => {
+                    if let Ok(mut z) = zoom_q.get_mut(webview) {
+                        z.0 = 0.0;
+                    }
                 }
-            }
-            BrowserCommand::DevTools => commands.trigger(RequestShowDevTool { webview }),
-            BrowserCommand::ViewSource => {}
-            BrowserCommand::Print => {}
+                BrowserViewCommand::DevTools => {
+                    commands.trigger(RequestShowDevTool { webview });
+                }
+                BrowserViewCommand::ViewSource => {}
+                BrowserViewCommand::Print => {}
+            },
+            BrowserCommand::Bar(_) => {}
         }
     }
 }
@@ -1131,10 +1137,10 @@ fn on_header_command_emit(
     mut messages: ResMut<Messages<AppCommand>>,
 ) {
     let cmd = match trigger.event().payload.header_command.as_str() {
-        "prev_page" => BrowserCommand::PrevPage,
-        "next_page" => BrowserCommand::NextPage,
-        "reload" => BrowserCommand::Reload,
-        "focus_address_bar" => BrowserCommand::FocusAddressBar,
+        "prev_page" => BrowserCommand::Navigation(BrowserNavigationCommand::PrevPage),
+        "next_page" => BrowserCommand::Navigation(BrowserNavigationCommand::NextPage),
+        "reload" => BrowserCommand::Navigation(BrowserNavigationCommand::Reload),
+        "focus_address_bar" => BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar),
         _ => return,
     };
     messages.write(AppCommand::Browser(cmd));
