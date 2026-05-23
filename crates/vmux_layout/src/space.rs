@@ -180,8 +180,7 @@ fn handle_space_commands(
                 let count = spaces.iter().count();
                 let name = format!("Tab {}", count + 1);
                 let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
-                let resolved =
-                    vmux_command::open::handler::resolve_url(url.as_deref(), startup);
+                let resolved = vmux_command::open::handler::resolve_url(url.as_deref(), startup);
                 let override_startup = crate::settings::EffectiveStartupUrl(resolved);
                 spawn_new_space(
                     main,

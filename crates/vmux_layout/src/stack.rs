@@ -247,10 +247,8 @@ fn handle_stack_commands(
                     .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                     .id();
                 let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
-                let url = vmux_command::open::handler::resolve_url(
-                    override_url.as_deref(),
-                    startup,
-                );
+                let url =
+                    vmux_command::open::handler::resolve_url(override_url.as_deref(), startup);
                 spawn_requests.write(LayoutSpawnRequest::OpenUrl { stack, url });
             }
             Dispatch::Stack(StackCommand::Close) => {
