@@ -8,7 +8,7 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, BrowserNavigationCommand, BrowserViewCommand,
-    LayoutCommand, ReadAppCommands, StackCommand,
+    LayoutCommand, ReadAppCommands, StackCommand, open::OpenCommand,
 };
 use vmux_core::PageMetadata;
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
@@ -1051,6 +1051,7 @@ fn handle_browser_commands(
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     terminal_q: Query<(), With<Terminal>>,
+    effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -1104,7 +1105,20 @@ fn handle_browser_commands(
                 }
                 BrowserNavigationCommand::Stop => {}
             },
-            BrowserCommand::Open(_) => {}
+            #[allow(clippy::single_match)]
+            BrowserCommand::Open(open_cmd) => match open_cmd {
+                OpenCommand::InPlace { url } => {
+                    let resolved = vmux_command::open::handler::resolve_url(
+                        url.as_deref(),
+                        effective_startup_url.as_ref().map(|s| s.0.as_str()),
+                    );
+                    commands.trigger(RequestNavigate {
+                        webview,
+                        url: resolved,
+                    });
+                }
+                _ => {}
+            },
             BrowserCommand::View(view) => match view {
                 BrowserViewCommand::ZoomIn => {
                     if let Ok(mut z) = zoom_q.get_mut(webview) {
@@ -2029,6 +2043,116 @@ mod tests {
             assert_eq!(
                 standalone_browser_count, 0,
                 "codex URL should never spawn a standalone browser tab"
+            );
+        }
+    }
+
+    mod open_in_place_flow {
+        use bevy::ecs::message::Messages;
+        use bevy::prelude::*;
+        use bevy_cef::prelude::{RequestNavigate, WebviewExtendStandardMaterial};
+        use vmux_command::open::OpenCommand;
+        use vmux_command::{AppCommand, BrowserCommand};
+        use vmux_history::LastActivatedAt;
+        use vmux_layout::Browser;
+        use vmux_layout::pane::Pane;
+        use vmux_layout::space::Space;
+        use vmux_layout::stack::stack_bundle;
+
+        #[derive(Resource, Default)]
+        struct CapturedNavigateUrls(Vec<String>);
+
+        fn build_app() -> App {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin));
+            app.add_systems(
+                Update,
+                super::super::handle_browser_commands.in_set(vmux_command::ReadAppCommands),
+            );
+            app.init_resource::<Assets<Mesh>>();
+            app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            app.init_resource::<CapturedNavigateUrls>();
+            app.add_observer(
+                |trigger: On<RequestNavigate>, mut captured: ResMut<CapturedNavigateUrls>| {
+                    captured.0.push(trigger.url.clone());
+                },
+            );
+            app
+        }
+
+        fn spawn_focused_stack(app: &mut App) {
+            let space = app
+                .world_mut()
+                .spawn((Space::default(), LastActivatedAt(1)))
+                .id();
+            let pane = app
+                .world_mut()
+                .spawn((Pane, LastActivatedAt(1), ChildOf(space)))
+                .id();
+            let stack = app
+                .world_mut()
+                .spawn(stack_bundle())
+                .insert((ChildOf(pane), LastActivatedAt(1)))
+                .id();
+            app.world_mut().spawn(Browser).insert(ChildOf(stack));
+        }
+
+        #[test]
+        fn in_place_with_explicit_url_triggers_request_navigate() {
+            let mut app = build_app();
+            spawn_focused_stack(&mut app);
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace {
+                        url: Some("https://example.com".into()),
+                    },
+                )));
+
+            app.update();
+
+            let captured = app.world().resource::<CapturedNavigateUrls>();
+            assert_eq!(captured.0, vec!["https://example.com".to_string()]);
+        }
+
+        #[test]
+        fn in_place_with_none_url_uses_startup_setting() {
+            let mut app = build_app();
+            app.insert_resource(vmux_layout::settings::EffectiveStartupUrl(
+                "https://startup.example".into(),
+            ));
+            spawn_focused_stack(&mut app);
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace { url: None },
+                )));
+
+            app.update();
+
+            let captured = app.world().resource::<CapturedNavigateUrls>();
+            assert_eq!(captured.0, vec!["https://startup.example".to_string()]);
+        }
+
+        #[test]
+        fn in_place_with_none_url_and_no_startup_uses_default() {
+            let mut app = build_app();
+            spawn_focused_stack(&mut app);
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace { url: None },
+                )));
+
+            app.update();
+
+            let captured = app.world().resource::<CapturedNavigateUrls>();
+            assert_eq!(
+                captured.0,
+                vec![vmux_command::open::handler::DEFAULT_NEW_PAGE_URL.to_string()]
             );
         }
     }
