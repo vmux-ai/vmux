@@ -207,120 +207,110 @@ fn handle_space_commands(
                     );
                 }
             }
-            AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) => {
-                match tab_cmd {
-                    TabCommand::Close => {
-                        let Some(active) = active_space else { continue };
-                        close_space_entity(
-                            active,
-                            active_space,
-                            spaces.iter().count(),
-                            &space_q,
-                            &main_q,
-                            *primary_window,
-                            &child_of_q,
-                            &all_children,
-                            &settings,
-                            effective_startup_url.as_deref(),
-                            &mut new_stack_ctx,
-                            &mut spawn_requests,
-                            &mut commands,
-                        );
+            AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) => match tab_cmd {
+                TabCommand::Close => {
+                    let Some(active) = active_space else { continue };
+                    close_space_entity(
+                        active,
+                        active_space,
+                        spaces.iter().count(),
+                        &space_q,
+                        &main_q,
+                        *primary_window,
+                        &child_of_q,
+                        &all_children,
+                        &settings,
+                        effective_startup_url.as_deref(),
+                        &mut new_stack_ctx,
+                        &mut spawn_requests,
+                        &mut commands,
+                    );
+                }
+                TabCommand::Next | TabCommand::Previous => {
+                    let Some(active) = active_space else { continue };
+                    let siblings =
+                        active_space_siblings(active, &child_of_q, &all_children, &space_q);
+                    if siblings.len() <= 1 {
+                        continue;
                     }
-                    TabCommand::Next | TabCommand::Previous => {
-                        let Some(active) = active_space else { continue };
-                        let siblings =
-                            active_space_siblings(active, &child_of_q, &all_children, &space_q);
-                        if siblings.len() <= 1 {
-                            continue;
-                        }
-                        let Some(idx) = siblings.iter().position(|e| *e == active) else {
-                            continue;
-                        };
-                        let target_idx = if *tab_cmd == TabCommand::Next {
-                            (idx + 1) % siblings.len()
-                        } else {
-                            (idx + siblings.len() - 1) % siblings.len()
-                        };
-                        let target = siblings[target_idx];
-                        if target != active {
-                            commands.entity(target).insert(LastActivatedAt::now());
-                        }
-                    }
-                    TabCommand::Rename => {}
-                    TabCommand::SelectIndex1
-                    | TabCommand::SelectIndex2
-                    | TabCommand::SelectIndex3
-                    | TabCommand::SelectIndex4
-                    | TabCommand::SelectIndex5
-                    | TabCommand::SelectIndex6
-                    | TabCommand::SelectIndex7
-                    | TabCommand::SelectIndex8
-                    | TabCommand::SelectLast => {
-                        let Some(active) = active_space else { continue };
-                        let siblings =
-                            active_space_siblings(active, &child_of_q, &all_children, &space_q);
-                        if siblings.is_empty() {
-                            continue;
-                        }
-                        let target_idx = match tab_cmd {
-                            TabCommand::SelectIndex1 => 0,
-                            TabCommand::SelectIndex2 => 1,
-                            TabCommand::SelectIndex3 => 2,
-                            TabCommand::SelectIndex4 => 3,
-                            TabCommand::SelectIndex5 => 4,
-                            TabCommand::SelectIndex6 => 5,
-                            TabCommand::SelectIndex7 => 6,
-                            TabCommand::SelectIndex8 => 7,
-                            TabCommand::SelectLast => siblings.len() - 1,
-                            _ => continue,
-                        };
-                        if target_idx >= siblings.len() {
-                            continue;
-                        }
-                        let target = siblings[target_idx];
-                        if target != active {
-                            commands.entity(target).insert(LastActivatedAt::now());
-                        }
-                    }
-                    TabCommand::SwapPrev | TabCommand::SwapNext => {
-                        let Some(active) = active_space else { continue };
-                        let Ok(co) = child_of_q.get(active) else {
-                            continue;
-                        };
-                        let parent = co.get();
-                        let Ok(children) = all_children.get(parent) else {
-                            continue;
-                        };
-                        let kind_positions: Vec<usize> = children
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, e)| space_q.contains(*e))
-                            .map(|(i, _)| i)
-                            .collect();
-                        let Some(active_idx) =
-                            find_kind_index(active, children, &kind_positions)
-                        else {
-                            continue;
-                        };
-                        let pair = if *tab_cmd == TabCommand::SwapPrev {
-                            resolve_prev(active_idx)
-                        } else {
-                            resolve_next(active_idx, kind_positions.len())
-                        };
-                        if let Some((a, b)) = pair {
-                            swap_siblings(
-                                &mut commands,
-                                parent,
-                                children,
-                                &kind_positions,
-                                a,
-                                b,
-                            );
-                        }
+                    let Some(idx) = siblings.iter().position(|e| *e == active) else {
+                        continue;
+                    };
+                    let target_idx = if *tab_cmd == TabCommand::Next {
+                        (idx + 1) % siblings.len()
+                    } else {
+                        (idx + siblings.len() - 1) % siblings.len()
+                    };
+                    let target = siblings[target_idx];
+                    if target != active {
+                        commands.entity(target).insert(LastActivatedAt::now());
                     }
                 }
-            }
+                TabCommand::Rename => {}
+                TabCommand::SelectIndex1
+                | TabCommand::SelectIndex2
+                | TabCommand::SelectIndex3
+                | TabCommand::SelectIndex4
+                | TabCommand::SelectIndex5
+                | TabCommand::SelectIndex6
+                | TabCommand::SelectIndex7
+                | TabCommand::SelectIndex8
+                | TabCommand::SelectLast => {
+                    let Some(active) = active_space else { continue };
+                    let siblings =
+                        active_space_siblings(active, &child_of_q, &all_children, &space_q);
+                    if siblings.is_empty() {
+                        continue;
+                    }
+                    let target_idx = match tab_cmd {
+                        TabCommand::SelectIndex1 => 0,
+                        TabCommand::SelectIndex2 => 1,
+                        TabCommand::SelectIndex3 => 2,
+                        TabCommand::SelectIndex4 => 3,
+                        TabCommand::SelectIndex5 => 4,
+                        TabCommand::SelectIndex6 => 5,
+                        TabCommand::SelectIndex7 => 6,
+                        TabCommand::SelectIndex8 => 7,
+                        TabCommand::SelectLast => siblings.len() - 1,
+                        _ => continue,
+                    };
+                    if target_idx >= siblings.len() {
+                        continue;
+                    }
+                    let target = siblings[target_idx];
+                    if target != active {
+                        commands.entity(target).insert(LastActivatedAt::now());
+                    }
+                }
+                TabCommand::SwapPrev | TabCommand::SwapNext => {
+                    let Some(active) = active_space else { continue };
+                    let Ok(co) = child_of_q.get(active) else {
+                        continue;
+                    };
+                    let parent = co.get();
+                    let Ok(children) = all_children.get(parent) else {
+                        continue;
+                    };
+                    let kind_positions: Vec<usize> = children
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, e)| space_q.contains(*e))
+                        .map(|(i, _)| i)
+                        .collect();
+                    let Some(active_idx) = find_kind_index(active, children, &kind_positions)
+                    else {
+                        continue;
+                    };
+                    let pair = if *tab_cmd == TabCommand::SwapPrev {
+                        resolve_prev(active_idx)
+                    } else {
+                        resolve_next(active_idx, kind_positions.len())
+                    };
+                    if let Some((a, b)) = pair {
+                        swap_siblings(&mut commands, parent, children, &kind_positions, a, b);
+                    }
+                }
+            },
             _ => continue,
         }
     }
@@ -640,5 +630,4 @@ mod tests {
             other => panic!("expected OpenUrl, got {other:?}"),
         }
     }
-
 }

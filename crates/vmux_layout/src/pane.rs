@@ -457,7 +457,6 @@ struct PaneStartupContext<'w> {
     effective: Option<Res<'w, crate::settings::EffectiveStartupUrl>>,
     requests: MessageWriter<'w, crate::LayoutSpawnRequest>,
     new_stack_ctx: ResMut<'w, NewStackContext>,
-    hover_intent: ResMut<'w, PaneHoverIntent>,
 }
 
 impl PaneStartupContext<'_> {
@@ -480,7 +479,6 @@ fn handle_pane_commands(
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<Stack>>,
-    settings: Res<LayoutSettings>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     mut commands: Commands,
     mut startup: PaneStartupContext,
@@ -499,7 +497,7 @@ fn handle_pane_commands(
         let AppCommand::Layout(LayoutCommand::Pane(pane_cmd)) = *cmd else {
             continue;
         };
-        let (_, active_pane_opt, active_stack_opt) = focused_stack(
+        let (_, active_pane_opt, _active_stack_opt) = focused_stack(
             &tabs,
             &all_children,
             &leaf_panes,

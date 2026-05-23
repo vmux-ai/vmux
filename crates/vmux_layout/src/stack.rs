@@ -415,9 +415,7 @@ fn handle_stack_commands(
                 commands.entity(active).despawn();
                 commands.entity(next).insert(LastActivatedAt::now());
             }
-            Dispatch::Stack(
-                sc @ (StackCommand::Next | StackCommand::Previous),
-            ) => {
+            Dispatch::Stack(sc @ (StackCommand::Next | StackCommand::Previous)) => {
                 let empty_stack = new_stack_ctx.stack.take();
                 let prev_stack = new_stack_ctx.previous_stack.take();
                 if let Some(e) = empty_stack {
@@ -451,11 +449,7 @@ fn handle_stack_commands(
                 else {
                     continue;
                 };
-                let delta: i32 = if sc == StackCommand::Next {
-                    1
-                } else {
-                    -1
-                };
+                let delta: i32 = if sc == StackCommand::Next { 1 } else { -1 };
                 let n = flat.len() as i32;
                 let idx = (current as i32 + delta).rem_euclid(n) as usize;
                 let (target_pane, target_stack) = flat[idx];
@@ -468,9 +462,7 @@ fn handle_stack_commands(
             Dispatch::Stack(
                 StackCommand::Reopen | StackCommand::Duplicate | StackCommand::MoveToPane,
             ) => {}
-            Dispatch::Stack(
-                sc @ (StackCommand::SwapPrev | StackCommand::SwapNext),
-            ) => {
+            Dispatch::Stack(sc @ (StackCommand::SwapPrev | StackCommand::SwapNext)) => {
                 let Some(pane) = active_pane else { continue };
                 let Some(stack) = active_stack else { continue };
                 let Ok(children) = pane_children.get(pane) else {
