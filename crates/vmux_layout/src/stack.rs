@@ -242,36 +242,16 @@ fn handle_stack_commands(
                 let Some(pane) = active_pane else {
                     continue;
                 };
-                if let Some(override_url) = override_url {
-                    let stack = commands
-                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id();
-                    let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
-                    let url = vmux_command::open::handler::resolve_url(
-                        Some(override_url.as_str()),
-                        startup,
-                    );
-                    spawn_requests.write(LayoutSpawnRequest::OpenUrl { stack, url });
-                } else {
-                    if new_stack_ctx.stack.is_some() {
-                        new_stack_ctx.needs_open = true;
-                        continue;
-                    }
-                    let stack = commands
-                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id();
-                    let url = effective_startup_url
-                        .as_deref()
-                        .map(|u| u.0.clone())
-                        .unwrap_or_default();
-                    if url.is_empty() {
-                        new_stack_ctx.stack = Some(stack);
-                        new_stack_ctx.previous_stack = active_stack;
-                        new_stack_ctx.needs_open = true;
-                    } else {
-                        spawn_requests.write(LayoutSpawnRequest::OpenUrl { stack, url });
-                    }
-                }
+                let _ = active_stack;
+                let stack = commands
+                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                    .id();
+                let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
+                let url = vmux_command::open::handler::resolve_url(
+                    override_url.as_deref(),
+                    startup,
+                );
+                spawn_requests.write(LayoutSpawnRequest::OpenUrl { stack, url });
             }
             Dispatch::Stack(StackCommand::Close) => {
                 let Some(pane) = active_pane else {

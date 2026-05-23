@@ -179,33 +179,20 @@ fn handle_space_commands(
                 let Ok(main) = main_q.single() else { continue };
                 let count = spaces.iter().count();
                 let name = format!("Tab {}", count + 1);
-                if let Some(url) = url {
-                    let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
-                    let resolved =
-                        vmux_command::open::handler::resolve_url(Some(url.as_str()), startup);
-                    let override_startup = crate::settings::EffectiveStartupUrl(resolved);
-                    spawn_new_space(
-                        main,
-                        *primary_window,
-                        name,
-                        &settings,
-                        Some(&override_startup),
-                        &mut new_stack_ctx,
-                        &mut spawn_requests,
-                        &mut commands,
-                    );
-                } else {
-                    spawn_new_space(
-                        main,
-                        *primary_window,
-                        name,
-                        &settings,
-                        effective_startup_url.as_deref(),
-                        &mut new_stack_ctx,
-                        &mut spawn_requests,
-                        &mut commands,
-                    );
-                }
+                let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
+                let resolved =
+                    vmux_command::open::handler::resolve_url(url.as_deref(), startup);
+                let override_startup = crate::settings::EffectiveStartupUrl(resolved);
+                spawn_new_space(
+                    main,
+                    *primary_window,
+                    name,
+                    &settings,
+                    Some(&override_startup),
+                    &mut new_stack_ctx,
+                    &mut spawn_requests,
+                    &mut commands,
+                );
             }
             AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) => match tab_cmd {
                 TabCommand::Close => {

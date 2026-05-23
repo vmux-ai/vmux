@@ -633,15 +633,10 @@ mod tests {
             enum_vals,
             &serde_json::json!(["top", "right", "bottom", "left"])
         );
-        let required = in_pane
-            .input_schema
-            .get("required")
-            .expect("required key");
+        let required = in_pane.input_schema.get("required").expect("required key");
         let required_arr = required.as_array().expect("required is array");
         assert!(
-            required_arr
-                .iter()
-                .any(|v| v.as_str() == Some("direction")),
+            required_arr.iter().any(|v| v.as_str() == Some("direction")),
             "direction must be required"
         );
     }

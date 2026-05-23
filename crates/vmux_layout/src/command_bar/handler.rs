@@ -994,11 +994,13 @@ fn on_command_bar_action(
                             target_stack: Some(stack_e),
                         });
                     } else {
-                        writer_params.p0().write(AppCommand::Browser(
-                            BrowserCommand::Open(OpenCommand::InNewStack {
-                                url: Some("vmux://terminal/".into()),
-                            }),
-                        ));
+                        writer_params
+                            .p0()
+                            .write(AppCommand::Browser(BrowserCommand::Open(
+                                OpenCommand::InNewStack {
+                                    url: Some("vmux://terminal/".into()),
+                                },
+                            )));
                     }
                 }
             } // end reattach else
