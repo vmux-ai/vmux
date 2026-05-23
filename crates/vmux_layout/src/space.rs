@@ -14,7 +14,8 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, TabCommand};
+use vmux_command::open::OpenCommand;
+use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, TabCommand};
 use vmux_history::{CreatedAt, LastActivatedAt};
 
 pub struct SpacePlugin;
@@ -171,8 +172,12 @@ fn handle_space_commands(
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) = *cmd else {
-            continue;
+        let (tab_cmd, override_url) = match cmd {
+            AppCommand::Layout(LayoutCommand::Tab(t)) => (*t, None),
+            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewTab { url })) => {
+                (TabCommand::New, Some(url.clone()))
+            }
+            _ => continue,
         };
 
         let active_space = spaces.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
@@ -182,16 +187,33 @@ fn handle_space_commands(
                 let Ok(main) = main_q.single() else { continue };
                 let count = spaces.iter().count();
                 let name = format!("Tab {}", count + 1);
-                spawn_new_space(
-                    main,
-                    *primary_window,
-                    name,
-                    &settings,
-                    effective_startup_url.as_deref(),
-                    &mut new_stack_ctx,
-                    &mut spawn_requests,
-                    &mut commands,
-                );
+                if let Some(override_url) = override_url {
+                    let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
+                    let url =
+                        vmux_command::open::handler::resolve_url(override_url.as_deref(), startup);
+                    let override_startup = crate::settings::EffectiveStartupUrl(url);
+                    spawn_new_space(
+                        main,
+                        *primary_window,
+                        name,
+                        &settings,
+                        Some(&override_startup),
+                        &mut new_stack_ctx,
+                        &mut spawn_requests,
+                        &mut commands,
+                    );
+                } else {
+                    spawn_new_space(
+                        main,
+                        *primary_window,
+                        name,
+                        &settings,
+                        effective_startup_url.as_deref(),
+                        &mut new_stack_ctx,
+                        &mut spawn_requests,
+                        &mut commands,
+                    );
+                }
             }
             TabCommand::Close => {
                 let Some(active) = active_space else { continue };
@@ -459,6 +481,10 @@ fn space_target(id: Option<&str>, spaces: impl IntoIterator<Item = Entity>) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use vmux_command::CommandPlugin;
 
     #[test]
     fn space_target_uses_event_tab_id() {
@@ -467,5 +493,159 @@ mod tests {
         let id = target.to_bits().to_string();
 
         assert_eq!(space_target(Some(&id), [other, target]), Some(target));
+    }
+
+    fn test_settings() -> LayoutSettings {
+        LayoutSettings {
+            radius: 0.0,
+            window: WindowSettings {
+                padding: 0.0,
+                padding_top: None,
+                padding_right: None,
+                padding_bottom: None,
+                padding_left: None,
+            },
+            pane: PaneSettings { gap: 0.0 },
+            side_sheet: SideSheetSettings::default(),
+            focus_ring: FocusRingSettings::default(),
+        }
+    }
+
+    #[derive(Resource, Default)]
+    struct CollectedSpawns(Vec<crate::LayoutSpawnRequest>);
+
+    fn collect_spawn_requests(
+        mut reader: MessageReader<crate::LayoutSpawnRequest>,
+        mut collected: ResMut<CollectedSpawns>,
+    ) {
+        for req in reader.read() {
+            collected.0.push(req.clone());
+        }
+    }
+
+    fn build_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin));
+        app.add_message::<crate::LayoutSpawnRequest>();
+        app.init_resource::<NewStackContext>();
+        app.insert_resource(test_settings());
+        app.init_resource::<CollectedSpawns>();
+        app.add_systems(
+            Update,
+            (
+                handle_space_commands.in_set(ReadAppCommands),
+                collect_spawn_requests.after(handle_space_commands),
+            ),
+        );
+        app
+    }
+
+    fn spawn_main_and_space(app: &mut App) -> Entity {
+        let window = app.world_mut().spawn(PrimaryWindow).id();
+        let main = app.world_mut().spawn(MainNode).id();
+        app.world_mut().spawn((
+            Space {
+                name: "Tab 1".into(),
+            },
+            LastActivatedAt::now(),
+            ChildOf(main),
+        ));
+        let _ = window;
+        main
+    }
+
+    #[test]
+    fn open_in_new_tab_explicit_url_spawns_new_space_with_url() {
+        let mut app = build_app();
+        spawn_main_and_space(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewTab {
+                    url: Some("https://example.com".into()),
+                },
+            )));
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1, "expected one spawn request");
+        match &collected.0[0] {
+            crate::LayoutSpawnRequest::OpenUrl { url, .. } => {
+                assert_eq!(url, "https://example.com");
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
+
+        let space_count = app.world_mut().query::<&Space>().iter(app.world()).count();
+        assert_eq!(space_count, 2, "expected two spaces after InNewTab");
+    }
+
+    #[test]
+    fn open_in_new_tab_none_url_falls_back_to_startup() {
+        let mut app = build_app();
+        app.insert_resource(crate::settings::EffectiveStartupUrl(
+            "https://startup.test".into(),
+        ));
+        spawn_main_and_space(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewTab { url: None },
+            )));
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1, "expected one spawn request");
+        match &collected.0[0] {
+            crate::LayoutSpawnRequest::OpenUrl { url, .. } => {
+                assert_eq!(url, "https://startup.test");
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_in_new_tab_none_url_no_startup_falls_back_to_default() {
+        let mut app = build_app();
+        spawn_main_and_space(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewTab { url: None },
+            )));
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1, "expected one spawn request");
+        match &collected.0[0] {
+            crate::LayoutSpawnRequest::OpenUrl { url, .. } => {
+                assert_eq!(url, vmux_command::open::handler::DEFAULT_NEW_PAGE_URL);
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tab_command_new_still_works() {
+        let mut app = build_app();
+        app.insert_resource(crate::settings::EffectiveStartupUrl(
+            "https://startup.test".into(),
+        ));
+        spawn_main_and_space(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::New)));
+
+        app.update();
+
+        let space_count = app.world_mut().query::<&Space>().iter(app.world()).count();
+        assert_eq!(space_count, 2, "TabCommand::New should still spawn a space");
     }
 }
