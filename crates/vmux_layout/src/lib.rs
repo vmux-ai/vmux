@@ -99,7 +99,7 @@ pub struct CloseRequiresConfirmation;
 pub struct SpaceFilePresent(pub bool);
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Message, Clone)]
+#[derive(Message, Clone, Debug)]
 pub enum LayoutSpawnRequest {
     Terminal { stack: Entity },
     OpenUrl { stack: Entity, url: String },

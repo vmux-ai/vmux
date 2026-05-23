@@ -12,7 +12,8 @@ use bevy::{
 };
 use moonshine_save::prelude::*;
 use vmux_command::{
-    AppCommand, LayoutCommand, ReadAppCommands, ServiceCommand, StackCommand, TerminalCommand,
+    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, ReadAppCommands, ServiceCommand,
+    StackCommand, TerminalCommand,
 };
 use vmux_history::LastActivatedAt;
 
@@ -194,10 +195,13 @@ fn handle_stack_commands(
     mut pending_cursor_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
-        let (stack_cmd, is_terminal, is_processes) = match *cmd {
-            AppCommand::Layout(LayoutCommand::Stack(t)) => (t, false, false),
-            AppCommand::Terminal(TerminalCommand::New) => (StackCommand::New, true, false),
-            AppCommand::Service(ServiceCommand::Open) => (StackCommand::New, false, true),
+        let (stack_cmd, is_terminal, is_processes, override_url) = match cmd {
+            AppCommand::Layout(LayoutCommand::Stack(t)) => (*t, false, false, None),
+            AppCommand::Terminal(TerminalCommand::New) => (StackCommand::New, true, false, None),
+            AppCommand::Service(ServiceCommand::Open) => (StackCommand::New, false, true, None),
+            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack { url })) => {
+                (StackCommand::New, false, false, Some(url.clone()))
+            }
             _ => continue,
         };
 
@@ -240,6 +244,14 @@ fn handle_stack_commands(
                         stack,
                         url: SERVICES_PAGE_URL.to_string(),
                     });
+                } else if let Some(override_url) = override_url {
+                    let stack = commands
+                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                        .id();
+                    let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
+                    let url =
+                        vmux_command::open::handler::resolve_url(override_url.as_deref(), startup);
+                    spawn_requests.write(LayoutSpawnRequest::OpenUrl { stack, url });
                 } else {
                     if new_stack_ctx.stack.is_some() {
                         new_stack_ctx.needs_open = true;
@@ -841,5 +853,162 @@ mod tests {
         let ctx = app.world().resource::<NewStackContext>();
         assert_ne!(ctx.stack, Some(stack));
         assert!(!ctx.needs_open);
+    }
+
+    #[derive(Resource, Default)]
+    struct CollectedSpawns(Vec<LayoutSpawnRequest>);
+
+    fn collect_spawn_requests(
+        mut reader: MessageReader<LayoutSpawnRequest>,
+        mut collected: ResMut<CollectedSpawns>,
+    ) {
+        for req in reader.read() {
+            collected.0.push(req.clone());
+        }
+    }
+
+    fn build_app_with_collector() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin));
+        app.add_message::<LayoutSpawnRequest>();
+        app.init_resource::<NewStackContext>();
+        app.add_message::<crate::LayoutSpawnRequest>();
+        app.init_resource::<PendingCursorWarp>();
+        app.insert_resource(test_settings());
+        app.init_resource::<Assets<Mesh>>();
+        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.init_resource::<CollectedSpawns>();
+        app.add_systems(
+            Update,
+            (
+                handle_stack_commands.in_set(WriteAppCommands),
+                collect_spawn_requests.after(handle_stack_commands),
+            ),
+        );
+        app
+    }
+
+    fn spawn_hierarchy(app: &mut App) -> (Entity, Entity) {
+        let tab = app
+            .world_mut()
+            .spawn((Space::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
+        (tab, pane)
+    }
+
+    #[test]
+    fn open_in_new_stack_with_explicit_url() {
+        let mut app = build_app_with_collector();
+        let (_tab, pane) = spawn_hierarchy(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewStack {
+                    url: Some("https://example.com".into()),
+                },
+            )));
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1, "expected one spawn request");
+        match &collected.0[0] {
+            LayoutSpawnRequest::OpenUrl { stack, url } => {
+                assert_eq!(url, "https://example.com");
+                assert_eq!(
+                    app.world().get::<ChildOf>(*stack).map(Relationship::get),
+                    Some(pane),
+                );
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_in_new_stack_none_url_with_startup() {
+        let mut app = build_app_with_collector();
+        app.insert_resource(crate::settings::EffectiveStartupUrl(
+            "https://startup.test".into(),
+        ));
+        let (_tab, pane) = spawn_hierarchy(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewStack { url: None },
+            )));
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1, "expected one spawn request");
+        match &collected.0[0] {
+            LayoutSpawnRequest::OpenUrl { stack, url } => {
+                assert_eq!(url, "https://startup.test");
+                assert_eq!(
+                    app.world().get::<ChildOf>(*stack).map(Relationship::get),
+                    Some(pane),
+                );
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_in_new_stack_none_url_no_startup_falls_back() {
+        let mut app = build_app_with_collector();
+        let (_tab, pane) = spawn_hierarchy(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewStack { url: None },
+            )));
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1, "expected one spawn request");
+        match &collected.0[0] {
+            LayoutSpawnRequest::OpenUrl { stack, url } => {
+                assert_eq!(url, vmux_command::open::handler::DEFAULT_NEW_PAGE_URL,);
+                assert_eq!(
+                    app.world().get::<ChildOf>(*stack).map(Relationship::get),
+                    Some(pane),
+                );
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn existing_stack_new_still_works_after_open_command_added() {
+        let mut app = build_app_with_collector();
+        app.insert_resource(crate::settings::EffectiveStartupUrl(
+            "https://startup.test".into(),
+        ));
+        let (_tab, _pane) = spawn_hierarchy(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Stack(StackCommand::New)));
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1);
+        match &collected.0[0] {
+            LayoutSpawnRequest::OpenUrl { url, .. } => {
+                assert_eq!(url, "https://startup.test");
+            }
+            other => panic!("expected OpenUrl, got {other:?}"),
+        }
     }
 }
