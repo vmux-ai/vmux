@@ -195,12 +195,19 @@ fn handle_stack_commands(
     mut pending_cursor_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
-        let (stack_cmd, is_terminal, is_processes, override_url) = match cmd {
-            AppCommand::Layout(LayoutCommand::Stack(t)) => (*t, false, false, None),
-            AppCommand::Terminal(TerminalCommand::New) => (StackCommand::New, true, false, None),
-            AppCommand::Service(ServiceCommand::Open) => (StackCommand::New, false, true, None),
+        enum Dispatch {
+            Stack(StackCommand),
+            NewStackTerminal,
+            NewStackServices,
+            NewStackUrl(Option<String>),
+        }
+
+        let dispatch = match cmd {
+            AppCommand::Layout(LayoutCommand::Stack(t)) => Dispatch::Stack(*t),
+            AppCommand::Terminal(TerminalCommand::New) => Dispatch::NewStackTerminal,
+            AppCommand::Service(ServiceCommand::Open) => Dispatch::NewStackServices,
             AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack { url })) => {
-                (StackCommand::New, false, false, Some(url.clone()))
+                Dispatch::NewStackUrl(url.clone())
             }
             _ => continue,
         };
@@ -214,43 +221,53 @@ fn handle_stack_commands(
             &stack_ts,
         );
 
-        match stack_cmd {
-            StackCommand::New => {
+        match dispatch {
+            Dispatch::NewStackTerminal => {
                 let Some(pane) = active_pane else {
                     continue;
                 };
-                if is_terminal {
-                    let stack = commands
-                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id();
-                    commands.entity(stack).insert(vmux_core::PageMetadata {
-                        url: TERMINAL_PAGE_URL.to_string(),
-                        title: "Terminal".to_string(),
-                        bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
-                        ..default()
-                    });
-                    spawn_requests.write(LayoutSpawnRequest::Terminal { stack });
-                } else if is_processes {
-                    let stack = commands
-                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id();
-                    commands.entity(stack).insert(vmux_core::PageMetadata {
-                        url: SERVICES_PAGE_URL.to_string(),
-                        title: "Background Services".to_string(),
-                        bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
-                        ..default()
-                    });
-                    spawn_requests.write(LayoutSpawnRequest::OpenUrl {
-                        stack,
-                        url: SERVICES_PAGE_URL.to_string(),
-                    });
-                } else if let Some(override_url) = override_url {
+                let stack = commands
+                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                    .id();
+                commands.entity(stack).insert(vmux_core::PageMetadata {
+                    url: TERMINAL_PAGE_URL.to_string(),
+                    title: "Terminal".to_string(),
+                    bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+                    ..default()
+                });
+                spawn_requests.write(LayoutSpawnRequest::Terminal { stack });
+            }
+            Dispatch::NewStackServices => {
+                let Some(pane) = active_pane else {
+                    continue;
+                };
+                let stack = commands
+                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                    .id();
+                commands.entity(stack).insert(vmux_core::PageMetadata {
+                    url: SERVICES_PAGE_URL.to_string(),
+                    title: "Background Services".to_string(),
+                    bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+                    ..default()
+                });
+                spawn_requests.write(LayoutSpawnRequest::OpenUrl {
+                    stack,
+                    url: SERVICES_PAGE_URL.to_string(),
+                });
+            }
+            Dispatch::NewStackUrl(override_url) => {
+                let Some(pane) = active_pane else {
+                    continue;
+                };
+                if let Some(override_url) = override_url {
                     let stack = commands
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
                     let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
-                    let url =
-                        vmux_command::open::handler::resolve_url(override_url.as_deref(), startup);
+                    let url = vmux_command::open::handler::resolve_url(
+                        Some(override_url.as_str()),
+                        startup,
+                    );
                     spawn_requests.write(LayoutSpawnRequest::OpenUrl { stack, url });
                 } else {
                     if new_stack_ctx.stack.is_some() {
@@ -273,7 +290,7 @@ fn handle_stack_commands(
                     }
                 }
             }
-            StackCommand::Close => {
+            Dispatch::Stack(StackCommand::Close) => {
                 let Some(pane) = active_pane else {
                     continue;
                 };
@@ -398,7 +415,9 @@ fn handle_stack_commands(
                 commands.entity(active).despawn();
                 commands.entity(next).insert(LastActivatedAt::now());
             }
-            StackCommand::Next | StackCommand::Previous => {
+            Dispatch::Stack(
+                sc @ (StackCommand::Next | StackCommand::Previous),
+            ) => {
                 let empty_stack = new_stack_ctx.stack.take();
                 let prev_stack = new_stack_ctx.previous_stack.take();
                 if let Some(e) = empty_stack {
@@ -432,7 +451,7 @@ fn handle_stack_commands(
                 else {
                     continue;
                 };
-                let delta: i32 = if stack_cmd == StackCommand::Next {
+                let delta: i32 = if sc == StackCommand::Next {
                     1
                 } else {
                     -1
@@ -446,8 +465,12 @@ fn handle_stack_commands(
                     pending_cursor_warp.target = Some(target_pane);
                 }
             }
-            StackCommand::Reopen | StackCommand::Duplicate | StackCommand::MoveToPane => {}
-            StackCommand::SwapPrev | StackCommand::SwapNext => {
+            Dispatch::Stack(
+                StackCommand::Reopen | StackCommand::Duplicate | StackCommand::MoveToPane,
+            ) => {}
+            Dispatch::Stack(
+                sc @ (StackCommand::SwapPrev | StackCommand::SwapNext),
+            ) => {
                 let Some(pane) = active_pane else { continue };
                 let Some(stack) = active_stack else { continue };
                 let Ok(children) = pane_children.get(pane) else {
@@ -462,7 +485,7 @@ fn handle_stack_commands(
                 let Some(active_idx) = find_kind_index(stack, children, &kind_positions) else {
                     continue;
                 };
-                let pair = if stack_cmd == StackCommand::SwapPrev {
+                let pair = if sc == StackCommand::SwapPrev {
                     resolve_prev(active_idx)
                 } else {
                     resolve_next(active_idx, kind_positions.len())
@@ -989,7 +1012,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_stack_new_still_works_after_open_command_added() {
+    fn in_new_stack_with_no_url_uses_startup_url() {
         let mut app = build_app_with_collector();
         app.insert_resource(crate::settings::EffectiveStartupUrl(
             "https://startup.test".into(),
@@ -998,7 +1021,9 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(StackCommand::New)));
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewStack { url: None },
+            )));
 
         app.update();
 

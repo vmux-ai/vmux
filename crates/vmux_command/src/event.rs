@@ -20,7 +20,7 @@ pub struct CommandBarOpenEvent {
     pub spaces: Vec<CommandBarSpace>,
     pub tabs: Vec<CommandBarTab>,
     pub commands: Vec<CommandBarCommandEntry>,
-    pub new_tab: bool,
+    pub target: Option<crate::open_target::OpenTarget>,
 }
 
 #[derive(
@@ -91,6 +91,7 @@ pub struct CommandBarCommandEntry {
 pub struct CommandBarActionEvent {
     pub action: String,
     pub value: String,
+    pub target: Option<crate::open_target::OpenTarget>,
 }
 
 #[derive(
@@ -316,11 +317,13 @@ mod tests {
     #[test]
     fn action_event_fields() {
         let evt = CommandBarActionEvent {
-            action: "navigate".to_string(),
+            action: "open".to_string(),
             value: "google.com".to_string(),
+            target: None,
         };
-        assert_eq!(evt.action, "navigate");
+        assert_eq!(evt.action, "open");
         assert_eq!(evt.value, "google.com");
+        assert_eq!(evt.target, None);
     }
 
     #[test]
@@ -355,6 +358,31 @@ mod tests {
     fn command_bar_retried_open_payload_still_gets_ack() {
         assert!(command_bar_open_should_ack(7));
         assert!(!command_bar_open_should_ack(0));
+    }
+
+    #[test]
+    fn command_bar_open_event_carries_target_enum() {
+        let event = CommandBarOpenEvent {
+            target: Some(crate::open_target::OpenTarget::InNewStack),
+            ..Default::default()
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).expect("ser");
+        let recovered =
+            rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(
+            recovered.target,
+            Some(crate::open_target::OpenTarget::InNewStack)
+        );
+    }
+
+    #[test]
+    fn command_bar_open_event_target_none_round_trips() {
+        let event = CommandBarOpenEvent::default();
+        assert_eq!(event.target, None);
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).expect("ser");
+        let recovered =
+            rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(recovered.target, None);
     }
 
     #[test]

@@ -57,8 +57,6 @@ pub enum LayoutCommand {
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StackCommand {
     #[default]
-    #[menu(id = "stack_new", label = "New Stack", accel = "super+n")]
-    New,
     #[menu(id = "stack_close", label = "Close Stack", accel = "super+w")]
     Close,
     #[menu(id = "stack_next", label = "Next Stack", accel = "super+shift+n")]

@@ -1,6 +1,7 @@
 pub mod event;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod open;
+pub mod open_target;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bundle;

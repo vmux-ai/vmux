@@ -25,7 +25,7 @@ pub fn Page() -> Element {
     let mut state = use_signal(CommandBarOpenEvent::default);
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
-    let mut new_tab = use_signal(|| false);
+    let mut is_new_stack = use_signal(|| false);
     let mut is_open = use_signal(|| false);
     let mut nav_mode = use_signal(|| false);
     let mut current_open_id = use_signal(|| 0u64);
@@ -50,7 +50,10 @@ pub fn Page() -> Element {
             query.set(data.url.clone());
             selected.set(0);
             nav_mode.set(false);
-            new_tab.set(data.new_tab);
+            is_new_stack.set(matches!(
+                data.target,
+                Some(vmux_command::open_target::OpenTarget::InNewStack)
+            ));
             state.set(data);
             is_open.set(true);
             if command_bar_open_should_ack(open_id) {
@@ -110,11 +113,11 @@ pub fn Page() -> Element {
         spaces,
         tabs,
         commands,
-        new_tab: _,
+        target: open_target,
         ..
     } = state();
     let q = query();
-    let is_new_tab = new_tab();
+    let is_new_tab = is_new_stack();
     let results = {
         let mut r = filter_results(&q, &tabs, &commands, &spaces, is_new_tab);
         let completions = if looks_like_path(q.trim()) {
@@ -219,7 +222,7 @@ pub fn Page() -> Element {
             }
             ResultItem::Navigate { url } => {
                 if !url.is_empty() {
-                    emit_action("navigate", url);
+                    emit_action_with_target("open", url, open_target);
                 }
             }
         }
@@ -369,7 +372,7 @@ pub fn Page() -> Element {
                                         if let Some(item) = results.get(sel) {
                                             execute(item);
                                         } else if !q.is_empty() {
-                                            emit_action("navigate", &q);
+                                            emit_action_with_target("open", &q, open_target);
                                         }
                                     }
                                 },
@@ -475,9 +478,18 @@ fn looks_like_path(s: &str) -> bool {
 }
 
 fn emit_action(action: &str, value: &str) {
+    emit_action_with_target(action, value, None);
+}
+
+fn emit_action_with_target(
+    action: &str,
+    value: &str,
+    target: Option<vmux_command::open_target::OpenTarget>,
+) {
     let _ = try_cef_bin_emit_rkyv(&CommandBarActionEvent {
         action: action.to_string(),
         value: value.to_string(),
+        target,
     });
 }
 
