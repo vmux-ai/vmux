@@ -53,6 +53,16 @@ pub enum McpParamTool {
         path: String,
         value: serde_json::Value,
     },
+    #[mcp(description = "Navigate the active or specified browser pane back one page in history.")]
+    BrowserGoBack { pane: Option<String> },
+    #[mcp(
+        description = "Navigate the active or specified browser pane forward one page in history."
+    )]
+    BrowserGoForward { pane: Option<String> },
+    #[mcp(
+        description = "Search vmux browsing history. Returns up to `limit` entries ranked by frecency."
+    )]
+    BrowserHistorySearch { query: String, limit: Option<u32> },
 }
 
 impl McpParamTool {
@@ -129,6 +139,15 @@ impl McpParamTool {
                     path,
                     value_json: value.to_string(),
                 })
+            }
+            McpParamTool::BrowserGoBack { pane } => Ok(AgentCommand::BrowserGoBack { pane }),
+            McpParamTool::BrowserGoForward { pane } => Ok(AgentCommand::BrowserGoForward { pane }),
+            McpParamTool::BrowserHistorySearch { query, limit } => {
+                if query.trim().is_empty() {
+                    return Err("browser_history_search.query is empty".into());
+                }
+                let limit = limit.unwrap_or(20).min(100);
+                Ok(AgentCommand::BrowserHistorySearch { query, limit })
             }
         }
     }
@@ -653,5 +672,53 @@ mod tests {
             required_arr.iter().any(|v| v.as_str() == Some("direction")),
             "direction must be required"
         );
+    }
+
+    #[test]
+    fn go_back_dispatches() {
+        let r = McpParamTool::BrowserGoBack { pane: None }.to_agent_command();
+        assert!(matches!(r, Ok(AgentCommand::BrowserGoBack { .. })));
+    }
+
+    #[test]
+    fn go_forward_dispatches() {
+        let r = McpParamTool::BrowserGoForward { pane: None }.to_agent_command();
+        assert!(matches!(r, Ok(AgentCommand::BrowserGoForward { .. })));
+    }
+
+    #[test]
+    fn history_search_rejects_empty_query() {
+        let r = McpParamTool::BrowserHistorySearch {
+            query: "  ".into(),
+            limit: None,
+        }
+        .to_agent_command();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn history_search_clamps_limit() {
+        let r = McpParamTool::BrowserHistorySearch {
+            query: "x".into(),
+            limit: Some(500),
+        }
+        .to_agent_command();
+        match r {
+            Ok(AgentCommand::BrowserHistorySearch { limit, .. }) => assert_eq!(limit, 100),
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn history_search_default_limit() {
+        let r = McpParamTool::BrowserHistorySearch {
+            query: "x".into(),
+            limit: None,
+        }
+        .to_agent_command();
+        match r {
+            Ok(AgentCommand::BrowserHistorySearch { limit, .. }) => assert_eq!(limit, 20),
+            _ => panic!(),
+        }
     }
 }

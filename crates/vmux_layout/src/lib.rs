@@ -56,7 +56,10 @@ pub mod window;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
-pub use cef::{Browser, LayoutCef, Loading, NavigationState, apply_chrome_state_from_cef};
+pub use cef::{
+    Browser, LayoutCef, Loading, NavigationState, apply_chrome_state_from_cef,
+    mirror_metadata_to_url,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use header::Header;
 #[cfg(not(target_arch = "wasm32"))]
@@ -110,6 +113,24 @@ pub enum LayoutSpawnRequest {
 pub struct BrowserNavigateRequest {
     pub url: String,
     pub pane: Option<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone)]
+pub struct BrowserGoBackRequest {
+    pub pane: Option<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone)]
+pub struct BrowserGoForwardRequest {
+    pub pane: Option<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone)]
+pub struct OpenInNewStackRequest {
+    pub url: String,
 }
 
 #[cfg(test)]

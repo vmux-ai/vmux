@@ -29,6 +29,7 @@ serde = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
+bevy_cef_core = { workspace = true }
 bevy_reflect = { workspace = true }
 moonshine-save = { workspace = true }
 bevy_ecs = { workspace = true }
@@ -41,5 +42,10 @@ bevy = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
+js-sys = "0.3"
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = "0.2.115"
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "Element",
+    "IntersectionObserver", "IntersectionObserverEntry", "IntersectionObserverInit",
+] }

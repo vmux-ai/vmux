@@ -5,6 +5,8 @@
 #[cfg(any(target_arch = "wasm32", test))]
 mod bin_ipc_envelope;
 
+pub mod favicon;
+
 pub mod theme;
 
 #[cfg(any(target_arch = "wasm32", test))]

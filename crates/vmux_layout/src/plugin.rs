@@ -16,8 +16,8 @@ use crate::toggle::TogglePlugin;
 use crate::webview_reveal::WebviewRevealPlugin;
 use crate::window::WindowPlugin;
 use crate::{
-    BrowserNavigateRequest, LayoutSpawnRequest, LayoutStartupSet, NewStackContext, Open, reconcile,
-    settings,
+    BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, LayoutSpawnRequest,
+    LayoutStartupSet, NewStackContext, Open, OpenInNewStackRequest, reconcile, settings,
 };
 
 pub struct LayoutPlugin;
@@ -31,6 +31,9 @@ impl Plugin for LayoutPlugin {
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<vmux_core::agent::RestartAgentPty>()
             .add_message::<BrowserNavigateRequest>()
+            .add_message::<BrowserGoBackRequest>()
+            .add_message::<BrowserGoForwardRequest>()
+            .add_message::<OpenInNewStackRequest>()
             .add_message::<reconcile::LayoutApplyRequest>()
             .add_message::<reconcile::LayoutApplyResponse>()
             .add_message::<reconcile::LayoutSnapshotRequest>()

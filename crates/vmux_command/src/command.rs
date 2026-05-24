@@ -191,9 +191,15 @@ pub enum BrowserBarCommand {
     #[menu(
         id = "browser_open_command_bar",
         label = "Command Bar",
-        accel = "super+l"
+        accel = "super+k"
     )]
     OpenCommandBar,
+    #[menu(
+        id = "browser_open_url_in_command_bar",
+        label = "Edit URL",
+        accel = "super+l"
+    )]
+    OpenUrlInCommandBar,
     #[menu(
         id = "browser_open_path_bar",
         label = "Path Navigator",
@@ -203,6 +209,8 @@ pub enum BrowserBarCommand {
     #[menu(id = "browser_open_commands", label = "Commands")]
     #[shortcut(direct = ">")]
     OpenCommands,
+    #[menu(id = "browser_open_history", label = "History", accel = "super+y")]
+    OpenHistory,
     #[menu(id = "browser_find", label = "Find", accel = "super+f", hidden)]
     Find,
 }

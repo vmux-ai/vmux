@@ -7,6 +7,7 @@ use vmux_layout::event::{
     TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
 use vmux_ui::components::icon::Icon;
+use vmux_ui::favicon::{GlobeIcon, favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 
@@ -104,45 +105,6 @@ fn text_color_class_for_bg(bg: &str) -> &'static str {
             }
         })
         .unwrap_or("text-foreground")
-}
-
-fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
-    let s = page_url.trim();
-    let rest = s
-        .strip_prefix("https://")
-        .or_else(|| s.strip_prefix("http://"))?;
-    rest.split(&['/', '?', '#'][..])
-        .next()
-        .filter(|h| !h.is_empty())
-}
-
-fn agent_host(url: &str) -> Option<&'static str> {
-    const AGENTS: &[(&str, &str)] = &[
-        ("vibe", "chat.mistral.ai"),
-        ("claude", "claude.ai"),
-        ("codex", "chatgpt.com"),
-    ];
-    for &(kind, host) in AGENTS {
-        if url.starts_with(&format!("vmux://agent/{kind}/cli/"))
-            || url.starts_with(&format!("vmux://agent/{kind}/"))
-        {
-            return Some(host);
-        }
-    }
-    None
-}
-
-fn favicon_src_for_url(favicon_url: &str, url: &str) -> Option<String> {
-    if !favicon_url.is_empty() {
-        return Some(favicon_url.to_string());
-    }
-    if let Some(host) = agent_host(url) {
-        return Some(format!(
-            "https://www.google.com/s2/favicons?domain={host}&sz=32"
-        ));
-    }
-    host_for_favicon_fallback(url)
-        .map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=32"))
 }
 
 fn favicon_src_for_stack_node(stack: &StackNode) -> Option<String> {
@@ -340,17 +302,6 @@ fn StackIcon(
             }
         } else {
             GlobeIcon {}
-        }
-    }
-}
-
-#[component]
-fn GlobeIcon() -> Element {
-    rsx! {
-        Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-            path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }
-            path { d: "M2 12h20" }
-            path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" }
         }
     }
 }
