@@ -1050,6 +1050,7 @@ fn handle_browser_commands(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     browsers: Query<(Entity, &ChildOf), (With<Browser>, Without<Header>, Without<SideSheet>)>,
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
+    mut meta_q: Query<&mut PageMetadata, With<Browser>>,
     terminal_q: Query<(), With<Terminal>>,
     effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
     mut commands: Commands,
@@ -1113,16 +1114,20 @@ fn handle_browser_commands(
                         effective_startup_url.as_ref().map(|s| s.0.as_str()),
                     );
                     if is_terminal {
-                        // Strip the Terminal/agent markers + ProcessId so the
-                        // on_terminal_removed observer fires KillProcess — the PTY
-                        // (vibe etc.) in vmux_service exits cleanly. The entity
-                        // keeps Browser so CEF can navigate it like any page.
                         commands
                             .entity(webview)
                             .remove::<Terminal>()
                             .remove::<vmux_service::protocol::ProcessId>()
                             .remove::<vmux_agent::components::AgentSession>();
                     }
+                    if let Ok(mut meta) = meta_q.get_mut(webview) {
+                        meta.url = resolved.clone();
+                        meta.title = resolved.clone();
+                        meta.favicon_url.clear();
+                    }
+                    commands
+                        .entity(webview)
+                        .insert(WebviewSource::new(&resolved));
                     commands.trigger(RequestNavigate {
                         webview,
                         url: resolved,

@@ -101,3 +101,7 @@ pub fn focus_pane_entity(entity: Entity, commands: &mut Commands, child_of_q: &Q
 #[require(Save)]
 #[type_path = "vmux_history"]
 pub struct Visit;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct Ready;

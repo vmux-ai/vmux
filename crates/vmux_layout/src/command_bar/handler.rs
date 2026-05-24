@@ -30,9 +30,7 @@ use vmux_command::{
     SpaceCommand, StackCommand,
 };
 use vmux_core::PageMetadata;
-use vmux_core::agent::{
-    AgentLaunchRequested, PageAgentAttachRequest, PageAgentSpawnTabRequest, parse_page_agent_url,
-};
+use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnTabRequest, parse_page_agent_url};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
@@ -72,7 +70,6 @@ pub(crate) struct CommandBarInputPlugin;
 impl Plugin for CommandBarInputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NewStackContext>()
-            .init_resource::<Messages<AgentLaunchRequested>>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<PageAgentAttachRequest>()
             .add_message::<PageAgentSpawnTabRequest>()
@@ -164,7 +161,7 @@ pub fn command_list(
     entries.extend(cli_agent_entries.into_iter().map(|entry| CommandBarEntry {
         id: entry.id,
         name: entry.name,
-        shortcut: entry.shortcut,
+        shortcut: String::new(),
     }));
     entries.extend(app_agent_entries.into_iter().map(|entry| CommandBarEntry {
         id: entry.id,
@@ -900,7 +897,7 @@ fn on_command_bar_action(
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut writer_params: ParamSet<(
         MessageWriter<AppCommand>,
-        Option<MessageWriter<AgentLaunchRequested>>,
+        MessageWriter<crate::LayoutSpawnRequest>,
         MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
         MessageWriter<TerminalSpawnRequest>,
         Option<MessageWriter<PageAgentAttachRequest>>,
@@ -917,7 +914,7 @@ fn on_command_bar_action(
     let terminals_snapshot = resource_params.p2().clone();
     let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
     let pid_to_entity = terminals_snapshot.pid_to_entity.clone();
-    let empty_stack = new_stack_ctx.stack;
+    let mut empty_stack = new_stack_ctx.stack;
     let previous_stack = new_stack_ctx.previous_stack;
     let mut custom_keyboard_restore = false;
 
@@ -1118,18 +1115,30 @@ fn on_command_bar_action(
                         custom_keyboard_restore = true;
                     }
                 }
-            } else if resource_params
+            } else if let Some(url) = resource_params
                 .p3()
                 .providers
                 .iter()
-                .any(|p| p.id == evt.value)
+                .find(|p| p.id == evt.value)
+                .map(|p| p.url.clone())
             {
-                let cwd = vmux_core::profile::default_space_dir();
-                if let Some(mut agent_launches) = writer_params.p1() {
-                    agent_launches.write(AgentLaunchRequested {
-                        provider_id: evt.value.clone(),
-                        cwd,
-                    });
+                if let Some(stack_e) = empty_stack {
+                    writer_params
+                        .p1()
+                        .write(crate::LayoutSpawnRequest::OpenUrl {
+                            stack: stack_e,
+                            url,
+                        });
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.previous_stack = None;
+                    empty_stack = None;
+                } else {
+                    let target = evt.target;
+                    writer_params
+                        .p0()
+                        .write(AppCommand::Browser(BrowserCommand::Open(
+                            build_open_command(target, url),
+                        )));
                 }
                 custom_keyboard_restore = true;
             } else if let Some(cmd) = match_command(&evt.value) {
