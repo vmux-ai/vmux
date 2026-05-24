@@ -4,7 +4,7 @@ use vmux_macro::{CommandBar, DefaultShortcuts, McpTool, OsSubMenu};
 
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, PartialEq, Eq)]
 pub enum OpenCommand {
-    #[menu(id = "open_in_place", label = "Open Here", accel = "super+l")]
+    #[menu(id = "open_in_place", label = "Open Here")]
     #[mcp(
         description = "Navigate the currently focused stack to the given URL. Equivalent to the user typing a URL in the address bar. Use when the user asks to 'go to', 'navigate to', or 'open' a URL without specifying placement; the current page is replaced. If url is omitted, opens the configured startup URL."
     )]

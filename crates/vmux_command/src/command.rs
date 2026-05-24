@@ -191,7 +191,7 @@ pub enum BrowserBarCommand {
     #[menu(
         id = "browser_open_command_bar",
         label = "Command Bar",
-        accel = "super+k"
+        accel = "super+l"
     )]
     OpenCommandBar,
     #[menu(

@@ -30,7 +30,9 @@ use vmux_command::{
     SpaceCommand, StackCommand,
 };
 use vmux_core::PageMetadata;
-use vmux_core::agent::{AgentLaunchRequested, PageAgentAttachRequest, PageAgentSpawnTabRequest};
+use vmux_core::agent::{
+    AgentLaunchRequested, PageAgentAttachRequest, PageAgentSpawnTabRequest, parse_page_agent_url,
+};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
@@ -548,6 +550,18 @@ fn handle_open_command_bar(
         return;
     }
 
+    if focused_stack_is_page_agent(
+        &tab_q,
+        &all_children,
+        &leaf_panes,
+        &pane_ts,
+        &pane_children,
+        &stack_ts,
+        &browser_meta,
+    ) {
+        return;
+    }
+
     let Ok((
         modal_e,
         mut modal_node,
@@ -825,6 +839,35 @@ fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
         Some(OpenTarget::InNewTab) => OpenCommand::InNewTab { url: Some(url) },
         Some(OpenTarget::InNewSpace) => OpenCommand::InNewSpace { url: Some(url) },
     }
+}
+
+fn focused_stack_is_page_agent(
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: &Query<&Children>,
+    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_children: &Query<&Children, With<Pane>>,
+    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
+    browser_meta: &Query<&PageMetadata, With<Browser>>,
+) -> bool {
+    let (_, _, active_stack) = focused_stack(
+        tab_q,
+        all_children,
+        leaf_panes,
+        pane_ts,
+        pane_children,
+        stack_ts,
+    );
+    let Some(stack) = active_stack else {
+        return false;
+    };
+    let Ok(children) = all_children.get(stack) else {
+        return false;
+    };
+    children
+        .iter()
+        .filter_map(|e| browser_meta.get(e).ok())
+        .any(|meta| parse_page_agent_url(&meta.url).is_some())
 }
 
 fn normalize_url(value: &str) -> String {
