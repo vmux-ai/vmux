@@ -31,6 +31,14 @@ impl AgentKind {
         }
     }
 
+    pub fn display_name(self) -> &'static str {
+        match self {
+            AgentKind::Vibe => "Vibe",
+            AgentKind::Claude => "Claude",
+            AgentKind::Codex => "Codex",
+        }
+    }
+
     pub fn as_url_segment(self) -> &'static str {
         match self {
             AgentKind::Vibe => "vibe",
@@ -67,6 +75,9 @@ impl From<AgentKind> for TerminalKind {
     }
 }
 
+#[derive(Component, Clone, Copy, Debug)]
+pub struct AgentProviderTargetKind(pub AgentKind);
+
 #[derive(Component, Debug, Clone)]
 pub struct AgentSession {
     pub kind: AgentKind,
@@ -98,12 +109,6 @@ pub struct SpawnAgentInStackRequest {
 }
 
 #[derive(Message, Debug, Clone)]
-pub struct AgentLaunchRequested {
-    pub provider_id: String,
-    pub cwd: PathBuf,
-}
-
-#[derive(Message, Debug, Clone)]
 pub struct PageAgentAttachRequest {
     pub stack: Entity,
     pub provider: String,
@@ -117,6 +122,16 @@ pub struct PageAgentSpawnTabRequest {
     pub provider: String,
     pub model: String,
     pub sid: String,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct PageAgentSpawnDefaultRequest {
+    pub pane: Entity,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct PageAgentAttachDefaultRequest {
+    pub stack: Entity,
 }
 
 #[derive(Message, Debug, Clone, Copy)]

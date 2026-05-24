@@ -30,7 +30,7 @@ use vmux_command::{
     SpaceCommand, StackCommand,
 };
 use vmux_core::PageMetadata;
-use vmux_core::agent::{AgentLaunchRequested, PageAgentAttachRequest, PageAgentSpawnTabRequest};
+use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnTabRequest, parse_page_agent_url};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
@@ -70,10 +70,11 @@ pub(crate) struct CommandBarInputPlugin;
 impl Plugin for CommandBarInputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NewStackContext>()
-            .init_resource::<Messages<AgentLaunchRequested>>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<PageAgentAttachRequest>()
             .add_message::<PageAgentSpawnTabRequest>()
+            .add_message::<vmux_core::agent::PageAgentSpawnDefaultRequest>()
+            .add_message::<vmux_core::agent::PageAgentAttachDefaultRequest>()
             .add_message::<SettingsPageSpawnRequest>()
             .add_message::<SpacesPageSpawnRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
@@ -160,7 +161,7 @@ pub fn command_list(
     entries.extend(cli_agent_entries.into_iter().map(|entry| CommandBarEntry {
         id: entry.id,
         name: entry.name,
-        shortcut: entry.shortcut,
+        shortcut: String::new(),
     }));
     entries.extend(app_agent_entries.into_iter().map(|entry| CommandBarEntry {
         id: entry.id,
@@ -546,6 +547,18 @@ fn handle_open_command_bar(
         return;
     }
 
+    if focused_stack_is_page_agent(
+        &tab_q,
+        &all_children,
+        &leaf_panes,
+        &pane_ts,
+        &pane_children,
+        &stack_ts,
+        &browser_meta,
+    ) {
+        return;
+    }
+
     let Ok((
         modal_e,
         mut modal_node,
@@ -825,6 +838,35 @@ fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
     }
 }
 
+fn focused_stack_is_page_agent(
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    all_children: &Query<&Children>,
+    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_children: &Query<&Children, With<Pane>>,
+    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
+    browser_meta: &Query<&PageMetadata, With<Browser>>,
+) -> bool {
+    let (_, _, active_stack) = focused_stack(
+        tab_q,
+        all_children,
+        leaf_panes,
+        pane_ts,
+        pane_children,
+        stack_ts,
+    );
+    let Some(stack) = active_stack else {
+        return false;
+    };
+    let Ok(children) = all_children.get(stack) else {
+        return false;
+    };
+    children
+        .iter()
+        .filter_map(|e| browser_meta.get(e).ok())
+        .any(|meta| parse_page_agent_url(&meta.url).is_some())
+}
+
 fn normalize_url(value: &str) -> String {
     if value.contains("://") {
         value.to_string()
@@ -855,7 +897,7 @@ fn on_command_bar_action(
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut writer_params: ParamSet<(
         MessageWriter<AppCommand>,
-        Option<MessageWriter<AgentLaunchRequested>>,
+        MessageWriter<crate::LayoutSpawnRequest>,
         MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
         MessageWriter<TerminalSpawnRequest>,
         Option<MessageWriter<PageAgentAttachRequest>>,
@@ -863,6 +905,8 @@ fn on_command_bar_action(
         MessageWriter<ProcessesMonitorSpawnRequest>,
         MessageWriter<SpacesPageSpawnRequest>,
     )>,
+    mut page_default_spawn_writer: MessageWriter<vmux_core::agent::PageAgentSpawnDefaultRequest>,
+    mut page_default_attach_writer: MessageWriter<vmux_core::agent::PageAgentAttachDefaultRequest>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -870,7 +914,7 @@ fn on_command_bar_action(
     let terminals_snapshot = resource_params.p2().clone();
     let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
     let pid_to_entity = terminals_snapshot.pid_to_entity.clone();
-    let empty_stack = new_stack_ctx.stack;
+    let mut empty_stack = new_stack_ctx.stack;
     let previous_stack = new_stack_ctx.previous_stack;
     let mut custom_keyboard_restore = false;
 
@@ -915,14 +959,40 @@ fn on_command_bar_action(
                 }
             } else {
                 let url = normalize_url(&evt.value);
-                let target = evt.target;
-                let open_cmd = build_open_command(target, url);
-                writer_params
-                    .p0()
-                    .write(AppCommand::Browser(BrowserCommand::Open(open_cmd)));
-                if empty_stack.is_some() {
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.previous_stack = None;
+                if matches!(url.as_str(), "vmux://agent/" | "vmux://agent") {
+                    if let Some(stack_e) = empty_stack {
+                        page_default_attach_writer.write(
+                            vmux_core::agent::PageAgentAttachDefaultRequest { stack: stack_e },
+                        );
+                        new_stack_ctx.stack = None;
+                        new_stack_ctx.previous_stack = None;
+                        custom_keyboard_restore = true;
+                    } else {
+                        let (_, active_pane_opt, _) = focused_stack(
+                            &queries.tab_q,
+                            &queries.all_children,
+                            &queries.leaf_panes,
+                            &queries.pane_ts,
+                            &queries.pane_children,
+                            &queries.stack_ts,
+                        );
+                        if let Some(pane_e) = active_pane_opt {
+                            page_default_spawn_writer.write(
+                                vmux_core::agent::PageAgentSpawnDefaultRequest { pane: pane_e },
+                            );
+                            custom_keyboard_restore = true;
+                        }
+                    }
+                } else {
+                    let target = evt.target;
+                    let open_cmd = build_open_command(target, url);
+                    writer_params
+                        .p0()
+                        .write(AppCommand::Browser(BrowserCommand::Open(open_cmd)));
+                    if empty_stack.is_some() {
+                        new_stack_ctx.stack = None;
+                        new_stack_ctx.previous_stack = None;
+                    }
                 }
             }
         }
@@ -1045,18 +1115,30 @@ fn on_command_bar_action(
                         custom_keyboard_restore = true;
                     }
                 }
-            } else if resource_params
+            } else if let Some(url) = resource_params
                 .p3()
                 .providers
                 .iter()
-                .any(|p| p.id == evt.value)
+                .find(|p| p.id == evt.value)
+                .map(|p| p.url.clone())
             {
-                let cwd = vmux_core::profile::default_space_dir();
-                if let Some(mut agent_launches) = writer_params.p1() {
-                    agent_launches.write(AgentLaunchRequested {
-                        provider_id: evt.value.clone(),
-                        cwd,
-                    });
+                if let Some(stack_e) = empty_stack {
+                    writer_params
+                        .p1()
+                        .write(crate::LayoutSpawnRequest::OpenUrl {
+                            stack: stack_e,
+                            url,
+                        });
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.previous_stack = None;
+                    empty_stack = None;
+                } else {
+                    let target = evt.target;
+                    writer_params
+                        .p0()
+                        .write(AppCommand::Browser(BrowserCommand::Open(
+                            build_open_command(target, url),
+                        )));
                 }
                 custom_keyboard_restore = true;
             } else if let Some(cmd) = match_command(&evt.value) {

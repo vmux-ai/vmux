@@ -5,7 +5,6 @@ use bevy::prelude::Resource;
 use crate::AgentKind;
 use crate::AgentVariant;
 use crate::client::cli::strategy::CliAgentStrategy;
-use crate::client::page::strategy::AgentPageStrategy;
 
 pub trait AgentStrategy: Send + Sync + 'static {
     fn kind(&self) -> AgentKind;
@@ -15,7 +14,6 @@ pub trait AgentStrategy: Send + Sync + 'static {
 #[derive(Resource, Default)]
 pub struct AgentStrategies {
     cli: HashMap<AgentKind, Box<dyn CliAgentStrategy>>,
-    page: HashMap<(String, String), Box<dyn AgentPageStrategy>>,
 }
 
 impl AgentStrategies {
@@ -25,28 +23,6 @@ impl AgentStrategies {
 
     pub fn get_cli(&self, kind: AgentKind) -> Option<&dyn CliAgentStrategy> {
         self.cli.get(&kind).map(|b| b.as_ref())
-    }
-
-    pub fn register_page(&mut self, strategy: Box<dyn AgentPageStrategy>) {
-        let key = (
-            strategy.provider().to_string(),
-            strategy.model().to_string(),
-        );
-        self.page.insert(key, strategy);
-    }
-
-    pub fn get_page_by_provider_model(
-        &self,
-        provider: &str,
-        model: &str,
-    ) -> Option<&dyn AgentPageStrategy> {
-        self.page
-            .get(&(provider.to_string(), model.to_string()))
-            .map(|b| b.as_ref())
-    }
-
-    pub fn page_strategies(&self) -> impl Iterator<Item = &dyn AgentPageStrategy> {
-        self.page.values().map(|b| b.as_ref())
     }
 
     pub fn cli_strategies(&self) -> impl Iterator<Item = &dyn CliAgentStrategy> {
@@ -96,109 +72,5 @@ mod tests {
         s.register_cli(Box::new(StubStrategy));
         assert!(s.get_cli(AgentKind::Claude).is_some());
         assert!(s.get_cli(AgentKind::Vibe).is_none());
-    }
-
-    #[test]
-    fn register_page_lookup_by_provider_model() {
-        struct StubPage {
-            provider: String,
-            model: String,
-        }
-        impl AgentStrategy for StubPage {
-            fn kind(&self) -> AgentKind {
-                AgentKind::Vibe
-            }
-            fn variant(&self) -> AgentVariant {
-                AgentVariant::Page
-            }
-        }
-        impl crate::client::page::strategy::AgentPageStrategy for StubPage {
-            fn provider(&self) -> &str {
-                &self.provider
-            }
-            fn model(&self) -> &str {
-                &self.model
-            }
-            fn endpoint(&self) -> &str {
-                "stub://"
-            }
-            fn build_request(
-                &self,
-                _: &str,
-                _: &[crate::message::Message],
-                _: &[crate::stream::ToolDef],
-                _: &str,
-            ) -> reqwest::Request {
-                reqwest::Client::new()
-                    .get("http://localhost/")
-                    .build()
-                    .unwrap()
-            }
-            fn parse_sse_event(&self, _: &str) -> Option<crate::stream::StreamEvent> {
-                None
-            }
-        }
-
-        let mut s = AgentStrategies::default();
-        s.register_page(Box::new(StubPage {
-            provider: "openai".into(),
-            model: "gpt-5.5".into(),
-        }));
-        s.register_page(Box::new(StubPage {
-            provider: "anthropic".into(),
-            model: "claude-opus-4.7".into(),
-        }));
-
-        assert!(s.get_page_by_provider_model("openai", "gpt-5.5").is_some());
-        assert!(
-            s.get_page_by_provider_model("anthropic", "claude-opus-4.7")
-                .is_some()
-        );
-        assert!(s.get_page_by_provider_model("nope", "nope").is_none());
-        assert_eq!(s.page_strategies().count(), 2);
-    }
-
-    #[test]
-    fn cli_and_page_coexist() {
-        struct Page;
-        impl AgentStrategy for Page {
-            fn kind(&self) -> AgentKind {
-                AgentKind::Vibe
-            }
-            fn variant(&self) -> AgentVariant {
-                AgentVariant::Page
-            }
-        }
-        impl crate::client::page::strategy::AgentPageStrategy for Page {
-            fn provider(&self) -> &str {
-                "p"
-            }
-            fn model(&self) -> &str {
-                "m"
-            }
-            fn endpoint(&self) -> &str {
-                "stub://"
-            }
-            fn build_request(
-                &self,
-                _: &str,
-                _: &[crate::message::Message],
-                _: &[crate::stream::ToolDef],
-                _: &str,
-            ) -> reqwest::Request {
-                reqwest::Client::new()
-                    .get("http://localhost/")
-                    .build()
-                    .unwrap()
-            }
-            fn parse_sse_event(&self, _: &str) -> Option<crate::stream::StreamEvent> {
-                None
-            }
-        }
-        let mut s = AgentStrategies::default();
-        s.register_cli(Box::new(StubStrategy));
-        s.register_page(Box::new(Page));
-        assert!(s.get_cli(AgentKind::Claude).is_some());
-        assert!(s.get_page_by_provider_model("p", "m").is_some());
     }
 }

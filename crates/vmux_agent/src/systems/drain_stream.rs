@@ -1,16 +1,22 @@
 use bevy::prelude::*;
 
-use crate::components::AgentMessages;
-use crate::events::{AgentDelta, AgentToolStatus, ToolStatus};
+use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession};
+use crate::events::{AgentApprovalRequest, AgentDelta, AgentToolStatus, ToolStatus};
 use crate::message::{AssistantBlock, Message};
 use crate::run_state::AgentRunState;
-use crate::stream::{StopReason, StreamEvent};
+use crate::stream::{PartialToolUse, StopReason, StreamEvent};
 
 pub fn drain_stream(
     mut commands: Commands,
-    mut q: Query<(Entity, &mut AgentRunState, &mut AgentMessages)>,
+    mut q: Query<(
+        Entity,
+        &mut AgentRunState,
+        &mut AgentMessages,
+        &AgentApprovalPolicy,
+        &AgentSession,
+    )>,
 ) {
-    for (entity, mut state, mut messages) in &mut q {
+    for (entity, mut state, mut messages, policy, _session) in &mut q {
         let drained: Vec<StreamEvent> = match &*state {
             AgentRunState::Streaming { rx, .. } => rx.try_iter().collect(),
             _ => continue,
@@ -21,7 +27,7 @@ pub fn drain_stream(
 
         ensure_assistant_tail(&mut messages);
 
-        let mut should_idle = false;
+        let mut next_state: Option<AgentRunState> = None;
         for event in drained {
             match event {
                 StreamEvent::TextDelta(text) => {
@@ -31,24 +37,87 @@ pub fn drain_stream(
                         text,
                     });
                 }
-                StreamEvent::ToolUseEnd { call_id } => {
-                    commands.trigger(AgentToolStatus {
-                        session: entity,
-                        call_id,
-                        status: ToolStatus::Pending,
-                    });
+                StreamEvent::ToolUseStart { call_id, name } => {
+                    if let AgentRunState::Streaming { partial, .. } = &mut *state {
+                        *partial = Some(PartialToolUse {
+                            call_id,
+                            name,
+                            args_buf: String::new(),
+                        });
+                    }
+                }
+                StreamEvent::ToolUseArgsDelta {
+                    call_id,
+                    json_chunk,
+                } => {
+                    if let AgentRunState::Streaming { partial, .. } = &mut *state
+                        && let Some(p) = partial
+                    {
+                        if !call_id.is_empty() && p.call_id.is_empty() {
+                            p.call_id = call_id;
+                        }
+                        p.args_buf.push_str(&json_chunk);
+                    }
+                }
+                StreamEvent::ToolUseEnd {
+                    call_id: streamed_id,
+                } => {
+                    let p = match &mut *state {
+                        AgentRunState::Streaming { partial, .. } => partial.take(),
+                        _ => None,
+                    };
+                    if let Some(mut p) = p {
+                        if p.call_id.is_empty() && !streamed_id.is_empty() {
+                            p.call_id = streamed_id;
+                        }
+                        push_tool_use_block(&mut messages, &p);
+                        let args_value: serde_json::Value = serde_json::from_str(&p.args_buf)
+                            .unwrap_or_else(|_| serde_json::Value::String(p.args_buf.clone()));
+                        commands.trigger(AgentToolStatus {
+                            session: entity,
+                            call_id: p.call_id.clone(),
+                            status: ToolStatus::Pending,
+                        });
+                        if policy.auto.contains(&p.name) {
+                            next_state = Some(spawn_running_tool(&p, args_value));
+                        } else {
+                            commands.trigger(AgentApprovalRequest {
+                                session: entity,
+                                call_id: p.call_id.clone(),
+                                name: p.name.clone(),
+                                args: args_value.clone(),
+                            });
+                            next_state = Some(AgentRunState::AwaitingApproval {
+                                call_id: p.call_id,
+                                name: p.name,
+                                args: args_value,
+                            });
+                        }
+                    }
                 }
                 StreamEvent::StopTurn {
                     reason: StopReason::EndTurn,
                 } => {
-                    should_idle = true;
+                    if next_state.is_none() {
+                        next_state = Some(AgentRunState::Idle);
+                    }
                 }
-                _ => {}
+                StreamEvent::StopTurn {
+                    reason: StopReason::ToolUse,
+                } => {}
+                StreamEvent::StopTurn {
+                    reason: StopReason::MaxTokens | StopReason::Other,
+                } => {
+                    next_state = Some(AgentRunState::Idle);
+                }
+                StreamEvent::Error(msg) => {
+                    next_state = Some(AgentRunState::Errored(msg));
+                }
             }
         }
 
-        if should_idle {
-            *state = AgentRunState::Idle;
+        if let Some(new_state) = next_state {
+            *state = new_state;
         }
     }
 }
@@ -70,10 +139,28 @@ fn append_text_delta(messages: &mut AgentMessages, text: &str) {
     }
 }
 
+fn push_tool_use_block(messages: &mut AgentMessages, p: &PartialToolUse) {
+    let Some(Message::Assistant { blocks }) = messages.0.last_mut() else {
+        return;
+    };
+    blocks.push(AssistantBlock::ToolUse {
+        call_id: p.call_id.clone(),
+        name: p.name.clone(),
+        args: p.args_buf.clone(),
+    });
+}
+
+fn spawn_running_tool(p: &PartialToolUse, args: serde_json::Value) -> AgentRunState {
+    let call_id = p.call_id.clone();
+    let task = crate::tool_dispatch::spawn_tool_task(call_id.clone(), p.name.clone(), args);
+    AgentRunState::RunningTool { call_id, task }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::echo::synthetic_echo_stream;
+    use crate::stream::PartialToolUse;
+    use crate::{AgentKind, AgentVariant};
     use bevy::tasks::IoTaskPool;
     use crossbeam_channel::unbounded;
 
@@ -84,20 +171,33 @@ mod tests {
         app
     }
 
+    fn make_session() -> AgentSession {
+        AgentSession {
+            kind: AgentKind::Vibe,
+            variant: AgentVariant::Page,
+            sid: "t".into(),
+            provider: "mock".into(),
+            model: "m".into(),
+        }
+    }
+
     #[test]
-    fn echo_stream_appends_text_and_idles() {
+    fn text_delta_then_end_turn_goes_idle() {
         let mut app = make_app();
         let (tx, rx) = unbounded::<StreamEvent>();
-        for e in synthetic_echo_stream("hi") {
-            tx.send(e).unwrap();
-        }
+        tx.send(StreamEvent::TextDelta("hi".into())).unwrap();
+        tx.send(StreamEvent::StopTurn {
+            reason: StopReason::EndTurn,
+        })
+        .unwrap();
         drop(tx);
-
         let task = IoTaskPool::get().spawn(async {});
         let entity = app
             .world_mut()
             .spawn((
+                make_session(),
                 AgentMessages::default(),
+                AgentApprovalPolicy::default(),
                 AgentRunState::Streaming {
                     rx,
                     _task: task,
@@ -105,23 +205,85 @@ mod tests {
                 },
             ))
             .id();
-
         app.update();
+        assert!(matches!(
+            app.world().get::<AgentRunState>(entity),
+            Some(AgentRunState::Idle)
+        ));
+    }
 
-        let world = app.world();
-        let state = world.get::<AgentRunState>(entity).unwrap();
-        assert!(matches!(state, AgentRunState::Idle));
-        let msgs = world.get::<AgentMessages>(entity).unwrap();
-        assert_eq!(msgs.0.len(), 1);
-        match &msgs.0[0] {
-            Message::Assistant { blocks } => {
-                assert_eq!(blocks.len(), 1);
-                match &blocks[0] {
-                    AssistantBlock::Text(t) => assert_eq!(t, "echo: hi"),
-                    _ => panic!("expected text block"),
-                }
+    #[test]
+    fn tool_use_without_policy_transitions_to_awaiting_approval() {
+        let mut app = make_app();
+        let (tx, rx) = unbounded::<StreamEvent>();
+        tx.send(StreamEvent::ToolUseStart {
+            call_id: "c1".into(),
+            name: "list_spaces".into(),
+        })
+        .unwrap();
+        tx.send(StreamEvent::ToolUseArgsDelta {
+            call_id: String::new(),
+            json_chunk: "{\"x\":1}".into(),
+        })
+        .unwrap();
+        tx.send(StreamEvent::ToolUseEnd {
+            call_id: String::new(),
+        })
+        .unwrap();
+        tx.send(StreamEvent::StopTurn {
+            reason: StopReason::ToolUse,
+        })
+        .unwrap();
+        drop(tx);
+        let task = IoTaskPool::get().spawn(async {});
+        let entity = app
+            .world_mut()
+            .spawn((
+                make_session(),
+                AgentMessages::default(),
+                AgentApprovalPolicy::default(),
+                AgentRunState::Streaming {
+                    rx,
+                    _task: task,
+                    partial: Some(PartialToolUse::default()),
+                },
+            ))
+            .id();
+        app.update();
+        match app.world().get::<AgentRunState>(entity).unwrap() {
+            AgentRunState::AwaitingApproval { call_id, name, .. } => {
+                assert_eq!(call_id, "c1");
+                assert_eq!(name, "list_spaces");
             }
-            _ => panic!("expected assistant message"),
+            _ => panic!("expected AwaitingApproval"),
+        }
+    }
+
+    #[test]
+    fn error_event_transitions_to_errored() {
+        let mut app = make_app();
+        let (tx, rx) = unbounded::<StreamEvent>();
+        tx.send(StreamEvent::Error("HTTP 500: boom".into()))
+            .unwrap();
+        drop(tx);
+        let task = IoTaskPool::get().spawn(async {});
+        let entity = app
+            .world_mut()
+            .spawn((
+                make_session(),
+                AgentMessages::default(),
+                AgentApprovalPolicy::default(),
+                AgentRunState::Streaming {
+                    rx,
+                    _task: task,
+                    partial: None,
+                },
+            ))
+            .id();
+        app.update();
+        match app.world().get::<AgentRunState>(entity).unwrap() {
+            AgentRunState::Errored(msg) => assert!(msg.contains("HTTP 500")),
+            _ => panic!("expected Errored"),
         }
     }
 }

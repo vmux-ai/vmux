@@ -15,18 +15,25 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 notify = { workspace = true }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 crossbeam-channel = "0.5"
 futures-lite = "2"
+futures-util = "0.3"
+rkyv = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
 uuid = { workspace = true }
 url = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_mcp = { path = "../vmux_mcp" }
 vmux_service = { path = "../vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
 
 [dev-dependencies]
+mockito = "1"
+serial_test = "3"
+tokio = { workspace = true, features = ["rt", "macros"] }
 vmux_server = { path = "../vmux_server" }

@@ -3,50 +3,54 @@ use vmux_command::snapshot::{
     AgentProviderSummary, AgentStrategySummary, CommandBarAgentsSnapshot,
 };
 
-use crate::plugin::AgentProviders;
-use crate::strategy::AgentStrategies;
+use vmux_core::Ready;
+use vmux_core::agent::AgentProviderTargetKind;
 
+use crate::client::page::strategy_index::PageStrategyIndex;
+
+#[allow(clippy::type_complexity)]
 pub fn update_agents_snapshot(
-    providers: Option<Res<AgentProviders>>,
-    strategies: Option<Res<AgentStrategies>>,
+    providers_q: Query<(&AgentProviderTargetKind, &Name), With<Ready>>,
+    changed_q: Query<
+        Entity,
+        (
+            With<AgentProviderTargetKind>,
+            Or<(Added<Ready>, Added<AgentProviderTargetKind>)>,
+        ),
+    >,
+    page_idx: Option<Res<PageStrategyIndex>>,
     mut snapshot: ResMut<CommandBarAgentsSnapshot>,
 ) {
-    let providers_changed = providers
-        .as_ref()
-        .map(|r| r.is_changed() || r.is_added())
-        .unwrap_or(false);
-    let strategies_changed = strategies
+    let providers_changed = !changed_q.is_empty();
+    let idx_changed = page_idx
         .as_ref()
         .map(|r| r.is_changed() || r.is_added())
         .unwrap_or(false);
     if !providers_changed
-        && !strategies_changed
+        && !idx_changed
         && (!snapshot.providers.is_empty() || !snapshot.strategies.is_empty())
     {
         return;
     }
 
-    snapshot.providers = providers
-        .as_ref()
-        .map(|p| {
-            p.command_entries()
-                .into_iter()
-                .map(|e| AgentProviderSummary {
-                    id: e.id.to_string(),
-                    name: e.name.to_string(),
-                    shortcut: e.shortcut.to_string(),
-                })
-                .collect()
+    let mut providers: Vec<AgentProviderSummary> = providers_q
+        .iter()
+        .map(|(kind, name)| AgentProviderSummary {
+            id: kind.0.as_url_segment().to_string(),
+            name: name.as_str().to_string(),
+            url: kind.0.cli_url_prefix(),
         })
-        .unwrap_or_default();
+        .collect();
+    providers.sort_by(|a, b| a.id.cmp(&b.id));
+    snapshot.providers = providers;
 
-    snapshot.strategies = strategies
+    snapshot.strategies = page_idx
         .as_ref()
-        .map(|s| {
-            s.page_strategies()
-                .map(|st| AgentStrategySummary {
-                    provider: st.provider().to_string(),
-                    model: st.model().to_string(),
+        .map(|idx| {
+            idx.keys()
+                .map(|key| AgentStrategySummary {
+                    provider: key.provider.clone(),
+                    model: key.model.clone(),
                 })
                 .collect()
         })
