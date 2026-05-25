@@ -63,6 +63,19 @@ pub enum AgentCommand {
     UpdateLayout {
         layout: crate::protocol::layout::LayoutSnapshot,
     },
+    BrowserGoBack {
+        pane: Option<String>,
+    },
+    BrowserGoForward {
+        pane: Option<String>,
+    },
+    BrowserHistorySearch {
+        query: String,
+        limit: u32,
+    },
+    OpenInNewStack {
+        url: String,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -105,6 +118,12 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::UpdateSettings { path, .. } if path.trim().is_empty() => {
             Err("update_settings.path is empty")
+        }
+        AgentCommand::BrowserHistorySearch { query, .. } if query.trim().is_empty() => {
+            Err("browser_history_search.query is empty")
+        }
+        AgentCommand::OpenInNewStack { url, .. } if url.trim().is_empty() => {
+            Err("open_in_new_stack.url is empty")
         }
         _ => Ok(()),
     }

@@ -90,6 +90,7 @@ impl Plugin for VmuxPlugin {
             TerminalPlugin,
             ServicePlugin,
             SpacePlugin,
+            vmux_history::HistoryPlugin,
             LayoutCefPlugin,
             CommandBarPagePlugin,
             BrowserPlugin,

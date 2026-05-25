@@ -32,7 +32,8 @@ use crate::browser_process::display_handler::{
 };
 use crate::browser_process::life_span_handler::{LifeSpanHandlerBuilder, WebviewPopupSenderInner};
 use crate::browser_process::load_handler::{
-    WebviewLoadHandlerBuilder, WebviewLoadingStateSenderInner,
+    WebviewCommittedNavigationSenderInner, WebviewLoadHandlerBuilder,
+    WebviewLoadingStateSenderInner,
 };
 use crate::browser_process::renderer_handler::SharedDeviceScaleFactor;
 use crate::browser_process::request_handler::RequestHandlerBuilder;
@@ -92,6 +93,7 @@ impl Browsers {
         brp_sender: Sender<BrpMessage>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
+        webview_committed_nav_sender: WebviewCommittedNavigationSenderInner,
         webview_chrome_state_sender: WebviewChromeStateSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
         texture_wake: Option<TextureWake>,
@@ -106,7 +108,6 @@ impl Browsers {
         ));
         let size = Rc::new(Cell::new(webview_size));
         let device_scale = Rc::new(Cell::new(device_scale_factor));
-        // Build the client before borrowing `shared_disk_context` mutably (same `self`).
         let mut client = self.client_handler(
             webview,
             size.clone(),
@@ -116,6 +117,7 @@ impl Browsers {
             brp_sender,
             system_cursor_icon_sender,
             webview_loading_state_sender,
+            webview_committed_nav_sender,
             webview_chrome_state_sender,
             webview_popup_sender,
             texture_wake,
@@ -807,6 +809,7 @@ impl Browsers {
         brp_sender: Sender<BrpMessage>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
+        webview_committed_nav_sender: WebviewCommittedNavigationSenderInner,
         webview_chrome_state_sender: WebviewChromeStateSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
         texture_wake: Option<TextureWake>,
@@ -826,6 +829,7 @@ impl Browsers {
         .with_load_handler(WebviewLoadHandlerBuilder::build(
             webview,
             webview_loading_state_sender,
+            webview_committed_nav_sender,
         ))
         .with_life_span_handler(LifeSpanHandlerBuilder::build(
             webview,

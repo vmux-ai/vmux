@@ -204,6 +204,11 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<vmux_history::CreatedAt>()
         .allow::<vmux_history::LastActivatedAt>()
         .allow::<vmux_history::Visit>()
+        .allow::<vmux_core::Url>()
+        .allow::<vmux_core::VisitCount>()
+        .allow::<vmux_core::LastVisitedAt>()
+        .allow::<vmux_core::VisitedUrl>()
+        .allow::<vmux_core::TransitionType>()
         .allow::<vmux_terminal::launch::TerminalLaunch>();
     commands.trigger_save(save);
 }
@@ -591,6 +596,94 @@ mod tests {
 
         let _ = saved_url;
         assert_eq!(meta.url, TERMINAL_PAGE_URL);
+    }
+
+    #[test]
+    fn url_and_visit_round_trip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("test_history.ron");
+
+        let mut app_save = App::new();
+        app_save.add_plugins(MinimalPlugins);
+        app_save.add_plugins(vmux_core::CorePlugin);
+        app_save.add_observer(save_on_default_event);
+
+        let url_e = app_save
+            .world_mut()
+            .spawn((
+                Save,
+                vmux_core::Url,
+                PageMetadata {
+                    url: "https://example.com".into(),
+                    title: "Example".into(),
+                    favicon_url: "".into(),
+                    bg_color: None,
+                },
+                vmux_core::VisitCount(3),
+                vmux_core::LastVisitedAt(1000),
+                vmux_core::CreatedAt(500),
+            ))
+            .id();
+
+        app_save.world_mut().spawn((
+            Save,
+            vmux_core::Visit,
+            vmux_core::VisitedUrl(url_e),
+            vmux_core::CreatedAt(900),
+            vmux_core::TransitionType::Typed,
+        ));
+
+        save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
+        app_save.update();
+
+        assert!(path.exists(), "save file should exist");
+
+        let mut app_load = App::new();
+        app_load.add_plugins(MinimalPlugins);
+        app_load.add_plugins(vmux_core::CorePlugin);
+        app_load.add_observer(load_on_default_event);
+        app_load.update();
+
+        app_load
+            .world_mut()
+            .commands()
+            .trigger_load(LoadWorld::default_from_file(path));
+        app_load.update();
+
+        let url_count = app_load
+            .world_mut()
+            .query::<&vmux_core::Url>()
+            .iter(app_load.world())
+            .count();
+        let visit_count = app_load
+            .world_mut()
+            .query::<&vmux_core::Visit>()
+            .iter(app_load.world())
+            .count();
+        assert_eq!(url_count, 1, "Url not round-tripped");
+        assert_eq!(visit_count, 1, "Visit not round-tripped");
+
+        let (vc, lva, ca) = app_load
+            .world_mut()
+            .query::<(
+                &vmux_core::VisitCount,
+                &vmux_core::LastVisitedAt,
+                &vmux_core::CreatedAt,
+            )>()
+            .iter(app_load.world())
+            .find(|(vc, _, _)| vc.0 == 3)
+            .expect("Url entity fields not round-tripped");
+        assert_eq!(vc.0, 3);
+        assert_eq!(lva.0, 1000);
+        assert_eq!(ca.0, 500);
+
+        let tt = app_load
+            .world_mut()
+            .query::<&vmux_core::TransitionType>()
+            .iter(app_load.world())
+            .next()
+            .expect("TransitionType not round-tripped");
+        assert_eq!(*tt, vmux_core::TransitionType::Typed);
     }
 
     #[test]

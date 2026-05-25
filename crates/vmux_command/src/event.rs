@@ -1,3 +1,8 @@
+pub use vmux_history::event::{
+    HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry, HistorySuggestionsRequest,
+    HistorySuggestionsResponse,
+};
+
 pub const COMMAND_BAR_OPEN_EVENT: &str = "command-bar-open";
 
 #[derive(

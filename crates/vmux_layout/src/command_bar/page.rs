@@ -11,10 +11,13 @@ use crate::command_bar::style::{command_bar_shell_class, result_item_class};
 use dioxus::prelude::*;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarOpenEvent, CommandBarReadyEvent,
-    CommandBarRenderedEvent, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
-    PathEntry, command_bar_open_should_ack, command_bar_open_should_reset_input, looks_like_url,
+    CommandBarRenderedEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
+    HistorySuggestionsRequest, HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE,
+    PathCompleteRequest, PathCompleteResponse, PathEntry, command_bar_open_should_ack,
+    command_bar_open_should_reset_input, looks_like_url,
 };
 use vmux_ui::components::icon::Icon;
+use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -33,6 +36,8 @@ pub fn Page() -> Element {
     let mut ready_sent = use_signal(|| false);
 
     let mut path_completions = use_signal(Vec::<PathEntry>::new);
+    let mut history_suggestions = use_signal(Vec::<HistoryEntry>::new);
+    let mut suggestions_request_id = use_signal(|| 0u64);
 
     let open_listener =
         use_bin_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
@@ -47,6 +52,7 @@ pub fn Page() -> Element {
             }
             current_open_id.set(open_id);
             path_completions.set(Vec::new());
+            history_suggestions.set(Vec::new());
             query.set(data.url.clone());
             selected.set(0);
             nav_mode.set(false);
@@ -98,6 +104,37 @@ pub fn Page() -> Element {
         });
     });
 
+    let _history_listener = use_bin_event_listener::<HistorySuggestionsResponse, _>(
+        HISTORY_SUGGESTIONS_RESPONSE_EVENT,
+        move |resp| {
+            if resp.request_id != *suggestions_request_id.read() {
+                return;
+            }
+            history_suggestions.set(resp.entries);
+        },
+    );
+
+    use_effect(move || {
+        let q = query();
+        let trimmed = q.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with('>')
+            || trimmed.starts_with('/')
+            || trimmed.starts_with('~')
+            || trimmed.starts_with("vmux://")
+        {
+            history_suggestions.set(Vec::new());
+            return;
+        }
+        let id = *suggestions_request_id.peek() + 1;
+        suggestions_request_id.set(id);
+        let _ = try_cef_bin_emit_rkyv(&HistorySuggestionsRequest {
+            query: trimmed.to_string(),
+            limit: 5,
+            request_id: id,
+        });
+    });
+
     // Focus input and install emacs-style Ctrl shortcuts AFTER Dioxus renders
     // the input element. Running in the event listener above is too early --
     // Dioxus hasn't created the DOM element yet.
@@ -119,7 +156,8 @@ pub fn Page() -> Element {
     let q = query();
     let is_new_tab = is_new_stack();
     let results = {
-        let mut r = filter_results(&q, &tabs, &commands, &spaces, is_new_tab);
+        let history = history_suggestions();
+        let mut r = filter_results(&q, &tabs, &commands, &spaces, is_new_tab, &history);
         let completions = if looks_like_path(q.trim()) {
             path_completions()
         } else {
@@ -165,6 +203,13 @@ pub fn Page() -> Element {
             Some(ResultItem::Space { name, .. }) => name.clone(),
             Some(ResultItem::Terminal { path }) if path.is_empty() => "Terminal".to_string(),
             Some(ResultItem::Terminal { path }) => path.clone(),
+            Some(ResultItem::History { title, url, .. }) => {
+                if title.is_empty() {
+                    url.clone()
+                } else {
+                    title.clone()
+                }
+            }
             None => q.clone(),
         }
     } else {
@@ -225,6 +270,9 @@ pub fn Page() -> Element {
                     emit_action_with_target("open", url, open_target);
                 }
             }
+            ResultItem::History { url, .. } => {
+                emit_action("navigate", url);
+            }
         }
     };
 
@@ -263,6 +311,7 @@ pub fn Page() -> Element {
                                         let is_u = url.contains("://") || (url.contains('.') && !url.contains(' '));
                                         (false, false, is_u)
                                     }
+                                    Some(ResultItem::History { .. }) => (false, false, true),
                                     None => (false, false, false),
                                 }
                             } else {
@@ -428,6 +477,20 @@ pub fn Page() -> Element {
                                             span { class: "text-base text-foreground", "{name}" }
                                         }
                                         span { class: "ml-2 shrink-0 rounded bg-muted px-1.5 py-0.5 text-sm text-muted-foreground", "{shortcut}" }
+                                    },
+                                    ResultItem::History { url, title, favicon_url, .. } => rsx! {
+                                        div { class: "flex items-center gap-2",
+                                            Favicon {
+                                                favicon_url: favicon_url.clone(),
+                                                url: url.clone(),
+                                                class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                                                globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                                            }
+                                            span { class: "truncate text-base text-foreground",
+                                                if title.is_empty() { "{url}" } else { "{title}" }
+                                            }
+                                            span { class: "ml-auto truncate text-sm text-muted-foreground max-w-xs", "{url}" }
+                                        }
                                     },
                                     ResultItem::Navigate { url } => rsx! {
                                         div { class: "flex items-center gap-2",

@@ -17,6 +17,7 @@ path = "src/lib.rs"
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+vmux_history = { path = "../vmux_history", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true }

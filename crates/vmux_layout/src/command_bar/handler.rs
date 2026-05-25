@@ -30,7 +30,7 @@ use vmux_command::{
     SpaceCommand, StackCommand,
 };
 use vmux_core::PageMetadata;
-use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnTabRequest, parse_page_agent_url};
+use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnTabRequest};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
@@ -336,6 +336,9 @@ fn command_bar_open_request(
                 request.should_toggle = true;
                 request.url_override = Some(String::new());
             }
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenUrlInCommandBar)) => {
+                request.should_toggle = true;
+            }
             AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPathBar)) => {
                 request.should_toggle = true;
                 request.url_override = Some("/".to_string());
@@ -544,18 +547,6 @@ fn handle_open_command_bar(
     }
 
     if !should_open {
-        return;
-    }
-
-    if focused_stack_is_page_agent(
-        &tab_q,
-        &all_children,
-        &leaf_panes,
-        &pane_ts,
-        &pane_children,
-        &stack_ts,
-        &browser_meta,
-    ) {
         return;
     }
 
@@ -838,35 +829,6 @@ fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
     }
 }
 
-fn focused_stack_is_page_agent(
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Space>>,
-    all_children: &Query<&Children>,
-    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: &Query<&Children, With<Pane>>,
-    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
-    browser_meta: &Query<&PageMetadata, With<Browser>>,
-) -> bool {
-    let (_, _, active_stack) = focused_stack(
-        tab_q,
-        all_children,
-        leaf_panes,
-        pane_ts,
-        pane_children,
-        stack_ts,
-    );
-    let Some(stack) = active_stack else {
-        return false;
-    };
-    let Ok(children) = all_children.get(stack) else {
-        return false;
-    };
-    children
-        .iter()
-        .filter_map(|e| browser_meta.get(e).ok())
-        .any(|meta| parse_page_agent_url(&meta.url).is_some())
-}
-
 fn normalize_url(value: &str) -> String {
     if value.contains("://") {
         value.to_string()
@@ -983,16 +945,22 @@ fn on_command_bar_action(
                             custom_keyboard_restore = true;
                         }
                     }
+                } else if let Some(stack_e) = empty_stack {
+                    writer_params
+                        .p1()
+                        .write(crate::LayoutSpawnRequest::OpenUrl {
+                            stack: stack_e,
+                            url,
+                        });
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.previous_stack = None;
+                    custom_keyboard_restore = true;
                 } else {
                     let target = evt.target;
                     let open_cmd = build_open_command(target, url);
                     writer_params
                         .p0()
                         .write(AppCommand::Browser(BrowserCommand::Open(open_cmd)));
-                    if empty_stack.is_some() {
-                        new_stack_ctx.stack = None;
-                        new_stack_ctx.previous_stack = None;
-                    }
                 }
             }
         }
@@ -1888,6 +1856,32 @@ mod tests {
         );
 
         assert!(!request.should_dismiss);
+    }
+
+    #[test]
+    fn open_command_bar_forces_empty_url_override() {
+        let request = command_bar_open_request(
+            [AppCommand::Browser(BrowserCommand::Bar(
+                BrowserBarCommand::OpenCommandBar,
+            ))],
+            "vmux://spaces/",
+        );
+
+        assert!(request.should_toggle);
+        assert_eq!(request.url_override, Some(String::new()));
+    }
+
+    #[test]
+    fn open_url_in_command_bar_leaves_url_override_unset_so_current_url_is_prefilled() {
+        let request = command_bar_open_request(
+            [AppCommand::Browser(BrowserCommand::Bar(
+                BrowserBarCommand::OpenUrlInCommandBar,
+            ))],
+            "vmux://spaces/",
+        );
+
+        assert!(request.should_toggle);
+        assert_eq!(request.url_override, None);
     }
 
     #[test]

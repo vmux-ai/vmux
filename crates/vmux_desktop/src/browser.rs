@@ -44,7 +44,8 @@ impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
         let embedded_hosts = app.world().resource::<Server>().embedded_hosts();
         webview_debug_log(format!("BrowserPlugin embedded_hosts={embedded_hosts:?}"));
-        app.configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
+        app.add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
+            .configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
             .add_plugins((
                 CefPlugin {
                     root_cache_path: cef_root_cache_path(),
@@ -64,8 +65,13 @@ impl Plugin for BrowserPlugin {
                     handle_browser_commands.in_set(ReadAppCommands),
                     vmux_layout::apply_chrome_state_from_cef,
                     drain_loading_state,
+                    drain_committed_navigation,
                     spawn_popup_tabs,
                     handle_browser_navigate_requests.after(vmux_terminal::ServiceMessageSet),
+                    handle_browser_go_back_requests,
+                    handle_browser_go_forward_requests,
+                    handle_open_in_new_stack_requests,
+                    handle_browser_open_history.in_set(ReadAppCommands),
                 ),
             )
             .add_systems(
@@ -73,6 +79,10 @@ impl Plugin for BrowserPlugin {
                 (sync_page_metadata_to_tab, spawn_visit_on_navigation)
                     .chain()
                     .after(vmux_layout::apply_chrome_state_from_cef),
+            )
+            .add_systems(
+                Update,
+                vmux_layout::mirror_metadata_to_url.after(vmux_layout::apply_chrome_state_from_cef),
             )
             .add_systems(
                 Update,
@@ -644,6 +654,15 @@ fn drain_loading_state(receiver: Res<WebviewLoadingStateReceiver>, mut commands:
     }
 }
 
+fn drain_committed_navigation(
+    receiver: Res<WebviewCommittedNavigationReceiver>,
+    mut writer: MessageWriter<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>,
+) {
+    while let Ok(ev) = receiver.0.try_recv() {
+        writer.write(ev);
+    }
+}
+
 fn spawn_popup_tabs(
     popup_rx: Res<WebviewPopupReceiver>,
     child_of_q: Query<&ChildOf>,
@@ -1170,7 +1189,7 @@ fn on_header_command_emit(
         "prev_page" => BrowserCommand::Navigation(BrowserNavigationCommand::PrevPage),
         "next_page" => BrowserCommand::Navigation(BrowserNavigationCommand::NextPage),
         "reload" => BrowserCommand::Navigation(BrowserNavigationCommand::Reload),
-        "focus_address_bar" => BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar),
+        "focus_address_bar" => BrowserCommand::Bar(BrowserBarCommand::OpenUrlInCommandBar),
         _ => return,
     };
     messages.write(AppCommand::Browser(cmd));
@@ -1443,6 +1462,125 @@ fn sync_page_metadata_to_tab(
     }
 }
 
+pub(crate) fn handle_browser_go_back_requests(
+    mut reader: MessageReader<vmux_layout::BrowserGoBackRequest>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
+    panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
+    browsers: Query<(Entity, &ChildOf), With<Browser>>,
+    pane_children: Query<&Children, With<Pane>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let target = match request.pane.as_deref() {
+            Some(s) => vmux_layout::target::parse_pane_target(s, &panes),
+            None => focus.pane.filter(|p| panes.contains(*p)),
+        };
+        let Some(pane_entity) = target else { continue };
+        let Some(webview) = vmux_layout::target::active_webview_for_tab(
+            active_stack_in_pane(pane_entity, &pane_children, &stack_ts),
+            &browsers,
+            &terminals,
+        ) else {
+            continue;
+        };
+        commands.trigger(bevy_cef::prelude::RequestGoBack { webview });
+    }
+}
+
+pub(crate) fn handle_browser_go_forward_requests(
+    mut reader: MessageReader<vmux_layout::BrowserGoForwardRequest>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
+    panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
+    browsers: Query<(Entity, &ChildOf), With<Browser>>,
+    pane_children: Query<&Children, With<Pane>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let target = match request.pane.as_deref() {
+            Some(s) => vmux_layout::target::parse_pane_target(s, &panes),
+            None => focus.pane.filter(|p| panes.contains(*p)),
+        };
+        let Some(pane_entity) = target else { continue };
+        let Some(webview) = vmux_layout::target::active_webview_for_tab(
+            active_stack_in_pane(pane_entity, &pane_children, &stack_ts),
+            &browsers,
+            &terminals,
+        ) else {
+            continue;
+        };
+        commands.trigger(bevy_cef::prelude::RequestGoForward { webview });
+    }
+}
+
+pub(crate) fn handle_browser_open_history(
+    mut reader: MessageReader<AppCommand>,
+    mut writer: MessageWriter<vmux_layout::OpenInNewStackRequest>,
+) {
+    for cmd in reader.read() {
+        if matches!(
+            cmd,
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenHistory))
+        ) {
+            writer.write(vmux_layout::OpenInNewStackRequest {
+                url: "vmux://history/".to_string(),
+            });
+        }
+    }
+}
+
+pub(crate) fn handle_open_in_new_stack_requests(
+    mut reader: MessageReader<vmux_layout::OpenInNewStackRequest>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
+    panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    child_of_q: Query<&ChildOf>,
+    lookups: vmux_agent::plugin::AgentLookups,
+    strategies: Res<vmux_agent::strategy::AgentStrategies>,
+    settings: Res<AppSettings>,
+    page_idx: Option<Res<vmux_agent::client::page::strategy_index::PageStrategyIndex>>,
+    kind_q: Query<&vmux_agent::client::page::strategy_components::StrategyKind>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    let pid_to_entity = lookups.pid_to_entity.as_deref();
+    let agent_to_entity = lookups.agent_to_entity.as_deref();
+    let empty_idx = vmux_agent::client::page::strategy_index::PageStrategyIndex::default();
+    let idx_ref = page_idx.as_deref().unwrap_or(&empty_idx);
+    for request in reader.read() {
+        let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) else {
+            continue;
+        };
+        if request.url.starts_with("vmux://") {
+            let _ = vmux_agent::plugin::spawn_vmux_tab(
+                &request.url,
+                pane,
+                &mut commands,
+                &mut meshes,
+                &mut webview_mt,
+                &settings,
+                pid_to_entity,
+                agent_to_entity,
+                &strategies,
+                &child_of_q,
+                idx_ref,
+                &kind_q,
+            );
+        } else {
+            vmux_agent::plugin::spawn_browser_tab(
+                pane,
+                &request.url,
+                &mut commands,
+                &mut meshes,
+                &mut webview_mt,
+            );
+        }
+    }
+}
+
 pub(crate) fn handle_browser_navigate_requests(
     mut reader: MessageReader<vmux_layout::BrowserNavigateRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -1698,6 +1836,9 @@ mod tests {
 
         fn add_consumer_systems(app: &mut App) {
             app.add_message::<vmux_layout::BrowserNavigateRequest>();
+            app.add_message::<vmux_layout::BrowserGoBackRequest>();
+            app.add_message::<vmux_layout::BrowserGoForwardRequest>();
+            app.add_message::<vmux_layout::OpenInNewStackRequest>();
             app.add_message::<vmux_layout::reconcile::LayoutApplyRequest>();
             app.add_message::<vmux_layout::reconcile::LayoutApplyResponse>();
             app.add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>();
@@ -1705,6 +1846,7 @@ mod tests {
             app.add_message::<vmux_terminal::TerminalSendRequest>();
             app.add_message::<vmux_terminal::RunShellRequest>();
             app.add_message::<vmux_setting::SettingsWriteRequest>();
+            app.add_message::<vmux_history::query::HistoryOpenIntent>();
             app.add_systems(
                 Update,
                 (

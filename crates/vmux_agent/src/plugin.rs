@@ -117,6 +117,7 @@ impl Plugin for AgentPlugin {
             .add_systems(
                 Update,
                 (
+                    forward_history_open_intent,
                     handle_agent_commands,
                     handle_agent_queries,
                     detect_agent_session_process_exit,
@@ -291,6 +292,33 @@ pub fn spawn_browser_tab(
     });
     commands.spawn((
         vmux_layout::Browser::new(meshes, webview_mt, url),
+        ChildOf(tab),
+    ));
+    tab
+}
+
+pub fn spawn_history_tab(
+    pane: Entity,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) -> Entity {
+    let url = "vmux://history/";
+    let title = "History";
+    let tab = commands
+        .spawn((
+            vmux_layout::stack::stack_bundle(),
+            LastActivatedAt::now(),
+            ChildOf(pane),
+        ))
+        .id();
+    commands.entity(tab).insert(PageMetadata {
+        url: url.to_string(),
+        title: title.to_string(),
+        ..default()
+    });
+    commands.spawn((
+        vmux_layout::Browser::new_with_title(meshes, webview_mt, url, title),
         ChildOf(tab),
     ));
     tab
@@ -486,6 +514,10 @@ pub fn spawn_vmux_tab(
             spawn_sessions_tab(pane, commands, meshes, webview_mt);
             Ok(())
         }
+        "history" => {
+            spawn_history_tab(pane, commands, meshes, webview_mt);
+            Ok(())
+        }
         "services" => {
             spawn_processes_tab(pane, commands, meshes, webview_mt);
             Ok(())
@@ -624,6 +656,9 @@ fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
     mut browser_nav_writer: MessageWriter<vmux_layout::BrowserNavigateRequest>,
+    mut browser_go_back_writer: MessageWriter<vmux_layout::BrowserGoBackRequest>,
+    mut browser_go_forward_writer: MessageWriter<vmux_layout::BrowserGoForwardRequest>,
+    mut open_in_new_stack_writer: MessageWriter<vmux_layout::OpenInNewStackRequest>,
     mut terminal_send_writer: MessageWriter<vmux_terminal::TerminalSendRequest>,
     mut run_shell_writer: MessageWriter<vmux_terminal::RunShellRequest>,
     focus: Res<FocusedStack>,
@@ -755,6 +790,25 @@ fn handle_agent_commands(
                 });
                 continue;
             }
+            ServiceAgentCommand::BrowserGoBack { pane } => {
+                browser_go_back_writer
+                    .write(vmux_layout::BrowserGoBackRequest { pane: pane.clone() });
+                AgentCommandResult::Ok
+            }
+            ServiceAgentCommand::BrowserGoForward { pane } => {
+                browser_go_forward_writer
+                    .write(vmux_layout::BrowserGoForwardRequest { pane: pane.clone() });
+                AgentCommandResult::Ok
+            }
+            ServiceAgentCommand::BrowserHistorySearch { query, limit } => {
+                bevy::log::info!("browser_history_search: query={:?} limit={}", query, limit);
+                AgentCommandResult::Ok
+            }
+            ServiceAgentCommand::OpenInNewStack { url } => {
+                open_in_new_stack_writer
+                    .write(vmux_layout::OpenInNewStackRequest { url: url.clone() });
+                AgentCommandResult::Ok
+            }
         };
         if let Some(service) = service.as_ref() {
             service.0.send(ClientMessage::AgentCommandResponse {
@@ -790,6 +844,28 @@ pub fn detect_agent_session_process_exit(
             meta.url = next;
         }
         writer.write(AgentSessionExited { entity });
+    }
+}
+
+pub(crate) fn forward_history_open_intent(
+    mut intents: MessageReader<vmux_history::query::HistoryOpenIntent>,
+    mut requests: MessageWriter<AgentCommandRequest>,
+) {
+    for intent in intents.read() {
+        let command = if intent.in_new_stack {
+            ServiceAgentCommand::OpenInNewStack {
+                url: intent.url.clone(),
+            }
+        } else {
+            ServiceAgentCommand::BrowserNavigate {
+                url: intent.url.clone(),
+                pane: None,
+            }
+        };
+        requests.write(AgentCommandRequest {
+            request_id: AgentRequestId::new(),
+            command,
+        });
     }
 }
 
@@ -1212,6 +1288,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
         app.add_message::<vmux_layout::BrowserNavigateRequest>();
+        app.add_message::<vmux_layout::BrowserGoBackRequest>();
+        app.add_message::<vmux_layout::BrowserGoForwardRequest>();
+        app.add_message::<vmux_layout::OpenInNewStackRequest>();
         app.add_message::<vmux_layout::reconcile::LayoutApplyRequest>();
         app.add_message::<vmux_layout::reconcile::LayoutApplyResponse>();
         app.add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>();
@@ -1219,6 +1298,7 @@ mod tests {
         app.add_message::<vmux_terminal::TerminalSendRequest>();
         app.add_message::<vmux_terminal::RunShellRequest>();
         app.add_message::<vmux_setting::SettingsWriteRequest>();
+        app.add_message::<vmux_history::query::HistoryOpenIntent>();
         app.add_systems(Update, vmux_terminal::handle_terminal_send_requests);
         app.insert_resource(FocusedStack::default());
         app.insert_resource(test_settings());
