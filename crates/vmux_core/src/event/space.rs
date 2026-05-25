@@ -66,11 +66,11 @@ mod tests {
         let row = SpaceRow {
             id: "work".to_string(),
             name: "Work".to_string(),
-            profile: "default".to_string(),
+            profile: "Personal".to_string(),
             is_active: true,
             tab_count: 3,
         };
-        assert_eq!(row.profile, "default");
+        assert_eq!(row.profile, "Personal");
         assert!(row.is_active);
         assert_eq!(row.tab_count, 3);
     }
@@ -104,7 +104,7 @@ mod tests {
             spaces: vec![SpaceRow {
                 id: "work".to_string(),
                 name: "Work".to_string(),
-                profile: "default".to_string(),
+                profile: "Personal".to_string(),
                 is_active: true,
                 tab_count: 2,
             }],

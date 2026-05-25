@@ -29,11 +29,11 @@ use vmux_layout::{
     },
     pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_stack_in_pane},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
-    tab::Tab,
     stack::{
         CloseConfirmed, PendingStackClose, Stack, active_stack_in_pane, collect_leaf_panes,
         focused_stack, stack_bundle,
     },
+    tab::Tab,
     window::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
     },
@@ -2551,8 +2551,8 @@ mod tests {
         use vmux_history::LastActivatedAt;
         use vmux_layout::Browser;
         use vmux_layout::pane::Pane;
-        use vmux_layout::tab::Tab;
         use vmux_layout::stack::stack_bundle;
+        use vmux_layout::tab::Tab;
 
         #[derive(Resource, Default)]
         struct CapturedNavigateUrls(Vec<String>);

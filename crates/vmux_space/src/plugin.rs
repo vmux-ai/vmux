@@ -16,10 +16,10 @@ use crate::event::{
     SPACES_LIST_EVENT, SPACES_PAGE_URL, SpaceCommandEvent, SpaceRow, SpacesListEvent,
 };
 use crate::model::{
-    DEFAULT_SPACE_ID, SpaceRecord, SpaceRegistry, default_space_record, registry_path,
-    space_layout_path_for, unique_space_id,
+    SpaceRecord, SpaceRegistry, bootstrap_space_record, registry_path, space_layout_path_for,
+    unique_space_id,
 };
-use crate::spaces::{ActiveSpace, Spaces, read_space_registry_from};
+use crate::spaces::{ActiveSpace, Spaces, read_space_registry_from, space_profile_bundle};
 
 #[derive(Message, Clone)]
 pub struct SaveSpaceRequest {
@@ -33,6 +33,7 @@ impl Plugin for SpacePlugin {
         app.init_resource::<ActiveSpace>();
         app.add_message::<SaveSpaceRequest>();
         register_spaces_page(app.world_mut().resource_mut::<Server>().as_mut());
+        app.add_systems(Startup, ensure_space_registry);
         app.add_message::<vmux_core::page::SpacesPageSpawnRequest>()
             .add_systems(
                 Update,
@@ -131,8 +132,17 @@ fn write_space_registry_to(root: &Path, registry: &SpaceRegistry) {
     }
 }
 
+fn ensure_space_registry() {
+    let root = profile::shared_data_dir();
+    let path = registry_path(&root);
+    if path.exists() {
+        return;
+    }
+    write_space_registry_to(&root, &read_space_registry_from(&root));
+}
+
 fn delete_space_record(registry: &mut SpaceRegistry, id: &str) -> Option<SpaceRecord> {
-    if id == DEFAULT_SPACE_ID {
+    if registry.spaces.len() <= 1 {
         return None;
     }
     let idx = registry.spaces.iter().position(|space| space.id == id)?;
@@ -140,9 +150,6 @@ fn delete_space_record(registry: &mut SpaceRegistry, id: &str) -> Option<SpaceRe
 }
 
 fn delete_space_layout(root: &Path, record: &SpaceRecord) {
-    if record.id == DEFAULT_SPACE_ID {
-        return;
-    }
     let path = space_layout_path_for(root, &record.id, &record.profile);
     if let Some(dir) = path.parent() {
         let _ = std::fs::remove_dir_all(dir);
@@ -249,7 +256,7 @@ fn apply_pending_space_switch(
     space_entities: Query<
         Entity,
         Or<(
-            With<vmux_layout::profile::Profile>,
+            With<vmux_layout::space::Space>,
             With<vmux_layout::tab::Tab>,
             With<vmux_history::Visit>,
         )>,
@@ -284,6 +291,7 @@ fn apply_pending_space_switch(
         for entity in &space_entities {
             commands.entity(entity).try_despawn();
         }
+        commands.spawn(space_profile_bundle(&record));
         let Ok(main) = main_q.single() else { return };
         let spawned = vmux_layout::window::spawn_default_tab_layout(
             main,
@@ -340,7 +348,7 @@ fn on_space_command(
     space_entities: Query<
         Entity,
         Or<(
-            With<vmux_layout::profile::Profile>,
+            With<vmux_layout::space::Space>,
             With<vmux_layout::tab::Tab>,
             With<vmux_history::Visit>,
         )>,
@@ -400,7 +408,7 @@ fn on_space_command(
             .spaces
             .first()
             .cloned()
-            .unwrap_or_else(default_space_record);
+            .unwrap_or_else(bootstrap_space_record);
         write_space_registry_to(&root, &registry);
         delete_space_layout(&root, &deleted);
         if !deleted_active {
@@ -459,6 +467,7 @@ fn on_space_command(
         for entity in &space_entities {
             commands.entity(entity).try_despawn();
         }
+        commands.spawn(space_profile_bundle(&active.record));
         let Ok(main) = main_q.single() else { return };
         if open_spaces_page {
             spawn_spaces_page_layout(
@@ -493,7 +502,7 @@ fn handle_open_in_new_space(
     space_entities: Query<
         Entity,
         Or<(
-            With<vmux_layout::profile::Profile>,
+            With<vmux_layout::space::Space>,
             With<vmux_layout::tab::Tab>,
             With<vmux_history::Visit>,
         )>,
@@ -533,12 +542,8 @@ fn handle_open_in_new_space(
             commands.entity(entity).try_despawn();
         }
         let Ok(main) = main_q.single() else { continue };
-        let spawned = vmux_layout::window::spawn_tab_layout(
-            main,
-            *primary_window,
-            vmux_layout::profile::Profile::default_profile(),
-            &mut commands,
-        );
+        commands.spawn(space_profile_bundle(&active.record));
+        let spawned = vmux_layout::window::spawn_tab_layout(main, *primary_window, &mut commands);
         if let Some(old_stack) = new_stack_ctx.stack.take() {
             commands.entity(old_stack).despawn();
         }
@@ -579,7 +584,7 @@ static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::DEFAULT_PROFILE_ID;
+    use crate::model::BOOTSTRAP_PROFILE_NAME;
     use vmux_history::LastActivatedAt;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
@@ -655,7 +660,7 @@ mod tests {
         SpaceRecord {
             id: "work".to_string(),
             name: "Work".to_string(),
-            profile: DEFAULT_PROFILE_ID.to_string(),
+            profile: BOOTSTRAP_PROFILE_NAME.to_string(),
         }
     }
 
@@ -665,16 +670,16 @@ mod tests {
             record: SpaceRecord {
                 id: "work".to_string(),
                 name: "Work".to_string(),
-                profile: DEFAULT_PROFILE_ID.to_string(),
+                profile: BOOTSTRAP_PROFILE_NAME.to_string(),
             },
         };
         let registry = SpaceRegistry {
-            spaces: vec![default_space_record(), active.record.clone()],
+            spaces: vec![bootstrap_space_record(), active.record.clone()],
         };
         let rows = space_rows(&active, &registry, 4);
         assert!(!rows[0].is_active);
         assert!(rows[1].is_active);
-        assert_eq!(rows[1].profile, DEFAULT_PROFILE_ID);
+        assert_eq!(rows[1].profile, BOOTSTRAP_PROFILE_NAME);
         assert_eq!(rows[1].tab_count, 4);
     }
 
@@ -692,11 +697,11 @@ mod tests {
     fn delete_space_removes_named_space_from_registry() {
         let mut registry = SpaceRegistry {
             spaces: vec![
-                default_space_record(),
+                bootstrap_space_record(),
                 SpaceRecord {
                     id: "work".to_string(),
                     name: "Work".to_string(),
-                    profile: DEFAULT_PROFILE_ID.to_string(),
+                    profile: BOOTSTRAP_PROFILE_NAME.to_string(),
                 },
             ],
         };
@@ -704,19 +709,19 @@ mod tests {
         let deleted = delete_space_record(&mut registry, "work").unwrap();
 
         assert_eq!(deleted.id, "work");
-        assert_eq!(registry.spaces, vec![default_space_record()]);
+        assert_eq!(registry.spaces, vec![bootstrap_space_record()]);
     }
 
     #[test]
-    fn delete_space_keeps_default_space() {
+    fn delete_space_keeps_last_space() {
         let mut registry = SpaceRegistry {
-            spaces: vec![default_space_record()],
+            spaces: vec![bootstrap_space_record()],
         };
 
-        let deleted = delete_space_record(&mut registry, "default");
+        let deleted = delete_space_record(&mut registry, "space-1");
 
         assert!(deleted.is_none());
-        assert_eq!(registry.spaces, vec![default_space_record()]);
+        assert_eq!(registry.spaces, vec![bootstrap_space_record()]);
     }
 
     #[test]
@@ -726,7 +731,7 @@ mod tests {
         write_space_registry_to(
             &profile::shared_data_dir(),
             &SpaceRegistry {
-                spaces: vec![default_space_record(), active_record.clone()],
+                spaces: vec![bootstrap_space_record(), active_record.clone()],
             },
         );
         let mut app = App::new();
@@ -783,7 +788,7 @@ mod tests {
         write_space_registry_to(
             &profile::shared_data_dir(),
             &SpaceRegistry {
-                spaces: vec![default_space_record(), active_record.clone()],
+                spaces: vec![bootstrap_space_record(), active_record.clone()],
             },
         );
         let mut app = App::new();
@@ -840,7 +845,7 @@ mod tests {
         assert!(app.world().get_entity(space).is_err());
         assert_eq!(
             app.world().resource::<ActiveSpace>().record,
-            default_space_record()
+            bootstrap_space_record()
         );
         let mut tab_query = app.world_mut().query::<&Tab>();
         assert_eq!(tab_query.iter(app.world()).count(), 1);
@@ -852,7 +857,7 @@ mod tests {
         write_space_registry_to(
             &profile::shared_data_dir(),
             &SpaceRegistry {
-                spaces: vec![default_space_record()],
+                spaces: vec![bootstrap_space_record()],
             },
         );
         let mut app = App::new();
@@ -861,7 +866,7 @@ mod tests {
         app.add_observer(on_space_command);
         app.insert_resource(vmux_layout::stack::FocusedStack::default());
         app.insert_resource(ActiveSpace {
-            record: default_space_record(),
+            record: bootstrap_space_record(),
         });
         app.insert_resource(test_settings());
         app.init_resource::<NewStackContext>();
@@ -944,7 +949,7 @@ mod tests {
         write_space_registry_to(
             &profile::shared_data_dir(),
             &SpaceRegistry {
-                spaces: vec![default_space_record()],
+                spaces: vec![bootstrap_space_record()],
             },
         );
         let mut app = App::new();
@@ -961,7 +966,7 @@ mod tests {
         app.init_resource::<vmux_layout::pane::PendingCursorWarp>();
         app.init_resource::<bevy_cef::prelude::IpcEventRawBuffer>();
         app.insert_resource(ActiveSpace {
-            record: default_space_record(),
+            record: bootstrap_space_record(),
         });
         app.insert_resource(test_settings());
         app.init_resource::<NewStackContext>();

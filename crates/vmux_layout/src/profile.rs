@@ -19,16 +19,4 @@ impl Plugin for ProfilePlugin {
 #[require(Save)]
 pub struct Profile {
     pub name: String,
-    pub color: [f32; 4],
-    pub icon: Option<String>,
-}
-
-impl Profile {
-    pub fn default_profile() -> Self {
-        Self {
-            name: "default".to_string(),
-            color: [0.4, 0.6, 1.0, 1.0],
-            icon: None,
-        }
-    }
 }

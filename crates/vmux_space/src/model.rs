@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT_SPACE_ID: &str = "default";
-pub const DEFAULT_PROFILE_ID: &str = "default";
+pub const BOOTSTRAP_PROFILE_NAME: &str = "Personal";
+pub const BOOTSTRAP_SPACE_ID: &str = "space-1";
+pub const BOOTSTRAP_SPACE_NAME: &str = "Space 1";
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SpaceRecord {
@@ -12,7 +13,7 @@ pub struct SpaceRecord {
 
 impl Default for SpaceRecord {
     fn default() -> Self {
-        default_space_record()
+        bootstrap_space_record()
     }
 }
 
@@ -21,11 +22,11 @@ pub struct SpaceRegistry {
     pub spaces: Vec<SpaceRecord>,
 }
 
-pub fn default_space_record() -> SpaceRecord {
+pub fn bootstrap_space_record() -> SpaceRecord {
     SpaceRecord {
-        id: DEFAULT_SPACE_ID.to_string(),
-        name: "Default".to_string(),
-        profile: DEFAULT_PROFILE_ID.to_string(),
+        id: BOOTSTRAP_SPACE_ID.to_string(),
+        name: BOOTSTRAP_SPACE_NAME.to_string(),
+        profile: BOOTSTRAP_PROFILE_NAME.to_string(),
     }
 }
 
@@ -34,12 +35,11 @@ pub fn registry_path(root: &Path) -> PathBuf {
 }
 
 pub fn space_layout_path_for(root: &Path, space_id: &str, profile: &str) -> PathBuf {
-    let profile_root = root.join("profiles").join(profile);
-    if space_id == DEFAULT_SPACE_ID {
-        profile_root.join("space.ron")
-    } else {
-        profile_root.join("spaces").join(space_id).join("space.ron")
-    }
+    root.join("profiles")
+        .join(normalize_space_id(profile))
+        .join("spaces")
+        .join(space_id)
+        .join("space.ron")
 }
 
 pub fn normalize_space_id(input: &str) -> String {
@@ -89,11 +89,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_space_uses_profile_space_file() {
+    fn space_layouts_are_scoped_under_profiles() {
         let root = PathBuf::from("/tmp/vmux");
         assert_eq!(
-            space_layout_path_for(&root, "default", "default"),
-            root.join("profiles").join("default").join("space.ron")
+            space_layout_path_for(&root, "space-1", "Personal"),
+            root.join("profiles")
+                .join("personal")
+                .join("spaces")
+                .join("space-1")
+                .join("space.ron")
         );
     }
 
@@ -122,12 +126,12 @@ mod tests {
             SpaceRecord {
                 id: "work".to_string(),
                 name: "Work".to_string(),
-                profile: "default".to_string(),
+                profile: BOOTSTRAP_PROFILE_NAME.to_string(),
             },
             SpaceRecord {
                 id: "work-2".to_string(),
                 name: "Work 2".to_string(),
-                profile: "default".to_string(),
+                profile: BOOTSTRAP_PROFILE_NAME.to_string(),
             },
         ];
         assert_eq!(unique_space_id(&records, "Work"), "work-3");

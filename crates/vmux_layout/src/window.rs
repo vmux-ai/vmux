@@ -4,12 +4,11 @@ use crate::{
     cef::{Browser, layout_cef_bundle},
     glass::{GlassCorners, GlassMaterial},
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
-    profile::Profile,
     scene::MainCamera,
     settings::LayoutSettings,
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
     stack::stack_bundle,
-    tab::tab_bundle,
+    tab::{Tab, tab_bundle},
     unit::{PIXELS_PER_METER, WindowExt},
 };
 use bevy::{
@@ -371,13 +370,13 @@ fn setup(
 
 fn spawn_default_tab(
     main_q: Query<Entity, With<Main>>,
-    profile_q: Query<(), With<Profile>>,
+    tab_q: Query<(), With<Tab>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     space_file: Option<Res<SpaceFilePresent>>,
     mut new_stack_ctx: ResMut<crate::NewStackContext>,
     mut commands: Commands,
 ) {
-    if !profile_q.is_empty() || space_file.as_deref().is_some_and(|s| s.0) {
+    if !tab_q.is_empty() || space_file.as_deref().is_some_and(|s| s.0) {
         return;
     }
 
@@ -391,13 +390,7 @@ pub struct SpawnedTabLayout {
     pub stack: Entity,
 }
 
-pub fn spawn_tab_layout(
-    main: Entity,
-    pw: Entity,
-    profile: Profile,
-    commands: &mut Commands,
-) -> SpawnedTabLayout {
-    commands.spawn(profile);
+pub fn spawn_tab_layout(main: Entity, pw: Entity, commands: &mut Commands) -> SpawnedTabLayout {
     let tab_e = commands
         .spawn((
             tab_bundle(),
@@ -458,7 +451,7 @@ pub fn spawn_default_tab_layout(
     new_stack_ctx: &mut crate::NewStackContext,
     commands: &mut Commands,
 ) -> SpawnedTabLayout {
-    let layout = spawn_tab_layout(main, pw, Profile::default_profile(), commands);
+    let layout = spawn_tab_layout(main, pw, commands);
     new_stack_ctx.stack = Some(layout.stack);
     new_stack_ctx.previous_stack = None;
     new_stack_ctx.needs_open = true;

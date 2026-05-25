@@ -10,6 +10,7 @@ use crate::pane::PanePlugin;
 use crate::profile::ProfilePlugin;
 use crate::scene::ScenePlugin;
 use crate::side_sheet::SideSheetLayoutPlugin;
+use crate::space::SpacePlugin;
 use crate::stack::StackPlugin;
 use crate::tab::TabPlugin;
 use crate::toggle::TogglePlugin;
@@ -62,6 +63,7 @@ impl Plugin for LayoutPlugin {
         .add_observer(mark_webview_page_ready_on_js_emit);
         app.add_plugins((
             ProfilePlugin,
+            SpacePlugin,
             ScenePlugin,
             WindowPlugin,
             TabPlugin,

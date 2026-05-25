@@ -41,6 +41,8 @@ pub mod drag;
 pub mod pane;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod side_sheet;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod space;
 #[allow(dead_code)]
 #[cfg(not(target_arch = "wasm32"))]
 pub mod swap;

@@ -2,7 +2,6 @@
 
 use dioxus::prelude::*;
 use vmux_space::event::{SPACES_LIST_EVENT, SpaceCommandEvent, SpaceRow, SpacesListEvent};
-use vmux_space::model::DEFAULT_SPACE_ID;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 
@@ -34,11 +33,9 @@ pub fn Page() -> Element {
         .iter()
         .find(|space| space.is_active)
         .map(|space| space.name.clone())
-        .unwrap_or_else(|| "Default".to_string());
+        .unwrap_or_else(|| "Space 1".to_string());
     let selected_space_id = spaces.get(sel).map(|space| space.id.clone());
-    let selected_space_deletable = spaces
-        .get(sel)
-        .is_some_and(|space| space.id != DEFAULT_SPACE_ID);
+    let selected_space_deletable = count > 1 && spaces.get(sel).is_some();
 
     rsx! {
         div {
@@ -95,7 +92,7 @@ pub fn Page() -> Element {
                                 key: "{space.id}",
                                 space: space.clone(),
                                 selected: index == sel,
-                                deletable: space.id != DEFAULT_SPACE_ID,
+                                deletable: count > 1,
                             }
                         }
                     }

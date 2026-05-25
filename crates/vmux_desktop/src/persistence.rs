@@ -11,6 +11,7 @@ use vmux_core::PageMetadata;
 use vmux_layout::event::SERVICES_PAGE_URL;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
+use vmux_layout::space::Space;
 use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
@@ -151,11 +152,13 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<Save>()
         .allow::<ChildOf>()
         .allow::<Children>()
+        .allow::<Name>()
         .allow::<Stack>()
         .allow::<Tab>()
         .allow::<Pane>()
         .allow::<PaneSplit>()
         .allow::<PaneSize>()
+        .allow::<Space>()
         .allow::<Profile>()
         .allow::<Open>()
         .allow::<PageMetadata>()
@@ -179,6 +182,8 @@ pub(crate) fn load_space_on_startup(active: Res<ActiveSpace>, mut commands: Comm
     if exists {
         info!("Loading space from {:?}", path);
         commands.trigger_load(LoadWorld::default_from_file(path));
+    } else {
+        commands.spawn(vmux_space::spaces::space_profile_bundle(&active.record));
     }
 }
 
@@ -647,7 +652,7 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.insert_resource(test_settings());
         app.insert_resource(ActiveSpace {
-            record: vmux_space::model::default_space_record(),
+            record: vmux_space::model::bootstrap_space_record(),
         });
         app.init_resource::<Assets<Mesh>>();
         app.init_resource::<Assets<WebviewExtendStandardMaterial>>();

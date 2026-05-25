@@ -268,7 +268,7 @@ mod tests {
         CommandBarSpace {
             id: id.to_string(),
             name: name.to_string(),
-            profile: "default".to_string(),
+            profile: "Personal".to_string(),
             is_active: active,
             tab_count: if active { 3 } else { 0 },
         }
@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn spaces_url_lists_all_spaces() {
         let spaces = vec![
-            space("default", "Default", false),
+            space("space-1", "Space 1", false),
             space("work", "Work", true),
         ];
 
@@ -297,16 +297,16 @@ mod tests {
                     url: SPACES_PAGE_URL.to_string(),
                 },
                 CommandBarResultItem::Space {
-                    id: "default".to_string(),
-                    name: "Default".to_string(),
-                    profile: "default".to_string(),
+                    id: "space-1".to_string(),
+                    name: "Space 1".to_string(),
+                    profile: "Personal".to_string(),
                     is_active: false,
                     tab_count: 0,
                 },
                 CommandBarResultItem::Space {
                     id: "work".to_string(),
                     name: "Work".to_string(),
-                    profile: "default".to_string(),
+                    profile: "Personal".to_string(),
                     is_active: true,
                     tab_count: 3,
                 },
@@ -357,7 +357,7 @@ mod tests {
     #[test]
     fn space_names_are_searchable() {
         let spaces = vec![
-            space("default", "Default", false),
+            space("space-1", "Space 1", false),
             space("client", "Client Work", false),
         ];
         let tabs: Vec<CommandBarTab> = Vec::new();
