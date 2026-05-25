@@ -3,6 +3,9 @@ use std::time::Duration;
 
 use bevy::time::common_conditions::on_timer;
 use bevy_cef::prelude::BinEventEmitterPlugin;
+use vmux_core::{
+    CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
+};
 use vmux_server::{PageConfig, Server};
 
 use crate::event::{
@@ -26,6 +29,7 @@ impl Plugin for HistoryPlugin {
             &PageConfig::with_custom_host("history"),
         );
         app.add_systems(Update, (spawn_visits, broadcast_history_changed).chain());
+        app.add_systems(Update, handle_history_page_open.in_set(PageOpenSet::HandleKnownPages));
         app.add_systems(
             Update,
             prune_history.run_if(on_timer(Duration::from_secs(3600))),
@@ -50,5 +54,27 @@ impl Plugin for HistoryPlugin {
         app.add_observer(on_history_suggestions_request);
 
         app.add_message::<HistoryOpenIntent>();
+        app.add_message::<CefPageAttachRequest>();
+    }
+}
+
+type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
+
+fn handle_history_page_open(
+    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
+    mut attach_writer: MessageWriter<CefPageAttachRequest>,
+    mut commands: Commands,
+) {
+    for (entity, task) in &tasks {
+        if task.url != "vmux://history/" {
+            continue;
+        }
+        attach_writer.write(CefPageAttachRequest {
+            stack: task.stack,
+            url: task.url.clone(),
+            title: "History".to_string(),
+            bg_color: None,
+        });
+        commands.entity(entity).insert(PageOpenHandled);
     }
 }

@@ -9202,6 +9202,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_browser"
+version = "0.0.10"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_cef_core",
+ "chrono",
+ "ron 0.8.1",
+ "vmux_agent",
+ "vmux_command",
+ "vmux_core",
+ "vmux_history",
+ "vmux_layout",
+ "vmux_server",
+ "vmux_service",
+ "vmux_setting",
+ "vmux_space",
+ "vmux_terminal",
+ "vmux_ui",
+]
+
+[[package]]
 name = "vmux_cli"
 version = "0.0.10"
 dependencies = [
@@ -9268,6 +9290,7 @@ dependencies = [
  "url",
  "uuid",
  "vmux_agent",
+ "vmux_browser",
  "vmux_command",
  "vmux_core",
  "vmux_history",
@@ -9465,6 +9488,7 @@ dependencies = [
  "serde",
  "tracing",
  "unicode-width",
+ "url",
  "vmux_command",
  "vmux_core",
  "vmux_history",

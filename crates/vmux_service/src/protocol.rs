@@ -1,6 +1,6 @@
 pub mod layout;
 pub use layout::{
-    Focus, LayoutNode, LayoutSnapshot, NodeKind, Space, SplitDirection, Tab, format_id, parse_id,
+    Focus, LayoutNode, LayoutSnapshot, NodeKind, SplitDirection, Stack, Tab, format_id, parse_id,
 };
 
 use vmux_core::event::{TermCursor, TermLine, TermSelectionRange};
@@ -444,23 +444,23 @@ mod tests {
 
     #[test]
     fn agent_command_update_layout_rkyv_round_trip() {
-        use crate::protocol::layout::{Focus, LayoutNode, LayoutSnapshot, Space};
+        use crate::protocol::layout::{Focus, LayoutNode, LayoutSnapshot, Tab};
         let cmd = AgentCommand::UpdateLayout {
             layout: LayoutSnapshot {
-                spaces: vec![Space {
-                    id: Some("space:1".into()),
+                tabs: vec![Tab {
+                    id: Some("tab:1".into()),
                     name: "X".into(),
                     is_active: true,
                     root: LayoutNode::Pane {
                         id: Some("pane:2".into()),
                         is_zoomed: false,
-                        tabs: vec![],
+                        stacks: vec![],
                     },
                 }],
                 focused: Focus {
-                    space: Some("space:1".into()),
+                    tab: Some("tab:1".into()),
                     pane: Some("pane:2".into()),
-                    tab: None,
+                    stack: None,
                 },
             },
         };
@@ -486,15 +486,15 @@ mod tests {
     #[test]
     fn agent_command_result_layout_rkyv_round_trip() {
         let result = AgentCommandResult::Layout(LayoutSnapshot {
-            spaces: vec![Space {
-                id: Some("space:1".into()),
+            tabs: vec![Tab {
+                id: Some("tab:1".into()),
                 name: "X".into(),
                 is_active: true,
                 root: LayoutNode::Pane {
                     id: Some("pane:2".into()),
                     is_zoomed: false,
-                    tabs: vec![Tab {
-                        id: Some("tab:3".into()),
+                    stacks: vec![Stack {
+                        id: Some("stack:3".into()),
                         title: "T".into(),
                         url: "https://x".into(),
                         kind: "browser".into(),
@@ -504,9 +504,9 @@ mod tests {
                 },
             }],
             focused: Focus {
-                space: Some("space:1".into()),
+                tab: Some("tab:1".into()),
                 pane: Some("pane:2".into()),
-                tab: Some("tab:3".into()),
+                stack: Some("stack:3".into()),
             },
         });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&result).unwrap();

@@ -1,9 +1,9 @@
 use crate::event::SERVICES_PAGE_URL;
 use crate::{
-    LayoutSpawnRequest, NewStackContext,
+    NewStackContext,
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
-    space::Space,
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
+    tab::Tab,
 };
 use bevy::{
     ecs::relationship::Relationship,
@@ -15,6 +15,7 @@ use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, ReadAppCommands, ServiceCommand,
     StackCommand,
 };
+use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_history::LastActivatedAt;
 
 /// Cached result of `focused_stack()`, computed once per frame in `Update`
@@ -123,7 +124,7 @@ pub fn active_stack_in_pane(
 }
 
 pub fn focused_stack(
-    tabs: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: &Query<&Children>,
     leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -138,7 +139,7 @@ pub fn focused_stack(
 
 fn compute_focused_stack(
     mut cached: ResMut<FocusedStack>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -178,7 +179,7 @@ pub fn stack_bundle() -> impl Bundle {
 
 fn handle_stack_commands(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -190,7 +191,7 @@ fn handle_stack_commands(
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
 
     mut new_stack_ctx: ResMut<NewStackContext>,
-    mut spawn_requests: MessageWriter<LayoutSpawnRequest>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
     mut pending_cursor_warp: ResMut<PendingCursorWarp>,
 ) {
@@ -233,9 +234,10 @@ fn handle_stack_commands(
                     bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
                     ..default()
                 });
-                spawn_requests.write(LayoutSpawnRequest::OpenUrl {
-                    stack,
+                page_open_requests.write(PageOpenRequest {
+                    target: PageOpenTarget::Stack(stack),
                     url: SERVICES_PAGE_URL.to_string(),
+                    request_id: None,
                 });
             }
             Dispatch::NewStackUrl(override_url) => {
@@ -251,7 +253,11 @@ fn handle_stack_commands(
                     let stack = commands
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
-                    spawn_requests.write(LayoutSpawnRequest::OpenUrl { stack, url });
+                    page_open_requests.write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(stack),
+                        url,
+                        request_id: None,
+                    });
                 } else {
                     if new_stack_ctx.stack.is_some() {
                         new_stack_ctx.needs_open = true;
@@ -468,7 +474,7 @@ fn handle_stack_commands(
 fn close_tab_if_only_closing_stack(
     tab: Entity,
     closing_stack: Entity,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
     stack_q: &Query<Entity, With<Stack>>,
@@ -504,7 +510,7 @@ fn entity_tree_contains_stack_other_than(
 
 fn sibling_tabs(
     tab: Entity,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
 ) -> Vec<Entity> {
@@ -553,7 +559,7 @@ fn sync_stack_picking(
 }
 
 pub fn open_startup_url_if_no_stacks(
-    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -563,7 +569,7 @@ pub fn open_startup_url_if_no_stacks(
     closing_primary: Query<(), (With<PrimaryWindow>, With<ClosingWindow>)>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     mut new_stack_ctx: ResMut<NewStackContext>,
-    mut spawn_requests: MessageWriter<crate::LayoutSpawnRequest>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
     if !closing_primary.is_empty() {
@@ -595,7 +601,11 @@ pub fn open_startup_url_if_no_stacks(
         new_stack_ctx.previous_stack = None;
         new_stack_ctx.needs_open = true;
     } else {
-        spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl { stack, url });
+        page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url,
+            request_id: None,
+        });
     }
 }
 
@@ -642,9 +652,8 @@ mod tests {
     fn closing_last_tab_opens_command_bar_with_replacement_tab() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<LayoutSpawnRequest>();
+        app.add_message::<PageOpenRequest>();
         app.init_resource::<NewStackContext>();
-        app.add_message::<crate::LayoutSpawnRequest>();
         app.init_resource::<PendingCursorWarp>();
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -654,7 +663,7 @@ mod tests {
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let tab_e = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -693,9 +702,8 @@ mod tests {
     fn closing_last_stack_in_tab_closes_tab_when_another_tab_exists() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<LayoutSpawnRequest>();
+        app.add_message::<PageOpenRequest>();
         app.init_resource::<NewStackContext>();
-        app.add_message::<crate::LayoutSpawnRequest>();
         app.init_resource::<PendingCursorWarp>();
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -705,7 +713,7 @@ mod tests {
         let root = app.world_mut().spawn_empty().id();
         let remaining_tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(1), ChildOf(root)))
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
             .id();
         let remaining_pane = app
             .world_mut()
@@ -719,7 +727,7 @@ mod tests {
 
         let closing_tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(2), ChildOf(root)))
+            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(root)))
             .id();
         let closing_pane = app
             .world_mut()
@@ -750,12 +758,12 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<NewStackContext>();
-        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_message::<PageOpenRequest>();
         app.add_systems(Update, open_startup_url_if_no_stacks);
 
         let old_tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt(1)))
             .id();
         let old_pane = app
             .world_mut()
@@ -766,7 +774,7 @@ mod tests {
 
         let active_tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(2)))
+            .spawn((Tab::default(), LastActivatedAt(2)))
             .id();
         let active_pane = app
             .world_mut()
@@ -791,12 +799,12 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<NewStackContext>();
-        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_message::<PageOpenRequest>();
         app.add_systems(Update, open_startup_url_if_no_stacks);
 
         let tab_e = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt(1)))
             .id();
         let pane_with_stack = app
             .world_mut()
@@ -822,12 +830,12 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<NewStackContext>();
-        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_message::<PageOpenRequest>();
         app.add_systems(Update, open_startup_url_if_no_stacks);
 
         let tab_e = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt(1)))
             .id();
         let pane = app
             .world_mut()
@@ -846,10 +854,10 @@ mod tests {
     }
 
     #[derive(Resource, Default)]
-    struct CollectedSpawns(Vec<LayoutSpawnRequest>);
+    struct CollectedSpawns(Vec<PageOpenRequest>);
 
     fn collect_spawn_requests(
-        mut reader: MessageReader<LayoutSpawnRequest>,
+        mut reader: MessageReader<PageOpenRequest>,
         mut collected: ResMut<CollectedSpawns>,
     ) {
         for req in reader.read() {
@@ -860,9 +868,8 @@ mod tests {
     fn build_app_with_collector() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<LayoutSpawnRequest>();
+        app.add_message::<PageOpenRequest>();
         app.init_resource::<NewStackContext>();
-        app.add_message::<crate::LayoutSpawnRequest>();
         app.init_resource::<PendingCursorWarp>();
         app.insert_resource(test_settings());
         app.init_resource::<Assets<Mesh>>();
@@ -881,7 +888,7 @@ mod tests {
     fn spawn_hierarchy(app: &mut App) -> (Entity, Entity) {
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -910,24 +917,23 @@ mod tests {
         let collected = app.world().resource::<CollectedSpawns>();
         assert_eq!(collected.0.len(), 1, "expected one spawn request");
         match &collected.0[0] {
-            LayoutSpawnRequest::OpenUrl { stack, url } => {
+            PageOpenRequest {
+                target: PageOpenTarget::Stack(stack),
+                url,
+                ..
+            } => {
                 assert_eq!(url, "https://example.com");
                 assert_eq!(
                     app.world().get::<ChildOf>(*stack).map(Relationship::get),
                     Some(pane),
                 );
             }
-            other => panic!("expected OpenUrl, got {other:?}"),
+            other => panic!("expected PageOpenRequest, got {other:?}"),
         }
     }
 
     #[test]
     fn open_in_new_stack_none_url_queues_empty_stack_for_command_bar() {
-        // url: None means the user invoked the shortcut without typing a URL.
-        // Handler spawns an empty stack and stashes it in NewStackContext so the
-        // command bar can open pre-filled. No LayoutSpawnRequest::OpenUrl is
-        // emitted until the user submits a URL (which produces a second
-        // OpenCommand::InNewStack { url: Some(...) } invocation).
         let mut app = build_app_with_collector();
         let (_tab, pane) = spawn_hierarchy(&mut app);
 
@@ -971,11 +977,6 @@ mod tests {
 
         let collected = app.world().resource::<CollectedSpawns>();
         assert_eq!(collected.0.len(), 1);
-        match &collected.0[0] {
-            LayoutSpawnRequest::OpenUrl { url, .. } => {
-                assert_eq!(url, "https://startup.test");
-            }
-            other => panic!("expected OpenUrl, got {other:?}"),
-        }
+        assert_eq!(collected.0[0].url, "https://startup.test");
     }
 }

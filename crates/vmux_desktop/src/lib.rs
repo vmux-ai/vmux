@@ -6,7 +6,6 @@
 )]
 
 mod background_lifecycle;
-mod browser;
 mod os_menu;
 mod persistence;
 
@@ -20,8 +19,8 @@ use bevy::winit::WinitSettings;
 use std::time::Duration;
 
 use {
-    browser::BrowserPlugin, os_menu::OsMenuPlugin, persistence::PersistencePlugin,
-    shortcut::ShortcutPlugin, vmux_command::CommandPlugin, vmux_layout::LayoutPlugin,
+    os_menu::OsMenuPlugin, persistence::PersistencePlugin, shortcut::ShortcutPlugin,
+    vmux_browser::BrowserPlugin, vmux_command::CommandPlugin, vmux_layout::LayoutPlugin,
     vmux_layout::cef::LayoutCefPlugin, vmux_layout::command_bar::plugin::CommandBarPagePlugin,
     vmux_server::ServerPlugin, vmux_service::plugin::ServicePlugin, vmux_setting::SettingsPlugin,
     vmux_space::SpacePlugin, vmux_terminal::TerminalPlugin,

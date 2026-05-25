@@ -16,25 +16,26 @@ use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::open::OpenCommand;
 use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, TabCommand};
+use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt};
 
-pub struct SpacePlugin;
+pub struct TabPlugin;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SpaceCommandSet;
+pub struct TabCommandSet;
 
-impl Plugin for SpacePlugin {
+impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<Space>()
+        app.register_type::<Tab>()
             .add_plugins(BinEventEmitterPlugin::<(TabsCommandEvent,)>::default())
             .add_observer(on_tabs_command_emit)
             .add_systems(
                 Update,
-                handle_space_commands
+                handle_tab_commands
                     .in_set(ReadAppCommands)
-                    .in_set(SpaceCommandSet),
+                    .in_set(TabCommandSet),
             )
-            .add_systems(PostUpdate, sync_space_visibility);
+            .add_systems(PostUpdate, sync_tab_visibility);
     }
 }
 
@@ -42,13 +43,13 @@ impl Plugin for SpacePlugin {
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout::tab"]
 #[require(Save)]
-pub struct Space {
+pub struct Tab {
     pub name: String,
 }
 
-pub fn space_bundle() -> impl Bundle {
+pub fn tab_bundle() -> impl Bundle {
     (
-        Space::default(),
+        Tab::default(),
         Transform::default(),
         GlobalTransform::default(),
         Visibility::default(),
@@ -66,19 +67,19 @@ pub fn space_bundle() -> impl Bundle {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn spawn_new_space(
+fn spawn_new_tab(
     main: Entity,
     pw: Entity,
     name: String,
     settings: &LayoutSettings,
     effective_startup_url: Option<&crate::settings::EffectiveStartupUrl>,
     new_stack_ctx: &mut NewStackContext,
-    spawn_requests: &mut MessageWriter<crate::LayoutSpawnRequest>,
+    page_open_requests: &mut MessageWriter<PageOpenRequest>,
     commands: &mut Commands,
 ) -> Entity {
-    let space_e = commands
+    let tab_e = commands
         .spawn((
-            Space { name },
+            Tab { name },
             Transform::default(),
             GlobalTransform::default(),
             Visibility::default(),
@@ -116,7 +117,7 @@ fn spawn_new_space(
                 row_gap: gap.row_gap,
                 ..default()
             },
-            ChildOf(space_e),
+            ChildOf(tab_e),
         ))
         .id();
 
@@ -150,17 +151,21 @@ fn spawn_new_space(
         new_stack_ctx.stack = Some(stack);
         new_stack_ctx.needs_open = true;
     } else {
-        spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl { stack, url });
+        page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url,
+            request_id: None,
+        });
     }
 
-    space_e
+    tab_e
 }
 
 #[allow(clippy::too_many_arguments)]
-fn handle_space_commands(
+fn handle_tab_commands(
     mut reader: MessageReader<AppCommand>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
-    space_q: Query<Entity, With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: Query<Entity, With<Tab>>,
     main_q: Query<Entity, With<MainNode>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
@@ -168,16 +173,16 @@ fn handle_space_commands(
     settings: Res<LayoutSettings>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     mut new_stack_ctx: ResMut<NewStackContext>,
-    mut spawn_requests: MessageWriter<crate::LayoutSpawnRequest>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let active_space = spaces.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
+        let active_tab = tabs.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
 
         match cmd {
             AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewTab { url })) => {
                 let Ok(main) = main_q.single() else { continue };
-                let count = spaces.iter().count();
+                let count = tabs.iter().count();
                 let name = format!("Tab {}", count + 1);
                 let startup_for_spawn = match url.as_deref() {
                     Some(u) if !u.is_empty() => {
@@ -188,7 +193,7 @@ fn handle_space_commands(
                     }
                     _ => None,
                 };
-                spawn_new_space(
+                spawn_new_tab(
                     main,
                     *primary_window,
                     name,
@@ -197,18 +202,18 @@ fn handle_space_commands(
                         .as_ref()
                         .or(effective_startup_url.as_deref()),
                     &mut new_stack_ctx,
-                    &mut spawn_requests,
+                    &mut page_open_requests,
                     &mut commands,
                 );
             }
             AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) => match tab_cmd {
                 TabCommand::Close => {
-                    let Some(active) = active_space else { continue };
-                    close_space_entity(
+                    let Some(active) = active_tab else { continue };
+                    close_tab_entity(
                         active,
-                        active_space,
-                        spaces.iter().count(),
-                        &space_q,
+                        active_tab,
+                        tabs.iter().count(),
+                        &tab_q,
                         &main_q,
                         *primary_window,
                         &child_of_q,
@@ -216,14 +221,13 @@ fn handle_space_commands(
                         &settings,
                         effective_startup_url.as_deref(),
                         &mut new_stack_ctx,
-                        &mut spawn_requests,
+                        &mut page_open_requests,
                         &mut commands,
                     );
                 }
                 TabCommand::Next | TabCommand::Previous => {
-                    let Some(active) = active_space else { continue };
-                    let siblings =
-                        active_space_siblings(active, &child_of_q, &all_children, &space_q);
+                    let Some(active) = active_tab else { continue };
+                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
                     if siblings.len() <= 1 {
                         continue;
                     }
@@ -250,9 +254,8 @@ fn handle_space_commands(
                 | TabCommand::SelectIndex7
                 | TabCommand::SelectIndex8
                 | TabCommand::SelectLast => {
-                    let Some(active) = active_space else { continue };
-                    let siblings =
-                        active_space_siblings(active, &child_of_q, &all_children, &space_q);
+                    let Some(active) = active_tab else { continue };
+                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
                     if siblings.is_empty() {
                         continue;
                     }
@@ -277,7 +280,7 @@ fn handle_space_commands(
                     }
                 }
                 TabCommand::SwapPrev | TabCommand::SwapNext => {
-                    let Some(active) = active_space else { continue };
+                    let Some(active) = active_tab else { continue };
                     let Ok(co) = child_of_q.get(active) else {
                         continue;
                     };
@@ -288,7 +291,7 @@ fn handle_space_commands(
                     let kind_positions: Vec<usize> = children
                         .iter()
                         .enumerate()
-                        .filter(|(_, e)| space_q.contains(*e))
+                        .filter(|(_, e)| tab_q.contains(*e))
                         .map(|(i, _)| i)
                         .collect();
                     let Some(active_idx) = find_kind_index(active, children, &kind_positions)
@@ -311,11 +314,11 @@ fn handle_space_commands(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn close_space_entity(
+fn close_tab_entity(
     target: Entity,
-    active_space: Option<Entity>,
-    space_count: usize,
-    space_q: &Query<Entity, With<Space>>,
+    active_tab: Option<Entity>,
+    tab_count: usize,
+    tab_q: &Query<Entity, With<Tab>>,
     main_q: &Query<Entity, With<MainNode>>,
     primary_window: Entity,
     child_of_q: &Query<&ChildOf>,
@@ -323,24 +326,24 @@ fn close_space_entity(
     settings: &LayoutSettings,
     effective_startup_url: Option<&crate::settings::EffectiveStartupUrl>,
     new_stack_ctx: &mut NewStackContext,
-    spawn_requests: &mut MessageWriter<crate::LayoutSpawnRequest>,
+    page_open_requests: &mut MessageWriter<PageOpenRequest>,
     commands: &mut Commands,
 ) {
-    let siblings = active_space_siblings(target, child_of_q, all_children, space_q);
+    let siblings = active_tab_siblings(target, child_of_q, all_children, tab_q);
     if siblings.len() <= 1 {
         let Ok(main) = main_q.single() else { return };
-        let name = format!("Tab {}", space_count + 1);
-        spawn_new_space(
+        let name = format!("Tab {}", tab_count + 1);
+        spawn_new_tab(
             main,
             primary_window,
             name,
             settings,
             effective_startup_url,
             new_stack_ctx,
-            spawn_requests,
+            page_open_requests,
             commands,
         );
-    } else if active_space == Some(target)
+    } else if active_tab == Some(target)
         && let Some(next) = pick_after_close(target, &siblings)
     {
         commands.entity(next).insert(LastActivatedAt::now());
@@ -348,11 +351,11 @@ fn close_space_entity(
     commands.entity(target).despawn();
 }
 
-pub fn active_space_siblings(
+pub fn active_tab_siblings(
     active: Entity,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
-    space_q: &Query<Entity, With<Space>>,
+    tab_q: &Query<Entity, With<Tab>>,
 ) -> Vec<Entity> {
     let Ok(co) = child_of_q.get(active) else {
         return vec![active];
@@ -363,7 +366,7 @@ pub fn active_space_siblings(
     };
     children
         .iter()
-        .filter(|e| space_q.contains(*e))
+        .filter(|e| tab_q.contains(*e))
         .collect::<Vec<_>>()
 }
 
@@ -377,14 +380,14 @@ fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
     if target == active { None } else { Some(target) }
 }
 
-fn sync_space_visibility(
-    mut spaces: Query<(Entity, &LastActivatedAt, &mut Node, &mut Visibility), With<Space>>,
+fn sync_tab_visibility(
+    mut tabs: Query<(Entity, &LastActivatedAt, &mut Node, &mut Visibility), With<Tab>>,
 ) {
-    let active = spaces
+    let active = tabs
         .iter()
         .max_by_key(|(_, ts, _, _)| ts.0)
         .map(|(e, _, _, _)| e);
-    for (entity, _, mut node, mut vis) in &mut spaces {
+    for (entity, _, mut node, mut vis) in &mut tabs {
         let is_active = Some(entity) == active;
         let target_display = if is_active {
             Display::Flex
@@ -407,8 +410,8 @@ fn sync_space_visibility(
 
 fn on_tabs_command_emit(
     trigger: On<BinReceive<TabsCommandEvent>>,
-    spaces: Query<(Entity, &LastActivatedAt), With<Space>>,
-    space_q: Query<Entity, With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    tab_q: Query<Entity, With<Tab>>,
     main_q: Query<Entity, With<MainNode>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
@@ -417,11 +420,11 @@ fn on_tabs_command_emit(
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut messages: ResMut<Messages<AppCommand>>,
-    mut spawn_requests: MessageWriter<crate::LayoutSpawnRequest>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
-    let active_space = spaces.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
+    let active_tab = tabs.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
     match evt.command.as_str() {
         "new" => {
             messages.write(AppCommand::Browser(BrowserCommand::Open(
@@ -429,17 +432,14 @@ fn on_tabs_command_emit(
             )));
         }
         "close" => {
-            let target = space_target(
-                evt.tab_id.as_deref(),
-                spaces.iter().map(|(entity, _)| entity),
-            )
-            .or(active_space);
+            let target = tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
+                .or(active_tab);
             let Some(target) = target else { return };
-            close_space_entity(
+            close_tab_entity(
                 target,
-                active_space,
-                spaces.iter().count(),
-                &space_q,
+                active_tab,
+                tabs.iter().count(),
+                &tab_q,
                 &main_q,
                 *primary_window,
                 &child_of_q,
@@ -447,7 +447,7 @@ fn on_tabs_command_emit(
                 &settings,
                 effective_startup_url.as_deref(),
                 &mut new_stack_ctx,
-                &mut spawn_requests,
+                &mut page_open_requests,
                 &mut commands,
             );
         }
@@ -458,7 +458,7 @@ fn on_tabs_command_emit(
             let Ok(bits) = id_str.parse::<u64>() else {
                 return;
             };
-            let Some((target, _)) = spaces.iter().find(|(e, _)| e.to_bits() == bits) else {
+            let Some((target, _)) = tabs.iter().find(|(e, _)| e.to_bits() == bits) else {
                 return;
             };
             commands.entity(target).insert(LastActivatedAt::now());
@@ -467,9 +467,9 @@ fn on_tabs_command_emit(
     }
 }
 
-fn space_target(id: Option<&str>, spaces: impl IntoIterator<Item = Entity>) -> Option<Entity> {
+fn tab_target(id: Option<&str>, tabs: impl IntoIterator<Item = Entity>) -> Option<Entity> {
     let bits = id?.parse::<u64>().ok()?;
-    spaces.into_iter().find(|e| e.to_bits() == bits)
+    tabs.into_iter().find(|e| e.to_bits() == bits)
 }
 
 #[cfg(test)]
@@ -481,12 +481,12 @@ mod tests {
     use vmux_command::CommandPlugin;
 
     #[test]
-    fn space_target_uses_event_tab_id() {
+    fn tab_target_uses_event_tab_id() {
         let target = Entity::from_bits(42);
         let other = Entity::from_bits(7);
         let id = target.to_bits().to_string();
 
-        assert_eq!(space_target(Some(&id), [other, target]), Some(target));
+        assert_eq!(tab_target(Some(&id), [other, target]), Some(target));
     }
 
     fn test_settings() -> LayoutSettings {
@@ -506,10 +506,10 @@ mod tests {
     }
 
     #[derive(Resource, Default)]
-    struct CollectedSpawns(Vec<crate::LayoutSpawnRequest>);
+    struct CollectedSpawns(Vec<PageOpenRequest>);
 
     fn collect_spawn_requests(
-        mut reader: MessageReader<crate::LayoutSpawnRequest>,
+        mut reader: MessageReader<PageOpenRequest>,
         mut collected: ResMut<CollectedSpawns>,
     ) {
         for req in reader.read() {
@@ -521,24 +521,25 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_message::<PageOpenRequest>();
         app.init_resource::<NewStackContext>();
         app.insert_resource(test_settings());
         app.init_resource::<CollectedSpawns>();
         app.add_systems(
             Update,
             (
-                handle_space_commands.in_set(ReadAppCommands),
-                collect_spawn_requests.after(handle_space_commands),
+                handle_tab_commands.in_set(ReadAppCommands),
+                collect_spawn_requests.after(handle_tab_commands),
             ),
         );
         app
     }
 
-    fn spawn_main_and_space(app: &mut App) -> Entity {
+    fn spawn_main_and_tab(app: &mut App) -> Entity {
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let main = app.world_mut().spawn(MainNode).id();
         app.world_mut().spawn((
-            Space {
+            Tab {
                 name: "Tab 1".into(),
             },
             LastActivatedAt::now(),
@@ -549,9 +550,9 @@ mod tests {
     }
 
     #[test]
-    fn open_in_new_tab_explicit_url_spawns_new_space_with_url() {
+    fn open_in_new_tab_explicit_url_spawns_new_tab_with_url() {
         let mut app = build_app();
-        spawn_main_and_space(&mut app);
+        spawn_main_and_tab(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -565,15 +566,10 @@ mod tests {
 
         let collected = app.world().resource::<CollectedSpawns>();
         assert_eq!(collected.0.len(), 1, "expected one spawn request");
-        match &collected.0[0] {
-            crate::LayoutSpawnRequest::OpenUrl { url, .. } => {
-                assert_eq!(url, "https://example.com");
-            }
-            other => panic!("expected OpenUrl, got {other:?}"),
-        }
+        assert_eq!(collected.0[0].url, "https://example.com");
 
-        let space_count = app.world_mut().query::<&Space>().iter(app.world()).count();
-        assert_eq!(space_count, 2, "expected two spaces after InNewTab");
+        let tab_count = app.world_mut().query::<&Tab>().iter(app.world()).count();
+        assert_eq!(tab_count, 2, "expected two tabs after InNewTab");
     }
 
     #[test]
@@ -582,7 +578,7 @@ mod tests {
         app.insert_resource(crate::settings::EffectiveStartupUrl(
             "https://startup.test".into(),
         ));
-        spawn_main_and_space(&mut app);
+        spawn_main_and_tab(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -594,21 +590,16 @@ mod tests {
 
         let collected = app.world().resource::<CollectedSpawns>();
         assert_eq!(collected.0.len(), 1, "expected one spawn request");
-        match &collected.0[0] {
-            crate::LayoutSpawnRequest::OpenUrl { url, .. } => {
-                assert_eq!(url, "https://startup.test");
-            }
-            other => panic!("expected OpenUrl, got {other:?}"),
-        }
+        assert_eq!(collected.0[0].url, "https://startup.test");
     }
 
     #[test]
     fn open_in_new_tab_none_url_no_startup_queues_command_bar_prompt() {
-        // url: None + no startup URL -> spawn_new_space queues the new stack in
+        // url: None + no startup URL -> spawn_new_tab queues the new stack in
         // NewStackContext so the command bar can open pre-filled. No spawn
         // request emitted until the user submits a URL.
         let mut app = build_app();
-        spawn_main_and_space(&mut app);
+        spawn_main_and_tab(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()

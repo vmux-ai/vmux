@@ -6,7 +6,7 @@ use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use std::path::PathBuf;
 
-use crate::browser::Browser;
+use vmux_browser::Browser;
 use vmux_core::PageMetadata;
 use vmux_layout::event::SERVICES_PAGE_URL;
 use vmux_layout::event::TERMINAL_PAGE_URL;
@@ -14,8 +14,8 @@ use vmux_layout::profile::Profile;
 use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
-    space::Space,
     stack::Stack,
+    tab::Tab,
     window::Main,
 };
 use vmux_setting::AppSettings;
@@ -25,47 +25,6 @@ use vmux_space::event::SPACES_PAGE_URL;
 use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
-
-fn run_legacy_migration() {
-    migrate_tab_to_space_type_name(vmux_core::profile::shared_data_dir());
-}
-
-fn migrate_tab_to_space_type_name(root: std::path::PathBuf) {
-    let profiles = root.join("profiles");
-    let Ok(entries) = std::fs::read_dir(&profiles) else {
-        return;
-    };
-    for profile_entry in entries.flatten() {
-        let profile_dir = profile_entry.path();
-        if !profile_dir.is_dir() {
-            continue;
-        }
-        migrate_file(&profile_dir.join("space.ron"));
-        let Ok(space_entries) = std::fs::read_dir(profile_dir.join("spaces")) else {
-            continue;
-        };
-        for space_entry in space_entries.flatten() {
-            let space_dir = space_entry.path();
-            if space_dir.is_dir() {
-                migrate_file(&space_dir.join("space.ron"));
-            }
-        }
-    }
-}
-
-fn migrate_file(path: &std::path::Path) {
-    let Ok(content) = std::fs::read_to_string(path) else {
-        return;
-    };
-    let needle = "vmux_desktop::layout::tab::Tab";
-    if !content.contains(needle) {
-        return;
-    }
-    let migrated = content.replace(needle, "vmux_desktop::layout::tab::Space");
-    if std::fs::write(path, migrated).is_ok() {
-        info!("Migrated Tab -> Space type name in {path:?}");
-    }
-}
 
 pub(crate) struct PersistencePlugin;
 
@@ -80,7 +39,6 @@ impl Plugin for PersistencePlugin {
         .add_message::<vmux_space::SaveSpaceRequest>()
         .add_observer(save_on_default_event)
         .add_observer(load_on_default_event)
-        .add_systems(Startup, run_legacy_migration.before(load_space_on_startup))
         .add_systems(
             Startup,
             load_space_on_startup.in_set(LayoutStartupSet::Persistence),
@@ -139,7 +97,7 @@ fn mark_dirty_on_change(
     mut auto_save: ResMut<AutoSave>,
     added_stacks: Query<(), Added<Stack>>,
     added_panes: Query<(), Added<Pane>>,
-    added_tabs: Query<(), Added<Space>>,
+    added_tabs: Query<(), Added<Tab>>,
     removed_stacks: RemovedComponents<Stack>,
     removed_panes: RemovedComponents<Pane>,
     changed_meta: Query<(), (Changed<PageMetadata>, With<Stack>)>,
@@ -194,7 +152,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<ChildOf>()
         .allow::<Children>()
         .allow::<Stack>()
-        .allow::<Space>()
+        .allow::<Tab>()
         .allow::<Pane>()
         .allow::<PaneSplit>()
         .allow::<PaneSize>()
@@ -213,23 +171,23 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
     commands.trigger_save(save);
 }
 
-/// Check if a session file exists and trigger load on startup.
+/// Check if a space file exists and trigger load on startup.
 pub(crate) fn load_space_on_startup(active: Res<ActiveSpace>, mut commands: Commands) {
     let path = space_path(&active);
     let exists = path.exists();
     commands.insert_resource(SpaceFilePresent(exists));
     if exists {
-        info!("Loading session from {:?}", path);
+        info!("Loading space from {:?}", path);
         commands.trigger_load(LoadWorld::default_from_file(path));
     }
 }
 
 /// Rebuild view components (Node, Transform, Browser, etc.) for entities
-/// that were loaded from session.ron. Loaded entities only have model
+/// that were loaded from space.ron. Loaded entities only have model
 /// components; this system adds the visual layer.
 pub(crate) fn rebuild_space_views(
     main_q: Query<Entity, With<Main>>,
-    tabs_need_view: Query<Entity, (With<Space>, Without<Node>)>,
+    tabs_need_view: Query<Entity, (With<Tab>, Without<Node>)>,
     splits_need_view: Query<(Entity, &PaneSplit), Without<Node>>,
     panes_need_view: Query<Entity, (With<Pane>, Without<PaneSplit>, Without<Node>)>,
     stacks_need_view: Query<
@@ -324,7 +282,6 @@ pub(crate) fn rebuild_space_views(
     // -- Stack: add absolute-fill node + spawn Browser child --
     let mut despawned = std::collections::HashSet::new();
     for (entity, meta, saved_launch) in &stacks_need_view {
-        // Discard empty tabs (no URL, no content) that were saved mid-session
         if meta.url.is_empty() {
             despawned.insert(entity);
             commands.entity(entity).despawn();
@@ -449,7 +406,7 @@ pub(crate) fn rebuild_space_views(
     }
 
     info!(
-        "Rebuilt session views: {} tabs, {} splits, {} panes, {} stacks",
+        "Rebuilt space views: {} tabs, {} splits, {} panes, {} stacks",
         tabs_need_view.iter().count(),
         splits_need_view.iter().count(),
         panes_need_view.iter().count(),
@@ -561,10 +518,7 @@ mod tests {
 
         let main = app.world_mut().spawn(Main).id();
         app.world_mut().spawn(PrimaryWindow);
-        let space = app
-            .world_mut()
-            .spawn((Space::default(), ChildOf(main)))
-            .id();
+        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let saved_url = format!(
             "{}{}",
@@ -687,8 +641,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_loaded_session_rebuilds_browser_views() {
-        let _home = HomeEnvGuard::use_temp_home("runtime-loaded-session-rebuilds-browser-views");
+    fn runtime_loaded_space_rebuilds_browser_views() {
+        let _home = HomeEnvGuard::use_temp_home("runtime-loaded-space-rebuilds-browser-views");
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.insert_resource(test_settings());
@@ -704,10 +658,7 @@ mod tests {
         app.world_mut().spawn(PrimaryWindow);
         app.update();
 
-        let space = app
-            .world_mut()
-            .spawn((Space::default(), ChildOf(main)))
-            .id();
+        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let tab = app
             .world_mut()

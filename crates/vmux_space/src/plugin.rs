@@ -3,8 +3,11 @@ use std::path::{Path, PathBuf};
 use bevy::{ecs::message::MessageReader, prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::TriggerLoad;
-use vmux_core::PageMetadata;
 use vmux_core::profile;
+use vmux_core::{
+    PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet, PageOpenTarget,
+    PageOpenTask,
+};
 use vmux_layout::NewStackContext;
 use vmux_layout::stack::Stack;
 use vmux_server::{PageConfig, PageReady, Server};
@@ -34,11 +37,19 @@ impl Plugin for SpacePlugin {
             .add_systems(
                 Update,
                 respond_spaces_spawn.in_set(vmux_command::ReadAppCommands),
+            )
+            .add_systems(
+                Update,
+                handle_spaces_page_open.in_set(PageOpenSet::HandleKnownPages),
             );
 
         app.add_plugins(BinEventEmitterPlugin::<(SpaceCommandEvent,)>::default())
             .add_observer(on_space_command)
             .add_observer(reset_spaces_sent_marker_on_page_ready)
+            .add_systems(
+                Update,
+                handle_open_in_new_space.in_set(vmux_command::ReadAppCommands),
+            )
             .add_systems(
                 Update,
                 (apply_pending_space_switch, broadcast_spaces_to_views).chain(),
@@ -48,6 +59,42 @@ impl Plugin for SpacePlugin {
                 crate::snapshot_updater::update_spaces_snapshot
                     .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
             );
+    }
+}
+
+type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
+
+fn handle_spaces_page_open(
+    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
+    children_q: Query<&Children>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for (entity, task) in &tasks {
+        if task.url != SPACES_PAGE_URL {
+            continue;
+        }
+        clear_stack_children(task.stack, &children_q, &mut commands);
+        commands.entity(task.stack).insert(PageMetadata {
+            title: "Spaces".to_string(),
+            url: SPACES_PAGE_URL.to_string(),
+            favicon_url: String::new(),
+            bg_color: None,
+        });
+        commands.spawn((
+            Spaces::new(&mut meshes, &mut webview_mt),
+            ChildOf(task.stack),
+        ));
+        commands.entity(entity).insert(PageOpenHandled);
+    }
+}
+
+fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
+    if let Ok(children) = children_q.get(stack) {
+        for child in children.iter() {
+            commands.entity(child).despawn();
+        }
     }
 }
 
@@ -203,7 +250,7 @@ fn apply_pending_space_switch(
         Entity,
         Or<(
             With<vmux_layout::profile::Profile>,
-            With<vmux_layout::space::Space>,
+            With<vmux_layout::tab::Tab>,
             With<vmux_history::Visit>,
         )>,
     >,
@@ -238,7 +285,7 @@ fn apply_pending_space_switch(
             commands.entity(entity).try_despawn();
         }
         let Ok(main) = main_q.single() else { return };
-        let spawned = vmux_layout::window::spawn_default_space_layout(
+        let spawned = vmux_layout::window::spawn_default_tab_layout(
             main,
             *primary_window,
             &mut new_stack_ctx,
@@ -261,7 +308,7 @@ fn spawn_spaces_page_layout(
     focus: Option<&mut vmux_layout::stack::FocusedStack>,
     commands: &mut Commands,
 ) {
-    let spawned = vmux_layout::window::spawn_default_space_layout(
+    let spawned = vmux_layout::window::spawn_default_tab_layout(
         main,
         primary_window,
         new_stack_ctx,
@@ -294,7 +341,7 @@ fn on_space_command(
         Entity,
         Or<(
             With<vmux_layout::profile::Profile>,
-            With<vmux_layout::space::Space>,
+            With<vmux_layout::tab::Tab>,
             With<vmux_history::Visit>,
         )>,
     >,
@@ -304,7 +351,7 @@ fn on_space_command(
     mut focus: Option<ResMut<vmux_layout::stack::FocusedStack>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    mut spawn_requests: Option<MessageWriter<vmux_layout::LayoutSpawnRequest>>,
+    mut spawn_requests: Option<MessageWriter<PageOpenRequest>>,
     mut save_requests: MessageWriter<SaveSpaceRequest>,
     stack_q: Query<(Entity, &PageMetadata), With<Stack>>,
     child_of_q: Query<&ChildOf>,
@@ -334,9 +381,10 @@ fn on_space_command(
                 ChildOf(pane),
             ))
             .id();
-        spawn_requests.write(vmux_layout::LayoutSpawnRequest::OpenUrl {
-            stack,
+        spawn_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
             url: SPACES_PAGE_URL.to_string(),
+            request_id: None,
         });
         return;
     }
@@ -423,7 +471,7 @@ fn on_space_command(
                 &mut commands,
             );
         } else {
-            let spawned = vmux_layout::window::spawn_default_space_layout(
+            let spawned = vmux_layout::window::spawn_default_tab_layout(
                 main,
                 *primary_window,
                 &mut new_stack_ctx,
@@ -435,6 +483,79 @@ fn on_space_command(
                 focus.stack = Some(spawned.stack);
             }
         }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_open_in_new_space(
+    mut reader: MessageReader<vmux_command::AppCommand>,
+    mut active: ResMut<ActiveSpace>,
+    space_entities: Query<
+        Entity,
+        Or<(
+            With<vmux_layout::profile::Profile>,
+            With<vmux_layout::tab::Tab>,
+            With<vmux_history::Visit>,
+        )>,
+    >,
+    main_q: Query<Entity, With<vmux_layout::window::Main>>,
+    primary_window: Single<Entity, With<PrimaryWindow>>,
+    effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
+    mut new_stack_ctx: ResMut<NewStackContext>,
+    mut focus: Option<ResMut<vmux_layout::stack::FocusedStack>>,
+    mut save_requests: MessageWriter<SaveSpaceRequest>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut commands: Commands,
+) {
+    for cmd in reader.read() {
+        let vmux_command::AppCommand::Browser(vmux_command::BrowserCommand::Open(
+            vmux_command::open::OpenCommand::InNewSpace { url },
+        )) = cmd
+        else {
+            continue;
+        };
+
+        let root = profile::shared_data_dir();
+        let mut registry = read_space_registry_from(&root);
+        let name = format!("Space {}", registry.spaces.len() + 1);
+        let record = SpaceRecord {
+            id: unique_space_id(&registry.spaces, &name),
+            name,
+            profile: active.record.profile.clone(),
+        };
+        registry.spaces.push(record.clone());
+        write_space_registry_to(&root, &registry);
+        save_requests.write(SaveSpaceRequest {
+            path: active.layout_path(),
+        });
+        active.record = record;
+        for entity in &space_entities {
+            commands.entity(entity).try_despawn();
+        }
+        let Ok(main) = main_q.single() else { continue };
+        let spawned = vmux_layout::window::spawn_tab_layout(
+            main,
+            *primary_window,
+            vmux_layout::profile::Profile::default_profile(),
+            &mut commands,
+        );
+        if let Some(old_stack) = new_stack_ctx.stack.take() {
+            commands.entity(old_stack).despawn();
+        }
+        new_stack_ctx.previous_stack = None;
+        new_stack_ctx.needs_open = false;
+        new_stack_ctx.dismiss_modal = false;
+        if let Some(focus) = focus.as_deref_mut() {
+            focus.tab = Some(spawned.tab);
+            focus.pane = Some(spawned.pane);
+            focus.stack = Some(spawned.stack);
+        }
+        let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
+        page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(spawned.stack),
+            url: vmux_command::open::handler::resolve_url(url.as_deref(), startup),
+            request_id: None,
+        });
     }
 }
 
@@ -463,7 +584,7 @@ mod tests {
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_layout::{pane::Pane, space::Space, stack::Stack, window::Main};
+    use vmux_layout::{pane::Pane, stack::Stack, tab::Tab, window::Main};
     use vmux_server::Server;
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
@@ -622,10 +743,7 @@ mod tests {
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
-        let space = app
-            .world_mut()
-            .spawn((Space::default(), ChildOf(main)))
-            .id();
+        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let tab = app
             .world_mut()
@@ -683,10 +801,7 @@ mod tests {
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
-        let space = app
-            .world_mut()
-            .spawn((Space::default(), ChildOf(main)))
-            .id();
+        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let tab = app
             .world_mut()
@@ -727,7 +842,7 @@ mod tests {
             app.world().resource::<ActiveSpace>().record,
             default_space_record()
         );
-        let mut tab_query = app.world_mut().query::<&Space>();
+        let mut tab_query = app.world_mut().query::<&Tab>();
         assert_eq!(tab_query.iter(app.world()).count(), 1);
     }
 
@@ -755,10 +870,7 @@ mod tests {
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
-        let old_tab = app
-            .world_mut()
-            .spawn((Space::default(), ChildOf(main)))
-            .id();
+        let old_tab = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(old_tab))).id();
         let tab = app
             .world_mut()
@@ -799,7 +911,7 @@ mod tests {
         assert!(!app.world().resource::<NewStackContext>().needs_open);
         assert!(app.world().resource::<NewStackContext>().stack.is_none());
 
-        let mut tab_query = app.world_mut().query::<&Space>();
+        let mut tab_query = app.world_mut().query::<&Tab>();
         assert_eq!(tab_query.iter(app.world()).count(), 1);
 
         let tabs = {
@@ -843,6 +955,7 @@ mod tests {
             vmux_layout::stack::StackPlugin,
         ));
         app.add_message::<vmux_layout::LayoutSpawnRequest>();
+        app.add_message::<PageOpenRequest>();
         app.add_message::<SaveSpaceRequest>();
         app.add_observer(on_space_command);
         app.init_resource::<vmux_layout::pane::PendingCursorWarp>();
@@ -859,7 +972,7 @@ mod tests {
         let main = app.world_mut().spawn(Main).id();
         let old_tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now(), ChildOf(main)))
+            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(main)))
             .id();
         let pane = app
             .world_mut()

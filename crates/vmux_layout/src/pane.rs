@@ -1,12 +1,12 @@
 use crate::{
     CloseRequiresConfirmation, NewStackContext,
     settings::{ConfirmCloseSettings, LayoutSettings},
-    space::Space,
     stack::{
         CloseConfirmed, PendingStackClose, Stack, active_among, active_pane_in_tab,
         active_stack_in_pane, focused_stack, stack_bundle,
     },
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
+    tab::Tab,
 };
 use bevy::{
     ecs::{
@@ -24,6 +24,7 @@ use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand, ReadAppCommands,
     open::{PaneDirection, PaneOpenMode, PaneTarget},
 };
+use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_history::LastActivatedAt;
 
 /// Marker: pane is waiting for close confirmation dialog.
@@ -135,7 +136,7 @@ pub struct Zoomed {
 fn tab_of(
     leaf: Entity,
     child_of_q: &Query<&ChildOf>,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
 ) -> Option<Entity> {
     let mut cur = leaf;
     loop {
@@ -175,7 +176,7 @@ fn collect_siblings_to_hide(
 
 fn handle_zoom_command(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -455,7 +456,7 @@ pub fn first_stack_in_pane(
 #[derive(bevy::ecs::system::SystemParam)]
 struct PaneStartupContext<'w> {
     effective: Option<Res<'w, crate::settings::EffectiveStartupUrl>>,
-    requests: MessageWriter<'w, crate::LayoutSpawnRequest>,
+    requests: MessageWriter<'w, PageOpenRequest>,
     new_stack_ctx: ResMut<'w, NewStackContext>,
 }
 
@@ -470,7 +471,7 @@ impl PaneStartupContext<'_> {
 
 fn handle_pane_commands(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -551,9 +552,11 @@ fn handle_pane_commands(
                             startup.new_stack_ctx.previous_stack = None;
                             startup.new_stack_ctx.needs_open = true;
                         } else {
-                            startup
-                                .requests
-                                .write(crate::LayoutSpawnRequest::OpenUrl { stack: tab, url });
+                            startup.requests.write(PageOpenRequest {
+                                target: PageOpenTarget::Stack(tab),
+                                url,
+                                request_id: None,
+                            });
                         }
                     }
                     continue;
@@ -825,7 +828,7 @@ fn find_sibling_pane(
 
 fn handle_open_in_pane(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -837,7 +840,7 @@ fn handle_open_in_pane(
     settings: Res<LayoutSettings>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     mut commands: Commands,
-    mut spawn_requests: MessageWriter<crate::LayoutSpawnRequest>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
@@ -917,9 +920,10 @@ fn handle_open_in_pane(
             let new_stack = commands
                 .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
                 .id();
-            spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl {
-                stack: new_stack,
+            page_open_requests.write(PageOpenRequest {
+                target: PageOpenTarget::Stack(new_stack),
                 url: resolved,
+                request_id: None,
             });
             pending_warp.target = Some(target_pane);
         } else {
@@ -928,9 +932,10 @@ fn handle_open_in_pane(
                     let active_stack = active_stack_in_pane(target_pane, &pane_children, &stack_ts)
                         .or_else(|| first_stack_in_pane(target_pane, &pane_children, &tab_filter));
                     if let Some(stack) = active_stack {
-                        spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl {
-                            stack,
+                        page_open_requests.write(PageOpenRequest {
+                            target: PageOpenTarget::Stack(stack),
                             url: resolved,
+                            request_id: None,
                         });
                     }
                 }
@@ -938,9 +943,10 @@ fn handle_open_in_pane(
                     let new_stack = commands
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
                         .id();
-                    spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl {
-                        stack: new_stack,
+                    page_open_requests.write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(new_stack),
                         url: resolved,
+                        request_id: None,
                     });
                 }
             }
@@ -950,7 +956,7 @@ fn handle_open_in_pane(
 
 fn on_pane_select(
     mut reader: MessageReader<AppCommand>,
-    tab_q: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tab_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -1463,10 +1469,7 @@ fn process_pending_pane_closes(world: &mut World) {
             }
             let mut current = pane;
             for _ in 0..10 {
-                if world
-                    .get_entity(current)
-                    .is_ok_and(|e| e.contains::<Space>())
-                {
+                if world.get_entity(current).is_ok_and(|e| e.contains::<Tab>()) {
                     if let Ok(mut entity_mut) = world.get_entity_mut(current) {
                         entity_mut.insert(LastActivatedAt::now());
                     }
@@ -1614,7 +1617,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let split_v = app
             .world_mut()
@@ -1702,7 +1705,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let split_v = app
             .world_mut()
@@ -1752,8 +1755,9 @@ mod tests {
         let _ = app.world().get::<ComputedNode>(b).unwrap();
         let _ = app.world().get::<UiGlobalTransform>(b).unwrap();
 
-        // Make B the active pane
-        app.world_mut().entity_mut(b).insert(LastActivatedAt::now());
+        app.world_mut().entity_mut(a).insert(LastActivatedAt(1));
+        app.world_mut().entity_mut(b).insert(LastActivatedAt(10));
+        app.world_mut().entity_mut(_c).insert(LastActivatedAt(0));
         let prev_a = app.world().get::<LastActivatedAt>(a).unwrap().0;
 
         app.world_mut()
@@ -1783,7 +1787,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let split = app
             .world_mut()
@@ -1858,14 +1862,14 @@ mod tests {
         app.init_resource::<PendingCursorWarp>();
         app.init_resource::<NewStackContext>();
         app.init_resource::<ConfirmCloseSettings>();
-        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_message::<PageOpenRequest>();
         app.insert_resource(test_settings());
         app.add_systems(Update, handle_pane_commands.in_set(WriteAppCommands));
 
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let tab_e = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -1902,7 +1906,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Space::default(),
+                Tab::default(),
                 Zoomed {
                     leaf,
                     hidden: vec![],
@@ -1930,7 +1934,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let split = app
             .world_mut()
@@ -1997,7 +2001,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let split = app
             .world_mut()
@@ -2063,7 +2067,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let only = app
             .world_mut()
@@ -2092,7 +2096,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Space::default(),
+                Tab::default(),
                 Zoomed {
                     leaf: leaf_b,
                     hidden: vec![leaf_a],
@@ -2126,7 +2130,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let split = app
             .world_mut()
@@ -2203,7 +2207,7 @@ mod tests {
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let split = app
             .world_mut()
@@ -2280,7 +2284,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Space::default(),
+                Tab::default(),
                 Zoomed {
                     leaf,
                     hidden: vec![sib],
@@ -2309,7 +2313,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn((
-                Space::default(),
+                Tab::default(),
                 Zoomed {
                     leaf,
                     hidden: vec![sib_a, sib_b],
@@ -2340,7 +2344,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
-        let tab = app.world_mut().spawn(Space::default()).id();
+        let tab = app.world_mut().spawn(Tab::default()).id();
         let split_root = app
             .world_mut()
             .spawn((
@@ -2380,7 +2384,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
-        let tab = app.world_mut().spawn(Space::default()).id();
+        let tab = app.world_mut().spawn(Tab::default()).id();
         let only = app.world_mut().spawn((Pane, ChildOf(tab))).id();
 
         let result = {
@@ -2409,10 +2413,10 @@ mod tests {
     }
 
     #[derive(Resource, Default)]
-    struct InPaneCollectedSpawns(Vec<crate::LayoutSpawnRequest>);
+    struct InPaneCollectedSpawns(Vec<PageOpenRequest>);
 
     fn collect_in_pane_spawns(
-        mut reader: MessageReader<crate::LayoutSpawnRequest>,
+        mut reader: MessageReader<PageOpenRequest>,
         mut collected: ResMut<InPaneCollectedSpawns>,
     ) {
         for req in reader.read() {
@@ -2424,6 +2428,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin));
         app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_message::<PageOpenRequest>();
         app.init_resource::<NewStackContext>();
         app.init_resource::<PendingCursorWarp>();
         app.init_resource::<InPaneCollectedSpawns>();
@@ -2442,7 +2447,7 @@ mod tests {
     fn spawn_single_pane(app: &mut App) -> (Entity, Entity, Entity) {
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -2458,7 +2463,7 @@ mod tests {
     fn spawn_pre_split(app: &mut App) -> (Entity, Entity, Entity, Entity) {
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt(1)))
             .id();
         let split = app
             .world_mut()
@@ -2500,7 +2505,7 @@ mod tests {
 
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let split = app
             .world_mut()
@@ -2565,7 +2570,7 @@ mod tests {
 
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
@@ -2630,7 +2635,11 @@ mod tests {
         let collected = app.world().resource::<InPaneCollectedSpawns>();
         assert_eq!(collected.0.len(), 1);
         match &collected.0[0] {
-            crate::LayoutSpawnRequest::OpenUrl { stack, url } => {
+            PageOpenRequest {
+                target: PageOpenTarget::Stack(stack),
+                url,
+                ..
+            } => {
                 assert_eq!(url, "https://x");
                 let stack_parent = app.world().get::<ChildOf>(*stack).map(|c| c.get()).unwrap();
                 assert_eq!(
@@ -2638,7 +2647,7 @@ mod tests {
                     "new stack should be in the second (right) pane"
                 );
             }
-            other => panic!("expected OpenUrl, got {other:?}"),
+            other => panic!("expected PageOpenRequest, got {other:?}"),
         }
     }
 
@@ -2663,7 +2672,11 @@ mod tests {
         let collected = app.world().resource::<InPaneCollectedSpawns>();
         assert_eq!(collected.0.len(), 1);
         match &collected.0[0] {
-            crate::LayoutSpawnRequest::OpenUrl { stack, url } => {
+            PageOpenRequest {
+                target: PageOpenTarget::Stack(stack),
+                url,
+                ..
+            } => {
                 assert_eq!(url, "https://new");
                 let stack_parent = app.world().get::<ChildOf>(*stack).map(|c| c.get()).unwrap();
                 assert_eq!(
@@ -2671,7 +2684,7 @@ mod tests {
                     "should navigate the existing right pane's stack"
                 );
             }
-            other => panic!("expected OpenUrl, got {other:?}"),
+            other => panic!("expected PageOpenRequest, got {other:?}"),
         }
     }
 
@@ -2696,13 +2709,17 @@ mod tests {
         let collected = app.world().resource::<InPaneCollectedSpawns>();
         assert_eq!(collected.0.len(), 1);
         let new_stack = match &collected.0[0] {
-            crate::LayoutSpawnRequest::OpenUrl { stack, url } => {
+            PageOpenRequest {
+                target: PageOpenTarget::Stack(stack),
+                url,
+                ..
+            } => {
                 assert_eq!(url, "https://x");
                 let stack_parent = app.world().get::<ChildOf>(*stack).map(|c| c.get()).unwrap();
                 assert_eq!(stack_parent, right);
                 *stack
             }
-            other => panic!("expected OpenUrl, got {other:?}"),
+            other => panic!("expected PageOpenRequest, got {other:?}"),
         };
 
         app.update();
@@ -2745,11 +2762,6 @@ mod tests {
 
         let collected = app.world().resource::<InPaneCollectedSpawns>();
         assert_eq!(collected.0.len(), 1);
-        match &collected.0[0] {
-            crate::LayoutSpawnRequest::OpenUrl { url, .. } => {
-                assert_eq!(url, "https://x");
-            }
-            other => panic!("expected OpenUrl, got {other:?}"),
-        }
+        assert_eq!(collected.0[0].url, "https://x");
     }
 }

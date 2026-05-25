@@ -14,8 +14,8 @@ use vmux_layout::{
     cef::Browser,
     event::SERVICES_PAGE_URL,
     pane::{Pane, PaneSplit},
-    space::Space,
     stack::{Stack, focused_stack, stack_bundle},
+    tab::Tab,
     window::WEBVIEW_MESH_DEPTH_BIAS,
 };
 
@@ -178,7 +178,7 @@ fn on_process_navigate(
     trigger: On<BinReceive<ProcessNavigateEvent>>,
     terminals: Query<(Entity, &ProcessId, &ChildOf), With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,

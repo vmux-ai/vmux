@@ -8,8 +8,8 @@ use crate::{
     scene::MainCamera,
     settings::LayoutSettings,
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
-    space::space_bundle,
     stack::stack_bundle,
+    tab::tab_bundle,
     unit::{PIXELS_PER_METER, WindowExt},
 };
 use bevy::{
@@ -61,7 +61,7 @@ impl Plugin for WindowPlugin {
         )
         .add_systems(
             Startup,
-            spawn_default_space.in_set(LayoutStartupSet::DefaultSpace),
+            spawn_default_tab.in_set(LayoutStartupSet::DefaultTab),
         )
         .add_systems(
             Startup,
@@ -369,8 +369,7 @@ fn setup(
     ));
 }
 
-/// Spawns the default session (Profile/Tab/Pane/Stack) if none was loaded.
-fn spawn_default_space(
+fn spawn_default_tab(
     main_q: Query<Entity, With<Main>>,
     profile_q: Query<(), With<Profile>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
@@ -378,33 +377,30 @@ fn spawn_default_space(
     mut new_stack_ctx: ResMut<crate::NewStackContext>,
     mut commands: Commands,
 ) {
-    // If profiles already exist (loaded from session.ron) or a session
-    // file is present (entities may still be arriving from the load
-    // observer), skip default session creation.
     if !profile_q.is_empty() || space_file.as_deref().is_some_and(|s| s.0) {
         return;
     }
 
     let Ok(main) = main_q.single() else { return };
-    spawn_default_space_layout(main, *primary_window, &mut new_stack_ctx, &mut commands);
+    spawn_default_tab_layout(main, *primary_window, &mut new_stack_ctx, &mut commands);
 }
 
-pub struct SpawnedSessionLayout {
+pub struct SpawnedTabLayout {
     pub tab: Entity,
     pub pane: Entity,
     pub stack: Entity,
 }
 
-pub fn spawn_space_layout(
+pub fn spawn_tab_layout(
     main: Entity,
     pw: Entity,
     profile: Profile,
     commands: &mut Commands,
-) -> SpawnedSessionLayout {
+) -> SpawnedTabLayout {
     commands.spawn(profile);
     let tab_e = commands
         .spawn((
-            space_bundle(),
+            tab_bundle(),
             LastActivatedAt::now(),
             CreatedAt::now(),
             ChildOf(main),
@@ -449,20 +445,20 @@ pub fn spawn_space_layout(
             ChildOf(leaf),
         ))
         .id();
-    SpawnedSessionLayout {
+    SpawnedTabLayout {
         tab: tab_e,
         pane: leaf,
         stack,
     }
 }
 
-pub fn spawn_default_space_layout(
+pub fn spawn_default_tab_layout(
     main: Entity,
     pw: Entity,
     new_stack_ctx: &mut crate::NewStackContext,
     commands: &mut Commands,
-) -> SpawnedSessionLayout {
-    let layout = spawn_space_layout(main, pw, Profile::default_profile(), commands);
+) -> SpawnedTabLayout {
+    let layout = spawn_tab_layout(main, pw, Profile::default_profile(), commands);
     new_stack_ctx.stack = Some(layout.stack);
     new_stack_ctx.previous_stack = None;
     new_stack_ctx.needs_open = true;
@@ -755,8 +751,8 @@ mod tests {
     }
 
     #[test]
-    fn default_session_requests_command_bar_open() {
-        let _home = HomeEnvGuard::use_temp_home("default-session");
+    fn default_tab_requests_command_bar_open() {
+        let _home = HomeEnvGuard::use_temp_home("default-tab");
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<crate::NewStackContext>();
@@ -773,7 +769,7 @@ mod tests {
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),
         });
-        app.add_systems(Update, spawn_default_space);
+        app.add_systems(Update, spawn_default_tab);
 
         app.world_mut().spawn(PrimaryWindow);
         app.world_mut().spawn(Main);

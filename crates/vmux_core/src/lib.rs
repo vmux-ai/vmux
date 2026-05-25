@@ -5,12 +5,19 @@ pub use process_id::ProcessId;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod page;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod page_open;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod profile;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod terminal;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod agent;
+#[cfg(not(target_arch = "wasm32"))]
+pub use page_open::{
+    CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,
+    PageOpenTarget, PageOpenTask,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;

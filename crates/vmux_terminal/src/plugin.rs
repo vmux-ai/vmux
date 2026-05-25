@@ -13,8 +13,8 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands};
-use vmux_core::PageMetadata;
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, TerminalSpawnRequest};
+use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
@@ -293,6 +293,10 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
         .add_systems(Update, respawn_shell_on_vibe_exit)
         .add_systems(
             Update,
+            handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
+        )
+        .add_systems(
+            Update,
             spawn_layout_requested_content.after(vmux_layout::stack::StackCommandSet),
         )
         .add_systems(
@@ -314,7 +318,6 @@ fn spawn_layout_requested_content(
     mut reader: MessageReader<LayoutSpawnRequest>,
     settings: Res<AppSettings>,
     active_space: Res<vmux_space::spaces::ActiveSpace>,
-    mut spawn_agent: MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -336,63 +339,123 @@ fn spawn_layout_requested_content(
                     .id();
                 commands.entity(terminal).insert(CefKeyboardTarget);
             }
-            LayoutSpawnRequest::OpenUrl { stack, url } => {
-                spawn_url_into_stack(
-                    *stack,
-                    url,
-                    &mut spawn_agent,
-                    &mut commands,
-                    &mut meshes,
-                    &mut webview_mt,
-                    &settings,
-                );
-            }
         }
     }
 }
 
-fn spawn_url_into_stack(
-    stack: Entity,
-    url: &str,
-    spawn_agent: &mut MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
+type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
+
+fn handle_terminal_page_open(
+    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
+    pid_to_entity: Option<Res<pid::PidToEntity>>,
+    child_of_q: Query<&ChildOf>,
+    children_q: Query<&Children>,
+    settings: Res<AppSettings>,
+    active_space: Res<vmux_space::spaces::ActiveSpace>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for (entity, task) in &tasks {
+        if task.url.starts_with(TERMINAL_PAGE_URL) {
+            match open_terminal_page(
+                task,
+                pid_to_entity.as_deref(),
+                &child_of_q,
+                &children_q,
+                &settings,
+                &active_space,
+                &mut commands,
+                &mut meshes,
+                &mut webview_mt,
+            ) {
+                Ok(()) => {
+                    commands.entity(entity).insert(PageOpenHandled);
+                }
+                Err(message) => {
+                    commands.entity(entity).insert(PageOpenError { message });
+                }
+            }
+        } else if task.url.starts_with(vmux_layout::event::SERVICES_PAGE_URL) {
+            clear_stack_children(task.stack, &children_q, &mut commands);
+            commands.entity(task.stack).insert(PageMetadata {
+                url: vmux_layout::event::SERVICES_PAGE_URL.to_string(),
+                title: "Background Services".to_string(),
+                bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+                ..default()
+            });
+            commands.spawn((
+                ProcessesMonitor::new(&mut meshes, &mut webview_mt),
+                ChildOf(task.stack),
+            ));
+            commands.entity(entity).insert(PageOpenHandled);
+        }
+    }
+}
+
+fn open_terminal_page(
+    task: &PageOpenTask,
+    pid_to_entity: Option<&pid::PidToEntity>,
+    child_of_q: &Query<&ChildOf>,
+    children_q: &Query<&Children>,
+    settings: &AppSettings,
+    active_space: &vmux_space::spaces::ActiveSpace,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) {
-    if url.starts_with(crate::event::TERMINAL_PAGE_URL) {
-        let terminal = commands
-            .spawn((
-                new_terminal_bundle(meshes, webview_mt, settings),
-                ChildOf(stack),
-            ))
-            .id();
-        commands.entity(terminal).insert(CefKeyboardTarget);
-    } else if let Some(kind) = vmux_core::agent::AgentKind::all()
-        .into_iter()
-        .find(|k| url.starts_with(&k.cli_url_prefix()))
-    {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
-        let id_part = url.strip_prefix(&kind.cli_url_prefix()).unwrap_or("");
-        let session_id = (!id_part.is_empty()).then(|| id_part.to_string());
-        spawn_agent.write(vmux_core::agent::SpawnAgentInStackRequest {
-            kind,
-            cwd,
-            session_id,
-            stack,
-        });
-    } else if url.starts_with(vmux_layout::event::SERVICES_PAGE_URL) {
-        commands.spawn((ProcessesMonitor::new(meshes, webview_mt), ChildOf(stack)));
-    } else if url.starts_with(vmux_space::event::SPACES_PAGE_URL) {
-        commands.spawn((
-            vmux_space::spaces::Spaces::new(meshes, webview_mt),
-            ChildOf(stack),
-        ));
+) -> Result<(), String> {
+    let parsed = url::Url::parse(&task.url)
+        .map_err(|e| format!("invalid terminal URL '{}': {e}", task.url))?;
+    let path = parsed.path().trim_start_matches('/');
+    if !path.is_empty() {
+        match path.parse::<u32>() {
+            Ok(pid) => {
+                if let Some(map) = pid_to_entity
+                    && let Some(&entity) = map.0.get(&pid)
+                {
+                    pid::focus_pane_entity(entity, commands, child_of_q);
+                    return Ok(());
+                }
+                warn!("no terminal pane for pid {pid}; spawning new");
+            }
+            Err(_) => return Err(format!("malformed terminal URL '{}'", task.url)),
+        }
+    }
+    let cwd_param = parsed
+        .query_pairs()
+        .find(|(k, _)| k == "cwd")
+        .map(|(_, v)| v.into_owned());
+    let cwd = if let Some(cwd) = cwd_param.as_deref() {
+        vmux_space::cwd::valid_cwd(cwd)?
     } else {
-        let browser_e = commands
-            .spawn((Browser::new(meshes, webview_mt, url), ChildOf(stack)))
-            .id();
-        commands.entity(browser_e).insert(CefKeyboardTarget);
+        Some(vmux_space::cwd::space_dir(&active_space.record.id))
+    };
+    clear_stack_children(task.stack, children_q, commands);
+    let title = cwd
+        .as_ref()
+        .map(|cwd| format!("Terminal ({})", cwd.display()))
+        .unwrap_or_else(|| "Terminal".to_string());
+    commands.entity(task.stack).insert(PageMetadata {
+        url: TERMINAL_PAGE_URL.to_string(),
+        title,
+        bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+        ..default()
+    });
+    let terminal = commands
+        .spawn((
+            new_terminal_bundle_with_cwd(meshes, webview_mt, settings, cwd.as_deref()),
+            ChildOf(task.stack),
+        ))
+        .id();
+    commands.entity(terminal).insert(CefKeyboardTarget);
+    Ok(())
+}
+
+fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
+    if let Ok(children) = children_q.get(stack) {
+        for child in children.iter() {
+            commands.entity(child).despawn();
+        }
     }
 }
 

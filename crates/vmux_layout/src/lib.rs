@@ -41,11 +41,11 @@ pub mod drag;
 pub mod pane;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod side_sheet;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod space;
 #[allow(dead_code)]
 #[cfg(not(target_arch = "wasm32"))]
 pub mod swap;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod tab;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod target;
 #[cfg(not(target_arch = "wasm32"))]
@@ -74,7 +74,7 @@ pub use window::fit_window_to_screen;
 pub enum LayoutStartupSet {
     Window,
     Persistence,
-    DefaultSpace,
+    DefaultTab,
     Post,
 }
 
@@ -105,7 +105,6 @@ pub struct SpaceFilePresent(pub bool);
 #[derive(Message, Clone, Debug)]
 pub enum LayoutSpawnRequest {
     Terminal { stack: Entity },
-    OpenUrl { stack: Entity, url: String },
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -113,6 +112,7 @@ pub enum LayoutSpawnRequest {
 pub struct BrowserNavigateRequest {
     pub url: String,
     pub pane: Option<String>,
+    pub request_id: Option<[u8; 16]>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]

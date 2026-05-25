@@ -4,8 +4,8 @@ use crate::{
     Header,
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
-    space::Space,
     stack::{Stack, active_among, collect_leaf_panes, focused_stack},
+    tab::Tab,
     window::{Main, Modal},
 };
 use bevy::{
@@ -29,11 +29,11 @@ use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
-use vmux_core::PageMetadata;
 use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnTabRequest};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
+use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::{LastActivatedAt, now_millis};
 
 pub(crate) use vmux_core::focus_pane_entity;
@@ -96,7 +96,7 @@ impl Plugin for CommandBarInputPlugin {
                 handle_open_command_bar
                     .in_set(ReadAppCommands)
                     .after(prewarm_command_bar_modal)
-                    .after(crate::space::SpaceCommandSet)
+                    .after(crate::tab::TabCommandSet)
                     .after(crate::stack::StackCommandSet),
             )
             .add_systems(
@@ -336,7 +336,7 @@ fn command_bar_open_request(
                 request.should_toggle = true;
                 request.url_override = Some(String::new());
             }
-            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenUrlInCommandBar)) => {
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPageInCommandBar)) => {
                 request.should_toggle = true;
             }
             AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPathBar)) => {
@@ -387,7 +387,7 @@ fn handle_open_command_bar(
     >,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
     browsers: NonSend<Browsers>,
-    tab_q: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tab_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -790,7 +790,7 @@ fn command_bar_open_payload(
 
 #[derive(SystemParam)]
 struct CommandBarActionQueries<'w, 's> {
-    tab_q: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Space>>,
+    tab_q: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
     all_children: Query<'w, 's, &'static Children>,
     leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
@@ -859,7 +859,7 @@ fn on_command_bar_action(
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut writer_params: ParamSet<(
         MessageWriter<AppCommand>,
-        MessageWriter<crate::LayoutSpawnRequest>,
+        MessageWriter<PageOpenRequest>,
         MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
         MessageWriter<TerminalSpawnRequest>,
         Option<MessageWriter<PageAgentAttachRequest>>,
@@ -946,12 +946,11 @@ fn on_command_bar_action(
                         }
                     }
                 } else if let Some(stack_e) = empty_stack {
-                    writer_params
-                        .p1()
-                        .write(crate::LayoutSpawnRequest::OpenUrl {
-                            stack: stack_e,
-                            url,
-                        });
+                    writer_params.p1().write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(stack_e),
+                        url,
+                        request_id: None,
+                    });
                     new_stack_ctx.stack = None;
                     new_stack_ctx.previous_stack = None;
                     custom_keyboard_restore = true;
@@ -1091,12 +1090,11 @@ fn on_command_bar_action(
                 .map(|p| p.url.clone())
             {
                 if let Some(stack_e) = empty_stack {
-                    writer_params
-                        .p1()
-                        .write(crate::LayoutSpawnRequest::OpenUrl {
-                            stack: stack_e,
-                            url,
-                        });
+                    writer_params.p1().write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(stack_e),
+                        url,
+                        request_id: None,
+                    });
                     new_stack_ctx.stack = None;
                     new_stack_ctx.previous_stack = None;
                     empty_stack = None;
@@ -1235,7 +1233,7 @@ fn on_command_bar_action(
 
 fn close_tab_if_only_pending_stack(
     stack: Entity,
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
     stack_q: &Query<Entity, With<Stack>>,
@@ -1260,7 +1258,7 @@ fn close_tab_if_only_pending_stack(
 
 fn ancestor_tab(
     entity: Entity,
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: &Query<&ChildOf>,
 ) -> Option<Entity> {
     let mut current = entity;
@@ -1289,7 +1287,7 @@ fn entity_tree_contains_stack_other_than(
 
 fn sibling_tabs(
     tab: Entity,
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
 ) -> Vec<Entity> {
@@ -1872,16 +1870,124 @@ mod tests {
     }
 
     #[test]
-    fn open_url_in_command_bar_leaves_url_override_unset_so_current_url_is_prefilled() {
+    fn open_page_in_command_bar_leaves_url_override_unset_so_current_url_is_prefilled() {
         let request = command_bar_open_request(
             [AppCommand::Browser(BrowserCommand::Bar(
-                BrowserBarCommand::OpenUrlInCommandBar,
+                BrowserBarCommand::OpenPageInCommandBar,
             ))],
             "vmux://spaces/",
         );
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, None);
+    }
+
+    #[test]
+    fn dismiss_action_closes_command_bar_modal_in_one_pass() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin));
+        app.add_plugins(crate::stack::StackPlugin);
+        app.add_plugins(CommandBarInputPlugin);
+        app.add_message::<TerminalSpawnRequest>();
+        app.add_message::<ProcessesMonitorSpawnRequest>();
+        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_message::<PageOpenRequest>();
+        app.init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>();
+        app.init_resource::<crate::pane::PendingCursorWarp>();
+        app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
+
+        let modal = app
+            .world_mut()
+            .spawn((
+                Modal,
+                Node {
+                    display: Display::Flex,
+                    ..default()
+                },
+                Visibility::Inherited,
+                CefKeyboardTarget,
+                CommandBarRenderedOpen(1),
+            ))
+            .id();
+
+        app.world_mut()
+            .trigger(BinReceive::<CommandBarActionEvent> {
+                webview: modal,
+                payload: CommandBarActionEvent {
+                    action: "dismiss".to_string(),
+                    value: String::new(),
+                    target: None,
+                },
+            });
+        app.world_mut().flush();
+
+        let vis_after_close = *app.world().get::<Visibility>(modal).unwrap();
+        let display_after_close = app.world().get::<Node>(modal).unwrap().display;
+        let has_kb_after_close = app.world().get::<CefKeyboardTarget>(modal).is_some();
+        let has_rendered_after_close = app.world().get::<CommandBarRenderedOpen>(modal).is_some();
+        let has_painted_after_close = app.world().get::<CommandBarPaintedOpen>(modal).is_some();
+        let has_pending_after_close = app.world().get::<PendingCommandBarReveal>(modal).is_some();
+
+        assert_eq!(
+            vis_after_close,
+            Visibility::Hidden,
+            "modal should be hidden after dismiss"
+        );
+        assert_eq!(
+            display_after_close,
+            Display::None,
+            "modal should have display None after dismiss"
+        );
+        assert!(
+            !has_kb_after_close,
+            "CefKeyboardTarget should be removed after dismiss"
+        );
+        assert!(
+            !has_rendered_after_close,
+            "CommandBarRenderedOpen should be cleared after dismiss"
+        );
+        assert!(
+            !has_painted_after_close,
+            "CommandBarPaintedOpen should be cleared after dismiss"
+        );
+        assert!(
+            !has_pending_after_close,
+            "PendingCommandBarReveal should be cleared after dismiss"
+        );
+
+        app.world_mut()
+            .run_system_once(prewarm_command_bar_modal)
+            .unwrap();
+
+        let vis_after_prewarm = *app.world().get::<Visibility>(modal).unwrap();
+        let display_after_prewarm = app.world().get::<Node>(modal).unwrap().display;
+        let has_kb_after_prewarm = app.world().get::<CefKeyboardTarget>(modal).is_some();
+        let pending_open_id_after_prewarm = app
+            .world()
+            .get::<PendingCommandBarReveal>(modal)
+            .map(|p| p.open_id);
+
+        assert_eq!(
+            vis_after_prewarm,
+            Visibility::Hidden,
+            "modal must stay hidden after prewarm"
+        );
+        assert!(
+            !has_kb_after_prewarm,
+            "CefKeyboardTarget must not return after prewarm"
+        );
+        assert!(
+            !command_bar_modal_is_open(display_after_prewarm, has_kb_after_prewarm),
+            "is_command_bar_open must report false after dismiss + prewarm"
+        );
+        if let Some(open_id) = pending_open_id_after_prewarm {
+            assert_eq!(
+                open_id, 0,
+                "prewarm should re-arm reveal at open_id=0 (which never fires until handle_open_command_bar bumps it)"
+            );
+        }
     }
 
     #[test]

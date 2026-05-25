@@ -10,8 +10,8 @@ use crate::pane::PanePlugin;
 use crate::profile::ProfilePlugin;
 use crate::scene::ScenePlugin;
 use crate::side_sheet::SideSheetLayoutPlugin;
-use crate::space::SpacePlugin;
 use crate::stack::StackPlugin;
+use crate::tab::TabPlugin;
 use crate::toggle::TogglePlugin;
 use crate::webview_reveal::WebviewRevealPlugin;
 use crate::window::WindowPlugin;
@@ -28,6 +28,7 @@ impl Plugin for LayoutPlugin {
         app.init_resource::<NewStackContext>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .add_message::<LayoutSpawnRequest>()
+            .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<vmux_core::agent::RestartAgentPty>()
             .add_message::<BrowserNavigateRequest>()
@@ -43,7 +44,7 @@ impl Plugin for LayoutPlugin {
                 (
                     LayoutStartupSet::Window,
                     LayoutStartupSet::Persistence,
-                    LayoutStartupSet::DefaultSpace,
+                    LayoutStartupSet::DefaultTab,
                     LayoutStartupSet::Post,
                 )
                     .chain(),
@@ -63,7 +64,7 @@ impl Plugin for LayoutPlugin {
             ProfilePlugin,
             ScenePlugin,
             WindowPlugin,
-            SpacePlugin,
+            TabPlugin,
             PanePlugin,
             StackPlugin,
             FocusRingPlugin,

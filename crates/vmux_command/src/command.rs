@@ -195,11 +195,11 @@ pub enum BrowserBarCommand {
     )]
     OpenCommandBar,
     #[menu(
-        id = "browser_open_url_in_command_bar",
-        label = "Edit URL",
+        id = "browser_open_page_in_command_bar",
+        label = "Edit Page",
         accel = "super+l"
     )]
-    OpenUrlInCommandBar,
+    OpenPageInCommandBar,
     #[menu(
         id = "browser_open_path_bar",
         label = "Path Navigator",
