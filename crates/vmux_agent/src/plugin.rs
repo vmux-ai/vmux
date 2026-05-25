@@ -1085,7 +1085,6 @@ mod tests {
             shortcuts: ShortcutSettings::default(),
             terminal: None,
             auto_update: false,
-            startup_url: None,
             agent: vmux_setting::AgentSettings::default(),
         }
     }

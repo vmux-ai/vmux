@@ -273,7 +273,6 @@ mod tests {
             },
             terminal: None,
             auto_update: false,
-            startup_url: None,
             agent: vmux_setting::AgentSettings::default(),
         }
     }

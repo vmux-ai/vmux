@@ -226,7 +226,7 @@ fn build_settings_schema() -> SettingsSchema {
                 id: "general".to_string(),
                 title: "General".to_string(),
                 description: None,
-                synthetic_keys: vec!["auto_update".to_string(), "startup_url".to_string()],
+                synthetic_keys: vec!["auto_update".to_string()],
                 root_path: String::new(),
             },
             SectionSpec {
@@ -256,7 +256,7 @@ fn build_settings_schema() -> SettingsSchema {
                 id: "browser".to_string(),
                 title: "Browser".to_string(),
                 description: None,
-                synthetic_keys: vec![],
+                synthetic_keys: vec!["startup_url".to_string()],
                 root_path: "browser".to_string(),
             },
         ],
@@ -270,11 +270,18 @@ fn build_settings_schema() -> SettingsSchema {
                 },
             ),
             field(
-                "startup_url",
+                "browser",
+                FieldSpec {
+                    order: vec!["startup_url".into()],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "browser.startup_url",
                 FieldSpec {
                     label: Some("Startup URL".into()),
-                    hint: Some("Empty defaults to vmux://vibe/.".into()),
-                    placeholder: Some("vmux://vibe/".into()),
+                    hint: Some("Empty defaults to vmux://agent/.".into()),
+                    placeholder: Some("vmux://agent/".into()),
                     ..Default::default()
                 },
             ),

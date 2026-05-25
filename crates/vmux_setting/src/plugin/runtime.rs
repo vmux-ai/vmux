@@ -26,7 +26,7 @@ pub struct SettingsLoadSet;
 
 #[derive(Clone, Debug, Deserialize, Serialize, Resource)]
 pub struct AppSettings {
-    #[allow(dead_code)]
+    #[serde(default = "default_browser_settings")]
     pub browser: BrowserSettings,
     #[serde(default)]
     pub layout: LayoutSettings,
@@ -36,8 +36,6 @@ pub struct AppSettings {
     pub terminal: Option<TerminalSettings>,
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
-    #[serde(default)]
-    pub startup_url: Option<String>,
     #[serde(default = "default_agent_settings")]
     pub agent: AgentSettings,
 }
@@ -77,10 +75,12 @@ fn default_provider_kind() -> String {
 }
 
 pub fn resolve_startup_url(settings: &AppSettings) -> String {
-    settings
-        .startup_url
-        .clone()
-        .unwrap_or_else(|| vmux_core::agent::AgentKind::Vibe.cli_url_prefix())
+    let url = settings.browser.startup_url.trim();
+    if url.is_empty() {
+        default_browser_startup_url()
+    } else {
+        url.to_string()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -198,8 +198,18 @@ impl KeyComboDef {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BrowserSettings {
-    #[allow(dead_code)]
+    #[serde(default = "default_browser_startup_url")]
     pub startup_url: String,
+}
+
+fn default_browser_settings() -> BrowserSettings {
+    BrowserSettings {
+        startup_url: default_browser_startup_url(),
+    }
+}
+
+fn default_browser_startup_url() -> String {
+    "vmux://agent/".to_string()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -653,7 +663,7 @@ mod tests {
     fn base_settings() -> AppSettings {
         AppSettings {
             browser: BrowserSettings {
-                startup_url: "about:blank".to_string(),
+                startup_url: default_browser_startup_url(),
             },
             layout: LayoutSettings {
                 radius: 0.0,
@@ -671,22 +681,28 @@ mod tests {
             shortcuts: ShortcutSettings::default(),
             terminal: None,
             auto_update: false,
-            startup_url: None,
             agent: crate::plugin::runtime::AgentSettings::default(),
         }
     }
 
     #[test]
-    fn resolve_startup_url_returns_user_override() {
+    fn resolve_startup_url_returns_browser_override() {
         let mut s = base_settings();
-        s.startup_url = Some("vmux://services/".into());
+        s.browser.startup_url = "vmux://services/".into();
         assert_eq!(resolve_startup_url(&s), "vmux://services/");
     }
 
     #[test]
-    fn resolve_startup_url_defaults_to_vibe() {
+    fn resolve_startup_url_defaults_to_agent_page() {
         let s = base_settings();
-        assert_eq!(resolve_startup_url(&s), "vmux://agent/vibe/");
+        assert_eq!(resolve_startup_url(&s), "vmux://agent/");
+    }
+
+    #[test]
+    fn resolve_startup_url_treats_empty_browser_url_as_default() {
+        let mut s = base_settings();
+        s.browser.startup_url.clear();
+        assert_eq!(resolve_startup_url(&s), "vmux://agent/");
     }
 
     #[test]
