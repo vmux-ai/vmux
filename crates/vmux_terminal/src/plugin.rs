@@ -1094,14 +1094,10 @@ fn poll_service_messages(
                     }
                 }
             }
-            ServiceMessage::ProcessExited {
-                process_id,
-                exit_code,
-            } => {
-                writers.process_exited.write(ProcessExitedEvent {
-                    process_id,
-                    exit_code,
-                });
+            ServiceMessage::ProcessExited { process_id, .. } => {
+                writers
+                    .process_exited
+                    .write(ProcessExitedEvent { process_id });
                 mode_map.modes.remove(&process_id);
                 set_local_copy_mode(&mut local_copy_mode, process_id, false);
                 mouse_state.per_process.remove(&process_id);
@@ -2263,8 +2259,6 @@ fn copy_mode_key_exits(key: vmux_service::protocol::CopyModeKey) -> bool {
 #[derive(Message, Debug, Clone)]
 pub struct ProcessExitedEvent {
     pub process_id: ProcessId,
-    #[allow(dead_code)]
-    pub exit_code: Option<i32>,
 }
 
 fn respawn_shell_on_agent_exit_for_entity(

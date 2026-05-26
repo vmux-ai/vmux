@@ -82,7 +82,6 @@ fn tracked_paths(manifest_dir: &Path) -> Vec<PathBuf> {
         "ui.rs",
         "components.rs",
         "util.rs",
-        "cef_bridge.rs",
     ] {
         v.push(manifest_dir.join("src").join(f));
     }

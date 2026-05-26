@@ -399,25 +399,6 @@ pub enum SplitDirection {
     Column,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum Edge {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum LayoutNode {
     Split {
@@ -430,26 +411,5 @@ pub enum LayoutNode {
         id: u64,
         is_active: bool,
         stacks: Vec<StackNode>,
-    },
-}
-
-#[cfg_attr(not(target_arch = "wasm32"), derive(bevy_ecs::message::Message))]
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind")]
-pub enum SideSheetDragCommand {
-    MoveStack {
-        from_pane: u64,
-        from_index: usize,
-        to_pane: u64,
-        to_index: usize,
-    },
-    SwapPane {
-        pane: u64,
-        target: u64,
-    },
-    SplitPane {
-        dragged: u64,
-        target: u64,
-        edge: Edge,
     },
 }

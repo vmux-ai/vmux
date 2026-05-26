@@ -127,10 +127,6 @@ pub struct CommandBarEntry {
 pub struct AppAgentEntry {
     pub id: String,
     pub name: String,
-    #[allow(dead_code)]
-    pub provider: String,
-    #[allow(dead_code)]
-    pub model: String,
 }
 
 pub fn app_agent_id(provider: &str, model: &str) -> String {
@@ -423,8 +419,6 @@ fn handle_open_command_bar(
         .map(|s| AppAgentEntry {
             id: app_agent_id(&s.provider, &s.model),
             name: format!("New {}/{} chat (App)", s.provider, s.model),
-            provider: s.provider.clone(),
-            model: s.model.clone(),
         })
         .collect();
     let mut new_stack_ctx = snapshot_params.p2();
