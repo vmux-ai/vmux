@@ -16,8 +16,6 @@ pub mod cef;
 #[cfg(not(target_arch = "wasm32"))]
 mod focus_ring;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod glass;
-#[cfg(not(target_arch = "wasm32"))]
 mod header;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;

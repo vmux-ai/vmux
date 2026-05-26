@@ -9,7 +9,6 @@ use bevy::{
     },
     picking::Pickable,
     prelude::*,
-    render::alpha::AlphaMode,
 };
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands};
@@ -17,7 +16,6 @@ use vmux_core::terminal::{ProcessesMonitorSpawnRequest, TerminalSpawnRequest};
 use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
 use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
 use vmux_server::{PageConfig, PageReady, Server};
 use vmux_service::{
@@ -585,15 +583,7 @@ pub fn new_terminal_bundle_with_cwd(
             ))),
         ),
         (
-            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                base: StandardMaterial {
-                    unlit: true,
-                    alpha_mode: AlphaMode::Blend,
-                    depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                    ..default()
-                },
-                ..default()
-            })),
+            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
             GlobalTransform::default(),
@@ -683,15 +673,7 @@ pub fn reattach_terminal_bundle(
             ))),
         ),
         (
-            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                base: StandardMaterial {
-                    unlit: true,
-                    alpha_mode: AlphaMode::Blend,
-                    depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                    ..default()
-                },
-                ..default()
-            })),
+            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
             GlobalTransform::default(),

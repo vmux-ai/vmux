@@ -2,7 +2,6 @@ use crate::event::COMMAND_BAR_PAGE_URL;
 use crate::{
     Header, LayoutStartupSet, SpaceFilePresent, TabLayoutSpawnContent, TabLayoutSpawnRequest,
     cef::{Browser, layout_cef_bundle},
-    glass::{GlassCorners, GlassMaterial},
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
     scene::MainCamera,
     settings::LayoutSettings,
@@ -12,10 +11,12 @@ use crate::{
     unit::{PIXELS_PER_METER, WindowExt},
 };
 use bevy::{
-    ecs::relationship::Relationship,
+    asset::{Asset, load_internal_asset, uuid_handle},
+    pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin, StandardMaterial},
     picking::Pickable,
     prelude::*,
-    render::alpha::AlphaMode,
+    render::{alpha::AlphaMode, render_resource::AsBindGroup},
+    shader::ShaderRef,
     ui::{FlexDirection, UiTargetCamera},
     window::PrimaryWindow,
     winit::WINIT_WINDOWS,
@@ -35,6 +36,8 @@ pub const WEBVIEW_Z_SIDE_SHEET: f32 = 0.022;
 pub const WEBVIEW_Z_MODAL: f32 = 0.06;
 pub const WEBVIEW_MESH_DEPTH_BIAS: f32 = 0.0;
 
+const WINDOW_SHADER_HANDLE: Handle<Shader> = uuid_handle!("a3e43dbf-9f06-4d0b-8a17-ef8d5ad4d1f4");
+
 const _: () = {
     assert!(WEBVIEW_Z_MAIN <= 0.025);
     assert!(WEBVIEW_Z_FOCUS_RING > WEBVIEW_Z_MAIN);
@@ -46,53 +49,97 @@ const _: () = {
 
 pub struct WindowPlugin;
 
-fn window_glass_base_color() -> Color {
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone, PartialEq)]
+pub struct WindowCorners {
+    #[uniform(100)]
+    pub clip: Vec4,
+    #[uniform(101)]
+    pub corner_mode: Vec4,
+}
+
+impl Default for WindowCorners {
+    fn default() -> Self {
+        Self {
+            clip: Vec4::new(0.0, 1.0, 1.0, PIXELS_PER_METER),
+            corner_mode: Vec4::ZERO,
+        }
+    }
+}
+
+impl MaterialExtension for WindowCorners {
+    fn fragment_shader() -> ShaderRef {
+        WINDOW_SHADER_HANDLE.into()
+    }
+}
+
+pub type WindowMaterial = ExtendedMaterial<StandardMaterial, WindowCorners>;
+
+fn window_background_color() -> Color {
     Color::srgba(0.13, 0.13, 0.14, 1.0)
+}
+
+fn window_background_material(radius: f32, size_m: Vec2) -> WindowMaterial {
+    WindowMaterial {
+        base: StandardMaterial {
+            base_color: window_background_color(),
+            unlit: true,
+            alpha_mode: AlphaMode::Opaque,
+            cull_mode: None,
+            ..default()
+        },
+        extension: WindowCorners {
+            clip: Vec4::new(radius, size_m.x, size_m.y, PIXELS_PER_METER),
+            ..default()
+        },
+    }
 }
 
 impl Plugin for WindowPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Startup,
-            setup
-                .in_set(LayoutStartupSet::Window)
-                .after(crate::scene::setup)
-                .after(ServerEmbedSet),
-        )
-        .add_systems(
-            Startup,
-            (request_default_layout, spawn_requested_tab_layouts)
-                .chain()
-                .in_set(LayoutStartupSet::DefaultTab),
-        )
-        .add_systems(
-            Startup,
-            (
-                spawn_glass_panes,
-                crate::stack::open_startup_url_if_no_stacks,
-                fit_window_to_screen,
+        load_internal_asset!(app, WINDOW_SHADER_HANDLE, "window.wgsl", Shader::from_wgsl);
+
+        app.add_plugins(MaterialPlugin::<WindowMaterial>::default())
+            .add_systems(
+                Startup,
+                setup
+                    .in_set(LayoutStartupSet::Window)
+                    .after(crate::scene::setup)
+                    .after(ServerEmbedSet),
             )
-                .chain()
-                .in_set(LayoutStartupSet::Post),
-        )
-        .add_systems(
-            PostUpdate,
-            (
-                fit_window_to_screen,
-                sync_glass_pane_clip,
-                sync_window_layout_to_settings,
-                sync_main_column_gap_to_pane_count,
-            ),
-        )
-        .add_systems(
-            Update,
-            (
-                maximize_window_to_screen.run_if(not(resource_exists::<ScreenMaximized>)),
-                crate::stack::open_startup_url_if_no_stacks,
-                spawn_requested_tab_layouts.after(ReadAppCommands),
-            ),
-        )
-        .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
+            .add_systems(
+                Startup,
+                (request_default_layout, spawn_requested_tab_layouts)
+                    .chain()
+                    .in_set(LayoutStartupSet::DefaultTab),
+            )
+            .add_systems(
+                Startup,
+                (
+                    crate::stack::open_startup_url_if_no_stacks,
+                    fit_window_to_screen,
+                )
+                    .chain()
+                    .in_set(LayoutStartupSet::Post),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    fit_window_to_screen,
+                    sync_window_surface_clip,
+                    apply_webview_material_defaults,
+                    sync_window_layout_to_settings,
+                    sync_main_column_gap_to_pane_count,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    maximize_window_to_screen.run_if(not(resource_exists::<ScreenMaximized>)),
+                    crate::stack::open_startup_url_if_no_stacks,
+                    spawn_requested_tab_layouts.after(ReadAppCommands),
+                ),
+            )
+            .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
     }
 }
 
@@ -147,6 +194,7 @@ where
     M: Material,
 {
     marker: VmuxWindow,
+    surface: WindowSurface,
     mesh: Mesh3d,
     material: MeshMaterial3d<M>,
     transform: Transform,
@@ -167,7 +215,7 @@ pub struct MainColumn;
 pub struct Modal;
 
 #[derive(Component)]
-pub struct Glass;
+pub struct WindowSurface;
 
 fn setup(
     window: Single<&Window, With<PrimaryWindow>>,
@@ -176,7 +224,7 @@ fn setup(
     mut commands: Commands,
     settings: Res<LayoutSettings>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<GlassMaterial>>,
+    mut materials: ResMut<Assets<WindowMaterial>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let m = window.meters();
@@ -185,25 +233,12 @@ fn setup(
     let root = commands
         .spawn(WindowBundle {
             marker: VmuxWindow,
+            surface: WindowSurface,
             mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-            material: MeshMaterial3d(materials.add(GlassMaterial {
-                base: StandardMaterial {
-                    base_color: window_glass_base_color(),
-                    unlit: true,
-                    alpha_mode: AlphaMode::Blend,
-                    cull_mode: None,
-                    perceptual_roughness: 0.23,
-                    specular_transmission: 0.9,
-                    diffuse_transmission: 1.0,
-                    thickness: 1.8,
-                    ior: 1.5,
-                    ..default()
-                },
-                extension: GlassCorners {
-                    clip: Vec4::new(settings.radius, m.x, m.y, PIXELS_PER_METER),
-                    ..default()
-                },
-            })),
+            material: MeshMaterial3d(materials.add(window_background_material(
+                settings.radius,
+                Vec2::new(m.x, m.y),
+            ))),
             transform: Transform {
                 translation: Vec3::new(0.0, m.y * 0.5, 0.0),
                 scale: Vec3::new(m.x, m.y, 1.0),
@@ -349,15 +384,7 @@ fn setup(
         ZIndex(3),
         WebviewSource::new(COMMAND_BAR_PAGE_URL),
         Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-        MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-            base: StandardMaterial {
-                unlit: true,
-                alpha_mode: AlphaMode::Blend,
-                depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                ..default()
-            },
-            ..default()
-        })),
+        MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
         WebviewSize(Vec2::new(800.0, 600.0)),
         Transform::default(),
         GlobalTransform::default(),
@@ -503,33 +530,40 @@ pub fn spawn_requested_tab_layouts(
     }
 }
 
-fn spawn_glass_panes() {}
-
-fn sync_glass_pane_clip(
-    q: Query<(&ChildOf, &MeshMaterial3d<GlassMaterial>), With<Glass>>,
-    parent_q: Query<&ComputedNode>,
+fn sync_window_surface_clip(
     settings: Res<LayoutSettings>,
-    mut materials: ResMut<Assets<GlassMaterial>>,
+    mut materials: ResMut<Assets<WindowMaterial>>,
+    q: Query<&MeshMaterial3d<WindowMaterial>, With<WindowSurface>>,
 ) {
-    let r = settings.radius;
-    for (child_of, handle) in &q {
-        let Ok(computed) = parent_q.get(child_of.get()) else {
-            continue;
-        };
-        let size_logical = computed.size * computed.inverse_scale_factor;
-        if size_logical.x <= 0.0 || size_logical.y <= 0.0 {
-            continue;
-        }
-        let w_m = size_logical.x / PIXELS_PER_METER;
-        let h_m = size_logical.y / PIXELS_PER_METER;
+    if !settings.is_changed() {
+        return;
+    }
+    for handle in &q {
         if let Some(mat) = materials.get_mut(handle) {
             let clip = &mut mat.extension.clip;
-            if (clip.x - r).abs() > 0.01
-                || (clip.y - w_m).abs() > 0.01
-                || (clip.z - h_m).abs() > 0.01
-            {
-                *clip = Vec4::new(r, w_m, h_m, PIXELS_PER_METER);
+            if (clip.x - settings.radius).abs() > 0.01 {
+                clip.x = settings.radius;
             }
+        }
+    }
+}
+
+fn apply_webview_material_defaults(
+    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    q: Query<
+        &MeshMaterial3d<WebviewExtendStandardMaterial>,
+        Or<(
+            Added<WebviewSource>,
+            Changed<MeshMaterial3d<WebviewExtendStandardMaterial>>,
+        )>,
+    >,
+) {
+    for handle in &q {
+        if let Some(material) = materials.get_mut(handle) {
+            material.base.unlit = true;
+            material.base.alpha_mode = AlphaMode::Blend;
+            material.base.depth_bias = WEBVIEW_MESH_DEPTH_BIAS;
+            material.base.cull_mode = None;
         }
     }
 }
@@ -643,9 +677,9 @@ fn sync_main_column_gap_to_pane_count(
 pub fn fit_window_to_screen(
     window: Single<&bevy::window::Window, With<PrimaryWindow>>,
     settings: Res<LayoutSettings>,
-    mut materials: ResMut<Assets<GlassMaterial>>,
+    mut materials: ResMut<Assets<WindowMaterial>>,
     mut last_size: Local<Vec2>,
-    mut q: Query<(&mut Transform, &MeshMaterial3d<GlassMaterial>), With<VmuxWindow>>,
+    mut q: Query<(&mut Transform, &MeshMaterial3d<WindowMaterial>), With<VmuxWindow>>,
 ) {
     let m = window.meters();
     if (m.x - last_size.x).abs() < 0.001 && (m.y - last_size.y).abs() < 0.001 {
@@ -668,6 +702,7 @@ pub fn fit_window_to_screen(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::relationship::Relationship;
     use bevy_cef::prelude::WebviewExtendStandardMaterial;
 
     static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -708,11 +743,59 @@ mod tests {
     }
 
     #[test]
-    fn window_glass_uses_dark_finder_style_background() {
+    fn window_uses_dark_finder_style_background() {
         assert_eq!(
-            window_glass_base_color(),
+            window_background_color(),
             Color::srgba(0.13, 0.13, 0.14, 1.0)
         );
+    }
+
+    #[test]
+    fn window_background_material_is_opaque() {
+        let material = window_background_material(12.0, Vec2::new(4.0, 3.0));
+
+        assert_eq!(material.base.alpha_mode, AlphaMode::Opaque);
+        assert_eq!(material.base.cull_mode, None);
+        assert_eq!(material.base.specular_transmission, 0.0);
+        assert_eq!(material.base.diffuse_transmission, 0.0);
+    }
+
+    #[test]
+    fn window_background_material_keeps_corner_clip() {
+        let material = window_background_material(12.0, Vec2::new(4.0, 3.0));
+
+        assert_eq!(
+            material.extension.clip,
+            Vec4::new(12.0, 4.0, 3.0, PIXELS_PER_METER)
+        );
+        assert_eq!(material.extension.corner_mode, Vec4::ZERO);
+    }
+
+    #[test]
+    fn apply_webview_material_defaults_renders_from_both_sides() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, apply_webview_material_defaults);
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
+            .add(WebviewExtendStandardMaterial::default());
+        app.world_mut().spawn((
+            WebviewSource::new("https://example.com/"),
+            MeshMaterial3d(handle.clone()),
+        ));
+        app.update();
+
+        let material = app
+            .world()
+            .resource::<Assets<WebviewExtendStandardMaterial>>()
+            .get(&handle)
+            .expect("webview material");
+
+        assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
+        assert_eq!(material.base.depth_bias, WEBVIEW_MESH_DEPTH_BIAS);
+        assert_eq!(material.base.cull_mode, None);
     }
 
     fn test_settings(gap: f32) -> LayoutSettings {
@@ -736,7 +819,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings(8.0))
             .init_resource::<Assets<Mesh>>()
-            .init_resource::<Assets<GlassMaterial>>()
+            .init_resource::<Assets<WindowMaterial>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>();
         app.world_mut().spawn((
             Window {
@@ -746,7 +829,7 @@ mod tests {
             PrimaryWindow,
         ));
         app.world_mut().spawn(crate::scene::MainCamera);
-        app.add_systems(Startup, (setup, spawn_glass_panes).chain());
+        app.add_systems(Startup, setup);
         app
     }
 
@@ -775,17 +858,17 @@ mod tests {
     }
 
     #[test]
-    fn chrome_panels_do_not_spawn_separate_glass() {
+    fn setup_spawns_one_window_surface() {
         let mut app = setup_window_app();
         app.update();
 
         let count = app
             .world_mut()
-            .query_filtered::<Entity, With<Glass>>()
+            .query_filtered::<Entity, With<WindowSurface>>()
             .iter(app.world())
             .count();
 
-        assert_eq!(count, 0);
+        assert_eq!(count, 1);
     }
 
     #[test]

@@ -2,12 +2,10 @@ use std::path::PathBuf;
 
 use bevy::picking::Pickable;
 use bevy::prelude::*;
-use bevy::render::alpha::AlphaMode;
 use bevy_cef::prelude::*;
 use vmux_server::{PageConfig, Server};
 
 use crate::event::LAYOUT_PAGE_URL;
-use crate::window::WEBVIEW_MESH_DEPTH_BIAS;
 
 #[derive(Component)]
 pub struct Browser;
@@ -114,15 +112,7 @@ impl Browser {
             WebviewSource::new(url),
             ResolvedWebviewUri(url.to_string()),
             Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                base: StandardMaterial {
-                    unlit: true,
-                    alpha_mode: AlphaMode::Blend,
-                    depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                    ..default()
-                },
-                ..default()
-            })),
+            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
             GlobalTransform::default(),
@@ -156,15 +146,7 @@ impl Browser {
             WebviewSource::new(url),
             ResolvedWebviewUri(url.to_string()),
             Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                base: StandardMaterial {
-                    unlit: true,
-                    alpha_mode: AlphaMode::Blend,
-                    depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                    ..default()
-                },
-                ..default()
-            })),
+            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
             GlobalTransform::default(),
@@ -204,15 +186,7 @@ pub fn layout_cef_bundle(
         ZIndex(2),
         WebviewSource::new(LAYOUT_PAGE_URL),
         Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-        MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-            base: StandardMaterial {
-                unlit: true,
-                alpha_mode: AlphaMode::Blend,
-                depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                ..default()
-            },
-            ..default()
-        })),
+        MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
         WebviewSize(Vec2::new(1280.0, 720.0)),
         Transform::default(),
         GlobalTransform::default(),

@@ -1,4 +1,4 @@
-#define_import_path vmux_desktop::display_panel_material
+#define_import_path vmux_layout::window_material
 
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,

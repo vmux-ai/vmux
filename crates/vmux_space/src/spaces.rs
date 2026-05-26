@@ -1,11 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use bevy::{picking::Pickable, prelude::*, render::alpha::AlphaMode};
+use bevy::{picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::profile;
 use vmux_layout::cef::Browser;
-use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
 
 use crate::event::{SPACES_PAGE_URL, SpaceRow};
 use crate::model::{
@@ -117,15 +116,7 @@ impl Spaces {
                 ))),
             ),
             (
-                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                    base: StandardMaterial {
-                        unlit: true,
-                        alpha_mode: AlphaMode::Blend,
-                        depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                        ..default()
-                    },
-                    ..default()
-                })),
+                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
                 WebviewSize(Vec2::new(1280.0, 720.0)),
                 Transform::default(),
                 GlobalTransform::default(),

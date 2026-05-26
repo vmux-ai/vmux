@@ -1,6 +1,4 @@
-use bevy::{
-    ecs::relationship::Relationship, picking::Pickable, prelude::*, render::alpha::AlphaMode,
-};
+use bevy::{ecs::relationship::Relationship, picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
@@ -16,7 +14,6 @@ use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::{Stack, focused_stack, stack_bundle},
     tab::Tab,
-    window::WEBVIEW_MESH_DEPTH_BIAS,
 };
 
 #[derive(Component)]
@@ -45,15 +42,7 @@ impl ProcessesMonitor {
                 ))),
             ),
             (
-                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                    base: StandardMaterial {
-                        unlit: true,
-                        alpha_mode: AlphaMode::Blend,
-                        depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                        ..default()
-                    },
-                    ..default()
-                })),
+                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
                 WebviewSize(Vec2::new(1280.0, 720.0)),
                 Transform::default(),
                 GlobalTransform::default(),
