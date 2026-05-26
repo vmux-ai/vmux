@@ -92,7 +92,7 @@ mod tests {
         assert_eq!(outcome, ReplaceOutcome::AlreadyDead);
     }
 
-    fn spawn_and_detach() -> i32 {
+    fn start_and_detach() -> i32 {
         let child = std::process::Command::new("sleep")
             .arg("60")
             .spawn()
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn graceful_shutdown_when_send_succeeds_and_pid_exits() {
-        let pid = spawn_and_detach();
+        let pid = start_and_detach();
 
         let outcome = replace_running(pid, || {
             unsafe { libc::kill(pid, libc::SIGTERM) };
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn escalates_to_sigterm_when_shutdown_send_fails() {
-        let pid = spawn_and_detach();
+        let pid = start_and_detach();
 
         let outcome = replace_running(pid, || {
             Err(std::io::Error::new(

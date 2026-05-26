@@ -84,7 +84,7 @@ impl Plugin for BrowserPlugin {
                     vmux_layout::apply_chrome_state_from_cef,
                     drain_loading_state,
                     drain_committed_navigation,
-                    spawn_popup_tabs,
+                    spawn_popup_stacks,
                     handle_page_open_requests.in_set(PageOpenSet::ResolveTarget),
                     attach_cef_page_requests.in_set(PageOpenSet::Fallback),
                     handle_unclaimed_page_open_tasks.in_set(PageOpenSet::Fallback),
@@ -685,10 +685,10 @@ fn drain_committed_navigation(
     }
 }
 
-fn spawn_popup_tabs(
+fn spawn_popup_stacks(
     popup_rx: Res<WebviewPopupReceiver>,
     child_of_q: Query<&ChildOf>,
-    tab_q: Query<(), With<Stack>>,
+    stack_q: Query<(), With<Stack>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -698,14 +698,14 @@ fn spawn_popup_tabs(
         if ev.target_url.is_empty() {
             continue;
         }
-        let Ok(tab_co) = child_of_q.get(ev.webview) else {
+        let Ok(stack_co) = child_of_q.get(ev.webview) else {
             continue;
         };
-        let tab = tab_co.get();
-        if !tab_q.contains(tab) {
+        let stack = stack_co.get();
+        if !stack_q.contains(stack) {
             continue;
         }
-        let Ok(pane_co) = child_of_q.get(tab) else {
+        let Ok(pane_co) = child_of_q.get(stack) else {
             continue;
         };
         let pane = pane_co.get();
@@ -1604,10 +1604,11 @@ fn resolve_page_open_target(
         PageOpenTarget::ActiveStack => focus
             .stack
             .or_else(|| {
-                focus
-                    .pane
-                    .filter(|pane| panes.contains(*pane))
-                    .map(|pane| spawn_stack_in_pane(pane, commands))
+                focus.pane.filter(|pane| panes.contains(*pane)).map(|pane| {
+                    commands
+                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                        .id()
+                })
             })
             .ok_or_else(|| "page_open: no focused stack or pane".to_string()),
         PageOpenTarget::Stack(stack) => {
@@ -1623,22 +1624,22 @@ fn resolve_page_open_target(
             }
             Ok(active_stack_in_pane(pane, pane_children, stack_ts)
                 .or_else(|| first_stack_in_pane(pane, pane_children, stack_filter))
-                .unwrap_or_else(|| spawn_stack_in_pane(pane, commands)))
+                .unwrap_or_else(|| {
+                    commands
+                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                        .id()
+                }))
         }
         PageOpenTarget::NewStackInPane(pane) => {
             if panes.contains(pane) {
-                Ok(spawn_stack_in_pane(pane, commands))
+                Ok(commands
+                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                    .id())
             } else {
                 Err("page_open: target pane does not exist".to_string())
             }
         }
     }
-}
-
-fn spawn_stack_in_pane(pane: Entity, commands: &mut Commands) -> Entity {
-    commands
-        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-        .id()
 }
 
 fn attach_cef_page_requests(
@@ -2071,43 +2072,43 @@ mod tests {
         }
 
         fn add_consumer_systems(app: &mut App) {
-            app.add_message::<vmux_layout::BrowserNavigateRequest>();
-            app.add_message::<vmux_layout::BrowserGoBackRequest>();
-            app.add_message::<vmux_layout::BrowserGoForwardRequest>();
-            app.add_message::<vmux_layout::OpenInNewStackRequest>();
-            app.add_message::<PageOpenRequest>();
-            app.add_message::<CefPageAttachRequest>();
-            app.add_message::<vmux_layout::reconcile::LayoutApplyRequest>();
-            app.add_message::<vmux_layout::reconcile::LayoutApplyResponse>();
-            app.add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>();
-            app.add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>();
-            app.add_message::<vmux_terminal::TerminalSendRequest>();
-            app.add_message::<vmux_terminal::RunShellRequest>();
-            app.add_message::<vmux_setting::SettingsWriteRequest>();
-            app.add_message::<vmux_history::query::HistoryOpenIntent>();
-            app.configure_sets(
-                Update,
-                (
-                    PageOpenSet::ResolveTarget,
-                    PageOpenSet::HandleKnownPages,
-                    PageOpenSet::Fallback,
-                    PageOpenSet::Respond,
+            app.add_message::<vmux_layout::BrowserNavigateRequest>()
+                .add_message::<vmux_layout::BrowserGoBackRequest>()
+                .add_message::<vmux_layout::BrowserGoForwardRequest>()
+                .add_message::<vmux_layout::OpenInNewStackRequest>()
+                .add_message::<PageOpenRequest>()
+                .add_message::<CefPageAttachRequest>()
+                .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
+                .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
+                .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
+                .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
+                .add_message::<vmux_terminal::TerminalSendRequest>()
+                .add_message::<vmux_terminal::RunShellRequest>()
+                .add_message::<vmux_setting::SettingsWriteRequest>()
+                .add_message::<vmux_history::query::HistoryOpenIntent>()
+                .configure_sets(
+                    Update,
+                    (
+                        PageOpenSet::ResolveTarget,
+                        PageOpenSet::HandleKnownPages,
+                        PageOpenSet::Fallback,
+                        PageOpenSet::Respond,
+                    )
+                        .chain(),
                 )
-                    .chain(),
-            );
-            app.add_systems(
-                Update,
-                (
-                    crate::handle_browser_navigate_requests,
-                    crate::handle_page_open_requests.in_set(PageOpenSet::ResolveTarget),
-                    handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),
-                    crate::attach_cef_page_requests.in_set(PageOpenSet::Fallback),
-                    crate::handle_unclaimed_page_open_tasks.in_set(PageOpenSet::Fallback),
-                    crate::respond_page_open_tasks.in_set(PageOpenSet::Respond),
-                    vmux_terminal::handle_terminal_send_requests,
-                    vmux_terminal::handle_run_shell_requests,
-                ),
-            );
+                .add_systems(
+                    Update,
+                    (
+                        crate::handle_browser_navigate_requests,
+                        crate::handle_page_open_requests.in_set(PageOpenSet::ResolveTarget),
+                        handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),
+                        crate::attach_cef_page_requests.in_set(PageOpenSet::Fallback),
+                        crate::handle_unclaimed_page_open_tasks.in_set(PageOpenSet::Fallback),
+                        crate::respond_page_open_tasks.in_set(PageOpenSet::Respond),
+                        vmux_terminal::handle_terminal_send_requests,
+                        vmux_terminal::handle_run_shell_requests,
+                    ),
+                );
         }
 
         type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
@@ -2140,12 +2141,12 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
-            app.init_resource::<AgentStrategies>();
-            app.insert_resource(FocusedStack::default());
-            app.insert_resource(test_settings());
-            app.init_resource::<Assets<Mesh>>();
-            app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-            app.init_resource::<CapturedNavigateUrls>();
+            app.init_resource::<AgentStrategies>()
+                .insert_resource(FocusedStack::default())
+                .insert_resource(test_settings())
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+                .init_resource::<CapturedNavigateUrls>();
 
             let pane = app.world_mut().spawn(Pane).id();
             let stack = app
@@ -2188,11 +2189,11 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
-            app.init_resource::<AgentStrategies>();
-            app.insert_resource(FocusedStack::default());
-            app.insert_resource(test_settings());
-            app.init_resource::<Assets<Mesh>>();
-            app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            app.init_resource::<AgentStrategies>()
+                .insert_resource(FocusedStack::default())
+                .insert_resource(test_settings())
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
 
@@ -2244,11 +2245,11 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
-            app.init_resource::<AgentStrategies>();
-            app.insert_resource(FocusedStack::default());
-            app.insert_resource(test_settings());
-            app.init_resource::<Assets<Mesh>>();
-            app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            app.init_resource::<AgentStrategies>()
+                .insert_resource(FocusedStack::default())
+                .insert_resource(test_settings())
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane_a = app.world_mut().spawn(Pane).id();
             let pane_b = app.world_mut().spawn(Pane).id();
@@ -2287,11 +2288,11 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
-            app.init_resource::<AgentStrategies>();
-            app.insert_resource(FocusedStack::default());
-            app.insert_resource(test_settings());
-            app.init_resource::<Assets<Mesh>>();
-            app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            app.init_resource::<AgentStrategies>()
+                .insert_resource(FocusedStack::default())
+                .insert_resource(test_settings())
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
             app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
@@ -2322,11 +2323,11 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
-            app.init_resource::<AgentStrategies>();
-            app.insert_resource(FocusedStack::default());
-            app.insert_resource(test_settings());
-            app.init_resource::<Assets<Mesh>>();
-            app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            app.init_resource::<AgentStrategies>()
+                .insert_resource(FocusedStack::default())
+                .insert_resource(test_settings())
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane_a = app.world_mut().spawn(Pane).id();
             let pane_b = app.world_mut().spawn(Pane).id();
@@ -2370,11 +2371,11 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
-            app.init_resource::<AgentStrategies>();
-            app.insert_resource(FocusedStack::default());
-            app.insert_resource(test_settings());
-            app.init_resource::<Assets<Mesh>>();
-            app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            app.init_resource::<AgentStrategies>()
+                .insert_resource(FocusedStack::default())
+                .insert_resource(test_settings())
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
             app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
@@ -2417,10 +2418,10 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin));
             add_consumer_systems(&mut app);
-            app.insert_resource(FocusedStack::default());
-            app.insert_resource(test_settings());
-            app.init_resource::<Assets<Mesh>>();
-            app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            app.insert_resource(FocusedStack::default())
+                .insert_resource(test_settings())
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
             let stack = app
@@ -2467,11 +2468,11 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
-            app.init_resource::<AgentStrategies>();
-            app.insert_resource(FocusedStack::default());
-            app.insert_resource(test_settings());
-            app.init_resource::<Assets<Mesh>>();
-            app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            app.init_resource::<AgentStrategies>()
+                .insert_resource(FocusedStack::default())
+                .insert_resource(test_settings())
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
             app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
@@ -2507,11 +2508,11 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
-            app.init_resource::<AgentStrategies>();
-            app.insert_resource(FocusedStack::default());
-            app.insert_resource(test_settings());
-            app.init_resource::<Assets<Mesh>>();
-            app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            app.init_resource::<AgentStrategies>()
+                .insert_resource(FocusedStack::default())
+                .insert_resource(test_settings())
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
             app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
@@ -2558,23 +2559,23 @@ mod tests {
 
         fn build_app() -> App {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin));
-            app.add_systems(
-                Update,
-                super::super::handle_browser_commands.in_set(vmux_command::ReadAppCommands),
-            );
-            app.init_resource::<Assets<Mesh>>();
-            app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-            app.init_resource::<CapturedNavigateUrls>();
-            app.add_observer(
-                |trigger: On<RequestNavigate>, mut captured: ResMut<CapturedNavigateUrls>| {
-                    captured.0.push(trigger.url.clone());
-                },
-            );
+            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin))
+                .add_systems(
+                    Update,
+                    super::super::handle_browser_commands.in_set(vmux_command::ReadAppCommands),
+                )
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+                .init_resource::<CapturedNavigateUrls>()
+                .add_observer(
+                    |trigger: On<RequestNavigate>, mut captured: ResMut<CapturedNavigateUrls>| {
+                        captured.0.push(trigger.url.clone());
+                    },
+                );
             app
         }
 
-        fn spawn_focused_stack(app: &mut App) {
+        fn build_focused_stack(app: &mut App) {
             let space = app
                 .world_mut()
                 .spawn((Tab::default(), LastActivatedAt(1)))
@@ -2594,7 +2595,7 @@ mod tests {
         #[test]
         fn in_place_with_explicit_url_triggers_request_navigate() {
             let mut app = build_app();
-            spawn_focused_stack(&mut app);
+            build_focused_stack(&mut app);
 
             app.world_mut()
                 .resource_mut::<Messages<AppCommand>>()
@@ -2616,7 +2617,7 @@ mod tests {
             app.insert_resource(vmux_layout::settings::EffectiveStartupUrl(
                 "https://startup.example".into(),
             ));
-            spawn_focused_stack(&mut app);
+            build_focused_stack(&mut app);
 
             app.world_mut()
                 .resource_mut::<Messages<AppCommand>>()
@@ -2633,7 +2634,7 @@ mod tests {
         #[test]
         fn in_place_with_none_url_and_no_startup_uses_default() {
             let mut app = build_app();
-            spawn_focused_stack(&mut app);
+            build_focused_stack(&mut app);
 
             app.world_mut()
                 .resource_mut::<Messages<AppCommand>>()

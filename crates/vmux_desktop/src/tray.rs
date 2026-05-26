@@ -19,8 +19,8 @@ struct TrayHandle {
 
 impl Plugin for TrayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_tray);
-        app.add_systems(Update, drain_tray_events);
+        app.add_systems(Startup, setup_tray)
+            .add_systems(Update, drain_tray_events);
     }
 }
 

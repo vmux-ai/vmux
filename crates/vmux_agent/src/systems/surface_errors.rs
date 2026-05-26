@@ -45,9 +45,9 @@ mod tests {
 
     fn make_app() -> App {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        app.add_message::<AgentToast>();
-        app.add_systems(Update, surface_errors);
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .add_message::<AgentToast>()
+            .add_systems(Update, surface_errors);
         app
     }
 

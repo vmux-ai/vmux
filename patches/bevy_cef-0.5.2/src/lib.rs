@@ -72,8 +72,8 @@ impl Plugin for CefPlugin {
         ));
         app.insert_resource(bevy_cef_core::prelude::CefDiskProfileRoot(
             self.root_cache_path.clone(),
-        ));
-        app.add_plugins((
+        ))
+        .add_plugins((
             LocalHostPlugin,
             MessageLoopPlugin {
                 config: self.command_line_config.clone(),

@@ -224,21 +224,21 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_plugins(ShortcutPlugin);
-        app.insert_resource(ButtonInput::<KeyCode>::default());
-        app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_plugins(ShortcutPlugin)
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
         app.update();
         app
     }
 
     fn test_app_with_settings(settings: AppSettings) -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_plugins(ShortcutPlugin);
-        app.insert_resource(settings);
-        app.insert_resource(ButtonInput::<KeyCode>::default());
-        app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_plugins(ShortcutPlugin)
+            .insert_resource(settings)
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
         app.update();
         app
     }

@@ -152,8 +152,8 @@ mod tests {
 
     fn make_app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.insert_resource(FocusedStack::default());
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(FocusedStack::default());
         app
     }
 

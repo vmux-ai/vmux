@@ -86,7 +86,7 @@ mod tests {
         None
     }
 
-    fn spawn_mock_strategy(app: &mut App) {
+    fn insert_mock_strategy(app: &mut App) {
         app.world_mut().spawn((
             Strategy,
             StrategyKey {
@@ -115,12 +115,12 @@ mod tests {
 
     fn make_app() -> App {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        app.insert_resource(PageStrategyIndex::default());
-        app.add_observer(on_strategy_added);
-        app.add_observer(on_strategy_removed);
-        app.add_systems(Update, continue_after_tool);
-        spawn_mock_strategy(&mut app);
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .insert_resource(PageStrategyIndex::default())
+            .add_observer(on_strategy_added)
+            .add_observer(on_strategy_removed)
+            .add_systems(Update, continue_after_tool);
+        insert_mock_strategy(&mut app);
         app
     }
 

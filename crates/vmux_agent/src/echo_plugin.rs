@@ -50,10 +50,10 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.insert_resource(PageStrategyIndex::default());
-        app.add_observer(on_strategy_added);
-        app.add_observer(on_strategy_removed);
-        app.add_plugins(EchoPlugin);
+        app.insert_resource(PageStrategyIndex::default())
+            .add_observer(on_strategy_added)
+            .add_observer(on_strategy_removed)
+            .add_plugins(EchoPlugin);
         app
     }
 

@@ -36,7 +36,7 @@ pub fn deliver(request_id: &[u8; 16], result: DispatchResult) {
     }
 }
 
-pub fn spawn_tool_task(
+pub fn start_tool_task(
     call_id: String,
     name: String,
     args: serde_json::Value,

@@ -29,7 +29,7 @@ use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
-use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnTabRequest};
+use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnStackRequest};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
@@ -72,7 +72,7 @@ impl Plugin for CommandBarInputPlugin {
         app.init_resource::<NewStackContext>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<PageAgentAttachRequest>()
-            .add_message::<PageAgentSpawnTabRequest>()
+            .add_message::<PageAgentSpawnStackRequest>()
             .add_message::<vmux_core::agent::PageAgentSpawnDefaultRequest>()
             .add_message::<vmux_core::agent::PageAgentAttachDefaultRequest>()
             .add_message::<SettingsPageSpawnRequest>()
@@ -857,7 +857,7 @@ fn on_command_bar_action(
         MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
         MessageWriter<TerminalSpawnRequest>,
         Option<MessageWriter<PageAgentAttachRequest>>,
-        Option<MessageWriter<PageAgentSpawnTabRequest>>,
+        Option<MessageWriter<PageAgentSpawnStackRequest>>,
         MessageWriter<ProcessesMonitorSpawnRequest>,
         MessageWriter<SpacesPageSpawnRequest>,
     )>,
@@ -1066,7 +1066,7 @@ fn on_command_bar_action(
                     );
                     if let Some(pane_e) = active_pane_opt {
                         if let Some(mut w) = writer_params.p5() {
-                            w.write(PageAgentSpawnTabRequest {
+                            w.write(PageAgentSpawnStackRequest {
                                 pane: pane_e,
                                 provider,
                                 model,
@@ -1571,9 +1571,9 @@ mod tests {
     #[test]
     fn hidden_prewarmed_modal_is_not_command_bar_open() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<CapturedCommandBarOpen>();
-        app.add_systems(Update, capture_command_bar_open);
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<CapturedCommandBarOpen>()
+            .add_systems(Update, capture_command_bar_open);
         app.world_mut().spawn((
             Modal,
             Node {
@@ -1591,8 +1591,8 @@ mod tests {
     #[test]
     fn command_bar_modal_prewarms_hidden_and_renderable() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_systems(Update, prewarm_command_bar_modal);
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, prewarm_command_bar_modal);
         let modal = app
             .world_mut()
             .spawn((
@@ -1624,8 +1624,8 @@ mod tests {
     #[test]
     fn ready_command_bar_modal_still_prewarms_hidden_and_renderable() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_systems(Update, prewarm_command_bar_modal);
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, prewarm_command_bar_modal);
         let modal = app
             .world_mut()
             .spawn((
@@ -1726,12 +1726,12 @@ mod tests {
     #[test]
     fn command_bar_paint_before_rendered_ack_still_allows_reveal() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<RenderTextureMessage>();
-        app.add_systems(
-            Update,
-            (mark_command_bar_painted, reveal_command_bar).chain(),
-        );
+        app.add_plugins(MinimalPlugins)
+            .add_message::<RenderTextureMessage>()
+            .add_systems(
+                Update,
+                (mark_command_bar_painted, reveal_command_bar).chain(),
+            );
 
         let modal = app
             .world_mut()
@@ -1881,16 +1881,16 @@ mod tests {
         use bevy::ecs::system::RunSystemOnce;
 
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_plugins(crate::stack::StackPlugin);
-        app.add_plugins(CommandBarInputPlugin);
-        app.add_message::<TerminalSpawnRequest>();
-        app.add_message::<ProcessesMonitorSpawnRequest>();
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
-        app.init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>();
-        app.init_resource::<crate::pane::PendingCursorWarp>();
-        app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_plugins(crate::stack::StackPlugin)
+            .add_plugins(CommandBarInputPlugin)
+            .add_message::<TerminalSpawnRequest>()
+            .add_message::<ProcessesMonitorSpawnRequest>()
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .init_resource::<crate::pane::PendingCursorWarp>()
+            .insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
 
         let modal = app
             .world_mut()
@@ -1987,9 +1987,9 @@ mod tests {
     #[test]
     fn command_bar_open_runs_after_tab_commands() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_plugins(crate::stack::StackPlugin);
-        app.add_plugins(CommandBarInputPlugin);
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_plugins(crate::stack::StackPlugin)
+            .add_plugins(CommandBarInputPlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
         let mut update = schedules.remove(Update).unwrap();

@@ -179,6 +179,13 @@ pub struct RunShellRequest {
     pub mode: ShellMode,
 }
 
+#[derive(Message, Clone)]
+pub struct TerminalStackSpawnRequest {
+    pub pane: Entity,
+    pub cwd: Option<PathBuf>,
+    pub pending_input: Option<Vec<u8>>,
+}
+
 pub struct TerminalPlugin;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -211,6 +218,7 @@ impl Plugin for TerminalPlugin {
             .register_type::<crate::launch::TerminalKind>()
             .add_message::<TerminalSendRequest>()
             .add_message::<RunShellRequest>()
+            .add_message::<TerminalStackSpawnRequest>()
             .add_message::<TerminalSpawnRequest>()
             .add_message::<ProcessesMonitorSpawnRequest>()
             .init_resource::<pid::PidToEntity>()
@@ -250,7 +258,12 @@ impl Plugin for TerminalPlugin {
         add_terminal_update_systems(app)
             .add_systems(
                 Update,
-                (handle_terminal_send_requests, handle_run_shell_requests).after(ServiceMessageSet),
+                (
+                    handle_terminal_send_requests,
+                    handle_run_shell_requests,
+                    respond_terminal_stack_spawn,
+                )
+                    .after(ServiceMessageSet),
             )
             .add_systems(
                 Update,
@@ -598,44 +611,50 @@ pub fn new_terminal_bundle_with_cwd(
     )
 }
 
-pub fn spawn_terminal_tab(
-    pane: Entity,
-    cwd: Option<&std::path::Path>,
-    pending_input: Option<Vec<u8>>,
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) -> Entity {
-    let tab = commands
-        .spawn((
-            vmux_layout::stack::stack_bundle(),
-            LastActivatedAt::now(),
-            ChildOf(pane),
-        ))
-        .id();
-    let title = cwd
-        .map(|cwd| format!("Terminal ({})", cwd.display()))
-        .unwrap_or_else(|| "Terminal".to_string());
-    commands.entity(tab).insert(PageMetadata {
-        url: TERMINAL_PAGE_URL.to_string(),
-        title,
-        bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
-        ..default()
-    });
-    let terminal = commands
-        .spawn((
-            new_terminal_bundle_with_cwd(meshes, webview_mt, settings, cwd),
-            ChildOf(tab),
-        ))
-        .id();
-    commands.entity(terminal).insert(CefKeyboardTarget);
-    if let Some(data) = pending_input {
-        commands
-            .entity(terminal)
-            .insert(PendingTerminalInput { data });
+fn respond_terminal_stack_spawn(
+    mut reader: MessageReader<TerminalStackSpawnRequest>,
+    settings: Res<AppSettings>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for request in reader.read() {
+        let stack = commands
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                LastActivatedAt::now(),
+                ChildOf(request.pane),
+            ))
+            .id();
+        let title = request
+            .cwd
+            .as_ref()
+            .map(|cwd| format!("Terminal ({})", cwd.display()))
+            .unwrap_or_else(|| "Terminal".to_string());
+        commands.entity(stack).insert(PageMetadata {
+            url: TERMINAL_PAGE_URL.to_string(),
+            title,
+            bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+            ..default()
+        });
+        let terminal = commands
+            .spawn((
+                new_terminal_bundle_with_cwd(
+                    &mut meshes,
+                    &mut webview_mt,
+                    &settings,
+                    request.cwd.as_deref(),
+                ),
+                ChildOf(stack),
+            ))
+            .id();
+        commands.entity(terminal).insert(CefKeyboardTarget);
+        if let Some(data) = request.pending_input.clone() {
+            commands
+                .entity(terminal)
+                .insert(PendingTerminalInput { data });
+        }
     }
-    terminal
 }
 
 pub fn reattach_terminal_bundle(
@@ -2365,10 +2384,8 @@ pub fn handle_run_shell_requests(
         ),
     >,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    settings: Res<AppSettings>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut terminal_stack_spawns: Option<MessageWriter<TerminalStackSpawnRequest>>,
 ) {
     for request in reader.read() {
         let crate::RunShellRequest { command, cwd, mode } = request.clone();
@@ -2379,18 +2396,15 @@ pub fn handle_run_shell_requests(
             commands
                 .entity(terminal)
                 .insert(PendingTerminalInput { data: input });
-        } else if let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane))
+        } else if let Some(terminal_stack_spawns) = terminal_stack_spawns.as_mut()
+            && let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane))
             && let Ok(cwd_path) = vmux_space::cwd::valid_cwd(&cwd)
         {
-            spawn_terminal_tab(
+            terminal_stack_spawns.write(TerminalStackSpawnRequest {
                 pane,
-                cwd_path.as_deref(),
-                Some(input),
-                &mut commands,
-                &mut meshes,
-                &mut webview_mt,
-                &settings,
-            );
+                cwd: cwd_path,
+                pending_input: Some(input),
+            });
         }
     }
 }

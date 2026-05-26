@@ -271,11 +271,11 @@ mod tests {
     #[test]
     fn focus_ring_does_not_capture_pointer_events() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.insert_resource(test_layout_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<FocusRingMaterial>>();
-        app.add_systems(Startup, spawn_focus_ring);
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_layout_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<FocusRingMaterial>>()
+            .add_systems(Startup, spawn_focus_ring);
         app.update();
 
         let pickable = app

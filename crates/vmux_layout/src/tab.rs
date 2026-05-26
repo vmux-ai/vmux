@@ -1,9 +1,6 @@
 use crate::event::TabsCommandEvent;
 use crate::{
-    NewStackContext,
-    pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
-    settings::LayoutSettings,
-    stack::stack_bundle,
+    TabLayoutSpawnContent, TabLayoutSpawnRequest,
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     window::Main as MainNode,
 };
@@ -16,8 +13,7 @@ use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::open::OpenCommand;
 use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, TabCommand};
-use vmux_core::{PageOpenRequest, PageOpenTarget};
-use vmux_history::{CreatedAt, LastActivatedAt};
+use vmux_history::LastActivatedAt;
 
 pub struct TabPlugin;
 
@@ -67,101 +63,6 @@ pub fn tab_bundle() -> impl Bundle {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn spawn_new_tab(
-    main: Entity,
-    pw: Entity,
-    name: String,
-    settings: &LayoutSettings,
-    effective_startup_url: Option<&crate::settings::EffectiveStartupUrl>,
-    new_stack_ctx: &mut NewStackContext,
-    page_open_requests: &mut MessageWriter<PageOpenRequest>,
-    commands: &mut Commands,
-) -> Entity {
-    let tab_e = commands
-        .spawn((
-            Tab { name },
-            Transform::default(),
-            GlobalTransform::default(),
-            Visibility::default(),
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                ..default()
-            },
-            LastActivatedAt::now(),
-            CreatedAt::now(),
-            ChildOf(main),
-        ))
-        .id();
-
-    let gap = pane_split_gaps(PaneSplitDirection::Row, settings.pane.gap);
-    let split_root = commands
-        .spawn((
-            Pane,
-            PaneSplit {
-                direction: PaneSplitDirection::Row,
-            },
-            HostWindow(pw),
-            ZIndex(0),
-            Transform::default(),
-            GlobalTransform::default(),
-            Node {
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                column_gap: gap.column_gap,
-                row_gap: gap.row_gap,
-                ..default()
-            },
-            ChildOf(tab_e),
-        ))
-        .id();
-
-    let leaf = commands
-        .spawn((
-            leaf_pane_bundle(),
-            LastActivatedAt::now(),
-            ChildOf(split_root),
-        ))
-        .id();
-
-    let stack = commands
-        .spawn((
-            stack_bundle(),
-            LastActivatedAt::now(),
-            CreatedAt::now(),
-            ChildOf(leaf),
-        ))
-        .id();
-
-    if let Some(old_stack) = new_stack_ctx.stack.take() {
-        commands.entity(old_stack).despawn();
-    }
-    new_stack_ctx.previous_stack = None;
-    new_stack_ctx.dismiss_modal = false;
-
-    let url = effective_startup_url
-        .map(|u| u.0.clone())
-        .unwrap_or_default();
-    if url.is_empty() {
-        new_stack_ctx.stack = Some(stack);
-        new_stack_ctx.needs_open = true;
-    } else {
-        page_open_requests.write(PageOpenRequest {
-            target: PageOpenTarget::Stack(stack),
-            url,
-            request_id: None,
-        });
-    }
-
-    tab_e
-}
-
-#[allow(clippy::too_many_arguments)]
 fn handle_tab_commands(
     mut reader: MessageReader<AppCommand>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
@@ -170,10 +71,8 @@ fn handle_tab_commands(
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
-    settings: Res<LayoutSettings>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
-    mut new_stack_ctx: ResMut<NewStackContext>,
-    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -184,46 +83,43 @@ fn handle_tab_commands(
                 let Ok(main) = main_q.single() else { continue };
                 let count = tabs.iter().count();
                 let name = format!("Tab {}", count + 1);
-                let startup_for_spawn = match url.as_deref() {
+                let content = match url.as_deref() {
                     Some(u) if !u.is_empty() => {
                         let startup = effective_startup_url.as_deref().map(|s| s.0.as_str());
-                        Some(crate::settings::EffectiveStartupUrl(
-                            vmux_command::open::handler::resolve_url(Some(u), startup),
+                        TabLayoutSpawnContent::Url(vmux_command::open::handler::resolve_url(
+                            Some(u),
+                            startup,
                         ))
                     }
-                    _ => None,
+                    _ => TabLayoutSpawnContent::StartupUrlOrPrompt,
                 };
-                spawn_new_tab(
+                layout_requests.write(TabLayoutSpawnRequest {
                     main,
-                    *primary_window,
-                    name,
-                    &settings,
-                    startup_for_spawn
-                        .as_ref()
-                        .or(effective_startup_url.as_deref()),
-                    &mut new_stack_ctx,
-                    &mut page_open_requests,
-                    &mut commands,
-                );
+                    primary_window: *primary_window,
+                    name: Some(name),
+                    content,
+                    clear_pending_stack: true,
+                    focus: true,
+                });
             }
             AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) => match tab_cmd {
                 TabCommand::Close => {
                     let Some(active) = active_tab else { continue };
-                    close_tab_entity(
-                        active,
-                        active_tab,
-                        tabs.iter().count(),
-                        &tab_q,
-                        &main_q,
-                        *primary_window,
-                        &child_of_q,
-                        &all_children,
-                        &settings,
-                        effective_startup_url.as_deref(),
-                        &mut new_stack_ctx,
-                        &mut page_open_requests,
-                        &mut commands,
-                    );
+                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
+                    if siblings.len() <= 1 {
+                        let Ok(main) = main_q.single() else { continue };
+                        layout_requests.write(TabLayoutSpawnRequest {
+                            main,
+                            primary_window: *primary_window,
+                            name: Some(format!("Tab {}", tabs.iter().count() + 1)),
+                            content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+                            clear_pending_stack: true,
+                            focus: true,
+                        });
+                    } else if let Some(next) = pick_after_close(active, &siblings) {
+                        commands.entity(next).insert(LastActivatedAt::now());
+                    }
+                    commands.entity(active).despawn();
                 }
                 TabCommand::Next | TabCommand::Previous => {
                     let Some(active) = active_tab else { continue };
@@ -313,44 +209,6 @@ fn handle_tab_commands(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn close_tab_entity(
-    target: Entity,
-    active_tab: Option<Entity>,
-    tab_count: usize,
-    tab_q: &Query<Entity, With<Tab>>,
-    main_q: &Query<Entity, With<MainNode>>,
-    primary_window: Entity,
-    child_of_q: &Query<&ChildOf>,
-    all_children: &Query<&Children>,
-    settings: &LayoutSettings,
-    effective_startup_url: Option<&crate::settings::EffectiveStartupUrl>,
-    new_stack_ctx: &mut NewStackContext,
-    page_open_requests: &mut MessageWriter<PageOpenRequest>,
-    commands: &mut Commands,
-) {
-    let siblings = active_tab_siblings(target, child_of_q, all_children, tab_q);
-    if siblings.len() <= 1 {
-        let Ok(main) = main_q.single() else { return };
-        let name = format!("Tab {}", tab_count + 1);
-        spawn_new_tab(
-            main,
-            primary_window,
-            name,
-            settings,
-            effective_startup_url,
-            new_stack_ctx,
-            page_open_requests,
-            commands,
-        );
-    } else if active_tab == Some(target)
-        && let Some(next) = pick_after_close(target, &siblings)
-    {
-        commands.entity(next).insert(LastActivatedAt::now());
-    }
-    commands.entity(target).despawn();
-}
-
 pub fn active_tab_siblings(
     active: Entity,
     child_of_q: &Query<&ChildOf>,
@@ -416,11 +274,8 @@ fn on_tabs_command_emit(
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
-    settings: Res<LayoutSettings>,
-    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
-    mut new_stack_ctx: ResMut<NewStackContext>,
     mut messages: ResMut<Messages<AppCommand>>,
-    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
@@ -435,21 +290,23 @@ fn on_tabs_command_emit(
             let target = tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
                 .or(active_tab);
             let Some(target) = target else { return };
-            close_tab_entity(
-                target,
-                active_tab,
-                tabs.iter().count(),
-                &tab_q,
-                &main_q,
-                *primary_window,
-                &child_of_q,
-                &all_children,
-                &settings,
-                effective_startup_url.as_deref(),
-                &mut new_stack_ctx,
-                &mut page_open_requests,
-                &mut commands,
-            );
+            let siblings = active_tab_siblings(target, &child_of_q, &all_children, &tab_q);
+            if siblings.len() <= 1 {
+                let Ok(main) = main_q.single() else { return };
+                layout_requests.write(TabLayoutSpawnRequest {
+                    main,
+                    primary_window: *primary_window,
+                    name: Some(format!("Tab {}", tabs.iter().count() + 1)),
+                    content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+                    clear_pending_stack: true,
+                    focus: true,
+                });
+            } else if active_tab == Some(target)
+                && let Some(next) = pick_after_close(target, &siblings)
+            {
+                commands.entity(next).insert(LastActivatedAt::now());
+            }
+            commands.entity(target).despawn();
         }
         "switch" => {
             let Some(id_str) = evt.tab_id.as_deref() else {
@@ -475,10 +332,12 @@ fn tab_target(id: Option<&str>, tabs: impl IntoIterator<Item = Entity>) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::NewStackContext;
     use crate::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_command::CommandPlugin;
+    use vmux_core::PageOpenRequest;
 
     #[test]
     fn tab_target_uses_event_tab_id() {
@@ -519,23 +378,26 @@ mod tests {
 
     fn build_app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
-        app.init_resource::<NewStackContext>();
-        app.insert_resource(test_settings());
-        app.init_resource::<CollectedSpawns>();
-        app.add_systems(
-            Update,
-            (
-                handle_tab_commands.in_set(ReadAppCommands),
-                collect_spawn_requests.after(handle_tab_commands),
-            ),
-        );
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<crate::NewStackContext>()
+            .insert_resource(test_settings())
+            .init_resource::<CollectedSpawns>()
+            .add_systems(
+                Update,
+                (
+                    handle_tab_commands.in_set(ReadAppCommands),
+                    crate::window::spawn_requested_tab_layouts,
+                    collect_spawn_requests,
+                )
+                    .chain(),
+            );
         app
     }
 
-    fn spawn_main_and_tab(app: &mut App) -> Entity {
+    fn build_main_and_tab(app: &mut App) -> Entity {
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let main = app.world_mut().spawn(MainNode).id();
         app.world_mut().spawn((
@@ -552,7 +414,7 @@ mod tests {
     #[test]
     fn open_in_new_tab_explicit_url_spawns_new_tab_with_url() {
         let mut app = build_app();
-        spawn_main_and_tab(&mut app);
+        build_main_and_tab(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -578,7 +440,7 @@ mod tests {
         app.insert_resource(crate::settings::EffectiveStartupUrl(
             "https://startup.test".into(),
         ));
-        spawn_main_and_tab(&mut app);
+        build_main_and_tab(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -595,11 +457,8 @@ mod tests {
 
     #[test]
     fn open_in_new_tab_none_url_no_startup_queues_command_bar_prompt() {
-        // url: None + no startup URL -> spawn_new_tab queues the new stack in
-        // NewStackContext so the command bar can open pre-filled. No spawn
-        // request emitted until the user submits a URL.
         let mut app = build_app();
-        spawn_main_and_tab(&mut app);
+        build_main_and_tab(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()

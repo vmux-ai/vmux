@@ -512,13 +512,13 @@ mod tests {
     #[test]
     fn persisted_terminal_tab_reattaches_saved_process() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.init_resource::<vmux_agent::strategy::AgentStrategies>();
-        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
-        app.add_systems(Update, rebuild_space_views);
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .init_resource::<vmux_agent::strategy::AgentStrategies>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+            .add_systems(Update, rebuild_space_views);
 
         let main = app.world_mut().spawn(Main).id();
         app.world_mut().spawn(PrimaryWindow);
@@ -648,15 +648,15 @@ mod tests {
     fn runtime_loaded_space_rebuilds_browser_views() {
         let _home = HomeEnvGuard::use_temp_home("runtime-loaded-space-rebuilds-browser-views");
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.insert_resource(test_settings());
-        app.insert_resource(ActiveSpace {
-            record: vmux_space::model::bootstrap_space_record(),
-        });
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.init_resource::<vmux_agent::strategy::AgentStrategies>();
-        app.add_plugins(PersistencePlugin);
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .insert_resource(ActiveSpace {
+                record: vmux_space::model::bootstrap_space_record(),
+            })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .init_resource::<vmux_agent::strategy::AgentStrategies>()
+            .add_plugins(PersistencePlugin);
 
         let main = app.world_mut().spawn(Main).id();
         app.world_mut().spawn(PrimaryWindow);

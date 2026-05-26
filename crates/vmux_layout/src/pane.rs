@@ -377,32 +377,6 @@ pub fn split_root_bundle(direction: PaneSplitDirection) -> impl Bundle {
     )
 }
 
-fn spawn_leaf_pane(commands: &mut Commands, parent: Entity) -> Entity {
-    commands
-        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
-        .id()
-}
-
-pub fn split_pane_in_two(
-    commands: &mut Commands,
-    active: Entity,
-    direction: PaneSplitDirection,
-    _pane_settings: &crate::settings::PaneSettings,
-    existing_tabs: &[Entity],
-) -> (Entity, Entity) {
-    let pane1 = spawn_leaf_pane(commands, active);
-    let pane2 = spawn_leaf_pane(commands, active);
-
-    for tab in existing_tabs {
-        commands.entity(*tab).insert(ChildOf(pane1));
-    }
-
-    commands.entity(active).insert(split_root_bundle(direction));
-    commands.entity(pane2).insert(LastActivatedAt::now());
-
-    (pane1, pane2)
-}
-
 /// Compute clamped flex_grow values after a resize delta.
 /// Returns (new_pane_grow, new_sibling_grow).
 fn compute_resize(pane_grow: f32, sib_grow: f32, delta: f32, parent_len: f32) -> (f32, f32) {
@@ -541,7 +515,9 @@ fn handle_pane_commands(
                         commands.entity(*primary_window).insert(ClosingWindow);
                     } else {
                         commands.entity(active).despawn();
-                        let leaf = spawn_leaf_pane(&mut commands, parent);
+                        let leaf = commands
+                            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
+                            .id();
                         let tab = commands
                             .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
                             .id();
@@ -837,7 +813,6 @@ fn handle_open_in_pane(
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<Stack>>,
-    settings: Res<LayoutSettings>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
@@ -889,13 +864,17 @@ fn handle_open_in_pane(
                             .get(active)
                             .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                             .unwrap_or_default();
-                        let (_p1, p2) = split_pane_in_two(
-                            &mut commands,
-                            active,
-                            split_dir,
-                            &settings.pane,
-                            &existing_tabs,
-                        );
+                        let pane1 = commands
+                            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
+                            .id();
+                        let p2 = commands
+                            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
+                            .id();
+                        for tab in &existing_tabs {
+                            commands.entity(*tab).insert(ChildOf(pane1));
+                        }
+                        commands.entity(active).insert(split_root_bundle(split_dir));
+                        commands.entity(p2).insert(LastActivatedAt::now());
                         (p2, true)
                     }
                 }
@@ -905,13 +884,17 @@ fn handle_open_in_pane(
                     .get(active)
                     .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                     .unwrap_or_default();
-                let (_p1, p2) = split_pane_in_two(
-                    &mut commands,
-                    active,
-                    split_dir,
-                    &settings.pane,
-                    &existing_tabs,
-                );
+                let pane1 = commands
+                    .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
+                    .id();
+                let p2 = commands
+                    .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
+                    .id();
+                for tab in &existing_tabs {
+                    commands.entity(*tab).insert(ChildOf(pane1));
+                }
+                commands.entity(active).insert(split_root_bundle(split_dir));
+                commands.entity(p2).insert(LastActivatedAt::now());
                 (p2, true)
             }
         };
@@ -1608,11 +1591,11 @@ mod tests {
         // active most recently (B in this test).
         use bevy::ui::{ComputedNode, UiGlobalTransform};
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.init_resource::<PaneHoverIntent>();
-        app.init_resource::<PendingCursorWarp>();
-        app.init_resource::<NewStackContext>();
-        app.add_systems(Update, on_pane_select.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .init_resource::<PaneHoverIntent>()
+            .init_resource::<PendingCursorWarp>()
+            .init_resource::<NewStackContext>()
+            .add_systems(Update, on_pane_select.in_set(WriteAppCommands));
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
@@ -1696,11 +1679,11 @@ mod tests {
         // From B, pressing 'h' should navigate to A (their bounding boxes overlap on Y).
         use bevy::ui::{ComputedNode, UiGlobalTransform};
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.init_resource::<PaneHoverIntent>();
-        app.init_resource::<PendingCursorWarp>();
-        app.init_resource::<NewStackContext>();
-        app.add_systems(Update, on_pane_select.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .init_resource::<PaneHoverIntent>()
+            .init_resource::<PendingCursorWarp>()
+            .init_resource::<NewStackContext>()
+            .add_systems(Update, on_pane_select.in_set(WriteAppCommands));
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
@@ -1778,11 +1761,11 @@ mod tests {
     fn select_left_picks_left_neighbor_in_horizontal_split() {
         use bevy::ui::{ComputedNode, UiGlobalTransform};
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.init_resource::<PaneHoverIntent>();
-        app.init_resource::<PendingCursorWarp>();
-        app.init_resource::<NewStackContext>();
-        app.add_systems(Update, on_pane_select.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .init_resource::<PaneHoverIntent>()
+            .init_resource::<PendingCursorWarp>()
+            .init_resource::<NewStackContext>()
+            .add_systems(Update, on_pane_select.in_set(WriteAppCommands));
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         let tab = app
@@ -1857,14 +1840,14 @@ mod tests {
     #[test]
     fn closing_last_pane_marks_window_closing() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.init_resource::<PaneHoverIntent>();
-        app.init_resource::<PendingCursorWarp>();
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<ConfirmCloseSettings>();
-        app.add_message::<PageOpenRequest>();
-        app.insert_resource(test_settings());
-        app.add_systems(Update, handle_pane_commands.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .init_resource::<PaneHoverIntent>()
+            .init_resource::<PendingCursorWarp>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<ConfirmCloseSettings>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(test_settings())
+            .add_systems(Update, handle_pane_commands.in_set(WriteAppCommands));
 
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let tab_e = app
@@ -1922,13 +1905,13 @@ mod tests {
     #[test]
     fn zoom_command_inserts_zoomed_with_correct_hidden_set() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.init_resource::<PaneHoverIntent>();
-        app.init_resource::<PendingCursorWarp>();
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<ConfirmCloseSettings>();
-        app.insert_resource(test_settings());
-        app.add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .init_resource::<PaneHoverIntent>()
+            .init_resource::<PendingCursorWarp>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<ConfirmCloseSettings>()
+            .insert_resource(test_settings())
+            .add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
         register_zoom_hooks(&mut app);
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
@@ -1989,13 +1972,13 @@ mod tests {
     #[test]
     fn zoom_command_on_zoomed_tab_removes_zoomed() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.init_resource::<PaneHoverIntent>();
-        app.init_resource::<PendingCursorWarp>();
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<ConfirmCloseSettings>();
-        app.insert_resource(test_settings());
-        app.add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .init_resource::<PaneHoverIntent>()
+            .init_resource::<PendingCursorWarp>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<ConfirmCloseSettings>()
+            .insert_resource(test_settings())
+            .add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
         register_zoom_hooks(&mut app);
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
@@ -2055,13 +2038,13 @@ mod tests {
     #[test]
     fn zoom_command_on_single_pane_tab_is_noop() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.init_resource::<PaneHoverIntent>();
-        app.init_resource::<PendingCursorWarp>();
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<ConfirmCloseSettings>();
-        app.insert_resource(test_settings());
-        app.add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .init_resource::<PaneHoverIntent>()
+            .init_resource::<PendingCursorWarp>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<ConfirmCloseSettings>()
+            .insert_resource(test_settings())
+            .add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
         register_zoom_hooks(&mut app);
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
@@ -2118,13 +2101,13 @@ mod tests {
     #[test]
     fn split_command_auto_unzooms_first() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.init_resource::<PaneHoverIntent>();
-        app.init_resource::<PendingCursorWarp>();
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<ConfirmCloseSettings>();
-        app.insert_resource(test_settings());
-        app.add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .init_resource::<PaneHoverIntent>()
+            .init_resource::<PendingCursorWarp>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<ConfirmCloseSettings>()
+            .insert_resource(test_settings())
+            .add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
         register_zoom_hooks(&mut app);
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
@@ -2195,13 +2178,13 @@ mod tests {
     #[test]
     fn select_command_auto_unzooms() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.init_resource::<PaneHoverIntent>();
-        app.init_resource::<PendingCursorWarp>();
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<ConfirmCloseSettings>();
-        app.insert_resource(test_settings());
-        app.add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .init_resource::<PaneHoverIntent>()
+            .init_resource::<PendingCursorWarp>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<ConfirmCloseSettings>()
+            .insert_resource(test_settings())
+            .add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
         register_zoom_hooks(&mut app);
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
@@ -2304,8 +2287,8 @@ mod tests {
     #[test]
     fn sync_zoom_visibility_sets_display_none_on_hidden_entities() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_systems(Update, sync_zoom_visibility);
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, sync_zoom_visibility);
 
         let leaf = app.world_mut().spawn((Pane, Node::default())).id();
         let sib_a = app.world_mut().spawn((Pane, Node::default())).id();
@@ -2426,25 +2409,25 @@ mod tests {
 
     fn build_in_pane_app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<PendingCursorWarp>();
-        app.init_resource::<InPaneCollectedSpawns>();
-        app.insert_resource(test_settings());
-        app.add_systems(
-            Update,
-            (
-                handle_open_in_pane.in_set(WriteAppCommands),
-                collect_in_pane_spawns.after(handle_open_in_pane),
-            ),
-        );
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<PendingCursorWarp>()
+            .init_resource::<InPaneCollectedSpawns>()
+            .insert_resource(test_settings())
+            .add_systems(
+                Update,
+                (
+                    handle_open_in_pane.in_set(WriteAppCommands),
+                    collect_in_pane_spawns.after(handle_open_in_pane),
+                ),
+            );
         let _window = app.world_mut().spawn(PrimaryWindow).id();
         app
     }
 
-    fn spawn_single_pane(app: &mut App) -> (Entity, Entity, Entity) {
+    fn build_single_pane(app: &mut App) -> (Entity, Entity, Entity) {
         let tab = app
             .world_mut()
             .spawn((Tab::default(), LastActivatedAt::now()))
@@ -2460,7 +2443,7 @@ mod tests {
         (tab, pane, stack)
     }
 
-    fn spawn_pre_split(app: &mut App) -> (Entity, Entity, Entity, Entity) {
+    fn build_pre_split(app: &mut App) -> (Entity, Entity, Entity, Entity) {
         let tab = app
             .world_mut()
             .spawn((Tab::default(), LastActivatedAt(1)))
@@ -2602,7 +2585,7 @@ mod tests {
     fn in_pane_new_split_right_creates_pane_to_the_right() {
         use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
         let mut app = build_in_pane_app();
-        let (_tab, pane, _stack) = spawn_single_pane(&mut app);
+        let (_tab, pane, _stack) = build_single_pane(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -2655,7 +2638,7 @@ mod tests {
     fn in_pane_existing_in_place_navigates_neighbor_active_stack() {
         use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
         let mut app = build_in_pane_app();
-        let (_tab, _split, _left, right) = spawn_pre_split(&mut app);
+        let (_tab, _split, _left, right) = build_pre_split(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -2692,7 +2675,7 @@ mod tests {
     fn in_pane_existing_new_stack_adds_stack_to_neighbor() {
         use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
         let mut app = build_in_pane_app();
-        let (_tab, _split, _left, right) = spawn_pre_split(&mut app);
+        let (_tab, _split, _left, right) = build_pre_split(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -2741,7 +2724,7 @@ mod tests {
     fn in_pane_existing_falls_back_to_new_split_when_no_sibling() {
         use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
         let mut app = build_in_pane_app();
-        let (_tab, pane, _stack) = spawn_single_pane(&mut app);
+        let (_tab, pane, _stack) = build_single_pane(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()

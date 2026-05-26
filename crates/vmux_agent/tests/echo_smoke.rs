@@ -56,9 +56,9 @@ fn echo_session_streams_to_assistant_message() {
     *MOCK_URL.lock().unwrap() = Some(format!("{}/echo", server.url()));
 
     let mut app = App::new();
-    app.add_plugins(bevy::app::TaskPoolPlugin::default());
-    app.init_resource::<BinIpcEventRawBuffer>();
-    app.add_plugins(PageAgentPlugin);
+    app.add_plugins(bevy::app::TaskPoolPlugin::default())
+        .init_resource::<BinIpcEventRawBuffer>()
+        .add_plugins(PageAgentPlugin);
 
     app.world_mut().spawn((
         Strategy,

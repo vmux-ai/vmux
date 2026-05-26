@@ -1,6 +1,6 @@
 use crate::event::COMMAND_BAR_PAGE_URL;
 use crate::{
-    Header, LayoutStartupSet, SpaceFilePresent,
+    Header, LayoutStartupSet, SpaceFilePresent, TabLayoutSpawnContent, TabLayoutSpawnRequest,
     cef::{Browser, layout_cef_bundle},
     glass::{GlassCorners, GlassMaterial},
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
@@ -22,6 +22,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
+use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt};
 use vmux_server::ServerEmbedSet;
 
@@ -60,7 +61,9 @@ impl Plugin for WindowPlugin {
         )
         .add_systems(
             Startup,
-            spawn_default_tab.in_set(LayoutStartupSet::DefaultTab),
+            (request_default_layout, spawn_requested_tab_layouts)
+                .chain()
+                .in_set(LayoutStartupSet::DefaultTab),
         )
         .add_systems(
             Startup,
@@ -86,6 +89,7 @@ impl Plugin for WindowPlugin {
             (
                 maximize_window_to_screen.run_if(not(resource_exists::<ScreenMaximized>)),
                 crate::stack::open_startup_url_if_no_stacks,
+                spawn_requested_tab_layouts.after(ReadAppCommands),
             ),
         )
         .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
@@ -368,94 +372,135 @@ fn setup(
     ));
 }
 
-fn spawn_default_tab(
+fn request_default_layout(
     main_q: Query<Entity, With<Main>>,
     tab_q: Query<(), With<Tab>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     space_file: Option<Res<SpaceFilePresent>>,
-    mut new_stack_ctx: ResMut<crate::NewStackContext>,
-    mut commands: Commands,
+    mut requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     if !tab_q.is_empty() || space_file.as_deref().is_some_and(|s| s.0) {
         return;
     }
 
     let Ok(main) = main_q.single() else { return };
-    spawn_default_tab_layout(main, *primary_window, &mut new_stack_ctx, &mut commands);
+    requests.write(TabLayoutSpawnRequest {
+        main,
+        primary_window: *primary_window,
+        name: None,
+        content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+        clear_pending_stack: false,
+        focus: true,
+    });
 }
 
-pub struct SpawnedTabLayout {
-    pub tab: Entity,
-    pub pane: Entity,
-    pub stack: Entity,
-}
+pub fn spawn_requested_tab_layouts(
+    mut reader: MessageReader<TabLayoutSpawnRequest>,
+    settings: Res<LayoutSettings>,
+    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
+    mut new_stack_ctx: ResMut<crate::NewStackContext>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut focus: Option<ResMut<crate::stack::FocusedStack>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let tab_e = commands
+            .spawn((
+                tab_bundle(),
+                LastActivatedAt::now(),
+                CreatedAt::now(),
+                ChildOf(request.main),
+            ))
+            .id();
+        if let Some(name) = request.name.clone() {
+            commands.entity(tab_e).insert(Tab { name });
+        }
 
-pub fn spawn_tab_layout(main: Entity, pw: Entity, commands: &mut Commands) -> SpawnedTabLayout {
-    let tab_e = commands
-        .spawn((
-            tab_bundle(),
-            LastActivatedAt::now(),
-            CreatedAt::now(),
-            ChildOf(main),
-        ))
-        .id();
+        let gap = pane_split_gaps(PaneSplitDirection::Row, settings.pane.gap);
+        let split_root = commands
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                HostWindow(request.primary_window),
+                ZIndex(0),
+                Transform::default(),
+                GlobalTransform::default(),
+                Node {
+                    flex_grow: 1.0,
+                    min_height: Val::Px(0.0),
+                    column_gap: gap.column_gap,
+                    row_gap: gap.row_gap,
+                    ..default()
+                },
+                ChildOf(tab_e),
+            ))
+            .id();
 
-    let gap = pane_split_gaps(PaneSplitDirection::Row, crate::event::PANE_GAP_PX);
-    let split_root = commands
-        .spawn((
-            Pane,
-            PaneSplit {
-                direction: PaneSplitDirection::Row,
-            },
-            HostWindow(pw),
-            ZIndex(0),
-            Transform::default(),
-            GlobalTransform::default(),
-            Node {
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                column_gap: gap.column_gap,
-                row_gap: gap.row_gap,
-                ..default()
-            },
-            ChildOf(tab_e),
-        ))
-        .id();
+        let leaf = commands
+            .spawn((
+                leaf_pane_bundle(),
+                LastActivatedAt::now(),
+                ChildOf(split_root),
+            ))
+            .id();
 
-    let leaf = commands
-        .spawn((
-            leaf_pane_bundle(),
-            LastActivatedAt::now(),
-            ChildOf(split_root),
-        ))
-        .id();
+        let stack = commands
+            .spawn((
+                stack_bundle(),
+                LastActivatedAt::now(),
+                CreatedAt::now(),
+                ChildOf(leaf),
+            ))
+            .id();
 
-    let stack = commands
-        .spawn((
-            stack_bundle(),
-            LastActivatedAt::now(),
-            CreatedAt::now(),
-            ChildOf(leaf),
-        ))
-        .id();
-    SpawnedTabLayout {
-        tab: tab_e,
-        pane: leaf,
-        stack,
+        if request.clear_pending_stack
+            && let Some(old_stack) = new_stack_ctx.stack.take()
+        {
+            commands.entity(old_stack).despawn();
+        }
+        new_stack_ctx.previous_stack = None;
+        new_stack_ctx.dismiss_modal = false;
+
+        match &request.content {
+            TabLayoutSpawnContent::StartupUrlOrPrompt => {
+                let url = effective_startup_url
+                    .as_deref()
+                    .map(|u| u.0.clone())
+                    .unwrap_or_default();
+                if url.is_empty() {
+                    new_stack_ctx.stack = Some(stack);
+                    new_stack_ctx.needs_open = true;
+                } else {
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.needs_open = false;
+                    page_open_requests.write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(stack),
+                        url,
+                        request_id: None,
+                    });
+                }
+            }
+            TabLayoutSpawnContent::Url(url) => {
+                new_stack_ctx.stack = None;
+                new_stack_ctx.needs_open = false;
+                page_open_requests.write(PageOpenRequest {
+                    target: PageOpenTarget::Stack(stack),
+                    url: url.clone(),
+                    request_id: None,
+                });
+            }
+        }
+
+        if request.focus
+            && let Some(focus) = focus.as_deref_mut()
+        {
+            focus.tab = Some(tab_e);
+            focus.pane = Some(leaf);
+            focus.stack = Some(stack);
+        }
     }
-}
-
-pub fn spawn_default_tab_layout(
-    main: Entity,
-    pw: Entity,
-    new_stack_ctx: &mut crate::NewStackContext,
-    commands: &mut Commands,
-) -> SpawnedTabLayout {
-    let layout = spawn_tab_layout(main, pw, commands);
-    new_stack_ctx.stack = Some(layout.stack);
-    new_stack_ctx.previous_stack = None;
-    new_stack_ctx.needs_open = true;
-    layout
 }
 
 fn spawn_glass_panes() {}
@@ -688,11 +733,11 @@ mod tests {
 
     fn setup_window_app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.insert_resource(test_settings(8.0));
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<GlassMaterial>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings(8.0))
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<GlassMaterial>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
         app.world_mut().spawn((
             Window {
                 resolution: (1200, 800).into(),
@@ -747,22 +792,27 @@ mod tests {
     fn default_tab_requests_command_bar_open() {
         let _home = HomeEnvGuard::use_temp_home("default-tab");
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<crate::NewStackContext>();
-        app.insert_resource(LayoutSettings {
-            radius: 0.0,
-            window: crate::settings::WindowSettings {
-                padding: 0.0,
-                padding_top: None,
-                padding_right: None,
-                padding_bottom: None,
-                padding_left: None,
-            },
-            pane: crate::settings::PaneSettings { gap: 0.0 },
-            side_sheet: crate::settings::SideSheetSettings::default(),
-            focus_ring: crate::settings::FocusRingSettings::default(),
-        });
-        app.add_systems(Update, spawn_default_tab);
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::NewStackContext>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(LayoutSettings {
+                radius: 0.0,
+                window: crate::settings::WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: crate::settings::PaneSettings { gap: 0.0 },
+                side_sheet: crate::settings::SideSheetSettings::default(),
+                focus_ring: crate::settings::FocusRingSettings::default(),
+            })
+            .add_systems(
+                Update,
+                (request_default_layout, spawn_requested_tab_layouts).chain(),
+            );
 
         app.world_mut().spawn(PrimaryWindow);
         app.world_mut().spawn(Main);

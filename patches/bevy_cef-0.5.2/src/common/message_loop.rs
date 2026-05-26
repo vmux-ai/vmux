@@ -64,9 +64,9 @@ impl Plugin for MessageLoopPlugin {
         #[cfg(target_os = "macos")]
         cef_initialize(&args, &mut cef_app, self.root_cache_path.as_deref());
 
-        app.insert_non_send_resource(cef_app);
-        app.insert_non_send_resource(MessageLoopWorkingReceiver(rx));
-        app.insert_non_send_resource(RunOnMainThread)
+        app.insert_non_send_resource(cef_app)
+            .insert_non_send_resource(MessageLoopWorkingReceiver(rx))
+            .insert_non_send_resource(RunOnMainThread)
             .add_systems(Main, cef_do_message_loop_work.before(Main::run_main))
             .add_systems(
                 Update,

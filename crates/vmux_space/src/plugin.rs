@@ -8,8 +8,8 @@ use vmux_core::{
     PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet, PageOpenTarget,
     PageOpenTask,
 };
-use vmux_layout::NewStackContext;
 use vmux_layout::stack::Stack;
+use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 use vmux_server::{PageConfig, PageReady, Server};
 
 use crate::event::{
@@ -30,11 +30,11 @@ pub struct SpacePlugin;
 
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ActiveSpace>();
-        app.add_message::<SaveSpaceRequest>();
+        app.init_resource::<ActiveSpace>()
+            .add_message::<SaveSpaceRequest>();
         register_spaces_page(app.world_mut().resource_mut::<Server>().as_mut());
-        app.add_systems(Startup, ensure_space_registry);
-        app.add_message::<vmux_core::page::SpacesPageSpawnRequest>()
+        app.add_systems(Startup, ensure_space_registry)
+            .add_message::<vmux_core::page::SpacesPageSpawnRequest>()
             .add_systems(
                 Update,
                 respond_spaces_spawn.in_set(vmux_command::ReadAppCommands),
@@ -263,8 +263,7 @@ fn apply_pending_space_switch(
     >,
     main_q: Query<Entity, With<vmux_layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    mut new_stack_ctx: ResMut<NewStackContext>,
-    focus: Option<ResMut<vmux_layout::stack::FocusedStack>>,
+    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
     let Some(mut pending) = pending else {
@@ -293,53 +292,15 @@ fn apply_pending_space_switch(
         }
         commands.spawn(space_profile_bundle(&record));
         let Ok(main) = main_q.single() else { return };
-        let spawned = vmux_layout::window::spawn_default_tab_layout(
+        layout_requests.write(TabLayoutSpawnRequest {
             main,
-            *primary_window,
-            &mut new_stack_ctx,
-            &mut commands,
-        );
-        if let Some(mut focus) = focus {
-            focus.tab = Some(spawned.tab);
-            focus.pane = Some(spawned.pane);
-            focus.stack = Some(spawned.stack);
-        }
+            primary_window: *primary_window,
+            name: None,
+            content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+            clear_pending_stack: false,
+            focus: true,
+        });
     }
-}
-
-fn spawn_spaces_page_layout(
-    main: Entity,
-    primary_window: Entity,
-    new_stack_ctx: &mut NewStackContext,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    focus: Option<&mut vmux_layout::stack::FocusedStack>,
-    commands: &mut Commands,
-) {
-    let spawned = vmux_layout::window::spawn_default_tab_layout(
-        main,
-        primary_window,
-        new_stack_ctx,
-        commands,
-    );
-    if let Some(focus) = focus {
-        focus.tab = Some(spawned.tab);
-        focus.pane = Some(spawned.pane);
-        focus.stack = Some(spawned.stack);
-    }
-    let Some(tab) = new_stack_ctx.stack.take() else {
-        return;
-    };
-    new_stack_ctx.previous_stack = None;
-    new_stack_ctx.needs_open = false;
-    new_stack_ctx.dismiss_modal = false;
-    commands.entity(tab).insert(PageMetadata {
-        title: "Spaces".to_string(),
-        url: SPACES_PAGE_URL.to_string(),
-        favicon_url: String::new(),
-        bg_color: None,
-    });
-    commands.spawn((Spaces::new(meshes, webview_mt), ChildOf(tab)));
 }
 
 fn on_space_command(
@@ -355,12 +316,10 @@ fn on_space_command(
     >,
     main_q: Query<Entity, With<vmux_layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    mut new_stack_ctx: ResMut<NewStackContext>,
-    mut focus: Option<ResMut<vmux_layout::stack::FocusedStack>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    focus: Option<ResMut<vmux_layout::stack::FocusedStack>>,
     mut spawn_requests: Option<MessageWriter<PageOpenRequest>>,
     mut save_requests: MessageWriter<SaveSpaceRequest>,
+    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     stack_q: Query<(Entity, &PageMetadata), With<Stack>>,
     child_of_q: Query<&ChildOf>,
     mut commands: Commands,
@@ -469,29 +428,18 @@ fn on_space_command(
         }
         commands.spawn(space_profile_bundle(&active.record));
         let Ok(main) = main_q.single() else { return };
-        if open_spaces_page {
-            spawn_spaces_page_layout(
-                main,
-                *primary_window,
-                &mut new_stack_ctx,
-                &mut meshes,
-                &mut webview_mt,
-                focus.as_deref_mut(),
-                &mut commands,
-            );
-        } else {
-            let spawned = vmux_layout::window::spawn_default_tab_layout(
-                main,
-                *primary_window,
-                &mut new_stack_ctx,
-                &mut commands,
-            );
-            if let Some(mut focus) = focus {
-                focus.tab = Some(spawned.tab);
-                focus.pane = Some(spawned.pane);
-                focus.stack = Some(spawned.stack);
-            }
-        }
+        layout_requests.write(TabLayoutSpawnRequest {
+            main,
+            primary_window: *primary_window,
+            name: None,
+            content: if open_spaces_page {
+                TabLayoutSpawnContent::Url(SPACES_PAGE_URL.to_string())
+            } else {
+                TabLayoutSpawnContent::StartupUrlOrPrompt
+            },
+            clear_pending_stack: true,
+            focus: true,
+        });
     }
 }
 
@@ -510,10 +458,8 @@ fn handle_open_in_new_space(
     main_q: Query<Entity, With<vmux_layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
-    mut new_stack_ctx: ResMut<NewStackContext>,
-    mut focus: Option<ResMut<vmux_layout::stack::FocusedStack>>,
     mut save_requests: MessageWriter<SaveSpaceRequest>,
-    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -543,23 +489,17 @@ fn handle_open_in_new_space(
         }
         let Ok(main) = main_q.single() else { continue };
         commands.spawn(space_profile_bundle(&active.record));
-        let spawned = vmux_layout::window::spawn_tab_layout(main, *primary_window, &mut commands);
-        if let Some(old_stack) = new_stack_ctx.stack.take() {
-            commands.entity(old_stack).despawn();
-        }
-        new_stack_ctx.previous_stack = None;
-        new_stack_ctx.needs_open = false;
-        new_stack_ctx.dismiss_modal = false;
-        if let Some(focus) = focus.as_deref_mut() {
-            focus.tab = Some(spawned.tab);
-            focus.pane = Some(spawned.pane);
-            focus.stack = Some(spawned.stack);
-        }
         let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
-        page_open_requests.write(PageOpenRequest {
-            target: PageOpenTarget::Stack(spawned.stack),
-            url: vmux_command::open::handler::resolve_url(url.as_deref(), startup),
-            request_id: None,
+        layout_requests.write(TabLayoutSpawnRequest {
+            main,
+            primary_window: *primary_window,
+            name: None,
+            content: TabLayoutSpawnContent::Url(vmux_command::open::handler::resolve_url(
+                url.as_deref(),
+                startup,
+            )),
+            clear_pending_stack: true,
+            focus: true,
         });
     }
 }
@@ -589,7 +529,7 @@ mod tests {
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_layout::{pane::Pane, stack::Stack, tab::Tab, window::Main};
+    use vmux_layout::{NewStackContext, pane::Pane, stack::Stack, tab::Tab, window::Main};
     use vmux_server::Server;
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
@@ -660,6 +600,22 @@ mod tests {
             id: "work".to_string(),
             name: "Work".to_string(),
             profile: BOOTSTRAP_PROFILE_NAME.to_string(),
+        }
+    }
+
+    fn resolve_stack_page_open_requests(
+        mut reader: MessageReader<PageOpenRequest>,
+        mut commands: Commands,
+    ) {
+        for request in reader.read() {
+            if let PageOpenTarget::Stack(stack) = request.target {
+                commands.spawn(PageOpenTask {
+                    id: vmux_core::PageOpenId::new(),
+                    stack,
+                    url: request.url.clone(),
+                    request_id: request.request_id,
+                });
+            }
         }
     }
 
@@ -734,16 +690,18 @@ mod tests {
             },
         );
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<SaveSpaceRequest>();
-        app.add_observer(on_space_command);
-        app.insert_resource(ActiveSpace {
-            record: active_record,
-        });
-        app.insert_resource(test_settings());
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SaveSpaceRequest>()
+            .add_message::<vmux_layout::TabLayoutSpawnRequest>()
+            .add_observer(on_space_command)
+            .insert_resource(ActiveSpace {
+                record: active_record,
+            })
+            .insert_resource(test_settings())
+            .insert_resource(test_settings().layout)
+            .init_resource::<NewStackContext>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
@@ -791,17 +749,27 @@ mod tests {
             },
         );
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<SaveSpaceRequest>();
-        app.add_observer(on_space_command);
-        app.add_systems(Update, apply_pending_space_switch);
-        app.insert_resource(ActiveSpace {
-            record: active_record,
-        });
-        app.insert_resource(test_settings());
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SaveSpaceRequest>()
+            .add_message::<vmux_layout::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_observer(on_space_command)
+            .add_systems(
+                Update,
+                (
+                    apply_pending_space_switch,
+                    vmux_layout::window::spawn_requested_tab_layouts,
+                )
+                    .chain(),
+            )
+            .insert_resource(ActiveSpace {
+                record: active_record,
+            })
+            .insert_resource(test_settings())
+            .insert_resource(test_settings().layout)
+            .init_resource::<NewStackContext>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
@@ -860,17 +828,29 @@ mod tests {
             },
         );
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<SaveSpaceRequest>();
-        app.add_observer(on_space_command);
-        app.insert_resource(vmux_layout::stack::FocusedStack::default());
-        app.insert_resource(ActiveSpace {
-            record: bootstrap_space_record(),
-        });
-        app.insert_resource(test_settings());
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SaveSpaceRequest>()
+            .add_message::<vmux_layout::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_observer(on_space_command)
+            .add_systems(
+                Update,
+                (
+                    vmux_layout::window::spawn_requested_tab_layouts,
+                    resolve_stack_page_open_requests,
+                    handle_spaces_page_open,
+                )
+                    .chain(),
+            )
+            .insert_resource(vmux_layout::stack::FocusedStack::default())
+            .insert_resource(ActiveSpace {
+                record: bootstrap_space_record(),
+            })
+            .insert_resource(test_settings())
+            .insert_resource(test_settings().layout)
+            .init_resource::<NewStackContext>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();
@@ -957,20 +937,23 @@ mod tests {
             vmux_command::CommandPlugin,
             bevy_cef::prelude::JsEmitEventPlugin::<SpaceCommandEvent>::default(),
             vmux_layout::stack::StackPlugin,
-        ));
-        app.add_message::<vmux_layout::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
-        app.add_message::<SaveSpaceRequest>();
-        app.add_observer(on_space_command);
-        app.init_resource::<vmux_layout::pane::PendingCursorWarp>();
-        app.init_resource::<bevy_cef::prelude::IpcEventRawBuffer>();
-        app.insert_resource(ActiveSpace {
+        ))
+        .add_message::<vmux_layout::LayoutSpawnRequest>()
+        .add_message::<vmux_layout::TabLayoutSpawnRequest>()
+        .add_message::<PageOpenRequest>()
+        .add_message::<SaveSpaceRequest>()
+        .add_observer(on_space_command)
+        .add_systems(Update, vmux_layout::window::spawn_requested_tab_layouts)
+        .init_resource::<vmux_layout::pane::PendingCursorWarp>()
+        .init_resource::<bevy_cef::prelude::IpcEventRawBuffer>()
+        .insert_resource(ActiveSpace {
             record: bootstrap_space_record(),
-        });
-        app.insert_resource(test_settings());
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        })
+        .insert_resource(test_settings())
+        .insert_resource(test_settings().layout)
+        .init_resource::<NewStackContext>()
+        .init_resource::<Assets<Mesh>>()
+        .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(Main).id();

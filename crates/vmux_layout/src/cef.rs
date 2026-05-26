@@ -228,7 +228,7 @@ pub fn layout_cef_bundle(
 mod tests {
     use super::*;
 
-    fn spawn_test_cef(
+    fn build_test_cef(
         mut commands: Commands,
         mut meshes: ResMut<Assets<Mesh>>,
         mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -240,10 +240,10 @@ mod tests {
     #[test]
     fn layout_cef_does_not_block_pointer_events_below_it() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.add_systems(Startup, spawn_test_cef);
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Startup, build_test_cef);
         app.update();
 
         let pickable = app
@@ -372,9 +372,9 @@ mod url_mirror_tests {
     #[test]
     fn updates_matching_url_meta() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CorePlugin);
-        app.add_systems(Update, mirror_metadata_to_url);
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(CorePlugin)
+            .add_systems(Update, mirror_metadata_to_url);
 
         app.world_mut().spawn((
             Url,
@@ -409,9 +409,9 @@ mod url_mirror_tests {
     #[test]
     fn skips_empty_tab_url() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CorePlugin);
-        app.add_systems(Update, mirror_metadata_to_url);
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(CorePlugin)
+            .add_systems(Update, mirror_metadata_to_url);
 
         app.world_mut().spawn((
             Url,

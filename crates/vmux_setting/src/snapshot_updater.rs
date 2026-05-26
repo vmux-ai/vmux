@@ -25,8 +25,8 @@ mod tests {
     #[test]
     fn writes_url_on_run() {
         let mut app = App::new();
-        app.init_resource::<CommandBarSettingsSnapshot>();
-        app.add_systems(Update, update_settings_snapshot);
+        app.init_resource::<CommandBarSettingsSnapshot>()
+            .add_systems(Update, update_settings_snapshot);
         app.update();
         let snap = app.world().resource::<CommandBarSettingsSnapshot>();
         assert_eq!(snap.settings_page_url, SETTINGS_PAGE_URL);

@@ -308,9 +308,23 @@ fn handle_stack_commands(
                         let stack = commands
                             .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                             .id();
-                        new_stack_ctx.stack = Some(stack);
                         new_stack_ctx.previous_stack = None;
-                        new_stack_ctx.needs_open = true;
+                        let startup_url = effective_startup_url
+                            .as_deref()
+                            .map(|u| u.0.clone())
+                            .unwrap_or_default();
+                        if startup_url.is_empty() {
+                            new_stack_ctx.stack = Some(stack);
+                            new_stack_ctx.needs_open = true;
+                        } else {
+                            new_stack_ctx.stack = None;
+                            new_stack_ctx.needs_open = false;
+                            page_open_requests.write(PageOpenRequest {
+                                target: PageOpenTarget::Stack(stack),
+                                url: startup_url,
+                                request_id: None,
+                            });
+                        }
                         continue;
                     }
 
@@ -592,18 +606,18 @@ pub fn open_startup_url_if_no_stacks(
     let stack = commands
         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
-    let url = effective_startup_url
+    let startup_url = effective_startup_url
         .as_deref()
         .map(|u| u.0.clone())
         .unwrap_or_default();
-    if url.is_empty() {
+    if startup_url.is_empty() {
         new_stack_ctx.stack = Some(stack);
         new_stack_ctx.previous_stack = None;
         new_stack_ctx.needs_open = true;
     } else {
         page_open_requests.write(PageOpenRequest {
             target: PageOpenTarget::Stack(stack),
-            url,
+            url: startup_url,
             request_id: None,
         });
     }
@@ -649,16 +663,16 @@ mod tests {
     }
 
     #[test]
-    fn closing_last_tab_opens_command_bar_with_replacement_tab() {
+    fn closing_last_stack_without_startup_url_opens_command_bar_with_replacement_stack() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<PageOpenRequest>();
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<PendingCursorWarp>();
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<PendingCursorWarp>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
 
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let tab_e = app
@@ -669,7 +683,7 @@ mod tests {
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab_e)))
             .id();
-        let original_tab = app
+        let original_stack = app
             .world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
@@ -682,17 +696,17 @@ mod tests {
         app.update();
 
         assert!(!app.world().entity(window).contains::<ClosingWindow>());
-        assert!(app.world().get_entity(original_tab).is_err());
+        assert!(app.world().get_entity(original_stack).is_err());
 
         let ctx = app.world().resource::<NewStackContext>();
-        let Some(replacement_tab) = ctx.stack else {
-            panic!("expected replacement tab to open command bar");
+        let Some(replacement_stack) = ctx.stack else {
+            panic!("expected replacement stack to open command bar");
         };
         assert!(ctx.needs_open);
         assert_eq!(ctx.previous_stack, None);
         assert_eq!(
             app.world()
-                .get::<ChildOf>(replacement_tab)
+                .get::<ChildOf>(replacement_stack)
                 .map(Relationship::get),
             Some(pane)
         );
@@ -701,14 +715,14 @@ mod tests {
     #[test]
     fn closing_last_stack_in_tab_closes_tab_when_another_tab_exists() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<PageOpenRequest>();
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<PendingCursorWarp>();
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<PendingCursorWarp>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
 
         let root = app.world_mut().spawn_empty().id();
         let remaining_tab = app
@@ -756,10 +770,10 @@ mod tests {
     #[test]
     fn empty_active_pane_opens_command_bar_even_when_other_tabs_have_stacks() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<NewStackContext>();
-        app.add_message::<PageOpenRequest>();
-        app.add_systems(Update, open_startup_url_if_no_stacks);
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<NewStackContext>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Update, open_startup_url_if_no_stacks);
 
         let old_tab = app
             .world_mut()
@@ -797,10 +811,10 @@ mod tests {
     #[test]
     fn empty_active_pane_does_not_open_command_bar_when_tab_has_stacks() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<NewStackContext>();
-        app.add_message::<PageOpenRequest>();
-        app.add_systems(Update, open_startup_url_if_no_stacks);
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<NewStackContext>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Update, open_startup_url_if_no_stacks);
 
         let tab_e = app
             .world_mut()
@@ -828,10 +842,10 @@ mod tests {
     #[test]
     fn active_empty_stack_does_not_reopen_command_bar() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<NewStackContext>();
-        app.add_message::<PageOpenRequest>();
-        app.add_systems(Update, open_startup_url_if_no_stacks);
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<NewStackContext>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Update, open_startup_url_if_no_stacks);
 
         let tab_e = app
             .world_mut()
@@ -867,25 +881,25 @@ mod tests {
 
     fn build_app_with_collector() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<PageOpenRequest>();
-        app.init_resource::<NewStackContext>();
-        app.init_resource::<PendingCursorWarp>();
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.init_resource::<CollectedSpawns>();
-        app.add_systems(
-            Update,
-            (
-                handle_stack_commands.in_set(WriteAppCommands),
-                collect_spawn_requests.after(handle_stack_commands),
-            ),
-        );
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<PendingCursorWarp>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .init_resource::<CollectedSpawns>()
+            .add_systems(
+                Update,
+                (
+                    handle_stack_commands.in_set(WriteAppCommands),
+                    collect_spawn_requests.after(handle_stack_commands),
+                ),
+            );
         app
     }
 
-    fn spawn_hierarchy(app: &mut App) -> (Entity, Entity) {
+    fn build_hierarchy(app: &mut App) -> (Entity, Entity, Entity) {
         let tab = app
             .world_mut()
             .spawn((Tab::default(), LastActivatedAt::now()))
@@ -894,15 +908,54 @@ mod tests {
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
             .id();
+        let stack =
+            app.world_mut()
+                .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
+        (tab, pane, stack.id())
+    }
+
+    #[test]
+    fn closing_last_stack_uses_startup_url_for_replacement_stack() {
+        let mut app = build_app_with_collector();
+        app.insert_resource(crate::settings::EffectiveStartupUrl(
+            "https://startup.test".into(),
+        ));
+        let (_tab, pane, original_stack) = build_hierarchy(&mut app);
+
         app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
-        (tab, pane)
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
+
+        app.update();
+
+        assert!(app.world().get_entity(original_stack).is_err());
+        let ctx = app.world().resource::<NewStackContext>();
+        assert_eq!(ctx.stack, None);
+        assert!(!ctx.needs_open);
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1);
+        assert_eq!(collected.0[0].url, "https://startup.test");
+        match collected.0[0].target {
+            PageOpenTarget::Stack(replacement_stack) => {
+                assert_ne!(replacement_stack, original_stack);
+                assert_eq!(
+                    app.world()
+                        .get::<ChildOf>(replacement_stack)
+                        .map(Relationship::get),
+                    Some(pane)
+                );
+            }
+            _ => panic!("expected stack target"),
+        }
     }
 
     #[test]
     fn open_in_new_stack_with_explicit_url() {
         let mut app = build_app_with_collector();
-        let (_tab, pane) = spawn_hierarchy(&mut app);
+        let (_tab, pane, _stack) = build_hierarchy(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -935,7 +988,7 @@ mod tests {
     #[test]
     fn open_in_new_stack_none_url_queues_empty_stack_for_command_bar() {
         let mut app = build_app_with_collector();
-        let (_tab, pane) = spawn_hierarchy(&mut app);
+        let (_tab, pane, _stack) = build_hierarchy(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -965,7 +1018,7 @@ mod tests {
         app.insert_resource(crate::settings::EffectiveStartupUrl(
             "https://startup.test".into(),
         ));
-        let (_tab, _pane) = spawn_hierarchy(&mut app);
+        let (_tab, _pane, _stack) = build_hierarchy(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()

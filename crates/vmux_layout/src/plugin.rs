@@ -18,17 +18,19 @@ use crate::webview_reveal::WebviewRevealPlugin;
 use crate::window::WindowPlugin;
 use crate::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, LayoutSpawnRequest,
-    LayoutStartupSet, NewStackContext, Open, OpenInNewStackRequest, reconcile, settings,
+    LayoutStartupSet, NewStackContext, Open, OpenInNewStackRequest, TabLayoutSpawnRequest,
+    reconcile, settings,
 };
 
 pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<Open>();
-        app.init_resource::<NewStackContext>()
+        app.register_type::<Open>()
+            .init_resource::<NewStackContext>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .add_message::<LayoutSpawnRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
             .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<vmux_core::agent::RestartAgentPty>()
@@ -56,24 +58,24 @@ impl Plugin for LayoutPlugin {
                     reconcile::apply_layout_requests,
                     reconcile::serve_snapshot_requests,
                 ),
-            );
-        app.add_plugins(BinEventEmitterPlugin::<(PageReady,)>::with_id(
-            PAGE_READY_BIN_EVENT_ID,
-        ))
-        .add_observer(mark_webview_page_ready_on_js_emit);
-        app.add_plugins((
-            ProfilePlugin,
-            SpacePlugin,
-            ScenePlugin,
-            WindowPlugin,
-            TabPlugin,
-            PanePlugin,
-            StackPlugin,
-            FocusRingPlugin,
-            GlassMaterialPlugin,
-            SideSheetLayoutPlugin,
-            HeaderLayoutPlugin,
-        ))
-        .add_plugins((CommandBarInputPlugin, TogglePlugin, WebviewRevealPlugin));
+            )
+            .add_plugins(BinEventEmitterPlugin::<(PageReady,)>::with_id(
+                PAGE_READY_BIN_EVENT_ID,
+            ))
+            .add_observer(mark_webview_page_ready_on_js_emit)
+            .add_plugins((
+                ProfilePlugin,
+                SpacePlugin,
+                ScenePlugin,
+                WindowPlugin,
+                TabPlugin,
+                PanePlugin,
+                StackPlugin,
+                FocusRingPlugin,
+                GlassMaterialPlugin,
+                SideSheetLayoutPlugin,
+                HeaderLayoutPlugin,
+            ))
+            .add_plugins((CommandBarInputPlugin, TogglePlugin, WebviewRevealPlugin));
     }
 }

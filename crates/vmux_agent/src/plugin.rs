@@ -5,7 +5,7 @@ use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
 use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_core::agent::{
     AgentKind, AgentProviderTargetKind, McpServerConfig, PageAgentAttachDefaultRequest,
-    PageAgentAttachRequest, PageAgentSpawnDefaultRequest, PageAgentSpawnTabRequest,
+    PageAgentAttachRequest, PageAgentSpawnDefaultRequest, PageAgentSpawnStackRequest,
     RestartAgentPty, SpawnAgentInStackRequest,
 };
 use vmux_core::{
@@ -25,7 +25,7 @@ use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
 use vmux_terminal::ProcessExited;
 use vmux_terminal::launch::TerminalLaunch;
-use vmux_terminal::{ServiceMessageSet, new_terminal_bundle_with_cwd};
+use vmux_terminal::{ServiceMessageSet, TerminalStackSpawnRequest, new_terminal_bundle_with_cwd};
 
 use crate::AgentVariant;
 use crate::client::cli::claude::ClaudeStrategy;
@@ -80,9 +80,11 @@ impl Plugin for AgentPlugin {
             .add_message::<AgentSessionExited>()
             .add_message::<SpawnAgentInStackRequest>()
             .add_message::<PageAgentAttachRequest>()
-            .add_message::<PageAgentSpawnTabRequest>()
+            .add_message::<PageAgentSpawnStackRequest>()
             .add_message::<PageAgentSpawnDefaultRequest>()
             .add_message::<PageAgentAttachDefaultRequest>()
+            .add_message::<TerminalStackSpawnRequest>()
+            .add_message::<ProcessStackSpawnRequest>()
             .add_message::<RestartAgentPty>()
             .add_systems(Startup, session::start_agent_session_watchers)
             .add_systems(
@@ -139,10 +141,11 @@ impl Plugin for AgentPlugin {
                 Update,
                 (
                     handle_spawn_agent_requests,
+                    respond_process_stack_spawn.after(handle_agent_commands),
                     handle_agent_page_open.in_set(PageOpenSet::HandleKnownPages),
                     handle_restart_agent_pty,
                     respond_page_agent_attach,
-                    respond_page_agent_spawn_tab,
+                    respond_page_agent_spawn_stack,
                     respond_page_agent_spawn_default,
                     respond_page_agent_attach_default,
                 ),
@@ -167,136 +170,6 @@ impl Plugin for AgentPlugin {
 }
 
 pub use crate::build_agent_launch;
-pub use vmux_terminal::spawn_terminal_tab;
-
-pub fn spawn_fresh_agent_tab(
-    kind: AgentKind,
-    pane: Entity,
-    cwd: PathBuf,
-    strategies: &AgentStrategies,
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) -> Result<Entity, String> {
-    let launch = crate::build_agent_launch(kind, &cwd, None, strategies)?;
-    let terminal = spawn_terminal_tab(
-        pane,
-        Some(&cwd),
-        None,
-        commands,
-        meshes,
-        webview_mt,
-        settings,
-    );
-    commands.entity(terminal).insert((
-        launch,
-        AgentSession { kind },
-        PendingAgentSession {
-            kind,
-            spawn_time: std::time::SystemTime::now(),
-            cwd,
-        },
-    ));
-    Ok(terminal)
-}
-
-pub fn spawn_agent_resume_tab(
-    kind: AgentKind,
-    pane: Entity,
-    cwd: PathBuf,
-    session_id: String,
-    strategies: &AgentStrategies,
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) -> Result<Entity, String> {
-    let launch = crate::build_agent_launch(kind, &cwd, Some(&session_id), strategies)?;
-    let terminal = spawn_terminal_tab(
-        pane,
-        Some(&cwd),
-        None,
-        commands,
-        meshes,
-        webview_mt,
-        settings,
-    );
-    commands
-        .entity(terminal)
-        .insert((launch, AgentSession { kind }, SessionId(session_id)));
-    Ok(terminal)
-}
-
-pub fn spawn_process_tab(
-    pane: Entity,
-    command: String,
-    args: Vec<String>,
-    cwd: PathBuf,
-    env: Vec<(String, String)>,
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) -> Entity {
-    let tab = commands
-        .spawn((
-            vmux_layout::stack::stack_bundle(),
-            LastActivatedAt::now(),
-            ChildOf(pane),
-        ))
-        .id();
-    let title = std::path::Path::new(&command)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(&command)
-        .to_string();
-    commands.entity(tab).insert(PageMetadata {
-        url: TERMINAL_PAGE_URL.to_string(),
-        title,
-        bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
-        ..default()
-    });
-    let launch = vmux_terminal::launch::TerminalLaunch {
-        command,
-        args,
-        cwd: cwd.to_string_lossy().to_string(),
-        env,
-        kind: vmux_terminal::launch::TerminalKind::Plain,
-    };
-    let term = commands
-        .spawn((
-            new_terminal_bundle_with_cwd(meshes, webview_mt, settings, Some(&cwd)),
-            ChildOf(tab),
-        ))
-        .id();
-    commands.entity(term).insert((launch, CefKeyboardTarget));
-    tab
-}
-
-pub fn spawn_page_agent_tab(
-    provider: &str,
-    model: &str,
-    pane: Entity,
-    sid: &str,
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    idx: &crate::client::page::strategy_index::PageStrategyIndex,
-    kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
-) -> Option<Entity> {
-    let tab = commands
-        .spawn((
-            vmux_layout::stack::stack_bundle(),
-            LastActivatedAt::now(),
-            ChildOf(pane),
-        ))
-        .id();
-    attach_page_agent_to_stack(
-        tab, provider, model, sid, commands, meshes, webview_mt, idx, kind_q,
-    )?;
-    Some(tab)
-}
 
 pub fn attach_page_agent_to_stack(
     stack: Entity,
@@ -355,15 +228,18 @@ pub fn page_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> Str
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-struct SpawnAssets<'w> {
-    meshes: ResMut<'w, Assets<Mesh>>,
-    webview_mt: ResMut<'w, Assets<WebviewExtendStandardMaterial>>,
-}
-
-#[derive(bevy::ecs::system::SystemParam)]
 struct SettingsParams<'w> {
     settings: ResMut<'w, AppSettings>,
     writes: MessageWriter<'w, vmux_setting::SettingsWriteRequest>,
+}
+
+#[derive(Message, Clone)]
+struct ProcessStackSpawnRequest {
+    pane: Entity,
+    command: String,
+    args: Vec<String>,
+    cwd: PathBuf,
+    env: Vec<(String, String)>,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -382,14 +258,14 @@ fn handle_agent_commands(
     mut open_in_new_stack_writer: MessageWriter<vmux_layout::OpenInNewStackRequest>,
     mut terminal_send_writer: MessageWriter<vmux_terminal::TerminalSendRequest>,
     mut run_shell_writer: MessageWriter<vmux_terminal::RunShellRequest>,
+    mut terminal_stack_spawn_writer: MessageWriter<TerminalStackSpawnRequest>,
+    mut process_stack_spawn_writer: MessageWriter<ProcessStackSpawnRequest>,
     focus: Res<FocusedStack>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     lookups: AgentLookups,
     mut sp: SettingsParams,
     service: Option<Res<vmux_service::client::ServiceClient>>,
     mut layout_apply_writer: MessageWriter<vmux_layout::reconcile::LayoutApplyRequest>,
-    mut commands: Commands,
-    mut assets: SpawnAssets,
 ) {
     let active_space = lookups.active_space.as_deref();
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
@@ -434,27 +310,19 @@ fn handle_agent_commands(
                                 .unwrap_or_else(default_space_dir)
                         });
                         if command.trim().is_empty() {
-                            spawn_terminal_tab(
+                            terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
                                 pane,
-                                Some(&cwd_path),
-                                None,
-                                &mut commands,
-                                &mut assets.meshes,
-                                &mut assets.webview_mt,
-                                &sp.settings,
-                            );
+                                cwd: Some(cwd_path),
+                                pending_input: None,
+                            });
                         } else {
-                            spawn_process_tab(
+                            process_stack_spawn_writer.write(ProcessStackSpawnRequest {
                                 pane,
-                                command.clone(),
-                                args.clone(),
-                                cwd_path,
-                                env.clone(),
-                                &mut commands,
-                                &mut assets.meshes,
-                                &mut assets.webview_mt,
-                                &sp.settings,
-                            );
+                                command: command.clone(),
+                                args: args.clone(),
+                                cwd: cwd_path,
+                                env: env.clone(),
+                            });
                         }
                         AgentCommandResult::Ok
                     }
@@ -538,6 +406,54 @@ fn handle_agent_commands(
                 result,
             });
         }
+    }
+}
+
+fn respond_process_stack_spawn(
+    mut reader: MessageReader<ProcessStackSpawnRequest>,
+    settings: Res<AppSettings>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for request in reader.read() {
+        let stack = commands
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                LastActivatedAt::now(),
+                ChildOf(request.pane),
+            ))
+            .id();
+        let title = std::path::Path::new(&request.command)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&request.command)
+            .to_string();
+        commands.entity(stack).insert(PageMetadata {
+            url: TERMINAL_PAGE_URL.to_string(),
+            title,
+            bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+            ..default()
+        });
+        let launch = vmux_terminal::launch::TerminalLaunch {
+            command: request.command.clone(),
+            args: request.args.clone(),
+            cwd: request.cwd.to_string_lossy().to_string(),
+            env: request.env.clone(),
+            kind: vmux_terminal::launch::TerminalKind::Plain,
+        };
+        let term = commands
+            .spawn((
+                new_terminal_bundle_with_cwd(
+                    &mut meshes,
+                    &mut webview_mt,
+                    &settings,
+                    Some(&request.cwd),
+                ),
+                ChildOf(stack),
+            ))
+            .id();
+        commands.entity(term).insert((launch, CefKeyboardTarget));
     }
 }
 
@@ -877,8 +793,8 @@ fn respond_page_agent_attach(
     }
 }
 
-fn respond_page_agent_spawn_tab(
-    mut reader: MessageReader<PageAgentSpawnTabRequest>,
+fn respond_page_agent_spawn_stack(
+    mut reader: MessageReader<PageAgentSpawnStackRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -890,10 +806,17 @@ fn respond_page_agent_spawn_tab(
             bevy::log::warn!("page strategy index not registered; skipping page spawn");
             continue;
         };
-        let _ = spawn_page_agent_tab(
+        let stack = commands
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                LastActivatedAt::now(),
+                ChildOf(req.pane),
+            ))
+            .id();
+        let _ = attach_page_agent_to_stack(
+            stack,
             &req.provider,
             &req.model,
-            req.pane,
             &req.sid,
             &mut commands,
             &mut meshes,
@@ -924,10 +847,17 @@ fn respond_page_agent_spawn_default(
             continue;
         };
         let sid = uuid::Uuid::new_v4().to_string();
-        if spawn_page_agent_tab(
+        let stack = commands
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                LastActivatedAt::now(),
+                ChildOf(req.pane),
+            ))
+            .id();
+        if attach_page_agent_to_stack(
+            stack,
             p.provider,
             p.default_model,
-            req.pane,
             &sid,
             &mut commands,
             &mut meshes,
@@ -938,7 +868,7 @@ fn respond_page_agent_spawn_default(
         .is_none()
         {
             bevy::log::warn!(
-                "spawn_page_agent_tab returned None: no strategy registered for {}/{}",
+                "page agent stack spawn failed: no strategy registered for {}/{}",
                 p.provider,
                 p.default_model
             );
@@ -1097,9 +1027,9 @@ mod tests {
     #[test]
     fn deep_link_focuses_existing_claude_tab() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<crate::session::AgentSessionToEntity>();
-        app.add_systems(Update, crate::session::track_session_id_inserts);
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::session::AgentSessionToEntity>()
+            .add_systems(Update, crate::session::track_session_id_inserts);
 
         let entity = app
             .world_mut()
@@ -1162,24 +1092,24 @@ mod tests {
     #[test]
     fn terminal_send_writes_raw_text_to_active_terminal() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
-        app.add_message::<vmux_layout::BrowserNavigateRequest>();
-        app.add_message::<vmux_layout::BrowserGoBackRequest>();
-        app.add_message::<vmux_layout::BrowserGoForwardRequest>();
-        app.add_message::<vmux_layout::OpenInNewStackRequest>();
-        app.add_message::<vmux_layout::reconcile::LayoutApplyRequest>();
-        app.add_message::<vmux_layout::reconcile::LayoutApplyResponse>();
-        app.add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>();
-        app.add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>();
-        app.add_message::<vmux_terminal::TerminalSendRequest>();
-        app.add_message::<vmux_terminal::RunShellRequest>();
-        app.add_message::<vmux_setting::SettingsWriteRequest>();
-        app.add_message::<vmux_history::query::HistoryOpenIntent>();
-        app.add_systems(Update, vmux_terminal::handle_terminal_send_requests);
-        app.insert_resource(FocusedStack::default());
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin))
+            .add_message::<vmux_layout::BrowserNavigateRequest>()
+            .add_message::<vmux_layout::BrowserGoBackRequest>()
+            .add_message::<vmux_layout::BrowserGoForwardRequest>()
+            .add_message::<vmux_layout::OpenInNewStackRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
+            .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
+            .add_message::<vmux_terminal::TerminalSendRequest>()
+            .add_message::<vmux_terminal::RunShellRequest>()
+            .add_message::<vmux_setting::SettingsWriteRequest>()
+            .add_message::<vmux_history::query::HistoryOpenIntent>()
+            .add_systems(Update, vmux_terminal::handle_terminal_send_requests)
+            .insert_resource(FocusedStack::default())
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
         let stack = app

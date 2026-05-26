@@ -113,9 +113,9 @@ impl Plugin for UpdatePlugin {
             pubkey: self.updater.pubkey.clone(),
             initial_delay: self.updater.initial_delay,
             poll_interval: self.updater.poll_interval,
-        });
-        app.add_systems(Startup, init_update_checker)
-            .add_systems(Update, poll_update_result);
+        })
+        .add_systems(Startup, init_update_checker)
+        .add_systems(Update, poll_update_result);
     }
 }
 

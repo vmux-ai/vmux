@@ -12,6 +12,8 @@ Use superpower. Invoke relevant skills BEFORE any response or action. Even a 1% 
 
 NEVER commit or push without running fmt + clippy + test on the **changed crates only** (not the whole workspace) and confirming they pass.
 
+Only run fmt, clippy, and test at the end of the task, after all intended edits are complete and immediately before committing, pushing, or opening a PR. Do not run cargo fmt, cargo clippy, cargo check, cargo test, or other compiler checks during the edit loop unless the user explicitly asks for an early check.
+
 The `scripts/changed-crates.sh` script computes the set: crates whose files changed, plus crates whose tests `include_str!` from changed paths.
 
 ```bash
@@ -46,6 +48,8 @@ This project targets macOS (primary) and Linux (CI). When adding imports or code
 
 - Do not add comments to code.
 - Do not use mod.rs files. Use the filename-based module pattern (e.g. `layout.rs` + `layout/` directory).
+- When configuring a Bevy `App` in plugins or tests, chain consecutive `App` builder calls in one expression (e.g. `app.add_plugins(...).init_resource::<T>().add_systems(...);`) instead of separate `app.*;` statements. Do not chain `app.world()`, `app.world_mut()`, `app.update()`, or control-flow-dependent mutations.
+- Prefer Bevy system + message integration over direct helper-function calls for cross-module behavior. Register message types and systems in plugins/tests, send typed messages, run schedules, and assert on resulting ECS state/messages instead of bypassing production flow with ad hoc helpers.
 
 ## Linear
 
@@ -76,6 +80,8 @@ Always prefer `git rebase` over `git merge` when updating branches. Use `git pus
 ## Before Pushing / Opening PRs
 
 **Mandatory**: Run fmt + clippy + test on the **changed crates only** before every `git push` or PR creation. Do not push or open a PR if any check fails. Fix all errors first.
+
+These checks are final-gate checks. Finish edits first, then run them once before push/PR/commit. If they fail, fix the issue and re-run the changed-crate loops.
 
 Use `scripts/changed-crates.sh` (see Pre-commit Checks above) to compute the changed-crate set and run the three loops. The repo-wide `make lint` / `make test` targets still exist (they iterate every workspace package) but are slow and intended for periodic full sweeps, not per-push validation.
 

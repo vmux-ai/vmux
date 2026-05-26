@@ -16,8 +16,8 @@ pub struct BackgroundLifecyclePlugin;
 
 impl Plugin for BackgroundLifecyclePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<LifecycleEvent>();
-        app.add_systems(Update, handle_lifecycle_events);
+        app.add_message::<LifecycleEvent>()
+            .add_systems(Update, handle_lifecycle_events);
     }
 }
 

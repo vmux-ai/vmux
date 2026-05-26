@@ -28,13 +28,13 @@ impl Plugin for HistoryPlugin {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")),
             &PageConfig::with_custom_host("history"),
         );
-        app.add_systems(Update, (spawn_visits, broadcast_history_changed).chain());
-        app.add_systems(Update, handle_history_page_open.in_set(PageOpenSet::HandleKnownPages));
-        app.add_systems(
+        app.add_systems(Update, (spawn_visits, broadcast_history_changed).chain())
+            .add_systems(Update, handle_history_page_open.in_set(PageOpenSet::HandleKnownPages))
+            .add_systems(
             Update,
             prune_history.run_if(on_timer(Duration::from_secs(3600))),
-        );
-        app.add_systems(Startup, prune_history);
+        )
+            .add_systems(Startup, prune_history);
 
         app.add_plugins(
             BinEventEmitterPlugin::<(
@@ -47,14 +47,14 @@ impl Plugin for HistoryPlugin {
             )>::default(),
         );
 
-        app.add_observer(on_history_query_request);
-        app.add_observer(on_history_delete_request);
-        app.add_observer(on_history_clear_all_request);
-        app.add_observer(on_history_open_request);
-        app.add_observer(on_history_suggestions_request);
+        app.add_observer(on_history_query_request)
+            .add_observer(on_history_delete_request)
+            .add_observer(on_history_clear_all_request)
+            .add_observer(on_history_open_request)
+            .add_observer(on_history_suggestions_request);
 
-        app.add_message::<HistoryOpenIntent>();
-        app.add_message::<CefPageAttachRequest>();
+        app.add_message::<HistoryOpenIntent>()
+            .add_message::<CefPageAttachRequest>();
     }
 }
 

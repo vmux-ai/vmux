@@ -428,7 +428,7 @@ pub fn apply_with_existing(
                 entity
             }
         };
-        create_descendants(world, tab_entity, &tab.root, &mut new_entities);
+        materialize_descendants(world, tab_entity, &tab.root, &mut new_entities);
     }
 
     for tab in &snapshot.tabs {
@@ -465,7 +465,7 @@ pub fn apply_with_existing(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn create_descendants(
+fn materialize_descendants(
     world: &mut World,
     parent: Entity,
     node: &proto::LayoutNode,
@@ -507,7 +507,9 @@ fn create_descendants(
                 Err(_) => return,
             },
             None => {
-                let entity = spawn_leaf_pane(world, parent);
+                let entity = world
+                    .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
+                    .id();
                 new_entities.insert(node as *const _, entity);
                 entity
             }
@@ -517,13 +519,31 @@ fn create_descendants(
     match node {
         proto::LayoutNode::Split { children, .. } => {
             for c in children {
-                create_descendants(world, node_entity, c, new_entities);
+                materialize_descendants(world, node_entity, c, new_entities);
             }
         }
         proto::LayoutNode::Pane { stacks, .. } => {
             for t in stacks {
                 if t.id.is_none() {
-                    spawn_tab(world, node_entity, t);
+                    let stack = world
+                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(node_entity)))
+                        .id();
+                    match t.kind.as_str() {
+                        "terminal" => {
+                            world
+                                .resource_mut::<Messages<LayoutSpawnRequest>>()
+                                .write(LayoutSpawnRequest::Terminal { stack });
+                        }
+                        _ => {
+                            world.resource_mut::<Messages<PageOpenRequest>>().write(
+                                PageOpenRequest {
+                                    target: PageOpenTarget::Stack(stack),
+                                    url: t.url.clone(),
+                                    request_id: None,
+                                },
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -555,36 +575,6 @@ fn set_split_direction(world: &mut World, entity: Entity, direction: proto::Spli
         let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
         node.column_gap = gap.column_gap;
         node.row_gap = gap.row_gap;
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn spawn_leaf_pane(world: &mut World, parent: Entity) -> Entity {
-    world
-        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
-        .id()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn spawn_tab(world: &mut World, pane: Entity, tab: &proto::Stack) {
-    let stack = world
-        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-        .id();
-    match tab.kind.as_str() {
-        "terminal" => {
-            world
-                .resource_mut::<Messages<LayoutSpawnRequest>>()
-                .write(LayoutSpawnRequest::Terminal { stack });
-        }
-        _ => {
-            world
-                .resource_mut::<Messages<PageOpenRequest>>()
-                .write(PageOpenRequest {
-                    target: PageOpenTarget::Stack(stack),
-                    url: tab.url.clone(),
-                    request_id: None,
-                });
-        }
     }
 }
 
@@ -1271,9 +1261,9 @@ mod tests {
     #[test]
     fn apply_returns_error_for_stale_tab_id_does_not_panic() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
         let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -1310,9 +1300,9 @@ mod tests {
     #[test]
     fn submitting_new_tab_id_none_spawns_stack_entity() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
         let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -1349,9 +1339,9 @@ mod tests {
     #[test]
     fn malformed_pane_id_skips_subtree_no_orphan_spawn() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
         let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
 
@@ -1372,7 +1362,7 @@ mod tests {
                 ..Default::default()
             }],
         };
-        create_descendants(app.world_mut(), tab, &bad_node, &mut new_entities);
+        materialize_descendants(app.world_mut(), tab, &bad_node, &mut new_entities);
 
         let pane_count_after = app
             .world_mut()
@@ -1395,9 +1385,9 @@ mod tests {
     #[test]
     fn malformed_split_id_skips_subtree_no_orphan_spawn() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
         let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
 
@@ -1418,7 +1408,7 @@ mod tests {
                 stacks: vec![],
             }],
         };
-        create_descendants(app.world_mut(), tab, &bad_node, &mut new_entities);
+        materialize_descendants(app.world_mut(), tab, &bad_node, &mut new_entities);
 
         let split_count_after = app
             .world_mut()
@@ -1508,8 +1498,8 @@ mod tests {
     #[test]
     fn focus_change_writes_focused_stack() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.insert_resource(crate::stack::FocusedStack::default());
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(crate::stack::FocusedStack::default());
 
         let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -1549,10 +1539,10 @@ mod tests {
     #[test]
     fn apply_focus_preserves_existing_when_dto_fields_omitted() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
-        app.insert_resource(crate::stack::FocusedStack::default());
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(crate::stack::FocusedStack::default());
 
         let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -1593,11 +1583,11 @@ mod tests {
     }
 
     #[test]
-    fn spawn_split_inserts_node_with_flex_direction() {
+    fn new_split_inserts_node_with_flex_direction() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
         let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
 
@@ -1649,9 +1639,9 @@ mod tests {
     #[test]
     fn new_split_wraps_existing_pane_without_converting_it() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
         let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let existing_pane = app
@@ -1746,9 +1736,9 @@ mod tests {
     #[test]
     fn new_root_split_id_none_reuses_existing_root_split_of_tab() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
         let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let existing_root = app
@@ -1841,11 +1831,11 @@ mod tests {
         use bevy::ecs::message::Messages;
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<LayoutSnapshotRequest>();
-        app.add_message::<LayoutSnapshotResponse>();
-        app.insert_resource(crate::stack::FocusedStack::default());
-        app.add_systems(Update, super::serve_snapshot_requests);
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LayoutSnapshotRequest>()
+            .add_message::<LayoutSnapshotResponse>()
+            .insert_resource(crate::stack::FocusedStack::default())
+            .add_systems(Update, super::serve_snapshot_requests);
 
         let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let _ = app
@@ -1875,13 +1865,13 @@ mod tests {
         use bevy::ecs::message::Messages;
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<LayoutApplyRequest>();
-        app.add_message::<LayoutApplyResponse>();
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
-        app.insert_resource(crate::stack::FocusedStack::default());
-        app.add_systems(Update, super::apply_layout_requests);
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LayoutApplyRequest>()
+            .add_message::<LayoutApplyResponse>()
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(crate::stack::FocusedStack::default())
+            .add_systems(Update, super::apply_layout_requests);
 
         let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let pane = app
@@ -1924,9 +1914,9 @@ mod tests {
     #[test]
     fn new_split_preserves_submitted_children_order_with_new_pane_first() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_message::<PageOpenRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
         let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let existing_pane = app
