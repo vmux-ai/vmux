@@ -14,14 +14,14 @@ use std::ptr;
 pub type SystemCursorIconSenderInner = Sender<SystemCursorIcon>;
 
 #[derive(Clone, Debug)]
-pub struct WebviewChromeStateEvent {
+pub struct WebviewCefStateEvent {
     pub webview: Entity,
     pub url: Option<String>,
     pub title: Option<String>,
     pub favicon_url: Option<String>,
 }
 
-pub type WebviewChromeStateSenderInner = Sender<WebviewChromeStateEvent>;
+pub type WebviewCefStateSenderInner = Sender<WebviewCefStateEvent>;
 
 fn first_favicon_url(icon_urls: Option<&mut CefStringList>) -> Option<String> {
     let list = icon_urls?;
@@ -45,20 +45,20 @@ pub struct DisplayHandlerBuilder {
     object: *mut RcImpl<sys::cef_display_handler_t, Self>,
     webview: Entity,
     cursor_icon: SystemCursorIconSenderInner,
-    chrome_tx: WebviewChromeStateSenderInner,
+    cef_tx: WebviewCefStateSenderInner,
 }
 
 impl DisplayHandlerBuilder {
     pub fn build(
         webview: Entity,
         cursor_icon: SystemCursorIconSenderInner,
-        chrome_tx: WebviewChromeStateSenderInner,
+        cef_tx: WebviewCefStateSenderInner,
     ) -> cef::DisplayHandler {
         cef::DisplayHandler::new(Self {
             object: core::ptr::null_mut(),
             webview,
             cursor_icon,
-            chrome_tx,
+            cef_tx,
         })
     }
 }
@@ -83,7 +83,7 @@ impl Clone for DisplayHandlerBuilder {
             object,
             webview: self.webview,
             cursor_icon: self.cursor_icon.clone(),
-            chrome_tx: self.chrome_tx.clone(),
+            cef_tx: self.cef_tx.clone(),
         }
     }
 }
@@ -102,7 +102,7 @@ impl ImplDisplayHandler for DisplayHandlerBuilder {
         url: Option<&CefString>,
     ) {
         let url = url.map(|u| u.to_string());
-        let _ = self.chrome_tx.send_blocking(WebviewChromeStateEvent {
+        let _ = self.cef_tx.send_blocking(WebviewCefStateEvent {
             webview: self.webview,
             url,
             title: None,
@@ -112,7 +112,7 @@ impl ImplDisplayHandler for DisplayHandlerBuilder {
 
     fn on_title_change(&self, _browser: Option<&mut Browser>, title: Option<&CefString>) {
         let title = title.map(|t| t.to_string());
-        let _ = self.chrome_tx.send_blocking(WebviewChromeStateEvent {
+        let _ = self.cef_tx.send_blocking(WebviewCefStateEvent {
             webview: self.webview,
             url: None,
             title,
@@ -126,7 +126,7 @@ impl ImplDisplayHandler for DisplayHandlerBuilder {
         icon_urls: Option<&mut CefStringList>,
     ) {
         let favicon_url = first_favicon_url(icon_urls);
-        let _ = self.chrome_tx.send_blocking(WebviewChromeStateEvent {
+        let _ = self.cef_tx.send_blocking(WebviewCefStateEvent {
             webview: self.webview,
             url: None,
             title: None,

@@ -48,7 +48,7 @@ pub struct CefSuppressKeyboardInput(pub bool);
 
 /// Marker: this webview should ignore pinch-to-zoom gestures.
 ///
-/// Useful for chrome / UI webviews where the host doesn't want the user to
+/// Useful for CEF / UI webviews where the host doesn't want the user to
 /// inadvertently zoom the layout.
 #[derive(Component, Debug, Clone, Copy, Default, Reflect)]
 #[reflect(Component, Default)]

@@ -231,7 +231,7 @@ fn handle_stack_commands(
                 commands.entity(stack).insert(vmux_core::PageMetadata {
                     url: SERVICES_PAGE_URL.to_string(),
                     title: "Background Services".to_string(),
-                    bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+                    bg_color: Some(crate::event::TERMINAL_CEF_BG_COLOR.to_string()),
                     ..default()
                 });
                 page_open_requests.write(PageOpenRequest {

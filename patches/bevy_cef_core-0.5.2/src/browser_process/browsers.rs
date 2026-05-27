@@ -22,13 +22,14 @@ use raw_window_handle::RawWindowHandle;
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Once;
+use std::time::Duration;
 
 mod devtool_render_handler;
 mod keyboard;
 
 use crate::browser_process::browsers::devtool_render_handler::DevToolRenderHandlerBuilder;
 use crate::browser_process::display_handler::{
-    DisplayHandlerBuilder, SystemCursorIconSenderInner, WebviewChromeStateSenderInner,
+    DisplayHandlerBuilder, SystemCursorIconSenderInner, WebviewCefStateSenderInner,
 };
 use crate::browser_process::life_span_handler::{LifeSpanHandlerBuilder, WebviewPopupSenderInner};
 use crate::browser_process::load_handler::{
@@ -43,6 +44,7 @@ pub use keyboard::*;
 /// Opaque white so normal web pages render correctly.
 /// UI overlay webviews pass `0x00000000` for transparency.
 const CEF_OSR_BACKGROUND_COLOR_ARGB: u32 = 0xFFFFFFFF;
+pub const DEFAULT_WINDOWLESS_FRAME_RATE: i32 = 120;
 
 static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
 
@@ -56,6 +58,8 @@ pub struct WebviewBrowser {
     pub host: BrowserHost,
     pub size: SharedViewSize,
     pub device_scale: SharedDeviceScaleFactor,
+    windowless_frame_rate: Cell<i32>,
+    hidden: Cell<bool>,
 }
 
 pub struct Browsers {
@@ -94,16 +98,18 @@ impl Browsers {
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
         webview_committed_nav_sender: WebviewCommittedNavigationSenderInner,
-        webview_chrome_state_sender: WebviewChromeStateSenderInner,
+        webview_cef_state_sender: WebviewCefStateSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
         texture_wake: Option<TextureWake>,
         initialize_scripts: &[String],
         _window_handle: Option<RawWindowHandle>,
         disk_profile_root: Option<&str>,
         background_color: Option<u32>,
+        windowless_frame_rate: i32,
     ) {
+        let windowless_frame_rate = normalize_windowless_frame_rate(windowless_frame_rate);
         webview_debug_log(format!(
-            "Browsers::create_browser entity={webview:?} uri={_uri} size={webview_size:?} scale={device_scale_factor} disk_profile={} bg={background_color:?}",
+            "Browsers::create_browser entity={webview:?} uri={_uri} size={webview_size:?} scale={device_scale_factor} disk_profile={} bg={background_color:?} fps={windowless_frame_rate}",
             disk_profile_root.is_some_and(|s| !s.trim().is_empty())
         ));
         let size = Rc::new(Cell::new(webview_size));
@@ -118,7 +124,7 @@ impl Browsers {
             system_cursor_icon_sender,
             webview_loading_state_sender,
             webview_committed_nav_sender,
-            webview_chrome_state_sender,
+            webview_cef_state_sender,
             webview_popup_sender,
             texture_wake,
         );
@@ -208,9 +214,7 @@ impl Browsers {
             Some(&mut client),
             Some(&_uri.into()),
             Some(&BrowserSettings {
-                // Cap OSR paints to one 120Hz frame budget. Higher rates can saturate a full core
-                // per active webview because each paint copies and uploads a full texture.
-                windowless_frame_rate: 120,
+                windowless_frame_rate,
                 background_color: background_color.unwrap_or(CEF_OSR_BACKGROUND_COLOR_ARGB),
                 ..Default::default()
             }),
@@ -225,6 +229,8 @@ impl Browsers {
             client: browser,
             size,
             device_scale,
+            windowless_frame_rate: Cell::new(windowless_frame_rate),
+            hidden: Cell::new(false),
         };
         self.browsers.insert(webview, webview_browser);
         webview_debug_log(format!(
@@ -250,14 +256,36 @@ impl Browsers {
     #[inline]
     pub fn set_osr_not_hidden(&self, webview: &Entity) {
         if let Some(b) = self.browsers.get(webview) {
-            b.host.was_hidden(0);
+            if b.hidden.replace(false) {
+                b.host.was_hidden(0);
+            }
         }
     }
 
     #[inline]
     pub fn set_osr_hidden(&self, webview: &Entity) {
         if let Some(b) = self.browsers.get(webview) {
-            b.host.was_hidden(1);
+            if !b.hidden.replace(true) {
+                b.host.was_hidden(1);
+            }
+        }
+    }
+
+    pub fn set_all_osr_hidden(&self) {
+        for browser in self.browsers.values() {
+            if !browser.hidden.replace(true) {
+                browser.host.was_hidden(1);
+            }
+            browser.host.set_focus(false as _);
+        }
+    }
+
+    pub fn set_windowless_frame_rate(&self, webview: &Entity, frame_rate: i32) {
+        let frame_rate = normalize_windowless_frame_rate(frame_rate);
+        if let Some(browser) = self.browsers.get(webview)
+            && browser.windowless_frame_rate.replace(frame_rate) != frame_rate
+        {
+            browser.host.set_windowless_frame_rate(frame_rate);
         }
     }
 
@@ -358,7 +386,9 @@ impl Browsers {
     /// the underlying browser. Caller is responsible for pacing (typically once
     /// per host vsync).
     pub fn send_external_begin_frame(&self, webview: &Entity) {
-        if let Some(browser) = self.browsers.get(webview) {
+        if let Some(browser) = self.browsers.get(webview)
+            && !browser.hidden.get()
+        {
             browser.host.send_external_begin_frame();
         }
     }
@@ -592,14 +622,14 @@ impl Browsers {
         }
     }
 
-    /// Reload a specific webview (normal reload, may use cache — Chrome ⌘R / Ctrl+R).
+    /// Reload a specific webview (normal reload, may use cache — browser ⌘R / Ctrl+R).
     pub fn reload_webview(&self, webview: &Entity) {
         if let Some(browser) = self.browsers.get(webview) {
             browser.client.reload();
         }
     }
 
-    /// Hard-reload a specific webview (bypass HTTP cache — Chrome ⌘⇧R / Ctrl+Shift+R).
+    /// Hard-reload a specific webview (bypass HTTP cache — browser ⌘⇧R / Ctrl+Shift+R).
     pub fn reload_webview_ignore_cache(&self, webview: &Entity) {
         if let Some(browser) = self.browsers.get(webview) {
             browser.client.reload_ignore_cache();
@@ -810,7 +840,7 @@ impl Browsers {
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
         webview_committed_nav_sender: WebviewCommittedNavigationSenderInner,
-        webview_chrome_state_sender: WebviewChromeStateSenderInner,
+        webview_cef_state_sender: WebviewCefStateSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
         texture_wake: Option<TextureWake>,
     ) -> Client {
@@ -824,7 +854,7 @@ impl Browsers {
         .with_display_handler(DisplayHandlerBuilder::build(
             webview,
             system_cursor_icon_sender,
-            webview_chrome_state_sender,
+            webview_cef_state_sender,
         ))
         .with_load_handler(WebviewLoadHandlerBuilder::build(
             webview,
@@ -925,10 +955,39 @@ fn utf16_index_from_byte(s: &str, byte_idx: usize) -> u32 {
     s[..byte_idx].encode_utf16().count() as u32
 }
 
+pub fn windowless_frame_rate_from_refresh_millihertz(refresh_rate_millihertz: Option<u32>) -> i32 {
+    refresh_rate_millihertz
+        .map(|millihertz| ((millihertz.saturating_add(999)) / 1000).max(1) as i32)
+        .unwrap_or(DEFAULT_WINDOWLESS_FRAME_RATE)
+}
+
+pub fn windowless_frame_interval_from_refresh_millihertz(
+    refresh_rate_millihertz: Option<u32>,
+) -> Duration {
+    windowless_frame_interval_from_frame_rate(windowless_frame_rate_from_refresh_millihertz(
+        refresh_rate_millihertz,
+    ))
+}
+
+pub fn windowless_frame_interval_from_frame_rate(frame_rate: i32) -> Duration {
+    Duration::from_nanos(
+        (1_000_000_000 / normalize_windowless_frame_rate(frame_rate) as u64).max(1),
+    )
+}
+
+fn normalize_windowless_frame_rate(frame_rate: i32) -> i32 {
+    frame_rate.max(1)
+}
+
 #[cfg(test)]
 mod tests {
+    use super::{
+        DEFAULT_WINDOWLESS_FRAME_RATE, windowless_frame_interval_from_refresh_millihertz,
+        windowless_frame_rate_from_refresh_millihertz,
+    };
     use crate::prelude::modifiers_from_mouse_buttons;
     use bevy::prelude::*;
+    use std::time::Duration;
 
     #[test]
     #[allow(clippy::unnecessary_cast)]
@@ -943,11 +1002,85 @@ mod tests {
     }
 
     #[test]
-    fn osr_frame_rate_is_capped_at_120hz() {
+    fn osr_frame_rate_uses_display_refresh_millihertz() {
+        assert_eq!(
+            windowless_frame_rate_from_refresh_millihertz(Some(60_000)),
+            60
+        );
+        assert_eq!(
+            windowless_frame_rate_from_refresh_millihertz(Some(119_880)),
+            DEFAULT_WINDOWLESS_FRAME_RATE
+        );
+        assert_eq!(
+            windowless_frame_rate_from_refresh_millihertz(Some(144_000)),
+            144
+        );
+    }
+
+    #[test]
+    fn osr_frame_rate_falls_back_to_120hz_when_refresh_unknown() {
+        assert_eq!(
+            windowless_frame_rate_from_refresh_millihertz(None),
+            DEFAULT_WINDOWLESS_FRAME_RATE
+        );
+    }
+
+    #[test]
+    fn osr_frame_rate_never_sets_cef_below_minimum() {
+        assert_eq!(windowless_frame_rate_from_refresh_millihertz(Some(0)), 1);
+    }
+
+    #[test]
+    fn osr_frame_interval_uses_display_refresh_millihertz() {
+        assert_eq!(
+            windowless_frame_interval_from_refresh_millihertz(Some(60_000)),
+            Duration::from_nanos(16_666_666)
+        );
+        assert!(
+            windowless_frame_interval_from_refresh_millihertz(Some(144_000))
+                < Duration::from_millis(8)
+        );
+    }
+
+    #[test]
+    fn osr_frame_rate_is_passed_to_cef_settings() {
         let implementation = include_str!("browsers.rs")
             .split("#[cfg(test)]\nmod tests")
             .next()
             .unwrap_or_default();
-        assert!(implementation.contains("windowless_frame_rate: 120"));
+        assert!(
+            implementation.contains("let windowless_frame_rate = normalize_windowless_frame_rate")
+        );
+        assert!(implementation.contains("windowless_frame_rate,"));
+    }
+
+    #[test]
+    fn existing_osr_browsers_can_update_frame_rate() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        assert!(implementation.contains("pub fn set_windowless_frame_rate"));
+        assert!(implementation.contains("host.set_windowless_frame_rate(frame_rate)"));
+    }
+
+    #[test]
+    fn hidden_osr_webviews_do_not_receive_begin_frames() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        assert!(implementation.contains("hidden: Cell<bool>"));
+        assert!(implementation.contains("&& !browser.hidden.get()"));
+    }
+
+    #[test]
+    fn all_osr_webviews_can_be_suspended_together() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        assert!(implementation.contains("pub fn set_all_osr_hidden"));
+        assert!(implementation.contains("browser.host.set_focus(false"));
     }
 }

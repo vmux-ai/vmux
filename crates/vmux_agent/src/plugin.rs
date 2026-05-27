@@ -188,7 +188,7 @@ pub fn attach_page_agent_to_stack(
     commands.entity(stack).insert(PageMetadata {
         url: url.clone(),
         title: format!("{provider}/{model}"),
-        bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+        bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
         ..default()
     });
     commands.entity(stack).insert((
@@ -432,7 +432,7 @@ fn respond_process_stack_spawn(
         commands.entity(stack).insert(PageMetadata {
             url: TERMINAL_PAGE_URL.to_string(),
             title,
-            bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+            bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
             ..default()
         });
         let launch = vmux_terminal::launch::TerminalLaunch {

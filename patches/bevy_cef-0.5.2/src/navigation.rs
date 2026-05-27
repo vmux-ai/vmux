@@ -48,7 +48,7 @@ pub struct RequestReload {
     pub webview: Entity,
 }
 
-/// Hard reload: bypass cache (Chrome ⌘⇧R / Ctrl+Shift+R).
+/// Hard reload: bypass cache (browser ⌘⇧R / Ctrl+Shift+R).
 #[derive(Debug, EntityEvent, Copy, Clone, Reflect, Serialize, Deserialize)]
 pub struct RequestReloadIgnoreCache {
     #[event_target]

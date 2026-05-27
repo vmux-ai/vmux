@@ -1,4 +1,4 @@
-//! Text span with tone/size defaults (vmux chrome; not part of upstream gallery).
+//! Text span with tone/size defaults (vmux CEF shell; not part of upstream gallery).
 
 use crate::util::merge_class;
 use dioxus::prelude::*;
@@ -11,7 +11,7 @@ pub enum UiTextTone {
     Default,
     Muted,
     Dim,
-    /// Sky accent (aligned with primary chrome).
+    /// Sky accent (aligned with primary CEF shell).
     Accent,
 }
 

@@ -5,7 +5,7 @@ use crate::window::VmuxWindow;
 use bevy::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, ToggleLayoutCommand};
 
-/// Tracks whether the layout chrome (header + side sheet) is currently hidden.
+/// Tracks whether the layout CEF shell (header + side sheet) is currently hidden.
 #[derive(Resource, Default, Debug)]
 pub struct LayoutHidden(pub bool);
 
@@ -19,10 +19,10 @@ impl Plugin for TogglePlugin {
     }
 }
 
-/// When the chrome is hidden, the pane fills the full window. Apply
+/// When the CEF shell is hidden, the pane fills the full window. Apply
 /// WINDOW_PAD_PX on all four sides to keep the pane off the system window
 /// edge. When visible, keep top + left at 0 (pane is flush against the
-/// chrome / system edge) and pad only the right + bottom corners.
+/// CEF shell / system edge) and pad only the right + bottom corners.
 fn sync_window_padding_to_layout_hidden(
     hidden: Res<LayoutHidden>,
     mut window_q: Query<&mut Node, With<VmuxWindow>>,

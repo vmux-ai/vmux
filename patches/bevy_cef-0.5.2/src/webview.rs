@@ -1,4 +1,4 @@
-use crate::chrome_state::WebviewChromeStateSender;
+use crate::cef_state::WebviewCefStateSender;
 use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
     BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, WebviewSize,
@@ -12,14 +12,15 @@ use crate::webview::mesh::MeshWebviewPlugin;
 use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::world::DeferredWorld;
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
+use bevy::window::{PrimaryWindow, Window};
 use bevy::winit::WINIT_WINDOWS;
 use bevy_cef_core::prelude::*;
 use bevy_remote::BrpSender;
 #[allow(deprecated)]
 use raw_window_handle::HasRawWindowHandle;
 use serde::{Deserialize, Serialize};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 mod history_swipe;
@@ -27,10 +28,33 @@ mod mesh;
 mod pinch_zoom;
 mod webview_sprite;
 
-const TEXTURE_WAKE_MIN_INTERVAL: Duration = Duration::from_millis(8);
-
 #[derive(Resource, Clone)]
 struct TextureWakeCallback(Option<TextureWake>);
+
+#[derive(Resource, Clone)]
+struct TextureWakeMinInterval(Arc<AtomicU64>);
+
+impl Default for TextureWakeMinInterval {
+    fn default() -> Self {
+        Self(Arc::new(AtomicU64::new(duration_nanos(
+            windowless_frame_interval_from_frame_rate(DEFAULT_WINDOWLESS_FRAME_RATE),
+        ))))
+    }
+}
+
+impl TextureWakeMinInterval {
+    fn set_min_interval(&self, interval: Duration) {
+        self.0.store(duration_nanos(interval), Ordering::Relaxed);
+    }
+
+    fn min_interval(&self) -> Duration {
+        Duration::from_nanos(self.0.load(Ordering::Relaxed))
+    }
+}
+
+fn duration_nanos(duration: Duration) -> u64 {
+    duration.as_nanos().try_into().unwrap_or(u64::MAX)
+}
 
 pub mod prelude {
     pub use crate::webview::{
@@ -96,14 +120,16 @@ pub struct WebviewPlugin;
 
 impl Plugin for WebviewPlugin {
     fn build(&self, app: &mut App) {
+        let texture_wake_policy = TextureWakeMinInterval::default();
         let texture_wake = app
             .world()
             .get_resource::<bevy::winit::EventLoopProxyWrapper>()
-            .map(spawn_texture_wake_throttler);
+            .map(|wrapper| spawn_texture_wake_throttler(wrapper, texture_wake_policy.clone()));
         app.register_type::<RequestShowDevTool>()
             .init_resource::<CefDiskProfileRoot>()
             .init_non_send_resource::<Browsers>()
             .insert_resource(TextureWakeCallback(texture_wake))
+            .insert_resource(texture_wake_policy)
             .add_plugins((MeshWebviewPlugin,))
             .add_systems(
                 Update,
@@ -113,6 +139,10 @@ impl Plugin for WebviewPlugin {
                     navigate_on_source_change,
                 )
                     .in_set(CefSystems::CreateAndResize),
+            )
+            .add_systems(
+                Update,
+                sync_windowless_frame_rate.after(CefSystems::CreateAndResize),
             )
             .add_systems(Last, drive_external_begin_frames)
             .add_observer(apply_request_show_devtool)
@@ -141,6 +171,39 @@ fn any_resized(webviews: Query<Entity, Changed<WebviewSize>>) -> bool {
     !webviews.is_empty()
 }
 
+fn sync_windowless_frame_rate(
+    browsers: NonSend<Browsers>,
+    texture_wake_policy: Res<TextureWakeMinInterval>,
+    webviews: Query<(Entity, Option<&HostWindow>), With<WebviewSource>>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
+) {
+    WINIT_WINDOWS.with(|winit_windows| {
+        let winit_windows = winit_windows.borrow();
+        let mut min_interval = None::<Duration>;
+        for (entity, host_window) in webviews.iter() {
+            let window_entity = host_window
+                .map(|h| h.0)
+                .or_else(|| primary_window.single().ok());
+            let refresh_rate_millihertz = window_entity
+                .and_then(|e| winit_windows.get_window(e))
+                .and_then(|window| window.current_monitor())
+                .and_then(|monitor| monitor.refresh_rate_millihertz());
+            let windowless_frame_rate =
+                windowless_frame_rate_from_refresh_millihertz(refresh_rate_millihertz);
+            let frame_interval = windowless_frame_interval_from_frame_rate(windowless_frame_rate);
+            min_interval = Some(
+                min_interval
+                    .map(|current| current.min(frame_interval))
+                    .unwrap_or(frame_interval),
+            );
+            browsers.set_windowless_frame_rate(&entity, windowless_frame_rate);
+        }
+        if let Some(interval) = min_interval {
+            texture_wake_policy.set_min_interval(interval);
+        }
+    });
+}
+
 /// Drives one CEF paint per Bevy frame for every active webview.
 ///
 /// Pairs with `external_begin_frame_enabled: true` on browser creation. Bevy's
@@ -150,13 +213,20 @@ fn any_resized(webviews: Query<Entity, Changed<WebviewSize>>) -> bool {
 fn drive_external_begin_frames(
     browsers: NonSend<Browsers>,
     webviews: Query<Entity, With<WebviewSource>>,
+    windows: Query<&Window>,
 ) {
+    if !windows.is_empty() && windows.iter().all(|window| !window.visible) {
+        return;
+    }
     for entity in webviews.iter() {
         browsers.send_external_begin_frame(&entity);
     }
 }
 
-fn spawn_texture_wake_throttler(wrapper: &bevy::winit::EventLoopProxyWrapper) -> TextureWake {
+fn spawn_texture_wake_throttler(
+    wrapper: &bevy::winit::EventLoopProxyWrapper,
+    policy: TextureWakeMinInterval,
+) -> TextureWake {
     let proxy = (**wrapper).clone();
     let (tx, rx) = mpsc::channel::<()>();
     std::thread::Builder::new()
@@ -166,8 +236,9 @@ fn spawn_texture_wake_throttler(wrapper: &bevy::winit::EventLoopProxyWrapper) ->
             while rx.recv().is_ok() {
                 if let Some(t) = last_fire {
                     let elapsed = Instant::now().duration_since(t);
-                    if elapsed < TEXTURE_WAKE_MIN_INTERVAL {
-                        std::thread::sleep(TEXTURE_WAKE_MIN_INTERVAL - elapsed);
+                    let min_interval = policy.min_interval();
+                    if elapsed < min_interval {
+                        std::thread::sleep(min_interval - elapsed);
                     }
                 }
                 while rx.try_recv().is_ok() {}
@@ -193,7 +264,7 @@ fn create_webview(
     cursor_icon_sender: Res<SystemCursorIconSender>,
     loading_state_sender: Res<WebviewLoadingStateSender>,
     committed_nav_sender: Res<WebviewCommittedNavigationSender>,
-    chrome_state_sender: Res<WebviewChromeStateSender>,
+    cef_state_sender: Res<WebviewCefStateSender>,
     popup_sender: Res<WebviewPopupSender>,
     texture_wake: Res<TextureWakeCallback>,
     webviews: Query<
@@ -222,15 +293,19 @@ fn create_webview(
                 .filter(|s| s.is_finite() && *s > 0.0)
                 .unwrap_or(1.0);
 
-            let host_window = host_window
-                .and_then(|w| winit_windows.get_window(w.0))
-                .or_else(|| winit_windows.get_window(primary_window.single().ok()?))
+            let winit_window = window_entity.and_then(|e| winit_windows.get_window(e));
+            let refresh_rate_millihertz = winit_window
+                .and_then(|window| window.current_monitor())
+                .and_then(|monitor| monitor.refresh_rate_millihertz());
+            let windowless_frame_rate =
+                windowless_frame_rate_from_refresh_millihertz(refresh_rate_millihertz);
+            let host_window = winit_window
                 .and_then(|w| {
                     #[allow(deprecated)]
                     w.raw_window_handle().ok()
                 });
             webview_debug_log(format!(
-                "create_webview entity={entity:?} uri={} size={:?} scale={device_scale_factor} transparent={transparent} host_window={}",
+                "create_webview entity={entity:?} uri={} size={:?} scale={device_scale_factor} transparent={transparent} host_window={} fps={windowless_frame_rate}",
                 uri.0,
                 size.0,
                 host_window.is_some()
@@ -247,13 +322,14 @@ fn create_webview(
                 cursor_icon_sender.clone(),
                 loading_state_sender.0.clone(),
                 committed_nav_sender.0.clone(),
-                chrome_state_sender.0.clone(),
+                cef_state_sender.0.clone(),
                 popup_sender.0.clone(),
                 texture_wake.0.clone(),
                 &initialize_scripts.0,
                 host_window,
                 disk_profile.0.as_deref(),
                 if transparent { Some(0x00000000) } else { None },
+                windowless_frame_rate,
             );
         }
     });
@@ -307,8 +383,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn texture_wake_throttle_caps_to_120hz() {
-        assert!(TEXTURE_WAKE_MIN_INTERVAL >= Duration::from_millis(8));
-        assert!(TEXTURE_WAKE_MIN_INTERVAL <= Duration::from_millis(9));
+    fn texture_wake_throttle_defaults_to_120hz_interval() {
+        assert_eq!(
+            TextureWakeMinInterval::default().min_interval(),
+            windowless_frame_interval_from_frame_rate(DEFAULT_WINDOWLESS_FRAME_RATE)
+        );
+    }
+
+    #[test]
+    fn begin_frame_driver_skips_when_all_windows_are_hidden() {
+        let implementation = include_str!("webview.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+
+        assert!(implementation.contains("windows: Query<&Window>"));
+        assert!(implementation.contains("windows.iter().all(|window| !window.visible)"));
+    }
+
+    #[test]
+    fn webview_uses_current_monitor_refresh_for_initial_cef_frame_rate() {
+        let implementation = include_str!("webview.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+
+        assert!(implementation.contains("current_monitor()"));
+        assert!(implementation.contains("refresh_rate_millihertz()"));
+        assert!(implementation.contains("windowless_frame_rate_from_refresh_millihertz"));
+        assert!(implementation.contains("windowless_frame_rate,"));
+    }
+
+    #[test]
+    fn webview_keeps_existing_cef_frame_rate_synced_to_monitor() {
+        let implementation = include_str!("webview.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+
+        assert!(implementation.contains("sync_windowless_frame_rate"));
+        assert!(implementation.contains("browsers.set_windowless_frame_rate"));
+        assert!(implementation.contains("texture_wake_policy.set_min_interval"));
     }
 }

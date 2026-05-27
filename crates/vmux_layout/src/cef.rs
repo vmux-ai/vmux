@@ -35,13 +35,13 @@ impl Plugin for LayoutCefPlugin {
 }
 
 pub fn mirror_metadata_to_url(
-    chrome_q: Query<
+    cef_q: Query<
         &vmux_core::PageMetadata,
         (Without<vmux_core::Url>, Changed<vmux_core::PageMetadata>),
     >,
     mut urls: Query<&mut vmux_core::PageMetadata, With<vmux_core::Url>>,
 ) {
-    for tab_meta in chrome_q.iter() {
+    for tab_meta in cef_q.iter() {
         if tab_meta.url.is_empty() {
             continue;
         }
@@ -62,21 +62,21 @@ pub fn mirror_metadata_to_url(
     }
 }
 
-pub fn apply_chrome_state_from_cef(
-    chrome_rx: Res<WebviewChromeStateReceiver>,
+pub fn apply_cef_state_from_webview(
+    cef_rx: Res<WebviewCefStateReceiver>,
     mut browser_meta: Query<&mut vmux_core::PageMetadata>,
 ) {
-    while let Ok(ev) = chrome_rx.0.try_recv() {
+    while let Ok(ev) = cef_rx.0.try_recv() {
         let Ok(mut meta) = browser_meta.get_mut(ev.webview) else {
             continue;
         };
-        apply_chrome_state_to_meta(&mut meta, ev);
+        apply_cef_state_to_meta(&mut meta, ev);
     }
 }
 
-pub(crate) fn apply_chrome_state_to_meta(
+pub(crate) fn apply_cef_state_to_meta(
     meta: &mut vmux_core::PageMetadata,
-    ev: bevy_cef_core::prelude::WebviewChromeStateEvent,
+    ev: bevy_cef_core::prelude::WebviewCefStateEvent,
 ) {
     let on_native_view = meta.url.starts_with("vmux://");
     let navigating_away = ev.url.as_deref().is_some_and(|u| !u.starts_with("vmux://"));
@@ -191,10 +191,7 @@ pub fn layout_cef_bundle(
         Transform::default(),
         GlobalTransform::default(),
         Visibility::Inherited,
-        Pickable {
-            should_block_lower: false,
-            is_hoverable: true,
-        },
+        Pickable::IGNORE,
     )
 }
 
@@ -212,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_cef_does_not_block_pointer_events_below_it() {
+    fn layout_cef_uses_manual_pointer_routing() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<Assets<Mesh>>()
@@ -224,22 +221,16 @@ mod tests {
             .world_mut()
             .query_filtered::<&Pickable, With<LayoutCef>>()
             .single(app.world())
-            .expect("layout chrome pickable");
+            .expect("layout CEF shell pickable");
 
-        assert_eq!(
-            pickable,
-            &Pickable {
-                should_block_lower: false,
-                is_hoverable: true,
-            }
-        );
+        assert_eq!(pickable, &Pickable::IGNORE);
     }
 }
 
 #[cfg(test)]
-mod apply_chrome_state_tests {
+mod apply_cef_state_tests {
     use super::*;
-    use bevy_cef_core::prelude::WebviewChromeStateEvent;
+    use bevy_cef_core::prelude::WebviewCefStateEvent;
     use vmux_core::PageMetadata;
 
     fn vmux_meta() -> PageMetadata {
@@ -260,12 +251,8 @@ mod apply_chrome_state_tests {
         }
     }
 
-    fn ev(
-        title: Option<&str>,
-        favicon: Option<&str>,
-        url: Option<&str>,
-    ) -> WebviewChromeStateEvent {
-        WebviewChromeStateEvent {
+    fn ev(title: Option<&str>, favicon: Option<&str>, url: Option<&str>) -> WebviewCefStateEvent {
+        WebviewCefStateEvent {
             webview: Entity::PLACEHOLDER,
             url: url.map(str::to_string),
             title: title.map(str::to_string),
@@ -276,21 +263,21 @@ mod apply_chrome_state_tests {
     #[test]
     fn vmux_url_preserves_title_against_cef_update() {
         let mut meta = vmux_meta();
-        apply_chrome_state_to_meta(&mut meta, ev(Some("vmux history POC"), None, None));
+        apply_cef_state_to_meta(&mut meta, ev(Some("vmux history POC"), None, None));
         assert_eq!(meta.title, "History");
     }
 
     #[test]
     fn vmux_url_preserves_favicon_against_cef_update() {
         let mut meta = vmux_meta();
-        apply_chrome_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None));
+        apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None));
         assert_eq!(meta.favicon_url, "");
     }
 
     #[test]
     fn vmux_url_preserves_url_when_cef_reports_same_vmux_url() {
         let mut meta = vmux_meta();
-        apply_chrome_state_to_meta(&mut meta, ev(None, None, Some("vmux://history/")));
+        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("vmux://history/")));
         assert_eq!(meta.url, "vmux://history/");
         assert_eq!(meta.title, "History");
     }
@@ -298,29 +285,29 @@ mod apply_chrome_state_tests {
     #[test]
     fn vmux_url_updates_when_cef_navigates_to_external_url() {
         let mut meta = vmux_meta();
-        apply_chrome_state_to_meta(&mut meta, ev(None, None, Some("https://anthropic.com")));
+        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://anthropic.com")));
         assert_eq!(meta.url, "https://anthropic.com");
     }
 
     #[test]
     fn after_navigation_away_subsequent_title_updates_apply() {
         let mut meta = vmux_meta();
-        apply_chrome_state_to_meta(&mut meta, ev(None, None, Some("https://anthropic.com")));
-        apply_chrome_state_to_meta(&mut meta, ev(Some("Frontier AI"), None, None));
+        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://anthropic.com")));
+        apply_cef_state_to_meta(&mut meta, ev(Some("Frontier AI"), None, None));
         assert_eq!(meta.title, "Frontier AI");
     }
 
     #[test]
     fn external_url_accepts_title_update() {
         let mut meta = external_meta();
-        apply_chrome_state_to_meta(&mut meta, ev(Some("New Title"), None, None));
+        apply_cef_state_to_meta(&mut meta, ev(Some("New Title"), None, None));
         assert_eq!(meta.title, "New Title");
     }
 
     #[test]
     fn external_url_accepts_favicon_update() {
         let mut meta = external_meta();
-        apply_chrome_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None));
+        apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None));
         assert_eq!(meta.favicon_url, "https://x/fav.ico");
     }
 
@@ -332,7 +319,7 @@ mod apply_chrome_state_tests {
             favicon_url: "https://example.com/fav.ico".into(),
             bg_color: None,
         };
-        apply_chrome_state_to_meta(&mut meta, ev(None, None, Some("https://other.com")));
+        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://other.com")));
         assert_eq!(meta.url, "https://other.com");
         assert_eq!(meta.favicon_url, "");
     }

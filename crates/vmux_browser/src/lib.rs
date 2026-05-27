@@ -2,9 +2,14 @@
 
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
+    input::{
+        ButtonState, InputSystems,
+        mouse::{MouseButton, MouseButtonInput},
+    },
+    picking::pointer::PointerButton,
     prelude::*,
     ui::{UiGlobalTransform, UiSystems},
-    window::{PrimaryWindow, WindowResized},
+    window::{CursorMoved, PrimaryWindow, WindowResized},
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
@@ -78,10 +83,20 @@ impl Plugin for BrowserPlugin {
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
             .add_systems(
+                PreUpdate,
+                (
+                    sync_layout_cef_pointer_target,
+                    forward_layout_cef_cursor_move.run_if(on_message::<CursorMoved>),
+                    forward_layout_cef_mouse_button.run_if(on_message::<MouseButtonInput>),
+                )
+                    .chain()
+                    .after(InputSystems),
+            )
+            .add_systems(
                 Update,
                 (
                     handle_browser_commands.in_set(ReadAppCommands),
-                    vmux_layout::apply_chrome_state_from_cef,
+                    vmux_layout::apply_cef_state_from_webview,
                     drain_loading_state,
                     drain_committed_navigation,
                     spawn_popup_stacks,
@@ -100,11 +115,12 @@ impl Plugin for BrowserPlugin {
                 Update,
                 (sync_page_metadata_to_tab, spawn_visit_on_navigation)
                     .chain()
-                    .after(vmux_layout::apply_chrome_state_from_cef),
+                    .after(vmux_layout::apply_cef_state_from_webview),
             )
             .add_systems(
                 Update,
-                vmux_layout::mirror_metadata_to_url.after(vmux_layout::apply_chrome_state_from_cef),
+                vmux_layout::mirror_metadata_to_url
+                    .after(vmux_layout::apply_cef_state_from_webview),
             )
             .add_systems(
                 Update,
@@ -114,7 +130,7 @@ impl Plugin for BrowserPlugin {
                     push_pane_tree_emit,
                     push_tabs_host_emit,
                 )
-                    .after(vmux_layout::apply_chrome_state_from_cef)
+                    .after(vmux_layout::apply_cef_state_from_webview)
                     .after(vmux_layout::stack::ComputeFocusSet),
             )
             .add_systems(
@@ -151,7 +167,7 @@ fn on_webview_ready_send_theme(
         };
         commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
     }
-    // Chrome / modal must never carry a stale zoom (e.g. from a previous
+    // CEF / modal must never carry a stale zoom (e.g. from a previous
     // session where pinch-zoom was allowed); force them to 0 once the
     // webview is ready, both on the component and on the CEF host.
     if cef_q.get(entity).is_ok() || modal_q.get(entity).is_ok() {
@@ -159,6 +175,180 @@ fn on_webview_ready_send_theme(
             zoom.0 = 0.0;
         }
         browsers.set_zoom_level(&entity, 0.0);
+    }
+}
+
+type CefPointerRegionQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Option<&'static Header>,
+        Option<&'static SideSheet>,
+        &'static Node,
+        &'static ComputedNode,
+        &'static UiGlobalTransform,
+        Option<&'static Visibility>,
+        Has<Open>,
+    ),
+    Or<(With<Header>, With<SideSheet>)>,
+>;
+
+#[derive(Clone, Copy)]
+struct CefPointerHitRect {
+    center: Vec2,
+    size: Vec2,
+    interactive: bool,
+}
+
+fn cef_pointer_hit_rect_contains(rect: CefPointerHitRect, point: Vec2) -> bool {
+    if !rect.interactive {
+        return false;
+    }
+    let half = rect.size * 0.5;
+    let min = rect.center - half;
+    let max = rect.center + half;
+    point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y
+}
+
+fn cef_pointer_hit_rect(
+    header: Option<&Header>,
+    side_sheet: Option<&SideSheet>,
+    node: &Node,
+    computed: &ComputedNode,
+    transform: &UiGlobalTransform,
+    visibility: Option<&Visibility>,
+    open: bool,
+) -> CefPointerHitRect {
+    let interactive = (header.is_some() || side_sheet.is_some())
+        && open
+        && node.display != Display::None
+        && !matches!(visibility, Some(Visibility::Hidden))
+        && computed.size.x > 0.0
+        && computed.size.y > 0.0;
+    CefPointerHitRect {
+        center: transform.transform_point2(Vec2::ZERO),
+        size: computed.size,
+        interactive,
+    }
+}
+
+fn cef_pointer_regions_contains(
+    cursor_pos: Vec2,
+    cef_regions: &CefPointerRegionQuery<'_, '_>,
+) -> bool {
+    cef_regions
+        .iter()
+        .map(
+            |(header, side_sheet, node, computed, transform, visibility, open)| {
+                cef_pointer_hit_rect(
+                    header, side_sheet, node, computed, transform, visibility, open,
+                )
+            },
+        )
+        .any(|rect| cef_pointer_hit_rect_contains(rect, cursor_pos))
+}
+
+fn sync_layout_cef_pointer_target(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    layout_q: Query<(Entity, Has<CefPointerTarget>), With<LayoutCef>>,
+    cef_regions: CefPointerRegionQuery<'_, '_>,
+    modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
+    mut commands: Commands,
+) {
+    let Ok((layout, has_target)) = layout_q.single() else {
+        return;
+    };
+    let should_target = modal_pointer_targets.is_empty()
+        && windows
+            .single()
+            .ok()
+            .and_then(Window::cursor_position)
+            .is_some_and(|pos| cef_pointer_regions_contains(pos, &cef_regions));
+    if should_target && !has_target {
+        commands.entity(layout).insert(CefPointerTarget);
+    } else if !should_target && has_target {
+        commands.entity(layout).remove::<CefPointerTarget>();
+    }
+}
+
+fn forward_layout_cef_cursor_move(
+    mut events: MessageReader<CursorMoved>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    suppress: Res<CefSuppressPointerInput>,
+    browsers: NonSend<Browsers>,
+    layout_q: Query<Entity, With<LayoutCef>>,
+    cef_regions: CefPointerRegionQuery<'_, '_>,
+    modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
+) {
+    if suppress.0 || !modal_pointer_targets.is_empty() {
+        for _ in events.read() {}
+        return;
+    }
+    let Ok(layout) = layout_q.single() else {
+        for _ in events.read() {}
+        return;
+    };
+    for event in events.read() {
+        if cef_pointer_regions_contains(event.position, &cef_regions) {
+            browsers.send_mouse_move(&layout, buttons.get_pressed(), event.position, false);
+        }
+    }
+}
+
+fn forward_layout_cef_mouse_button(
+    mut events: MessageReader<MouseButtonInput>,
+    windows: Query<&Window>,
+    suppress: Res<CefSuppressPointerInput>,
+    browsers: NonSend<Browsers>,
+    layout_q: Query<Entity, With<LayoutCef>>,
+    cef_regions: CefPointerRegionQuery<'_, '_>,
+    modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
+    mut captured: Local<bool>,
+) {
+    if suppress.0 || !modal_pointer_targets.is_empty() {
+        for _ in events.read() {}
+        *captured = false;
+        return;
+    }
+    let Ok(layout) = layout_q.single() else {
+        for _ in events.read() {}
+        *captured = false;
+        return;
+    };
+    for event in events.read() {
+        let Some(button) = pointer_button_from_mouse_button(event.button) else {
+            continue;
+        };
+        let Ok(window) = windows.get(event.window) else {
+            continue;
+        };
+        let Some(position) = window.cursor_position() else {
+            continue;
+        };
+        let inside = cef_pointer_regions_contains(position, &cef_regions);
+        if event.state == ButtonState::Pressed && inside {
+            *captured = true;
+        }
+        if inside || *captured {
+            browsers.send_mouse_click(
+                &layout,
+                position,
+                button,
+                event.state == ButtonState::Released,
+            );
+        }
+        if event.state == ButtonState::Released {
+            *captured = false;
+        }
+    }
+}
+
+fn pointer_button_from_mouse_button(button: MouseButton) -> Option<PointerButton> {
+    match button {
+        MouseButton::Left => Some(PointerButton::Primary),
+        MouseButton::Right => Some(PointerButton::Secondary),
+        MouseButton::Middle => Some(PointerButton::Middle),
+        _ => None,
     }
 }
 
@@ -285,10 +475,10 @@ fn sync_children_to_ui(
             continue;
         }
 
-        let is_chrome = status.is_some() || side_sheet.is_some() || modal.is_some();
+        let is_cef_ui = status.is_some() || side_sheet.is_some() || modal.is_some();
 
         // Check if this browser's parent tab is the active tab in its pane
-        let is_active_stack = if parent != glass_entity && !is_chrome {
+        let is_active_stack = if parent != glass_entity && !is_cef_ui {
             active_stack_in_pane(pane_entity, &pane_children, &tab_ts) == Some(parent)
         } else {
             true
@@ -300,7 +490,7 @@ fn sync_children_to_ui(
             new_stack_ctx.stack.is_some() && new_stack_ctx.previous_stack == Some(parent);
 
         let is_inactive_stack =
-            parent != glass_entity && !is_chrome && !is_active_stack && !is_previous_stack;
+            parent != glass_entity && !is_cef_ui && !is_active_stack && !is_previous_stack;
 
         let sx = size_px.x / glass_size_px.x;
         let sy = size_px.y / glass_size_px.y;
@@ -309,7 +499,7 @@ fn sync_children_to_ui(
         } else {
             Vec3::new(sx, sy, 1.0)
         };
-        if parent != glass_entity && !is_chrome && (tf.scale - new_scale).length() > 0.01 {
+        if parent != glass_entity && !is_cef_ui && (tf.scale - new_scale).length() > 0.01 {
             info!(
                 "[ui] browser child_of={:?} scale {:?} -> {:?} (inactive={})",
                 parent, tf.scale, new_scale, is_inactive_stack
@@ -338,7 +528,7 @@ fn sync_children_to_ui(
         } else {
             0.01 + self_computed.stack_index as f32 * 0.001
         };
-        let history_swipe_tx = if parent != glass_entity && !is_chrome {
+        let history_swipe_tx = if parent != glass_entity && !is_cef_ui {
             history_swipe_visual
                 .map(|visual| visual.offset_px / glass_size_px.x)
                 .unwrap_or(0.0)
@@ -459,7 +649,7 @@ fn sync_webview_pane_corner_clip(
         // corner_mode = 1.0 → round bottom corners only, so the pane top
         // sits flush against the url row above it. Switch to 0.0 (all
         // corners) when the active tab is split (each pane floats as a
-        // card) or when the chrome is hidden (no url row above to merge
+        // card) or when the CEF shell is hidden (no url row above to merge
         // with).
         let pane_count = pane_count_for_browser(
             browser_e,
@@ -555,6 +745,7 @@ fn sync_osr_webview_focus(
         return;
     }
     ready.sort_by_key(|e| e.to_bits());
+    let window_visible = primary_window.visible;
     let window_focused = primary_window.focused;
 
     let active_stack_opt = focus.stack;
@@ -566,7 +757,14 @@ fn sync_osr_webview_focus(
     });
     let active = choose_osr_active_webview(modal_keyboard_target, active_stack, ready[0]);
 
-    if !window_focused {
+    if !window_visible {
+        if last_active.is_some() || *last_ready_set != *ready {
+            webview_debug_log(format!("osr focus window_hidden ready={ready:?}"));
+            browsers.sync_osr_focus_to_active_pane(None, &[]);
+            *last_active = None;
+            last_ready_set.clone_from(&ready);
+        }
+    } else if !window_focused {
         if last_active.is_some() || *last_ready_set != *ready {
             webview_debug_log(format!("osr focus window_unfocused ready={ready:?}"));
             browsers.sync_osr_focus_to_active_pane(None, &[]);
@@ -607,7 +805,7 @@ fn sync_osr_webview_focus(
         }
 
         if should_show_osr_webview(
-            window_focused,
+            window_visible,
             parent_is_stack,
             pane_is_leaf,
             is_active,
@@ -647,12 +845,15 @@ fn choose_osr_active_webview(
 }
 
 fn should_show_osr_webview(
-    _window_focused: bool,
+    window_visible: bool,
     parent_is_stack: bool,
     pane_is_leaf: bool,
     stack_is_active: bool,
     stack_is_previous_new_stack: bool,
 ) -> bool {
+    if !window_visible {
+        return false;
+    }
     if !parent_is_stack || !pane_is_leaf {
         return true;
     }
@@ -1933,10 +2134,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn osr_webview_stays_visible_when_window_is_unfocused() {
+    fn osr_webview_hides_when_window_is_hidden() {
         assert!(!should_show_osr_webview(true, true, true, false, false));
+        assert!(!should_show_osr_webview(false, true, true, true, false));
+        assert!(!should_show_osr_webview(false, false, true, false, false));
         assert!(should_show_osr_webview(true, true, true, true, false));
-        assert!(should_show_osr_webview(false, true, true, true, false));
     }
 
     #[test]
@@ -1944,8 +2146,30 @@ mod tests {
         assert!(should_show_osr_webview(true, false, true, false, false));
         assert!(should_show_osr_webview(true, true, false, false, false));
         assert!(should_show_osr_webview(true, true, true, false, true));
-        assert!(should_show_osr_webview(false, false, true, false, false));
-        assert!(should_show_osr_webview(false, true, false, false, false));
+    }
+
+    #[test]
+    fn cef_pointer_hit_rect_contains_edges() {
+        let rect = CefPointerHitRect {
+            center: Vec2::new(50.0, 20.0),
+            size: Vec2::new(100.0, 40.0),
+            interactive: true,
+        };
+
+        assert!(cef_pointer_hit_rect_contains(rect, Vec2::new(0.0, 0.0)));
+        assert!(cef_pointer_hit_rect_contains(rect, Vec2::new(100.0, 40.0)));
+        assert!(!cef_pointer_hit_rect_contains(rect, Vec2::new(100.1, 20.0)));
+    }
+
+    #[test]
+    fn cef_pointer_ignores_inactive_regions() {
+        let rect = CefPointerHitRect {
+            center: Vec2::new(50.0, 20.0),
+            size: Vec2::new(100.0, 40.0),
+            interactive: false,
+        };
+
+        assert!(!cef_pointer_hit_rect_contains(rect, Vec2::new(50.0, 20.0)));
     }
 
     #[test]

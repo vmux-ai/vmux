@@ -1,6 +1,6 @@
 [package]
 name = "vmux_layout"
-description = "Bevy layout shell and single CEF chrome webview"
+description = "Bevy layout shell and single CEF layout webview"
 version.workspace = true
 edition.workspace = true
 publish = false

@@ -12,7 +12,11 @@ Use superpower. Invoke relevant skills BEFORE any response or action. Even a 1% 
 
 NEVER commit or push without running fmt + clippy + test on the **changed crates only** (not the whole workspace) and confirming they pass.
 
-Only run fmt, clippy, and test at the end of the task, after all intended edits are complete and immediately before committing, pushing, or opening a PR. Do not run cargo fmt, cargo clippy, cargo check, cargo test, or other compiler checks during the edit loop unless the user explicitly asks for an early check.
+Run tests during the edit loop when they support TDD, debugging, or behavior verification. Do not run cargo fmt, cargo clippy, make lint, make lint-fix, or other formatting/linting checks during the edit loop unless the user explicitly asks for an early check.
+
+Fmt, clippy, and linter checks are final-gate checks only. Never run them for exploration, after partial edits, or as a mid-task sanity check. Run them only immediately before a commit, push, or PR, then fix any failures and re-run the changed-crate loops.
+
+Do not treat "edits are complete" or "task is complete" as permission to run final gates. Final gates require an active commit, push, PR creation, or an explicit user request for checks in the current turn. If no commit/push/PR is requested, stop after edits and report that checks were not run.
 
 The `scripts/changed-crates.sh` script computes the set: crates whose files changed, plus crates whose tests `include_str!` from changed paths.
 
@@ -42,7 +46,7 @@ If any check fails, fix the issue before committing. Do not push broken code.
 
 ## Platform-Specific Code
 
-This project targets macOS (primary) and Linux (CI). When adding imports or code that uses platform-specific APIs (CEF, winit, AppKit), always add appropriate `#[cfg(...)]` gates. Run `cargo fmt` after adding cfg-gated imports -- rustfmt reorders them.
+This project targets macOS (primary) and Linux (CI). When adding imports or code that uses platform-specific APIs (CEF, winit, AppKit), always add appropriate `#[cfg(...)]` gates. Let the final fmt gate reorder cfg-gated imports.
 
 ## Rules
 
@@ -81,7 +85,7 @@ Always prefer `git rebase` over `git merge` when updating branches. Use `git pus
 
 **Mandatory**: Run fmt + clippy + test on the **changed crates only** before every `git push` or PR creation. Do not push or open a PR if any check fails. Fix all errors first.
 
-These checks are final-gate checks. Finish edits first, then run them once before push/PR/commit. If they fail, fix the issue and re-run the changed-crate loops.
+These checks are final-gate checks. Finish edits first, then run them once immediately before push/PR/commit. Do not run fmt, clippy, or linter checks earlier in the task unless the user explicitly asks for an early check. Tests may run earlier when they support TDD, debugging, or behavior verification. If final gates fail, fix the issue and re-run the changed-crate loops.
 
 Use `scripts/changed-crates.sh` (see Pre-commit Checks above) to compute the changed-crate set and run the three loops. The repo-wide `make lint` / `make test` targets still exist (they iterate every workspace package) but are slow and intended for periodic full sweeps, not per-push validation.
 

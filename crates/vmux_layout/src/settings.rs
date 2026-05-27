@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Resource)]
 pub struct LayoutSettings {
     /// Corner radius (px) applied across the design system: pane corner clip,
-    /// focus ring, and the chrome CSS `--radius` variable.
+    /// focus ring, and the CEF CSS `--radius` variable.
     #[serde(default)]
     pub radius: f32,
     #[serde(default)]

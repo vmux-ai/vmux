@@ -392,7 +392,7 @@ fn handle_terminal_page_open(
             commands.entity(task.stack).insert(PageMetadata {
                 url: vmux_layout::event::SERVICES_PAGE_URL.to_string(),
                 title: "Background Services".to_string(),
-                bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+                bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
                 ..default()
             });
             commands.spawn((
@@ -449,7 +449,7 @@ fn open_terminal_page(
     commands.entity(task.stack).insert(PageMetadata {
         url: TERMINAL_PAGE_URL.to_string(),
         title,
-        bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+        bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
         ..default()
     });
     let terminal = commands
@@ -624,7 +624,7 @@ fn respond_terminal_stack_spawn(
         commands.entity(stack).insert(PageMetadata {
             url: TERMINAL_PAGE_URL.to_string(),
             title,
-            bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+            bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
             ..default()
         });
         let terminal = commands

@@ -223,7 +223,7 @@ fn build_settings_schema() -> SettingsSchema {
             SectionSpec {
                 id: "layout".to_string(),
                 title: "Layout".to_string(),
-                description: Some("Window chrome, panes, sidebar, and focus ring.".to_string()),
+                description: Some("Window CEF shell, panes, sidebar, and focus ring.".to_string()),
                 synthetic_keys: vec![],
                 root_path: "layout".to_string(),
             },

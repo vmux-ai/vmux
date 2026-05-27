@@ -313,7 +313,7 @@ fn setup(
         Transform::default(),
         GlobalTransform::default(),
         Node {
-            height: Val::Px(crate::event::CHROME_RESERVED_HEIGHT_PX),
+            height: Val::Px(crate::event::CEF_RESERVED_HEIGHT_PX),
             flex_shrink: 0.0,
             ..default()
         },
@@ -597,7 +597,7 @@ fn sync_window_layout_to_settings(
     let cfg_width = crate::event::SIDE_SHEET_WIDTH_PX;
 
     // Root window: padding + flex-row column gap. Top and left are flush
-    // with the window so the chrome / pane meet the system edge; right
+    // with the window so the CEF shell / pane meet the system edge; right
     // and bottom keep a gap.
     if let Ok(mut node) = window_q.single_mut() {
         node.padding = UiRect {
@@ -645,7 +645,7 @@ fn sync_window_layout_to_settings(
 
 /// Keep MainColumn's row_gap at 0 when the active tab has a single pane
 /// (so the url row sits flush against the pane content) and switch to
-/// PANE_GAP_PX when it's split (so panes visually separate from chrome).
+/// PANE_GAP_PX when it's split (so panes visually separate from CEF shell).
 fn sync_main_column_gap_to_pane_count(
     focus: Res<crate::stack::FocusedStack>,
     all_children: Query<&Children>,

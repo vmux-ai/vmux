@@ -51,7 +51,7 @@ pub struct LayoutStateEvent {
 }
 
 impl LayoutStateEvent {
-    pub fn main_chrome_left(&self) -> f32 {
+    pub fn main_cef_left(&self) -> f32 {
         if self.side_sheet_open {
             self.side_sheet_width + self.pane_gap
         } else {
@@ -98,19 +98,19 @@ pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 /// lights when the side sheet is closed.
 pub const TRAFFIC_LIGHTS_PAD_PX: f32 = 80.0;
 
-/// Vertical space the chrome reserves in the layout above the pane.
-/// The chrome puts tabs at the very top (traffic lights sit on the
+/// Vertical space the CEF shell reserves in the layout above the pane.
+/// The CEF shell puts tabs at the very top (traffic lights sit on the
 /// left of the tab row, in the reserved padding) so no extra titlebar
 /// strip is needed.
-pub const CHROME_RESERVED_HEIGHT_PX: f32 = HEADER_HEIGHT_PX;
+pub const CEF_RESERVED_HEIGHT_PX: f32 = HEADER_HEIGHT_PX;
 
 /// Hardcoded window edge padding (px). Not user-configurable.
 pub const WINDOW_PAD_PX: f32 = 4.0;
 
 /// Default page bg color for terminal-like stacks (terminals, processes,
-/// agent CLIs). Matches catppuccin-mocha `base` so the chrome url row
+/// agent CLIs). Matches catppuccin-mocha `base` so the CEF URL row
 /// blends with the terminal surface below it.
-pub const TERMINAL_CHROME_BG_COLOR: &str = "#1e1e2e";
+pub const TERMINAL_CEF_BG_COLOR: &str = "#1e1e2e";
 
 /// Gap (px) between split panes inside a tab.
 pub const PANE_GAP_PX: f32 = 4.0;
@@ -123,7 +123,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn main_chrome_left_includes_side_sheet_gap_when_open() {
+    fn main_cef_left_includes_side_sheet_gap_when_open() {
         let open = LayoutStateEvent {
             side_sheet_open: true,
             side_sheet_width: 280.0,
@@ -137,8 +137,8 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(open.main_chrome_left(), 288.0);
-        assert_eq!(closed.main_chrome_left(), 0.0);
+        assert_eq!(open.main_cef_left(), 288.0);
+        assert_eq!(closed.main_cef_left(), 0.0);
     }
 
     #[test]

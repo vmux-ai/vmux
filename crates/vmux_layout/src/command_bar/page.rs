@@ -7,7 +7,13 @@ use crate::command_bar::keyboard::{
 use crate::command_bar::results::{
     CommandBarResultItem as ResultItem, SETTINGS_PAGE_URL, SPACES_PAGE_URL, filter_results,
 };
-use crate::command_bar::style::{command_bar_shell_class, result_item_class};
+use crate::command_bar::style::{
+    command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
+    command_bar_root_class, command_bar_shell_class, result_content_row_class,
+    result_history_url_class, result_item_class, result_list_class, result_primary_text_class,
+    result_secondary_text_class, result_shortcut_badge_class, result_terminal_path_class,
+    result_trailing_slot_class,
+};
 use dioxus::prelude::*;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarOpenEvent, CommandBarReadyEvent,
@@ -282,7 +288,7 @@ pub fn Page() -> Element {
 
     rsx! {
         div {
-            class: "flex h-full w-full items-start justify-center pt-[15%]",
+            class: command_bar_root_class(),
             onclick: move |_| { is_open.set(false); emit_action("dismiss", ""); },
             div {
                 class: command_bar_shell_class(),
@@ -290,7 +296,7 @@ pub fn Page() -> Element {
                 // Inner glow overlay
                 div { class: "pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-white/20 to-transparent" }
                 div { class: "p-2",
-                    div { class: "flex items-center gap-2 rounded-lg bg-white/5 px-3",
+                    div { class: command_bar_input_row_class(),
                         if !space_name.is_empty() {
                             span {
                                 title: "{space_name}",
@@ -341,7 +347,7 @@ pub fn Page() -> Element {
                                 } }
                             }
                         }
-                        div { class: "relative flex-1",
+                        div { class: command_bar_input_wrap_class(),
                             if !ghost_text.is_empty() {
                                 div {
                                     class: "pointer-events-none absolute inset-0 flex items-center",
@@ -353,7 +359,7 @@ pub fn Page() -> Element {
                                 id: "command-bar-input",
                                 r#type: "text",
                                 "data-ghost": "{ghost_text}",
-                                class: "w-full py-2.5 text-base text-foreground bg-transparent outline-none placeholder:text-muted-foreground",
+                                class: command_bar_input_class(),
                                 placeholder: if is_new_tab {
                                     "Search or type a URL, or select Terminal..."
                                 } else {
@@ -430,7 +436,7 @@ pub fn Page() -> Element {
                     }
                 }
                 if !results.is_empty() {
-                    div { class: "max-h-80 overflow-y-auto border-t border-border",
+                    div { class: result_list_class(),
                         for (i, item) in results.iter().enumerate() {
                             div {
                                 key: "{i}",
@@ -442,84 +448,92 @@ pub fn Page() -> Element {
                                 },
                                 match item {
                                     ResultItem::Terminal { path } => rsx! {
-                                        div { class: "flex items-center gap-2",
+                                        div { class: result_content_row_class(),
                                             span { class: "shrink-0 text-base text-muted-foreground", ">_" }
                                             if path.is_empty() {
                                                 span { class: "text-base text-foreground", "Terminal" }
                                             } else {
-                                                span { class: "text-base text-foreground", "Open in Terminal" }
-                                                span { class: "ml-1 text-sm text-muted-foreground", "{path}" }
+                                                span { class: "shrink-0 text-base text-foreground", "Open in Terminal" }
+                                                span { class: result_terminal_path_class(), "{path}" }
                                             }
                                         }
+                                        span { class: result_trailing_slot_class() }
                                     },
                                     ResultItem::Stack { title, url, .. } => rsx! {
-                                        div { class: "flex min-w-0 flex-col",
-                                            span { class: "truncate text-base text-foreground", "{title}" }
-                                            span { class: "truncate text-sm text-muted-foreground", "{url}" }
+                                        div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                                            span { class: result_primary_text_class(), "{title}" }
+                                            span { class: result_secondary_text_class(), "{url}" }
                                         }
-                                        span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "Stack" }
+                                        span { class: result_trailing_slot_class(), "Stack" }
                                     },
                                     ResultItem::Space { name, profile, is_active, tab_count, .. } => rsx! {
-                                        div { class: "flex min-w-0 flex-col",
+                                        div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                             div { class: "flex min-w-0 items-center gap-2",
-                                                span { class: "truncate text-base text-foreground", "{name}" }
+                                                span { class: result_primary_text_class(), "{name}" }
                                                 if *is_active {
                                                     span { class: "rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300", "active" }
                                                 }
                                             }
-                                            span { class: "truncate text-sm text-muted-foreground", "{profile}" }
+                                            span { class: result_secondary_text_class(), "{profile}" }
                                         }
-                                        span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "{tab_count} tabs" }
+                                        span { class: result_trailing_slot_class(), "{tab_count} tabs" }
                                     },
                                     ResultItem::Command { name, shortcut, .. } => rsx! {
-                                        div { class: "flex items-center gap-2",
+                                        div { class: result_content_row_class(),
                                             span { class: "shrink-0 text-base text-muted-foreground", ">_" }
-                                            span { class: "text-base text-foreground", "{name}" }
+                                            span { class: result_primary_text_class(), "{name}" }
                                         }
-                                        span { class: "ml-2 shrink-0 rounded bg-muted px-1.5 py-0.5 text-sm text-muted-foreground", "{shortcut}" }
+                                        span { class: result_trailing_slot_class(),
+                                            if !shortcut.is_empty() {
+                                                span { class: result_shortcut_badge_class(), "{shortcut}" }
+                                            }
+                                        }
                                     },
                                     ResultItem::History { url, title, favicon_url, .. } => rsx! {
-                                        div { class: "flex items-center gap-2",
+                                        div { class: result_content_row_class(),
                                             Favicon {
                                                 favicon_url: favicon_url.clone(),
                                                 url: url.clone(),
                                                 class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
                                                 globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                                             }
-                                            span { class: "truncate text-base text-foreground",
+                                            span { class: "min-w-0 flex-1 truncate text-base text-foreground",
                                                 if title.is_empty() { "{url}" } else { "{title}" }
                                             }
-                                            span { class: "ml-auto truncate text-sm text-muted-foreground max-w-xs", "{url}" }
+                                            span { class: result_history_url_class(), "{url}" }
                                         }
+                                        span { class: result_trailing_slot_class() }
                                     },
                                     ResultItem::Navigate { url } => rsx! {
-                                        div { class: "flex items-center gap-2",
+                                        div { class: result_content_row_class(),
                                             Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                                                 circle { cx: "11", cy: "11", r: "8" }
                                                 path { d: "m21 21-4.3-4.3" }
                                             }
                                             if url == SPACES_PAGE_URL {
-                                                div { class: "flex min-w-0 flex-col",
-                                                    span { class: "truncate text-base text-foreground", "Spaces Page" }
-                                                    span { class: "truncate text-sm text-muted-foreground", "{url}" }
+                                                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                                                    span { class: result_primary_text_class(), "Spaces Page" }
+                                                    span { class: result_secondary_text_class(), "{url}" }
                                                 }
                                             } else if url == SETTINGS_PAGE_URL {
-                                                div { class: "flex min-w-0 flex-col",
-                                                    span { class: "truncate text-base text-foreground", "Settings" }
-                                                    span { class: "truncate text-sm text-muted-foreground", "{url}" }
+                                                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                                                    span { class: result_primary_text_class(), "Settings" }
+                                                    span { class: result_secondary_text_class(), "{url}" }
                                                 }
                                             } else if url.is_empty() {
                                                 span { class: "text-base text-foreground", "Search" }
                                             } else if looks_like_url(url) {
-                                                span { class: "min-w-0 break-all text-base text-foreground", "Open \"{url}\"" }
+                                                span { class: result_primary_text_class(), "Open \"{url}\"" }
                                             } else {
-                                                span { class: "min-w-0 break-all text-base text-foreground", "Search \"{url}\"" }
+                                                span { class: result_primary_text_class(), "Search \"{url}\"" }
                                             }
                                         }
                                         if url == SPACES_PAGE_URL || url == SETTINGS_PAGE_URL {
-                                            span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "New tab" }
+                                            span { class: result_trailing_slot_class(), "New tab" }
                                         } else if !url.is_empty() {
-                                            span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "\u{21b5}" }
+                                            span { class: result_trailing_slot_class(), "\u{21b5}" }
+                                        } else {
+                                            span { class: result_trailing_slot_class() }
                                         }
                                     },
                                 }

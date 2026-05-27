@@ -31,12 +31,14 @@ impl Plugin for MessageLoopPlugin {
             .world()
             .get_resource::<bevy::winit::EventLoopProxyWrapper>()
             .map(|wrapper| (**wrapper).clone());
+        let wake_policy = MessageLoopWakePolicy::default();
 
         let mut cef_app = BrowserProcessAppBuilder::build(
             tx,
             self.config.clone(),
             self.extensions.clone(),
             wake_proxy,
+            wake_policy.clone(),
         );
 
         // On macOS and when a separate render process binary is available,
@@ -64,7 +66,8 @@ impl Plugin for MessageLoopPlugin {
         #[cfg(target_os = "macos")]
         cef_initialize(&args, &mut cef_app, self.root_cache_path.as_deref());
 
-        app.insert_non_send_resource(cef_app)
+        app.insert_resource(wake_policy)
+            .insert_non_send_resource(cef_app)
             .insert_non_send_resource(MessageLoopWorkingReceiver(rx))
             .insert_non_send_resource(RunOnMainThread)
             .add_systems(Main, cef_do_message_loop_work.before(Main::run_main))

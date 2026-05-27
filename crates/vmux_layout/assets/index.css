@@ -10,7 +10,8 @@
 
   html,
   body {
-    @apply m-0 p-0 h-full w-full;
+    @apply m-0 p-0 h-full w-full overflow-x-hidden;
+    max-width: 100%;
   }
 
   html.dark body {
@@ -51,4 +52,3 @@
   background-size: 200% 100%;
   animation: loading-sweep 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
-

@@ -40,7 +40,7 @@ pub fn Page() -> Element {
     );
     let header_vars = format!(
         "--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;",
-        state.main_chrome_left(),
+        state.main_cef_left(),
         vmux_layout::event::WINDOW_PAD_PX,
         state.header_height,
         state.tab_row_pad_left(),
@@ -160,7 +160,7 @@ fn HeaderView() -> Element {
     let tabs_loading = (tabs_listener.is_loading)();
     let tabs_error = (tabs_listener.error)();
 
-    let (url_row_style, url_row_class) = url_row_chrome(active_bg_color.as_deref());
+    let (url_row_style, url_row_class) = url_row_cef(active_bg_color.as_deref());
 
     rsx! {
         div {
@@ -225,7 +225,7 @@ fn HeaderView() -> Element {
     }
 }
 
-fn url_row_chrome(bg_color: Option<&str>) -> (String, String) {
+fn url_row_cef(bg_color: Option<&str>) -> (String, String) {
     if let Some(color) = bg_color {
         let text_class = text_color_class_for_bg(color);
         (
