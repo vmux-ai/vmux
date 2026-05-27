@@ -83,11 +83,18 @@ fn handle_tab_commands(
                 let Ok(main) = main_q.single() else { continue };
                 let count = tabs.iter().count();
                 let name = format!("Tab {}", count + 1);
-                let startup = effective_startup_url.as_deref().map(|s| s.0.as_str());
-                let content = TabLayoutSpawnContent::Url(vmux_command::open::handler::resolve_url(
-                    url.as_deref(),
-                    startup,
-                ));
+                let content = url
+                    .as_deref()
+                    .filter(|url| !url.is_empty())
+                    .map(|url| TabLayoutSpawnContent::Url(url.to_string()))
+                    .or_else(|| {
+                        effective_startup_url
+                            .as_deref()
+                            .map(|startup| startup.0.as_str())
+                            .filter(|startup| !startup.is_empty())
+                            .map(|startup| TabLayoutSpawnContent::Url(startup.to_string()))
+                    })
+                    .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt);
                 layout_requests.write(TabLayoutSpawnRequest {
                     main,
                     primary_window: *primary_window,
@@ -451,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn open_in_new_tab_none_url_no_startup_falls_back_to_default() {
+    fn open_in_new_tab_none_url_no_startup_opens_prompt() {
         let mut app = build_app();
         build_main_and_tab(&mut app);
 
@@ -464,13 +471,9 @@ mod tests {
         app.update();
 
         let collected = app.world().resource::<CollectedSpawns>();
-        assert_eq!(collected.0.len(), 1, "expected one spawn request");
-        assert_eq!(
-            collected.0[0].url,
-            vmux_command::open::handler::DEFAULT_NEW_PAGE_URL
-        );
+        assert!(collected.0.is_empty(), "expected no spawn request");
         let ctx = app.world().resource::<NewStackContext>();
-        assert!(ctx.stack.is_none());
-        assert!(!ctx.needs_open);
+        assert!(ctx.stack.is_some());
+        assert!(ctx.needs_open);
     }
 }

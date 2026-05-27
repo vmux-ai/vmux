@@ -2,7 +2,10 @@ use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use std::time::Instant;
 pub(crate) use vmux_command::shortcut::{ChordState, KeyCombo, Modifiers, Shortcut};
-use vmux_command::{AppCommand, WriteAppCommands};
+use vmux_command::{
+    AppCommand, BrowserCommand, OpenCommand, PaneDirection, PaneOpenMode, PaneTarget,
+    WriteAppCommands,
+};
 use vmux_setting::{AppSettings, load_settings};
 
 pub struct ShortcutPlugin;
@@ -132,7 +135,7 @@ fn direct_command(bindings: &ShortcutMap, pressed: &KeyCombo) -> Option<AppComma
         .bindings
         .iter()
         .find_map(|(binding, cmd_id)| match binding {
-            Shortcut::Direct(combo) if combo == pressed => AppCommand::from_menu_id(cmd_id),
+            Shortcut::Direct(combo) if combo == pressed => command_from_shortcut_id(cmd_id),
             _ => None,
         })
 }
@@ -157,10 +160,32 @@ fn chord_command(
             Shortcut::Chord(binding_prefix, second)
                 if binding_prefix == prefix && second == &effective =>
             {
-                AppCommand::from_menu_id(cmd_id)
+                command_from_shortcut_id(cmd_id)
             }
             _ => None,
         })
+}
+
+fn command_from_shortcut_id(cmd_id: &str) -> Option<AppCommand> {
+    match cmd_id {
+        "split_v" => Some(AppCommand::Browser(BrowserCommand::Open(
+            OpenCommand::InPane {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: None,
+            },
+        ))),
+        "split_h" => Some(AppCommand::Browser(BrowserCommand::Open(
+            OpenCommand::InPane {
+                direction: PaneDirection::Bottom,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: None,
+            },
+        ))),
+        _ => AppCommand::from_menu_id(cmd_id),
+    }
 }
 
 fn effective_chord_second(prefix: &KeyCombo, pressed: &KeyCombo) -> KeyCombo {
@@ -220,7 +245,9 @@ mod tests {
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_setting::{AppSettings, BrowserSettings, KeyComboDef, ShortcutSettings};
+    use vmux_setting::{
+        AppSettings, BrowserSettings, KeyComboDef, ShortcutDef, ShortcutEntry, ShortcutSettings,
+    };
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -275,6 +302,31 @@ mod tests {
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
         }
+    }
+
+    fn split_settings_with_leader(key: &str) -> AppSettings {
+        let mut settings = test_settings_with_leader(key);
+        settings.shortcuts.bindings.push(ShortcutEntry {
+            command: "split_v".into(),
+            binding: ShortcutDef::Leader(KeyComboDef {
+                key: "%".into(),
+                ctrl: false,
+                shift: false,
+                alt: false,
+                super_key: false,
+            }),
+        });
+        settings.shortcuts.bindings.push(ShortcutEntry {
+            command: "split_h".into(),
+            binding: ShortcutDef::Leader(KeyComboDef {
+                key: "\"".into(),
+                ctrl: false,
+                shift: false,
+                alt: false,
+                super_key: false,
+            }),
+        });
+        settings
     }
 
     fn press(app: &mut App, key: KeyCode) {
@@ -507,6 +559,80 @@ mod tests {
         assert_eq!(
             commands,
             vec![AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))]
+        );
+    }
+
+    #[test]
+    fn configured_split_v_legacy_binding_emits_right_split() {
+        let mut app = test_app_with_settings(split_settings_with_leader("b"));
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyB);
+        app.update();
+        clear_input_frame(&mut app);
+
+        release(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::ControlLeft);
+        app.update();
+        clear_input_frame(&mut app);
+
+        press(&mut app, KeyCode::ShiftLeft);
+        press(&mut app, KeyCode::Digit5);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(
+            commands,
+            vec![AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InPane {
+                    direction: PaneDirection::Right,
+                    target: PaneTarget::NewSplit,
+                    mode: PaneOpenMode::NewStack,
+                    url: None,
+                }
+            ))]
+        );
+    }
+
+    #[test]
+    fn configured_split_h_legacy_binding_emits_bottom_split() {
+        let mut app = test_app_with_settings(split_settings_with_leader("b"));
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyB);
+        app.update();
+        clear_input_frame(&mut app);
+
+        release(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::ControlLeft);
+        app.update();
+        clear_input_frame(&mut app);
+
+        press(&mut app, KeyCode::ShiftLeft);
+        press(&mut app, KeyCode::Quote);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(
+            commands,
+            vec![AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InPane {
+                    direction: PaneDirection::Bottom,
+                    target: PaneTarget::NewSplit,
+                    mode: PaneOpenMode::NewStack,
+                    url: None,
+                }
+            ))]
         );
     }
 }

@@ -1295,6 +1295,7 @@ fn handle_browser_commands(
     mut meta_q: Query<&mut PageMetadata, With<Browser>>,
     terminal_q: Query<(), With<Terminal>>,
     effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -1355,6 +1356,21 @@ fn handle_browser_commands(
                         url.as_deref(),
                         effective_startup_url.as_ref().map(|s| s.0.as_str()),
                     );
+                    if resolved.is_empty() {
+                        continue;
+                    }
+                    let on_native_view = meta_q
+                        .get(webview)
+                        .map(|m| m.url.starts_with("vmux://"))
+                        .unwrap_or(false);
+                    if is_terminal || on_native_view || resolved.starts_with("vmux://") {
+                        page_open_requests.write(PageOpenRequest {
+                            target: PageOpenTarget::Stack(active),
+                            url: resolved,
+                            request_id: None,
+                        });
+                        continue;
+                    }
                     if is_terminal {
                         commands
                             .entity(webview)
@@ -2772,31 +2788,48 @@ mod tests {
         use bevy_cef::prelude::{RequestNavigate, WebviewExtendStandardMaterial};
         use vmux_command::open::OpenCommand;
         use vmux_command::{AppCommand, BrowserCommand};
+        use vmux_core::{PageOpenRequest, PageOpenTarget};
         use vmux_history::LastActivatedAt;
         use vmux_layout::Browser;
         use vmux_layout::pane::Pane;
         use vmux_layout::stack::stack_bundle;
         use vmux_layout::tab::Tab;
+        use vmux_terminal::Terminal;
 
         #[derive(Resource, Default)]
         struct CapturedNavigateUrls(Vec<String>);
 
+        #[derive(Resource, Default)]
+        struct CapturedPageOpenRequests(Vec<PageOpenRequest>);
+
         fn build_app() -> App {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin))
+                .add_message::<PageOpenRequest>()
                 .add_systems(
                     Update,
-                    super::super::handle_browser_commands.in_set(vmux_command::ReadAppCommands),
+                    (
+                        super::super::handle_browser_commands.in_set(vmux_command::ReadAppCommands),
+                        capture_page_open_requests.after(vmux_command::ReadAppCommands),
+                    ),
                 )
                 .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>()
                 .init_resource::<CapturedNavigateUrls>()
+                .init_resource::<CapturedPageOpenRequests>()
                 .add_observer(
                     |trigger: On<RequestNavigate>, mut captured: ResMut<CapturedNavigateUrls>| {
                         captured.0.push(trigger.url.clone());
                     },
                 );
             app
+        }
+
+        fn capture_page_open_requests(
+            mut reader: MessageReader<PageOpenRequest>,
+            mut captured: ResMut<CapturedPageOpenRequests>,
+        ) {
+            captured.0.extend(reader.read().cloned());
         }
 
         fn build_focused_stack(app: &mut App) {
@@ -2816,6 +2849,52 @@ mod tests {
             app.world_mut().spawn(Browser).insert(ChildOf(stack));
         }
 
+        fn build_focused_terminal_stack(app: &mut App) {
+            let space = app
+                .world_mut()
+                .spawn((Tab::default(), LastActivatedAt(1)))
+                .id();
+            let pane = app
+                .world_mut()
+                .spawn((Pane, LastActivatedAt(1), ChildOf(space)))
+                .id();
+            let stack = app
+                .world_mut()
+                .spawn(stack_bundle())
+                .insert((ChildOf(pane), LastActivatedAt(1)))
+                .id();
+            app.world_mut()
+                .spawn((Browser, Terminal))
+                .insert(ChildOf(stack));
+        }
+
+        fn build_focused_native_stack(app: &mut App, native_url: &str) {
+            let space = app
+                .world_mut()
+                .spawn((Tab::default(), LastActivatedAt(1)))
+                .id();
+            let pane = app
+                .world_mut()
+                .spawn((Pane, LastActivatedAt(1), ChildOf(space)))
+                .id();
+            let stack = app
+                .world_mut()
+                .spawn(stack_bundle())
+                .insert((ChildOf(pane), LastActivatedAt(1)))
+                .id();
+            app.world_mut()
+                .spawn((
+                    Browser,
+                    vmux_core::PageMetadata {
+                        url: native_url.to_string(),
+                        title: native_url.to_string(),
+                        favicon_url: String::new(),
+                        bg_color: None,
+                    },
+                ))
+                .insert(ChildOf(stack));
+        }
+
         #[test]
         fn in_place_with_explicit_url_triggers_request_navigate() {
             let mut app = build_app();
@@ -2833,6 +2912,75 @@ mod tests {
 
             let captured = app.world().resource::<CapturedNavigateUrls>();
             assert_eq!(captured.0, vec!["https://example.com".to_string()]);
+        }
+
+        #[test]
+        fn in_place_with_vmux_url_routes_through_page_open() {
+            let mut app = build_app();
+            build_focused_stack(&mut app);
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace {
+                        url: Some("vmux://agent/vibe".into()),
+                    },
+                )));
+
+            app.update();
+
+            let navigates = app.world().resource::<CapturedNavigateUrls>();
+            assert!(navigates.0.is_empty());
+            let page_opens = app.world().resource::<CapturedPageOpenRequests>();
+            assert_eq!(page_opens.0.len(), 1);
+            assert_eq!(page_opens.0[0].url, "vmux://agent/vibe");
+            assert!(matches!(page_opens.0[0].target, PageOpenTarget::Stack(_)));
+        }
+
+        #[test]
+        fn in_place_from_native_view_to_web_routes_through_page_open() {
+            let mut app = build_app();
+            build_focused_native_stack(&mut app, "vmux://spaces/");
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace {
+                        url: Some("https://mistral.ai".into()),
+                    },
+                )));
+
+            app.update();
+
+            let navigates = app.world().resource::<CapturedNavigateUrls>();
+            assert!(navigates.0.is_empty());
+            let page_opens = app.world().resource::<CapturedPageOpenRequests>();
+            assert_eq!(page_opens.0.len(), 1);
+            assert_eq!(page_opens.0[0].url, "https://mistral.ai");
+            assert!(matches!(page_opens.0[0].target, PageOpenTarget::Stack(_)));
+        }
+
+        #[test]
+        fn in_place_from_terminal_to_web_routes_through_page_open() {
+            let mut app = build_app();
+            build_focused_terminal_stack(&mut app);
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace {
+                        url: Some("https://google.com".into()),
+                    },
+                )));
+
+            app.update();
+
+            let navigates = app.world().resource::<CapturedNavigateUrls>();
+            assert!(navigates.0.is_empty());
+            let page_opens = app.world().resource::<CapturedPageOpenRequests>();
+            assert_eq!(page_opens.0.len(), 1);
+            assert_eq!(page_opens.0[0].url, "https://google.com");
+            assert!(matches!(page_opens.0[0].target, PageOpenTarget::Stack(_)));
         }
 
         #[test]
@@ -2856,7 +3004,7 @@ mod tests {
         }
 
         #[test]
-        fn in_place_with_none_url_and_no_startup_uses_default() {
+        fn in_place_with_none_url_and_no_startup_does_not_navigate() {
             let mut app = build_app();
             build_focused_stack(&mut app);
 
@@ -2869,10 +3017,9 @@ mod tests {
             app.update();
 
             let captured = app.world().resource::<CapturedNavigateUrls>();
-            assert_eq!(
-                captured.0,
-                vec![vmux_command::open::handler::DEFAULT_NEW_PAGE_URL.to_string()]
-            );
+            assert!(captured.0.is_empty());
+            let page_opens = app.world().resource::<CapturedPageOpenRequests>();
+            assert!(page_opens.0.is_empty());
         }
     }
 }

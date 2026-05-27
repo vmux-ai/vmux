@@ -817,6 +817,7 @@ fn handle_open_in_pane(
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut pending_warp: ResMut<PendingCursorWarp>,
+    mut new_stack_ctx: ResMut<NewStackContext>,
 ) {
     for cmd in reader.read() {
         let AppCommand::Browser(BrowserCommand::Open(OpenCommand::InPane {
@@ -845,6 +846,7 @@ fn handle_open_in_pane(
             url.as_deref(),
             effective_startup_url.as_ref().map(|s| s.0.as_str()),
         );
+        let resolved = (!resolved.is_empty()).then_some(resolved);
 
         let split_dir = direction_to_split(direction);
 
@@ -903,11 +905,12 @@ fn handle_open_in_pane(
             let new_stack = commands
                 .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
                 .id();
-            page_open_requests.write(PageOpenRequest {
-                target: PageOpenTarget::Stack(new_stack),
-                url: resolved,
-                request_id: None,
-            });
+            open_or_prompt_stack(
+                new_stack,
+                resolved,
+                &mut new_stack_ctx,
+                &mut page_open_requests,
+            );
             pending_warp.target = Some(target_pane);
         } else {
             match mode {
@@ -915,25 +918,49 @@ fn handle_open_in_pane(
                     let active_stack = active_stack_in_pane(target_pane, &pane_children, &stack_ts)
                         .or_else(|| first_stack_in_pane(target_pane, &pane_children, &tab_filter));
                     if let Some(stack) = active_stack {
-                        page_open_requests.write(PageOpenRequest {
-                            target: PageOpenTarget::Stack(stack),
-                            url: resolved,
-                            request_id: None,
-                        });
+                        open_or_prompt_stack(
+                            stack,
+                            resolved,
+                            &mut new_stack_ctx,
+                            &mut page_open_requests,
+                        );
                     }
                 }
                 PaneOpenMode::NewStack => {
                     let new_stack = commands
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
                         .id();
-                    page_open_requests.write(PageOpenRequest {
-                        target: PageOpenTarget::Stack(new_stack),
-                        url: resolved,
-                        request_id: None,
-                    });
+                    open_or_prompt_stack(
+                        new_stack,
+                        resolved,
+                        &mut new_stack_ctx,
+                        &mut page_open_requests,
+                    );
                 }
             }
         }
+    }
+}
+
+fn open_or_prompt_stack(
+    stack: Entity,
+    url: Option<String>,
+    new_stack_ctx: &mut NewStackContext,
+    page_open_requests: &mut MessageWriter<PageOpenRequest>,
+) {
+    if let Some(url) = url {
+        new_stack_ctx.stack = None;
+        new_stack_ctx.previous_stack = None;
+        new_stack_ctx.needs_open = false;
+        page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url,
+            request_id: None,
+        });
+    } else {
+        new_stack_ctx.stack = Some(stack);
+        new_stack_ctx.previous_stack = None;
+        new_stack_ctx.needs_open = true;
     }
 }
 
@@ -2632,6 +2659,32 @@ mod tests {
             }
             other => panic!("expected PageOpenRequest, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn in_pane_new_split_without_url_or_startup_opens_prompt_stack() {
+        use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
+        let mut app = build_in_pane_app();
+        let (_tab, pane, _stack) = build_single_pane(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InPane {
+                    direction: PaneDirection::Right,
+                    target: PaneTarget::NewSplit,
+                    mode: PaneOpenMode::NewStack,
+                    url: None,
+                },
+            )));
+        app.update();
+
+        assert!(app.world().get::<PaneSplit>(pane).is_some());
+        let collected = app.world().resource::<InPaneCollectedSpawns>();
+        assert!(collected.0.is_empty());
+        let ctx = app.world().resource::<NewStackContext>();
+        assert!(ctx.stack.is_some());
+        assert!(ctx.needs_open);
     }
 
     #[test]

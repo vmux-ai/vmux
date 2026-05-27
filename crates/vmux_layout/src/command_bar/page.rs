@@ -277,7 +277,9 @@ pub fn Page() -> Element {
                 }
             }
             ResultItem::History { url, .. } => {
-                emit_action("navigate", url);
+                if !url.is_empty() {
+                    emit_action_with_target("open", url, open_target);
+                }
             }
         }
     };

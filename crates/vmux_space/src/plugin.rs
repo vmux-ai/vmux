@@ -489,15 +489,23 @@ fn handle_open_in_new_space(
         }
         let Ok(main) = main_q.single() else { continue };
         commands.spawn(space_profile_bundle(&active.record));
-        let startup = effective_startup_url.as_deref().map(|u| u.0.as_str());
+        let content = url
+            .as_deref()
+            .filter(|url| !url.is_empty())
+            .map(|url| TabLayoutSpawnContent::Url(url.to_string()))
+            .or_else(|| {
+                effective_startup_url
+                    .as_deref()
+                    .map(|startup| startup.0.as_str())
+                    .filter(|startup| !startup.is_empty())
+                    .map(|startup| TabLayoutSpawnContent::Url(startup.to_string()))
+            })
+            .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt);
         layout_requests.write(TabLayoutSpawnRequest {
             main,
             primary_window: *primary_window,
             name: None,
-            content: TabLayoutSpawnContent::Url(vmux_command::open::handler::resolve_url(
-                url.as_deref(),
-                startup,
-            )),
+            content,
             clear_pending_stack: true,
             focus: true,
         });

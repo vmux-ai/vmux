@@ -10,6 +10,7 @@ use std::time::Duration;
 use vmux_terminal as terminal;
 use vmux_terminal::{PtyExited, Terminal};
 
+const FOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
 const UNFOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
 const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_secs(60);
 const BACKGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_secs(1);
@@ -33,7 +34,12 @@ impl Plugin for BackgroundLifecyclePlugin {
 
 pub(crate) fn foreground_winit_settings() -> WinitSettings {
     WinitSettings {
-        focused_mode: UpdateMode::Continuous,
+        focused_mode: UpdateMode::Reactive {
+            wait: FOCUSED_FRAME_INTERVAL,
+            react_to_device_events: true,
+            react_to_user_events: true,
+            react_to_window_events: true,
+        },
         unfocused_mode: UpdateMode::reactive_low_power(UNFOCUSED_FRAME_INTERVAL),
     }
 }
@@ -53,6 +59,7 @@ fn sync_winit_power_mode(
 ) {
     let all_hidden = windows.iter().all(|w| !w.visible);
     let any_visible = windows.iter().any(|w| w.visible);
+    let any_focused = windows.iter().any(|w| w.visible && w.focused);
     let next = if all_hidden {
         hidden_winit_settings()
     } else {
@@ -66,6 +73,7 @@ fn sync_winit_power_mode(
         policy.set_min_wake_interval(cef_wake_interval(
             all_hidden,
             any_visible,
+            any_focused,
             foreground_cef_wake_interval(monitors.iter().map(|m| m.refresh_rate_millihertz)),
         ));
     }
@@ -78,9 +86,10 @@ fn foreground_cef_wake_interval(refresh_rates: impl IntoIterator<Item = Option<u
 fn cef_wake_interval(
     all_hidden: bool,
     any_visible: bool,
+    any_focused: bool,
     foreground_interval: Duration,
 ) -> Duration {
-    if all_hidden || !any_visible {
+    if all_hidden || !any_visible || !any_focused {
         BACKGROUND_CEF_WAKE_INTERVAL
     } else {
         foreground_interval
@@ -150,10 +159,85 @@ mod tests {
     }
 
     #[test]
-    fn foreground_power_mode_is_continuous_when_focused() {
+    fn no_continuous_update_mode_anywhere_in_workspace() {
+        use std::path::Path;
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root");
+        let banned = ["UpdateMode", "::", "Continuous"].concat();
+        let mut offenders = Vec::new();
+        for root in ["crates", "patches"] {
+            let dir = workspace_root.join(root);
+            if !dir.exists() {
+                continue;
+            }
+            walk_rs_files(&dir, &mut |path, source| {
+                if path.ends_with("background_lifecycle.rs") {
+                    return;
+                }
+                for (lineno, line) in source.lines().enumerate() {
+                    let stripped = line.trim_start();
+                    if stripped.starts_with("//") || stripped.starts_with("///") {
+                        continue;
+                    }
+                    if line.contains(&banned) {
+                        offenders.push(format!(
+                            "{}:{}: {}",
+                            path.display(),
+                            lineno + 1,
+                            line.trim()
+                        ));
+                    }
+                }
+            });
+        }
+        assert!(
+            offenders.is_empty(),
+            "Bevy `UpdateMode::Continuous` is banned in vmux (causes 100-200% idle CPU). Use `UpdateMode::Reactive` and route missing wake sources via `EventLoopProxy::send_event(WinitUserEvent::WakeUp)`. See AGENTS.md. Offenders:\n{}",
+            offenders.join("\n")
+        );
+    }
+
+    fn walk_rs_files(dir: &std::path::Path, visit: &mut dyn FnMut(&std::path::Path, &str)) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().and_then(|n| n.to_str()) == Some("target") {
+                    continue;
+                }
+                walk_rs_files(&path, visit);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("rs")
+                && let Ok(source) = std::fs::read_to_string(&path)
+            {
+                visit(&path, &source);
+            }
+        }
+    }
+
+    #[test]
+    fn foreground_power_mode_is_reactive_when_focused() {
         let settings = foreground_winit_settings();
 
-        assert_eq!(settings.focused_mode, UpdateMode::Continuous);
+        let UpdateMode::Reactive {
+            wait,
+            react_to_device_events,
+            react_to_user_events,
+            react_to_window_events,
+        } = settings.focused_mode
+        else {
+            panic!(
+                "focused mode must be Reactive, got {:?}",
+                settings.focused_mode
+            );
+        };
+        assert_eq!(wait, Duration::from_secs(1));
+        assert!(react_to_device_events);
+        assert!(react_to_user_events);
+        assert!(react_to_window_events);
         assert_eq!(
             settings.unfocused_mode,
             UpdateMode::reactive_low_power(Duration::from_secs(1))
@@ -182,27 +266,27 @@ mod tests {
         );
         assert!(foreground_cef_wake_interval([Some(144_000)]) < Duration::from_millis(8));
         assert_eq!(
-            cef_wake_interval(false, true, Duration::from_millis(7)),
+            cef_wake_interval(false, true, true, Duration::from_millis(7)),
             Duration::from_millis(7)
         );
     }
 
     #[test]
-    fn cef_wake_policy_stays_foreground_when_visible_unfocused() {
+    fn cef_wake_policy_throttles_visible_unfocused() {
         assert_eq!(
-            cef_wake_interval(false, true, Duration::from_millis(7)),
-            Duration::from_millis(7)
+            cef_wake_interval(false, true, false, Duration::from_millis(7)),
+            Duration::from_secs(1)
         );
     }
 
     #[test]
     fn cef_wake_policy_throttles_hidden() {
         assert_eq!(
-            cef_wake_interval(false, false, Duration::from_millis(7)),
+            cef_wake_interval(false, false, true, Duration::from_millis(7)),
             Duration::from_secs(1)
         );
         assert_eq!(
-            cef_wake_interval(true, true, Duration::from_millis(7)),
+            cef_wake_interval(true, true, true, Duration::from_millis(7)),
             Duration::from_secs(1)
         );
     }

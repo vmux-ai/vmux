@@ -54,6 +54,7 @@ This project targets macOS (primary) and Linux (CI). When adding imports or code
 - Do not use mod.rs files. Use the filename-based module pattern (e.g. `layout.rs` + `layout/` directory).
 - When configuring a Bevy `App` in plugins or tests, chain consecutive `App` builder calls in one expression (e.g. `app.add_plugins(...).init_resource::<T>().add_systems(...);`) instead of separate `app.*;` statements. Do not chain `app.world()`, `app.world_mut()`, `app.update()`, or control-flow-dependent mutations.
 - Prefer Bevy system + message integration over direct helper-function calls for cross-module behavior. Register message types and systems in plugins/tests, send typed messages, run schedules, and assert on resulting ECS state/messages instead of bypassing production flow with ad hoc helpers.
+- **Never use `bevy::winit::UpdateMode::Continuous`.** It causes 100-200% idle CPU. Use `UpdateMode::Reactive` or `UpdateMode::reactive_low_power`. If input/scroll/animation lags, the fix is to route the missing wake source through `EventLoopProxy::send_event(WinitUserEvent::WakeUp)` — not to switch to Continuous. The CEF wake throttler (`MessageLoopWakePolicy` + `cef-wake-throttle` thread) already wakes the loop at display refresh rate when CEF schedules pump work. A `no_continuous_update_mode` test in `vmux_desktop` enforces this.
 
 ## Linear
 
