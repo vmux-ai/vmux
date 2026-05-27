@@ -83,16 +83,11 @@ fn handle_tab_commands(
                 let Ok(main) = main_q.single() else { continue };
                 let count = tabs.iter().count();
                 let name = format!("Tab {}", count + 1);
-                let content = match url.as_deref() {
-                    Some(u) if !u.is_empty() => {
-                        let startup = effective_startup_url.as_deref().map(|s| s.0.as_str());
-                        TabLayoutSpawnContent::Url(vmux_command::open::handler::resolve_url(
-                            Some(u),
-                            startup,
-                        ))
-                    }
-                    _ => TabLayoutSpawnContent::StartupUrlOrPrompt,
-                };
+                let startup = effective_startup_url.as_deref().map(|s| s.0.as_str());
+                let content = TabLayoutSpawnContent::Url(vmux_command::open::handler::resolve_url(
+                    url.as_deref(),
+                    startup,
+                ));
                 layout_requests.write(TabLayoutSpawnRequest {
                     main,
                     primary_window: *primary_window,
@@ -456,7 +451,7 @@ mod tests {
     }
 
     #[test]
-    fn open_in_new_tab_none_url_no_startup_queues_command_bar_prompt() {
+    fn open_in_new_tab_none_url_no_startup_falls_back_to_default() {
         let mut app = build_app();
         build_main_and_tab(&mut app);
 
@@ -469,9 +464,13 @@ mod tests {
         app.update();
 
         let collected = app.world().resource::<CollectedSpawns>();
-        assert!(collected.0.is_empty(), "no spawn until URL is provided");
+        assert_eq!(collected.0.len(), 1, "expected one spawn request");
+        assert_eq!(
+            collected.0[0].url,
+            vmux_command::open::handler::DEFAULT_NEW_PAGE_URL
+        );
         let ctx = app.world().resource::<NewStackContext>();
-        assert!(ctx.stack.is_some(), "an empty stack should be queued");
-        assert!(ctx.needs_open, "command bar should be requested");
+        assert!(ctx.stack.is_none());
+        assert!(!ctx.needs_open);
     }
 }

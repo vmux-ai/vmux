@@ -367,6 +367,25 @@ fn command_bar_open_request(
     request
 }
 
+fn pending_stack_startup_url_request(
+    new_stack_ctx: &mut NewStackContext,
+    startup_url: Option<&str>,
+) -> Option<PageOpenRequest> {
+    if !new_stack_ctx.needs_open {
+        return None;
+    }
+    let stack = new_stack_ctx.stack?;
+    let url = startup_url.filter(|url| !url.is_empty())?;
+    new_stack_ctx.stack = None;
+    new_stack_ctx.previous_stack = None;
+    new_stack_ctx.needs_open = false;
+    Some(PageOpenRequest {
+        target: PageOpenTarget::Stack(stack),
+        url: url.to_string(),
+        request_id: None,
+    })
+}
+
 fn handle_open_command_bar(
     mut reader: MessageReader<AppCommand>,
     mut modal_q: Query<
@@ -405,6 +424,8 @@ fn handle_open_command_bar(
         Res<CommandBarAgentsSnapshot>,
         Res<CommandBarSpacesSnapshot>,
         ResMut<NewStackContext>,
+        Option<Res<crate::settings::EffectiveStartupUrl>>,
+        MessageWriter<PageOpenRequest>,
     )>,
     mut commands: Commands,
 ) {
@@ -421,7 +442,7 @@ fn handle_open_command_bar(
             name: format!("New {}/{} chat (App)", s.provider, s.model),
         })
         .collect();
-    let mut new_stack_ctx = snapshot_params.p2();
+    let startup_url = snapshot_params.p3().map(|url| url.0.clone());
 
     let request =
         command_bar_open_request(reader.read().cloned(), &spaces_snapshot.spaces_page_url);
@@ -453,6 +474,7 @@ fn handle_open_command_bar(
                 .remove::<CommandBarRenderedOpen>()
                 .remove::<CommandBarPaintedOpen>()
                 .remove::<PendingCommandBarReveal>();
+            let mut new_stack_ctx = snapshot_params.p2();
             // Discard empty tab created by a previous Cmd+T
             if let Some(stack_e) = new_stack_ctx.stack.take() {
                 commands.entity(stack_e).despawn();
@@ -516,14 +538,32 @@ fn handle_open_command_bar(
                 .remove::<CommandBarRenderedOpen>()
                 .remove::<CommandBarPaintedOpen>()
                 .remove::<PendingCommandBarReveal>();
+            let mut new_stack_ctx = snapshot_params.p2();
             new_stack_ctx.needs_open = false;
             return;
         }
     }
 
-    if new_stack_ctx.needs_open {
+    let startup_request = {
+        let mut new_stack_ctx = snapshot_params.p2();
+        pending_stack_startup_url_request(&mut new_stack_ctx, startup_url.as_deref())
+    };
+    if let Some(request) = startup_request {
+        snapshot_params.p4().write(request);
+        return;
+    }
+
+    let should_open_pending_stack = {
+        let mut new_stack_ctx = snapshot_params.p2();
+        if new_stack_ctx.needs_open {
+            new_stack_ctx.needs_open = false;
+            true
+        } else {
+            false
+        }
+    };
+    if should_open_pending_stack {
         should_open = true;
-        new_stack_ctx.needs_open = false;
     }
 
     if should_toggle {
@@ -557,7 +597,7 @@ fn handle_open_command_bar(
         return;
     };
 
-    let is_new_stack = new_stack_ctx.stack.is_some();
+    let is_new_stack = snapshot_params.p2().stack.is_some();
     let was_open = command_bar_modal_is_open(modal_node.display, has_keyboard_target);
 
     if !was_open {
@@ -676,7 +716,7 @@ fn handle_open_command_bar(
                 open_id: 0,
                 payload: None,
             });
-        new_stack_ctx.needs_open = true;
+        snapshot_params.p2().needs_open = true;
         return;
     }
 
@@ -758,7 +798,7 @@ fn handle_open_command_bar(
         payload.commands.len()
     ));
     if should_requeue_command_bar_open_after_emit(command_bar_ready) {
-        new_stack_ctx.needs_open = true;
+        snapshot_params.p2().needs_open = true;
     }
 }
 
@@ -1874,6 +1914,47 @@ mod tests {
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, None);
+    }
+
+    #[test]
+    fn pending_stack_with_startup_url_dispatches_url_request() {
+        let stack = Entity::from_bits(7);
+        let previous_stack = Entity::from_bits(6);
+        let mut ctx = NewStackContext {
+            stack: Some(stack),
+            previous_stack: Some(previous_stack),
+            needs_open: true,
+            dismiss_modal: false,
+        };
+
+        let request =
+            pending_stack_startup_url_request(&mut ctx, Some("https://startup.test")).unwrap();
+
+        match request.target {
+            PageOpenTarget::Stack(target) => assert_eq!(target, stack),
+            other => panic!("expected stack target, got {other:?}"),
+        }
+        assert_eq!(request.url, "https://startup.test");
+        assert_eq!(ctx.stack, None);
+        assert_eq!(ctx.previous_stack, None);
+        assert!(!ctx.needs_open);
+    }
+
+    #[test]
+    fn pending_stack_without_startup_url_keeps_prompt_pending() {
+        let stack = Entity::from_bits(7);
+        let mut ctx = NewStackContext {
+            stack: Some(stack),
+            previous_stack: None,
+            needs_open: true,
+            dismiss_modal: false,
+        };
+
+        let request = pending_stack_startup_url_request(&mut ctx, Some(""));
+
+        assert!(request.is_none());
+        assert_eq!(ctx.stack, Some(stack));
+        assert!(ctx.needs_open);
     }
 
     #[test]

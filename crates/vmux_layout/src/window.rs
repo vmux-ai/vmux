@@ -23,7 +23,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
-use vmux_core::{PageOpenRequest, PageOpenTarget};
+use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt};
 use vmux_server::ServerEmbedSet;
 
@@ -135,8 +135,10 @@ impl Plugin for WindowPlugin {
                 Update,
                 (
                     maximize_window_to_screen.run_if(not(resource_exists::<ScreenMaximized>)),
-                    crate::stack::open_startup_url_if_no_stacks,
-                    spawn_requested_tab_layouts.after(ReadAppCommands),
+                    crate::stack::open_startup_url_if_no_stacks.before(PageOpenSet::ResolveTarget),
+                    spawn_requested_tab_layouts
+                        .after(ReadAppCommands)
+                        .before(PageOpenSet::ResolveTarget),
                 ),
             )
             .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
