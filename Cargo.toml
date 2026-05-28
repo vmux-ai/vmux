@@ -13,10 +13,46 @@ homepage = "https://vmux.ai"
 repository = "https://github.com/vmux-ai/vmux"
 
 [workspace.dependencies]
-bevy = { version = "0.18", default-features = true, features = ["https"] }
+bevy = { version = "0.18", default-features = false, features = [
+    "std",
+    "multi_threaded",
+    "async_executor",
+    "bevy_animation",
+    "bevy_asset",
+    "bevy_log",
+    "bevy_winit",
+    "bevy_window",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "bevy_post_process",
+    "bevy_mesh",
+    "bevy_sprite",
+    "bevy_ui",
+    "bevy_ui_render",
+    "bevy_image",
+    "bevy_scene",
+    "bevy_state",
+    "bevy_input_focus",
+    "bevy_picking",
+    "mesh_picking",
+    "sprite_picking",
+    "ui_picking",
+    "custom_cursor",
+    "reflect_auto_register",
+    "default_font",
+    "bevy_camera_controller",
+    "free_camera",
+    "https",
+    "x11",
+    "wayland",
+] }
 bevy_ecs = { version = "0.18", default-features = true }
 bevy_reflect = { version = "0.18", default-features = true }
-bevy_winit = { version = "0.18", default-features = true }
+bevy_winit = { version = "0.18", default-features = false, features = [
+    "x11",
+    "wayland",
+] }
 bevy_cef = "0.5.2"
 bevy_cef_core = "0.5.2"
 moonshine-save = "0.6.1"

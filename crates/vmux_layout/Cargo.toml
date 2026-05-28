@@ -36,10 +36,7 @@ vmux_core = { path = "../vmux_core" }
 serde_json = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bevy = { workspace = true, features = [
-    "bevy_camera_controller",
-    "free_camera",
-] }
+bevy = { workspace = true }
 bevy_asset = "0.18"
 bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }

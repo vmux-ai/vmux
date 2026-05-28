@@ -8,19 +8,21 @@ Reduce iterative build cost by replacing Bevy's default feature set with an expl
 
 Use an aggressive root-level trim first. The workspace `bevy` dependency will set `default-features = false` and enumerate the features vmux needs. Keep feature ownership centralized in the root `Cargo.toml` so all crates share one Bevy capability set and Cargo feature unification stays predictable.
 
-The first pass will not change patched `bevy_cef` default features. That avoids mixing Bevy root trimming with CEF patch surgery. If build verification shows `bevy_cef` still re-enables too much, trim the patch in a second pass.
+The first pass will also trim patched `bevy_cef` feature declarations that re-enable Bevy's aggregate feature bundles. Keep the CEF patch behavior intact, but replace broad bundle features with explicit narrow features.
 
 ## Feature Set
 
-Keep app/runtime basics: `std`, `multi_threaded`, `async_executor`, `bevy_asset`, `bevy_log`, `bevy_state`, `bevy_scene`, `reflect_auto_register`, `custom_cursor`, `default_font`, and `https`.
+Keep app/runtime basics: `std`, `multi_threaded`, `async_executor`, `bevy_asset`, `bevy_log`, `bevy_state`, `bevy_scene`, `bevy_animation`, `reflect_auto_register`, `custom_cursor`, `default_font`, and `https`.
 
-Keep desktop and rendering stack: `bevy_winit`, `bevy_window`, `bevy_render`, `bevy_core_pipeline`, `bevy_pbr`, `bevy_sprite`, `bevy_ui`, `bevy_text`, `bevy_image`, and `png`.
+Keep desktop and rendering stack: `bevy_winit`, `bevy_window`, `bevy_render`, `bevy_core_pipeline`, `bevy_pbr`, `bevy_post_process`, `bevy_mesh`, `bevy_sprite`, `bevy_ui`, `bevy_ui_render`, and `bevy_image`.
 
-Keep interaction and current vmux-specific needs: `bevy_input_focus`, `bevy_picking`, `mesh_picking`, `ui_picking`, `bevy_camera_controller`, and `free_camera`.
+Keep interaction and current vmux-specific needs: `bevy_input_focus`, `bevy_picking`, `mesh_picking`, `sprite_picking`, `ui_picking`, `bevy_camera_controller`, and `free_camera`.
 
-Drop obvious unused defaults: audio, Vorbis, gamepad/Gilrs, glTF, animation, morph animation, KTX2, SMAA LUTs, tonemapping LUTs, sysinfo plugin, WebGL, and Android platform features.
+Drop obvious unused defaults: audio, Vorbis, gamepad/Gilrs, glTF, glTF animation, morph animation, KTX2, SMAA LUTs, tonemapping LUTs, sysinfo plugin, WebGL, and Android platform features.
 
-Linux windowing features are a verification item. If Linux checks fail due missing platform support, add back only the needed platform feature instead of restoring `default_platform`.
+Do not include `bevy_text` or `png` explicitly in the first implementation pass. `bevy_ui` pulls `bevy_text` transitively, and CEF local assets serve PNG files as bytes rather than decoding them through Bevy's image loader. Add `png` back only if compile or runtime verification shows Bevy must decode PNG assets directly.
+
+Keep Linux windowing as targeted `x11` and `wayland` features because `winit` does not compile for Linux without at least one backend. Do not restore `default_platform`.
 
 ## Verification
 

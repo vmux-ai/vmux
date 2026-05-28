@@ -13,10 +13,7 @@ name = "vmux_desktop"
 path = "src/main.rs"
 
 [dependencies]
-bevy = { workspace = true, features = [
-    "bevy_camera_controller",
-    "free_camera",
-] }
+bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
 

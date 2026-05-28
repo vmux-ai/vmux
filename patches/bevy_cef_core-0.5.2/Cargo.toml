@@ -53,19 +53,21 @@ features = [
     "bevy_log",
     "bevy_window",
     "bevy_asset",
-    "bevy_sprite",
-    "bevy_pbr",
-    "bevy_winit",
-    "picking",
+    "bevy_picking",
 ]
 default-features = false
 
 [dependencies.bevy_winit]
 version = "0.18"
-default-features = true
+default-features = false
+features = [
+    "x11",
+    "wayland",
+]
 
 [dependencies.winit]
 version = "0.30"
+default-features = false
 
 [dependencies.bevy_remote]
 version = "0.18"
