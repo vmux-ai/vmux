@@ -7,6 +7,7 @@ use bevy::{
     camera::PerspectiveProjection,
     camera::Projection,
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState},
+    core_pipeline::tonemapping::Tonemapping,
     math::curve::easing::EasingCurve,
     post_process::bloom::Bloom,
     prelude::*,
@@ -116,6 +117,7 @@ pub fn setup(mut commands: Commands, window: Single<&Window, With<PrimaryWindow>
     commands.spawn((
         MainCamera,
         Camera3d::default(),
+        Tonemapping::SomewhatBoringDisplayTransform,
         Projection::Perspective(PerspectiveProjection {
             fov: FOV_Y,
             ..default()
@@ -477,5 +479,28 @@ mod tests {
     #[test]
     fn camera_margin_is_zero() {
         assert_eq!(camera_margin_px(), 0.0);
+    }
+
+    #[test]
+    fn main_camera_uses_non_lut_tonemapping() {
+        let mut app = App::new();
+        app.register_required_components::<
+            Camera3d,
+            bevy::core_pipeline::tonemapping::Tonemapping,
+        >()
+            .add_systems(Update, setup);
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+        app.update();
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&bevy::core_pipeline::tonemapping::Tonemapping, With<MainCamera>>();
+        let tonemapping = query.single(app.world()).expect("main camera tonemapping");
+
+        assert_eq!(
+            *tonemapping,
+            bevy::core_pipeline::tonemapping::Tonemapping::SomewhatBoringDisplayTransform
+        );
     }
 }
