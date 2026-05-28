@@ -6,7 +6,7 @@ description.workspace = true
 publish = false
 
 [features]
-debug = ["bevy_cef/debug"]
+dev = ["bevy_cef/debug", "bevy/dynamic_linking"]
 
 [[bin]]
 name = "vmux_desktop"

@@ -20,13 +20,26 @@ fn dev_target_signs_then_runs_debug_binary() {
         makefile.contains("dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process")
     );
     assert!(makefile.contains("./scripts/sign-dev-mac.sh"));
-    assert!(makefile.contains("exec env -u CEF_PATH ./target/debug/vmux_desktop"));
+    assert!(makefile.contains("DYLD_LIBRARY_PATH=\"$$dylib_path\" ./target/debug/vmux_desktop"));
     assert!(makefile.contains("identity=\"$$(./scripts/ensure-local-codesign-identity.sh)\" &&"));
     assert!(!makefile.contains("run-mac:"));
     assert!(!makefile.contains("build-mac-debug"));
     assert!(!makefile.contains("sign-mac-debug"));
     assert!(!makefile.contains("package-local-mac"));
     assert!(!makefile.contains("package-release-mac"));
+}
+
+#[test]
+fn dev_target_keeps_service_out_of_desktop_dynamic_linking_build() {
+    let makefile = include_str!("../../../Makefile");
+
+    assert!(
+        makefile.contains("env -u CEF_PATH \"$(CARGO_BIN)\" build -p vmux_service -p vmux_cli")
+    );
+    assert!(
+        makefile.contains("env -u CEF_PATH \"$(CARGO_BIN)\" build -p vmux_desktop --features dev")
+    );
+    assert!(!makefile.contains("build -p vmux_desktop -p vmux_cli -p vmux_service --features dev"));
 }
 
 #[test]
