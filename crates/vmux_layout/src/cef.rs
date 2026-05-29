@@ -1,9 +1,6 @@
-use std::path::PathBuf;
-
 use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_server::{PageConfig, Server};
 
 use crate::event::LAYOUT_PAGE_URL;
 
@@ -26,12 +23,7 @@ pub struct NavigationState {
 pub struct LayoutCefPlugin;
 
 impl Plugin for LayoutCefPlugin {
-    fn build(&self, app: &mut App) {
-        app.world_mut().resource_mut::<Server>().register(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-            &PageConfig::with_custom_host("layout").with_bundle_dir("dist-layout"),
-        );
-    }
+    fn build(&self, _app: &mut App) {}
 }
 
 pub fn mirror_metadata_to_url(

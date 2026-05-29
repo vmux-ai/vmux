@@ -1,7 +1,4 @@
-use std::path::PathBuf;
 use std::process::Command;
-
-use vmux_server::build::{CefEmbeddedPageFinalize, PageBuilder};
 
 fn main() {
     let hash = Command::new("git")
@@ -25,24 +22,4 @@ fn main() {
     println!("cargo::rerun-if-changed=../../.git/refs");
     println!("cargo::rerun-if-env-changed=VMUX_BUILD_PROFILE");
 
-    let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    PageBuilder::new(manifest_dir.clone(), "vmux_layout", "vmux_layout_app")
-        .dist_subdir("dist-layout")
-        .track_manifest_rel_paths(&["../vmux_ui/assets/theme.css"])
-        .dx_extra_args(&["--bin", "vmux_layout_app", "--features", "web"])
-        .cef_finalize(CefEmbeddedPageFinalize {
-            strip_uncompiled_tailwind_css: true,
-        })
-        .tailwind_postprocess_after_dx(&["index-dxh", "layout-dxh"])
-        .run("vmux_layout");
-
-    PageBuilder::new(manifest_dir, "vmux_layout", "vmux_command_bar_app")
-        .dist_subdir("dist-command-bar")
-        .track_manifest_rel_paths(&["../vmux_ui/assets/theme.css"])
-        .dx_extra_args(&["--bin", "vmux_command_bar_app", "--features", "web"])
-        .cef_finalize(CefEmbeddedPageFinalize {
-            strip_uncompiled_tailwind_css: true,
-        })
-        .tailwind_postprocess_after_dx(&["index-dxp", "command_bar-dxp"])
-        .run("vmux_command_bar");
 }

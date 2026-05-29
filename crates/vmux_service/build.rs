@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
@@ -22,15 +21,4 @@ fn main() {
     println!("cargo::rerun-if-changed=../../.git/HEAD");
     println!("cargo::rerun-if-changed=../../.git/refs");
     println!("cargo::rerun-if-env-changed=VMUX_BUILD_PROFILE");
-
-    use vmux_server::build::{CefEmbeddedPageFinalize, PageBuilder};
-    let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    PageBuilder::new(manifest_dir, "vmux_service", "vmux_service_app")
-        .track_manifest_rel_paths(&["../vmux_ui/assets/theme.css"])
-        .dx_extra_args(&["--bin", "vmux_service_app", "--features", "web"])
-        .cef_finalize(CefEmbeddedPageFinalize {
-            strip_uncompiled_tailwind_css: true,
-        })
-        .tailwind_postprocess_after_dx(&["index-dxs", "services-dxs"])
-        .run("vmux_service");
 }

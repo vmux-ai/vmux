@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_layout::event::{
+use crate::event::{
     HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
     PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent,
     TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
@@ -36,12 +36,12 @@ pub fn Page() -> Element {
     let side_sheet_vars = format!(
         "--vmux-side-sheet-width:{}px;--vmux-side-sheet-pad-top:{}px;",
         state.side_sheet_width,
-        vmux_layout::event::url_bar_top(),
+        crate::event::url_bar_top(),
     );
     let header_vars = format!(
         "--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;",
         state.main_cef_left(),
-        vmux_layout::event::WINDOW_PAD_PX,
+        crate::event::WINDOW_PAD_PX,
         state.header_height,
         state.tab_row_pad_left(),
     );
@@ -577,7 +577,7 @@ fn NewStackRow(pane_id: u64) -> Element {
             r#type: "button",
             class: "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
+                let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                     command: "new_stack".to_string(),
                     pane_id: pane_id.to_string(),
                     stack_index: 0,
@@ -612,7 +612,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
             },
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
+                let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                     command: "activate_stack".to_string(),
                     pane_id: pane_id.to_string(),
                     stack_index,
@@ -634,7 +634,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 class: "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10",
                 onclick: move |evt| {
                     evt.stop_propagation();
-                    let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
+                    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                         command: "close_stack".to_string(),
                         pane_id: pane_id.to_string(),
                         stack_index,

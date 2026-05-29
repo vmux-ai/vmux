@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_history::event::{
+use crate::event::{
     HISTORY_CHANGED_EVENT, HISTORY_QUERY_RESPONSE_EVENT, HistoryChangedEvent,
     HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryOpenRequest,
     HistoryQueryRequest, HistoryQueryResponse,

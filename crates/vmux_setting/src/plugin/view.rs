@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use bevy::{picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_command::command::{AppCommand, LayoutCommand, WindowCommand};
@@ -10,7 +8,7 @@ use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::{FocusedStack, stack_bundle},
 };
-use vmux_server::{PageConfig, PageReady, Server};
+use vmux_server::PageReady;
 
 use crate::event::{
     SETTINGS_LIST_EVENT, SETTINGS_PAGE_URL, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent,
@@ -77,13 +75,6 @@ pub(crate) fn reset_sent_markers_on_page_ready(
         .entity(entity)
         .remove::<SettingsListSent>()
         .remove::<SettingsSchemaSent>();
-}
-
-pub(crate) fn register_settings_page(registry: &mut Server) {
-    registry.register(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-        &PageConfig::with_custom_host("settings"),
-    );
 }
 
 #[derive(Component)]

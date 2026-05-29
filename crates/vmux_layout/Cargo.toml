@@ -11,21 +11,8 @@ default = []
 debug = []
 web = []
 
-[[bin]]
-name = "vmux_layout_app"
-path = "src/main.rs"
-required-features = ["web"]
-
-[[bin]]
-name = "vmux_command_bar_app"
-path = "src/command_bar_app.rs"
-required-features = ["web"]
-
 [lib]
 path = "src/lib.rs"
-
-[build-dependencies]
-vmux_server = { path = "../vmux_server", features = ["build"] }
 
 [dependencies]
 rkyv = { workspace = true }

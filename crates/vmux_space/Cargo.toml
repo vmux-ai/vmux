@@ -4,22 +4,13 @@ description = "Space list webview app"
 version.workspace = true
 edition.workspace = true
 publish = false
-build = "build.rs"
 
 [features]
 default = []
 web = []
 
-[[bin]]
-name = "vmux_space_app"
-path = "src/main.rs"
-required-features = ["web"]
-
 [lib]
 path = "src/lib.rs"
-
-[build-dependencies]
-vmux_server = { path = "../vmux_server", features = ["build"] }
 
 [dependencies]
 rkyv = { workspace = true }

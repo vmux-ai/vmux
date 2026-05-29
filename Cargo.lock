@@ -8582,6 +8582,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_app"
+version = "0.0.10"
+dependencies = [
+ "bevy",
+ "dioxus",
+ "vmux_history",
+ "vmux_layout",
+ "vmux_server",
+ "vmux_service",
+ "vmux_setting",
+ "vmux_space",
+ "vmux_terminal",
+ "web-sys",
+]
+
+[[package]]
 name = "vmux_browser"
 version = "0.0.10"
 dependencies = [
@@ -8670,6 +8686,7 @@ dependencies = [
  "url",
  "uuid",
  "vmux_agent",
+ "vmux_app",
  "vmux_browser",
  "vmux_command",
  "vmux_core",

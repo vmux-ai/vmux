@@ -88,6 +88,10 @@ uuid = { version = "1", features = ["v4", "serde", "js"] }
 opt-level = "z"
 codegen-units = 1
 
+[profile.release.package.vmux_app]
+opt-level = "z"
+codegen-units = 1
+
 [profile.release.package.vmux_ui]
 opt-level = "z"
 codegen-units = 1

@@ -17,7 +17,7 @@ use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageO
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
-use vmux_server::{PageConfig, PageReady, Server};
+use vmux_server::PageReady;
 use vmux_service::{
     client::{ServiceHandle, ServiceWake},
     protocol::{ClientMessage, ProcessId, ServiceMessage},
@@ -224,11 +224,6 @@ impl Plugin for TerminalPlugin {
                 Update,
                 (pid::track_pid_inserts, pid::track_pid_removals).chain(),
             );
-        app.world_mut().resource_mut::<Server>().register(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-            &PageConfig::with_custom_host("terminal"),
-        );
-
         let service_wake = service_wake_callback(app);
         if let Some(handle) = ServiceHandle::connect_with_wake(service_wake.clone()) {
             tracing::info!("connected to existing service");

@@ -5,6 +5,8 @@
 )]
 
 pub mod model;
+#[cfg(target_arch = "wasm32")]
+pub mod page;
 
 pub use vmux_core::event::space as event;
 

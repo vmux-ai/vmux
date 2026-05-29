@@ -12,9 +12,7 @@ fi
 
 copy_webview_app() {
     local host="$1"
-    local crate="$2"
-    local subdir="${3:-dist}"
-    local src="$ROOT/crates/$crate/$subdir"
+    local src="$ROOT/crates/vmux_app/dist"
     local dest="$WEBVIEW_ROOT/$host"
 
     if [[ ! -f "$src/index.html" ]]; then
@@ -29,11 +27,12 @@ copy_webview_app() {
 rm -rf "$WEBVIEW_ROOT"
 mkdir -p "$WEBVIEW_ROOT"
 
-copy_webview_app "layout" "vmux_layout" "dist-layout"
-copy_webview_app "command-bar" "vmux_layout" "dist-command-bar"
-copy_webview_app "terminal" "vmux_terminal"
-copy_webview_app "services" "vmux_service"
-copy_webview_app "history" "vmux_history"
-copy_webview_app "spaces" "vmux_space"
+copy_webview_app "layout"
+copy_webview_app "command-bar"
+copy_webview_app "terminal"
+copy_webview_app "services"
+copy_webview_app "history"
+copy_webview_app "spaces"
+copy_webview_app "settings"
 
 echo "copy-webview-assets: copied webview assets to $WEBVIEW_ROOT"

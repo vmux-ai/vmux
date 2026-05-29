@@ -4,8 +4,8 @@ use dioxus::html::Modifiers;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use unicode_width::UnicodeWidthChar;
-use vmux_terminal::event::*;
-use vmux_terminal::render_model::{
+use crate::event::*;
+use crate::render_model::{
     cursor_cell_style, span_background_overlay, span_classes, span_inline_style,
     span_looks_like_suggestion,
 };

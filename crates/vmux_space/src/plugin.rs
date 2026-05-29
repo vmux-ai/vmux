@@ -10,7 +10,7 @@ use vmux_core::{
 };
 use vmux_layout::stack::Stack;
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
-use vmux_server::{PageConfig, PageReady, Server};
+use vmux_server::PageReady;
 
 use crate::event::{
     SPACES_LIST_EVENT, SPACES_PAGE_URL, SpaceCommandEvent, SpaceRow, SpacesListEvent,
@@ -32,7 +32,6 @@ impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActiveSpace>()
             .add_message::<SaveSpaceRequest>();
-        register_spaces_page(app.world_mut().resource_mut::<Server>().as_mut());
         app.add_systems(Startup, ensure_space_registry)
             .add_message::<vmux_core::page::SpacesPageSpawnRequest>()
             .add_systems(
@@ -113,13 +112,6 @@ fn reset_spaces_sent_marker_on_page_ready(
         return;
     }
     commands.entity(entity).remove::<SpacesListSent>();
-}
-
-fn register_spaces_page(registry: &mut Server) {
-    registry.register(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-        &PageConfig::with_custom_host("spaces"),
-    );
 }
 
 fn write_space_registry_to(root: &Path, registry: &SpaceRegistry) {

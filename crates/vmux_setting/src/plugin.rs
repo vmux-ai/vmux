@@ -4,7 +4,6 @@ pub mod view;
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::{BinEventEmitterPlugin, WebviewExtendStandardMaterial};
 use vmux_command::{ReadAppCommands, WriteAppCommands};
-use vmux_server::Server;
 
 use crate::event::SettingsCommandEvent;
 use runtime::{
@@ -13,7 +12,7 @@ use runtime::{
 };
 use view::{
     broadcast_schema_to_views, broadcast_settings_to_views, handle_open_settings_command,
-    on_settings_command, register_settings_page, reset_sent_markers_on_page_ready,
+    on_settings_command, reset_sent_markers_on_page_ready,
 };
 
 pub struct SettingsPlugin;
@@ -40,7 +39,6 @@ impl Plugin for SettingsPlugin {
             )
             .add_systems(Update, update_effective_startup_url);
 
-        register_settings_page(app.world_mut().resource_mut::<Server>().as_mut());
         app.add_systems(
             Update,
             crate::snapshot_updater::update_settings_snapshot

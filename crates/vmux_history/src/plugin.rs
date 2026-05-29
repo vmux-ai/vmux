@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::time::Duration;
 
 use bevy::time::common_conditions::on_timer;
@@ -6,7 +5,6 @@ use bevy_cef::prelude::BinEventEmitterPlugin;
 use vmux_core::{
     CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
 };
-use vmux_server::{PageConfig, Server};
 
 use crate::event::{
     HistoryChangedEvent, HistoryClearAllRequest, HistoryDeleteRequest, HistoryOpenRequest,
@@ -24,10 +22,6 @@ pub struct HistoryPlugin;
 
 impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().resource_mut::<Server>().register(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-            &PageConfig::with_custom_host("history"),
-        );
         app.add_systems(Update, (spawn_visits, broadcast_history_changed).chain())
             .add_systems(Update, handle_history_page_open.in_set(PageOpenSet::HandleKnownPages))
             .add_systems(

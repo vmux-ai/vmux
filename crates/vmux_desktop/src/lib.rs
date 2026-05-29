@@ -18,10 +18,10 @@ use bevy::window::{CompositeAlphaMode, ExitCondition, Window as NativeWindow, Wi
 
 use {
     os_menu::OsMenuPlugin, persistence::PersistencePlugin, shortcut::ShortcutPlugin,
-    vmux_browser::BrowserPlugin, vmux_command::CommandPlugin, vmux_layout::LayoutPlugin,
-    vmux_layout::cef::LayoutCefPlugin, vmux_layout::command_bar::plugin::CommandBarPagePlugin,
-    vmux_server::ServerPlugin, vmux_service::plugin::ServicePlugin, vmux_setting::SettingsPlugin,
-    vmux_space::SpacePlugin, vmux_terminal::TerminalPlugin,
+    vmux_app::VmuxAppPlugin, vmux_browser::BrowserPlugin, vmux_command::CommandPlugin,
+    vmux_layout::LayoutPlugin, vmux_layout::cef::LayoutCefPlugin, vmux_server::ServerPlugin,
+    vmux_service::plugin::ServicePlugin, vmux_setting::SettingsPlugin, vmux_space::SpacePlugin,
+    vmux_terminal::TerminalPlugin,
 };
 
 use vmux_agent::AgentPlugin;
@@ -75,6 +75,7 @@ impl Plugin for VmuxPlugin {
                         ..default()
                     }),
                 ServerPlugin,
+                VmuxAppPlugin,
                 SettingsPlugin,
                 CommandPlugin,
                 ShortcutPlugin,
@@ -84,7 +85,6 @@ impl Plugin for VmuxPlugin {
                 SpacePlugin,
                 vmux_history::HistoryPlugin,
                 LayoutCefPlugin,
-                CommandBarPagePlugin,
                 BrowserPlugin,
             ))
             .add_plugins((

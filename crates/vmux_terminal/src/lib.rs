@@ -5,6 +5,8 @@
 )]
 
 pub mod event;
+#[cfg(target_arch = "wasm32")]
+pub mod page;
 pub mod render_model;
 
 #[cfg(not(target_arch = "wasm32"))]

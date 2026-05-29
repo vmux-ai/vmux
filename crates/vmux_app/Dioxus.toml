@@ -1,6 +1,6 @@
 [application]
-name = "vmux_space"
+name = "vmux_app"
 default_platform = "web"
 
 [web.app]
-title = "Spaces"
+title = "vmux"

@@ -14,17 +14,9 @@ web = []
 name = "vmux_service"
 path = "src/main.rs"
 
-[[bin]]
-name = "vmux_service_app"
-path = "src/app_main.rs"
-required-features = ["web"]
-
 [lib]
 name = "vmux_service"
 path = "src/lib.rs"
-
-[build-dependencies]
-vmux_server = { path = "../vmux_server", features = ["build"] }
 
 [dependencies]
 rkyv = { workspace = true }

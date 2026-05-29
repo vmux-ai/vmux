@@ -1,0 +1,38 @@
+[package]
+name = "vmux_app"
+description = "Shared built-in vmux web app bundle"
+version.workspace = true
+edition.workspace = true
+publish = false
+build = "build.rs"
+
+[features]
+default = []
+web = []
+
+[[bin]]
+name = "vmux_app"
+path = "src/main.rs"
+required-features = ["web"]
+
+[lib]
+path = "src/lib.rs"
+
+[build-dependencies]
+vmux_server = { path = "../vmux_server", features = ["build"] }
+
+[dependencies]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bevy = { workspace = true }
+vmux_server = { path = "../vmux_server" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus = { workspace = true }
+vmux_history = { path = "../vmux_history" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_service = { path = "../vmux_service" }
+vmux_setting = { path = "../vmux_setting" }
+vmux_space = { path = "../vmux_space" }
+vmux_terminal = { path = "../vmux_terminal" }
+web-sys = { version = "0.3", features = ["Location", "Window"] }
