@@ -1,27 +1,6 @@
 #!/usr/bin/env bash
-# Block push if the changed-crate test set has any failing test or clippy lint.
-
 set -euo pipefail
 
-ROOT="$(git rev-parse --show-toplevel)"
-PKGS="$(BASE=origin/main "$ROOT/scripts/changed-crates.sh")"
-
-if [ -z "$PKGS" ]; then
-  echo "pre-push: no relevant crates changed; skipping checks"
-  exit 0
-fi
-
-echo "pre-push: checking crates:"
-printf '  %s\n' $PKGS
-
-for pkg in $PKGS; do
-  cargo fmt -p "$pkg" -- --check
-done
-
-for pkg in $PKGS; do
-  env -u CEF_PATH cargo clippy -p "$pkg" --all-targets -- -D warnings
-done
-
-for pkg in $PKGS; do
-  env -u CEF_PATH cargo test -p "$pkg"
-done
+cargo fmt --all -- --check
+env -u CEF_PATH cargo clippy --workspace --exclude bevy_cef --exclude bevy_cef_core --exclude bevy_cef_debug_render_process --all-targets -- -D warnings
+env -u CEF_PATH cargo test --workspace --exclude bevy_cef --exclude bevy_cef_core --exclude bevy_cef_debug_render_process

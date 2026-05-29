@@ -1,11 +1,11 @@
 #![allow(non_snake_case)]
 
-use dioxus::prelude::*;
 use crate::event::{
     HISTORY_CHANGED_EVENT, HISTORY_QUERY_RESPONSE_EVENT, HistoryChangedEvent,
     HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry, HistoryOpenRequest,
     HistoryQueryRequest, HistoryQueryResponse,
 };
+use dioxus::prelude::*;
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;

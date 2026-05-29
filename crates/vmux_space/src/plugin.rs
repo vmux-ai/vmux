@@ -530,7 +530,7 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_layout::{NewStackContext, pane::Pane, stack::Stack, tab::Tab, window::Main};
-    use vmux_server::Server;
+    use vmux_server::{PageConfig, Server};
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
     struct HomeEnvGuard {
@@ -641,7 +641,10 @@ mod tests {
     #[test]
     fn registers_spaces_host_before_cef_embedded_hosts_are_read() {
         let mut registry = Server::default();
-        register_spaces_page(&mut registry);
+        registry.register(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+            &PageConfig::with_custom_host("spaces").with_bundle_dir("dist"),
+        );
 
         let hosts = registry.embedded_hosts();
         let entry = hosts.entry_for_host("spaces").unwrap();

@@ -1,11 +1,11 @@
 #![allow(non_snake_case)]
 
-use dioxus::prelude::*;
 use crate::event::{
     HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
     PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent,
     TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
+use dioxus::prelude::*;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{GlobeIcon, favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
