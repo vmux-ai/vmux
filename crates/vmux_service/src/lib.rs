@@ -35,6 +35,10 @@ pub mod sm_app_service;
 pub mod supervisor;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest =
+    vmux_core::page::PageManifest { host: "services" };
+
+#[cfg(not(target_arch = "wasm32"))]
 mod paths;
 #[cfg(not(target_arch = "wasm32"))]
 pub use paths::*;

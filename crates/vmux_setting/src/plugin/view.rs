@@ -2,13 +2,13 @@ use bevy::{picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_command::command::{AppCommand, LayoutCommand, WindowCommand};
 use vmux_core::PageMetadata;
+use vmux_core::page::PageReady;
 use vmux_history::{CreatedAt, LastActivatedAt};
 use vmux_layout::{
     Browser,
     pane::{Pane, PaneSplit},
     stack::{FocusedStack, stack_bundle},
 };
-use vmux_server::PageReady;
 
 use crate::event::{
     SETTINGS_LIST_EVENT, SETTINGS_PAGE_URL, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent,

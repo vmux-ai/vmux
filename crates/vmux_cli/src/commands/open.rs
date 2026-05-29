@@ -52,7 +52,7 @@ mod tests {
     }
 
     #[test]
-    fn run_launches_vmux_app() {
+    fn run_launches_desktop_app() {
         let launcher = RecordingLauncher {
             calls: RefCell::new(Vec::new()),
         };

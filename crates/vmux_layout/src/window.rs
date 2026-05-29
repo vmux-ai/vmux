@@ -23,9 +23,9 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
+use vmux_core::page::ServerEmbedSet;
 use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt};
-use vmux_server::ServerEmbedSet;
 
 pub const SIDE_SHEET_TOP_PADDING_PX: f32 = 22.0;
 

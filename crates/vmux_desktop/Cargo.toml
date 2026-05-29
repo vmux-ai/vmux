@@ -27,7 +27,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 vmux_agent = { path = "../vmux_agent" }
-vmux_app = { path = "../vmux_app" }
 vmux_browser = { path = "../vmux_browser" }
 vmux_core = { path = "../vmux_core" }
 vmux_history = { path = "../vmux_history" }

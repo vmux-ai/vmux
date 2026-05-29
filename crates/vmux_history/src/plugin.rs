@@ -22,6 +22,7 @@ pub struct HistoryPlugin;
 
 impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_systems(Update, (spawn_visits, broadcast_history_changed).chain())
             .add_systems(Update, handle_history_page_open.in_set(PageOpenSet::HandleKnownPages))
             .add_systems(

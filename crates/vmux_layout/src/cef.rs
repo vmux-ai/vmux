@@ -23,7 +23,10 @@ pub struct NavigationState {
 pub struct LayoutCefPlugin;
 
 impl Plugin for LayoutCefPlugin {
-    fn build(&self, _app: &mut App) {}
+    fn build(&self, app: &mut App) {
+        app.world_mut().spawn(crate::LAYOUT_PAGE_MANIFEST);
+        app.world_mut().spawn(crate::COMMAND_BAR_PAGE_MANIFEST);
+    }
 }
 
 pub fn mirror_metadata_to_url(

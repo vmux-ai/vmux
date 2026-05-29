@@ -18,7 +18,6 @@ vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
-vmux_server = { path = "../vmux_server" }
 vmux_service = { path = "../vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }

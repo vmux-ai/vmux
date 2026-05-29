@@ -19,6 +19,7 @@ pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.init_resource::<LastSelfWriteHash>()
             .add_message::<SettingsWriteRequest>()
             .configure_sets(

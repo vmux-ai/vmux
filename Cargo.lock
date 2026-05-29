@@ -8574,27 +8574,10 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_mcp",
- "vmux_server",
  "vmux_service",
  "vmux_setting",
  "vmux_space",
  "vmux_terminal",
-]
-
-[[package]]
-name = "vmux_app"
-version = "0.0.10"
-dependencies = [
- "bevy",
- "dioxus",
- "vmux_history",
- "vmux_layout",
- "vmux_server",
- "vmux_service",
- "vmux_setting",
- "vmux_space",
- "vmux_terminal",
- "web-sys",
 ]
 
 [[package]]
@@ -8611,7 +8594,6 @@ dependencies = [
  "vmux_core",
  "vmux_history",
  "vmux_layout",
- "vmux_server",
  "vmux_service",
  "vmux_setting",
  "vmux_space",
@@ -8651,6 +8633,8 @@ name = "vmux_core"
 version = "0.0.10"
 dependencies = [
  "bevy",
+ "bevy_cef",
+ "bevy_cef_core",
  "bevy_ecs",
  "bevy_reflect",
  "moonshine-save",
@@ -8686,7 +8670,6 @@ dependencies = [
  "url",
  "uuid",
  "vmux_agent",
- "vmux_app",
  "vmux_browser",
  "vmux_command",
  "vmux_core",
@@ -8717,7 +8700,6 @@ dependencies = [
  "ron 0.8.1",
  "serde",
  "vmux_core",
- "vmux_server",
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",
@@ -8749,7 +8731,6 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_history",
- "vmux_server",
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",
@@ -8781,12 +8762,18 @@ dependencies = [
 name = "vmux_server"
 version = "0.0.10"
 dependencies = [
- "bevy",
- "bevy_cef",
- "bevy_cef_core",
+ "dioxus",
  "regex",
  "rkyv",
  "serde",
+ "vmux_core",
+ "vmux_history",
+ "vmux_layout",
+ "vmux_service",
+ "vmux_setting",
+ "vmux_space",
+ "vmux_terminal",
+ "web-sys",
 ]
 
 [[package]]
@@ -8813,7 +8800,6 @@ dependencies = [
  "uuid",
  "vmux_core",
  "vmux_layout",
- "vmux_server",
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",
@@ -8837,7 +8823,6 @@ dependencies = [
  "vmux_core",
  "vmux_history",
  "vmux_layout",
- "vmux_server",
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",
@@ -8862,7 +8847,6 @@ dependencies = [
  "vmux_core",
  "vmux_history",
  "vmux_layout",
- "vmux_server",
  "vmux_setting",
  "vmux_ui",
  "wasm-bindgen",
@@ -8890,7 +8874,6 @@ dependencies = [
  "vmux_core",
  "vmux_history",
  "vmux_layout",
- "vmux_server",
  "vmux_service",
  "vmux_setting",
  "vmux_space",
@@ -8906,12 +8889,12 @@ dependencies = [
  "dioxus",
  "dioxus-primitives",
  "js-sys",
+ "regex",
  "rkyv",
  "ron 0.8.1",
  "serde",
  "serde_json",
  "time",
- "vmux_server",
  "wasm-bindgen",
  "web-sys",
 ]

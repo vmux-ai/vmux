@@ -15,6 +15,10 @@ pub mod snapshot_updater;
 pub mod themes;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest =
+    vmux_core::page::PageManifest { host: "settings" };
+
+#[cfg(not(target_arch = "wasm32"))]
 pub use plugin::SettingsPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::runtime::{

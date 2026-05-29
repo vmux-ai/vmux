@@ -36,8 +36,6 @@ tracing-appender = "0.2"
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
 
-vmux_server = { path = "../vmux_server" }
-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }

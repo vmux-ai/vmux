@@ -1,12 +1,16 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use vmux_server::build::{CefEmbeddedPageFinalize, PageBuilder};
+#[allow(dead_code)]
+#[path = "src/build.rs"]
+mod page_build;
+
+use page_build::{CefEmbeddedPageFinalize, PageBuilder};
 
 fn main() {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let target = std::env::var("TARGET").unwrap_or_default();
-    PageBuilder::new(manifest_dir.clone(), "vmux_app", "vmux_app")
+    PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
         .track_manifest_rel_paths(&[
             "../vmux_ui/assets/theme.css",
             "../vmux_history/src",
@@ -17,12 +21,12 @@ fn main() {
             "../vmux_terminal/src",
             "../vmux_terminal/assets/fonts",
         ])
-        .dx_extra_args(&["--bin", "vmux_app", "--features", "web"])
+        .dx_extra_args(&["--bin", "vmux_server", "--features", "web"])
         .cef_finalize(CefEmbeddedPageFinalize {
             strip_uncompiled_tailwind_css: true,
         })
-        .tailwind_postprocess_after_dx(&["index-dxv", "vmux_app-dxv"])
-        .run("vmux_app");
+        .tailwind_postprocess_after_dx(&["index-dxv", "vmux_server-dxv"])
+        .run("vmux_server");
     if target.contains("wasm32") {
         return;
     }

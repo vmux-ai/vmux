@@ -68,6 +68,15 @@ pub use webview_reveal::PendingWebviewReveal;
 pub use window::fit_window_to_screen;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest =
+    vmux_core::page::PageManifest { host: "layout" };
+#[cfg(not(target_arch = "wasm32"))]
+pub const COMMAND_BAR_PAGE_MANIFEST: vmux_core::page::PageManifest =
+    vmux_core::page::PageManifest {
+        host: "command-bar",
+    };
+
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LayoutStartupSet {
     Window,

@@ -12,12 +12,12 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands};
+use vmux_core::page::PageReady;
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, TerminalSpawnRequest};
 use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
-use vmux_server::PageReady;
 use vmux_service::{
     client::{ServiceHandle, ServiceWake},
     protocol::{ClientMessage, ProcessId, ServiceMessage},
@@ -212,6 +212,7 @@ pub fn format_terminal_url(
 
 impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.register_type::<crate::launch::TerminalLaunch>()
             .register_type::<crate::launch::TerminalKind>()
             .add_message::<TerminalSendRequest>()

@@ -26,7 +26,6 @@ moonshine-save = { workspace = true }
 bevy_ecs = { workspace = true }
 ron = { workspace = true }
 vmux_core = { path = "../vmux_core" }
-vmux_server = { path = "../vmux_server" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 bevy = { workspace = true }

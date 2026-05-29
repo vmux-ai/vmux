@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use bevy::{ecs::message::MessageReader, prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::TriggerLoad;
+use vmux_core::page::PageReady;
 use vmux_core::profile;
 use vmux_core::{
     PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet, PageOpenTarget,
@@ -10,7 +11,6 @@ use vmux_core::{
 };
 use vmux_layout::stack::Stack;
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
-use vmux_server::PageReady;
 
 use crate::event::{
     SPACES_LIST_EVENT, SPACES_PAGE_URL, SpaceCommandEvent, SpaceRow, SpacesListEvent,
@@ -30,6 +30,7 @@ pub struct SpacePlugin;
 
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.init_resource::<ActiveSpace>()
             .add_message::<SaveSpaceRequest>()
             .add_systems(Startup, ensure_space_registry)
@@ -529,7 +530,6 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_layout::{NewStackContext, pane::Pane, stack::Stack, tab::Tab, window::Main};
-    use vmux_server::{PageConfig, Server};
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
     struct HomeEnvGuard {
@@ -639,13 +639,16 @@ mod tests {
 
     #[test]
     fn registers_spaces_host_before_cef_embedded_hosts_are_read() {
-        let mut registry = Server::default();
-        registry.register(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-            &PageConfig::with_custom_host("spaces").with_bundle_dir("dist"),
+        let mut app = App::new();
+        app.add_plugins(SpacePlugin);
+        let mut query = app.world_mut().query::<&vmux_core::page::PageManifest>();
+        let hosts = bevy_cef_core::prelude::CefEmbeddedHosts(
+            query
+                .iter(app.world())
+                .map(vmux_core::page::PageManifest::embedded_host)
+                .collect(),
         );
 
-        let hosts = registry.embedded_hosts();
         let entry = hosts.entry_for_host("spaces").unwrap();
         assert_eq!(entry.default_document, "spaces/index.html");
     }

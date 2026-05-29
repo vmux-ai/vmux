@@ -37,4 +37,3 @@ vmux_terminal = { path = "../vmux_terminal" }
 mockito = "1"
 serial_test = "3"
 tokio = { workspace = true, features = ["rt", "macros"] }
-vmux_server = { path = "../vmux_server" }

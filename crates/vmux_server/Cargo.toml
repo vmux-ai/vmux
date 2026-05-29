@@ -4,15 +4,42 @@ description = "Bevy plugin: serve embedded webview pages over vmux:// URLs"
 version.workspace = true
 edition.workspace = true
 publish = false
+build = "build.rs"
 
 [features]
 default = []
 build = ["dep:regex"]
+web = [
+    "dep:dioxus",
+    "dep:vmux_history",
+    "dep:vmux_layout",
+    "dep:vmux_service",
+    "dep:vmux_setting",
+    "dep:vmux_space",
+    "dep:vmux_terminal",
+    "dep:web-sys",
+]
 
 [dependencies]
-bevy = { workspace = true }
-bevy_cef = { workspace = true }
-bevy_cef_core = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
 regex = { workspace = true, optional = true }
+vmux_core = { path = "../vmux_core" }
+
+[build-dependencies]
+regex = { workspace = true }
+
+[[bin]]
+name = "vmux_server"
+path = "src/main.rs"
+required-features = ["web"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus = { workspace = true, optional = true }
+vmux_history = { path = "../vmux_history", optional = true }
+vmux_layout = { path = "../vmux_layout", optional = true }
+vmux_service = { path = "../vmux_service", optional = true }
+vmux_setting = { path = "../vmux_setting", optional = true }
+vmux_space = { path = "../vmux_space", optional = true }
+vmux_terminal = { path = "../vmux_terminal", optional = true }
+web-sys = { version = "0.3", features = ["Location", "Window"], optional = true }

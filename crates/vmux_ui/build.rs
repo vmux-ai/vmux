@@ -3,7 +3,12 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use vmux_server::build::{
+
+#[allow(dead_code)]
+#[path = "../vmux_server/src/build.rs"]
+mod page_build;
+
+use page_build::{
     dx_web_public_dir, replace_dist_from_dx_public, run_dx_web_bundle,
     workspace_root_from_manifest_dir,
 };
@@ -13,6 +18,7 @@ fn main() {
     let workspace_root = workspace_root_from_manifest_dir(&manifest_dir);
 
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=../vmux_server/src/build.rs");
 
     let target = std::env::var("TARGET").unwrap_or_default();
     let profile = std::env::var("PROFILE").unwrap_or_default();

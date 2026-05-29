@@ -31,7 +31,6 @@ vmux_layout = { path = "../vmux_layout" }
 vmux_service = { path = "../vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
-vmux_server = { path = "../vmux_server" }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 libc = "0.2"

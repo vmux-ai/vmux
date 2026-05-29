@@ -18,8 +18,8 @@ use bevy::window::{CompositeAlphaMode, ExitCondition, Window as NativeWindow, Wi
 
 use {
     os_menu::OsMenuPlugin, persistence::PersistencePlugin, shortcut::ShortcutPlugin,
-    vmux_app::VmuxAppPlugin, vmux_browser::BrowserPlugin, vmux_command::CommandPlugin,
-    vmux_layout::LayoutPlugin, vmux_layout::cef::LayoutCefPlugin, vmux_server::ServerPlugin,
+    vmux_browser::BrowserPlugin, vmux_command::CommandPlugin, vmux_core::page::ServerPlugin,
+    vmux_layout::LayoutPlugin, vmux_layout::cef::LayoutCefPlugin,
     vmux_service::plugin::ServicePlugin, vmux_setting::SettingsPlugin, vmux_space::SpacePlugin,
     vmux_terminal::TerminalPlugin,
 };
@@ -75,7 +75,6 @@ impl Plugin for VmuxPlugin {
                         ..default()
                     }),
                 ServerPlugin,
-                VmuxAppPlugin,
                 SettingsPlugin,
                 CommandPlugin,
                 ShortcutPlugin,

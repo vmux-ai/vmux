@@ -12,7 +12,7 @@ use bevy::{
     window::{CursorMoved, PrimaryWindow, WindowResized},
 };
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
+use bevy_cef_core::prelude::{CefEmbeddedHosts, RenderTextureMessage, webview_debug_log};
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, BrowserNavigationCommand, BrowserViewCommand,
     ReadAppCommands, open::OpenCommand,
@@ -20,6 +20,7 @@ use vmux_command::{
 use vmux_core::{
     CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenId,
     PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
+    page::{PageManifest, PageReady},
 };
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::command_bar::handler::PendingCommandBarReveal;
@@ -43,7 +44,6 @@ use vmux_layout::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
     },
 };
-use vmux_server::{PageReady, Server};
 use vmux_setting::AppSettings;
 use vmux_terminal::{self as terminal, PtyExited, RestartPty, Terminal};
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
@@ -52,7 +52,13 @@ pub struct BrowserPlugin;
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
-        let embedded_hosts = app.world().resource::<Server>().embedded_hosts();
+        let mut manifests = app.world_mut().query::<&PageManifest>();
+        let embedded_hosts = CefEmbeddedHosts(
+            manifests
+                .iter(app.world())
+                .map(PageManifest::embedded_host)
+                .collect(),
+        );
         webview_debug_log(format!("BrowserPlugin embedded_hosts={embedded_hosts:?}"));
         app.add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<PageOpenRequest>()

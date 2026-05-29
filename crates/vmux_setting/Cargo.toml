@@ -28,7 +28,6 @@ vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
-vmux_server = { path = "../vmux_server" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }

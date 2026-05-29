@@ -20,6 +20,10 @@ pub mod snapshot_updater;
 pub mod spaces;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest =
+    vmux_core::page::PageManifest { host: "spaces" };
+
+#[cfg(not(target_arch = "wasm32"))]
 pub use plugin::{SaveSpaceRequest, SpacePlugin};
 #[cfg(not(target_arch = "wasm32"))]
 pub use spaces::{ActiveSpace, Spaces};

@@ -1,8 +1,8 @@
 use bevy::{ecs::relationship::Relationship, picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
+use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
-use vmux_server::PageReady;
 use vmux_service::event::*;
 use vmux_service::protocol::{ClientMessage, ProcessId};
 
