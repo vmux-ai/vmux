@@ -195,7 +195,7 @@ impl Browsers {
         let browser = browser_host_create_browser_sync(
             Some(&WindowInfo {
                 windowless_rendering_enabled: true as _,
-                external_begin_frame_enabled: true as _,
+                external_begin_frame_enabled: false as _,
                 #[cfg(target_os = "macos")]
                 parent_view: match _window_handle {
                     Some(RawWindowHandle::AppKit(handle)) => handle.ns_view.as_ptr(),
@@ -377,19 +377,6 @@ impl Browsers {
                 mouse_up as _,
                 1,
             );
-        }
-    }
-
-    /// [`SendExternalBeginFrame`](https://cef-builds.spotifycdn.com/docs/145.6/classCefBrowserHost.html#a78a87fa64517c4d6e2e1ac80d7e72f23)
-    ///
-    /// Drives a single CEF paint when `external_begin_frame_enabled` was set on
-    /// the underlying browser. Caller is responsible for pacing (typically once
-    /// per host vsync).
-    pub fn send_external_begin_frame(&self, webview: &Entity) {
-        if let Some(browser) = self.browsers.get(webview)
-            && !browser.hidden.get()
-        {
-            browser.host.send_external_begin_frame();
         }
     }
 
@@ -1055,6 +1042,17 @@ mod tests {
     }
 
     #[test]
+    fn osr_uses_cef_internal_begin_frame_scheduler() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+
+        assert!(implementation.contains("external_begin_frame_enabled: false as _"));
+        assert!(!implementation.contains("send_external_begin_frame"));
+    }
+
+    #[test]
     fn existing_osr_browsers_can_update_frame_rate() {
         let implementation = include_str!("browsers.rs")
             .split("#[cfg(test)]\nmod tests")
@@ -1065,13 +1063,13 @@ mod tests {
     }
 
     #[test]
-    fn hidden_osr_webviews_do_not_receive_begin_frames() {
+    fn hidden_osr_webviews_are_suspended_with_cef_visibility() {
         let implementation = include_str!("browsers.rs")
             .split("#[cfg(test)]\nmod tests")
             .next()
             .unwrap_or_default();
         assert!(implementation.contains("hidden: Cell<bool>"));
-        assert!(implementation.contains("&& !browser.hidden.get()"));
+        assert!(implementation.contains("browser.host.was_hidden(1)"));
     }
 
     #[test]

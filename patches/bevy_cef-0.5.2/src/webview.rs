@@ -144,7 +144,6 @@ impl Plugin for WebviewPlugin {
                 Update,
                 sync_windowless_frame_rate.after(CefSystems::CreateAndResize),
             )
-            .add_systems(Last, drive_external_begin_frames)
             .add_observer(apply_request_show_devtool)
             .add_observer(apply_request_close_devtool);
 
@@ -202,25 +201,6 @@ fn sync_windowless_frame_rate(
             texture_wake_policy.set_min_interval(interval);
         }
     });
-}
-
-/// Drives one CEF paint per Bevy frame for every active webview.
-///
-/// Pairs with `external_begin_frame_enabled: true` on browser creation. Bevy's
-/// frame loop is gated by winit/wgpu vsync, so this naturally produces frames at
-/// the host display refresh rate instead of CEF's free-running internal clock —
-/// eliminating phase drift between CEF compositor frames and display vsync.
-fn drive_external_begin_frames(
-    browsers: NonSend<Browsers>,
-    webviews: Query<Entity, With<WebviewSource>>,
-    windows: Query<&Window>,
-) {
-    if !windows.is_empty() && windows.iter().all(|window| !window.visible) {
-        return;
-    }
-    for entity in webviews.iter() {
-        browsers.send_external_begin_frame(&entity);
-    }
 }
 
 fn spawn_texture_wake_throttler(
@@ -391,14 +371,14 @@ mod tests {
     }
 
     #[test]
-    fn begin_frame_driver_skips_when_all_windows_are_hidden() {
+    fn webview_does_not_drive_external_begin_frames_from_bevy_schedule() {
         let implementation = include_str!("webview.rs")
             .split("#[cfg(test)]\nmod tests")
             .next()
             .unwrap_or_default();
 
-        assert!(implementation.contains("windows: Query<&Window>"));
-        assert!(implementation.contains("windows.iter().all(|window| !window.visible)"));
+        assert!(!implementation.contains("drive_external_begin_frames"));
+        assert!(!implementation.contains("send_external_begin_frame"));
     }
 
     #[test]
