@@ -18,7 +18,7 @@ fn ensure_extended_webview_placeholder<E: MaterialExtension>(
     webviews: Query<(Entity, &MeshMaterial3d<WebviewExtendedMaterial<E>>), With<WebviewSource>>,
 ) {
     for (entity, mesh_mat) in &webviews {
-        let Some(mat) = materials.get_mut(mesh_mat.id()) else {
+        let Some(mut mat) = materials.get_mut(mesh_mat.id()) else {
             continue;
         };
         if mat.base.surface.is_some() {
@@ -68,7 +68,7 @@ fn render<E: MaterialExtension>(
         let Ok(mat_handle) = webviews.get(texture.webview) else {
             continue;
         };
-        let Some(material) = materials.get_mut(mat_handle.id()) else {
+        let Some(mut material) = materials.get_mut(mat_handle.id()) else {
             continue;
         };
         let handle = material

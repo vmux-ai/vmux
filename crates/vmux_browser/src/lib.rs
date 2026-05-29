@@ -418,6 +418,7 @@ fn sync_children_to_ui(
         (
             &mut Transform,
             &ComputedNode,
+            &bevy::ui::ComputedStackIndex,
             &UiGlobalTransform,
             &ChildOf,
             &mut WebviewSize,
@@ -445,6 +446,7 @@ fn sync_children_to_ui(
     for (
         mut tf,
         self_computed,
+        self_stack_index,
         self_ui_gt,
         child_of,
         mut webview_size,
@@ -532,7 +534,7 @@ fn sync_children_to_ui(
                 WEBVIEW_Z_MAIN - 0.01
             }
         } else {
-            0.01 + self_computed.stack_index as f32 * 0.001
+            0.01 + self_stack_index.0 as f32 * 0.001
         };
         let history_swipe_tx = if parent != glass_entity && !is_cef_ui {
             history_swipe_visual
@@ -671,21 +673,21 @@ fn sync_webview_pane_corner_clip(
         } else {
             1.0
         };
-        if let Some(mat) = materials.get_mut(mat_h.id()) {
+        if let Some(mut mat) = materials.get_mut(mat_h.id()) {
             mat.extension.pane_corner_clip = Vec4::new(r, w, h, mode);
         }
     }
     for (size, mat_h) in &status {
         let w = size.0.x.max(1.0e-6);
         let h = size.0.y.max(1.0e-6);
-        if let Some(mat) = materials.get_mut(mat_h.id()) {
+        if let Some(mut mat) = materials.get_mut(mat_h.id()) {
             mat.extension.pane_corner_clip = Vec4::new(r, w, h, 0.0);
         }
     }
     for (size, mat_h) in &side_sheet {
         let w = size.0.x.max(1.0e-6);
         let h = size.0.y.max(1.0e-6);
-        if let Some(mat) = materials.get_mut(mat_h.id()) {
+        if let Some(mut mat) = materials.get_mut(mat_h.id()) {
             mat.extension.pane_corner_clip = Vec4::new(r, w, h, 0.0);
         }
     }

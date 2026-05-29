@@ -52,7 +52,7 @@ release: build-release
 
 # One-time CEF download (macOS paths; pin matches bevy_cef 0.5.x)
 setup-cef:
-	"$(CARGO_BIN)" install export-cef-dir@145.6.1+145.0.28 --force
+	"$(CARGO_BIN)" install export-cef-dir@148.2.0+148.0.8 --force
 	"$(EXPORT_CEF_BIN)" --force "$$HOME/.local/share"
 
 # Build from vmux-patched bevy_cef_core (required when adding CEF schemes such as vmux://).

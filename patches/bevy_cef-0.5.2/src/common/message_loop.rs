@@ -67,9 +67,9 @@ impl Plugin for MessageLoopPlugin {
         cef_initialize(&args, &mut cef_app, self.root_cache_path.as_deref());
 
         app.insert_resource(wake_policy)
-            .insert_non_send_resource(cef_app)
-            .insert_non_send_resource(MessageLoopWorkingReceiver(rx))
-            .insert_non_send_resource(RunOnMainThread)
+            .insert_non_send(cef_app)
+            .insert_non_send(MessageLoopWorkingReceiver(rx))
+            .insert_non_send(RunOnMainThread)
             .add_systems(Main, cef_do_message_loop_work.before(Main::run_main))
             .add_systems(
                 Update,
@@ -86,7 +86,7 @@ fn load_cef_library(app: &mut App) {
     #[cfg(all(target_os = "macos", not(feature = "debug")))]
     let loader = cef::library_loader::LibraryLoader::new(&std::env::current_exe().unwrap(), false);
     assert!(loader.load());
-    app.insert_non_send_resource(loader);
+    app.insert_non_send(loader);
 }
 
 #[cfg(target_os = "macos")]

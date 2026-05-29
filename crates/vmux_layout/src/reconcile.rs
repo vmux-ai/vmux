@@ -382,7 +382,7 @@ fn run_build_snapshot(world: &mut World) -> LayoutSnapshot {
         Query<&crate::pane::Zoomed>,
         Res<crate::stack::FocusedStack>,
     )>::new(world);
-    let (tabs, splits, leaves, stacks, pane_sizes, zoomed, focused) = state.get(world);
+    let (tabs, splits, leaves, stacks, pane_sizes, zoomed, focused) = state.get(world).unwrap();
     crate::snapshot::build_layout_snapshot(
         &tabs,
         &splits,

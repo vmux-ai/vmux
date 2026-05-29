@@ -51,7 +51,7 @@ fn setup_tray(world: &mut World) {
         }
     };
 
-    world.insert_non_send_resource(TrayHandle {
+    world.insert_non_send(TrayHandle {
         _tray: tray,
         show_id,
         quit_id,

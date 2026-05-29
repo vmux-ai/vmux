@@ -225,7 +225,7 @@ fn on_toggle_player_mode(
                     SceneSunlight,
                     DirectionalLight {
                         illuminance: 0.0,
-                        shadows_enabled: false,
+                        shadow_maps_enabled: false,
                         color: Color::srgb(1.0, 0.98, 0.95),
                         ..default()
                     },

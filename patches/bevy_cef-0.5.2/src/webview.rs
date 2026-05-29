@@ -129,7 +129,7 @@ impl Plugin for WebviewPlugin {
             .map(|wrapper| spawn_texture_wake_throttler(wrapper, texture_wake_policy.clone()));
         app.register_type::<RequestShowDevTool>()
             .init_resource::<CefDiskProfileRoot>()
-            .init_non_send_resource::<Browsers>()
+            .init_non_send::<Browsers>()
             .insert_resource(TextureWakeCallback(texture_wake))
             .insert_resource(texture_wake_policy)
             .add_plugins((MeshWebviewPlugin,))
@@ -152,7 +152,7 @@ impl Plugin for WebviewPlugin {
         app.world_mut()
             .register_component_hooks::<WebviewSource>()
             .on_despawn(|mut world: DeferredWorld, ctx: HookContext| {
-                world.non_send_resource_mut::<Browsers>().close(&ctx.entity);
+                world.non_send_mut::<Browsers>().close(&ctx.entity);
             });
 
         app.world_mut()

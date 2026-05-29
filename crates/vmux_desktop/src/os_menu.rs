@@ -48,7 +48,7 @@ fn setup(world: &mut World) {
         PENDING_MENU_EVENTS.lock().push(event.id.0.clone());
     }));
 
-    world.insert_non_send_resource(OsMenuResource(menu));
+    world.insert_non_send(OsMenuResource(menu));
 }
 
 fn forward_menu_events(world: &mut World) {

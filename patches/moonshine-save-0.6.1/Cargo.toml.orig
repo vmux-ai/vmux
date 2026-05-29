@@ -1,0 +1,27 @@
+[package]
+name = "moonshine-save"
+version = "0.6.1"
+edition = "2021"
+license = "MIT"
+description = "Save/Load framework for Bevy"
+categories = ["game-development"]
+keywords = ["bevy", "save", "load", "serde", "ron"]
+readme = "README.md"
+homepage = "https://github.com/Zeenobit/moonshine_save"
+repository = "https://github.com/Zeenobit/moonshine_save"
+
+[dependencies]
+ron = "0.12"
+serde = "1"
+thiserror = "2"
+bevy_app = "0.18"
+bevy_ecs = "0.18"
+bevy_log = "0.18"
+bevy_platform = "0.18"
+bevy_reflect = "0.18"
+bevy_scene = "0.18"
+bevy_utils = "0.18"
+moonshine-util = "0.4"
+
+[dev-dependencies]
+bevy = "0.18"

@@ -12,10 +12,11 @@ use crate::{
 };
 use bevy::{
     asset::{Asset, load_internal_asset, uuid_handle},
+    material::AlphaMode,
     pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin, StandardMaterial},
     picking::Pickable,
     prelude::*,
-    render::{alpha::AlphaMode, render_resource::AsBindGroup},
+    render::render_resource::AsBindGroup,
     shader::ShaderRef,
     ui::{FlexDirection, UiTargetCamera},
     window::PrimaryWindow,
@@ -541,7 +542,7 @@ fn sync_window_surface_clip(
         return;
     }
     for handle in &q {
-        if let Some(mat) = materials.get_mut(handle) {
+        if let Some(mut mat) = materials.get_mut(handle) {
             let clip = &mut mat.extension.clip;
             if (clip.x - settings.radius).abs() > 0.01 {
                 clip.x = settings.radius;
@@ -561,7 +562,7 @@ fn apply_webview_material_defaults(
     >,
 ) {
     for handle in &q {
-        if let Some(material) = materials.get_mut(handle) {
+        if let Some(mut material) = materials.get_mut(handle) {
             material.base.unlit = true;
             material.base.alpha_mode = AlphaMode::Blend;
             material.base.depth_bias = WEBVIEW_MESH_DEPTH_BIAS;
@@ -695,7 +696,7 @@ pub fn fit_window_to_screen(
         tf.translation = Vec3::new(0.0, m.y * 0.5, 0.0);
         tf.scale = Vec3::new(m.x, m.y, 1.0);
 
-        if let Some(mat) = materials.get_mut(handle) {
+        if let Some(mut mat) = materials.get_mut(handle) {
             mat.extension.clip = Vec4::new(r, m.x, m.y, PIXELS_PER_METER);
         }
     }

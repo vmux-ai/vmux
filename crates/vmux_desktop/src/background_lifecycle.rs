@@ -134,7 +134,7 @@ fn handle_lifecycle_events(world: &mut World) {
 }
 
 fn hide_all_osr_webviews(world: &mut World) {
-    if let Some(browsers) = world.get_non_send_resource::<Browsers>() {
+    if let Some(browsers) = world.get_non_send::<Browsers>() {
         browsers.set_all_osr_hidden();
     }
 }

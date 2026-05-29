@@ -72,8 +72,8 @@ pub(crate) fn apply_webview_texture(
             height: texture.height,
             dirty: texture.dirty.clone(),
         });
-    } else if let Some(image) = images.get_mut(handle.id()) {
-        update_webview_image(texture, image);
+    } else if let Some(mut image) = images.get_mut(handle.id()) {
+        update_webview_image(texture, &mut image);
     }
 }
 
@@ -98,7 +98,9 @@ fn upload_webview_textures(
         let Some(gpu) = gpu_images.get(upload.image) else {
             continue;
         };
-        if gpu.size.width != upload.width || gpu.size.height != upload.height {
+        if gpu.texture_descriptor.size.width != upload.width
+            || gpu.texture_descriptor.size.height != upload.height
+        {
             continue;
         }
         let stride = upload.width * 4;
