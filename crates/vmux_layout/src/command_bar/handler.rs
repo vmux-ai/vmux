@@ -1793,6 +1793,7 @@ mod tests {
                 width: 1,
                 height: 1,
                 buffer: std::sync::Arc::new(vec![0, 0, 0, 255]),
+                dirty: Vec::new(),
             });
 
         app.update();

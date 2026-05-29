@@ -1,7 +1,6 @@
 use crate::common::WebviewSource;
-use crate::prelude::{
-    WebviewMaterial, WebviewSurface, update_webview_image, webview_placeholder_image,
-};
+use crate::prelude::{WebviewMaterial, WebviewSurface, webview_placeholder_image};
+use crate::webview::texture_upload::{WebviewTextureUploads, apply_webview_texture};
 use bevy::asset::*;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
@@ -63,42 +62,29 @@ pub fn render_standard_materials(
     mut er: MessageReader<RenderTextureMessage>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut uploads: ResMut<WebviewTextureUploads>,
     webviews: Query<&MeshMaterial3d<WebviewExtendStandardMaterial>>,
     mut logged: Local<bevy::platform::collections::HashSet<Entity>>,
 ) {
     for texture in er.read() {
-        if let Ok(handle) = webviews.get(texture.webview)
-            && let Some(material) = materials.get_mut(handle.id())
-            && let Some(image) = {
-                let handle = material
-                    .extension
-                    .surface
-                    .get_or_insert_with(|| images.add(webview_placeholder_image()));
-                commands
-                    .entity(texture.webview)
-                    .insert(WebviewSurface(handle.clone()));
-                images.get_mut(handle.id())
-            }
-        {
-            update_webview_image(texture.clone(), image);
-            if logged.insert(texture.webview) {
-                webview_debug_log(format!(
-                    "texture applied entity={:?} size={}x{} bytes={}",
-                    texture.webview,
-                    texture.width,
-                    texture.height,
-                    texture.buffer.len()
-                ));
-            }
-        } else {
-            bevy::log::warn!(
-                "[tex-apply] FAILED to apply texture for {:?} {}x{}",
-                texture.webview,
-                texture.width,
-                texture.height
-            );
+        let Ok(mat_handle) = webviews.get(texture.webview) else {
+            continue;
+        };
+        let Some(material) = materials.get_mut(mat_handle.id()) else {
+            continue;
+        };
+        let handle = material
+            .extension
+            .surface
+            .get_or_insert_with(|| images.add(webview_placeholder_image()))
+            .clone();
+        commands
+            .entity(texture.webview)
+            .insert(WebviewSurface(handle.clone()));
+        apply_webview_texture(texture, &mut images, &handle, &mut uploads);
+        if logged.insert(texture.webview) {
             webview_debug_log(format!(
-                "texture apply failed entity={:?} size={}x{} bytes={}",
+                "texture applied entity={:?} size={}x{} bytes={}",
                 texture.webview,
                 texture.width,
                 texture.height,

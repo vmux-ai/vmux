@@ -84,6 +84,22 @@ rfd = "0.15"
 rkyv = { version = "0.8", features = ["alloc"] }
 uuid = { version = "1", features = ["v4", "serde", "js"] }
 
+# Dev builds of a Bevy + CEF app are unusably slow without optimizing dependencies.
+# Our crates stay at opt-level 1 for fast rebuilds; all deps compile at 3 (cached).
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# Hot CEF render/compositing path: optimize even in dev so the texture pipeline
+# isn't bottlenecked by an unoptimized build during development.
+[profile.dev.package.bevy_cef]
+opt-level = 3
+
+[profile.dev.package.bevy_cef_core]
+opt-level = 3
+
 [profile.release.package.vmux_history]
 opt-level = "z"
 codegen-units = 1

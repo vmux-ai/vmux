@@ -46,6 +46,13 @@ pub use keyboard::*;
 const CEF_OSR_BACKGROUND_COLOR_ARGB: u32 = 0xFFFFFFFF;
 pub const DEFAULT_WINDOWLESS_FRAME_RATE: i32 = 120;
 
+/// Frame rate for a visible-but-unfocused host window (another app is focused).
+/// CEF keeps painting animations, but at a fraction of the focused rate to cut idle CPU.
+pub const BACKGROUND_WINDOWLESS_FRAME_RATE: i32 = 30;
+
+/// Frame rate for a hidden host window. CEF still needs a nonzero rate to keep timers alive.
+pub const HIDDEN_WINDOWLESS_FRAME_RATE: i32 = 1;
+
 static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
 
 /// Disk profile root for [`RequestContextSettings::cache_path`], aligned with `CefPlugin::root_cache_path` in the `bevy_cef` crate.
@@ -962,6 +969,19 @@ pub fn windowless_frame_interval_from_frame_rate(frame_rate: i32) -> Duration {
     )
 }
 
+/// Scale a webview's windowless frame rate by host-window focus/visibility so unfocused or
+/// hidden windows stop driving the CEF paint → texture-upload → Bevy render loop at full rate.
+pub fn effective_windowless_frame_rate(monitor_rate: i32, visible: bool, focused: bool) -> i32 {
+    let monitor_rate = normalize_windowless_frame_rate(monitor_rate);
+    if !visible {
+        HIDDEN_WINDOWLESS_FRAME_RATE
+    } else if !focused {
+        BACKGROUND_WINDOWLESS_FRAME_RATE.min(monitor_rate)
+    } else {
+        monitor_rate
+    }
+}
+
 fn normalize_windowless_frame_rate(frame_rate: i32) -> i32 {
     frame_rate.max(1)
 }
@@ -969,12 +989,42 @@ fn normalize_windowless_frame_rate(frame_rate: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_WINDOWLESS_FRAME_RATE, windowless_frame_interval_from_refresh_millihertz,
+        BACKGROUND_WINDOWLESS_FRAME_RATE, DEFAULT_WINDOWLESS_FRAME_RATE,
+        HIDDEN_WINDOWLESS_FRAME_RATE, effective_windowless_frame_rate,
+        windowless_frame_interval_from_refresh_millihertz,
         windowless_frame_rate_from_refresh_millihertz,
     };
     use crate::prelude::modifiers_from_mouse_buttons;
     use bevy::prelude::*;
     use std::time::Duration;
+
+    #[test]
+    fn focused_window_keeps_monitor_frame_rate() {
+        assert_eq!(effective_windowless_frame_rate(120, true, true), 120);
+        assert_eq!(effective_windowless_frame_rate(60, true, true), 60);
+    }
+
+    #[test]
+    fn visible_unfocused_window_is_throttled_but_never_above_monitor() {
+        assert_eq!(
+            effective_windowless_frame_rate(120, true, false),
+            BACKGROUND_WINDOWLESS_FRAME_RATE
+        );
+        // A slow monitor caps the background rate too.
+        assert_eq!(effective_windowless_frame_rate(24, true, false), 24);
+    }
+
+    #[test]
+    fn hidden_window_drops_to_minimum_frame_rate() {
+        assert_eq!(
+            effective_windowless_frame_rate(120, false, true),
+            HIDDEN_WINDOWLESS_FRAME_RATE
+        );
+        assert_eq!(
+            effective_windowless_frame_rate(120, false, false),
+            HIDDEN_WINDOWLESS_FRAME_RATE
+        );
+    }
 
     #[test]
     #[allow(clippy::unnecessary_cast)]

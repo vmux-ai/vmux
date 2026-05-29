@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 mod history_swipe;
 mod mesh;
 mod pinch_zoom;
+mod texture_upload;
 mod webview_sprite;
 
 #[derive(Resource, Clone)]
@@ -59,6 +60,7 @@ fn duration_nanos(duration: Duration) -> u64 {
 pub mod prelude {
     pub use crate::webview::{
         CefSystems, RequestCloseDevtool, RequestShowDevTool, WebviewPlugin, mesh::*,
+        texture_upload::WebviewTextureUploads,
     };
 }
 
@@ -174,6 +176,7 @@ fn sync_windowless_frame_rate(
     browsers: NonSend<Browsers>,
     texture_wake_policy: Res<TextureWakeMinInterval>,
     webviews: Query<(Entity, Option<&HostWindow>), With<WebviewSource>>,
+    windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
 ) {
     WINIT_WINDOWS.with(|winit_windows| {
@@ -187,8 +190,15 @@ fn sync_windowless_frame_rate(
                 .and_then(|e| winit_windows.get_window(e))
                 .and_then(|window| window.current_monitor())
                 .and_then(|monitor| monitor.refresh_rate_millihertz());
-            let windowless_frame_rate =
-                windowless_frame_rate_from_refresh_millihertz(refresh_rate_millihertz);
+            let (visible, focused) = window_entity
+                .and_then(|e| windows.get(e).ok())
+                .map(|w| (w.visible, w.focused))
+                .unwrap_or((true, true));
+            let windowless_frame_rate = effective_windowless_frame_rate(
+                windowless_frame_rate_from_refresh_millihertz(refresh_rate_millihertz),
+                visible,
+                focused,
+            );
             let frame_interval = windowless_frame_interval_from_frame_rate(windowless_frame_rate);
             min_interval = Some(
                 min_interval

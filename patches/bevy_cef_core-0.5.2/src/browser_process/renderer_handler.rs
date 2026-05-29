@@ -29,6 +29,48 @@ pub struct RenderTextureMessage {
     /// Wrapped in `Arc` so the message survives Bevy's per-reader clone (3 consumers — mesh,
     /// extend-material, sprite) without copying the full BGRA buffer each time.
     pub buffer: Arc<Vec<u8>>,
+    /// Sub-regions of `buffer` that changed this paint, in pixels with an upper-left origin.
+    /// Empty means treat the whole frame as dirty (full upload).
+    pub dirty: Vec<WebviewDirtyRect>,
+}
+
+/// A changed sub-region of a webview paint, in pixels with an upper-left origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebviewDirtyRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+fn webview_dirty_rects(
+    rects: Option<&[cef::Rect]>,
+    width: u32,
+    height: u32,
+) -> Vec<WebviewDirtyRect> {
+    let Some(rects) = rects else {
+        return Vec::new();
+    };
+    let surface_w = width as i32;
+    let surface_h = height as i32;
+    rects
+        .iter()
+        .filter_map(|r| {
+            let left = r.x.max(0);
+            let top = r.y.max(0);
+            let right = r.x.saturating_add(r.width).min(surface_w);
+            let bottom = r.y.saturating_add(r.height).min(surface_h);
+            if right <= left || bottom <= top {
+                return None;
+            }
+            Some(WebviewDirtyRect {
+                x: left as u32,
+                y: top as u32,
+                width: (right - left) as u32,
+                height: (bottom - top) as u32,
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -140,7 +182,7 @@ impl ImplRenderHandler for RenderHandlerBuilder {
         &self,
         _browser: Option<&mut Browser>,
         type_: PaintElementType,
-        _dirty_rects: Option<&[cef::Rect]>,
+        dirty_rects: Option<&[cef::Rect]>,
         buffer: *const u8,
         width: c_int,
         height: c_int,
@@ -157,6 +199,7 @@ impl ImplRenderHandler for RenderHandlerBuilder {
             buffer: Arc::new(unsafe {
                 std::slice::from_raw_parts(buffer, (width * height * 4) as usize).to_vec()
             }),
+            dirty: webview_dirty_rects(dirty_rects, width as u32, height as u32),
         };
         send_render_texture(&self.texture_sender, self.texture_wake.as_ref(), texture);
     }
@@ -201,10 +244,52 @@ mod tests {
                 width: 1,
                 height: 1,
                 buffer: Arc::new(vec![0, 0, 0, 0]),
+                dirty: Vec::new(),
             },
         );
 
         assert!(rx.try_recv().is_ok());
         assert_eq!(wakes.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn dirty_rects_are_clamped_to_surface_bounds() {
+        let rects = [
+            cef::Rect {
+                x: -5,
+                y: 0,
+                width: 100,
+                height: 100,
+            },
+            cef::Rect {
+                x: 90,
+                y: 90,
+                width: 100,
+                height: 100,
+            },
+        ];
+        let dirty = webview_dirty_rects(Some(&rects), 100, 100);
+        assert_eq!(
+            dirty,
+            vec![
+                WebviewDirtyRect {
+                    x: 0,
+                    y: 0,
+                    width: 95,
+                    height: 100,
+                },
+                WebviewDirtyRect {
+                    x: 90,
+                    y: 90,
+                    width: 10,
+                    height: 10,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn missing_dirty_rects_mean_full_frame() {
+        assert!(webview_dirty_rects(None, 100, 100).is_empty());
     }
 }

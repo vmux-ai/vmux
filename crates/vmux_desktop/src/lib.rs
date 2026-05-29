@@ -95,6 +95,30 @@ impl Plugin for VmuxPlugin {
                 background_lifecycle::BackgroundLifecyclePlugin,
                 tray::TrayPlugin,
             ));
+
+        #[cfg(feature = "dev")]
+        app.add_systems(Last, log_update_rate);
+    }
+}
+
+/// Dev-only: report how often `app.update()` runs — the Bevy tick rate that drives CEF pumping,
+/// texture uploads, and rendering. Summarized once per second so the log stays readable (a static
+/// page idles near 1/s; an animating page climbs toward the display refresh rate).
+#[cfg(feature = "dev")]
+fn log_update_rate(mut ticks: Local<u32>, mut window_start: Local<Option<std::time::Instant>>) {
+    *ticks += 1;
+    let now = std::time::Instant::now();
+    let start = *window_start.get_or_insert(now);
+    let elapsed = now.duration_since(start);
+    if elapsed >= std::time::Duration::from_secs(1) {
+        info!(
+            "app.update(): {} ticks in {:.2}s (~{:.0}/s)",
+            *ticks,
+            elapsed.as_secs_f64(),
+            *ticks as f64 / elapsed.as_secs_f64()
+        );
+        *ticks = 0;
+        *window_start = Some(now);
     }
 }
 
