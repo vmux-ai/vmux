@@ -31,8 +31,8 @@ pub struct SpacePlugin;
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ActiveSpace>()
-            .add_message::<SaveSpaceRequest>();
-        app.add_systems(Startup, ensure_space_registry)
+            .add_message::<SaveSpaceRequest>()
+            .add_systems(Startup, ensure_space_registry)
             .add_message::<vmux_core::page::SpacesPageSpawnRequest>()
             .add_systems(
                 Update,
@@ -41,9 +41,8 @@ impl Plugin for SpacePlugin {
             .add_systems(
                 Update,
                 handle_spaces_page_open.in_set(PageOpenSet::HandleKnownPages),
-            );
-
-        app.add_plugins(BinEventEmitterPlugin::<(SpaceCommandEvent,)>::default())
+            )
+            .add_plugins(BinEventEmitterPlugin::<(SpaceCommandEvent,)>::default())
             .add_observer(on_space_command)
             .add_observer(reset_spaces_sent_marker_on_page_ready)
             .add_systems(

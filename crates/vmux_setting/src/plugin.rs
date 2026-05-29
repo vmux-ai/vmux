@@ -37,18 +37,15 @@ impl Plugin for SettingsPlugin {
                 Update,
                 (persist_settings_to_disk, reload_settings_on_change).chain(),
             )
-            .add_systems(Update, update_effective_startup_url);
-
-        app.add_systems(
-            Update,
-            crate::snapshot_updater::update_settings_snapshot
-                .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
-        );
-
-        app.add_message::<vmux_core::page::SettingsPageSpawnRequest>()
-            .add_systems(Update, respond_settings_spawn.in_set(ReadAppCommands));
-
-        app.add_plugins(BinEventEmitterPlugin::<(SettingsCommandEvent,)>::default())
+            .add_systems(Update, update_effective_startup_url)
+            .add_systems(
+                Update,
+                crate::snapshot_updater::update_settings_snapshot
+                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+            )
+            .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
+            .add_systems(Update, respond_settings_spawn.in_set(ReadAppCommands))
+            .add_plugins(BinEventEmitterPlugin::<(SettingsCommandEvent,)>::default())
             .add_observer(on_settings_command)
             .add_observer(reset_sent_markers_on_page_ready)
             .add_systems(

@@ -233,9 +233,8 @@ impl Plugin for TerminalPlugin {
             ensure_service_started();
             app.insert_resource(ServiceConnectRetry::new());
         }
-        app.insert_resource(ServiceWakeCallback(service_wake));
-
-        app.init_resource::<MouseSelectionState>()
+        app.insert_resource(ServiceWakeCallback(service_wake))
+            .init_resource::<MouseSelectionState>()
             .init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
             .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
@@ -267,15 +266,13 @@ impl Plugin for TerminalPlugin {
             .add_observer(on_term_resize)
             .add_observer(on_term_mouse)
             .add_observer(on_restart_pty)
-            .add_observer(on_terminal_removed);
-
-        app.add_plugins(crate::processes_monitor::ProcessesMonitorPlugin);
-
-        app.add_systems(
-            Update,
-            crate::snapshot_updater::update_terminals_snapshot
-                .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
-        );
+            .add_observer(on_terminal_removed)
+            .add_plugins(crate::processes_monitor::ProcessesMonitorPlugin)
+            .add_systems(
+                Update,
+                crate::snapshot_updater::update_terminals_snapshot
+                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+            );
     }
 }
 

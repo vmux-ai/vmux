@@ -25,29 +25,26 @@ impl Plugin for HistoryPlugin {
         app.add_systems(Update, (spawn_visits, broadcast_history_changed).chain())
             .add_systems(Update, handle_history_page_open.in_set(PageOpenSet::HandleKnownPages))
             .add_systems(
-            Update,
-            prune_history.run_if(on_timer(Duration::from_secs(3600))),
-        )
-            .add_systems(Startup, prune_history);
-
-        app.add_plugins(
-            BinEventEmitterPlugin::<(
-                HistoryQueryRequest,
-                HistoryDeleteRequest,
-                HistoryClearAllRequest,
-                HistoryOpenRequest,
-                HistorySuggestionsRequest,
-                HistoryChangedEvent,
-            )>::default(),
-        );
-
-        app.add_observer(on_history_query_request)
+                Update,
+                prune_history.run_if(on_timer(Duration::from_secs(3600))),
+            )
+            .add_systems(Startup, prune_history)
+            .add_plugins(
+                BinEventEmitterPlugin::<(
+                    HistoryQueryRequest,
+                    HistoryDeleteRequest,
+                    HistoryClearAllRequest,
+                    HistoryOpenRequest,
+                    HistorySuggestionsRequest,
+                    HistoryChangedEvent,
+                )>::default(),
+            )
+            .add_observer(on_history_query_request)
             .add_observer(on_history_delete_request)
             .add_observer(on_history_clear_all_request)
             .add_observer(on_history_open_request)
-            .add_observer(on_history_suggestions_request);
-
-        app.add_message::<HistoryOpenIntent>()
+            .add_observer(on_history_suggestions_request)
+            .add_message::<HistoryOpenIntent>()
             .add_message::<CefPageAttachRequest>();
     }
 }
