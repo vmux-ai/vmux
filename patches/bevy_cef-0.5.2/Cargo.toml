@@ -127,6 +127,7 @@ features = ["mesh_picking"]
 
 [dependencies.cef]
 version = "148.2.0"
+features = ["accelerated_osr"]
 
 [dependencies.rkyv]
 workspace = true

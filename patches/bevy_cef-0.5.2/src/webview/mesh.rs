@@ -32,6 +32,7 @@ impl Plugin for MeshWebviewPlugin {
             WebviewExtendStandardMaterialPlugin,
             WebviewSpritePlugin,
             crate::webview::texture_upload::WebviewTextureUploadPlugin,
+            crate::webview::accelerated_upload::WebviewAcceleratedUploadPlugin,
         ))
         .add_systems(
             Update,

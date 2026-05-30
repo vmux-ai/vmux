@@ -73,6 +73,8 @@ pub struct Browsers {
     browsers: HashMap<Entity, WebviewBrowser>,
     sender: TextureSender,
     receiver: TextureReceiver,
+    accel_sender: AcceleratedSender,
+    accel_receiver: AcceleratedReceiver,
     /// Lazily created when [`Self::create_browser`] is called with a non-empty disk profile root.
     /// Shared by all webviews so multiple panes use one cookie store and avoid conflicting contexts on the same path.
     shared_disk_context: Option<RequestContext>,
@@ -81,10 +83,13 @@ pub struct Browsers {
 impl Default for Browsers {
     fn default() -> Self {
         let (sender, receiver) = async_channel::unbounded::<RenderTextureMessage>();
+        let (accel_sender, accel_receiver) = async_channel::unbounded::<AcceleratedFrame>();
         Browsers {
             browsers: HashMap::default(),
             sender,
             receiver,
+            accel_sender,
+            accel_receiver,
             shared_disk_context: None,
         }
     }
@@ -215,7 +220,8 @@ impl Browsers {
                     }
                     _ => cef_dll_sys::HWND(std::ptr::null_mut()),
                 },
-                // shared_texture_enabled: true as _,
+                #[cfg(target_os = "macos")]
+                shared_texture_enabled: true as _,
                 ..Default::default()
             }),
             Some(&mut client),
@@ -545,6 +551,11 @@ impl Browsers {
         self.receiver.try_recv()
     }
 
+    #[inline]
+    pub fn try_receive_accelerated(&self) -> core::result::Result<AcceleratedFrame, TryRecvError> {
+        self.accel_receiver.try_recv()
+    }
+
     /// Shows the DevTools for the specified webview.
     pub fn show_devtool(&self, webview: &Entity) {
         let Some(browser) = self.browsers.get(webview) else {
@@ -841,6 +852,7 @@ impl Browsers {
         ClientHandlerBuilder::new(RenderHandlerBuilder::build(
             webview,
             self.sender.clone(),
+            self.accel_sender.clone(),
             texture_wake,
             size.clone(),
             device_scale.clone(),

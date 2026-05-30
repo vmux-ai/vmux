@@ -6,6 +6,8 @@ mod command_line_config;
 mod context_menu_handler;
 mod display_handler;
 mod extensions;
+#[cfg(target_os = "macos")]
+mod keepalive;
 mod life_span_handler;
 mod load_handler;
 mod localhost;
@@ -22,6 +24,8 @@ pub use command_line_config::*;
 pub use context_menu_handler::*;
 pub use display_handler::*;
 pub use extensions::*;
+#[cfg(target_os = "macos")]
+pub use keepalive::*;
 pub use life_span_handler::*;
 pub use load_handler::*;
 pub use localhost::*;

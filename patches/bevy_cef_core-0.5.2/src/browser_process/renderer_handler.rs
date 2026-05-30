@@ -1,8 +1,12 @@
+#[cfg(target_os = "macos")]
+use super::keepalive::{IoSurfaceKeepAlive, RealIoSurfaceOps};
 use async_channel::{Receiver, Sender};
 use bevy::prelude::*;
+use cef::osr_texture_import::SharedTextureHandle;
 use cef::rc::{Rc, RcImpl};
 use cef::*;
 use cef_dll_sys::cef_paint_element_type_t;
+use std::any::Any;
 use std::cell::Cell;
 use std::os::raw::c_int;
 use std::sync::Arc;
@@ -81,6 +85,23 @@ pub enum RenderPaintElementType {
     Popup,
 }
 
+pub struct SendSharedTextureHandle(pub SharedTextureHandle);
+unsafe impl Send for SendSharedTextureHandle {}
+unsafe impl Sync for SendSharedTextureHandle {}
+
+pub struct AcceleratedFrame {
+    pub webview: Entity,
+    pub ty: RenderPaintElementType,
+    pub width: u32,
+    pub height: u32,
+    pub handle: SendSharedTextureHandle,
+    pub keepalive: Arc<dyn Any + Send + Sync>,
+    pub dirty: Vec<WebviewDirtyRect>,
+}
+
+pub type AcceleratedSender = Sender<AcceleratedFrame>;
+pub type AcceleratedReceiver = Receiver<AcceleratedFrame>;
+
 pub type SharedViewSize = std::rc::Rc<Cell<Vec2>>;
 
 /// Window / backing-store scale passed to CEF as [`ScreenInfo::device_scale_factor`].
@@ -93,6 +114,7 @@ pub struct RenderHandlerBuilder {
     object: *mut RcImpl<sys::cef_render_handler_t, Self>,
     webview: Entity,
     texture_sender: TextureSender,
+    accel_sender: AcceleratedSender,
     texture_wake: Option<TextureWake>,
     size: SharedViewSize,
     device_scale: SharedDeviceScaleFactor,
@@ -102,6 +124,7 @@ impl RenderHandlerBuilder {
     pub fn build(
         webview: Entity,
         texture_sender: TextureSender,
+        accel_sender: AcceleratedSender,
         texture_wake: Option<TextureWake>,
         size: SharedViewSize,
         device_scale: SharedDeviceScaleFactor,
@@ -110,6 +133,7 @@ impl RenderHandlerBuilder {
             object: std::ptr::null_mut(),
             webview,
             texture_sender,
+            accel_sender,
             texture_wake,
             size,
             device_scale,
@@ -143,6 +167,7 @@ impl Clone for RenderHandlerBuilder {
             object,
             webview: self.webview,
             texture_sender: self.texture_sender.clone(),
+            accel_sender: self.accel_sender.clone(),
             texture_wake: self.texture_wake.clone(),
             size: self.size.clone(),
             device_scale: self.device_scale.clone(),
@@ -202,6 +227,49 @@ impl ImplRenderHandler for RenderHandlerBuilder {
             dirty: webview_dirty_rects(dirty_rects, width as u32, height as u32),
         };
         send_render_texture(&self.texture_sender, self.texture_wake.as_ref(), texture);
+    }
+
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn on_accelerated_paint(
+        &self,
+        _browser: Option<&mut Browser>,
+        type_: PaintElementType,
+        dirty_rects: Option<&[cef::Rect]>,
+        info: Option<&AcceleratedPaintInfo>,
+    ) {
+        #[cfg(target_os = "macos")]
+        {
+            let Some(info) = info else {
+                return;
+            };
+            let ty = match type_.as_ref() {
+                cef_paint_element_type_t::PET_POPUP => RenderPaintElementType::Popup,
+                _ => RenderPaintElementType::View,
+            };
+            let width = info.extra.coded_size.width as u32;
+            let height = info.extra.coded_size.height as u32;
+            let keepalive: Arc<dyn Any + Send + Sync> =
+                Arc::new(IoSurfaceKeepAlive::<RealIoSurfaceOps>::retain(
+                    info.shared_texture_io_surface,
+                ));
+            let frame = AcceleratedFrame {
+                webview: self.webview,
+                ty,
+                width,
+                height,
+                handle: SendSharedTextureHandle(SharedTextureHandle::new(info)),
+                keepalive,
+                dirty: webview_dirty_rects(dirty_rects, width, height),
+            };
+            let _ = self.accel_sender.send_blocking(frame);
+            if let Some(wake) = self.texture_wake.as_ref() {
+                wake();
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (type_, dirty_rects, info);
+        }
     }
 
     #[inline]

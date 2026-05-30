@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
+mod accelerated_upload;
 mod history_swipe;
 mod mesh;
 mod pinch_zoom;
