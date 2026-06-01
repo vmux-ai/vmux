@@ -89,6 +89,10 @@ impl Plugin for BrowserPlugin {
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
             .add_systems(
+                Update,
+                mark_content_windowed.before(CefSystems::CreateAndResize),
+            )
+            .add_systems(
                 PreUpdate,
                 (
                     sync_layout_cef_pointer_target,
@@ -144,6 +148,8 @@ impl Plugin for BrowserPlugin {
                 (
                     sync_keyboard_target,
                     sync_children_to_ui,
+                    sync_windowed_frames,
+                    sync_windowed_chrome,
                     sync_cef_webview_resize_after_ui,
                     sync_webview_pane_corner_clip,
                     sync_osr_webview_focus,
@@ -549,6 +555,99 @@ fn sync_children_to_ui(
         if webview_size.0 != dip {
             webview_size.0 = dip;
         }
+    }
+}
+
+/// Mark all content webviews windowed before browser creation. Covers restored panes that bypass
+/// `Browser::new`. Excludes chrome (`LayoutCef`/`Header`/`SideSheet`/`Modal`), which stays OSR for now.
+fn mark_content_windowed(
+    mut commands: Commands,
+    q: Query<
+        Entity,
+        (
+            With<Browser>,
+            With<WebviewSource>,
+            Without<WebviewWindowed>,
+            Without<LayoutCef>,
+            Without<Header>,
+            Without<SideSheet>,
+            Without<Modal>,
+        ),
+    >,
+) {
+    for entity in &q {
+        commands.entity(entity).insert(WebviewWindowed);
+    }
+}
+
+/// Position windowed (native) content webviews to match their pane rect. Reads the mesh scale set
+/// by `sync_children_to_ui` (visible active pane has a real scale; inactive panes ~1e-6) to pick
+/// which native view to show. No-op for OSR webviews / non-macOS (`set_windowed_*` are no-ops).
+fn sync_windowed_frames(
+    browsers: NonSend<Browsers>,
+    browser_q: Query<
+        (
+            Entity,
+            &Transform,
+            &ComputedNode,
+            &UiGlobalTransform,
+            &ChildOf,
+        ),
+        (With<Browser>, With<WebviewWindowed>, Without<LayoutCef>),
+    >,
+    child_of_q: Query<&ChildOf>,
+    pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
+) {
+    for (entity, tf, self_computed, self_ui_gt, child_of) in &browser_q {
+        if tf.scale.x <= 1.0e-3 {
+            browsers.set_windowed_hidden(&entity, true);
+            continue;
+        }
+        let parent = child_of.get();
+        let pane_entity = child_of_q.get(parent).map(|co| co.get()).unwrap_or(parent);
+        let (computed, ui_gt) = pane_rect
+            .get(pane_entity)
+            .unwrap_or((self_computed, self_ui_gt));
+        let size_px = computed.size;
+        let center = ui_gt.transform_point2(Vec2::ZERO);
+        let left = center.x - size_px.x * 0.5;
+        let top = center.y - size_px.y * 0.5;
+        let scale = 1.0 / computed.inverse_scale_factor.max(1.0e-6);
+        browsers.set_windowed_hidden(&entity, false);
+        browsers.set_windowed_frame(&entity, left, top, size_px.x, size_px.y, scale);
+    }
+}
+
+/// Position windowed (native) chrome (`LayoutCef`: header/sidebar/side sheets) as a full-window view
+/// kept in front of the content native views, so its transparent regions composite over the page
+/// below. Hit-test pass-through (so the page still receives input) is handled separately.
+/// Position the native layout as a full-window view behind the native page(s). The layout is created
+/// before any page, so it stays the backmost sibling — no reorder needed. Its opaque header/sidebar
+/// show wherever the (inset) page doesn't cover; the page covers the content region on top.
+fn sync_windowed_chrome(
+    browsers: NonSend<Browsers>,
+    chrome_q: Query<(Entity, Option<&HostWindow>), (With<LayoutCef>, With<WebviewWindowed>)>,
+    windows: Query<&Window>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
+) {
+    for (entity, host_window) in &chrome_q {
+        let window_entity = host_window
+            .map(|h| h.0)
+            .or_else(|| primary_window.single().ok());
+        let Some(window_entity) = window_entity else {
+            continue;
+        };
+        let Ok(window) = windows.get(window_entity) else {
+            continue;
+        };
+        let scale = window.resolution.scale_factor();
+        let w = window.resolution.physical_width() as f32;
+        let h = window.resolution.physical_height() as f32;
+        if w <= 0.0 || h <= 0.0 {
+            continue;
+        }
+        browsers.set_windowed_hidden(&entity, false);
+        browsers.set_windowed_frame(&entity, 0.0, 0.0, w, h, scale);
     }
 }
 

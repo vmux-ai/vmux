@@ -2,7 +2,7 @@ use crate::cef_state::WebviewCefStateSender;
 use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
     BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, WebviewSize,
-    WebviewSource, WebviewTransparent,
+    WebviewSource, WebviewTransparent, WebviewWindowed,
 };
 use crate::cursor_icon::SystemCursorIconSender;
 use crate::loading_state::{WebviewCommittedNavigationSender, WebviewLoadingStateSender};
@@ -266,6 +266,7 @@ fn create_webview(
             &PreloadScripts,
             Option<&HostWindow>,
             Has<WebviewTransparent>,
+            Has<WebviewWindowed>,
         ),
         Added<ResolvedWebviewUri>,
     >,
@@ -274,7 +275,9 @@ fn create_webview(
 ) {
     WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
-        for (entity, uri, size, initialize_scripts, host_window, transparent) in webviews.iter() {
+        for (entity, uri, size, initialize_scripts, host_window, transparent, windowed) in
+            webviews.iter()
+        {
             let window_entity = host_window
                 .map(|h| h.0)
                 .or_else(|| primary_window.single().ok());
@@ -319,8 +322,18 @@ fn create_webview(
                 &initialize_scripts.0,
                 host_window,
                 disk_profile.0.as_deref(),
-                if transparent { Some(0x00000000) } else { None },
+                // Native (windowed) transparent view = the layout shell. Give it an opaque dark
+                // background matching the app glass (0xFF212124) so it shows dark, not white, before
+                // its first paint. OSR transparent views (Player mode, command bar) stay clear.
+                if windowed && transparent {
+                    Some(0xFF212124)
+                } else if transparent {
+                    Some(0x00000000)
+                } else {
+                    None
+                },
                 windowless_frame_rate,
+                windowed,
             );
         }
     });

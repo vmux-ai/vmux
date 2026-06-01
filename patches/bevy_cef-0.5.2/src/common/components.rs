@@ -12,6 +12,7 @@ impl Plugin for WebviewCoreComponentsPlugin {
             .register_type::<WebviewSource>()
             .register_type::<CefKeyboardTarget>()
             .register_type::<CefIgnorePinchZoom>()
+            .register_type::<WebviewWindowed>()
             .register_type::<HistorySwipeVisualOffset>()
             .register_type::<HostWindow>()
             .register_type::<ZoomLevel>()
@@ -53,6 +54,14 @@ pub struct CefSuppressKeyboardInput(pub bool);
 #[derive(Component, Debug, Clone, Copy, Default, Reflect)]
 #[reflect(Component, Default)]
 pub struct CefIgnorePinchZoom;
+
+/// Marker: create this webview as a **windowed** native CEF child view (Chromium renders,
+/// composites, scrolls, and handles input itself) instead of off-screen rendering into a Bevy
+/// mesh. macOS browse mode. Read at browser creation; toggling at runtime requires recreating the
+/// browser.
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewWindowed;
 
 #[derive(Component, Debug, Clone, Reflect)]
 #[reflect(Component, Debug)]

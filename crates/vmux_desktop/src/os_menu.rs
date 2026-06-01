@@ -15,6 +15,13 @@ pub(crate) struct PendingWindowClose {
     pub window: Option<Entity>,
 }
 
+/// When a menu key-equivalent last fired. ⌘W triggers the `stack_close` menu item *and* Chromium's
+/// built-in ⌘W (`performClose:` → `WindowCloseRequested`). The red traffic-light button is the only
+/// legitimate window close and never fires a menu event first, so we suppress a `CloseRequested`
+/// that lands right after a menu command.
+#[derive(Resource, Default)]
+pub(crate) struct LastMenuCommandAt(pub Option<std::time::Instant>);
+
 static PENDING_MENU_EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 #[allow(dead_code)]
@@ -25,12 +32,13 @@ pub struct OsMenuPlugin;
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PendingWindowClose>()
+            .init_resource::<LastMenuCommandAt>()
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
                 (
                     forward_menu_events.in_set(WriteAppCommands),
-                    close_with_confirmation,
+                    close_with_confirmation.after(forward_menu_events),
                     process_pending_window_close,
                 ),
             );
@@ -44,8 +52,18 @@ fn setup(world: &mut World) {
     #[cfg(target_os = "macos")]
     menu.init_for_nsapp();
 
-    MenuEvent::set_event_handler(Some(|event: MenuEvent| {
+    // Native CEF views hold keyboard focus, so app shortcuts arrive as menu key-equivalents.
+    // `forward_menu_events` only drains on a Bevy tick; with the loop idle that's ~1s late. Wake the
+    // loop from the menu handler so the command is processed this frame.
+    let proxy = world
+        .get_resource::<bevy::winit::EventLoopProxyWrapper>()
+        .map(|w| (**w).clone());
+
+    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         PENDING_MENU_EVENTS.lock().push(event.id.0.clone());
+        if let Some(proxy) = &proxy {
+            let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
+        }
     }));
 
     world.insert_non_send(OsMenuResource(menu));
@@ -60,6 +78,9 @@ fn forward_menu_events(world: &mut World) {
         std::mem::take(&mut *events)
     };
 
+    if !drained.is_empty() {
+        world.resource_mut::<LastMenuCommandAt>().0 = Some(std::time::Instant::now());
+    }
     for event_id in drained {
         if event_id == "app_quit" {
             handle_quit_request(world);
@@ -86,8 +107,17 @@ fn close_with_confirmation(
     settings: Res<AppSettings>,
     live_terminals: Query<(), (With<Terminal>, Without<PtyExited>)>,
     mut pending: ResMut<PendingWindowClose>,
+    last_menu_command: Res<LastMenuCommandAt>,
 ) {
+    // ⌘W fires the `stack_close` menu item but Chromium's built-in ⌘W also requests a window close.
+    // Suppress a close that lands within 300ms of a menu command — the red button never does.
+    let from_menu_key_equivalent = last_menu_command
+        .0
+        .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(300));
     for event in closed.read() {
+        if from_menu_key_equivalent {
+            continue;
+        }
         let should_confirm = terminal::should_confirm_close(&settings);
         if should_confirm && live_terminals.iter().count() > 0 {
             pending.window = Some(event.window);

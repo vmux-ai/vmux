@@ -98,6 +98,7 @@ impl Browser {
     ) -> impl Bundle {
         (
             Self,
+            WebviewWindowed,
             vmux_core::PageMetadata {
                 title: url.to_string(),
                 url: url.to_string(),
@@ -132,6 +133,7 @@ impl Browser {
     ) -> impl Bundle {
         (
             Self,
+            WebviewWindowed,
             vmux_core::PageMetadata {
                 title: title.to_string(),
                 url: url.to_string(),
@@ -165,7 +167,7 @@ pub fn layout_cef_bundle(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> impl Bundle {
     (
-        LayoutCef,
+        (LayoutCef, WebviewWindowed),
         Browser,
         HostWindow(host_window),
         WebviewTransparent,

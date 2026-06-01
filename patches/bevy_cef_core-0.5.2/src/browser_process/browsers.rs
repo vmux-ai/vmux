@@ -1,5 +1,6 @@
 use crate::browser_process::BrpHandler;
 use crate::browser_process::ClientHandlerBuilder;
+use crate::browser_process::client_handler::FocusCanceler;
 use crate::browser_process::client_handler::{
     BinEmitEventHandler, BinIpcEventRaw, IpcEventRaw, JsEmitEventHandler,
 };
@@ -12,9 +13,10 @@ use bevy_remote::BrpMessage;
 use cef::{
     Browser, BrowserHost, BrowserSettings, CefString, Client, CompositionUnderline,
     DictionaryValue, ImplBrowser, ImplBrowserHost, ImplDictionaryValue, ImplFrame, ImplListValue,
-    ImplProcessMessage, ImplRequestContext, MouseButtonType, ProcessId, Range, RequestContext,
-    RequestContextSettings, WindowInfo, binary_value_create, browser_host_create_browser_sync,
-    dictionary_value_create, process_message_create, register_scheme_handler_factory,
+    ImplProcessMessage, ImplRequestContext, MouseButtonType, ProcessId, Range, Rect,
+    RequestContext, RequestContextSettings, WindowInfo, binary_value_create,
+    browser_host_create_browser_sync, dictionary_value_create, process_message_create,
+    register_scheme_handler_factory,
 };
 use cef_dll_sys::{cef_event_flags_t, cef_mouse_button_type_t};
 #[allow(deprecated)]
@@ -67,6 +69,14 @@ pub struct WebviewBrowser {
     pub device_scale: SharedDeviceScaleFactor,
     windowless_frame_rate: Cell<i32>,
     hidden: Cell<bool>,
+    /// Last applied windowed (native) frame in points `(x, y, w, h)`. Used to skip redundant
+    /// `setFrame`/`was_resized` calls — re-resizing CEF to the same size every frame clears its
+    /// surface and leaves it blank until the next real paint.
+    last_frame: Cell<Option<(f64, f64, f64, f64)>>,
+    /// True for native (windowed) browsers. `set_focus(true)` makes a windowed browser's `NSView`
+    /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die. Keyboard is
+    /// routed via `CefKeyboardTarget` forwarding instead, so windowed browsers must not be focused.
+    windowed: bool,
 }
 
 pub struct Browsers {
@@ -118,6 +128,7 @@ impl Browsers {
         disk_profile_root: Option<&str>,
         background_color: Option<u32>,
         windowless_frame_rate: i32,
+        windowed: bool,
     ) {
         let windowless_frame_rate = normalize_windowless_frame_rate(windowless_frame_rate);
         webview_debug_log(format!(
@@ -204,26 +215,46 @@ impl Browsers {
             }
         };
 
+        #[cfg(target_os = "macos")]
+        let window_info = {
+            let parent = match _window_handle {
+                Some(RawWindowHandle::AppKit(handle)) => handle.ns_view.as_ptr(),
+                _ => std::ptr::null_mut(),
+            };
+            if windowed {
+                WindowInfo::default().set_as_child(
+                    parent,
+                    &Rect {
+                        x: 0,
+                        y: 0,
+                        width: webview_size.x.max(1.0) as i32,
+                        height: webview_size.y.max(1.0) as i32,
+                    },
+                )
+            } else {
+                WindowInfo {
+                    windowless_rendering_enabled: true as _,
+                    external_begin_frame_enabled: false as _,
+                    parent_view: parent,
+                    shared_texture_enabled: true as _,
+                    ..Default::default()
+                }
+            }
+        };
+        #[cfg(not(target_os = "macos"))]
+        let window_info = WindowInfo {
+            windowless_rendering_enabled: true as _,
+            external_begin_frame_enabled: false as _,
+            #[cfg(target_os = "windows")]
+            parent_window: match _window_handle {
+                Some(RawWindowHandle::Win32(handle)) => cef_dll_sys::HWND(handle.hwnd.get() as _),
+                _ => cef_dll_sys::HWND(std::ptr::null_mut()),
+            },
+            ..Default::default()
+        };
+
         let browser = browser_host_create_browser_sync(
-            Some(&WindowInfo {
-                windowless_rendering_enabled: true as _,
-                external_begin_frame_enabled: false as _,
-                #[cfg(target_os = "macos")]
-                parent_view: match _window_handle {
-                    Some(RawWindowHandle::AppKit(handle)) => handle.ns_view.as_ptr(),
-                    _ => std::ptr::null_mut(),
-                },
-                #[cfg(target_os = "windows")]
-                parent_window: match _window_handle {
-                    Some(RawWindowHandle::Win32(handle)) => {
-                        cef_dll_sys::HWND(handle.hwnd.get() as _)
-                    }
-                    _ => cef_dll_sys::HWND(std::ptr::null_mut()),
-                },
-                #[cfg(target_os = "macos")]
-                shared_texture_enabled: true as _,
-                ..Default::default()
-            }),
+            Some(&window_info),
             Some(&mut client),
             Some(&_uri.into()),
             Some(&BrowserSettings {
@@ -236,7 +267,9 @@ impl Browsers {
         )
         .expect("Failed to create browser");
         let host = browser.host().expect("Failed to get browser host");
-        host.was_hidden(0);
+        if !windowed {
+            host.was_hidden(0);
+        }
         let webview_browser = WebviewBrowser {
             host,
             client: browser,
@@ -244,6 +277,8 @@ impl Browsers {
             device_scale,
             windowless_frame_rate: Cell::new(windowless_frame_rate),
             hidden: Cell::new(false),
+            last_frame: Cell::new(None),
+            windowed,
         };
         self.browsers.insert(webview, webview_browser);
         webview_debug_log(format!(
@@ -325,16 +360,20 @@ impl Browsers {
         }
         if let Some(a) = active
             && let Some(browser) = self.browsers.get(&a)
+            && !browser.windowed
         {
             browser.host.set_focus(true as _);
         }
         for &h in auxiliary_osr_focus {
-            if let Some(browser) = self.browsers.get(&h) {
+            if let Some(browser) = self.browsers.get(&h)
+                && !browser.windowed
+            {
                 browser.host.set_focus(true as _);
             }
         }
         if let Some(a) = active
             && let Some(browser) = self.browsers.get(&a)
+            && !browser.windowed
         {
             browser.host.set_focus(true as _);
         }
@@ -383,7 +422,9 @@ impl Browsers {
                 PointerButton::Middle => cef_mouse_button_type_t::MBT_MIDDLE,
                 _ => cef_mouse_button_type_t::MBT_LEFT,
             };
-            browser.host.set_focus(true as _);
+            if !browser.windowed {
+                browser.host.set_focus(true as _);
+            }
             browser.host.send_mouse_click_event(
                 Some(&mouse_event),
                 MouseButtonType::from(mouse_button),
@@ -535,6 +576,75 @@ impl Browsers {
             browser.host.was_resized();
         }
     }
+
+    /// Position a windowed (non-OSR) browser's native child view. `left_px`/`top_px`/`w_px`/`h_px`
+    /// are physical pixels, top-left origin / Y-down (UI space); `scale` is the backing scale
+    /// factor. Converts to AppKit points (Y-up, relative to the parent view).
+    #[cfg(target_os = "macos")]
+    pub fn set_windowed_frame(
+        &self,
+        webview: &Entity,
+        left_px: f32,
+        top_px: f32,
+        w_px: f32,
+        h_px: f32,
+        scale: f32,
+    ) {
+        use objc2_app_kit::NSView;
+        use objc2_foundation::{NSPoint, NSRect, NSSize};
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let s = (scale as f64).max(1.0e-6);
+        let w = w_px as f64 / s;
+        let h = h_px as f64 / s;
+        let x = left_px as f64 / s;
+        let parent = unsafe { view.superview() };
+        // winit's content view is flipped (origin top-left, y-down) — match Bevy UI's top_px
+        // directly. Only fall back to the AppKit y-up flip if the parent is not flipped.
+        let flipped = parent.as_ref().is_some_and(|p| p.isFlipped());
+        let y = if flipped {
+            top_px as f64 / s
+        } else {
+            let parent_h = parent
+                .as_ref()
+                .map(|p| p.bounds().size.height)
+                .unwrap_or(0.0);
+            (parent_h - top_px as f64 / s - h).max(0.0)
+        };
+        let frame = (x, y, w, h);
+        if browser.last_frame.get() == Some(frame) {
+            return;
+        }
+        browser.last_frame.set(Some(frame));
+        view.setFrame(NSRect::new(NSPoint::new(x, y), NSSize::new(w, h)));
+        browser.host.was_resized();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn set_windowed_frame(&self, _: &Entity, _: f32, _: f32, _: f32, _: f32, _: f32) {}
+
+    #[cfg(target_os = "macos")]
+    pub fn set_windowed_hidden(&self, webview: &Entity, hidden: bool) {
+        use objc2_app_kit::NSView;
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        view.setHidden(hidden);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn set_windowed_hidden(&self, _: &Entity, _: bool) {}
 
     /// Closes the browser associated with the given webview entity.
     ///
@@ -697,7 +807,9 @@ impl Browsers {
 
     pub fn set_ime_composition_for(&self, webview: &Entity, text: &str, cursor_utf16: Option<u32>) {
         if let Some(browser) = self.browsers.get(webview) {
-            browser.host.set_focus(true as _);
+            if !browser.windowed {
+                browser.host.set_focus(true as _);
+            }
             Self::set_ime_composition_on(browser, text, cursor_utf16);
         }
     }
@@ -733,7 +845,9 @@ impl Browsers {
 
     pub fn ime_cancel_composition_for(&self, webview: &Entity) {
         if let Some(browser) = self.browsers.get(webview) {
-            browser.host.set_focus(true as _);
+            if !browser.windowed {
+                browser.host.set_focus(true as _);
+            }
             browser.host.ime_cancel_composition();
         }
     }
@@ -753,7 +867,9 @@ impl Browsers {
 
     pub fn ime_finish_composition_for(&self, webview: &Entity, keep_selection: bool) {
         if let Some(browser) = self.browsers.get(webview) {
-            browser.host.set_focus(true as _);
+            if !browser.windowed {
+                browser.host.set_focus(true as _);
+            }
             browser.host.ime_finish_composing_text(keep_selection as _);
         }
     }
@@ -770,7 +886,9 @@ impl Browsers {
 
     pub fn set_ime_commit_text_for(&self, webview: &Entity, text: &str) {
         if let Some(browser) = self.browsers.get(webview) {
-            browser.host.set_focus(true as _);
+            if !browser.windowed {
+                browser.host.set_focus(true as _);
+            }
             Self::set_ime_commit_text_on(browser, text);
         }
     }
@@ -853,10 +971,12 @@ impl Browsers {
             webview,
             self.sender.clone(),
             self.accel_sender.clone(),
-            texture_wake,
+            texture_wake.clone(),
             size.clone(),
             device_scale.clone(),
         ))
+        .with_wake(texture_wake)
+        .with_focus_handler(FocusCanceler::build())
         .with_display_handler(DisplayHandlerBuilder::build(
             webview,
             system_cursor_icon_sender,

@@ -1,12 +1,13 @@
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::window::{Monitor, Window};
-use bevy::winit::{UpdateMode, WinitSettings};
+use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
 use bevy_cef_core::prelude::{
     Browsers, MessageLoopWakePolicy, windowless_frame_interval_from_refresh_millihertz,
 };
 use std::time::Duration;
 
+use vmux_layout::scene::InteractionMode;
 use vmux_terminal as terminal;
 use vmux_terminal::{PtyExited, Terminal};
 
@@ -28,15 +29,20 @@ impl Plugin for BackgroundLifecyclePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<LifecycleEvent>()
             .add_systems(Update, handle_lifecycle_events)
-            .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events));
+            .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
+            .add_systems(Update, keep_awake_while_revealing);
     }
 }
 
-pub(crate) fn foreground_winit_settings() -> WinitSettings {
+/// `react_to_device_events` is the high-frequency scroll/mouse-move wake source: winit ticks Bevy on
+/// every raw HID report. In browse (User) mode native CEF views own scroll/input, so Bevy must NOT
+/// wake on those — only Player mode's free camera consumes `AccumulatedMouseMotion`. Window events
+/// (resize/focus, OSR chrome hover) and user events (CEF texture wake) stay on in both modes.
+pub(crate) fn foreground_winit_settings(react_to_device_events: bool) -> WinitSettings {
     WinitSettings {
         focused_mode: UpdateMode::Reactive {
             wait: FOCUSED_FRAME_INTERVAL,
-            react_to_device_events: true,
+            react_to_device_events,
             react_to_user_events: true,
             react_to_window_events: true,
         },
@@ -54,6 +60,7 @@ fn hidden_winit_settings() -> WinitSettings {
 fn sync_winit_power_mode(
     mut settings: ResMut<WinitSettings>,
     wake_policy: Option<Res<MessageLoopWakePolicy>>,
+    mode: Res<InteractionMode>,
     windows: Query<&Window>,
     monitors: Query<&Monitor>,
 ) {
@@ -63,7 +70,7 @@ fn sync_winit_power_mode(
     let next = if all_hidden {
         hidden_winit_settings()
     } else {
-        foreground_winit_settings()
+        foreground_winit_settings(*mode == InteractionMode::Player)
     };
     if settings.focused_mode != next.focused_mode || settings.unfocused_mode != next.unfocused_mode
     {
@@ -93,6 +100,23 @@ fn cef_wake_interval(
         BACKGROUND_CEF_WAKE_INTERVAL
     } else {
         foreground_interval
+    }
+}
+
+/// Keep the winit loop ticking while any webview is mid-reveal. Native pages don't wake Bevy (no OSR
+/// paints) and browse mode disables raw device events, so the 2-frame reveal counter
+/// ([`vmux_layout::PendingWebviewReveal`]) would otherwise stall at ~1 tick/s — newly split or opened
+/// panes take seconds to appear. Route the missing wake explicitly (see AGENTS.md). Self-terminating:
+/// once all reveals complete the query is empty and we stop waking.
+fn keep_awake_while_revealing(
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    pending: Query<(), With<vmux_layout::PendingWebviewReveal>>,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    if let Some(proxy) = proxy {
+        let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
     }
 }
 
@@ -220,7 +244,7 @@ mod tests {
 
     #[test]
     fn foreground_power_mode_is_reactive_when_focused() {
-        let settings = foreground_winit_settings();
+        let settings = foreground_winit_settings(false);
 
         let UpdateMode::Reactive {
             wait,
@@ -235,13 +259,24 @@ mod tests {
             );
         };
         assert_eq!(wait, Duration::from_secs(1));
-        assert!(react_to_device_events);
         assert!(react_to_user_events);
         assert!(react_to_window_events);
         assert_eq!(
             settings.unfocused_mode,
             UpdateMode::reactive_low_power(Duration::from_secs(1))
         );
+        // Browse mode: raw device-event wakes off (native CEF owns scroll); Player mode: on (free
+        // camera reads AccumulatedMouseMotion).
+        assert!(!react_to_device_events);
+        let player = foreground_winit_settings(true);
+        let UpdateMode::Reactive {
+            react_to_device_events: player_device,
+            ..
+        } = player.focused_mode
+        else {
+            panic!("focused mode must be Reactive");
+        };
+        assert!(player_device);
     }
 
     #[test]

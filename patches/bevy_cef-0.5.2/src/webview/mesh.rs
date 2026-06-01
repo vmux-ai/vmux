@@ -48,7 +48,14 @@ impl Plugin for MeshWebviewPlugin {
 
 fn setup_observers(
     mut commands: Commands,
-    webviews: Query<Entity, (Added<WebviewSource>, Or<(With<Mesh3d>, With<Mesh2d>)>)>,
+    webviews: Query<
+        Entity,
+        (
+            Added<WebviewSource>,
+            Or<(With<Mesh3d>, With<Mesh2d>)>,
+            Without<WebviewWindowed>,
+        ),
+    >,
 ) {
     for entity in webviews.iter() {
         commands
@@ -114,9 +121,20 @@ fn on_mouse_wheel(
     windows: Query<&Window>,
     webviews_all: Query<
         (Entity, Option<&Pickable>),
-        (With<WebviewSource>, Or<(With<Mesh3d>, With<Mesh2d>)>),
+        (
+            With<WebviewSource>,
+            Or<(With<Mesh3d>, With<Mesh2d>)>,
+            Without<WebviewWindowed>,
+        ),
     >,
-    webviews_targeted: Query<Entity, (With<WebviewSource>, With<CefPointerTarget>)>,
+    webviews_targeted: Query<
+        Entity,
+        (
+            With<WebviewSource>,
+            With<CefPointerTarget>,
+            Without<WebviewWindowed>,
+        ),
+    >,
     suppress: Res<CefSuppressPointerInput>,
     mut history_swipe: Local<HistorySwipeState>,
 ) {
