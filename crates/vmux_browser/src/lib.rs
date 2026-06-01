@@ -419,6 +419,23 @@ fn sync_keyboard_target(
     }
 }
 
+fn tab_ancestor(
+    start: Entity,
+    child_of_q: &Query<&ChildOf>,
+    tabs_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+) -> Option<Entity> {
+    let mut e = start;
+    loop {
+        if tabs_q.contains(e) {
+            return Some(e);
+        }
+        match child_of_q.get(e) {
+            Ok(co) => e = co.get(),
+            Err(_) => return None,
+        }
+    }
+}
+
 fn sync_children_to_ui(
     mut browser_q: Query<
         (
@@ -442,12 +459,15 @@ fn sync_children_to_ui(
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    tabs_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
     new_stack_ctx: Res<vmux_layout::NewStackContext>,
     glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<VmuxWindow>>,
 ) {
     let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
     let pad = glass_node.padding;
     let glass_size_px = glass_node.size + pad.min_inset + pad.max_inset;
+
+    let active_tab = tabs_q.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
 
     for (
         mut tf,
@@ -506,19 +526,20 @@ fn sync_children_to_ui(
         let is_inactive_stack =
             parent != glass_entity && !is_cef_ui && !is_active_stack && !is_previous_stack;
 
+        let is_inactive_tab = parent != glass_entity
+            && !is_cef_ui
+            && match tab_ancestor(parent, &child_of_q, &tabs_q) {
+                Some(tab) => Some(tab) != active_tab,
+                None => false,
+            };
+
         let sx = size_px.x / glass_size_px.x;
         let sy = size_px.y / glass_size_px.y;
-        let new_scale = if is_inactive_stack {
+        let new_scale = if is_inactive_stack || is_inactive_tab {
             Vec3::splat(1e-6)
         } else {
             Vec3::new(sx, sy, 1.0)
         };
-        if parent != glass_entity && !is_cef_ui && (tf.scale - new_scale).length() > 0.01 {
-            info!(
-                "[ui] browser child_of={:?} scale {:?} -> {:?} (inactive={})",
-                parent, tf.scale, new_scale, is_inactive_stack
-            );
-        }
         tf.scale = new_scale;
 
         let center_ui = ui_gt.transform_point2(Vec2::ZERO);
@@ -618,9 +639,6 @@ fn sync_windowed_frames(
     }
 }
 
-/// Position windowed (native) chrome (`LayoutCef`: header/sidebar/side sheets) as a full-window view
-/// kept in front of the content native views, so its transparent regions composite over the page
-/// below. Hit-test pass-through (so the page still receives input) is handled separately.
 /// Position the native layout as a full-window view behind the native page(s). The layout is created
 /// before any page, so it stays the backmost sibling — no reorder needed. Its opaque header/sidebar
 /// show wherever the (inset) page doesn't cover; the page covers the content region on top.

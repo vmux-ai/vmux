@@ -6,6 +6,8 @@
 )]
 
 mod background_lifecycle;
+#[cfg(target_os = "macos")]
+mod native_keyboard;
 mod os_menu;
 mod persistence;
 

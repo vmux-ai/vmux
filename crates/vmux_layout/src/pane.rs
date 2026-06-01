@@ -15,7 +15,7 @@ use bevy::{
     input::mouse::AccumulatedMouseMotion,
     prelude::*,
     ui::{FlexDirection, UiGlobalTransform},
-    window::{ClosingWindow, PrimaryWindow},
+    window::PrimaryWindow,
 };
 use bevy_cef::prelude::CefKeyboardTarget;
 use moonshine_save::prelude::*;
@@ -454,7 +454,6 @@ fn handle_pane_commands(
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<Stack>>,
-    primary_window: Single<Entity, With<PrimaryWindow>>,
     mut commands: Commands,
     mut startup: PaneStartupContext,
     mut resize_q: ParamSet<(
@@ -511,29 +510,25 @@ fn handle_pane_commands(
                 let parent = pane_co.get();
 
                 if !split_dir_q.contains(parent) {
-                    if leaf_panes.iter().count() <= 1 {
-                        commands.entity(*primary_window).insert(ClosingWindow);
+                    commands.entity(active).despawn();
+                    let leaf = commands
+                        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
+                        .id();
+                    let tab = commands
+                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
+                        .id();
+                    commands.entity(leaf).insert(LastActivatedAt::now());
+                    let url = startup.url();
+                    if url.is_empty() {
+                        startup.new_stack_ctx.stack = Some(tab);
+                        startup.new_stack_ctx.previous_stack = None;
+                        startup.new_stack_ctx.needs_open = true;
                     } else {
-                        commands.entity(active).despawn();
-                        let leaf = commands
-                            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
-                            .id();
-                        let tab = commands
-                            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
-                            .id();
-                        commands.entity(leaf).insert(LastActivatedAt::now());
-                        let url = startup.url();
-                        if url.is_empty() {
-                            startup.new_stack_ctx.stack = Some(tab);
-                            startup.new_stack_ctx.previous_stack = None;
-                            startup.new_stack_ctx.needs_open = true;
-                        } else {
-                            startup.requests.write(PageOpenRequest {
-                                target: PageOpenTarget::Stack(tab),
-                                url,
-                                request_id: None,
-                            });
-                        }
+                        startup.requests.write(PageOpenRequest {
+                            target: PageOpenTarget::Stack(tab),
+                            url,
+                            request_id: None,
+                        });
                     }
                     continue;
                 }
@@ -1865,7 +1860,7 @@ mod tests {
     }
 
     #[test]
-    fn closing_last_pane_marks_window_closing() {
+    fn closing_last_pane_keeps_window_with_fresh_stack() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
@@ -1893,7 +1888,24 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().entity(window).contains::<ClosingWindow>());
+        assert!(
+            !app.world().entity(window).contains::<ClosingWindow>(),
+            "closing the last pane must keep the window open"
+        );
+        let mut panes = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Pane>, Without<PaneSplit>)>();
+        assert_eq!(
+            panes.iter(app.world()).count(),
+            1,
+            "a fresh leaf pane should replace the closed one"
+        );
+        let mut stacks = app.world_mut().query_filtered::<Entity, With<Stack>>();
+        assert_eq!(
+            stacks.iter(app.world()).count(),
+            1,
+            "the fresh pane should contain one stack"
+        );
     }
 
     #[test]

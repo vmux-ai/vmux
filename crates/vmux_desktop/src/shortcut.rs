@@ -14,6 +14,16 @@ impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, init_shortcuts.after(load_settings))
             .add_systems(Update, process_key_input.in_set(WriteAppCommands));
+
+        #[cfg(target_os = "macos")]
+        app.add_systems(
+            Startup,
+            crate::native_keyboard::install_native_key_monitor.after(init_shortcuts),
+        )
+        .add_systems(
+            Update,
+            crate::native_keyboard::process_monitored_keys.in_set(WriteAppCommands),
+        );
     }
 }
 
@@ -56,6 +66,9 @@ fn init_shortcuts(mut commands: Commands, settings: Option<Res<AppSettings>>) {
             }
         }
     }
+
+    #[cfg(target_os = "macos")]
+    crate::native_keyboard::set_shortcut_map(map.clone());
 
     commands.insert_resource(map);
     commands.insert_resource(ChordState::default());
@@ -130,7 +143,7 @@ fn process_key_input(
     }
 }
 
-fn direct_command(bindings: &ShortcutMap, pressed: &KeyCombo) -> Option<AppCommand> {
+pub(crate) fn direct_command(bindings: &ShortcutMap, pressed: &KeyCombo) -> Option<AppCommand> {
     bindings
         .bindings
         .iter()
@@ -140,14 +153,14 @@ fn direct_command(bindings: &ShortcutMap, pressed: &KeyCombo) -> Option<AppComma
         })
 }
 
-fn has_chord_prefix(bindings: &ShortcutMap, pressed: &KeyCombo) -> bool {
+pub(crate) fn has_chord_prefix(bindings: &ShortcutMap, pressed: &KeyCombo) -> bool {
     bindings
         .bindings
         .iter()
         .any(|(binding, _)| matches!(binding, Shortcut::Chord(prefix, _) if prefix == pressed))
 }
 
-fn chord_command(
+pub(crate) fn chord_command(
     bindings: &ShortcutMap,
     prefix: &KeyCombo,
     pressed: &KeyCombo,
