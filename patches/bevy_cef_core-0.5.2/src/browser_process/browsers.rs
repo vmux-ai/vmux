@@ -646,6 +646,33 @@ impl Browsers {
     #[cfg(not(target_os = "macos"))]
     pub fn set_windowed_hidden(&self, _: &Entity, _: bool) {}
 
+    #[cfg(target_os = "macos")]
+    pub fn nudge_windowed_repaint(&self, webview: &Entity) -> bool {
+        use objc2_app_kit::NSView;
+        let Some(browser) = self.browsers.get(webview) else {
+            return false;
+        };
+        if !browser.windowed {
+            return false;
+        }
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return false;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let mut frame = view.frame();
+        frame.size.height += 1.0;
+        view.setFrame(frame);
+        browser.host.was_resized();
+        browser.last_frame.set(None);
+        true
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn nudge_windowed_repaint(&self, _: &Entity) -> bool {
+        false
+    }
+
     /// Closes the browser associated with the given webview entity.
     ///
     /// The browser will be removed from the hash map after closing.

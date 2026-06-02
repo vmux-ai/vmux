@@ -150,6 +150,7 @@ impl Plugin for BrowserPlugin {
                     sync_children_to_ui,
                     sync_windowed_frames,
                     sync_windowed_chrome,
+                    apply_repaint_nudge,
                     sync_cef_webview_resize_after_ui,
                     sync_webview_pane_corner_clip,
                     sync_osr_webview_focus,
@@ -666,6 +667,13 @@ fn sync_windowed_chrome(
         }
         browsers.set_windowed_hidden(&entity, false);
         browsers.set_windowed_frame(&entity, 0.0, 0.0, w, h, scale);
+    }
+}
+
+fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Added<PageReady>>) {
+    for entity in &ready {
+        let nudged = browsers.nudge_windowed_repaint(&entity);
+        info!("[repaint-nudge] e={entity:?} nudged={nudged}");
     }
 }
 
