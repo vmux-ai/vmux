@@ -1,8 +1,9 @@
 use crate::cef_state::WebviewCefStateSender;
 use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
-    BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, WebviewSize,
-    WebviewSource, WebviewTransparent, WebviewWindowed,
+    BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri,
+    WebviewOpaqueWindowedBackground, WebviewSize, WebviewSource, WebviewTransparent,
+    WebviewWindowed,
 };
 use crate::cursor_icon::SystemCursorIconSender;
 use crate::loading_state::{WebviewCommittedNavigationSender, WebviewLoadingStateSender};
@@ -267,17 +268,30 @@ fn create_webview(
             Option<&HostWindow>,
             Has<WebviewTransparent>,
             Has<WebviewWindowed>,
+            Has<WebviewOpaqueWindowedBackground>,
         ),
-        Added<ResolvedWebviewUri>,
+        With<ResolvedWebviewUri>,
     >,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
 ) {
     WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
-        for (entity, uri, size, initialize_scripts, host_window, transparent, windowed) in
+        for (
+            entity,
+            uri,
+            size,
+            initialize_scripts,
+            host_window,
+            transparent,
+            windowed,
+            opaque_windowed_background,
+        ) in
             webviews.iter()
         {
+            if browsers.has_browser(entity) {
+                continue;
+            }
             let window_entity = host_window
                 .map(|h| h.0)
                 .or_else(|| primary_window.single().ok());
@@ -322,10 +336,7 @@ fn create_webview(
                 &initialize_scripts.0,
                 host_window,
                 disk_profile.0.as_deref(),
-                // Native (windowed) transparent view = the layout shell. Give it an opaque dark
-                // background matching the app glass (0xFF212124) so it shows dark, not white, before
-                // its first paint. OSR transparent views (Player mode, command bar) stay clear.
-                if windowed && transparent {
+                if windowed && opaque_windowed_background {
                     Some(0xFF212124)
                 } else if transparent {
                     Some(0x00000000)
@@ -428,5 +439,18 @@ mod tests {
         assert!(implementation.contains("sync_windowless_frame_rate"));
         assert!(implementation.contains("browsers.set_windowless_frame_rate"));
         assert!(implementation.contains("texture_wake_policy.set_min_interval"));
+    }
+
+    #[test]
+    fn opaque_windowed_background_only_applies_to_windowed_webviews() {
+        let implementation = include_str!("webview.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+
+        assert!(implementation.contains("WebviewOpaqueWindowedBackground"));
+        assert!(implementation.contains("if windowed && opaque_windowed_background"));
+        assert!(!implementation.contains("if windowed && transparent"));
+        assert!(implementation.contains("Some(0x00000000)"));
     }
 }

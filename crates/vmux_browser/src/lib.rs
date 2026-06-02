@@ -23,7 +23,7 @@ use vmux_core::{
     page::{PageManifest, PageReady},
 };
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
-use vmux_layout::command_bar::handler::PendingCommandBarReveal;
+use vmux_layout::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
 use vmux_layout::event::SideSheetCommandEvent;
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
@@ -90,7 +90,10 @@ impl Plugin for BrowserPlugin {
             .add_observer(on_hard_reload_notify_header)
             .add_systems(
                 Update,
-                mark_content_windowed.before(CefSystems::CreateAndResize),
+                sync_cef_backend_for_interaction_mode
+                    .after(PageOpenSet::Fallback)
+                    .after(spawn_popup_stacks)
+                    .before(CefSystems::CreateAndResize),
             )
             .add_systems(
                 PreUpdate,
@@ -150,6 +153,7 @@ impl Plugin for BrowserPlugin {
                     sync_children_to_ui,
                     sync_windowed_frames,
                     sync_windowed_chrome,
+                    sync_windowed_command_bar,
                     apply_repaint_nudge,
                     sync_cef_webview_resize_after_ui,
                     sync_webview_pane_corner_clip,
@@ -580,25 +584,56 @@ fn sync_children_to_ui(
     }
 }
 
-/// Mark all content webviews windowed before browser creation. Covers restored panes that bypass
-/// `Browser::new`. Excludes chrome (`LayoutCef`/`Header`/`SideSheet`/`Modal`), which stays OSR for now.
-fn mark_content_windowed(
-    mut commands: Commands,
-    q: Query<
-        Entity,
-        (
-            With<Browser>,
-            With<WebviewSource>,
-            Without<WebviewWindowed>,
-            Without<LayoutCef>,
-            Without<Header>,
-            Without<SideSheet>,
-            Without<Modal>,
-        ),
-    >,
-) {
-    for entity in &q {
-        commands.entity(entity).insert(WebviewWindowed);
+fn webview_should_use_windowed(mode: vmux_layout::scene::InteractionMode) -> bool {
+    cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User
+}
+
+fn sync_cef_backend_for_interaction_mode(world: &mut World) {
+    let mode = world
+        .get_resource::<vmux_layout::scene::InteractionMode>()
+        .copied()
+        .unwrap_or_default();
+    let should_windowed = webview_should_use_windowed(mode);
+    let mut query = world.query_filtered::<Entity, (With<Browser>, With<WebviewSource>)>();
+    let entities: Vec<Entity> = query.iter(world).collect();
+    let mut recreate = Vec::new();
+    {
+        let browsers = world.non_send::<Browsers>();
+        for &entity in &entities {
+            if browsers
+                .is_windowed(&entity)
+                .is_some_and(|actual| actual != should_windowed)
+            {
+                recreate.push(entity);
+            }
+        }
+    }
+    if !recreate.is_empty() {
+        let mut browsers = world.non_send_mut::<Browsers>();
+        for entity in &recreate {
+            browsers.close(entity);
+        }
+    }
+    for entity in entities {
+        let marker_matches = world.get::<WebviewWindowed>(entity).is_some() == should_windowed;
+        let needs_recreate = recreate.contains(&entity);
+        if marker_matches && !needs_recreate {
+            continue;
+        }
+        let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
+            continue;
+        };
+        if should_windowed {
+            entity_mut.insert(WebviewWindowed);
+        } else {
+            entity_mut.remove::<WebviewWindowed>();
+        }
+        if needs_recreate {
+            entity_mut
+                .remove::<PageReady>()
+                .remove::<PendingWebviewReveal>()
+                .remove::<PendingCommandBarReveal>();
+        }
     }
 }
 
@@ -615,7 +650,12 @@ fn sync_windowed_frames(
             &UiGlobalTransform,
             &ChildOf,
         ),
-        (With<Browser>, With<WebviewWindowed>, Without<LayoutCef>),
+        (
+            With<Browser>,
+            With<WebviewWindowed>,
+            Without<LayoutCef>,
+            Without<Modal>,
+        ),
     >,
     child_of_q: Query<&ChildOf>,
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
@@ -637,6 +677,7 @@ fn sync_windowed_frames(
         let scale = 1.0 / computed.inverse_scale_factor.max(1.0e-6);
         browsers.set_windowed_hidden(&entity, false);
         browsers.set_windowed_frame(&entity, left, top, size_px.x, size_px.y, scale);
+        browsers.raise_windowed_to_front(&entity);
     }
 }
 
@@ -667,6 +708,168 @@ fn sync_windowed_chrome(
         }
         browsers.set_windowed_hidden(&entity, false);
         browsers.set_windowed_frame(&entity, 0.0, 0.0, w, h, scale);
+        browsers.lower_windowed_to_back(&entity);
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CommandBarWindowedFrame {
+    left_px: f32,
+    top_px: f32,
+    width_px: f32,
+    height_px: f32,
+}
+
+fn command_bar_windowed_frame(
+    window_width_px: f32,
+    window_height_px: f32,
+    scale: f32,
+    measured_size: Option<Vec2>,
+) -> Option<CommandBarWindowedFrame> {
+    if !window_width_px.is_finite()
+        || !window_height_px.is_finite()
+        || !scale.is_finite()
+        || window_width_px <= 0.0
+        || window_height_px <= 0.0
+        || scale <= 0.0
+    {
+        return None;
+    }
+
+    const MARGIN: f32 = 16.0;
+    const MAX_W: f32 = 576.0;
+    const MIN_W: f32 = 240.0;
+    const MIN_H: f32 = 56.0;
+    const FALLBACK_H: f32 = 360.0;
+
+    let win_w = window_width_px / scale;
+    let win_h = window_height_px / scale;
+    let top = win_h * 0.15;
+    let available_w = (win_w - MARGIN * 2.0).max(1.0);
+    let min_w = MIN_W.min(available_w);
+    let box_w = available_w.min(MAX_W).max(min_w);
+    let available_h = (win_h - top - MARGIN).max(1.0);
+    let min_h = MIN_H.min(available_h);
+    let measured_h = measured_size
+        .map(|size| size.y)
+        .filter(|height| height.is_finite() && *height > 0.0)
+        .unwrap_or(FALLBACK_H);
+    let box_h = measured_h.min(available_h).max(min_h);
+    let box_x = ((win_w - box_w) * 0.5).max(0.0);
+
+    Some(CommandBarWindowedFrame {
+        left_px: box_x * scale,
+        top_px: top * scale,
+        width_px: box_w * scale,
+        height_px: box_h * scale,
+    })
+}
+
+fn command_bar_hidden_windowed_frame() -> CommandBarWindowedFrame {
+    CommandBarWindowedFrame {
+        left_px: 0.0,
+        top_px: 0.0,
+        width_px: 1.0,
+        height_px: 1.0,
+    }
+}
+
+fn hide_windowed_command_bar(browsers: &Browsers, entity: Entity) {
+    let frame = command_bar_hidden_windowed_frame();
+    browsers.set_windowed_hidden(&entity, true);
+    browsers.resize(&entity, Vec2::new(frame.width_px, frame.height_px), 1.0);
+    browsers.set_windowed_frame(
+        &entity,
+        frame.left_px,
+        frame.top_px,
+        frame.width_px,
+        frame.height_px,
+        1.0,
+    );
+}
+
+fn command_bar_windowed_view_should_show(
+    display: Display,
+    visibility: Visibility,
+    has_keyboard_target: bool,
+) -> bool {
+    display != Display::None && visibility != Visibility::Hidden && has_keyboard_target
+}
+
+fn sync_windowed_command_bar(
+    browsers: NonSend<Browsers>,
+    modal_q: Query<
+        (
+            Entity,
+            &Node,
+            &Visibility,
+            Has<CefKeyboardTarget>,
+            Option<&HostWindow>,
+            Option<&CommandBarNativeSize>,
+        ),
+        (With<Modal>, With<WebviewWindowed>),
+    >,
+    windows: Query<&Window>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
+    mut was_open: Local<bool>,
+) {
+    let Ok((entity, node, visibility, has_keyboard_target, host_window, native_size)) =
+        modal_q.single()
+    else {
+        *was_open = false;
+        return;
+    };
+    let open =
+        command_bar_windowed_view_should_show(node.display, *visibility, has_keyboard_target);
+    if !open {
+        hide_windowed_command_bar(&browsers, entity);
+        *was_open = false;
+        return;
+    }
+    if !browsers.has_browser(entity) {
+        return;
+    }
+    let window_entity = host_window
+        .map(|h| h.0)
+        .or_else(|| primary_window.single().ok());
+    let Some(window_entity) = window_entity else {
+        hide_windowed_command_bar(&browsers, entity);
+        return;
+    };
+    let Ok(window) = windows.get(window_entity) else {
+        hide_windowed_command_bar(&browsers, entity);
+        return;
+    };
+    let scale = window.resolution.scale_factor();
+    let measured = native_size.map(|size| Vec2::new(size.width, size.height));
+    let Some(frame) = command_bar_windowed_frame(
+        window.resolution.physical_width() as f32,
+        window.resolution.physical_height() as f32,
+        scale,
+        measured,
+    ) else {
+        hide_windowed_command_bar(&browsers, entity);
+        return;
+    };
+
+    browsers.set_windowed_frame(
+        &entity,
+        frame.left_px,
+        frame.top_px,
+        frame.width_px,
+        frame.height_px,
+        scale,
+    );
+    browsers.resize(
+        &entity,
+        Vec2::new(frame.width_px / scale, frame.height_px / scale),
+        scale,
+    );
+    browsers.set_windowed_hidden(&entity, false);
+    if !*was_open {
+        browsers.raise_windowed_to_front(&entity);
+        browsers.nudge_windowed_repaint(&entity);
+        *was_open = true;
     }
 }
 
@@ -679,7 +882,7 @@ fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Added<P
 
 fn sync_cef_webview_resize_after_ui(
     browsers: NonSend<Browsers>,
-    webviews: Query<(Entity, &WebviewSize), With<Browser>>,
+    webviews: Query<(Entity, &WebviewSize), (With<Browser>, Without<Modal>)>,
     host_window: Query<&HostWindow>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -2372,6 +2575,202 @@ mod tests {
             choose_osr_active_webview(Some(modal), Some(pane), pane),
             modal
         );
+    }
+
+    #[test]
+    fn windowed_chrome_sync_sends_layout_behind_pages() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_chrome")
+            .nth(1)
+            .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("browsers.lower_windowed_to_back"));
+    }
+
+    #[test]
+    fn windowed_page_sync_sends_pages_above_layout() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_frames")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("browsers.raise_windowed_to_front"));
+    }
+
+    #[test]
+    fn browser_mode_uses_windowed_webviews_on_macos() {
+        assert_eq!(
+            webview_should_use_windowed(vmux_layout::scene::InteractionMode::User),
+            cfg!(target_os = "macos")
+        );
+    }
+
+    #[test]
+    fn player_mode_uses_osr_webviews() {
+        assert!(!webview_should_use_windowed(
+            vmux_layout::scene::InteractionMode::Player
+        ));
+    }
+
+    #[test]
+    fn browser_mode_marks_every_cef_surface_windowed_on_macos() {
+        let mut app = App::new();
+        app.world_mut().insert_non_send(Browsers::default());
+        app.insert_resource(vmux_layout::scene::InteractionMode::User);
+
+        let layout = app
+            .world_mut()
+            .spawn((Browser, LayoutCef, WebviewSource::new("vmux://layout/")))
+            .id();
+        let modal = app
+            .world_mut()
+            .spawn((Browser, Modal, WebviewSource::new("vmux://command-bar/")))
+            .id();
+        let page = app
+            .world_mut()
+            .spawn((Browser, WebviewSource::new("https://example.com/")))
+            .id();
+
+        sync_cef_backend_for_interaction_mode(app.world_mut());
+
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(layout).is_some(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(modal).is_some(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(page).is_some(),
+            cfg!(target_os = "macos")
+        );
+    }
+
+    #[test]
+    fn player_mode_marks_every_cef_surface_osr() {
+        let mut app = App::new();
+        app.world_mut().insert_non_send(Browsers::default());
+        app.insert_resource(vmux_layout::scene::InteractionMode::Player);
+
+        let layout = app
+            .world_mut()
+            .spawn((
+                Browser,
+                LayoutCef,
+                WebviewWindowed,
+                WebviewSource::new("vmux://layout/"),
+            ))
+            .id();
+        let modal = app
+            .world_mut()
+            .spawn((
+                Browser,
+                Modal,
+                WebviewWindowed,
+                WebviewSource::new("vmux://command-bar/"),
+            ))
+            .id();
+        let page = app
+            .world_mut()
+            .spawn((
+                Browser,
+                WebviewWindowed,
+                WebviewSource::new("https://example.com/"),
+            ))
+            .id();
+
+        sync_cef_backend_for_interaction_mode(app.world_mut());
+
+        assert!(app.world().get::<WebviewWindowed>(layout).is_none());
+        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
+        assert!(app.world().get::<WebviewWindowed>(page).is_none());
+    }
+
+    #[test]
+    fn backend_sync_runs_after_page_spawners_before_cef_create() {
+        let source = include_str!("lib.rs");
+        let plugin_build = source
+            .split("impl Plugin for BrowserPlugin")
+            .nth(1)
+            .and_then(|tail| tail.split("fn cef_root_cache_path").next())
+            .unwrap_or_default();
+
+        assert!(plugin_build.contains(".after(PageOpenSet::Fallback)"));
+        assert!(plugin_build.contains(".after(spawn_popup_stacks)"));
+        assert!(plugin_build.contains(".before(CefSystems::CreateAndResize)"));
+    }
+
+    #[test]
+    fn command_bar_windowed_frame_uses_measured_height() {
+        let frame =
+            command_bar_windowed_frame(1600.0, 1000.0, 2.0, Some(Vec2::new(500.0, 220.0))).unwrap();
+
+        assert!((frame.left_px - 224.0).abs() < 0.01);
+        assert!((frame.top_px - 150.0).abs() < 0.01);
+        assert!((frame.width_px - 1152.0).abs() < 0.01);
+        assert!((frame.height_px - 440.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn command_bar_windowed_frame_clamps_height_to_window() {
+        let frame =
+            command_bar_windowed_frame(800.0, 500.0, 1.0, Some(Vec2::new(500.0, 1000.0))).unwrap();
+
+        assert!((frame.top_px - 75.0).abs() < 0.01);
+        assert!((frame.height_px - 409.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn command_bar_hidden_windowed_frame_collapses_native_view() {
+        let frame = command_bar_hidden_windowed_frame();
+
+        assert_eq!(frame.left_px, 0.0);
+        assert_eq!(frame.top_px, 0.0);
+        assert_eq!(frame.width_px, 1.0);
+        assert_eq!(frame.height_px, 1.0);
+    }
+
+    #[test]
+    fn command_bar_windowed_view_waits_for_reveal() {
+        assert!(!command_bar_windowed_view_should_show(
+            Display::Flex,
+            Visibility::Hidden,
+            true
+        ));
+        assert!(command_bar_windowed_view_should_show(
+            Display::Flex,
+            Visibility::Inherited,
+            true
+        ));
+    }
+
+    #[test]
+    fn generic_webview_resize_excludes_command_bar_modal() {
+        let source = include_str!("lib.rs");
+        let resize_fn = source
+            .split("fn sync_cef_webview_resize_after_ui")
+            .nth(1)
+            .and_then(|tail| tail.split("fn pane_count_for_browser").next())
+            .unwrap_or_default();
+
+        assert!(resize_fn.contains("Without<Modal>"));
+    }
+
+    #[test]
+    fn command_bar_windowed_sync_resizes_cef_to_native_frame() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_command_bar")
+            .nth(1)
+            .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("browsers.resize"));
     }
 
     #[test]

@@ -17,7 +17,7 @@ use crate::command_bar::style::{
 use dioxus::prelude::*;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarOpenEvent, CommandBarReadyEvent,
-    CommandBarRenderedEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
+    CommandBarRenderedEvent, CommandBarSizeEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
     HistorySuggestionsRequest, HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE,
     PathCompleteRequest, PathCompleteResponse, PathEntry, command_bar_open_should_ack,
     command_bar_open_should_reset_input, looks_like_url,
@@ -40,6 +40,7 @@ pub fn Page() -> Element {
     let mut current_open_id = use_signal(|| 0u64);
     let mut last_rendered_open_id = use_signal(|| 0u64);
     let mut ready_sent = use_signal(|| false);
+    let mut observed_size_open_id = use_signal(|| None::<u64>);
 
     let mut path_completions = use_signal(Vec::<PathEntry>::new);
     let mut history_suggestions = use_signal(Vec::<HistoryEntry>::new);
@@ -150,8 +151,34 @@ pub fn Page() -> Element {
         }
     });
 
+    use_effect(move || {
+        if !is_open() || !state().native_windowed {
+            return;
+        }
+        let open_id = current_open_id();
+        if observed_size_open_id() == Some(open_id) {
+            return;
+        }
+        if install_command_bar_size_observer() {
+            observed_size_open_id.set(Some(open_id));
+        }
+    });
+
+    use_effect(move || {
+        if !is_open() || !state().native_windowed {
+            return;
+        }
+        let _ = query();
+        let _ = selected();
+        let _ = nav_mode();
+        let _ = path_completions();
+        let _ = history_suggestions();
+        emit_command_bar_size();
+    });
+
     let CommandBarOpenEvent {
         url: _,
+        native_windowed,
         space_name,
         spaces,
         tabs,
@@ -290,10 +317,11 @@ pub fn Page() -> Element {
 
     rsx! {
         div {
-            class: command_bar_root_class(),
+            class: command_bar_root_class(native_windowed),
             onclick: move |_| { is_open.set(false); emit_action("dismiss", ""); },
             div {
-                class: command_bar_shell_class(),
+                id: "command-bar-shell",
+                class: command_bar_shell_class(native_windowed),
                 onclick: move |e| { e.stop_propagation(); },
                 // Inner glow overlay
                 div { class: "pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-white/20 to-transparent" }
@@ -709,6 +737,39 @@ fn is_vmux_synthetic_dioxus_keydown(e: &KeyboardEvent) -> bool {
         .downcast::<web_sys::KeyboardEvent>()
         .map(is_vmux_synthetic_keydown)
         .unwrap_or(false)
+}
+
+fn emit_command_bar_size() {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(el) = document.get_element_by_id("command-bar-shell") else {
+        return;
+    };
+    let shell: web_sys::HtmlElement = el.unchecked_into();
+    let width = shell.offset_width().max(1) as u32;
+    let height = shell.offset_height().max(1) as u32;
+    let _ = try_cef_bin_emit_rkyv(&CommandBarSizeEvent { width, height });
+}
+
+fn install_command_bar_size_observer() -> bool {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return false;
+    };
+    let Some(el) = document.get_element_by_id("command-bar-shell") else {
+        return false;
+    };
+    emit_command_bar_size();
+    let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
+        emit_command_bar_size();
+    }) as Box<dyn FnMut(JsValue)>);
+    let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) else {
+        return false;
+    };
+    observer.observe(&el);
+    std::mem::forget(observer);
+    callback.forget();
+    true
 }
 
 fn is_vmux_synthetic_keydown(e: &web_sys::KeyboardEvent) -> bool {

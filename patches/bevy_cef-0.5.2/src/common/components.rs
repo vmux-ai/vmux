@@ -13,6 +13,8 @@ impl Plugin for WebviewCoreComponentsPlugin {
             .register_type::<CefKeyboardTarget>()
             .register_type::<CefIgnorePinchZoom>()
             .register_type::<WebviewWindowed>()
+            .register_type::<WebviewNativeLiquidGlass>()
+            .register_type::<WebviewOpaqueWindowedBackground>()
             .register_type::<HistorySwipeVisualOffset>()
             .register_type::<HostWindow>()
             .register_type::<ZoomLevel>()
@@ -62,6 +64,14 @@ pub struct CefIgnorePinchZoom;
 #[derive(Component, Debug, Clone, Copy, Default, Reflect)]
 #[reflect(Component, Default)]
 pub struct WebviewWindowed;
+
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewNativeLiquidGlass;
+
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewOpaqueWindowedBackground;
 
 #[derive(Component, Debug, Clone, Reflect)]
 #[reflect(Component, Debug)]

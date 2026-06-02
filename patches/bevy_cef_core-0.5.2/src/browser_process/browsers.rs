@@ -292,6 +292,11 @@ impl Browsers {
         self.browsers.contains_key(&webview)
     }
 
+    #[inline]
+    pub fn is_windowed(&self, webview: &Entity) -> Option<bool> {
+        self.browsers.get(webview).map(|browser| browser.windowed)
+    }
+
     /// `true` when [`Self::emit_event`] can send (main frame exists). If this is `false`,
     /// [`Self::emit_event`] is a no-op — callers must not treat the payload as delivered.
     #[inline]
@@ -645,6 +650,52 @@ impl Browsers {
 
     #[cfg(not(target_os = "macos"))]
     pub fn set_windowed_hidden(&self, _: &Entity, _: bool) {}
+
+    #[cfg(target_os = "macos")]
+    pub fn raise_windowed_to_front(&self, webview: &Entity) {
+        use objc2_app_kit::{NSView, NSWindowOrderingMode};
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        if !browser.windowed {
+            return;
+        }
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let Some(parent) = (unsafe { view.superview() }) else {
+            return;
+        };
+        parent.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Above, None);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn raise_windowed_to_front(&self, _: &Entity) {}
+
+    #[cfg(target_os = "macos")]
+    pub fn lower_windowed_to_back(&self, webview: &Entity) {
+        use objc2_app_kit::{NSView, NSWindowOrderingMode};
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        if !browser.windowed {
+            return;
+        }
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let Some(parent) = (unsafe { view.superview() }) else {
+            return;
+        };
+        parent.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Below, None);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn lower_windowed_to_back(&self, _: &Entity) {}
 
     #[cfg(target_os = "macos")]
     pub fn nudge_windowed_repaint(&self, webview: &Entity) -> bool {

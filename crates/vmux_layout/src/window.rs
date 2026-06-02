@@ -705,6 +705,7 @@ pub fn fit_window_to_screen(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cef::LayoutCef;
     use bevy::ecs::relationship::Relationship;
     use bevy_cef::prelude::WebviewExtendStandardMaterial;
 
@@ -872,6 +873,48 @@ mod tests {
             .count();
 
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn command_bar_modal_backend_is_mode_driven() {
+        let mut app = setup_window_app();
+        app.update();
+
+        let modal = app
+            .world_mut()
+            .query_filtered::<Entity, With<Modal>>()
+            .single(app.world())
+            .expect("modal");
+
+        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
+    }
+
+    #[test]
+    fn only_layout_shell_requests_opaque_windowed_background() {
+        let mut app = setup_window_app();
+        app.update();
+
+        let layout_shell = app
+            .world_mut()
+            .query_filtered::<Entity, With<LayoutCef>>()
+            .single(app.world())
+            .expect("layout shell");
+        let modal = app
+            .world_mut()
+            .query_filtered::<Entity, With<Modal>>()
+            .single(app.world())
+            .expect("modal");
+
+        assert!(
+            app.world()
+                .get::<WebviewOpaqueWindowedBackground>(layout_shell)
+                .is_some()
+        );
+        assert!(
+            app.world()
+                .get::<WebviewOpaqueWindowedBackground>(modal)
+                .is_none()
+        );
     }
 
     #[test]

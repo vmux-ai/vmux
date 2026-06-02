@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use vmux_browser::Browser;
 use vmux_core::PageMetadata;
@@ -176,7 +176,8 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
 /// Check if a space file exists and trigger load on startup.
 pub(crate) fn load_space_on_startup(active: Res<ActiveSpace>, mut commands: Commands) {
     let path = space_path(&active);
-    let exists = path.exists();
+    let removed_stale = remove_stale_space_if_needed(&path);
+    let exists = path.exists() && !removed_stale;
     commands.insert_resource(SpaceFilePresent(exists));
     if exists {
         info!("Loading space from {:?}", path);
@@ -184,6 +185,73 @@ pub(crate) fn load_space_on_startup(active: Res<ActiveSpace>, mut commands: Comm
     } else {
         commands.spawn(vmux_space::spaces::space_profile_bundle(&active.record));
     }
+}
+
+fn remove_stale_space_if_needed(path: &Path) -> bool {
+    let Ok(body) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    if !space_is_stale(&body) {
+        return false;
+    }
+    warn!("Removing stale space from {:?}", path);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::remove_dir_all(dir);
+    } else {
+        let _ = std::fs::remove_file(path);
+    }
+    true
+}
+
+fn space_is_stale(body: &str) -> bool {
+    space_contains_stale_agent_url(body) || space_is_prompt_only_empty_url(body)
+}
+
+fn space_contains_stale_agent_url(body: &str) -> bool {
+    body.split("vmux://agent/").skip(1).any(|tail| {
+        let suffix = tail.split('"').next().unwrap_or_default();
+        let url = format!("vmux://agent/{suffix}");
+        is_stale_agent_url(&url)
+    })
+}
+
+fn is_stale_agent_url(url: &str) -> bool {
+    let normalized = url.trim_end_matches('/');
+    if normalized == "vmux://agent" {
+        return false;
+    }
+    !vmux_agent::AgentKind::all()
+        .into_iter()
+        .any(|kind| url.starts_with(&kind.cli_url_prefix()))
+}
+
+fn space_is_prompt_only_empty_url(body: &str) -> bool {
+    let urls = page_metadata_urls(body);
+    !urls.is_empty() && urls.iter().all(|url| url.trim().is_empty())
+}
+
+fn page_metadata_urls(body: &str) -> Vec<&str> {
+    let mut urls = Vec::new();
+    let mut in_page_metadata = false;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("\"vmux_header::system::PageMetadata\":") {
+            in_page_metadata = true;
+            continue;
+        }
+        if !in_page_metadata {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("url: \"")
+            && let Some((url, _)) = rest.split_once('"')
+        {
+            urls.push(url);
+        }
+        if trimmed == ")," {
+            in_page_metadata = false;
+        }
+    }
+    urls
 }
 
 /// Rebuild view components (Node, Transform, Browser, etc.) for entities
@@ -688,5 +756,73 @@ mod tests {
                 .iter()
                 .any(|entity| app.world().entity(entity).contains::<Browser>())
         );
+    }
+
+    #[test]
+    fn stale_agent_page_url_marks_space_stale() {
+        assert!(space_contains_stale_agent_url(
+            r#"url: "vmux://agent/echo/echo/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
+        ));
+    }
+
+    #[test]
+    fn known_cli_agent_url_does_not_mark_space_stale() {
+        assert!(!space_contains_stale_agent_url(
+            r#"url: "vmux://agent/codex/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
+        ));
+    }
+
+    #[test]
+    fn stale_space_file_is_removed_before_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let space_dir = dir.path().join("profiles/personal/spaces/space-1");
+        std::fs::create_dir_all(&space_dir).expect("space dir");
+        let path = space_dir.join("space.ron");
+        std::fs::write(
+            &path,
+            r#"url: "vmux://agent/echo/echo/edb5335d-20cf-4c3d-9433-8619c405a0f2""#,
+        )
+        .expect("write stale space");
+
+        assert!(remove_stale_space_if_needed(&path));
+        assert!(!path.exists());
+        assert!(!space_dir.exists());
+    }
+
+    #[test]
+    fn prompt_only_empty_url_space_is_removed_before_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let space_dir = dir.path().join("profiles/personal/spaces/space-1");
+        std::fs::create_dir_all(&space_dir).expect("space dir");
+        let path = space_dir.join("space.ron");
+        std::fs::write(
+            &path,
+            r#"
+(
+  resources: {},
+  entities: {
+    1: (
+      components: {
+        "vmux_desktop::layout::stack::Stack": (
+          scroll_x: 0.0,
+          scroll_y: 0.0,
+        ),
+        "vmux_header::system::PageMetadata": (
+          title: "",
+          url: "",
+          favicon_url: "",
+          bg_color: None,
+        ),
+      },
+    ),
+  },
+)
+"#,
+        )
+        .expect("write prompt-only space");
+
+        assert!(remove_stale_space_if_needed(&path));
+        assert!(!path.exists());
+        assert!(!space_dir.exists());
     }
 }

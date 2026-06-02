@@ -58,6 +58,8 @@ web-sys = { version = "0.3", features = [
     "HtmlInputElement",
     "KeyboardEvent",
     "KeyboardEventInit",
+    "ResizeObserver",
+    "ResizeObserverEntry",
     "ScrollIntoViewOptions",
     "ScrollLogicalPosition",
     "Window",

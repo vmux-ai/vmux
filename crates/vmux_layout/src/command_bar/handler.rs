@@ -16,8 +16,8 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
-    CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSpace, CommandBarTab,
-    PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
+    CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent, CommandBarSpace,
+    CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
 };
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
@@ -55,6 +55,12 @@ struct CommandBarRenderedOpen(u64);
 #[derive(Component)]
 struct CommandBarPaintedOpen(u64);
 
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct CommandBarNativeSize {
+    pub width: f32,
+    pub height: f32,
+}
+
 #[derive(Component)]
 pub struct PendingCommandBarReveal {
     frames: u8,
@@ -82,11 +88,13 @@ impl Plugin for CommandBarInputPlugin {
                 PathCompleteRequest,
                 CommandBarReadyEvent,
                 CommandBarRenderedEvent,
+                CommandBarSizeEvent,
             )>::default())
             .add_observer(on_command_bar_action)
             .add_observer(on_path_complete_request)
             .add_observer(on_command_bar_ready)
             .add_observer(on_command_bar_rendered)
+            .add_observer(on_command_bar_size)
             .add_systems(
                 Update,
                 prewarm_command_bar_modal.before(CefSystems::CreateAndResize),
@@ -313,6 +321,16 @@ fn on_command_bar_rendered(
         .insert(CommandBarRenderedOpen(trigger.event().payload.open_id));
 }
 
+fn on_command_bar_size(trigger: On<BinReceive<CommandBarSizeEvent>>, mut commands: Commands) {
+    let payload = trigger.event().payload;
+    commands
+        .entity(trigger.event().webview)
+        .insert(CommandBarNativeSize {
+            width: payload.width.max(1) as f32,
+            height: payload.height.max(1) as f32,
+        });
+}
+
 #[derive(Default)]
 struct CommandBarOpenRequest {
     should_toggle: bool,
@@ -397,6 +415,7 @@ fn handle_open_command_bar(
             Has<CommandBarReady>,
             Option<&CommandBarRenderedOpen>,
             Option<&PendingCommandBarReveal>,
+            Has<WebviewWindowed>,
         ),
         With<Modal>,
     >,
@@ -455,12 +474,12 @@ fn handle_open_command_bar(
     if should_dismiss {
         let is_open = modal_q
             .single()
-            .map(|(_, n, _, has_keyboard_target, _, _, _)| {
+            .map(|(_, n, _, has_keyboard_target, _, _, _, _)| {
                 command_bar_modal_is_open(n.display, has_keyboard_target)
             })
             .unwrap_or(false);
         if is_open {
-            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _, _)) = modal_q.single_mut()
+            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _, _, _)) = modal_q.single_mut()
             else {
                 return;
             };
@@ -519,12 +538,12 @@ fn handle_open_command_bar(
     if should_dismiss_nav {
         let is_open = modal_q
             .single()
-            .map(|(_, n, _, has_keyboard_target, _, _, _)| {
+            .map(|(_, n, _, has_keyboard_target, _, _, _, _)| {
                 command_bar_modal_is_open(n.display, has_keyboard_target)
             })
             .unwrap_or(false);
         if is_open {
-            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _, _)) = modal_q.single_mut()
+            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _, _, _)) = modal_q.single_mut()
             else {
                 return;
             };
@@ -569,7 +588,7 @@ fn handle_open_command_bar(
     if should_toggle {
         let is_open = modal_q
             .single()
-            .map(|(_, n, visibility, has_keyboard_target, _, _, _)| {
+            .map(|(_, n, visibility, has_keyboard_target, _, _, _, _)| {
                 command_bar_modal_is_visible(n.display, *visibility, has_keyboard_target)
             })
             .unwrap_or(false);
@@ -592,6 +611,7 @@ fn handle_open_command_bar(
         command_bar_ready,
         rendered_open,
         modal_pending_reveal,
+        native_windowed,
     )) = modal_q.single_mut()
     else {
         return;
@@ -615,7 +635,8 @@ fn handle_open_command_bar(
         .entity(modal_e)
         .insert(Pickable::default())
         .insert(CefKeyboardTarget)
-        .insert(CefPointerTarget);
+        .insert(CefPointerTarget)
+        .remove::<CommandBarNativeSize>();
 
     // Command bar is a CEF webview — allow keyboard forwarding
     suppress.0 = false;
@@ -750,6 +771,7 @@ fn handle_open_command_bar(
     };
     let payload = command_bar_open_payload(
         open_id,
+        native_windowed,
         space_name,
         current_url,
         bar_spaces,
@@ -804,6 +826,7 @@ fn handle_open_command_bar(
 
 fn command_bar_open_payload(
     open_id: u64,
+    native_windowed: bool,
     space_name: String,
     url: String,
     spaces: Vec<CommandBarSpace>,
@@ -813,6 +836,7 @@ fn command_bar_open_payload(
 ) -> CommandBarOpenEvent {
     CommandBarOpenEvent {
         open_id,
+        native_windowed,
         url,
         space_name,
         spaces,
@@ -1832,6 +1856,7 @@ mod tests {
     fn command_bar_payload_includes_space_name() {
         let payload = command_bar_open_payload(
             7,
+            false,
             "Work".to_string(),
             "https://example.com".to_string(),
             Vec::new(),
@@ -1856,6 +1881,7 @@ mod tests {
 
         let payload = command_bar_open_payload(
             8,
+            true,
             "Work".to_string(),
             "vmux://spaces/".to_string(),
             spaces.clone(),
@@ -1865,6 +1891,7 @@ mod tests {
         );
 
         assert_eq!(payload.spaces, spaces);
+        assert!(payload.native_windowed);
     }
 
     #[test]

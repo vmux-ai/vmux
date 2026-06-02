@@ -262,8 +262,8 @@ fn build_settings_schema() -> SettingsSchema {
                 "browser.startup_url",
                 FieldSpec {
                     label: Some("Startup URL".into()),
-                    hint: Some("Empty defaults to vmux://agent/.".into()),
-                    placeholder: Some("vmux://agent/".into()),
+                    hint: Some("Empty opens the command bar prompt.".into()),
+                    placeholder: Some("https://example.com".into()),
                     ..Default::default()
                 },
             ),

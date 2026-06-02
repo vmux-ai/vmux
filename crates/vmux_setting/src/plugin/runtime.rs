@@ -76,7 +76,7 @@ fn default_provider_kind() -> String {
 
 pub fn resolve_startup_url(settings: &AppSettings) -> String {
     let url = settings.browser.startup_url.trim();
-    if url.is_empty() {
+    if url.is_empty() || url == "vmux://agent/" || url == "vmux://agent" {
         default_browser_startup_url()
     } else {
         url.to_string()
@@ -209,7 +209,7 @@ fn default_browser_settings() -> BrowserSettings {
 }
 
 fn default_browser_startup_url() -> String {
-    "vmux://agent/".to_string()
+    String::new()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -693,16 +693,29 @@ mod tests {
     }
 
     #[test]
-    fn resolve_startup_url_defaults_to_agent_page() {
+    fn resolve_startup_url_defaults_to_command_bar_prompt() {
         let s = base_settings();
-        assert_eq!(resolve_startup_url(&s), "vmux://agent/");
+        assert_eq!(resolve_startup_url(&s), "");
     }
 
     #[test]
-    fn resolve_startup_url_treats_empty_browser_url_as_default() {
+    fn resolve_startup_url_keeps_empty_browser_url_as_prompt() {
         let mut s = base_settings();
         s.browser.startup_url.clear();
-        assert_eq!(resolve_startup_url(&s), "vmux://agent/");
+        assert_eq!(resolve_startup_url(&s), "");
+    }
+
+    #[test]
+    fn resolve_startup_url_treats_legacy_agent_default_as_prompt() {
+        let mut s = base_settings();
+        s.browser.startup_url = "vmux://agent/".into();
+        assert_eq!(resolve_startup_url(&s), "");
+    }
+
+    #[test]
+    fn embedded_settings_default_to_command_bar_prompt() {
+        let s = load_embedded_settings();
+        assert_eq!(resolve_startup_url(&s), "");
     }
 
     #[test]

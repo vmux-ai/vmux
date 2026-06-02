@@ -6,12 +6,20 @@ pub fn result_item_class(is_selected: bool) -> &'static str {
     }
 }
 
-pub fn command_bar_root_class() -> &'static str {
-    "flex h-full w-full items-start justify-center overflow-x-hidden pt-[15%]"
+pub fn command_bar_root_class(native_windowed: bool) -> &'static str {
+    if native_windowed {
+        "flex w-full flex-col overflow-x-hidden"
+    } else {
+        "flex h-full w-full items-start justify-center overflow-x-hidden pt-[15%]"
+    }
 }
 
-pub fn command_bar_shell_class() -> &'static str {
-    "relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+pub fn command_bar_shell_class(native_windowed: bool) -> &'static str {
+    if native_windowed {
+        "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+    } else {
+        "relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+    }
 }
 
 pub fn command_bar_input_row_class() -> &'static str {
@@ -90,14 +98,30 @@ mod tests {
 
     #[test]
     fn command_bar_root_disables_horizontal_scroll() {
-        let class = command_bar_root_class();
+        let class = command_bar_root_class(false);
 
         assert!(class.contains("overflow-x-hidden"));
     }
 
     #[test]
+    fn command_bar_root_preserves_osr_positioning() {
+        let class = command_bar_root_class(false);
+
+        assert!(class.contains("h-full"));
+        assert!(class.contains("pt-[15%]"));
+    }
+
+    #[test]
+    fn command_bar_root_fits_native_view() {
+        let class = command_bar_root_class(true);
+
+        assert!(!class.contains("h-full"));
+        assert!(!class.contains("pt-[15%]"));
+    }
+
+    #[test]
     fn command_bar_shell_does_not_apply_backdrop_filter() {
-        let class = command_bar_shell_class();
+        let class = command_bar_shell_class(false);
 
         assert!(!class.contains("backdrop-"));
     }
@@ -111,10 +135,25 @@ mod tests {
 
     #[test]
     fn command_bar_shell_uses_solid_background() {
-        let class = command_bar_shell_class();
+        let class = command_bar_shell_class(false);
 
         assert!(class.contains("bg-background"));
         assert!(!class.contains("bg-white/10"));
+    }
+
+    #[test]
+    fn command_bar_shell_preserves_osr_max_width() {
+        let class = command_bar_shell_class(false);
+
+        assert!(class.contains("max-w-xl"));
+    }
+
+    #[test]
+    fn command_bar_shell_fills_native_view_width() {
+        let class = command_bar_shell_class(true);
+
+        assert!(!class.contains("max-w-xl"));
+        assert!(class.contains("w-full"));
     }
 
     #[test]
