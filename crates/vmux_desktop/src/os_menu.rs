@@ -173,8 +173,7 @@ fn close_with_confirmation(
         .0
         .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(300));
     for event in closed.read() {
-        if from_menu_key_equivalent || from_stack_close || from_tab_close || from_native_page_open
-        {
+        if from_menu_key_equivalent || from_stack_close || from_tab_close || from_native_page_open {
             info!(
                 target: "vmux_desktop::window_close",
                 window = ?event.window,

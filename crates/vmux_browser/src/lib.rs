@@ -657,6 +657,8 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
 /// which native view to show. No-op for OSR webviews / non-macOS (`set_windowed_*` are no-ops).
 fn sync_windowed_frames(
     browsers: NonSend<Browsers>,
+    settings: Res<AppSettings>,
+    layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
     browser_q: Query<
         (
             Entity,
@@ -675,9 +677,11 @@ fn sync_windowed_frames(
     child_of_q: Query<&ChildOf>,
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
+    tab_q: Query<(), With<Tab>>,
+    pane_q: Query<(), With<Pane>>,
+    all_children: Query<&Children>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
 ) {
-    // While the (OSR) command bar is open, hide the native pages so the modal — which composites in
-    // the Bevy layer, behind native views — is visible on top.
     if vmux_layout::command_bar::handler::is_command_bar_open(&modal_q) {
         for (entity, ..) in &browser_q {
             browsers.set_windowed_hidden(&entity, true);
@@ -701,6 +705,17 @@ fn sync_windowed_frames(
         let scale = 1.0 / computed.inverse_scale_factor.max(1.0e-6);
         browsers.set_windowed_hidden(&entity, false);
         browsers.set_windowed_frame(&entity, left, top, size_px.x, size_px.y, scale);
+        let pane_count = pane_count_for_browser(
+            entity,
+            &child_of_q,
+            &tab_q,
+            &pane_q,
+            &all_children,
+            &leaf_panes,
+        )
+        .unwrap_or(1);
+        let all_corners = layout_hidden.0 || pane_count > 1;
+        browsers.set_windowed_corner_radius(&entity, settings.layout.radius, scale, all_corners);
         browsers.raise_windowed_to_front(&entity);
     }
 }
@@ -2557,6 +2572,34 @@ mod tests {
             .unwrap_or_default();
 
         assert!(sync_fn.contains("browsers.raise_windowed_to_front"));
+    }
+
+    #[test]
+    fn windowed_page_sync_hides_pages_while_command_bar_is_open() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_frames")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("is_command_bar_open"));
+        assert!(sync_fn.contains("browsers.set_windowed_hidden(&entity, true);"));
+        assert!(sync_fn.contains("return;"));
+    }
+
+    #[test]
+    fn windowed_page_sync_applies_settings_radius_to_native_page() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_frames")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("settings: Res<AppSettings>"));
+        assert!(sync_fn.contains("settings.layout.radius"));
+        assert!(sync_fn.contains("browsers.set_windowed_corner_radius(&entity"));
     }
 
     #[test]

@@ -73,6 +73,8 @@ pub struct WebviewBrowser {
     /// `setFrame`/`was_resized` calls — re-resizing CEF to the same size every frame clears its
     /// surface and leaves it blank until the next real paint.
     last_frame: Cell<Option<(f64, f64, f64, f64)>>,
+    last_corner_radius: Cell<Option<f64>>,
+    last_corner_radius_all_corners: Cell<Option<bool>>,
     /// True for native (windowed) browsers. `set_focus(true)` makes a windowed browser's `NSView`
     /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die. Keyboard is
     /// routed via `CefKeyboardTarget` forwarding instead, so windowed browsers must not be focused.
@@ -287,6 +289,8 @@ impl Browsers {
             windowless_frame_rate: Cell::new(windowless_frame_rate),
             hidden: Cell::new(false),
             last_frame: Cell::new(None),
+            last_corner_radius: Cell::new(None),
+            last_corner_radius_all_corners: Cell::new(None),
             windowed,
             #[cfg(target_os = "macos")]
             native_liquid_glass,
@@ -671,6 +675,47 @@ impl Browsers {
     }
 
     #[cfg(target_os = "macos")]
+    fn apply_view_tree_corner_radius(view: &objc2_app_kit::NSView, radius: f64, all_corners: bool) {
+        view.setWantsLayer(true);
+        if let Some(layer) = view.layer() {
+            Self::apply_layer_tree_corner_radius(&layer, radius, all_corners);
+        }
+        let subviews = view.subviews();
+        for i in 0..subviews.count() {
+            let child = subviews.objectAtIndex(i);
+            Self::apply_view_tree_corner_radius(&child, radius, all_corners);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn apply_layer_tree_corner_radius(
+        layer: &objc2_quartz_core::CALayer,
+        radius: f64,
+        all_corners: bool,
+    ) {
+        use objc2_quartz_core::CACornerMask;
+        let all = CACornerMask::LayerMinXMinYCorner
+            | CACornerMask::LayerMaxXMinYCorner
+            | CACornerMask::LayerMinXMaxYCorner
+            | CACornerMask::LayerMaxXMaxYCorner;
+        let bottom = if layer.isGeometryFlipped() {
+            CACornerMask::LayerMinXMaxYCorner | CACornerMask::LayerMaxXMaxYCorner
+        } else {
+            CACornerMask::LayerMinXMinYCorner | CACornerMask::LayerMaxXMinYCorner
+        };
+        layer.setCornerRadius(radius);
+        layer.setMasksToBounds(radius > 0.0);
+        layer.setMaskedCorners(if all_corners { all } else { bottom });
+        let Some(sublayers) = (unsafe { layer.sublayers() }) else {
+            return;
+        };
+        for i in 0..sublayers.count() {
+            let child = sublayers.objectAtIndex(i);
+            Self::apply_layer_tree_corner_radius(&child, radius, all_corners);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
     pub fn set_windowed_frame(
         &self,
         webview: &Entity,
@@ -736,6 +781,44 @@ impl Browsers {
 
     #[cfg(not(target_os = "macos"))]
     pub fn set_windowed_frame(&self, _: &Entity, _: f32, _: f32, _: f32, _: f32, _: f32) {}
+
+    #[cfg(target_os = "macos")]
+    pub fn set_windowed_corner_radius(
+        &self,
+        webview: &Entity,
+        radius_px: f32,
+        scale: f32,
+        all_corners: bool,
+    ) {
+        use objc2::ClassType;
+        use objc2_app_kit::NSView;
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        let s = (scale as f64).max(1.0e-6);
+        let radius = (radius_px as f64 / s).max(0.0);
+        if browser.last_corner_radius.get() == Some(radius)
+            && browser.last_corner_radius_all_corners.get() == Some(all_corners)
+        {
+            return;
+        }
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        browser.last_corner_radius.set(Some(radius));
+        browser
+            .last_corner_radius_all_corners
+            .set(Some(all_corners));
+        if let Some(glass) = &browser.native_liquid_glass {
+            Self::apply_view_tree_corner_radius(glass.as_super(), radius, all_corners);
+        }
+        Self::apply_view_tree_corner_radius(view, radius, all_corners);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn set_windowed_corner_radius(&self, _: &Entity, _: f32, _: f32, _: bool) {}
 
     #[cfg(target_os = "macos")]
     pub fn set_windowed_hidden(&self, webview: &Entity, hidden: bool) {
@@ -1528,6 +1611,20 @@ mod tests {
         assert!(implementation.contains("for i in 0..sublayers.count()"));
         assert!(implementation.contains("let child = sublayers.objectAtIndex(i)"));
         assert!(implementation.contains("Self::make_layer_tree_transparent(&child, clear_color)"));
+    }
+
+    #[test]
+    fn windowed_native_views_apply_corner_radius() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+
+        assert!(implementation.contains("last_corner_radius: Cell<Option<f64>>"));
+        assert!(implementation.contains("fn apply_view_tree_corner_radius"));
+        assert!(implementation.contains("layer.setCornerRadius(radius)"));
+        assert!(implementation.contains("layer.setMasksToBounds(radius > 0.0)"));
+        assert!(implementation.contains("pub fn set_windowed_corner_radius"));
     }
 
     #[test]

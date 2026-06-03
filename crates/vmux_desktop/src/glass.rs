@@ -5,7 +5,11 @@ pub(crate) struct GlassPlugin;
 impl Plugin for GlassPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<GlassState>()
-            .add_systems(Update, install_window_glass);
+            .init_non_send::<CommandBarOverlay>()
+            .add_systems(Update, install_window_glass)
+            // Run after PostUpdate's `sync_windowed_frames` (which raises each page to front every
+            // frame) so the overlay stays on top of the pages.
+            .add_systems(Last, sync_command_bar_overlay);
     }
 }
 
@@ -79,4 +83,108 @@ fn install_window_glass(
     state._glass = Some(glass);
     state.installed = true;
     info!("VMUX_GLASS: NSGlassEffectView installed as window backdrop (behind content view)");
+}
+
+#[derive(Default)]
+struct CommandBarOverlay {
+    view: Option<objc2::rc::Retained<objc2_app_kit::NSView>>,
+    shown: bool,
+    /// Keeps the currently-displayed IOSurface alive while it's the overlay layer's contents.
+    held: Option<bevy_cef_core::prelude::AcceleratedFrame>,
+}
+
+fn primary_content_view_ptr(entity: Entity) -> Option<*mut core::ffi::c_void> {
+    use bevy::winit::WINIT_WINDOWS;
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    WINIT_WINDOWS.with_borrow(|windows| {
+        let id = windows.entity_to_winit.get(&entity)?;
+        let wrapper = windows.windows.get(id)?;
+        let handle = wrapper.window_handle().ok()?;
+        match handle.as_raw() {
+            RawWindowHandle::AppKit(h) => Some(h.ns_view.as_ptr()),
+            _ => None,
+        }
+    })
+}
+
+/// A2: show the command bar's OSR IOSurface in a full-window native overlay composited **above** the
+/// page (so the page stays visible through the surface's transparent backdrop). The surface is
+/// produced by the OSR modal and routed here via `NativeOverlayFrames`.
+fn sync_command_bar_overlay(
+    mut state: NonSendMut<CommandBarOverlay>,
+    modal_open_q: Query<
+        (&Node, Has<bevy_cef::prelude::CefKeyboardTarget>),
+        With<vmux_layout::window::Modal>,
+    >,
+    modal_e_q: Query<Entity, With<vmux_layout::window::Modal>>,
+    window_q: Query<Entity, With<bevy::window::PrimaryWindow>>,
+    windows: Query<&bevy::window::Window>,
+    overlay_frames: Res<bevy_cef::prelude::NativeOverlayFrames>,
+) {
+    use objc2::{MainThreadMarker, MainThreadOnly, runtime::AnyObject};
+    use objc2_app_kit::NSView;
+
+    if !glass_enabled() {
+        return;
+    }
+    let open = vmux_layout::command_bar::handler::is_command_bar_open(&modal_open_q);
+    if !open {
+        if state.shown {
+            if let Some(view) = &state.view {
+                view.setHidden(true);
+            }
+            state.shown = false;
+            state.held = None;
+        }
+        return;
+    }
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let (Ok(window_e), Ok(modal_e)) = (window_q.single(), modal_e_q.single()) else {
+        return;
+    };
+    let Some(ns_view) = primary_content_view_ptr(window_e) else {
+        return;
+    };
+    let content: &NSView = unsafe { &*ns_view.cast::<NSView>() };
+    let bounds = content.bounds();
+
+    if state.view.is_none() {
+        let view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
+        view.setWantsLayer(true);
+        state.view = Some(view);
+    }
+    let Some(view) = state.view.clone() else {
+        return;
+    };
+    view.setFrame(bounds);
+
+    let next = overlay_frames
+        .0
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(&modal_e));
+    if let Some(frame) = next {
+        if let Some(layer) = view.layer() {
+            let io_surface = frame.io_surface as *mut AnyObject;
+            if !io_surface.is_null() {
+                let scale = windows
+                    .get(window_e)
+                    .map(|w| w.resolution.scale_factor() as f64)
+                    .unwrap_or(2.0);
+                layer.setOpaque(false);
+                layer.setContentsScale(scale);
+                unsafe { layer.setContents(Some(&*io_surface)) };
+            }
+        }
+        state.held = Some(frame);
+    }
+
+    if !state.shown {
+        view.setHidden(false);
+        state.shown = true;
+    }
+    // Raise above the native pages (re-add reorders to front; pages re-raise each frame).
+    content.addSubview(&view);
 }

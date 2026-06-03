@@ -15,7 +15,10 @@ impl Plugin for TogglePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LayoutHidden>()
             .add_systems(Update, handle_toggle.in_set(ReadAppCommands))
-            .add_systems(Update, sync_window_padding_to_layout_hidden);
+            .add_systems(
+                PostUpdate,
+                sync_window_padding_to_layout_hidden.before(bevy::ui::UiSystems::Layout),
+            );
     }
 }
 
@@ -64,5 +67,25 @@ fn handle_toggle(
                 commands.entity(entity).insert(Open);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn window_padding_sync_runs_before_ui_layout() {
+        let source = include_str!("toggle.rs");
+        let plugin_build = source
+            .split("impl Plugin for TogglePlugin")
+            .nth(1)
+            .and_then(|tail| tail.split("/// When").next())
+            .unwrap_or_default();
+
+        assert!(plugin_build.contains(".add_systems(\n                PostUpdate,"));
+        assert!(
+            plugin_build.contains(
+                "sync_window_padding_to_layout_hidden.before(bevy::ui::UiSystems::Layout)"
+            )
+        );
     }
 }

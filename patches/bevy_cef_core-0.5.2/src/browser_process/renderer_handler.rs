@@ -95,6 +95,9 @@ pub struct AcceleratedFrame {
     pub width: u32,
     pub height: u32,
     pub handle: SendSharedTextureHandle,
+    /// Raw `IOSurfaceRef` (as `usize`) backing this frame, kept alive by `keepalive`. Lets a native
+    /// overlay set it directly as a `CALayer`'s `contents` instead of importing into a GPU texture.
+    pub io_surface: usize,
     pub keepalive: Arc<dyn Any + Send + Sync>,
     pub dirty: Vec<WebviewDirtyRect>,
 }
@@ -252,12 +255,14 @@ impl ImplRenderHandler for RenderHandlerBuilder {
                 Arc::new(IoSurfaceKeepAlive::<RealIoSurfaceOps>::retain(
                     info.shared_texture_io_surface,
                 ));
+            let io_surface = info.shared_texture_io_surface as usize;
             let frame = AcceleratedFrame {
                 webview: self.webview,
                 ty,
                 width,
                 height,
                 handle: SendSharedTextureHandle(SharedTextureHandle::new(info)),
+                io_surface,
                 keepalive,
                 dirty: webview_dirty_rects(dirty_rects, width, height),
             };

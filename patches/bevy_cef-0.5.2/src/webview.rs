@@ -61,8 +61,8 @@ fn duration_nanos(duration: Duration) -> u64 {
 
 pub mod prelude {
     pub use crate::webview::{
-        CefSystems, RequestCloseDevtool, RequestShowDevTool, WebviewPlugin, mesh::*,
-        texture_upload::WebviewTextureUploads,
+        CefSystems, RequestCloseDevtool, RequestShowDevTool, WebviewPlugin,
+        accelerated_upload::NativeOverlayFrames, mesh::*, texture_upload::WebviewTextureUploads,
     };
 }
 

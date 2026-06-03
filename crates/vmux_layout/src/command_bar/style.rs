@@ -31,7 +31,7 @@ pub fn command_bar_input_wrap_class() -> &'static str {
 }
 
 pub fn command_bar_input_class() -> &'static str {
-    "w-full min-w-0 bg-transparent py-2.5 text-base text-foreground outline-none placeholder:text-muted-foreground"
+    "w-full min-w-0 cursor-text bg-transparent py-2.5 text-base text-foreground caret-foreground outline-none placeholder:text-muted-foreground"
 }
 
 pub fn result_list_class() -> &'static str {
@@ -175,6 +175,14 @@ mod tests {
         assert!(wrap.contains("min-w-0"));
         assert!(wrap.contains("overflow-hidden"));
         assert!(input.contains("min-w-0"));
+    }
+
+    #[test]
+    fn command_bar_input_shows_text_cursor() {
+        let input = command_bar_input_class();
+
+        assert!(input.contains("cursor-text"));
+        assert!(input.contains("caret-foreground"));
     }
 
     #[test]

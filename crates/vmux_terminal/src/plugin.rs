@@ -2434,7 +2434,10 @@ mod tests {
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_terminal_page_open);
 
-        let stack = app.world_mut().spawn(vmux_layout::stack::stack_bundle()).id();
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
         let task = app
             .world_mut()
             .spawn(PageOpenTask {
@@ -2448,9 +2451,7 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
-        let mut terminals = app
-            .world_mut()
-            .query_filtered::<&ChildOf, With<Terminal>>();
+        let mut terminals = app.world_mut().query_filtered::<&ChildOf, With<Terminal>>();
         assert_eq!(
             terminals
                 .iter(app.world())

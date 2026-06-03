@@ -1,3 +1,4 @@
+use crate::common::WebviewNativeOverlay;
 use crate::prelude::WebviewSurface;
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
@@ -21,6 +22,12 @@ struct PendingAcceleratedUpload {
 #[derive(Resource, Default)]
 pub struct WebviewAcceleratedQueue(Mutex<Vec<PendingAcceleratedUpload>>);
 
+/// Latest accelerated frame per [`WebviewNativeOverlay`] webview, for a native overlay layer to
+/// display (instead of a Bevy texture). Take the frame and keep it alive while its IOSurface is set
+/// as a `CALayer`'s contents.
+#[derive(Resource, Default)]
+pub struct NativeOverlayFrames(pub Mutex<HashMap<Entity, AcceleratedFrame>>);
+
 #[derive(Resource, Default)]
 struct ExtractedAcceleratedUploads(Vec<PendingAcceleratedUpload>);
 
@@ -29,6 +36,7 @@ pub(crate) struct WebviewAcceleratedUploadPlugin;
 impl Plugin for WebviewAcceleratedUploadPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WebviewAcceleratedQueue>()
+            .init_resource::<NativeOverlayFrames>()
             .add_systems(Update, queue_accelerated_uploads);
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
@@ -46,6 +54,8 @@ impl Plugin for WebviewAcceleratedUploadPlugin {
 fn queue_accelerated_uploads(
     browsers: NonSend<Browsers>,
     surfaces: Query<&WebviewSurface>,
+    overlay_webviews: Query<Entity, With<WebviewNativeOverlay>>,
+    overlay_frames: Res<NativeOverlayFrames>,
     mut images: ResMut<Assets<Image>>,
     queue: Res<WebviewAcceleratedQueue>,
 ) {
@@ -64,6 +74,13 @@ fn queue_accelerated_uploads(
         }
     }
     for (webview, mut frame) in latest {
+        // Native-overlay webviews don't blit to a Bevy texture; hand the newest frame to the overlay.
+        if overlay_webviews.contains(webview) {
+            if let Ok(mut overlay) = overlay_frames.0.lock() {
+                overlay.insert(webview, frame);
+            }
+            continue;
+        }
         let Ok(surface) = surfaces.get(webview) else {
             continue;
         };

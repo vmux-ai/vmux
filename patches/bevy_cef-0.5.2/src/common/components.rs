@@ -16,6 +16,7 @@ impl Plugin for WebviewCoreComponentsPlugin {
             .register_type::<WebviewNativeLiquidGlass>()
             .register_type::<WebviewOpaqueWindowedBackground>()
             .register_type::<WebviewMaxFrameRate>()
+            .register_type::<WebviewNativeOverlay>()
             .register_type::<HistorySwipeVisualOffset>()
             .register_type::<HostWindow>()
             .register_type::<ZoomLevel>()
@@ -80,6 +81,13 @@ pub struct WebviewOpaqueWindowedBackground;
 #[derive(Component, Debug, Clone, Copy, Reflect)]
 #[reflect(Component)]
 pub struct WebviewMaxFrameRate(pub i32);
+
+/// Marker: route this OSR webview's accelerated IOSurface frames into `NativeOverlayFrames` (for a
+/// native overlay layer) instead of uploading them to its Bevy texture. Lets the surface be shown
+/// in a native view composited *above* windowed pages.
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewNativeOverlay;
 
 #[derive(Component, Debug, Clone, Reflect)]
 #[reflect(Component, Debug)]

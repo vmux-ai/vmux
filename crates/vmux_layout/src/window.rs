@@ -393,6 +393,7 @@ fn setup(
             Browser,
             WebviewTransparent,
             WebviewNativeLiquidGlass,
+            bevy_cef::prelude::WebviewNativeOverlay,
             bevy_cef::prelude::CefIgnorePinchZoom,
         ),
         Node {
