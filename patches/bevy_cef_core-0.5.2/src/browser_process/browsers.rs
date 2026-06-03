@@ -77,6 +77,8 @@ pub struct WebviewBrowser {
     /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die. Keyboard is
     /// routed via `CefKeyboardTarget` forwarding instead, so windowed browsers must not be focused.
     windowed: bool,
+    #[cfg(target_os = "macos")]
+    native_liquid_glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
 }
 
 pub struct Browsers {
@@ -129,7 +131,9 @@ impl Browsers {
         background_color: Option<u32>,
         windowless_frame_rate: i32,
         windowed: bool,
+        native_liquid_glass: bool,
     ) {
+        let _ = native_liquid_glass;
         let windowless_frame_rate = normalize_windowless_frame_rate(windowless_frame_rate);
         webview_debug_log(format!(
             "Browsers::create_browser entity={webview:?} uri={_uri} size={webview_size:?} scale={device_scale_factor} disk_profile={} bg={background_color:?} fps={windowless_frame_rate}",
@@ -270,6 +274,11 @@ impl Browsers {
         if !windowed {
             host.was_hidden(0);
         }
+        #[cfg(target_os = "macos")]
+        let native_liquid_glass =
+            (windowed && native_liquid_glass).then(|| Self::create_native_liquid_glass(&host));
+        #[cfg(target_os = "macos")]
+        let native_liquid_glass = native_liquid_glass.flatten();
         let webview_browser = WebviewBrowser {
             host,
             client: browser,
@@ -279,6 +288,8 @@ impl Browsers {
             hidden: Cell::new(false),
             last_frame: Cell::new(None),
             windowed,
+            #[cfg(target_os = "macos")]
+            native_liquid_glass,
         };
         self.browsers.insert(webview, webview_browser);
         webview_debug_log(format!(
@@ -582,9 +593,83 @@ impl Browsers {
         }
     }
 
-    /// Position a windowed (non-OSR) browser's native child view. `left_px`/`top_px`/`w_px`/`h_px`
-    /// are physical pixels, top-left origin / Y-down (UI space); `scale` is the backing scale
-    /// factor. Converts to AppKit points (Y-up, relative to the parent view).
+    #[cfg(target_os = "macos")]
+    fn create_native_liquid_glass(
+        host: &BrowserHost,
+    ) -> Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>> {
+        use objc2::{ClassType, MainThreadMarker, runtime::AnyClass};
+        use objc2_app_kit::{
+            NSColor, NSGlassEffectView, NSGlassEffectViewStyle, NSView, NSWindowOrderingMode,
+        };
+        if AnyClass::get(c"NSGlassEffectView").is_none() {
+            webview_debug_log("native_liquid_glass unavailable");
+            return None;
+        }
+        let mtm = MainThreadMarker::new()?;
+        let handle = host.window_handle();
+        if handle.is_null() {
+            webview_debug_log("native_liquid_glass missing host window handle");
+            return None;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let clear_color = NSColor::clearColor();
+        Self::make_view_tree_transparent(view, &clear_color);
+        let Some(parent) = (unsafe { view.superview() }) else {
+            webview_debug_log("native_liquid_glass missing parent view");
+            return None;
+        };
+        let frame = view.frame();
+        let hidden = view.isHidden();
+        let glass = NSGlassEffectView::new(mtm);
+        glass.setStyle(NSGlassEffectViewStyle::Regular);
+        let glass_view: &NSView = glass.as_super();
+        Self::make_view_tree_transparent(glass_view, &clear_color);
+        glass_view.setFrame(frame);
+        glass_view.setHidden(hidden);
+        parent.addSubview_positioned_relativeTo(
+            glass_view,
+            NSWindowOrderingMode::Above,
+            Some(view),
+        );
+        view.removeFromSuperview();
+        glass.setContentView(Some(view));
+        view.setFrame(glass_view.bounds());
+        webview_debug_log("native_liquid_glass attached");
+        Some(glass)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn make_view_tree_transparent(
+        view: &objc2_app_kit::NSView,
+        clear_color: &objc2_app_kit::NSColor,
+    ) {
+        view.setWantsLayer(true);
+        if let Some(layer) = view.layer() {
+            Self::make_layer_tree_transparent(&layer, clear_color);
+        }
+        let subviews = view.subviews();
+        for i in 0..subviews.count() {
+            let child = subviews.objectAtIndex(i);
+            Self::make_view_tree_transparent(&child, clear_color);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn make_layer_tree_transparent(
+        layer: &objc2_quartz_core::CALayer,
+        clear_color: &objc2_app_kit::NSColor,
+    ) {
+        layer.setOpaque(false);
+        layer.setBackgroundColor(Some(&clear_color.CGColor()));
+        let Some(sublayers) = (unsafe { layer.sublayers() }) else {
+            return;
+        };
+        for i in 0..sublayers.count() {
+            let child = sublayers.objectAtIndex(i);
+            Self::make_layer_tree_transparent(&child, clear_color);
+        }
+    }
+
     #[cfg(target_os = "macos")]
     pub fn set_windowed_frame(
         &self,
@@ -595,6 +680,7 @@ impl Browsers {
         h_px: f32,
         scale: f32,
     ) {
+        use objc2::ClassType;
         use objc2_app_kit::NSView;
         use objc2_foundation::{NSPoint, NSRect, NSSize};
         let Some(browser) = self.browsers.get(webview) else {
@@ -609,7 +695,13 @@ impl Browsers {
         let w = w_px as f64 / s;
         let h = h_px as f64 / s;
         let x = left_px as f64 / s;
-        let parent = unsafe { view.superview() };
+        let glass_view = browser
+            .native_liquid_glass
+            .as_ref()
+            .map(|glass| glass.as_super());
+        let parent = glass_view
+            .and_then(|glass_view| unsafe { glass_view.superview() })
+            .or_else(|| unsafe { view.superview() });
         // winit's content view is flipped (origin top-left, y-down) — match Bevy UI's top_px
         // directly. Only fall back to the AppKit y-up flip if the parent is not flipped.
         let flipped = parent.as_ref().is_some_and(|p| p.isFlipped());
@@ -627,7 +719,18 @@ impl Browsers {
             return;
         }
         browser.last_frame.set(Some(frame));
-        view.setFrame(NSRect::new(NSPoint::new(x, y), NSSize::new(w, h)));
+        let rect = NSRect::new(NSPoint::new(x, y), NSSize::new(w, h));
+        if let Some(glass_view) = glass_view {
+            glass_view.setFrame(rect);
+            view.setFrame(glass_view.bounds());
+        } else {
+            view.setFrame(rect);
+        }
+        let clear_color = objc2_app_kit::NSColor::clearColor();
+        Self::make_view_tree_transparent(view, &clear_color);
+        if let Some(glass_view) = glass_view {
+            Self::make_view_tree_transparent(glass_view, &clear_color);
+        }
         browser.host.was_resized();
     }
 
@@ -636,6 +739,7 @@ impl Browsers {
 
     #[cfg(target_os = "macos")]
     pub fn set_windowed_hidden(&self, webview: &Entity, hidden: bool) {
+        use objc2::ClassType;
         use objc2_app_kit::NSView;
         let Some(browser) = self.browsers.get(webview) else {
             return;
@@ -645,6 +749,9 @@ impl Browsers {
             return;
         }
         let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        if let Some(glass) = &browser.native_liquid_glass {
+            glass.as_super().setHidden(hidden);
+        }
         view.setHidden(hidden);
     }
 
@@ -653,6 +760,7 @@ impl Browsers {
 
     #[cfg(target_os = "macos")]
     pub fn raise_windowed_to_front(&self, webview: &Entity) {
+        use objc2::ClassType;
         use objc2_app_kit::{NSView, NSWindowOrderingMode};
         let Some(browser) = self.browsers.get(webview) else {
             return;
@@ -665,10 +773,18 @@ impl Browsers {
             return;
         }
         let view: &NSView = unsafe { &*handle.cast::<NSView>() };
-        let Some(parent) = (unsafe { view.superview() }) else {
-            return;
-        };
-        parent.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Above, None);
+        if let Some(glass) = &browser.native_liquid_glass {
+            let glass_view = glass.as_super();
+            let Some(parent) = (unsafe { glass_view.superview() }) else {
+                return;
+            };
+            parent.addSubview_positioned_relativeTo(glass_view, NSWindowOrderingMode::Above, None);
+        } else {
+            let Some(parent) = (unsafe { view.superview() }) else {
+                return;
+            };
+            parent.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Above, None);
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -676,6 +792,7 @@ impl Browsers {
 
     #[cfg(target_os = "macos")]
     pub fn lower_windowed_to_back(&self, webview: &Entity) {
+        use objc2::ClassType;
         use objc2_app_kit::{NSView, NSWindowOrderingMode};
         let Some(browser) = self.browsers.get(webview) else {
             return;
@@ -688,10 +805,18 @@ impl Browsers {
             return;
         }
         let view: &NSView = unsafe { &*handle.cast::<NSView>() };
-        let Some(parent) = (unsafe { view.superview() }) else {
-            return;
-        };
-        parent.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Below, None);
+        if let Some(glass) = &browser.native_liquid_glass {
+            let glass_view = glass.as_super();
+            let Some(parent) = (unsafe { glass_view.superview() }) else {
+                return;
+            };
+            parent.addSubview_positioned_relativeTo(glass_view, NSWindowOrderingMode::Below, None);
+        } else {
+            let Some(parent) = (unsafe { view.superview() }) else {
+                return;
+            };
+            parent.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Below, None);
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -699,6 +824,7 @@ impl Browsers {
 
     #[cfg(target_os = "macos")]
     pub fn nudge_windowed_repaint(&self, webview: &Entity) -> bool {
+        use objc2::ClassType;
         use objc2_app_kit::NSView;
         let Some(browser) = self.browsers.get(webview) else {
             return false;
@@ -711,9 +837,17 @@ impl Browsers {
             return false;
         }
         let view: &NSView = unsafe { &*handle.cast::<NSView>() };
-        let mut frame = view.frame();
+        let target = browser
+            .native_liquid_glass
+            .as_ref()
+            .map(|glass| glass.as_super())
+            .unwrap_or(view);
+        let mut frame = target.frame();
         frame.size.height += 1.0;
-        view.setFrame(frame);
+        target.setFrame(frame);
+        if let Some(glass) = &browser.native_liquid_glass {
+            view.setFrame(glass.as_super().bounds());
+        }
         browser.host.was_resized();
         browser.last_frame.set(None);
         true
@@ -729,6 +863,12 @@ impl Browsers {
     /// The browser will be removed from the hash map after closing.
     pub fn close(&mut self, webview: &Entity) {
         if let Some(browser) = self.browsers.remove(webview) {
+            #[cfg(target_os = "macos")]
+            if let Some(glass) = &browser.native_liquid_glass {
+                use objc2::ClassType;
+                glass.setContentView(None);
+                glass.as_super().removeFromSuperview();
+            }
             browser.host.close_browser(true as _);
             debug!("Closed browser with webview: {:?}", webview);
         }
@@ -1330,6 +1470,64 @@ mod tests {
             .unwrap_or_default();
         assert!(implementation.contains("hidden: Cell<bool>"));
         assert!(implementation.contains("browser.host.was_hidden(1)"));
+    }
+
+    #[test]
+    fn native_liquid_glass_embeds_cef_view_as_content() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        let create_fn = implementation
+            .split("fn create_native_liquid_glass")
+            .nth(1)
+            .and_then(|tail| {
+                tail.split("#[cfg(target_os = \"macos\")]\n    pub fn set_windowed_frame")
+                    .next()
+            })
+            .unwrap_or_default();
+
+        assert!(create_fn.contains("NSGlassEffectViewStyle::Regular"));
+        assert!(create_fn.contains("glass.setContentView(Some(view))"));
+        assert!(create_fn.contains("view.setFrame(glass_view.bounds())"));
+    }
+
+    #[test]
+    fn native_liquid_glass_makes_cef_view_layer_transparent() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        let create_fn = implementation
+            .split("fn create_native_liquid_glass")
+            .nth(1)
+            .and_then(|tail| {
+                tail.split("#[cfg(target_os = \"macos\")]\n    pub fn set_windowed_frame")
+                    .next()
+            })
+            .unwrap_or_default();
+
+        assert!(create_fn.contains("view.setWantsLayer(true)"));
+        assert!(create_fn.contains("layer.setOpaque(false)"));
+        assert!(create_fn.contains("layer.setBackgroundColor(Some(&clear_color.CGColor()))"));
+        assert!(create_fn.contains("Self::make_view_tree_transparent"));
+    }
+
+    #[test]
+    fn native_liquid_glass_recursively_clears_cef_subviews() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+
+        assert!(implementation.contains("fn make_view_tree_transparent"));
+        assert!(implementation.contains("fn make_layer_tree_transparent"));
+        assert!(implementation.contains("for i in 0..subviews.count()"));
+        assert!(implementation.contains("let child = subviews.objectAtIndex(i)"));
+        assert!(implementation.contains("Self::make_view_tree_transparent(&child, clear_color)"));
+        assert!(implementation.contains("for i in 0..sublayers.count()"));
+        assert!(implementation.contains("let child = sublayers.objectAtIndex(i)"));
+        assert!(implementation.contains("Self::make_layer_tree_transparent(&child, clear_color)"));
     }
 
     #[test]

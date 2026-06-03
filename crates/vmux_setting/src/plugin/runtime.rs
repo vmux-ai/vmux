@@ -209,7 +209,7 @@ fn default_browser_settings() -> BrowserSettings {
 }
 
 fn default_browser_startup_url() -> String {
-    String::new()
+    "https://www.google.com".to_string()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -693,29 +693,29 @@ mod tests {
     }
 
     #[test]
-    fn resolve_startup_url_defaults_to_command_bar_prompt() {
+    fn resolve_startup_url_defaults_to_google() {
         let s = base_settings();
-        assert_eq!(resolve_startup_url(&s), "");
+        assert_eq!(resolve_startup_url(&s), "https://www.google.com");
     }
 
     #[test]
-    fn resolve_startup_url_keeps_empty_browser_url_as_prompt() {
+    fn resolve_startup_url_uses_google_for_empty_browser_url() {
         let mut s = base_settings();
         s.browser.startup_url.clear();
-        assert_eq!(resolve_startup_url(&s), "");
+        assert_eq!(resolve_startup_url(&s), "https://www.google.com");
     }
 
     #[test]
-    fn resolve_startup_url_treats_legacy_agent_default_as_prompt() {
+    fn resolve_startup_url_treats_legacy_agent_default_as_google() {
         let mut s = base_settings();
         s.browser.startup_url = "vmux://agent/".into();
-        assert_eq!(resolve_startup_url(&s), "");
+        assert_eq!(resolve_startup_url(&s), "https://www.google.com");
     }
 
     #[test]
-    fn embedded_settings_default_to_command_bar_prompt() {
+    fn embedded_settings_default_to_google() {
         let s = load_embedded_settings();
-        assert_eq!(resolve_startup_url(&s), "");
+        assert_eq!(resolve_startup_url(&s), "https://www.google.com");
     }
 
     #[test]

@@ -10,6 +10,7 @@ use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::GpuImage;
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
 use bevy_cef_core::prelude::{AcceleratedFrame, Browsers};
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 struct PendingAcceleratedUpload {
@@ -51,10 +52,24 @@ fn queue_accelerated_uploads(
     let Ok(mut pending) = queue.0.lock() else {
         return;
     };
+    // Coalesce to the newest frame per webview. Each accelerated frame carries the full current
+    // surface, so older queued frames are redundant. When more than one arrived for a webview since
+    // the last upload, blit the whole surface (drop dirty rects) so no superseded region is missed.
+    let mut latest: HashMap<Entity, AcceleratedFrame> = HashMap::new();
+    let mut coalesced: HashSet<Entity> = HashSet::new();
     while let Ok(frame) = browsers.try_receive_accelerated() {
-        let Ok(surface) = surfaces.get(frame.webview) else {
+        let webview = frame.webview;
+        if latest.insert(webview, frame).is_some() {
+            coalesced.insert(webview);
+        }
+    }
+    for (webview, mut frame) in latest {
+        let Ok(surface) = surfaces.get(webview) else {
             continue;
         };
+        if coalesced.contains(&webview) {
+            frame.dirty.clear();
+        }
         let id = surface.0.id();
         let mismatched = images
             .get(id)

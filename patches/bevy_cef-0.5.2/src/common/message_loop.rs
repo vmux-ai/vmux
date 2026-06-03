@@ -161,6 +161,7 @@ Fix: make install-debug-render-process  (or: cargo build -p bevy_cef_debug_rende
         browser_subprocess_path: browser_subprocess_path.as_str().into(),
         no_sandbox: true as _,
         root_cache_path: root_cache_path.unwrap_or_default().into(),
+        background_color: 0x00000000,
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,
         disable_signal_handlers: true as _,
@@ -201,6 +202,7 @@ fn cef_initialize(
         browser_subprocess_path: subprocess_path.as_str().into(),
         no_sandbox: true as _,
         root_cache_path: root_cache_path.unwrap_or_default().into(),
+        background_color: 0x00000000,
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,
         disable_signal_handlers: false as _,
@@ -302,6 +304,13 @@ mod tests {
             .next()
             .unwrap_or_default();
         assert_eq!(main_loop.matches("cef::do_message_loop_work();").count(), 1);
+    }
+
+    #[test]
+    fn cef_global_background_is_transparent_for_windowed_glass() {
+        let source = include_str!("message_loop.rs");
+
+        assert!(source.contains("background_color: 0x00000000"));
     }
 }
 

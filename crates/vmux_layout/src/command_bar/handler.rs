@@ -65,7 +65,7 @@ pub struct CommandBarNativeSize {
 pub struct PendingCommandBarReveal {
     frames: u8,
     open_id: u64,
-    payload: Option<String>,
+    payload: Option<Vec<u8>>,
 }
 
 const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
@@ -269,6 +269,24 @@ fn next_command_bar_reveal_frames(
     }
 }
 
+fn next_command_bar_reveal_frames_for_backend(
+    native_windowed: bool,
+    frames: u8,
+    open_id: u64,
+    rendered_open_id: Option<u64>,
+    painted_open_id: Option<u64>,
+    has_native_size: bool,
+) -> Option<u8> {
+    if native_windowed && open_id != 0 && rendered_open_id != Some(open_id) {
+        return if has_native_size {
+            None
+        } else {
+            Some(frames.saturating_add(1))
+        };
+    }
+    next_command_bar_reveal_frames(frames, open_id, rendered_open_id, painted_open_id)
+}
+
 fn command_bar_reveal_start_frames(was_prewarmed: bool) -> u8 {
     if was_prewarmed {
         COMMAND_BAR_REVEAL_FRAMES
@@ -296,7 +314,7 @@ fn should_start_command_bar_reveal(
 
 fn should_retry_command_bar_open_payload(
     open_id: u64,
-    payload: Option<&str>,
+    payload: Option<&[u8]>,
     rendered_open_id: Option<u64>,
 ) -> bool {
     open_id != 0 && payload.is_some() && rendered_open_id != Some(open_id)
@@ -307,6 +325,10 @@ fn should_requeue_command_bar_open_after_emit(_command_bar_ready: bool) -> bool 
 }
 
 fn on_command_bar_ready(trigger: On<BinReceive<CommandBarReadyEvent>>, mut commands: Commands) {
+    webview_debug_log(format!(
+        "command_bar ready entity={:?}",
+        trigger.event().webview
+    ));
     commands
         .entity(trigger.event().webview)
         .insert(CommandBarReady);
@@ -316,19 +338,48 @@ fn on_command_bar_rendered(
     trigger: On<BinReceive<CommandBarRenderedEvent>>,
     mut commands: Commands,
 ) {
+    webview_debug_log(format!(
+        "command_bar rendered entity={:?} open_id={}",
+        trigger.event().webview,
+        trigger.event().payload.open_id
+    ));
     commands
         .entity(trigger.event().webview)
         .insert(CommandBarRenderedOpen(trigger.event().payload.open_id));
 }
 
-fn on_command_bar_size(trigger: On<BinReceive<CommandBarSizeEvent>>, mut commands: Commands) {
+fn on_command_bar_size(
+    trigger: On<BinReceive<CommandBarSizeEvent>>,
+    state: Query<(&Visibility, Option<&PendingCommandBarReveal>)>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    if let Ok((visibility, pending_reveal)) = state.get(webview)
+        && !command_bar_size_should_apply(*visibility, pending_reveal)
+    {
+        webview_debug_log(format!(
+            "command_bar size ignored entity={webview:?} visibility={visibility:?} pending={}",
+            pending_reveal.is_some()
+        ));
+        return;
+    }
     let payload = trigger.event().payload;
-    commands
-        .entity(trigger.event().webview)
-        .insert(CommandBarNativeSize {
-            width: payload.width.max(1) as f32,
-            height: payload.height.max(1) as f32,
-        });
+    webview_debug_log(format!(
+        "command_bar size entity={webview:?} width={} height={}",
+        payload.width, payload.height
+    ));
+    commands.entity(webview).insert(CommandBarNativeSize {
+        width: payload.width.max(1) as f32,
+        height: payload.height.max(1) as f32,
+    });
+}
+
+fn command_bar_size_should_apply(
+    visibility: Visibility,
+    pending_reveal: Option<&PendingCommandBarReveal>,
+) -> bool {
+    visibility != Visibility::Hidden
+        || pending_reveal.is_some_and(|pending| pending.open_id != 0 && pending.payload.is_some())
 }
 
 #[derive(Default)]
@@ -779,13 +830,10 @@ fn handle_open_command_bar(
         bar_commands,
         target,
     );
-    let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    let ron_body_len = ron_body.len();
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        modal_e,
-        COMMAND_BAR_OPEN_EVENT,
-        &payload,
-    ));
+    let event = BinHostEmitEvent::from_rkyv(modal_e, COMMAND_BAR_OPEN_EVENT, &payload);
+    let payload_bytes = event.payload.clone();
+    let payload_bytes_len = payload_bytes.len();
+    commands.trigger(event);
     if should_start_command_bar_reveal(
         has_browser,
         host_emit_ready,
@@ -800,7 +848,7 @@ fn handle_open_command_bar(
             .insert(PendingCommandBarReveal {
                 frames: reveal_start_frames,
                 open_id,
-                payload: Some(ron_body.clone()),
+                payload: Some(payload_bytes.clone()),
             });
     } else {
         commands
@@ -810,12 +858,12 @@ fn handle_open_command_bar(
             .insert(PendingCommandBarReveal {
                 frames: reveal_start_frames,
                 open_id,
-                payload: Some(ron_body),
+                payload: Some(payload_bytes),
             });
     }
     webview_debug_log(format!(
         "command_bar emit open entity={modal_e:?} payload_len={} tabs={} commands={}",
-        ron_body_len,
+        payload_bytes_len,
         payload.tabs.len(),
         payload.commands.len()
     ));
@@ -1402,18 +1450,24 @@ fn reveal_command_bar(
             &mut PendingCommandBarReveal,
             Option<&CommandBarRenderedOpen>,
             Option<&CommandBarPaintedOpen>,
+            Option<&CommandBarNativeSize>,
+            Has<WebviewWindowed>,
         ),
         With<Modal>,
     >,
 ) {
-    for (entity, mut vis, mut pending, rendered, painted) in &mut query {
+    for (entity, mut vis, mut pending, rendered, painted, native_size, native_windowed) in
+        &mut query
+    {
         let rendered_open_id = rendered.map(|rendered| rendered.0);
         let painted_open_id = painted.map(|painted| painted.0);
-        match next_command_bar_reveal_frames(
+        match next_command_bar_reveal_frames_for_backend(
+            native_windowed,
             pending.frames,
             pending.open_id,
             rendered_open_id,
             painted_open_id,
+            native_size.is_some(),
         ) {
             Some(frames) => pending.frames = frames,
             None => {
@@ -1449,7 +1503,11 @@ fn retry_pending_command_bar_open(
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
-        commands.trigger(HostEmitEvent::new(entity, COMMAND_BAR_OPEN_EVENT, &payload));
+        commands.trigger(BinHostEmitEvent::from_bytes(
+            entity,
+            COMMAND_BAR_OPEN_EVENT,
+            payload.to_vec(),
+        ));
     }
 }
 
@@ -1577,25 +1635,38 @@ mod tests {
     fn command_bar_open_payload_retries_until_rendered_ack() {
         assert!(should_retry_command_bar_open_payload(
             7,
-            Some("payload"),
+            Some(b"payload"),
             None
         ));
         assert!(should_retry_command_bar_open_payload(
             7,
-            Some("payload"),
+            Some(b"payload"),
             Some(6)
         ));
         assert!(!should_retry_command_bar_open_payload(
             7,
-            Some("payload"),
+            Some(b"payload"),
             Some(7)
         ));
         assert!(!should_retry_command_bar_open_payload(
             0,
-            Some("payload"),
+            Some(b"payload"),
             None
         ));
         assert!(!should_retry_command_bar_open_payload(7, None, None));
+    }
+
+    #[test]
+    fn command_bar_open_retry_uses_binary_host_emit() {
+        let source = include_str!("handler.rs");
+        let retry_fn = source
+            .split("fn retry_pending_command_bar_open")
+            .nth(1)
+            .and_then(|tail| tail.split("fn mark_command_bar_painted").next())
+            .unwrap_or_default();
+
+        assert!(retry_fn.contains("BinHostEmitEvent::from_bytes"));
+        assert!(!retry_fn.contains("HostEmitEvent::new"));
     }
 
     #[test]
@@ -1788,6 +1859,42 @@ mod tests {
     }
 
     #[test]
+    fn native_command_bar_does_not_fallback_reveal_without_rendered_ack() {
+        assert_eq!(
+            next_command_bar_reveal_frames_for_backend(true, 10, 7, None, None, false),
+            Some(11)
+        );
+        assert_eq!(
+            next_command_bar_reveal_frames_for_backend(false, 10, 7, None, None, false),
+            None
+        );
+    }
+
+    #[test]
+    fn native_command_bar_ignores_hidden_prewarm_size() {
+        assert!(!command_bar_size_should_apply(Visibility::Hidden, None));
+        assert!(command_bar_size_should_apply(Visibility::Inherited, None));
+    }
+
+    #[test]
+    fn native_command_bar_accepts_hidden_open_size() {
+        let pending = PendingCommandBarReveal {
+            frames: 0,
+            open_id: 7,
+            payload: Some(Vec::new()),
+        };
+
+        assert!(command_bar_size_should_apply(
+            Visibility::Hidden,
+            Some(&pending)
+        ));
+        assert_eq!(
+            next_command_bar_reveal_frames_for_backend(true, 0, 7, None, None, true),
+            None
+        );
+    }
+
+    #[test]
     fn command_bar_paint_before_rendered_ack_still_allows_reveal() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1805,7 +1912,7 @@ mod tests {
                 PendingCommandBarReveal {
                     frames: 2,
                     open_id: 7,
-                    payload: Some("payload".to_string()),
+                    payload: Some(b"payload".to_vec()),
                 },
             ))
             .id();

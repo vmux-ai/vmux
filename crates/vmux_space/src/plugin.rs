@@ -93,7 +93,7 @@ fn handle_spaces_page_open(
 fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
     if let Ok(children) = children_q.get(stack) {
         for child in children.iter() {
-            commands.entity(child).despawn();
+            commands.entity(child).try_despawn();
         }
     }
 }

@@ -235,6 +235,16 @@ mod tests {
         }
     }
 
+    fn super_combo(key: KeyCode) -> KeyCombo {
+        KeyCombo {
+            key,
+            modifiers: Modifiers {
+                super_key: true,
+                ..Default::default()
+            },
+        }
+    }
+
     #[test]
     fn leader_then_h_consumes_and_emits_select_left() {
         let map = map();
@@ -276,5 +286,35 @@ mod tests {
         let action = decide(&map, &mut pending, combo(KeyCode::KeyH, false), later);
         assert!(matches!(action, KeyAction::PassThrough));
         assert!(pending.is_none());
+    }
+
+    #[test]
+    fn native_command_bar_shortcuts_are_consumed_before_cef() {
+        use vmux_command::{BrowserBarCommand, BrowserCommand};
+
+        let map = map();
+        let mut pending = None;
+        let now = Instant::now();
+        let shortcuts = [
+            (
+                super_combo(KeyCode::KeyK),
+                BrowserBarCommand::OpenCommandBar,
+            ),
+            (
+                super_combo(KeyCode::KeyL),
+                BrowserBarCommand::OpenPageInCommandBar,
+            ),
+            (super_combo(KeyCode::Slash), BrowserBarCommand::OpenPathBar),
+        ];
+
+        for (pressed, expected) in shortcuts {
+            let action = decide(&map, &mut pending, pressed, now);
+            match action {
+                KeyAction::Consume(Some(AppCommand::Browser(BrowserCommand::Bar(cmd)))) => {
+                    assert_eq!(cmd, expected);
+                }
+                _ => panic!("expected command bar shortcut"),
+            }
+        }
     }
 }

@@ -1,6 +1,6 @@
 (
     browser: (
-        startup_url: "",
+        startup_url: "https://www.google.com",
     ),
     layout: (
         radius: 8.0,

@@ -436,10 +436,13 @@ pub(crate) fn rebuild_space_views(
             {
                 commands.spawn((Settings::new(&mut meshes, &mut webview_mt), ChildOf(entity)));
             } else {
-                commands.spawn((
-                    Browser::new(&mut meshes, &mut webview_mt, &meta.url),
-                    ChildOf(entity),
-                ));
+                let browser = commands
+                    .spawn((
+                        Browser::new(&mut meshes, &mut webview_mt, &meta.url),
+                        ChildOf(entity),
+                    ))
+                    .id();
+                commands.entity(browser).insert(meta.clone());
             }
         }
     }
@@ -738,8 +741,8 @@ mod tests {
                 PageMetadata {
                     title: "Example".to_string(),
                     url: "https://example.com".to_string(),
-                    favicon_url: String::new(),
-                    bg_color: None,
+                    favicon_url: "https://example.com/favicon.ico".to_string(),
+                    bg_color: Some("#123456".to_string()),
                 },
                 ChildOf(pane),
             ))
@@ -751,11 +754,15 @@ mod tests {
         app.update();
 
         let children = app.world().get::<Children>(tab).unwrap();
-        assert!(
-            children
-                .iter()
-                .any(|entity| app.world().entity(entity).contains::<Browser>())
-        );
+        let browser = children
+            .iter()
+            .find(|entity| app.world().entity(*entity).contains::<Browser>())
+            .expect("browser child");
+        let meta = app.world().get::<PageMetadata>(browser).unwrap();
+        assert_eq!(meta.title, "Example");
+        assert_eq!(meta.url, "https://example.com");
+        assert_eq!(meta.favicon_url, "https://example.com/favicon.ico");
+        assert_eq!(meta.bg_color.as_deref(), Some("#123456"));
     }
 
     #[test]

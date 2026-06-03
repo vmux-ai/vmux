@@ -363,6 +363,7 @@ fn Tab(tab: TabRow) -> Element {
         before:[background:radial-gradient(circle_at_top_left,transparent_0,transparent_8px,var(--tab-bg)_8px)] \
         after:content-[''] after:absolute after:bottom-0 after:-right-2 after:h-2 after:w-2 after:pointer-events-none \
         after:[background:radial-gradient(circle_at_top_right,transparent_0,transparent_8px,var(--tab-bg)_8px)]";
+    let tab_box_classes = "group flex h-10 w-52 min-w-52 max-w-52 basis-52 shrink-0 grow-0 -mb-[3px] pb-[3px] cursor-pointer items-center gap-2 px-3.5";
 
     let (tab_style, tab_class, title_class, close_class) = if is_active {
         if let Some(ref color) = tab.bg_color {
@@ -370,9 +371,9 @@ fn Tab(tab: TabRow) -> Element {
             (
                 format!("--tab-bg:{color};"),
                 format!(
-                    "{skirt_classes} group flex h-10 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-2 rounded-t-md px-3.5 bg-[var(--tab-bg)] {text_class}"
+                    "{skirt_classes} {tab_box_classes} rounded-t-md bg-[var(--tab-bg)] {text_class}"
                 ),
-                format!("min-w-0 truncate text-ui font-medium {text_class}"),
+                format!("min-w-0 flex-1 truncate text-ui font-medium {text_class}"),
                 format!(
                     "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/20 {text_class}"
                 ),
@@ -381,17 +382,19 @@ fn Tab(tab: TabRow) -> Element {
             (
                 "--tab-bg:var(--glass);".to_string(),
                 format!(
-                    "{skirt_classes} glass group flex h-10 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-2 rounded-t-md border-b-0 px-3.5"
+                    "{skirt_classes} {tab_box_classes} glass rounded-t-md border-b-0"
                 ),
-                "min-w-0 truncate text-ui font-medium text-foreground".to_string(),
+                "min-w-0 flex-1 truncate text-ui font-medium text-foreground".to_string(),
                 "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
             )
         }
     } else {
         (
             String::new(),
-            "group flex h-10 min-w-0 max-w-[200px] items-center gap-2 rounded-md px-3.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground".to_string(),
-            "min-w-0 truncate text-ui".to_string(),
+            format!(
+                "{tab_box_classes} rounded-md text-muted-foreground hover:bg-glass-hover hover:text-foreground"
+            ),
+            "min-w-0 flex-1 truncate text-ui".to_string(),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
     };
@@ -400,16 +403,15 @@ fn Tab(tab: TabRow) -> Element {
         div {
             class: "{tab_class}",
             style: "{tab_style}",
-            button {
-                r#type: "button",
+            onclick: move |_| {
+                let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
+                    command: "switch".to_string(),
+                    tab_id: Some(id_switch.clone()),
+                });
+            },
+            div {
                 title: "{tooltip}",
-                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2.5",
-                onclick: move |_| {
-                    let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
-                        command: "switch".to_string(),
-                        tab_id: Some(id_switch.clone()),
-                    });
-                },
+                class: "flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden",
                 StackIcon {
                     url: tab.url.clone(),
                     title: display_title.clone(),
@@ -423,7 +425,12 @@ fn Tab(tab: TabRow) -> Element {
                 aria_label: "Close tab",
                 title: "Close tab",
                 class: "{close_class}",
+                onmousedown: move |evt| {
+                    evt.prevent_default();
+                    evt.stop_propagation();
+                },
                 onclick: move |evt| {
+                    evt.prevent_default();
                     evt.stop_propagation();
                     let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
                         command: "close".to_string(),
@@ -632,7 +639,12 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 aria_label: "Close stack",
                 title: "Close stack",
                 class: "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10",
+                onmousedown: move |evt| {
+                    evt.prevent_default();
+                    evt.stop_propagation();
+                },
                 onclick: move |evt| {
+                    evt.prevent_default();
                     evt.stop_propagation();
                     let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                         command: "close_stack".to_string(),

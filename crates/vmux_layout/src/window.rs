@@ -79,12 +79,28 @@ fn window_background_color() -> Color {
     Color::srgba(0.13, 0.13, 0.14, 1.0)
 }
 
-fn window_background_material(radius: f32, size_m: Vec2) -> WindowMaterial {
+fn window_surface_alpha(mode: crate::scene::InteractionMode) -> f32 {
+    match mode {
+        crate::scene::InteractionMode::User => 0.0,
+        crate::scene::InteractionMode::Player => 1.0,
+    }
+}
+
+fn window_background_material(
+    radius: f32,
+    size_m: Vec2,
+    mode: crate::scene::InteractionMode,
+) -> WindowMaterial {
+    let alpha = window_surface_alpha(mode);
     WindowMaterial {
         base: StandardMaterial {
-            base_color: window_background_color(),
+            base_color: window_background_color().with_alpha(alpha),
             unlit: true,
-            alpha_mode: AlphaMode::Opaque,
+            alpha_mode: if alpha <= 0.0 {
+                AlphaMode::Blend
+            } else {
+                AlphaMode::Opaque
+            },
             cull_mode: None,
             ..default()
         },
@@ -127,6 +143,7 @@ impl Plugin for WindowPlugin {
                 (
                     fit_window_to_screen,
                     sync_window_surface_clip,
+                    sync_window_surface_alpha,
                     apply_webview_material_defaults,
                     sync_window_layout_to_settings,
                     sync_main_column_gap_to_pane_count,
@@ -226,6 +243,7 @@ fn setup(
     main_camera: Single<Entity, With<MainCamera>>,
     mut commands: Commands,
     settings: Res<LayoutSettings>,
+    mode: Res<crate::scene::InteractionMode>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<WindowMaterial>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -241,6 +259,7 @@ fn setup(
             material: MeshMaterial3d(materials.add(window_background_material(
                 settings.radius,
                 Vec2::new(m.x, m.y),
+                *mode,
             ))),
             transform: Transform {
                 translation: Vec3::new(0.0, m.y * 0.5, 0.0),
@@ -373,6 +392,7 @@ fn setup(
             HostWindow(pw),
             Browser,
             WebviewTransparent,
+            WebviewNativeLiquidGlass,
             bevy_cef::prelude::CefIgnorePinchZoom,
         ),
         Node {
@@ -547,6 +567,27 @@ fn sync_window_surface_clip(
             if (clip.x - settings.radius).abs() > 0.01 {
                 clip.x = settings.radius;
             }
+        }
+    }
+}
+
+fn sync_window_surface_alpha(
+    mode: Res<crate::scene::InteractionMode>,
+    mut materials: ResMut<Assets<WindowMaterial>>,
+    q: Query<&MeshMaterial3d<WindowMaterial>, With<WindowSurface>>,
+) {
+    if !mode.is_changed() {
+        return;
+    }
+    let alpha = window_surface_alpha(*mode);
+    for handle in &q {
+        if let Some(mut mat) = materials.get_mut(handle) {
+            mat.base.base_color = mat.base.base_color.with_alpha(alpha);
+            mat.base.alpha_mode = if alpha <= 0.0 {
+                AlphaMode::Blend
+            } else {
+                AlphaMode::Opaque
+            };
         }
     }
 }
@@ -755,8 +796,28 @@ mod tests {
     }
 
     #[test]
-    fn window_background_material_is_opaque() {
-        let material = window_background_material(12.0, Vec2::new(4.0, 3.0));
+    fn window_surface_is_transparent_in_user_mode() {
+        assert_eq!(
+            window_surface_alpha(crate::scene::InteractionMode::User),
+            0.0
+        );
+    }
+
+    #[test]
+    fn window_surface_is_opaque_in_player_mode() {
+        assert_eq!(
+            window_surface_alpha(crate::scene::InteractionMode::Player),
+            1.0
+        );
+    }
+
+    #[test]
+    fn window_background_material_is_opaque_in_player_mode() {
+        let material = window_background_material(
+            12.0,
+            Vec2::new(4.0, 3.0),
+            crate::scene::InteractionMode::Player,
+        );
 
         assert_eq!(material.base.alpha_mode, AlphaMode::Opaque);
         assert_eq!(material.base.cull_mode, None);
@@ -765,8 +826,24 @@ mod tests {
     }
 
     #[test]
+    fn window_background_material_is_transparent_in_user_mode() {
+        let material = window_background_material(
+            12.0,
+            Vec2::new(4.0, 3.0),
+            crate::scene::InteractionMode::User,
+        );
+
+        assert_eq!(material.base.base_color.alpha(), 0.0);
+        assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
+    }
+
+    #[test]
     fn window_background_material_keeps_corner_clip() {
-        let material = window_background_material(12.0, Vec2::new(4.0, 3.0));
+        let material = window_background_material(
+            12.0,
+            Vec2::new(4.0, 3.0),
+            crate::scene::InteractionMode::Player,
+        );
 
         assert_eq!(
             material.extension.clip,
@@ -821,6 +898,7 @@ mod tests {
     fn setup_window_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .insert_resource(crate::scene::InteractionMode::User)
             .insert_resource(test_settings(8.0))
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WindowMaterial>>()
@@ -890,7 +968,7 @@ mod tests {
     }
 
     #[test]
-    fn only_layout_shell_requests_opaque_windowed_background() {
+    fn layout_chrome_uses_transparent_liquid_glass() {
         let mut app = setup_window_app();
         app.update();
 
@@ -908,6 +986,11 @@ mod tests {
         assert!(
             app.world()
                 .get::<WebviewOpaqueWindowedBackground>(layout_shell)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<WebviewNativeLiquidGlass>(layout_shell)
                 .is_some()
         );
         assert!(
@@ -915,6 +998,7 @@ mod tests {
                 .get::<WebviewOpaqueWindowedBackground>(modal)
                 .is_none()
         );
+        assert!(app.world().get::<WebviewNativeLiquidGlass>(modal).is_some());
     }
 
     #[test]

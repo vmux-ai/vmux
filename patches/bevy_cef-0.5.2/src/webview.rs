@@ -1,9 +1,9 @@
 use crate::cef_state::WebviewCefStateSender;
 use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
-    BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri,
-    WebviewOpaqueWindowedBackground, WebviewSize, WebviewSource, WebviewTransparent,
-    WebviewWindowed,
+    BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, WebviewMaxFrameRate,
+    WebviewNativeLiquidGlass, WebviewOpaqueWindowedBackground, WebviewSize, WebviewSource,
+    WebviewTransparent, WebviewWindowed,
 };
 use crate::cursor_icon::SystemCursorIconSender;
 use crate::loading_state::{WebviewCommittedNavigationSender, WebviewLoadingStateSender};
@@ -177,14 +177,17 @@ fn any_resized(webviews: Query<Entity, Changed<WebviewSize>>) -> bool {
 fn sync_windowless_frame_rate(
     browsers: NonSend<Browsers>,
     texture_wake_policy: Res<TextureWakeMinInterval>,
-    webviews: Query<(Entity, Option<&HostWindow>), With<WebviewSource>>,
+    webviews: Query<
+        (Entity, Option<&HostWindow>, Option<&WebviewMaxFrameRate>),
+        With<WebviewSource>,
+    >,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
 ) {
     WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
         let mut min_interval = None::<Duration>;
-        for (entity, host_window) in webviews.iter() {
+        for (entity, host_window, max_frame_rate) in webviews.iter() {
             let window_entity = host_window
                 .map(|h| h.0)
                 .or_else(|| primary_window.single().ok());
@@ -196,11 +199,14 @@ fn sync_windowless_frame_rate(
                 .and_then(|e| windows.get(e).ok())
                 .map(|w| (w.visible, w.focused))
                 .unwrap_or((true, true));
-            let windowless_frame_rate = effective_windowless_frame_rate(
+            let mut windowless_frame_rate = effective_windowless_frame_rate(
                 windowless_frame_rate_from_refresh_millihertz(refresh_rate_millihertz),
                 visible,
                 focused,
             );
+            if let Some(cap) = max_frame_rate {
+                windowless_frame_rate = windowless_frame_rate.min(cap.0.max(1));
+            }
             let frame_interval = windowless_frame_interval_from_frame_rate(windowless_frame_rate);
             min_interval = Some(
                 min_interval
@@ -268,6 +274,7 @@ fn create_webview(
             Option<&HostWindow>,
             Has<WebviewTransparent>,
             Has<WebviewWindowed>,
+            Has<WebviewNativeLiquidGlass>,
             Has<WebviewOpaqueWindowedBackground>,
         ),
         With<ResolvedWebviewUri>,
@@ -285,6 +292,7 @@ fn create_webview(
             host_window,
             transparent,
             windowed,
+            native_liquid_glass,
             opaque_windowed_background,
         ) in
             webviews.iter()
@@ -345,6 +353,7 @@ fn create_webview(
                 },
                 windowless_frame_rate,
                 windowed,
+                native_liquid_glass,
             );
         }
     });

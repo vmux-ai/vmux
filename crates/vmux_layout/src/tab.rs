@@ -11,6 +11,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
+use std::time::Instant;
 use vmux_command::open::OpenCommand;
 use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, TabCommand};
 use vmux_history::LastActivatedAt;
@@ -23,6 +24,7 @@ pub struct TabCommandSet;
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
+            .init_resource::<LastTabCloseAt>()
             .add_plugins(BinEventEmitterPlugin::<(TabsCommandEvent,)>::default())
             .add_observer(on_tabs_command_emit)
             .add_systems(
@@ -42,6 +44,9 @@ impl Plugin for TabPlugin {
 pub struct Tab {
     pub name: String,
 }
+
+#[derive(Resource, Default)]
+pub struct LastTabCloseAt(pub Option<Instant>);
 
 pub fn tab_bundle() -> impl Bundle {
     (
@@ -278,6 +283,7 @@ fn on_tabs_command_emit(
     all_children: Query<&Children>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
+    mut last_tab_close: ResMut<LastTabCloseAt>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
@@ -289,6 +295,7 @@ fn on_tabs_command_emit(
             )));
         }
         "close" => {
+            last_tab_close.0 = Some(Instant::now());
             let target = tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
                 .or(active_tab);
             let Some(target) = target else { return };
@@ -475,5 +482,49 @@ mod tests {
         let ctx = app.world().resource::<NewStackContext>();
         assert!(ctx.stack.is_some());
         assert!(ctx.needs_open);
+    }
+
+    #[test]
+    fn tabs_close_event_records_recent_tab_close() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, TabPlugin))
+            .add_message::<crate::TabLayoutSpawnRequest>();
+
+        let webview = app.world_mut().spawn_empty().id();
+        let main = app.world_mut().spawn(MainNode).id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab {
+                    name: "Tab 1".into(),
+                },
+                LastActivatedAt::now(),
+                ChildOf(main),
+            ))
+            .id();
+        let other_tab = app
+            .world_mut()
+            .spawn((
+                Tab {
+                    name: "Tab 2".into(),
+                },
+                LastActivatedAt(1),
+                ChildOf(main),
+            ))
+            .id();
+        app.world_mut().spawn(PrimaryWindow);
+
+        app.world_mut().trigger(BinReceive::<TabsCommandEvent> {
+            webview,
+            payload: TabsCommandEvent {
+                command: "close".to_string(),
+                tab_id: Some(tab.to_bits().to_string()),
+            },
+        });
+        app.world_mut().flush();
+
+        assert!(app.world().get_entity(tab).is_err());
+        assert!(app.world().get_entity(other_tab).is_ok());
+        assert!(app.world().resource::<LastTabCloseAt>().0.is_some());
     }
 }

@@ -167,7 +167,12 @@ pub fn layout_cef_bundle(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> impl Bundle {
     (
-        (LayoutCef, WebviewWindowed, WebviewOpaqueWindowedBackground),
+        (
+            LayoutCef,
+            WebviewWindowed,
+            WebviewNativeLiquidGlass,
+            WebviewMaxFrameRate(30),
+        ),
         Browser,
         HostWindow(host_window),
         WebviewTransparent,

@@ -15,7 +15,7 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{CefEmbeddedHosts, RenderTextureMessage, webview_debug_log};
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, BrowserNavigationCommand, BrowserViewCommand,
-    ReadAppCommands, open::OpenCommand,
+    LayoutCommand, ReadAppCommands, StackCommand, open::OpenCommand,
 };
 use vmux_core::{
     CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenId,
@@ -33,19 +33,16 @@ use vmux_layout::{
         PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT,
         StackNode, StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsHostEvent,
     },
-    pane::{Pane, PaneHoverIntent, PaneSplit, first_leaf_descendant, first_stack_in_pane},
+    pane::{Pane, PaneHoverIntent, PaneSplit, first_stack_in_pane},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
-    stack::{
-        CloseConfirmed, PendingStackClose, Stack, active_stack_in_pane, collect_leaf_panes,
-        focused_stack, stack_bundle,
-    },
+    stack::{Stack, active_stack_in_pane, collect_leaf_panes, focused_stack, stack_bundle},
     tab::Tab,
     window::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
     },
 };
 use vmux_setting::AppSettings;
-use vmux_terminal::{self as terminal, PtyExited, RestartPty, Terminal};
+use vmux_terminal::{self as terminal, RestartPty, Terminal};
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
 
 pub struct BrowserPlugin;
@@ -588,21 +585,38 @@ fn webview_should_use_windowed(mode: vmux_layout::scene::InteractionMode) -> boo
     cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User
 }
 
+/// When set, the layout chrome stays OSR (windowless) even in User mode so its transparent areas
+/// reveal the native glass window backdrop. Pages remain windowed. Read once from `VMUX_GLASS`.
+fn glass_experiment_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("VMUX_GLASS").is_some())
+}
+
 fn sync_cef_backend_for_interaction_mode(world: &mut World) {
     let mode = world
         .get_resource::<vmux_layout::scene::InteractionMode>()
         .copied()
         .unwrap_or_default();
-    let should_windowed = webview_should_use_windowed(mode);
+    let base_windowed = webview_should_use_windowed(mode);
     let mut query = world.query_filtered::<Entity, (With<Browser>, With<WebviewSource>)>();
     let entities: Vec<Entity> = query.iter(world).collect();
+    // The layout chrome and the command-bar modal stay OSR so their transparent areas reveal the
+    // native glass backdrop; only the page webviews are windowed.
+    let osr_only: Vec<Entity> = if glass_experiment_enabled() {
+        let mut q = world.query_filtered::<Entity, Or<(With<LayoutCef>, With<Modal>)>>();
+        q.iter(world).collect()
+    } else {
+        Vec::new()
+    };
+    let target_windowed = |entity: Entity| base_windowed && !osr_only.contains(&entity);
     let mut recreate = Vec::new();
     {
         let browsers = world.non_send::<Browsers>();
         for &entity in &entities {
             if browsers
                 .is_windowed(&entity)
-                .is_some_and(|actual| actual != should_windowed)
+                .is_some_and(|actual| actual != target_windowed(entity))
             {
                 recreate.push(entity);
             }
@@ -615,7 +629,8 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
         }
     }
     for entity in entities {
-        let marker_matches = world.get::<WebviewWindowed>(entity).is_some() == should_windowed;
+        let want_windowed = target_windowed(entity);
+        let marker_matches = world.get::<WebviewWindowed>(entity).is_some() == want_windowed;
         let needs_recreate = recreate.contains(&entity);
         if marker_matches && !needs_recreate {
             continue;
@@ -623,7 +638,7 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
         let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
             continue;
         };
-        if should_windowed {
+        if want_windowed {
             entity_mut.insert(WebviewWindowed);
         } else {
             entity_mut.remove::<WebviewWindowed>();
@@ -659,7 +674,16 @@ fn sync_windowed_frames(
     >,
     child_of_q: Query<&ChildOf>,
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
+    modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
 ) {
+    // While the (OSR) command bar is open, hide the native pages so the modal — which composites in
+    // the Bevy layer, behind native views — is visible on top.
+    if vmux_layout::command_bar::handler::is_command_bar_open(&modal_q) {
+        for (entity, ..) in &browser_q {
+            browsers.set_windowed_hidden(&entity, true);
+        }
+        return;
+    }
     for (entity, tf, self_computed, self_ui_gt, child_of) in &browser_q {
         if tf.scale.x <= 1.0e-3 {
             browsers.set_windowed_hidden(&entity, true);
@@ -796,6 +820,14 @@ fn command_bar_windowed_view_should_show(
     display != Display::None && visibility != Visibility::Hidden && has_keyboard_target
 }
 
+fn command_bar_windowed_view_should_render_hidden(
+    display: Display,
+    visibility: Visibility,
+    has_keyboard_target: bool,
+) -> bool {
+    display != Display::None && visibility == Visibility::Hidden && has_keyboard_target
+}
+
 fn sync_windowed_command_bar(
     browsers: NonSend<Browsers>,
     modal_q: Query<
@@ -812,16 +844,40 @@ fn sync_windowed_command_bar(
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     mut was_open: Local<bool>,
+    mut dbg: Local<Option<(bool, bool, bool, bool)>>,
 ) {
-    let Ok((entity, node, visibility, has_keyboard_target, host_window, native_size)) =
-        modal_q.single()
+    let matched = modal_q.single();
+    {
+        let s = match &matched {
+            Ok((_, node, visibility, kbd, _, _)) => (
+                true,
+                node.display != Display::None,
+                **visibility != Visibility::Hidden,
+                *kbd,
+            ),
+            Err(_) => (false, false, false, false),
+        };
+        if *dbg != Some(s) {
+            info!(
+                "[wcmd] windowed_modal={} display_flex={} visible={} kbd_target={}",
+                s.0, s.1, s.2, s.3
+            );
+            *dbg = Some(s);
+        }
+    }
+    let Ok((entity, node, visibility, has_keyboard_target, host_window, native_size)) = matched
     else {
         *was_open = false;
         return;
     };
     let open =
         command_bar_windowed_view_should_show(node.display, *visibility, has_keyboard_target);
-    if !open {
+    let render_hidden = command_bar_windowed_view_should_render_hidden(
+        node.display,
+        *visibility,
+        has_keyboard_target,
+    );
+    if !open && !render_hidden {
         hide_windowed_command_bar(&browsers, entity);
         *was_open = false;
         return;
@@ -841,6 +897,20 @@ fn sync_windowed_command_bar(
         return;
     };
     let scale = window.resolution.scale_factor();
+    if render_hidden {
+        let frame = command_bar_hidden_windowed_frame();
+        browsers.set_windowed_hidden(&entity, false);
+        browsers.resize(&entity, Vec2::new(frame.width_px, frame.height_px), 1.0);
+        browsers.set_windowed_frame(
+            &entity,
+            frame.left_px,
+            frame.top_px,
+            frame.width_px,
+            frame.height_px,
+            1.0,
+        );
+        return;
+    }
     let measured = native_size.map(|size| Vec2::new(size.width, size.height));
     let Some(frame) = command_bar_windowed_frame(
         window.resolution.physical_width() as f32,
@@ -866,8 +936,8 @@ fn sync_windowed_command_bar(
         scale,
     );
     browsers.set_windowed_hidden(&entity, false);
+    browsers.raise_windowed_to_front(&entity);
     if !*was_open {
-        browsers.raise_windowed_to_front(&entity);
         browsers.nudge_windowed_repaint(&entity);
         *was_open = true;
     }
@@ -1401,11 +1471,6 @@ fn push_stacks_host_emit(
     if !should_emit_cached_payload(&ron_body, &last, page_ready.is_changed()) {
         return;
     }
-    warn!(
-        "[stacks-debug] emitting StacksHostEvent: {} stacks, ron_len={}",
-        payload.stacks.len(),
-        ron_body.len()
-    );
     commands.trigger(BinHostEmitEvent::from_rkyv(cef_e, STACKS_EVENT, &payload));
     *last = ron_body;
 }
@@ -1806,22 +1871,9 @@ fn on_hard_reload_notify_header(
 fn on_side_sheet_command_emit(
     trigger: On<BinReceive<SideSheetCommandEvent>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    tab_query: Query<(Entity, &LastActivatedAt), With<Tab>>,
-    all_children: Query<&Children>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
-    child_of_q: Query<&ChildOf>,
-    split_q: Query<(), With<PaneSplit>>,
-    mut close_extra: ParamSet<(
-        Query<'static, 'static, &'static mut Window, With<PrimaryWindow>>,
-        Query<'static, 'static, (), (With<Terminal>, Without<PtyExited>)>,
-        Query<'static, 'static, (), With<CloseConfirmed>>,
-        Query<'static, 'static, (), With<PendingStackClose>>,
-    )>,
     mut hover_intent: ResMut<PaneHoverIntent>,
-    settings: Res<AppSettings>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut commands: Commands,
 ) {
@@ -1852,118 +1904,11 @@ fn on_side_sheet_command_emit(
             let Some(&target_stack) = stack_entities.get(evt.stack_index as usize) else {
                 return;
             };
-
-            // Confirm close if terminal is still running
-            let needs_confirm = terminal::should_confirm_close(&settings)
-                && terminal::has_live_terminal(target_stack, &all_children, &close_extra.p1());
-            if needs_confirm {
-                if close_extra.p2().contains(target_stack) {
-                    commands.entity(target_stack).remove::<CloseConfirmed>();
-                } else {
-                    if !close_extra.p3().contains(target_stack) {
-                        commands.entity(target_stack).insert(PendingStackClose);
-                    }
-                    return;
-                }
-            }
-
-            if stack_entities.len() > 1 {
-                let is_active = active_stack_in_pane(target_pane, &pane_children, &stack_ts)
-                    == Some(target_stack);
-                commands.entity(target_stack).despawn();
-                if is_active {
-                    let next = stack_entities
-                        .iter()
-                        .copied()
-                        .find(|&e| e != target_stack)
-                        .unwrap();
-                    commands.entity(next).insert(LastActivatedAt::now());
-                }
-            } else if leaf_panes.iter().count() <= 1 {
-                if let Ok(mut window) = close_extra.p0().single_mut() {
-                    window.visible = false;
-                }
-            } else {
-                let Ok(pane_co) = child_of_q.get(target_pane) else {
-                    return;
-                };
-                let parent = pane_co.get();
-                let Ok(parent_children) = pane_children.get(parent) else {
-                    return;
-                };
-                let is_pane = |e: Entity| leaf_panes.contains(e) || split_q.contains(e);
-                let Some(sibling) = parent_children
-                    .iter()
-                    .find(|&e| e != target_pane && is_pane(e))
-                else {
-                    return;
-                };
-
-                let (_, current_active_pane, _) = focused_stack(
-                    &tab_query,
-                    &all_children,
-                    &leaf_panes,
-                    &pane_ts,
-                    &pane_children,
-                    &stack_ts,
-                );
-                let target_pane_is_active = current_active_pane == Some(target_pane);
-                let sibling_is_active = current_active_pane == Some(sibling);
-
-                let sibling_children: Vec<Entity> = pane_children
-                    .get(sibling)
-                    .map(|c| c.iter().collect())
-                    .unwrap_or_default();
-                for &child in &sibling_children {
-                    commands.entity(child).insert(ChildOf(parent));
-                }
-
-                let (new_active_pane, tab_to_activate);
-                if split_q.contains(sibling) {
-                    new_active_pane = first_leaf_descendant(sibling, &pane_children, &leaf_panes);
-                    tab_to_activate =
-                        active_stack_in_pane(new_active_pane, &pane_children, &stack_ts).or_else(
-                            || first_stack_in_pane(new_active_pane, &pane_children, &stack_q),
-                        );
-                    commands.entity(sibling).remove::<ChildOf>();
-                    commands.queue(move |world: &mut World| {
-                        world.despawn(sibling);
-                    });
-                } else {
-                    new_active_pane = parent;
-                    tab_to_activate = sibling_children
-                        .iter()
-                        .copied()
-                        .find(|&e| stack_ts.get(e).is_ok())
-                        .or_else(|| {
-                            sibling_children
-                                .iter()
-                                .copied()
-                                .find(|&e| stack_q.contains(e))
-                        });
-                    commands.entity(parent).remove::<PaneSplit>();
-                    commands.entity(parent).insert(Node {
-                        flex_grow: 1.0,
-                        flex_basis: Val::Px(0.0),
-                        align_items: AlignItems::Stretch,
-                        justify_content: JustifyContent::Stretch,
-                        ..default()
-                    });
-                    commands.entity(sibling).despawn();
-                }
-
-                commands.entity(target_pane).despawn();
-
-                if target_pane_is_active || sibling_is_active {
-                    commands
-                        .entity(new_active_pane)
-                        .insert(LastActivatedAt::now());
-                    if let Some(tab) = tab_to_activate {
-                        commands.entity(tab).insert(LastActivatedAt::now());
-                    }
-                }
-            }
-
+            commands.entity(target_pane).insert(LastActivatedAt::now());
+            commands.entity(target_stack).insert(LastActivatedAt::now());
+            messages.write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
         }
@@ -2370,7 +2315,7 @@ fn attach_error_page_to_stack(
 fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
     if let Ok(children) = children_q.get(stack) {
         for child in children.iter() {
-            commands.entity(child).despawn();
+            commands.entity(child).try_despawn();
         }
     }
 }
@@ -2501,6 +2446,19 @@ mod tests {
     }
 
     #[test]
+    fn side_sheet_close_stack_routes_through_stack_command() {
+        let source = include_str!("lib.rs");
+        let branch = source
+            .split("\"close_stack\" => {")
+            .nth(1)
+            .and_then(|rest| rest.split("\"new_stack\" => {").next())
+            .expect("close_stack branch");
+
+        assert!(branch.contains("StackCommand::Close"));
+        assert!(!branch.contains("window.visible = false"));
+    }
+
+    #[test]
     fn cef_pointer_hit_rect_contains_edges() {
         let rect = CefPointerHitRect {
             center: Vec2::new(50.0, 20.0),
@@ -2599,6 +2557,19 @@ mod tests {
             .unwrap_or_default();
 
         assert!(sync_fn.contains("browsers.raise_windowed_to_front"));
+    }
+
+    #[test]
+    fn windowed_command_bar_sync_keeps_modal_above_pages() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_command_bar")
+            .nth(1)
+            .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("browsers.raise_windowed_to_front(&entity);"));
+        assert!(!sync_fn.contains("if !*was_open {\n        browsers.raise_windowed_to_front"));
     }
 
     #[test]
@@ -2736,16 +2707,55 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_windowed_view_waits_for_reveal() {
+    fn command_bar_windowed_view_requires_display_and_keyboard_target() {
+        assert!(!command_bar_windowed_view_should_show(
+            Display::None,
+            Visibility::Hidden,
+            true
+        ));
         assert!(!command_bar_windowed_view_should_show(
             Display::Flex,
             Visibility::Hidden,
-            true
+            false
         ));
         assert!(command_bar_windowed_view_should_show(
             Display::Flex,
             Visibility::Inherited,
             true
+        ));
+    }
+
+    #[test]
+    fn command_bar_windowed_view_shows_hidden_pending_view_for_renderer_ack() {
+        assert!(!command_bar_windowed_view_should_show(
+            Display::Flex,
+            Visibility::Hidden,
+            true
+        ));
+        assert!(command_bar_windowed_view_should_render_hidden(
+            Display::Flex,
+            Visibility::Hidden,
+            true
+        ));
+        assert!(!command_bar_windowed_view_should_show(
+            Display::None,
+            Visibility::Hidden,
+            true
+        ));
+        assert!(!command_bar_windowed_view_should_show(
+            Display::Flex,
+            Visibility::Hidden,
+            false
+        ));
+        assert!(!command_bar_windowed_view_should_render_hidden(
+            Display::None,
+            Visibility::Hidden,
+            true
+        ));
+        assert!(!command_bar_windowed_view_should_render_hidden(
+            Display::Flex,
+            Visibility::Hidden,
+            false
         ));
     }
 

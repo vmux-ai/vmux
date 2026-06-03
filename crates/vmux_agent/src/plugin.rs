@@ -666,7 +666,6 @@ fn handle_agent_page_open_task(
                 vmux_terminal::pid::focus_pane_entity(entity, commands, child_of_q);
                 return Ok(());
             }
-            clear_stack_children(task.stack, children_q, commands);
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
             spawn_agent.write(SpawnAgentInStackRequest {
                 kind,
@@ -680,7 +679,6 @@ fn handle_agent_page_open_task(
             if segs.len() == 1
                 && let Some(kind) = AgentKind::from_url_segment(segs[0])
             {
-                clear_stack_children(task.stack, children_q, commands);
                 let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
                 spawn_agent.write(SpawnAgentInStackRequest {
                     kind,
@@ -712,9 +710,65 @@ fn handle_agent_page_open_task(
 fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
     if let Ok(children) = children_q.get(stack) {
         for child in children.iter() {
-            commands.entity(child).despawn();
+            commands.entity(child).try_despawn();
         }
     }
+}
+
+fn attach_agent_spawn_error_to_stack(
+    stack: Entity,
+    kind: AgentKind,
+    message: &str,
+    children_q: &Query<&Children>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    clear_stack_children(stack, children_q, commands);
+    let title = "Agent failed to start";
+    let url = format!("vmux://error/agent/{}/", kind.as_url_segment());
+    let message = html_escape(message);
+    let html = format!(
+        "<!doctype html><html><head><meta charset='utf-8'><title>{title}</title><style>html,body{{height:100%;margin:0;background:#101114;color:#e8e8ea;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}}main{{height:100%;display:flex;align-items:center;justify-content:center;padding:40px;box-sizing:border-box}}section{{max-width:640px}}h1{{font-size:28px;line-height:1.15;margin:0 0 12px;font-weight:650}}p{{font-size:14px;line-height:1.55;margin:0;color:#a9abb2}}code{{display:block;margin-top:18px;padding:12px;border-radius:6px;background:#1a1c22;color:#d7d8dd;white-space:pre-wrap;word-break:break-word}}</style></head><body><main><section><h1>{title}</h1><p>{}</p><code>{}</code></section></main></body></html>",
+        kind.display_name(),
+        message
+    );
+    let data_url = data_url_for_html(&html);
+    commands.entity(stack).insert(PageMetadata {
+        url,
+        title: title.to_string(),
+        bg_color: Some("#101114".to_string()),
+        ..default()
+    });
+    let browser = commands
+        .spawn((
+            vmux_layout::Browser::new_with_title(meshes, webview_mt, &data_url, title),
+            ChildOf(stack),
+        ))
+        .id();
+    commands.entity(browser).insert(CefKeyboardTarget);
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn data_url_for_html(html: &str) -> String {
+    let mut encoded = String::with_capacity(html.len() * 3);
+    for byte in html.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(*byte as char)
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    format!("data:text/html;charset=utf-8,{encoded}")
 }
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
@@ -723,17 +777,29 @@ fn handle_spawn_agent_requests(
     mut reader: MessageReader<SpawnAgentInStackRequest>,
     settings: Res<AppSettings>,
     strategies: Option<Res<AgentStrategies>>,
+    children_q: Query<&Children>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for req in reader.read() {
         let Some(strategies) = strategies.as_deref() else {
-            bevy::log::warn!("agent strategies not registered; cannot spawn agent");
+            let message = "agent strategies not registered; cannot spawn agent";
+            bevy::log::warn!("{message}");
+            attach_agent_spawn_error_to_stack(
+                req.stack,
+                req.kind,
+                message,
+                &children_q,
+                &mut commands,
+                &mut meshes,
+                &mut webview_mt,
+            );
             continue;
         };
         match crate::build_agent_launch(req.kind, &req.cwd, req.session_id.as_deref(), strategies) {
             Ok(launch) => {
+                clear_stack_children(req.stack, &children_q, &mut commands);
                 let terminal = commands
                     .spawn((
                         new_terminal_bundle_with_cwd(
@@ -761,6 +827,15 @@ fn handle_spawn_agent_requests(
             }
             Err(e) => {
                 bevy::log::warn!("agent spawn ({:?}) failed: {e}", req.kind);
+                attach_agent_spawn_error_to_stack(
+                    req.stack,
+                    req.kind,
+                    &e,
+                    &children_q,
+                    &mut commands,
+                    &mut meshes,
+                    &mut webview_mt,
+                );
             }
         }
     }
@@ -1140,5 +1215,46 @@ mod tests {
             .get::<vmux_terminal::PendingTerminalInput>(terminal)
             .expect("PendingTerminalInput inserted");
         assert_eq!(pending.data, b"ls".to_vec());
+    }
+
+    #[test]
+    fn failed_cli_agent_spawn_shows_error_page() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(AgentStrategies::default())
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(
+                Update,
+                (handle_agent_page_open, handle_spawn_agent_requests).chain(),
+            );
+
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
+        let child = app.world_mut().spawn(ChildOf(stack)).id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://agent/vibe".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+        app.update();
+
+        assert!(app.world().get_entity(child).is_err());
+        let mut browsers = app
+            .world_mut()
+            .query_filtered::<(&PageMetadata, &ChildOf), With<vmux_layout::Browser>>();
+        let titles: Vec<String> = browsers
+            .iter(app.world())
+            .filter(|(_, child_of)| child_of.parent() == stack)
+            .map(|(meta, _)| meta.title.clone())
+            .collect();
+        assert_eq!(titles, vec!["Agent failed to start".to_string()]);
     }
 }

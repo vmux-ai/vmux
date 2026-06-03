@@ -254,7 +254,7 @@ fn is_modifier_key(key: KeyCode) -> bool {
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
-    use vmux_command::{CommandPlugin, LayoutCommand, SpaceCommand};
+    use vmux_command::{CommandPlugin, LayoutCommand, SpaceCommand, StackCommand};
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -333,6 +333,31 @@ mod tests {
             command: "split_h".into(),
             binding: ShortcutDef::Leader(KeyComboDef {
                 key: "\"".into(),
+                ctrl: false,
+                shift: false,
+                alt: false,
+                super_key: false,
+            }),
+        });
+        settings
+    }
+
+    fn current_settings_with_leader(key: &str) -> AppSettings {
+        let mut settings = split_settings_with_leader(key);
+        settings.shortcuts.bindings.push(ShortcutEntry {
+            command: "toggle_pane".into(),
+            binding: ShortcutDef::Leader(KeyComboDef {
+                key: "o".into(),
+                ctrl: false,
+                shift: false,
+                alt: false,
+                super_key: false,
+            }),
+        });
+        settings.shortcuts.bindings.push(ShortcutEntry {
+            command: "close_pane".into(),
+            binding: ShortcutDef::Leader(KeyComboDef {
+                key: "x".into(),
                 ctrl: false,
                 shift: false,
                 alt: false,
@@ -608,6 +633,37 @@ mod tests {
                     mode: PaneOpenMode::NewStack,
                     url: None,
                 }
+            ))]
+        );
+    }
+
+    #[test]
+    fn configured_legacy_leader_x_emits_stack_close() {
+        let mut app = test_app_with_settings(current_settings_with_leader("b"));
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyB);
+        app.update();
+        clear_input_frame(&mut app);
+
+        release(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::ControlLeft);
+        app.update();
+        clear_input_frame(&mut app);
+
+        press(&mut app, KeyCode::KeyX);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(
+            commands,
+            vec![AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close
             ))]
         );
     }

@@ -361,7 +361,9 @@ fn handle_terminal_page_open(
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for (entity, task) in &tasks {
-        if task.url.starts_with(TERMINAL_PAGE_URL) {
+        if task.url == TERMINAL_PAGE_URL.trim_end_matches('/')
+            || task.url.starts_with(TERMINAL_PAGE_URL)
+        {
             match open_terminal_page(
                 task,
                 pid_to_entity.as_deref(),
@@ -458,7 +460,7 @@ fn open_terminal_page(
 fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
     if let Ok(children) = children_q.get(stack) {
         for child in children.iter() {
-            commands.entity(child).despawn();
+            commands.entity(child).try_despawn();
         }
     }
 }
@@ -2388,9 +2390,74 @@ pub fn handle_run_shell_requests(
 mod tests {
     use super::*;
     use bevy::ecs::schedule::Schedules;
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use vmux_setting::{BrowserSettings, ShortcutSettings};
 
     fn process_id(byte: u8) -> ProcessId {
         ProcessId([byte; 16])
+    }
+
+    fn test_settings() -> AppSettings {
+        AppSettings {
+            browser: BrowserSettings {
+                startup_url: "about:blank".to_string(),
+            },
+            layout: LayoutSettings {
+                radius: 0.0,
+                window: WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: PaneSettings { gap: 0.0 },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            },
+            shortcuts: ShortcutSettings::default(),
+            terminal: None,
+            auto_update: false,
+            agent: vmux_setting::AgentSettings::default(),
+        }
+    }
+
+    #[test]
+    fn terminal_page_open_accepts_url_without_trailing_slash() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .init_resource::<vmux_space::spaces::ActiveSpace>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_terminal_page_open);
+
+        let stack = app.world_mut().spawn(vmux_layout::stack::stack_bundle()).id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: vmux_core::PageOpenId::new(),
+                stack,
+                url: "vmux://terminal".to_string(),
+                request_id: None,
+            })
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<PageOpenHandled>(task).is_some());
+        let mut terminals = app
+            .world_mut()
+            .query_filtered::<&ChildOf, With<Terminal>>();
+        assert_eq!(
+            terminals
+                .iter(app.world())
+                .filter(|child_of| child_of.get() == stack)
+                .count(),
+            1
+        );
     }
 
     #[test]

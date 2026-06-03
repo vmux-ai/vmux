@@ -303,100 +303,95 @@ fn handle_stack_commands(
                         continue;
                     }
 
-                    if leaf_panes.iter().count() <= 1 {
+                    if let Ok(parent) = child_of_q.get(pane).map(Relationship::get)
+                        && split_dir_q.contains(parent)
+                    {
                         commands.entity(active).despawn();
-                        let stack = commands
-                            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                            .id();
-                        new_stack_ctx.previous_stack = None;
-                        let startup_url = effective_startup_url
-                            .as_deref()
-                            .map(|u| u.0.clone())
+                        let Ok(siblings) = pane_children.get(parent) else {
+                            continue;
+                        };
+                        let sibling = siblings.iter().find(|&e| {
+                            e != pane && (leaf_panes.contains(e) || split_dir_q.contains(e))
+                        });
+                        let Some(sibling) = sibling else {
+                            continue;
+                        };
+                        let sibling_children: Vec<Entity> = pane_children
+                            .get(sibling)
+                            .map(|c| c.iter().collect())
                             .unwrap_or_default();
-                        if startup_url.is_empty() {
-                            new_stack_ctx.stack = Some(stack);
-                            new_stack_ctx.needs_open = true;
-                        } else {
-                            new_stack_ctx.stack = None;
-                            new_stack_ctx.needs_open = false;
-                            page_open_requests.write(PageOpenRequest {
-                                target: PageOpenTarget::Stack(stack),
-                                url: startup_url,
-                                request_id: None,
-                            });
+
+                        for &child in &sibling_children {
+                            commands.entity(child).insert(ChildOf(parent));
                         }
-                        continue;
-                    }
 
-                    let Ok(pane_co) = child_of_q.get(pane) else {
-                        continue;
-                    };
-                    let parent = pane_co.get();
+                        let new_active_pane;
+                        if split_dir_q.contains(sibling) {
+                            new_active_pane =
+                                first_leaf_descendant(sibling, &pane_children, &leaf_panes);
+                            commands.entity(sibling).remove::<ChildOf>();
+                            commands.queue(move |world: &mut World| {
+                                world.despawn(sibling);
+                            });
+                        } else {
+                            new_active_pane = parent;
+                            commands.entity(parent).remove::<PaneSplit>();
+                            commands.entity(parent).insert(Node {
+                                flex_grow: 1.0,
+                                flex_basis: Val::Px(0.0),
+                                align_items: AlignItems::Stretch,
+                                justify_content: JustifyContent::Stretch,
+                                ..default()
+                            });
+                            commands.entity(sibling).despawn();
+                        }
 
-                    if !split_dir_q.contains(parent) {
-                        commands.entity(active).despawn();
+                        commands.entity(pane).despawn();
+                        commands
+                            .entity(new_active_pane)
+                            .insert(LastActivatedAt::now());
+                        let new_stack =
+                            active_stack_in_pane(new_active_pane, &pane_children, &stack_ts)
+                                .or_else(|| {
+                                    first_stack_in_pane(new_active_pane, &pane_children, &stack_q)
+                                })
+                                .or_else(|| {
+                                    sibling_children
+                                        .iter()
+                                        .copied()
+                                        .find(|&e| stack_q.contains(e))
+                                });
+                        if let Some(t) = new_stack {
+                            commands.entity(t).insert(LastActivatedAt::now());
+                        }
+                        if new_stack_ctx.stack == Some(active) {
+                            new_stack_ctx.stack = None;
+                        }
+                        new_stack_ctx.previous_stack = None;
+                        new_stack_ctx.needs_open = false;
                         continue;
                     }
 
                     commands.entity(active).despawn();
-
-                    let Ok(siblings) = pane_children.get(parent) else {
-                        continue;
-                    };
-                    let sibling = siblings.iter().find(|&e| {
-                        e != pane && (leaf_panes.contains(e) || split_dir_q.contains(e))
-                    });
-                    let Some(sibling) = sibling else {
-                        continue;
-                    };
-
-                    let sibling_children: Vec<Entity> = pane_children
-                        .get(sibling)
-                        .map(|c| c.iter().collect())
+                    let stack = commands
+                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                        .id();
+                    new_stack_ctx.previous_stack = None;
+                    let startup_url = effective_startup_url
+                        .as_deref()
+                        .map(|u| u.0.clone())
                         .unwrap_or_default();
-
-                    for &child in &sibling_children {
-                        commands.entity(child).insert(ChildOf(parent));
-                    }
-
-                    let new_active_pane;
-                    if split_dir_q.contains(sibling) {
-                        new_active_pane =
-                            first_leaf_descendant(sibling, &pane_children, &leaf_panes);
-                        commands.entity(sibling).remove::<ChildOf>();
-                        commands.queue(move |world: &mut World| {
-                            world.despawn(sibling);
-                        });
+                    if startup_url.is_empty() {
+                        new_stack_ctx.stack = Some(stack);
+                        new_stack_ctx.needs_open = true;
                     } else {
-                        new_active_pane = parent;
-                        commands.entity(parent).remove::<PaneSplit>();
-                        commands.entity(parent).insert(Node {
-                            flex_grow: 1.0,
-                            flex_basis: Val::Px(0.0),
-                            align_items: AlignItems::Stretch,
-                            justify_content: JustifyContent::Stretch,
-                            ..default()
+                        new_stack_ctx.stack = None;
+                        new_stack_ctx.needs_open = false;
+                        page_open_requests.write(PageOpenRequest {
+                            target: PageOpenTarget::Stack(stack),
+                            url: startup_url,
+                            request_id: None,
                         });
-                        commands.entity(sibling).despawn();
-                    }
-
-                    commands.entity(pane).despawn();
-                    commands
-                        .entity(new_active_pane)
-                        .insert(LastActivatedAt::now());
-                    let new_stack =
-                        active_stack_in_pane(new_active_pane, &pane_children, &stack_ts)
-                            .or_else(|| {
-                                first_stack_in_pane(new_active_pane, &pane_children, &stack_q)
-                            })
-                            .or_else(|| {
-                                sibling_children
-                                    .iter()
-                                    .copied()
-                                    .find(|&e| stack_q.contains(e))
-                            });
-                    if let Some(t) = new_stack {
-                        commands.entity(t).insert(LastActivatedAt::now());
                     }
                     continue;
                 }
@@ -642,6 +637,7 @@ mod tests {
     use crate::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
+    use bevy::ecs::relationship::Relationship;
     use bevy::window::ClosingWindow;
     use bevy_cef::prelude::WebviewExtendStandardMaterial;
     use vmux_command::{CommandPlugin, WriteAppCommands};
@@ -713,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn closing_last_stack_in_tab_closes_tab_when_another_tab_exists() {
+    fn closing_last_stack_in_tab_closes_the_tab_when_another_tab_exists() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_message::<PageOpenRequest>()
@@ -747,8 +743,10 @@ mod tests {
             .world_mut()
             .spawn((Pane, LastActivatedAt(2), ChildOf(closing_tab)))
             .id();
-        app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(closing_pane)));
+        let closing_stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(closing_pane)))
+            .id();
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -759,12 +757,77 @@ mod tests {
         app.update();
 
         assert!(app.world().get_entity(closing_tab).is_err());
+        assert!(app.world().get_entity(closing_stack).is_err());
         assert!(app.world().get_entity(remaining_tab).is_ok());
         assert!(app.world().get::<LastActivatedAt>(remaining_tab).unwrap().0 > 1);
 
         let ctx = app.world().resource::<NewStackContext>();
         assert_eq!(ctx.stack, None);
         assert!(!ctx.needs_open);
+    }
+
+    #[test]
+    fn closing_only_stack_in_split_pane_closes_pane() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<PendingCursorWarp>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let split = app
+            .world_mut()
+            .spawn((
+                crate::pane::split_root_bundle(crate::pane::PaneSplitDirection::Row),
+                ChildOf(tab),
+            ))
+            .id();
+        let active_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(split)))
+            .id();
+        let other_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(split)))
+            .id();
+        let original_stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(active_pane)))
+            .id();
+        let other_stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(other_pane)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
+
+        app.update();
+
+        assert!(app.world().get_entity(split).is_ok());
+        assert!(app.world().get_entity(active_pane).is_err());
+        assert!(app.world().get_entity(other_pane).is_err());
+        assert!(app.world().get_entity(original_stack).is_err());
+        assert!(app.world().get_entity(other_stack).is_ok());
+        assert_eq!(
+            app.world()
+                .get::<ChildOf>(other_stack)
+                .map(Relationship::get),
+            Some(split)
+        );
+        assert!(!app.world().entity(split).contains::<PaneSplit>());
+        assert_eq!(app.world().resource::<NewStackContext>().stack, None);
+        assert!(!app.world().resource::<NewStackContext>().needs_open);
     }
 
     #[test]

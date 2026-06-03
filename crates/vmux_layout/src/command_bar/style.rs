@@ -16,7 +16,7 @@ pub fn command_bar_root_class(native_windowed: bool) -> &'static str {
 
 pub fn command_bar_shell_class(native_windowed: bool) -> &'static str {
     if native_windowed {
-        "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+        "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-transparent shadow-2xl"
     } else {
         "relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
     }
@@ -157,6 +157,14 @@ mod tests {
     }
 
     #[test]
+    fn command_bar_native_shell_uses_transparent_background() {
+        let class = command_bar_shell_class(true);
+
+        assert!(class.contains("bg-transparent"));
+        assert!(!class.contains("bg-background"));
+    }
+
+    #[test]
     fn command_bar_input_shrinks_inside_shell() {
         let row = command_bar_input_row_class();
         let wrap = command_bar_input_wrap_class();
@@ -228,5 +236,13 @@ mod tests {
         let css = include_str!("../../assets/index.css");
 
         assert!(css.contains("overflow-x-hidden"));
+    }
+
+    #[test]
+    fn layout_css_keeps_glass_background_transparent() {
+        let css = include_str!("../../assets/index.css");
+
+        assert!(css.contains("--glass: transparent;"));
+        assert!(!css.contains("--glass: oklch(0.36 0 0 / 0.82);"));
     }
 }
