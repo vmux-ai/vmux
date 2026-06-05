@@ -141,10 +141,10 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
             vmux_browser::request_native_command_bar_dismiss_for_mouse_down(x_px, y_px);
         }
         if event_type == NSEventType::MouseMoved {
-            let crosses_into_other_pane = event_location_in_window_physical_px(ev)
-                .and_then(|(x, y)| vmux_layout::pane::wake_target_for_cursor(x, y))
-                .is_some();
-            if crosses_into_other_pane {
+            let should_wake = event_location_in_window_physical_px(ev)
+                .map(|(x, y)| vmux_layout::pane::wake_on_move(x, y))
+                .unwrap_or(false);
+            if should_wake {
                 local_wake(NATIVE_MOUSE_MOVE_WAKE_INTERVAL);
             }
         } else {

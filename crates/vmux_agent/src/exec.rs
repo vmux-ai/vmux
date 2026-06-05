@@ -4,7 +4,29 @@ pub fn is_executable_path(path: &Path) -> bool {
     is_executable(path)
 }
 
+#[cfg(test)]
+static FORCED_MISSING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+pub(crate) fn set_forced_missing(commands: Vec<String>) {
+    if let Ok(mut guard) = FORCED_MISSING.lock() {
+        *guard = commands;
+    }
+}
+
+#[cfg(test)]
+fn is_forced_missing(command: &str) -> bool {
+    FORCED_MISSING
+        .lock()
+        .map(|guard| guard.iter().any(|c| c == command))
+        .unwrap_or(false)
+}
+
 pub fn find_executable(command: &str) -> Option<PathBuf> {
+    #[cfg(test)]
+    if is_forced_missing(command) {
+        return None;
+    }
     let from_path = std::env::var_os("PATH")
         .and_then(|path| path.into_string().ok())
         .and_then(|path| find_executable_in_path(command, &path));

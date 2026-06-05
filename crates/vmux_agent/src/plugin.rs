@@ -1255,6 +1255,7 @@ mod tests {
 
     #[test]
     fn missing_vibe_cli_shows_setup_page_at_vibe_url() {
+        crate::exec::set_forced_missing(vec!["vibe".to_string()]);
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
@@ -1299,5 +1300,6 @@ mod tests {
         assert_eq!(metas.len(), 1);
         assert_eq!(metas[0].title, "Set up Vibe CLI");
         assert_eq!(metas[0].url, "vmux://agent/vibe/setup");
+        crate::exec::set_forced_missing(Vec::new());
     }
 }

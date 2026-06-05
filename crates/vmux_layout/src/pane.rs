@@ -1209,18 +1209,25 @@ mod hover_wake {
         }
     }
 
-    pub fn wake_target_for_cursor(x: f32, y: f32) -> Option<u64> {
-        let regions = REGIONS.lock().ok()?;
+    pub fn wake_on_move(x: f32, y: f32) -> bool {
+        let Ok(regions) = REGIONS.lock() else {
+            return false;
+        };
         let hit = regions
             .panes
             .iter()
             .find(|(_, min_x, min_y, max_x, max_y)| {
                 x >= *min_x && x <= *max_x && y >= *min_y && y <= *max_y
             })
-            .map(|(entity, ..)| *entity)?;
-        let target = (Some(hit) != regions.active).then_some(hit)?;
-        PENDING.store(target, Ordering::Relaxed);
-        Some(target)
+            .map(|(entity, ..)| *entity);
+        match hit {
+            Some(entity) if Some(entity) == regions.active => false,
+            Some(entity) => {
+                PENDING.store(entity, Ordering::Relaxed);
+                true
+            }
+            None => true,
+        }
     }
 
     pub fn take_pending_target() -> Option<u64> {
@@ -1232,7 +1239,7 @@ mod hover_wake {
 }
 
 #[cfg(target_os = "macos")]
-pub use hover_wake::wake_target_for_cursor;
+pub use hover_wake::wake_on_move;
 
 #[cfg(target_os = "macos")]
 fn publish_pane_hover_regions(
@@ -2357,14 +2364,16 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn wake_target_only_fires_over_non_active_pane() {
+    fn wake_on_move_suppresses_only_over_active_pane() {
         super::hover_wake::publish(
             vec![(1, 0.0, 0.0, 100.0, 100.0), (2, 200.0, 0.0, 300.0, 100.0)],
             Some(1),
         );
-        assert_eq!(super::wake_target_for_cursor(50.0, 50.0), None);
-        assert_eq!(super::wake_target_for_cursor(250.0, 50.0), Some(2));
-        assert_eq!(super::wake_target_for_cursor(150.0, 50.0), None);
+        assert!(!super::wake_on_move(50.0, 50.0));
+        assert!(super::wake_on_move(250.0, 50.0));
+        assert_eq!(super::hover_wake::take_pending_target(), Some(2));
+        assert!(super::wake_on_move(150.0, 50.0));
+        assert_eq!(super::hover_wake::take_pending_target(), None);
     }
 
     #[test]
