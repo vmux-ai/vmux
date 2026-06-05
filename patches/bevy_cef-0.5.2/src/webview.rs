@@ -3,7 +3,7 @@ use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
     BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, WebviewMaxFrameRate,
     WebviewNativeLiquidGlass, WebviewOpaqueWindowedBackground, WebviewSize, WebviewSource,
-    WebviewTransparent, WebviewWindowed,
+    WebviewTransparent, WebviewWindowed, WebviewWindowedNativeFocus,
 };
 use crate::cursor_icon::SystemCursorIconSender;
 use crate::loading_state::{WebviewCommittedNavigationSender, WebviewLoadingStateSender};
@@ -276,6 +276,7 @@ fn create_webview(
             Has<WebviewWindowed>,
             Has<WebviewNativeLiquidGlass>,
             Has<WebviewOpaqueWindowedBackground>,
+            Has<WebviewWindowedNativeFocus>,
         ),
         With<ResolvedWebviewUri>,
     >,
@@ -294,6 +295,7 @@ fn create_webview(
             windowed,
             native_liquid_glass,
             opaque_windowed_background,
+            windowed_native_focus,
         ) in
             webviews.iter()
         {
@@ -354,6 +356,7 @@ fn create_webview(
                 windowless_frame_rate,
                 windowed,
                 native_liquid_glass,
+                windowed && windowed_native_focus,
             );
         }
     });
@@ -461,5 +464,18 @@ mod tests {
         assert!(implementation.contains("if windowed && opaque_windowed_background"));
         assert!(!implementation.contains("if windowed && transparent"));
         assert!(implementation.contains("Some(0x00000000)"));
+    }
+
+    #[test]
+    fn webview_passes_windowed_native_focus_policy_to_core() {
+        let implementation = include_str!("webview.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+
+        assert!(implementation.contains("WebviewWindowedNativeFocus"));
+        assert!(implementation.contains("Has<WebviewWindowedNativeFocus>"));
+        assert!(implementation.contains("windowed_native_focus"));
+        assert!(implementation.contains("windowed && windowed_native_focus"));
     }
 }

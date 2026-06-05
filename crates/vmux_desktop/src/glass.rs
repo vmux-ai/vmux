@@ -13,10 +13,6 @@ impl Plugin for GlassPlugin {
     }
 }
 
-fn glass_enabled() -> bool {
-    std::env::var_os("VMUX_GLASS").is_some()
-}
-
 #[derive(Default)]
 struct GlassState {
     installed: bool,
@@ -36,10 +32,6 @@ fn install_window_glass(
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     if state.installed {
-        return;
-    }
-    if !glass_enabled() {
-        state.installed = true;
         return;
     }
     let Some(mtm) = MainThreadMarker::new() else {
@@ -68,7 +60,7 @@ fn install_window_glass(
         return;
     };
     if AnyClass::get(c"NSGlassEffectView").is_none() {
-        warn!("VMUX_GLASS: NSGlassEffectView unavailable (needs macOS 26+)");
+        warn!("glass: NSGlassEffectView unavailable (needs macOS 26+)");
         state.installed = true;
         return;
     }
@@ -82,7 +74,7 @@ fn install_window_glass(
     parent.addSubview_positioned_relativeTo(glass_view, NSWindowOrderingMode::Below, Some(content));
     state._glass = Some(glass);
     state.installed = true;
-    info!("VMUX_GLASS: NSGlassEffectView installed as window backdrop (behind content view)");
+    info!("glass: NSGlassEffectView installed as window backdrop (behind content view)");
 }
 
 #[derive(Default)]
@@ -124,9 +116,6 @@ fn sync_command_bar_overlay(
     use objc2::{MainThreadMarker, MainThreadOnly, runtime::AnyObject};
     use objc2_app_kit::NSView;
 
-    if !glass_enabled() {
-        return;
-    }
     let open = vmux_layout::command_bar::handler::is_command_bar_open(&modal_open_q);
     if !open {
         if state.shown {
@@ -144,6 +133,16 @@ fn sync_command_bar_overlay(
     let (Ok(window_e), Ok(modal_e)) = (window_q.single(), modal_e_q.single()) else {
         return;
     };
+    // Pull the latest OSR frame for the modal. A *windowed* command bar produces none, so leave the
+    // overlay dormant rather than covering the native command bar with an empty input-stealing layer.
+    let next = overlay_frames
+        .0
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(&modal_e));
+    if next.is_none() && state.held.is_none() {
+        return;
+    }
     let Some(ns_view) = primary_content_view_ptr(window_e) else {
         return;
     };
@@ -160,11 +159,6 @@ fn sync_command_bar_overlay(
     };
     view.setFrame(bounds);
 
-    let next = overlay_frames
-        .0
-        .lock()
-        .ok()
-        .and_then(|mut map| map.remove(&modal_e));
     if let Some(frame) = next {
         if let Some(layer) = view.layer() {
             let io_surface = frame.io_surface as *mut AnyObject;

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags};
+use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use parking_lot::Mutex;
 use vmux_command::AppCommand;
 
@@ -166,6 +166,10 @@ fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
 fn install(wake: impl Fn() + Send + Sync + 'static) {
     let block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let ev = unsafe { event.as_ref() };
+        wake();
+        if ev.r#type() != NSEventType::KeyDown {
+            return event.as_ptr();
+        }
         let key_code = ev.keyCode();
         let flags = ev.modifierFlags();
         let Some(combo) = translate(key_code, flags) else {
@@ -176,15 +180,13 @@ fn install(wake: impl Fn() + Send + Sync + 'static) {
                 if let Some(cmd) = cmd {
                     PENDING_COMMANDS.lock().push(cmd);
                 }
-                wake();
                 std::ptr::null_mut()
             }
             KeyAction::PassThrough => event.as_ptr(),
         }
     });
-    let token = unsafe {
-        NSEvent::addLocalMonitorForEventsMatchingMask_handler(NSEventMask::KeyDown, &block)
-    };
+    let mask = NSEventMask::KeyDown | NSEventMask::KeyUp | NSEventMask::FlagsChanged;
+    let token = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &block) };
     if let Some(token) = token {
         std::mem::forget(token);
     }

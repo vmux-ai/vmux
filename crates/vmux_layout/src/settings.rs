@@ -49,9 +49,9 @@ fn default_side_sheet_width() -> f32 {
     280.0
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WindowSettings {
-    #[serde(default)]
+    #[serde(default = "default_window_padding")]
     pub padding: f32,
     #[serde(default)]
     pub padding_top: Option<f32>,
@@ -79,6 +79,22 @@ impl WindowSettings {
     pub fn pad_left(&self) -> f32 {
         self.padding_left.unwrap_or(self.padding)
     }
+}
+
+impl Default for WindowSettings {
+    fn default() -> Self {
+        Self {
+            padding: default_window_padding(),
+            padding_top: None,
+            padding_right: None,
+            padding_bottom: None,
+            padding_left: None,
+        }
+    }
+}
+
+fn default_window_padding() -> f32 {
+    crate::event::WINDOW_PAD_PX
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

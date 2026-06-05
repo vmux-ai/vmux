@@ -240,9 +240,22 @@ pub fn cursor_row_update(previous: Option<&TermCursor>, next: &TermCursor) -> Cu
     CursorRowUpdate { clear, set }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Default,
+    PartialEq,
+    Eq,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct TermKeyEvent {
     pub key: String,
+    #[serde(default)]
+    pub code: String,
     pub modifiers: u8,
     pub text: Option<String>,
 }

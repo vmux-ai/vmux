@@ -48,14 +48,22 @@ pub struct LayoutStateEvent {
     pub pane_gap: f32,
     #[serde(default)]
     pub radius: f32,
+    #[serde(default)]
+    pub window_pad_top: f32,
+    #[serde(default = "default_window_pad")]
+    pub window_pad_right: f32,
+    #[serde(default = "default_window_pad")]
+    pub window_pad_bottom: f32,
+    #[serde(default)]
+    pub window_pad_left: f32,
 }
 
 impl LayoutStateEvent {
     pub fn main_cef_left(&self) -> f32 {
         if self.side_sheet_open {
-            self.side_sheet_width + self.pane_gap
+            self.window_pad_left + self.side_sheet_width + self.pane_gap
         } else {
-            0.0
+            self.window_pad_left
         }
     }
 
@@ -89,6 +97,10 @@ fn default_side_sheet_width() -> f32 {
 
 fn default_pane_gap() -> f32 {
     8.0
+}
+
+fn default_window_pad() -> f32 {
+    WINDOW_PAD_PX
 }
 
 pub const HEADER_HEIGHT_PX: f32 = 72.0;
@@ -139,6 +151,25 @@ mod tests {
 
         assert_eq!(open.main_cef_left(), 288.0);
         assert_eq!(closed.main_cef_left(), 0.0);
+    }
+
+    #[test]
+    fn main_cef_left_includes_effective_window_left_padding() {
+        let closed = LayoutStateEvent {
+            side_sheet_open: false,
+            window_pad_left: 16.0,
+            ..Default::default()
+        };
+        let open = LayoutStateEvent {
+            side_sheet_open: true,
+            side_sheet_width: 280.0,
+            pane_gap: 8.0,
+            window_pad_left: 16.0,
+            ..Default::default()
+        };
+
+        assert_eq!(closed.main_cef_left(), 16.0);
+        assert_eq!(open.main_cef_left(), 304.0);
     }
 
     #[test]

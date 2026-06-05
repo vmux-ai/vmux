@@ -346,6 +346,7 @@ pub enum TabCommand {
 pub enum ToggleLayoutCommand {
     #[default]
     #[menu(id = "toggle_layout", label = "Toggle Layout", accel = "super+shift+s")]
+    #[shortcut(direct = "Super+Shift+S")]
     Toggle,
 }
 

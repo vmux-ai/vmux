@@ -1,8 +1,10 @@
 use crate::Open;
 use crate::header::Header;
+use crate::settings::LayoutSettings;
 use crate::side_sheet::SideSheet;
-use crate::window::VmuxWindow;
+use crate::window::{ScreenMaximized, VmuxWindow, window_uses_full_padding};
 use bevy::prelude::*;
+use bevy::window::{Monitor, PrimaryWindow};
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, ToggleLayoutCommand};
 
 /// Tracks whether the layout CEF shell (header + side sheet) is currently hidden.
@@ -28,10 +30,22 @@ impl Plugin for TogglePlugin {
 /// CEF shell / system edge) and pad only the right + bottom corners.
 fn sync_window_padding_to_layout_hidden(
     hidden: Res<LayoutHidden>,
+    settings: Res<LayoutSettings>,
+    screen_maximized: Option<Res<ScreenMaximized>>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    monitors: Query<&Monitor>,
     mut window_q: Query<&mut Node, With<VmuxWindow>>,
 ) {
-    let pad = crate::event::WINDOW_PAD_PX;
-    let (top, left) = if hidden.0 { (pad, pad) } else { (0.0, 0.0) };
+    let fullscreen = screen_maximized.is_some()
+        || primary_window
+            .single()
+            .ok()
+            .is_some_and(|window| window_uses_full_padding(window, &monitors));
+    let (top, left) = if hidden.0 || fullscreen {
+        (settings.window.pad_top(), settings.window.pad_left())
+    } else {
+        (0.0, 0.0)
+    };
     for mut node in &mut window_q {
         let want_top = Val::Px(top);
         let want_left = Val::Px(left);
@@ -72,6 +86,15 @@ fn handle_toggle(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::{
+        settings::{
+            FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+        },
+        window::VmuxWindow,
+    };
+    use bevy::window::{Monitor, MonitorSelection, WindowMode};
+
     #[test]
     fn window_padding_sync_runs_before_ui_layout() {
         let source = include_str!("toggle.rs");
@@ -87,5 +110,109 @@ mod tests {
                 "sync_window_padding_to_layout_hidden.before(bevy::ui::UiSystems::Layout)"
             )
         );
+    }
+
+    #[test]
+    fn hidden_layout_padding_uses_layout_window_settings() {
+        let source = include_str!("toggle.rs");
+        let sync_fn = source
+            .split("fn sync_window_padding_to_layout_hidden")
+            .nth(1)
+            .and_then(|tail| tail.split("fn handle_toggle").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("settings.window.pad_top()"));
+        assert!(sync_fn.contains("settings.window.pad_left()"));
+    }
+
+    #[test]
+    fn fullscreen_window_padding_uses_layout_window_settings() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(LayoutHidden(false))
+            .insert_resource(LayoutSettings {
+                radius: 0.0,
+                window: WindowSettings {
+                    padding: 16.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: PaneSettings { gap: 0.0 },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            })
+            .add_systems(Update, sync_window_padding_to_layout_hidden);
+        app.world_mut().spawn((
+            Window {
+                mode: WindowMode::BorderlessFullscreen(MonitorSelection::Current),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        let root = app.world_mut().spawn((VmuxWindow, Node::default())).id();
+
+        app.update();
+
+        let node = app.world().get::<Node>(root).expect("window node");
+        assert_eq!(node.padding.top, Val::Px(16.0));
+        assert_eq!(node.padding.left, Val::Px(16.0));
+    }
+
+    #[test]
+    fn maximized_window_padding_uses_layout_window_settings() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(LayoutHidden(false))
+            .insert_resource(LayoutSettings {
+                radius: 0.0,
+                window: WindowSettings {
+                    padding: 16.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: PaneSettings { gap: 0.0 },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            })
+            .add_systems(Update, sync_window_padding_to_layout_hidden);
+        app.world_mut().spawn((
+            Window {
+                resolution: (1200, 800).into(),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        app.world_mut().spawn(Monitor {
+            name: None,
+            physical_width: 1200,
+            physical_height: 800,
+            physical_position: IVec2::ZERO,
+            refresh_rate_millihertz: None,
+            scale_factor: 1.0,
+            video_modes: Vec::new(),
+        });
+        let root = app.world_mut().spawn((VmuxWindow, Node::default())).id();
+
+        app.update();
+
+        let node = app.world().get::<Node>(root).expect("window node");
+        assert_eq!(node.padding.top, Val::Px(16.0));
+        assert_eq!(node.padding.left, Val::Px(16.0));
+    }
+
+    #[test]
+    fn startup_maximized_window_padding_does_not_depend_on_monitor_query() {
+        let source = include_str!("toggle.rs");
+        let sync_fn = source
+            .split("fn sync_window_padding_to_layout_hidden")
+            .nth(1)
+            .and_then(|tail| tail.split("fn handle_toggle").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("ScreenMaximized"));
     }
 }

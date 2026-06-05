@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use bevy::{
     ecs::relationship::Relationship,
@@ -9,9 +10,14 @@ use bevy::{
     },
     picking::Pickable,
     prelude::*,
+    winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
-use vmux_command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands};
+use vmux_command::shortcut::{KeyCombo, Modifiers, Shortcut};
+use vmux_command::{
+    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneDirection, PaneOpenMode,
+    PaneTarget, StackCommand, WriteAppCommands,
+};
 use vmux_core::page::PageReady;
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, TerminalSpawnRequest};
 use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
@@ -85,6 +91,11 @@ pub struct TerminalModeMap {
 struct LocalCopyModeState {
     active: std::collections::HashSet<ProcessId>,
     input_states: std::collections::HashMap<ProcessId, CopyModeInputState>,
+}
+
+#[derive(Resource, Default)]
+struct TerminalWebShortcutState {
+    pending_prefix: Option<(KeyCombo, Instant)>,
 }
 
 #[derive(Default)]
@@ -238,8 +249,13 @@ impl Plugin for TerminalPlugin {
             .init_resource::<MouseSelectionState>()
             .init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
+            .init_resource::<TerminalWebShortcutState>()
             .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
-            .add_plugins(BinEventEmitterPlugin::<(TermResizeEvent, TermMouseEvent)>::default())
+            .add_plugins(BinEventEmitterPlugin::<(
+                TermResizeEvent,
+                TermMouseEvent,
+                TermKeyEvent,
+            )>::default())
             .add_systems(
                 PreUpdate,
                 (
@@ -266,6 +282,7 @@ impl Plugin for TerminalPlugin {
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
             .add_observer(on_term_mouse)
+            .add_observer(on_term_key)
             .add_observer(on_restart_pty)
             .add_observer(on_terminal_removed)
             .add_plugins(crate::processes_monitor::ProcessesMonitorPlugin)
@@ -1704,6 +1721,323 @@ fn logical_key_to_bytes(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
     }
 }
 
+fn term_key_event_to_key(event: &TermKeyEvent) -> Key {
+    match event.key.as_str() {
+        "Enter" => Key::Enter,
+        "Backspace" => Key::Backspace,
+        "Tab" => Key::Tab,
+        "Escape" | "Esc" => Key::Escape,
+        " " | "Space" => Key::Space,
+        "ArrowUp" => Key::ArrowUp,
+        "ArrowDown" => Key::ArrowDown,
+        "ArrowRight" => Key::ArrowRight,
+        "ArrowLeft" => Key::ArrowLeft,
+        "Home" => Key::Home,
+        "End" => Key::End,
+        "PageUp" => Key::PageUp,
+        "PageDown" => Key::PageDown,
+        "Delete" => Key::Delete,
+        "Insert" => Key::Insert,
+        _ => {
+            let text = event.text.as_deref().unwrap_or(event.key.as_str());
+            Key::Character(text.into())
+        }
+    }
+}
+
+fn term_key_event_to_bytes(event: &TermKeyEvent) -> Vec<u8> {
+    if is_web_modifier_key_event(event) {
+        return Vec::new();
+    }
+    let ctrl = event.modifiers & MOD_CTRL != 0;
+    let alt = event.modifiers & MOD_ALT != 0;
+    let key = term_key_event_to_key(event);
+    logical_key_to_bytes(&key, ctrl, alt)
+}
+
+fn is_web_modifier_key_event(event: &TermKeyEvent) -> bool {
+    matches!(
+        event.key.as_str(),
+        "Shift" | "Control" | "Alt" | "Meta" | "OS" | "Fn" | "CapsLock"
+    ) || matches!(
+        event.code.as_str(),
+        "ShiftLeft"
+            | "ShiftRight"
+            | "ControlLeft"
+            | "ControlRight"
+            | "AltLeft"
+            | "AltRight"
+            | "MetaLeft"
+            | "MetaRight"
+            | "OSLeft"
+            | "OSRight"
+            | "CapsLock"
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TerminalWebShortcutAction {
+    Command(AppCommand),
+    Consume,
+    PassThrough,
+}
+
+struct TerminalWebShortcutMap {
+    bindings: Vec<(Shortcut, String)>,
+    chord_timeout_ms: u64,
+}
+
+fn terminal_web_shortcut_map(settings: Option<&AppSettings>) -> TerminalWebShortcutMap {
+    let mut map = TerminalWebShortcutMap {
+        bindings: AppCommand::default_shortcuts(),
+        chord_timeout_ms: 1000,
+    };
+
+    if let Some(settings) = settings {
+        map.chord_timeout_ms = settings.shortcuts.chord_timeout_ms;
+        if let Some(leader) = settings.shortcuts.leader.to_key_combo() {
+            for (binding, _) in &mut map.bindings {
+                if let Shortcut::Chord(prefix, _) = binding {
+                    *prefix = leader.clone();
+                }
+            }
+            for entry in &settings.shortcuts.bindings {
+                if let Some(binding) = entry.binding.to_shortcut_with_leader(&leader) {
+                    map.bindings.push((binding, entry.command.clone()));
+                }
+            }
+        } else {
+            for entry in &settings.shortcuts.bindings {
+                if let Some(binding) = entry.binding.to_shortcut() {
+                    map.bindings.push((binding, entry.command.clone()));
+                }
+            }
+        }
+    }
+
+    map
+}
+
+fn resolve_terminal_web_shortcut(
+    event: &TermKeyEvent,
+    settings: Option<&AppSettings>,
+    state: &mut TerminalWebShortcutState,
+) -> TerminalWebShortcutAction {
+    let Some(combo) = term_key_event_to_shortcut_combo(event) else {
+        return TerminalWebShortcutAction::PassThrough;
+    };
+    let map = terminal_web_shortcut_map(settings);
+    let now = Instant::now();
+    if let Some((_, started)) = state.pending_prefix.as_ref()
+        && now.duration_since(*started) > Duration::from_millis(map.chord_timeout_ms)
+    {
+        state.pending_prefix = None;
+    }
+
+    if let Some((prefix, _)) = state.pending_prefix.clone() {
+        if let Some(cmd) = terminal_web_chord_command(&map, &prefix, &combo) {
+            state.pending_prefix = None;
+            return TerminalWebShortcutAction::Command(cmd);
+        }
+        state.pending_prefix = None;
+    }
+
+    if let Some(cmd) = terminal_web_direct_command(&map, &combo)
+        && (combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key)
+    {
+        return TerminalWebShortcutAction::Command(cmd);
+    }
+
+    if terminal_web_has_chord_prefix(&map, &combo) {
+        state.pending_prefix = Some((combo, now));
+        return TerminalWebShortcutAction::Consume;
+    }
+
+    TerminalWebShortcutAction::PassThrough
+}
+
+fn term_key_event_to_shortcut_combo(event: &TermKeyEvent) -> Option<KeyCombo> {
+    if is_web_modifier_key_event(event) {
+        return None;
+    }
+    let key = shortcut_key_code_from_web_code(&event.code)?;
+    Some(KeyCombo {
+        key,
+        modifiers: Modifiers {
+            ctrl: event.modifiers & MOD_CTRL != 0,
+            shift: event.modifiers & MOD_SHIFT != 0,
+            alt: event.modifiers & MOD_ALT != 0,
+            super_key: event.modifiers & MOD_SUPER != 0,
+        },
+    })
+}
+
+fn terminal_web_direct_command(
+    map: &TerminalWebShortcutMap,
+    pressed: &KeyCombo,
+) -> Option<AppCommand> {
+    map.bindings
+        .iter()
+        .find_map(|(binding, cmd_id)| match binding {
+            Shortcut::Direct(combo) if combo == pressed => {
+                terminal_command_from_shortcut_id(cmd_id)
+            }
+            _ => None,
+        })
+}
+
+fn terminal_web_has_chord_prefix(map: &TerminalWebShortcutMap, pressed: &KeyCombo) -> bool {
+    map.bindings
+        .iter()
+        .any(|(binding, _)| matches!(binding, Shortcut::Chord(prefix, _) if prefix == pressed))
+}
+
+fn terminal_web_chord_command(
+    map: &TerminalWebShortcutMap,
+    prefix: &KeyCombo,
+    pressed: &KeyCombo,
+) -> Option<AppCommand> {
+    let effective = effective_terminal_web_chord_second(prefix, pressed);
+    map.bindings
+        .iter()
+        .find_map(|(binding, cmd_id)| match binding {
+            Shortcut::Chord(binding_prefix, second)
+                if binding_prefix == prefix && second == &effective =>
+            {
+                terminal_command_from_shortcut_id(cmd_id)
+            }
+            _ => None,
+        })
+}
+
+fn effective_terminal_web_chord_second(prefix: &KeyCombo, pressed: &KeyCombo) -> KeyCombo {
+    let mut effective = pressed.clone();
+    if prefix.modifiers.ctrl {
+        effective.modifiers.ctrl = false;
+    }
+    if prefix.modifiers.alt {
+        effective.modifiers.alt = false;
+    }
+    if prefix.modifiers.super_key {
+        effective.modifiers.super_key = false;
+    }
+    effective
+}
+
+fn terminal_command_from_shortcut_id(cmd_id: &str) -> Option<AppCommand> {
+    match cmd_id {
+        "split_v" => Some(AppCommand::Browser(BrowserCommand::Open(
+            OpenCommand::InPane {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: None,
+            },
+        ))),
+        "split_h" => Some(AppCommand::Browser(BrowserCommand::Open(
+            OpenCommand::InPane {
+                direction: PaneDirection::Bottom,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: None,
+            },
+        ))),
+        _ => AppCommand::from_menu_id(cmd_id),
+    }
+}
+
+fn shortcut_key_code_from_web_code(code: &str) -> Option<KeyCode> {
+    let key = key_code_from_web_code(code);
+    if matches!(
+        key,
+        KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified)
+    ) {
+        None
+    } else {
+        Some(key)
+    }
+}
+
+fn key_code_from_web_code(code: &str) -> KeyCode {
+    match code {
+        "KeyA" => KeyCode::KeyA,
+        "KeyB" => KeyCode::KeyB,
+        "KeyC" => KeyCode::KeyC,
+        "KeyD" => KeyCode::KeyD,
+        "KeyE" => KeyCode::KeyE,
+        "KeyF" => KeyCode::KeyF,
+        "KeyG" => KeyCode::KeyG,
+        "KeyH" => KeyCode::KeyH,
+        "KeyI" => KeyCode::KeyI,
+        "KeyJ" => KeyCode::KeyJ,
+        "KeyK" => KeyCode::KeyK,
+        "KeyL" => KeyCode::KeyL,
+        "KeyM" => KeyCode::KeyM,
+        "KeyN" => KeyCode::KeyN,
+        "KeyO" => KeyCode::KeyO,
+        "KeyP" => KeyCode::KeyP,
+        "KeyQ" => KeyCode::KeyQ,
+        "KeyR" => KeyCode::KeyR,
+        "KeyS" => KeyCode::KeyS,
+        "KeyT" => KeyCode::KeyT,
+        "KeyU" => KeyCode::KeyU,
+        "KeyV" => KeyCode::KeyV,
+        "KeyW" => KeyCode::KeyW,
+        "KeyX" => KeyCode::KeyX,
+        "KeyY" => KeyCode::KeyY,
+        "KeyZ" => KeyCode::KeyZ,
+        "Digit0" => KeyCode::Digit0,
+        "Digit1" => KeyCode::Digit1,
+        "Digit2" => KeyCode::Digit2,
+        "Digit3" => KeyCode::Digit3,
+        "Digit4" => KeyCode::Digit4,
+        "Digit5" => KeyCode::Digit5,
+        "Digit6" => KeyCode::Digit6,
+        "Digit7" => KeyCode::Digit7,
+        "Digit8" => KeyCode::Digit8,
+        "Digit9" => KeyCode::Digit9,
+        "Equal" => KeyCode::Equal,
+        "Minus" => KeyCode::Minus,
+        "Period" => KeyCode::Period,
+        "Comma" => KeyCode::Comma,
+        "Quote" => KeyCode::Quote,
+        "Semicolon" => KeyCode::Semicolon,
+        "Slash" => KeyCode::Slash,
+        "Backslash" => KeyCode::Backslash,
+        "Backquote" => KeyCode::Backquote,
+        "BracketLeft" => KeyCode::BracketLeft,
+        "BracketRight" => KeyCode::BracketRight,
+        "Enter" => KeyCode::Enter,
+        "Space" => KeyCode::Space,
+        "Tab" => KeyCode::Tab,
+        "Backspace" => KeyCode::Backspace,
+        "Delete" => KeyCode::Delete,
+        "Insert" => KeyCode::Insert,
+        "Home" => KeyCode::Home,
+        "End" => KeyCode::End,
+        "PageUp" => KeyCode::PageUp,
+        "PageDown" => KeyCode::PageDown,
+        "ArrowUp" => KeyCode::ArrowUp,
+        "ArrowDown" => KeyCode::ArrowDown,
+        "ArrowLeft" => KeyCode::ArrowLeft,
+        "ArrowRight" => KeyCode::ArrowRight,
+        "Escape" => KeyCode::Escape,
+        "F1" => KeyCode::F1,
+        "F2" => KeyCode::F2,
+        "F3" => KeyCode::F3,
+        "F4" => KeyCode::F4,
+        "F5" => KeyCode::F5,
+        "F6" => KeyCode::F6,
+        "F7" => KeyCode::F7,
+        "F8" => KeyCode::F8,
+        "F9" => KeyCode::F9,
+        "F10" => KeyCode::F10,
+        "F11" => KeyCode::F11,
+        "F12" => KeyCode::F12,
+        _ => KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
+    }
+}
+
 /// Handle mouse wheel scrolling — sends scroll input to service.
 fn handle_terminal_scroll(
     mut er: MessageReader<MouseWheel>,
@@ -1987,6 +2321,94 @@ fn on_term_mouse(
     for action in mouse_terminal_actions(entry, event, mouse_capture, std::time::Instant::now()) {
         update_local_copy_mode_for_mouse_action(&mut local_copy_mode, process_id, &action);
         send_mouse_action(&service.0, process_id, action);
+    }
+}
+
+fn on_term_key(
+    trigger: On<BinReceive<TermKeyEvent>>,
+    q: Query<&ProcessId, With<Terminal>>,
+    service: Option<Res<ServiceClient>>,
+    mode_map: Res<TerminalModeMap>,
+    mut local_copy_mode: ResMut<LocalCopyModeState>,
+    settings: Option<Res<AppSettings>>,
+    mut web_shortcuts: ResMut<TerminalWebShortcutState>,
+    mut app_commands: MessageWriter<AppCommand>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+) {
+    let entity = trigger.event_target();
+    let event = &trigger.payload;
+    match resolve_terminal_web_shortcut(event, settings.as_deref(), &mut web_shortcuts) {
+        TerminalWebShortcutAction::Command(cmd) => {
+            app_commands.write(cmd);
+            if let Some(proxy) = proxy.as_ref() {
+                let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
+            }
+            return;
+        }
+        TerminalWebShortcutAction::Consume => return,
+        TerminalWebShortcutAction::PassThrough => {}
+    }
+    if is_web_modifier_key_event(event) {
+        return;
+    }
+    let Some(service) = service else { return };
+    let Ok(pid) = q.get(entity) else { return };
+    let process_id = *pid;
+    let super_key = event.modifiers & MOD_SUPER != 0;
+    if super_key {
+        match event.code.as_str() {
+            "KeyV" => {
+                if let Some(text) = crate::clipboard::read_blocking()
+                    && !text.is_empty()
+                {
+                    let mut data = Vec::new();
+                    data.extend_from_slice(b"\x1b[200~");
+                    data.extend_from_slice(text.as_bytes());
+                    data.extend_from_slice(b"\x1b[201~");
+                    service
+                        .0
+                        .send(ClientMessage::ProcessInput { process_id, data });
+                }
+                return;
+            }
+            "KeyC" => {
+                service
+                    .0
+                    .send(ClientMessage::GetSelectionText { process_id });
+                return;
+            }
+            _ => return,
+        }
+    }
+
+    if is_copy_mode_active(&mode_map, &local_copy_mode, process_id) {
+        let key = term_key_event_to_key(event);
+        let mapped = map_copy_mode_keys_with_state(
+            &mut local_copy_mode,
+            process_id,
+            CopyModeKeyInput {
+                key: &key,
+                key_code: key_code_from_web_code(&event.code),
+                ctrl: event.modifiers & MOD_CTRL != 0,
+                shift: event.modifiers & MOD_SHIFT != 0,
+            },
+        );
+        for k in mapped {
+            if copy_mode_key_exits(k) {
+                set_local_copy_mode(&mut local_copy_mode, process_id, false);
+            }
+            service
+                .0
+                .send(ClientMessage::CopyModeKey { process_id, key: k });
+        }
+        return;
+    }
+
+    let data = term_key_event_to_bytes(event);
+    if !data.is_empty() {
+        service
+            .0
+            .send(ClientMessage::ProcessInput { process_id, data });
     }
 }
 
@@ -2557,6 +2979,111 @@ mod tests {
         );
 
         assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn web_terminal_key_events_delegate_text_to_pty_bytes() {
+        let event = TermKeyEvent {
+            key: "a".to_string(),
+            code: "KeyA".to_string(),
+            modifiers: 0,
+            text: Some("a".to_string()),
+        };
+
+        assert_eq!(term_key_event_to_bytes(&event), b"a".to_vec());
+    }
+
+    #[test]
+    fn web_terminal_key_events_delegate_control_sequences() {
+        let event = TermKeyEvent {
+            key: "c".to_string(),
+            code: "KeyC".to_string(),
+            modifiers: MOD_CTRL,
+            text: None,
+        };
+
+        assert_eq!(term_key_event_to_bytes(&event), vec![3]);
+    }
+
+    #[test]
+    fn web_terminal_key_events_ignore_modifier_keys() {
+        let event = TermKeyEvent {
+            key: "Shift".to_string(),
+            code: "ShiftLeft".to_string(),
+            modifiers: MOD_SHIFT,
+            text: None,
+        };
+
+        assert!(term_key_event_to_bytes(&event).is_empty());
+    }
+
+    #[test]
+    fn web_terminal_shortcuts_emit_app_command_before_pty_input() {
+        let event = TermKeyEvent {
+            key: "l".to_string(),
+            code: "KeyL".to_string(),
+            modifiers: MOD_SUPER,
+            text: Some("l".to_string()),
+        };
+        let mut state = TerminalWebShortcutState::default();
+
+        assert_eq!(
+            resolve_terminal_web_shortcut(&event, None, &mut state),
+            TerminalWebShortcutAction::Command(AppCommand::Browser(
+                vmux_command::BrowserCommand::Bar(
+                    vmux_command::BrowserBarCommand::OpenPageInCommandBar
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn web_terminal_menu_accel_shortcuts_emit_app_command_before_pty_input() {
+        let event = TermKeyEvent {
+            key: "S".to_string(),
+            code: "KeyS".to_string(),
+            modifiers: MOD_SUPER | MOD_SHIFT,
+            text: Some("S".to_string()),
+        };
+        let mut state = TerminalWebShortcutState::default();
+
+        assert_eq!(
+            resolve_terminal_web_shortcut(&event, None, &mut state),
+            TerminalWebShortcutAction::Command(AppCommand::Layout(
+                vmux_command::LayoutCommand::ToggleLayout(
+                    vmux_command::ToggleLayoutCommand::Toggle
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn terminal_page_emits_key_events_from_native_webview() {
+        let source = include_str!("page.rs");
+
+        assert!(source.contains("emit_key("));
+        assert!(source.contains("onkeydown"));
+        assert!(source.contains("TermKeyEvent"));
+    }
+
+    #[test]
+    fn terminal_page_focus_does_not_draw_browser_outline() {
+        let source = include_str!("page.rs");
+
+        assert!(source.contains("outline:none"));
+    }
+
+    #[test]
+    fn terminal_web_shortcut_wakes_next_command_frame() {
+        let source = include_str!("plugin.rs");
+        let on_term_key = source
+            .split("fn on_term_key")
+            .nth(1)
+            .and_then(|tail| tail.split("fn on_term_ready").next())
+            .unwrap_or_default();
+
+        assert!(on_term_key.contains("EventLoopProxyWrapper"));
+        assert!(on_term_key.contains("WinitUserEvent::WakeUp"));
     }
 
     fn mouse_event(button: u8, col: u16, row: u16, pressed: bool, moving: bool) -> TermMouseEvent {

@@ -41,6 +41,7 @@ pub fn Page() -> Element {
     let mut last_rendered_open_id = use_signal(|| 0u64);
     let mut ready_sent = use_signal(|| false);
     let mut observed_size_open_id = use_signal(|| None::<u64>);
+    let mut outside_pointer_listener_installed = use_signal(|| false);
 
     let mut path_completions = use_signal(Vec::<PathEntry>::new);
     let mut history_suggestions = use_signal(Vec::<HistoryEntry>::new);
@@ -152,6 +153,15 @@ pub fn Page() -> Element {
     });
 
     use_effect(move || {
+        if outside_pointer_listener_installed() {
+            return;
+        }
+        if install_command_bar_outside_pointer_listener(is_open) {
+            outside_pointer_listener_installed.set(true);
+        }
+    });
+
+    use_effect(move || {
         if !is_open() || !state().native_windowed {
             return;
         }
@@ -173,7 +183,7 @@ pub fn Page() -> Element {
         let _ = nav_mode();
         let _ = path_completions();
         let _ = history_suggestions();
-        emit_command_bar_size();
+        schedule_command_bar_size_emit();
     });
 
     let CommandBarOpenEvent {
@@ -318,7 +328,7 @@ pub fn Page() -> Element {
     rsx! {
         div {
             class: command_bar_root_class(native_windowed),
-            onclick: move |_| { is_open.set(false); emit_action("dismiss", ""); },
+            onclick: move |_| { dismiss_command_bar(is_open); },
             div {
                 id: "command-bar-shell",
                 class: command_bar_shell_class(native_windowed),
@@ -451,10 +461,12 @@ pub fn Page() -> Element {
                                     } else if e.key() == Key::Escape
                                         || (ctrl && e.code() == Code::KeyC)
                                     {
-                                        is_open.set(false);
-                                        emit_action("dismiss", "");
+                                        dismiss_command_bar(is_open);
                                     } else if e.key() == Key::Enter {
-                                        if let Some(item) = results.get(sel) {
+                                        if should_open_typed_query_on_enter(open_target, nav_mode(), &q) {
+                                            is_open.set(false);
+                                            emit_action_with_target("open", &q, open_target);
+                                        } else if let Some(item) = results.get(sel) {
                                             execute(item);
                                         } else if !q.is_empty() {
                                             emit_action_with_target("open", &q, open_target);
@@ -466,7 +478,7 @@ pub fn Page() -> Element {
                     }
                 }
                 if !results.is_empty() {
-                    div { class: result_list_class(),
+                    div { id: "command-bar-results", class: result_list_class(),
                         for (i, item) in results.iter().enumerate() {
                             div {
                                 key: "{i}",
@@ -584,6 +596,19 @@ fn looks_like_path(s: &str) -> bool {
         || s.contains('/') && !s.contains(' ') && !s.contains("://")
 }
 
+fn should_open_typed_query_on_enter(
+    open_target: Option<vmux_command::open_target::OpenTarget>,
+    nav_mode: bool,
+    query: &str,
+) -> bool {
+    matches!(
+        open_target,
+        Some(vmux_command::open_target::OpenTarget::InPlace)
+    ) && !nav_mode
+        && !query.trim().is_empty()
+        && !query.trim_start().starts_with('>')
+}
+
 fn emit_action(action: &str, value: &str) {
     emit_action_with_target(action, value, None);
 }
@@ -598,6 +623,71 @@ fn emit_action_with_target(
         value: value.to_string(),
         target,
     });
+}
+
+fn dismiss_command_bar(mut is_open: Signal<bool>) {
+    if !is_open() {
+        return;
+    }
+    is_open.set(false);
+    emit_action("dismiss", "");
+}
+
+fn install_command_bar_outside_pointer_listener(is_open: Signal<bool>) -> bool {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return false;
+    };
+    if js_sys::Reflect::get(
+        &document,
+        &JsValue::from_str("_commandBarOutsidePointerBound"),
+    )
+    .map(|v| v.is_truthy())
+    .unwrap_or(false)
+    {
+        return true;
+    }
+
+    let closure = Closure::wrap(Box::new(move |event: web_sys::Event| {
+        if !is_open() {
+            return;
+        }
+        let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let Some(shell) = document.get_element_by_id("command-bar-shell") else {
+            return;
+        };
+        let Some(target) = event.target() else {
+            return;
+        };
+        let inside_shell = target
+            .dyn_ref::<web_sys::Node>()
+            .is_some_and(|node| shell.contains(Some(node)));
+        if inside_shell {
+            return;
+        }
+        dismiss_command_bar(is_open);
+    }) as Box<dyn FnMut(web_sys::Event)>);
+
+    let options = web_sys::AddEventListenerOptions::new();
+    options.set_capture(true);
+    if document
+        .add_event_listener_with_callback_and_add_event_listener_options(
+            "pointerdown",
+            closure.as_ref().unchecked_ref(),
+            &options,
+        )
+        .is_err()
+    {
+        return false;
+    }
+    let _ = js_sys::Reflect::set(
+        &document,
+        &JsValue::from_str("_commandBarOutsidePointerBound"),
+        &JsValue::TRUE,
+    );
+    closure.forget();
+    true
 }
 
 fn focus_and_install_ctrl_bindings() {
@@ -623,6 +713,9 @@ fn focus_and_install_ctrl_bindings() {
 
     let input2 = input.clone();
     let closure = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
+        if handle_plain_meta_a(&e, &input2) {
+            return;
+        }
         if !e.ctrl_key() {
             return;
         }
@@ -732,6 +825,17 @@ fn focus_and_install_ctrl_bindings() {
     closure.forget();
 }
 
+fn handle_plain_meta_a(e: &web_sys::KeyboardEvent, input: &web_sys::HtmlInputElement) -> bool {
+    if !e.meta_key() || e.ctrl_key() || e.alt_key() || e.shift_key() || e.code() != "KeyA" {
+        return false;
+    }
+    e.prevent_default();
+    e.stop_immediate_propagation();
+    let len = input.value().len() as u32;
+    let _ = input.set_selection_range(0, len);
+    true
+}
+
 fn is_vmux_synthetic_dioxus_keydown(e: &KeyboardEvent) -> bool {
     e.data()
         .downcast::<web_sys::KeyboardEvent>()
@@ -747,9 +851,58 @@ fn emit_command_bar_size() {
         return;
     };
     let shell: web_sys::HtmlElement = el.unchecked_into();
-    let width = shell.offset_width().max(1) as u32;
-    let height = shell.offset_height().max(1) as u32;
+    let document_width = document
+        .document_element()
+        .map(|el| el.scroll_width())
+        .unwrap_or(0);
+    let body_width = document.body().map(|body| body.scroll_width()).unwrap_or(0);
+    let result_list_extra_height = command_bar_results_extra_height(&document);
+    let width = shell
+        .offset_width()
+        .max(shell.scroll_width())
+        .max(document_width)
+        .max(body_width)
+        .max(1) as u32;
+    let height = shell
+        .offset_height()
+        .max(shell.scroll_height() + result_list_extra_height)
+        .max(1) as u32;
     let _ = try_cef_bin_emit_rkyv(&CommandBarSizeEvent { width, height });
+}
+
+fn command_bar_results_extra_height(document: &web_sys::Document) -> i32 {
+    let Some(el) = document.get_element_by_id("command-bar-results") else {
+        return 0;
+    };
+    let list: web_sys::HtmlElement = el.clone().unchecked_into();
+    let max_outer_height = web_sys::window()
+        .and_then(|window| window.get_computed_style(&el).ok().flatten())
+        .and_then(|style| style.get_property_value("max-height").ok())
+        .and_then(|value| css_px_value(&value))
+        .map(|height| height.ceil() as i32);
+    let border_height = (list.offset_height() - list.client_height()).max(0);
+    let natural_outer_height = list.scroll_height() + border_height;
+    let ideal_outer_height = max_outer_height
+        .map(|height| natural_outer_height.min(height))
+        .unwrap_or(natural_outer_height);
+    (ideal_outer_height - list.offset_height()).max(0)
+}
+
+fn css_px_value(value: &str) -> Option<f64> {
+    let value = value.trim().strip_suffix("px")?.parse::<f64>().ok()?;
+    value.is_finite().then_some(value.max(0.0))
+}
+
+fn schedule_command_bar_size_emit() {
+    emit_command_bar_size();
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::wrap(Box::new(move || {
+        emit_command_bar_size();
+    }) as Box<dyn FnMut()>);
+    let _ = window.request_animation_frame(callback.as_ref().unchecked_ref());
+    callback.forget();
 }
 
 fn install_command_bar_size_observer() -> bool {
@@ -759,9 +912,9 @@ fn install_command_bar_size_observer() -> bool {
     let Some(el) = document.get_element_by_id("command-bar-shell") else {
         return false;
     };
-    emit_command_bar_size();
+    schedule_command_bar_size_emit();
     let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
-        emit_command_bar_size();
+        schedule_command_bar_size_emit();
     }) as Box<dyn FnMut(JsValue)>);
     let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) else {
         return false;
@@ -819,5 +972,38 @@ fn dispatch_input_event(el: &web_sys::HtmlInputElement) {
     init.set_bubbles(true);
     if let Ok(evt) = web_sys::Event::new_with_event_init_dict("input", &init) {
         let _ = el.dispatch_event(&evt);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_command::open_target::OpenTarget;
+
+    #[test]
+    fn in_place_enter_opens_typed_query_without_nav_selection() {
+        assert!(should_open_typed_query_on_enter(
+            Some(OpenTarget::InPlace),
+            false,
+            "https://example.com"
+        ));
+    }
+
+    #[test]
+    fn in_place_enter_keeps_explicit_nav_selection() {
+        assert!(!should_open_typed_query_on_enter(
+            Some(OpenTarget::InPlace),
+            true,
+            "https://example.com"
+        ));
+    }
+
+    #[test]
+    fn command_query_enter_keeps_command_selection() {
+        assert!(!should_open_typed_query_on_enter(
+            Some(OpenTarget::InPlace),
+            false,
+            "> close"
+        ));
     }
 }

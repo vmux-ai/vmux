@@ -15,6 +15,7 @@ impl Plugin for WebviewCoreComponentsPlugin {
             .register_type::<WebviewWindowed>()
             .register_type::<WebviewNativeLiquidGlass>()
             .register_type::<WebviewOpaqueWindowedBackground>()
+            .register_type::<WebviewWindowedNativeFocus>()
             .register_type::<WebviewMaxFrameRate>()
             .register_type::<WebviewNativeOverlay>()
             .register_type::<HistorySwipeVisualOffset>()
@@ -74,6 +75,10 @@ pub struct WebviewNativeLiquidGlass;
 #[derive(Component, Debug, Clone, Copy, Default, Reflect)]
 #[reflect(Component, Default)]
 pub struct WebviewOpaqueWindowedBackground;
+
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewWindowedNativeFocus;
 
 /// Caps an OSR webview's windowless frame rate (fps). `sync_windowless_frame_rate` clamps the
 /// monitor-derived rate to this value, so a mostly-static surface (e.g. layout chrome) repaints —

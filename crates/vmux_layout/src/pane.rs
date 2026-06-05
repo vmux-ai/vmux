@@ -33,13 +33,11 @@ pub struct PendingPaneClose;
 
 pub struct PanePlugin;
 
-const HOVER_DEBOUNCE_MS: u64 = 80;
 const HOVER_COOLDOWN_MS: u64 = 300;
 
 #[derive(Resource, Default)]
 pub struct PaneHoverIntent {
     pub target: Option<Entity>,
-    pub since: Option<Instant>,
     pub last_activation: Option<Instant>,
 }
 
@@ -63,7 +61,7 @@ impl Plugin for PanePlugin {
             .add_systems(
                 Update,
                 (
-                    poll_cursor_pane_focus,
+                    poll_cursor_pane_focus.before(crate::stack::ComputeFocusSet),
                     click_pane_in_player_mode,
                     pane_gap_drag_resize,
                     process_pending_pane_closes,
@@ -79,6 +77,14 @@ impl Plugin for PanePlugin {
                     warp_cursor_to_active_pane,
                 ),
             );
+        #[cfg(target_os = "macos")]
+        app.add_systems(
+            Update,
+            (
+                publish_pane_hover_regions,
+                apply_pending_hover.before(crate::stack::ComputeFocusSet),
+            ),
+        );
         register_zoom_hooks(app);
     }
 }
@@ -811,8 +817,8 @@ fn handle_open_in_pane(
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut pending_warp: ResMut<PendingCursorWarp>,
     mut new_stack_ctx: ResMut<NewStackContext>,
+    mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
         let AppCommand::Browser(BrowserCommand::Open(OpenCommand::InPane {
@@ -906,7 +912,6 @@ fn handle_open_in_pane(
                 &mut new_stack_ctx,
                 &mut page_open_requests,
             );
-            pending_warp.target = Some(target_pane);
         } else {
             match mode {
                 PaneOpenMode::InPlace => {
@@ -934,6 +939,7 @@ fn handle_open_in_pane(
                 }
             }
         }
+        pending_warp.target = Some(target_pane);
     }
 }
 
@@ -1057,12 +1063,14 @@ fn on_pane_select(
 
 fn poll_cursor_pane_focus(
     mode: Res<crate::scene::InteractionMode>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     leaf_panes: Query<
         (Entity, &ComputedNode, &UiGlobalTransform),
         (With<Pane>, Without<PaneSplit>),
     >,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_children: Query<&Children, With<Pane>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     mut intent: ResMut<PaneHoverIntent>,
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
@@ -1082,13 +1090,12 @@ fn poll_cursor_pane_focus(
     {
         return;
     }
-    let Ok(window) = windows.single() else {
+    let Ok((window_entity, window)) = windows.single() else {
         return;
     };
-    let Some(cursor_pos) = window.physical_cursor_position() else {
+    let Some(cursor) = pane_hover_cursor_position(window_entity, window) else {
         return;
     };
-    let cursor = Vec2::new(cursor_pos.x, cursor_pos.y);
 
     let mut hovered_pane: Option<Entity> = None;
     for (entity, node, ui_gt) in &leaf_panes {
@@ -1118,22 +1125,178 @@ fn poll_cursor_pane_focus(
         return;
     }
 
-    if intent.target != Some(target) {
-        intent.target = Some(target);
-        intent.since = Some(Instant::now());
-        return;
+    commands.entity(target).insert(LastActivatedAt::now());
+    if let Some(target_stack) = active_stack_in_pane(target, &pane_children, &stack_ts) {
+        commands.entity(target_stack).insert(LastActivatedAt::now());
+    }
+    intent.target = None;
+}
+
+pub fn pane_hover_cursor_position(window_entity: Entity, window: &Window) -> Option<Vec2> {
+    #[cfg(target_os = "macos")]
+    {
+        native_window_cursor_position(window_entity, window).or_else(|| {
+            window
+                .physical_cursor_position()
+                .map(|pos| Vec2::new(pos.x, pos.y))
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window_entity;
+        window
+            .physical_cursor_position()
+            .map(|pos| Vec2::new(pos.x, pos.y))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn native_window_cursor_position(window_entity: Entity, window: &Window) -> Option<Vec2> {
+    use bevy::winit::WINIT_WINDOWS;
+    use objc2_app_kit::{NSApplication, NSEvent, NSView};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
+        let mtm = objc2::MainThreadMarker::new()?;
+        if !NSApplication::sharedApplication(mtm).isActive() {
+            return None;
+        }
+        let winit_window = winit_windows.get_window(window_entity)?;
+        let handle = winit_window.window_handle().ok()?;
+        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+            return None;
+        };
+        let view: &NSView = unsafe { &*appkit.ns_view.as_ptr().cast::<NSView>() };
+        let ns_window = view.window()?;
+        let screen_point = NSEvent::mouseLocation();
+        let window_point = ns_window.convertPointFromScreen(screen_point);
+        let point = view.convertPoint_fromView(window_point, None);
+        let bounds = view.bounds();
+        let y = if view.isFlipped() {
+            point.y
+        } else {
+            bounds.size.height - point.y
+        };
+        let scale = window.resolution.scale_factor() as f64;
+        let x = point.x * scale;
+        let y = y * scale;
+        if x.is_finite() && y.is_finite() {
+            Some(Vec2::new(x as f32, y as f32))
+        } else {
+            None
+        }
+    })
+}
+
+#[cfg(target_os = "macos")]
+mod hover_wake {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{LazyLock, Mutex};
+
+    #[derive(Default)]
+    struct Regions {
+        panes: Vec<(u64, f32, f32, f32, f32)>,
+        active: Option<u64>,
     }
 
-    let Some(since) = intent.since else {
+    static REGIONS: LazyLock<Mutex<Regions>> = LazyLock::new(|| Mutex::new(Regions::default()));
+    static PENDING: AtomicU64 = AtomicU64::new(0);
+
+    pub fn publish(panes: Vec<(u64, f32, f32, f32, f32)>, active: Option<u64>) {
+        if let Ok(mut regions) = REGIONS.lock() {
+            regions.panes = panes;
+            regions.active = active;
+        }
+    }
+
+    pub fn wake_target_for_cursor(x: f32, y: f32) -> Option<u64> {
+        let regions = REGIONS.lock().ok()?;
+        let hit = regions
+            .panes
+            .iter()
+            .find(|(_, min_x, min_y, max_x, max_y)| {
+                x >= *min_x && x <= *max_x && y >= *min_y && y <= *max_y
+            })
+            .map(|(entity, ..)| *entity)?;
+        let target = (Some(hit) != regions.active).then_some(hit)?;
+        PENDING.store(target, Ordering::Relaxed);
+        Some(target)
+    }
+
+    pub fn take_pending_target() -> Option<u64> {
+        match PENDING.swap(0, Ordering::Relaxed) {
+            0 => None,
+            bits => Some(bits),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub use hover_wake::wake_target_for_cursor;
+
+#[cfg(target_os = "macos")]
+fn publish_pane_hover_regions(
+    mode: Res<crate::scene::InteractionMode>,
+    leaf_panes: Query<
+        (Entity, &ComputedNode, &UiGlobalTransform),
+        (With<Pane>, Without<PaneSplit>),
+    >,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
+) {
+    if *mode != crate::scene::InteractionMode::User {
+        hover_wake::publish(Vec::new(), None);
+        return;
+    }
+    let mut panes = Vec::new();
+    for (entity, node, ui_gt) in &leaf_panes {
+        let center = ui_gt.transform_point2(Vec2::ZERO);
+        let half = node.size * 0.5;
+        panes.push((
+            entity.to_bits(),
+            center.x - half.x,
+            center.y - half.y,
+            center.x + half.x,
+            center.y + half.y,
+        ));
+    }
+    let active = active_among(
+        leaf_panes
+            .iter()
+            .filter_map(|(entity, _, _)| pane_ts.get(entity).ok()),
+    )
+    .map(|entity| entity.to_bits());
+    hover_wake::publish(panes, active);
+}
+
+#[cfg(target_os = "macos")]
+fn apply_pending_hover(
+    mode: Res<crate::scene::InteractionMode>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_children: Query<&Children, With<Pane>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    mut commands: Commands,
+) {
+    let Some(bits) = hover_wake::take_pending_target() else {
         return;
     };
-    if since.elapsed().as_millis() < HOVER_DEBOUNCE_MS as u128 {
+    if *mode != crate::scene::InteractionMode::User {
         return;
     }
-
+    let Some(target) = Entity::try_from_bits(bits) else {
+        return;
+    };
+    if !leaf_panes.contains(target) {
+        return;
+    }
+    let current = active_among(leaf_panes.iter().filter_map(|e| pane_ts.get(e).ok()));
+    if current == Some(target) {
+        return;
+    }
     commands.entity(target).insert(LastActivatedAt::now());
-    intent.target = None;
-    intent.last_activation = Some(Instant::now());
+    if let Some(stack) = active_stack_in_pane(target, &pane_children, &stack_ts) {
+        commands.entity(stack).insert(LastActivatedAt::now());
+    }
 }
 
 fn click_pane_in_player_mode(
@@ -2107,6 +2270,131 @@ mod tests {
     }
 
     #[test]
+    fn pane_hover_activates_hovered_pane_in_single_update() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::scene::InteractionMode>()
+            .init_resource::<PaneHoverIntent>()
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .add_systems(Update, poll_cursor_pane_focus);
+
+        let window = app
+            .world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id();
+        app.world_mut()
+            .entity_mut(window)
+            .get_mut::<Window>()
+            .unwrap()
+            .set_physical_cursor_position(Some(bevy::math::DVec2::new(400.0, 450.0)));
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1)))
+            .id();
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let left = place_pane(
+            &mut app,
+            split,
+            Vec2::new(400.0, 450.0),
+            Vec2::new(800.0, 900.0),
+        );
+        let right = place_pane(
+            &mut app,
+            split,
+            Vec2::new(1200.0, 450.0),
+            Vec2::new(800.0, 900.0),
+        );
+        app.world_mut().entity_mut(left).insert(LastActivatedAt(1));
+        app.world_mut()
+            .entity_mut(right)
+            .insert(LastActivatedAt(10));
+        let left_stack = app
+            .world()
+            .get::<Children>(left)
+            .unwrap()
+            .iter()
+            .find(|&e| app.world().get::<Stack>(e).is_some())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(left_stack)
+            .insert(LastActivatedAt(1));
+
+        app.update();
+
+        assert!(
+            app.world().get::<LastActivatedAt>(left).unwrap().0 > 10,
+            "hovered pane should activate in the same update"
+        );
+        assert!(
+            app.world().get::<LastActivatedAt>(left_stack).unwrap().0 > 1,
+            "hovered pane active stack should activate in the same update"
+        );
+    }
+
+    #[test]
+    fn pane_hover_uses_native_cursor_position_fallback() {
+        let source = include_str!("pane.rs");
+        let poll_fn = source
+            .split("fn poll_cursor_pane_focus")
+            .nth(1)
+            .and_then(|tail| tail.split("fn click_pane_in_player_mode").next())
+            .unwrap_or_default();
+
+        assert!(poll_fn.contains("pane_hover_cursor_position(window_entity, window)"));
+        assert!(source.contains("fn native_window_cursor_position"));
+        assert!(source.contains("NSEvent::mouseLocation()"));
+        assert!(source.contains("convertPointFromScreen"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn wake_target_only_fires_over_non_active_pane() {
+        super::hover_wake::publish(
+            vec![(1, 0.0, 0.0, 100.0, 100.0), (2, 200.0, 0.0, 300.0, 100.0)],
+            Some(1),
+        );
+        assert_eq!(super::wake_target_for_cursor(50.0, 50.0), None);
+        assert_eq!(super::wake_target_for_cursor(250.0, 50.0), Some(2));
+        assert_eq!(super::wake_target_for_cursor(150.0, 50.0), None);
+    }
+
+    #[test]
+    fn pane_hover_activates_target_stack() {
+        let source = include_str!("pane.rs");
+        let poll_fn = source
+            .split("fn poll_cursor_pane_focus")
+            .nth(1)
+            .and_then(|tail| tail.split("fn pane_hover_cursor_position").next())
+            .unwrap_or_default();
+
+        assert!(poll_fn.contains("active_stack_in_pane(target"));
+        assert!(poll_fn.contains("commands.entity(target_stack).insert(LastActivatedAt::now())"));
+    }
+
+    #[test]
+    fn pane_hover_runs_before_focus_cache_computes() {
+        let source = include_str!("pane.rs");
+        let plugin_build = source
+            .split("impl Plugin for PanePlugin")
+            .nth(1)
+            .and_then(|tail| tail.split("fn register_zoom_hooks").next())
+            .unwrap_or_default();
+
+        assert!(
+            plugin_build.contains("poll_cursor_pane_focus.before(crate::stack::ComputeFocusSet)")
+        );
+    }
+
+    #[test]
     fn removing_zoomed_pane_clears_zoom_state() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
@@ -2671,6 +2959,39 @@ mod tests {
             }
             other => panic!("expected PageOpenRequest, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn in_pane_new_split_warps_cursor_to_new_pane() {
+        use vmux_command::open::{PaneDirection, PaneOpenMode, PaneTarget};
+        let mut app = build_in_pane_app();
+        let (_tab, pane, _stack) = build_single_pane(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InPane {
+                    direction: PaneDirection::Right,
+                    target: PaneTarget::NewSplit,
+                    mode: PaneOpenMode::NewStack,
+                    url: Some("https://x".into()),
+                },
+            )));
+        app.update();
+
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(pane)
+            .unwrap()
+            .iter()
+            .filter(|e| app.world().get::<Pane>(*e).is_some())
+            .collect();
+
+        assert_eq!(
+            app.world().resource::<PendingCursorWarp>().target,
+            Some(children[1]),
+            "split should warp cursor to the newly active pane"
+        );
     }
 
     #[test]

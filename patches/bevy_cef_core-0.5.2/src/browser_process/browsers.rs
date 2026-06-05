@@ -75,10 +75,12 @@ pub struct WebviewBrowser {
     last_frame: Cell<Option<(f64, f64, f64, f64)>>,
     last_corner_radius: Cell<Option<f64>>,
     last_corner_radius_all_corners: Cell<Option<bool>>,
+    last_focus_ring: Cell<Option<(f64, f64, f64, f64)>>,
     /// True for native (windowed) browsers. `set_focus(true)` makes a windowed browser's `NSView`
     /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die. Keyboard is
     /// routed via `CefKeyboardTarget` forwarding instead, so windowed browsers must not be focused.
     windowed: bool,
+    allow_native_focus: bool,
     #[cfg(target_os = "macos")]
     native_liquid_glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
 }
@@ -134,11 +136,12 @@ impl Browsers {
         windowless_frame_rate: i32,
         windowed: bool,
         native_liquid_glass: bool,
+        allow_native_focus: bool,
     ) {
         let _ = native_liquid_glass;
         let windowless_frame_rate = normalize_windowless_frame_rate(windowless_frame_rate);
         webview_debug_log(format!(
-            "Browsers::create_browser entity={webview:?} uri={_uri} size={webview_size:?} scale={device_scale_factor} disk_profile={} bg={background_color:?} fps={windowless_frame_rate}",
+            "Browsers::create_browser entity={webview:?} uri={_uri} size={webview_size:?} scale={device_scale_factor} disk_profile={} bg={background_color:?} fps={windowless_frame_rate} allow_native_focus={allow_native_focus}",
             disk_profile_root.is_some_and(|s| !s.trim().is_empty())
         ));
         let size = Rc::new(Cell::new(webview_size));
@@ -156,6 +159,7 @@ impl Browsers {
             webview_cef_state_sender,
             webview_popup_sender,
             texture_wake,
+            !allow_native_focus,
         );
 
         // `RequestContext::register_scheme_handler_factory` is not always enough: some navigations
@@ -291,7 +295,9 @@ impl Browsers {
             last_frame: Cell::new(None),
             last_corner_radius: Cell::new(None),
             last_corner_radius_all_corners: Cell::new(None),
+            last_focus_ring: Cell::new(None),
             windowed,
+            allow_native_focus,
             #[cfg(target_os = "macos")]
             native_liquid_glass,
         };
@@ -375,8 +381,10 @@ impl Browsers {
         active: Option<Entity>,
         auxiliary_osr_focus: &[Entity],
     ) {
-        for (_entity, browser) in &self.browsers {
-            browser.host.set_focus(false as _);
+        for browser in self.browsers.values() {
+            if !browser.windowed {
+                browser.host.set_focus(false as _);
+            }
         }
         if let Some(a) = active
             && let Some(browser) = self.browsers.get(&a)
@@ -472,6 +480,15 @@ impl Browsers {
     pub fn send_key(&self, webview: &Entity, event: cef::KeyEvent) {
         if let Some(browser) = self.browsers.get(webview) {
             browser.host.send_key_event(Some(&event));
+        }
+    }
+
+    pub fn set_windowed_focus(&self, webview: &Entity, focused: bool) {
+        if let Some(browser) = self.browsers.get(webview)
+            && browser.windowed
+            && browser.allow_native_focus
+        {
+            browser.host.set_focus(focused as _);
         }
     }
 
@@ -676,42 +693,17 @@ impl Browsers {
 
     #[cfg(target_os = "macos")]
     fn apply_view_tree_corner_radius(view: &objc2_app_kit::NSView, radius: f64, all_corners: bool) {
+        use objc2_quartz_core::CACornerMask;
         view.setWantsLayer(true);
         if let Some(layer) = view.layer() {
-            Self::apply_layer_tree_corner_radius(&layer, radius, all_corners);
-        }
-        let subviews = view.subviews();
-        for i in 0..subviews.count() {
-            let child = subviews.objectAtIndex(i);
-            Self::apply_view_tree_corner_radius(&child, radius, all_corners);
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    fn apply_layer_tree_corner_radius(
-        layer: &objc2_quartz_core::CALayer,
-        radius: f64,
-        all_corners: bool,
-    ) {
-        use objc2_quartz_core::CACornerMask;
-        let all = CACornerMask::LayerMinXMinYCorner
-            | CACornerMask::LayerMaxXMinYCorner
-            | CACornerMask::LayerMinXMaxYCorner
-            | CACornerMask::LayerMaxXMaxYCorner;
-        let bottom = if layer.isGeometryFlipped() {
-            CACornerMask::LayerMinXMaxYCorner | CACornerMask::LayerMaxXMaxYCorner
-        } else {
-            CACornerMask::LayerMinXMinYCorner | CACornerMask::LayerMaxXMinYCorner
-        };
-        layer.setCornerRadius(radius);
-        layer.setMasksToBounds(radius > 0.0);
-        layer.setMaskedCorners(if all_corners { all } else { bottom });
-        let Some(sublayers) = (unsafe { layer.sublayers() }) else {
-            return;
-        };
-        for i in 0..sublayers.count() {
-            let child = sublayers.objectAtIndex(i);
-            Self::apply_layer_tree_corner_radius(&child, radius, all_corners);
+            let all = CACornerMask::LayerMinXMinYCorner
+                | CACornerMask::LayerMaxXMinYCorner
+                | CACornerMask::LayerMinXMaxYCorner
+                | CACornerMask::LayerMaxXMaxYCorner;
+            let bottom = CACornerMask::LayerMinXMinYCorner | CACornerMask::LayerMaxXMinYCorner;
+            layer.setCornerRadius(radius);
+            layer.setMasksToBounds(true);
+            layer.setMaskedCorners(if all_corners { all } else { bottom });
         }
     }
 
@@ -819,6 +811,45 @@ impl Browsers {
 
     #[cfg(not(target_os = "macos"))]
     pub fn set_windowed_corner_radius(&self, _: &Entity, _: f32, _: f32, _: bool) {}
+
+    #[cfg(target_os = "macos")]
+    pub fn set_windowed_focus_ring(
+        &self,
+        webview: &Entity,
+        width_px: f32,
+        scale: f32,
+        color_rgb: [f32; 3],
+    ) {
+        use objc2_app_kit::{NSColor, NSView};
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        let s = (scale as f64).max(1.0e-6);
+        let width = (width_px as f64 / s).max(0.0);
+        let r = color_rgb[0].clamp(0.0, 1.0) as f64;
+        let g = color_rgb[1].clamp(0.0, 1.0) as f64;
+        let b = color_rgb[2].clamp(0.0, 1.0) as f64;
+        let state = Some((width, r, g, b));
+        if browser.last_focus_ring.get() == state {
+            return;
+        }
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        view.setWantsLayer(true);
+        let Some(layer) = view.layer() else {
+            return;
+        };
+        browser.last_focus_ring.set(state);
+        let color = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 1.0);
+        layer.setBorderWidth(width);
+        layer.setBorderColor(Some(&color.CGColor()));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn set_windowed_focus_ring(&self, _: &Entity, _: f32, _: f32, _: [f32; 3]) {}
 
     #[cfg(target_os = "macos")]
     pub fn set_windowed_hidden(&self, webview: &Entity, hidden: bool) {
@@ -947,10 +978,19 @@ impl Browsers {
     pub fn close(&mut self, webview: &Entity) {
         if let Some(browser) = self.browsers.remove(webview) {
             #[cfg(target_os = "macos")]
-            if let Some(glass) = &browser.native_liquid_glass {
+            {
                 use objc2::ClassType;
-                glass.setContentView(None);
-                glass.as_super().removeFromSuperview();
+                use objc2_app_kit::NSView;
+                if let Some(glass) = &browser.native_liquid_glass {
+                    glass.setContentView(None);
+                    glass.as_super().removeFromSuperview();
+                } else if browser.windowed {
+                    let handle = browser.host.window_handle();
+                    if !handle.is_null() {
+                        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+                        view.removeFromSuperview();
+                    }
+                }
             }
             browser.host.close_browser(true as _);
             debug!("Closed browser with webview: {:?}", webview);
@@ -1267,8 +1307,9 @@ impl Browsers {
         webview_cef_state_sender: WebviewCefStateSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
         texture_wake: Option<TextureWake>,
+        cancel_native_focus: bool,
     ) -> Client {
-        ClientHandlerBuilder::new(RenderHandlerBuilder::build(
+        let client = ClientHandlerBuilder::new(RenderHandlerBuilder::build(
             webview,
             self.sender.clone(),
             self.accel_sender.clone(),
@@ -1276,27 +1317,32 @@ impl Browsers {
             size.clone(),
             device_scale.clone(),
         ))
-        .with_wake(texture_wake)
-        .with_focus_handler(FocusCanceler::build())
-        .with_display_handler(DisplayHandlerBuilder::build(
-            webview,
-            system_cursor_icon_sender,
-            webview_cef_state_sender,
-        ))
-        .with_load_handler(WebviewLoadHandlerBuilder::build(
-            webview,
-            webview_loading_state_sender,
-            webview_committed_nav_sender,
-        ))
-        .with_life_span_handler(LifeSpanHandlerBuilder::build(
-            webview,
-            webview_popup_sender.clone(),
-        ))
-        .with_request_handler(RequestHandlerBuilder::build(webview, webview_popup_sender))
-        .with_message_handler(JsEmitEventHandler::new(webview, ipc_event_sender))
-        .with_message_handler(BinEmitEventHandler::new(webview, bin_ipc_event_sender))
-        .with_message_handler(BrpHandler::new(brp_sender))
-        .build()
+        .with_wake(texture_wake);
+        let client = if cancel_native_focus {
+            client.with_focus_handler(FocusCanceler::build())
+        } else {
+            client
+        };
+        client
+            .with_display_handler(DisplayHandlerBuilder::build(
+                webview,
+                system_cursor_icon_sender,
+                webview_cef_state_sender,
+            ))
+            .with_load_handler(WebviewLoadHandlerBuilder::build(
+                webview,
+                webview_loading_state_sender,
+                webview_committed_nav_sender,
+            ))
+            .with_life_span_handler(LifeSpanHandlerBuilder::build(
+                webview,
+                webview_popup_sender.clone(),
+            ))
+            .with_request_handler(RequestHandlerBuilder::build(webview, webview_popup_sender))
+            .with_message_handler(JsEmitEventHandler::new(webview, ipc_event_sender))
+            .with_message_handler(BinEmitEventHandler::new(webview, bin_ipc_event_sender))
+            .with_message_handler(BrpHandler::new(brp_sender))
+            .build()
     }
 
     #[inline]
@@ -1623,8 +1669,118 @@ mod tests {
         assert!(implementation.contains("last_corner_radius: Cell<Option<f64>>"));
         assert!(implementation.contains("fn apply_view_tree_corner_radius"));
         assert!(implementation.contains("layer.setCornerRadius(radius)"));
-        assert!(implementation.contains("layer.setMasksToBounds(radius > 0.0)"));
+        assert!(implementation.contains("layer.setMasksToBounds(true)"));
         assert!(implementation.contains("pub fn set_windowed_corner_radius"));
+    }
+
+    #[test]
+    fn windowed_native_views_clip_to_frame_with_zero_radius() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+
+        assert!(implementation.contains("layer.setMasksToBounds(true)"));
+        assert!(!implementation.contains("layer.setMasksToBounds(radius > 0.0)"));
+    }
+
+    #[test]
+    fn windowed_native_views_support_focus_ring_border() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+
+        assert!(implementation.contains("last_focus_ring"));
+        assert!(implementation.contains("pub fn set_windowed_focus_ring"));
+        assert!(implementation.contains("layer.setBorderWidth(width)"));
+        assert!(implementation.contains("layer.setBorderColor"));
+    }
+
+    #[test]
+    fn windowed_native_focus_can_bypass_focus_canceler() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+
+        assert!(implementation.contains("allow_native_focus"));
+        assert!(implementation.contains("if cancel_native_focus"));
+        assert!(implementation.contains(".with_focus_handler(FocusCanceler::build())"));
+        assert!(implementation.contains("pub fn set_windowed_focus"));
+    }
+
+    #[test]
+    fn osr_focus_sync_does_not_clear_windowed_focus() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        let sync_fn = implementation
+            .split("pub fn sync_osr_focus_to_active_pane")
+            .nth(1)
+            .and_then(|tail| tail.split("pub fn send_mouse_move").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("if !browser.windowed"));
+        assert!(!sync_fn.contains(
+            "for (_entity, browser) in &self.browsers {\n            browser.host.set_focus(false"
+        ));
+    }
+
+    #[test]
+    fn closing_non_glass_windowed_browser_removes_native_view() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        let close_fn = implementation
+            .split("pub fn close")
+            .nth(1)
+            .and_then(|tail| tail.split("pub fn try_receive_texture").next())
+            .unwrap_or_default();
+
+        assert!(close_fn.contains("window_handle"));
+        assert!(close_fn.contains("removeFromSuperview"));
+    }
+
+    #[test]
+    fn windowed_native_corner_clip_does_not_mutate_cef_sublayers() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        let apply_fn = implementation
+            .split("fn apply_view_tree_corner_radius")
+            .nth(1)
+            .and_then(|tail| {
+                tail.split("#[cfg(target_os = \"macos\")]\n    pub fn set_windowed_frame")
+                    .next()
+            })
+            .unwrap_or_default();
+
+        assert!(!apply_fn.contains("subviews"));
+        assert!(!apply_fn.contains("sublayers"));
+        assert!(!apply_fn.contains("for i in 0.."));
+    }
+
+    #[test]
+    fn windowed_native_bottom_corner_mask_is_not_flipped_to_top() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        let apply_fn = implementation
+            .split("fn apply_view_tree_corner_radius")
+            .nth(1)
+            .and_then(|tail| {
+                tail.split("#[cfg(target_os = \"macos\")]\n    pub fn set_windowed_frame")
+                    .next()
+            })
+            .unwrap_or_default();
+
+        assert!(apply_fn.contains("LayerMinXMinYCorner | CACornerMask::LayerMaxXMinYCorner"));
+        assert!(!apply_fn.contains("isGeometryFlipped"));
     }
 
     #[test]

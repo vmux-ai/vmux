@@ -32,6 +32,9 @@ pub(crate) struct LastStackCloseAt(pub Option<std::time::Instant>);
 pub(crate) struct LastNativePageOpenAt(pub Option<std::time::Instant>);
 
 static PENDING_MENU_EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+const WINDOW_CLOSE_SUPPRESSION_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
+const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
+    std::time::Duration::from_millis(1500);
 
 #[allow(dead_code)]
 struct OsMenuResource(Menu);
@@ -158,20 +161,20 @@ fn close_with_confirmation(
     last_tab_close: Option<Res<vmux_layout::tab::LastTabCloseAt>>,
 ) {
     // ⌘W fires the `stack_close` menu item but Chromium's built-in ⌘W also requests a window close.
-    // Suppress a close that lands within 300ms of a menu command — the red button never does.
+    // Suppress a close that lands right after a menu command — the red button never does.
     let from_menu_key_equivalent = last_menu_command
         .0
-        .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(300));
+        .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
     let from_tab_close = last_tab_close
         .as_deref()
         .and_then(|last| last.0)
-        .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(300));
+        .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
     let from_stack_close = last_stack_close
         .0
-        .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(300));
+        .is_some_and(|t| t.elapsed() < WINDOW_CLOSE_SUPPRESSION_WINDOW);
     let from_native_page_open = last_native_page_open
         .0
-        .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(300));
+        .is_some_and(|t| t.elapsed() < NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW);
     for event in closed.read() {
         if from_menu_key_equivalent || from_stack_close || from_tab_close || from_native_page_open {
             info!(
@@ -341,6 +344,25 @@ mod tests {
                     url: Some("vmux://terminal".to_string()),
                 },
             )));
+        app.world_mut()
+            .resource_mut::<Messages<WindowCloseRequested>>()
+            .write(WindowCloseRequested { window });
+
+        app.world_mut().run_schedule(Update);
+
+        assert!(app.world().get::<Window>(window).unwrap().visible);
+    }
+
+    #[test]
+    fn delayed_window_close_request_after_native_page_open_is_suppressed() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<WindowCloseRequested>()
+            .insert_resource(test_settings());
+
+        let window = app.world_mut().spawn(Window::default()).id();
+        app.world_mut().resource_mut::<LastNativePageOpenAt>().0 =
+            Some(std::time::Instant::now() - std::time::Duration::from_millis(1000));
         app.world_mut()
             .resource_mut::<Messages<WindowCloseRequested>>()
             .write(WindowCloseRequested { window });

@@ -614,6 +614,12 @@ fn handle_agent_page_open_task(
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> Result<(), String> {
+    // The Vibe-CLI setup page lives in the agent namespace but is a *served* page, not an agent
+    // session — attach it directly rather than mis-parsing "vibe/setup" as a Page-agent provider/model.
+    if task.url == "vmux://agent/vibe/setup" {
+        attach_vibe_cli_setup_to_stack(task.stack, children_q, commands, meshes, webview_mt);
+        return Ok(());
+    }
     let parsed =
         url::Url::parse(&task.url).map_err(|e| format!("invalid agent URL '{}': {e}", task.url))?;
     let path = parsed.path().trim_start_matches('/');
@@ -763,17 +769,7 @@ fn attach_vibe_cli_setup_to_stack(
 ) {
     clear_stack_children(stack, children_q, commands);
     let title = "Set up Vibe CLI";
-    let url = "vmux://agent/vibe/";
-    let command = "curl -LsSf https://mistral.ai/vibe/install.sh | bash";
-    let setup = "vibe --setup";
-    let verify = "vibe --version";
-    let html = format!(
-        "<!doctype html><html><head><meta charset='utf-8'><title>{title}</title><style>html,body{{height:100%;margin:0;background:#101114;color:#e8e8ea;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}}main{{min-height:100%;display:flex;align-items:center;justify-content:center;padding:40px;box-sizing:border-box}}section{{max-width:720px}}h1{{font-size:28px;line-height:1.15;margin:0 0 12px;font-weight:650}}p{{font-size:14px;line-height:1.55;margin:0 0 14px;color:#a9abb2}}code{{display:block;margin:10px 0 18px;padding:12px;border-radius:6px;background:#1a1c22;color:#d7d8dd;white-space:pre-wrap;word-break:break-word}}.inline{{display:inline;margin:0;padding:0.1rem 0.35rem}}</style></head><body><main><section><h1>Install Vibe CLI</h1><p>Vmux opens this page through the local <code class='inline'>vibe</code> command. Install Vibe, restart Vmux so PATH is refreshed, then open this URL again.</p><code>{}</code><p>Finish local setup:</p><code>{}</code><p>Verify the command is available:</p><code>{}</code></section></main></body></html>",
-        html_escape(command),
-        html_escape(setup),
-        html_escape(verify)
-    );
-    let data_url = data_url_for_html(&html);
+    let url = "vmux://agent/vibe/setup";
     commands.entity(stack).insert(PageMetadata {
         url: url.to_string(),
         title: title.to_string(),
@@ -782,7 +778,7 @@ fn attach_vibe_cli_setup_to_stack(
     });
     let browser = commands
         .spawn((
-            vmux_layout::Browser::new_with_title(meshes, webview_mt, &data_url, title),
+            vmux_layout::Browser::new_with_title(meshes, webview_mt, url, title),
             ChildOf(stack),
         ))
         .id();
@@ -1290,7 +1286,7 @@ mod tests {
 
         assert!(app.world().get_entity(child).is_err());
         let stack_meta = app.world().get::<PageMetadata>(stack).unwrap();
-        assert_eq!(stack_meta.url, "vmux://agent/vibe/");
+        assert_eq!(stack_meta.url, "vmux://agent/vibe/setup");
         assert_eq!(stack_meta.title, "Set up Vibe CLI");
         let mut browsers = app
             .world_mut()
@@ -1302,11 +1298,6 @@ mod tests {
             .collect();
         assert_eq!(metas.len(), 1);
         assert_eq!(metas[0].title, "Set up Vibe CLI");
-        assert!(metas[0].url.contains("Install%20Vibe%20CLI"));
-        assert!(
-            metas[0].url.contains(
-                "curl%20-LsSf%20https%3A%2F%2Fmistral.ai%2Fvibe%2Finstall.sh%20%7C%20bash"
-            )
-        );
+        assert_eq!(metas[0].url, "vmux://agent/vibe/setup");
     }
 }

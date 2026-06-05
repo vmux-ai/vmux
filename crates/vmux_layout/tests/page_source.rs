@@ -57,6 +57,24 @@ fn header_tabs_use_same_fixed_width_for_active_and_inactive_states() {
 }
 
 #[test]
+fn inactive_tabs_add_horizontal_padding_on_hover() {
+    let tab = tab_component_source();
+    let inactive_branch = tab
+        .split("} else {\n        (\n            String::new(),")
+        .nth(1)
+        .and_then(|rest| rest.split(")\n    };").next())
+        .expect("inactive tab branch");
+    let active_branch = tab
+        .split("if is_active {")
+        .nth(1)
+        .and_then(|rest| rest.split("} else {").next())
+        .expect("active tab branch");
+
+    assert!(inactive_branch.contains("hover:px-4"));
+    assert!(!active_branch.contains("hover:px-4"));
+}
+
+#[test]
 fn embedded_header_css_has_fixed_tab_utilities() {
     let css_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../vmux_server/dist/assets/index.css");
@@ -75,6 +93,29 @@ fn embedded_header_css_has_fixed_tab_utilities() {
     ] {
         assert!(css.contains(selector), "missing {selector}");
     }
+}
+
+#[test]
+fn layout_page_offsets_header_and_side_sheet_by_window_padding() {
+    let source = include_str!("../src/page.rs");
+
+    assert!(source.contains("--vmux-header-top"));
+    assert!(source.contains("--vmux-side-sheet-left"));
+    assert!(source.contains("--vmux-side-sheet-top"));
+    assert!(source.contains("--vmux-side-sheet-bottom"));
+    assert!(source.contains("top-[var(--vmux-header-top)]"));
+    assert!(source.contains("left-[var(--vmux-side-sheet-left)]"));
+}
+
+#[test]
+fn command_bar_page_installs_document_pointer_dismiss_listener() {
+    let source = include_str!("../src/command_bar/page.rs");
+
+    assert!(source.contains("install_command_bar_outside_pointer_listener"));
+    assert!(source.contains("\"pointerdown\""));
+    assert!(source.contains("command-bar-shell"));
+    assert!(source.contains("shell.contains"));
+    assert!(source.contains("emit_action(\"dismiss\", \"\")"));
 }
 
 fn tab_component_source() -> &'static str {

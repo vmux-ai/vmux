@@ -46,6 +46,7 @@ web_pages! {
     render_history: "history" => vmux_history::page::Page,
     render_spaces: "spaces" => vmux_space::page::Page,
     render_settings: "settings" => vmux_setting::page::Page,
+    render_agent: "agent" => vmux_vibe_setup::page::Page,
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]

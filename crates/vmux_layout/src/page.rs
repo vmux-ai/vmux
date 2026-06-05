@@ -34,14 +34,18 @@ pub fn Page() -> Element {
         }
     });
     let side_sheet_vars = format!(
-        "--vmux-side-sheet-width:{}px;--vmux-side-sheet-pad-top:{}px;",
+        "--vmux-side-sheet-width:{}px;--vmux-side-sheet-left:{}px;--vmux-side-sheet-top:{}px;--vmux-side-sheet-bottom:{}px;--vmux-side-sheet-pad-top:{}px;",
         state.side_sheet_width,
+        state.window_pad_left,
+        state.window_pad_top,
+        state.window_pad_bottom,
         crate::event::url_bar_top(),
     );
     let header_vars = format!(
-        "--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;",
+        "--vmux-header-top:{}px;--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;",
+        state.window_pad_top,
         state.main_cef_left(),
-        crate::event::WINDOW_PAD_PX,
+        state.window_pad_right,
         state.header_height,
         state.tab_row_pad_left(),
     );
@@ -50,7 +54,7 @@ pub fn Page() -> Element {
         div { class: "fixed inset-0 pointer-events-none text-foreground",
             if state.side_sheet_open {
                 aside {
-                    class: "pointer-events-auto fixed left-0 top-0 bottom-0 min-h-0 overflow-hidden w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
+                    class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-hidden w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
                     style: "{side_sheet_vars}",
                     div { class: "flex h-full min-h-0 flex-col",
                         SideSheetView {}
@@ -59,7 +63,7 @@ pub fn Page() -> Element {
             }
             if state.header_visible() {
                 div {
-                    class: "pointer-events-auto fixed top-0 left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
+                    class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
                     style: "{header_vars}",
                     HeaderView {}
                 }
@@ -392,7 +396,7 @@ fn Tab(tab: TabRow) -> Element {
         (
             String::new(),
             format!(
-                "{tab_box_classes} rounded-md text-muted-foreground hover:bg-glass-hover hover:text-foreground"
+                "{tab_box_classes} rounded-md text-muted-foreground hover:bg-glass-hover hover:px-4 hover:text-foreground"
             ),
             "min-w-0 flex-1 truncate text-ui".to_string(),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),

@@ -387,6 +387,7 @@ struct CommandBarOpenRequest {
     should_toggle: bool,
     should_dismiss: bool,
     should_dismiss_nav: bool,
+    replace_active_stack: bool,
     url_override: Option<String>,
 }
 
@@ -403,6 +404,7 @@ fn command_bar_open_request(
             }
             AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPageInCommandBar)) => {
                 request.should_toggle = true;
+                request.replace_active_stack = true;
             }
             AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPathBar)) => {
                 request.should_toggle = true;
@@ -453,6 +455,35 @@ fn pending_stack_startup_url_request(
         url: url.to_string(),
         request_id: None,
     })
+}
+
+fn command_bar_should_open_pending_stack(
+    new_stack_ctx: &mut NewStackContext,
+    explicit_toggle: bool,
+) -> bool {
+    if explicit_toggle {
+        new_stack_ctx.needs_open = false;
+        return false;
+    }
+    if new_stack_ctx.needs_open {
+        new_stack_ctx.needs_open = false;
+        true
+    } else {
+        false
+    }
+}
+
+fn command_bar_cancel_pending_stack_for_active_open(
+    new_stack_ctx: &mut NewStackContext,
+    replace_active_stack: bool,
+) -> Option<(Entity, Option<Entity>)> {
+    if !replace_active_stack {
+        return None;
+    }
+    new_stack_ctx.needs_open = false;
+    let previous_stack = new_stack_ctx.previous_stack.take();
+    let stack = new_stack_ctx.stack.take()?;
+    Some((stack, previous_stack))
 }
 
 fn handle_open_command_bar(
@@ -520,7 +551,21 @@ fn handle_open_command_bar(
     let should_toggle = request.should_toggle;
     let should_dismiss = request.should_dismiss;
     let should_dismiss_nav = request.should_dismiss_nav;
+    let replace_active_stack = request.replace_active_stack;
     let url_override = request.url_override;
+
+    let mut active_stack_override = None;
+    let canceled_pending_stack = {
+        let mut new_stack_ctx = snapshot_params.p2();
+        command_bar_cancel_pending_stack_for_active_open(&mut new_stack_ctx, replace_active_stack)
+    };
+    if let Some((stack, previous_stack)) = canceled_pending_stack {
+        commands.entity(stack).despawn();
+        if let Some(previous_stack) = previous_stack {
+            active_stack_override = Some(previous_stack);
+            focus_pane_entity(previous_stack, &mut commands, &child_of_q);
+        }
+    }
 
     if should_dismiss {
         let is_open = modal_q
@@ -625,12 +670,7 @@ fn handle_open_command_bar(
 
     let should_open_pending_stack = {
         let mut new_stack_ctx = snapshot_params.p2();
-        if new_stack_ctx.needs_open {
-            new_stack_ctx.needs_open = false;
-            true
-        } else {
-            false
-        }
+        command_bar_should_open_pending_stack(&mut new_stack_ctx, should_toggle)
     };
     if should_open_pending_stack {
         should_open = true;
@@ -698,14 +738,17 @@ fn handle_open_command_bar(
     } else if is_new_stack {
         String::new()
     } else {
-        let (_, _, active_stack) = focused_stack(
-            &tab_q,
-            &all_children,
-            &leaf_panes,
-            &pane_ts,
-            &pane_children,
-            &stack_ts,
-        );
+        let active_stack = active_stack_override.or_else(|| {
+            let (_, _, active_stack) = focused_stack(
+                &tab_q,
+                &all_children,
+                &leaf_panes,
+                &pane_ts,
+                &pane_children,
+                &stack_ts,
+            );
+            active_stack
+        });
         active_stack
             .and_then(|tab| {
                 let Ok(children) = all_children.get(tab) else {
@@ -815,7 +858,9 @@ fn handle_open_command_bar(
     let reveal_start_frames = command_bar_reveal_start_frames(
         modal_pending_reveal.is_some_and(|pending| pending.open_id == 0),
     );
-    let target = if is_new_stack {
+    let target = if replace_active_stack {
+        Some(vmux_command::open_target::OpenTarget::InPlace)
+    } else if is_new_stack {
         Some(vmux_command::open_target::OpenTarget::InNewStack)
     } else {
         None
@@ -2049,6 +2094,49 @@ mod tests {
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, None);
+    }
+
+    #[test]
+    fn open_page_in_command_bar_marks_payload_as_in_place_target() {
+        let source = include_str!("handler.rs");
+        let open_fn = source
+            .split("fn handle_open_command_bar")
+            .nth(1)
+            .and_then(|tail| tail.split("fn command_bar_open_payload").next())
+            .unwrap_or_default();
+
+        assert!(open_fn.contains("if replace_active_stack"));
+        assert!(open_fn.contains("OpenTarget::InPlace"));
+    }
+
+    #[test]
+    fn open_page_in_command_bar_cancels_pending_new_stack_context() {
+        let pending_stack = Entity::from_bits(7);
+        let previous_stack = Entity::from_bits(6);
+        let request = command_bar_open_request(
+            [AppCommand::Browser(BrowserCommand::Bar(
+                BrowserBarCommand::OpenPageInCommandBar,
+            ))],
+            "vmux://spaces/",
+        );
+        let mut ctx = NewStackContext {
+            stack: Some(pending_stack),
+            previous_stack: Some(previous_stack),
+            needs_open: true,
+            dismiss_modal: false,
+        };
+
+        assert!(request.replace_active_stack);
+        assert!(!command_bar_should_open_pending_stack(&mut ctx, true));
+        let canceled = command_bar_cancel_pending_stack_for_active_open(
+            &mut ctx,
+            request.replace_active_stack,
+        );
+
+        assert_eq!(canceled, Some((pending_stack, Some(previous_stack))));
+        assert_eq!(ctx.stack, None);
+        assert_eq!(ctx.previous_stack, None);
+        assert!(!ctx.needs_open);
     }
 
     #[test]

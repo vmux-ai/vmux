@@ -87,6 +87,7 @@ impl Plugin for VmuxPlugin {
                 ServicePlugin,
                 SpacePlugin,
                 vmux_history::HistoryPlugin,
+                vmux_vibe_setup::VibeSetupPlugin,
                 LayoutCefPlugin,
                 BrowserPlugin,
             ))

@@ -9533,6 +9533,7 @@ dependencies = [
  "vmux_space",
  "vmux_terminal",
  "vmux_ui",
+ "vmux_vibe_setup",
 ]
 
 [[package]]
@@ -9572,6 +9573,9 @@ dependencies = [
  "js-sys",
  "libc",
  "moonshine-save",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
  "raw-window-handle",
  "rfd",
  "rkyv",
@@ -9624,6 +9628,7 @@ dependencies = [
  "vmux_setting",
  "vmux_space",
  "vmux_terminal",
+ "vmux_vibe_setup",
  "web-sys",
 ]
 
@@ -9748,6 +9753,20 @@ dependencies = [
  "time",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "vmux_vibe_setup"
+version = "0.0.10"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "dioxus",
+ "rkyv",
+ "serde",
+ "vmux_core",
+ "vmux_terminal",
+ "vmux_ui",
 ]
 
 [[package]]

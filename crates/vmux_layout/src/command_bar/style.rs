@@ -186,6 +186,82 @@ mod tests {
     }
 
     #[test]
+    fn command_bar_size_event_uses_scroll_height_for_native_expansion() {
+        let source = include_str!("page.rs");
+        let size_fn = source
+            .split("fn emit_command_bar_size")
+            .nth(1)
+            .and_then(|tail| tail.split("fn install_command_bar_size_observer").next())
+            .unwrap_or_default();
+
+        assert!(size_fn.contains("scroll_height"));
+    }
+
+    #[test]
+    fn command_bar_size_event_uses_results_list_natural_height() {
+        let source = include_str!("page.rs");
+        let size_fn = source
+            .split("fn emit_command_bar_size")
+            .nth(1)
+            .and_then(|tail| tail.split("fn schedule_command_bar_size_emit").next())
+            .unwrap_or_default();
+
+        assert!(source.contains("id: \"command-bar-results\""));
+        assert!(size_fn.contains("command_bar_results_extra_height"));
+        assert!(size_fn.contains("shell.scroll_height() + result_list_extra_height"));
+        assert!(source.contains("max-height"));
+        assert!(source.contains("client_height"));
+        assert!(source.contains("offset_height"));
+    }
+
+    #[test]
+    fn command_bar_size_event_considers_document_scroll_width() {
+        let source = include_str!("page.rs");
+        let size_fn = source
+            .split("fn emit_command_bar_size")
+            .nth(1)
+            .and_then(|tail| tail.split("fn schedule_command_bar_size_emit").next())
+            .unwrap_or_default();
+
+        assert!(size_fn.contains("document_element"));
+        assert!(size_fn.contains("body"));
+        assert!(size_fn.contains("document_width"));
+        assert!(size_fn.contains("body_width"));
+        assert!(!size_fn.contains("document_height"));
+        assert!(!size_fn.contains("body_height"));
+    }
+
+    #[test]
+    fn command_bar_size_event_is_scheduled_after_layout() {
+        let source = include_str!("page.rs");
+        let schedule_fn = source
+            .split("fn schedule_command_bar_size_emit")
+            .nth(1)
+            .and_then(|tail| tail.split("fn install_command_bar_size_observer").next())
+            .unwrap_or_default();
+
+        assert!(schedule_fn.contains("request_animation_frame"));
+    }
+
+    #[test]
+    fn command_bar_input_handles_plain_meta_a() {
+        let source = include_str!("page.rs");
+
+        assert!(source.contains("fn handle_plain_meta_a"));
+        assert!(source.contains("e.meta_key()"));
+        assert!(source.contains("input.set_selection_range(0, len)"));
+    }
+
+    #[test]
+    fn command_bar_in_place_enter_opens_typed_query_before_suggestions() {
+        let source = include_str!("page.rs");
+
+        assert!(source.contains("fn should_open_typed_query_on_enter"));
+        assert!(source.contains("OpenTarget::InPlace"));
+        assert!(source.contains("emit_action_with_target(\"open\", &q, open_target)"));
+    }
+
+    #[test]
     fn results_list_disables_horizontal_scroll() {
         let class = result_list_class();
 

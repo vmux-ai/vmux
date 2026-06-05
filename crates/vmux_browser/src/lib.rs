@@ -6,6 +6,7 @@ use bevy::{
         ButtonState, InputSystems,
         mouse::{MouseButton, MouseButtonInput},
     },
+    material::AlphaMode,
     picking::pointer::PointerButton,
     prelude::*,
     ui::{UiGlobalTransform, UiSystems},
@@ -13,9 +14,11 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{CefEmbeddedHosts, RenderTextureMessage, webview_debug_log};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{LazyLock, Mutex};
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, BrowserNavigationCommand, BrowserViewCommand,
-    LayoutCommand, ReadAppCommands, StackCommand, open::OpenCommand,
+    LayoutCommand, ReadAppCommands, StackCommand, event::CommandBarActionEvent, open::OpenCommand,
 };
 use vmux_core::{
     CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenId,
@@ -96,6 +99,9 @@ impl Plugin for BrowserPlugin {
                 PreUpdate,
                 (
                     sync_layout_cef_pointer_target,
+                    dismiss_windowed_command_bar_from_native_monitor,
+                    dismiss_windowed_command_bar_on_outside_click
+                        .run_if(on_message::<MouseButtonInput>),
                     forward_layout_cef_cursor_move.run_if(on_message::<CursorMoved>),
                     forward_layout_cef_mouse_button.run_if(on_message::<MouseButtonInput>),
                 )
@@ -147,6 +153,7 @@ impl Plugin for BrowserPlugin {
                 PostUpdate,
                 (
                     sync_keyboard_target,
+                    sync_windowed_content_mesh_materials,
                     sync_children_to_ui,
                     sync_windowed_frames,
                     sync_windowed_chrome,
@@ -160,7 +167,8 @@ impl Plugin for BrowserPlugin {
                     .chain()
                     .after(UiSystems::Layout)
                     .before(render_standard_materials),
-            );
+            )
+            .add_systems(Last, refresh_active_windowed_hover);
     }
 }
 
@@ -355,6 +363,90 @@ fn forward_layout_cef_mouse_button(
             *captured = false;
         }
     }
+}
+
+fn dismiss_windowed_command_bar_on_outside_click(
+    mut events: MessageReader<MouseButtonInput>,
+    windows: Query<&Window>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
+    modal_q: Query<
+        (
+            Entity,
+            &Node,
+            &Visibility,
+            Has<CefKeyboardTarget>,
+            Option<&HostWindow>,
+            Option<&CommandBarNativeSize>,
+        ),
+        (With<Modal>, With<WebviewWindowed>),
+    >,
+    mut commands: Commands,
+) {
+    let Ok((modal_e, node, visibility, has_keyboard_target, host_window, native_size)) =
+        modal_q.single()
+    else {
+        for _ in events.read() {}
+        return;
+    };
+    let open =
+        command_bar_windowed_view_should_show(node.display, *visibility, has_keyboard_target);
+    let window_entity = host_window
+        .map(|h| h.0)
+        .or_else(|| primary_window.single().ok());
+    let Some(window_entity) = window_entity else {
+        for _ in events.read() {}
+        return;
+    };
+    let Ok(window) = windows.get(window_entity) else {
+        for _ in events.read() {}
+        return;
+    };
+    let frame = command_bar_windowed_frame(
+        window.resolution.physical_width() as f32,
+        window.resolution.physical_height() as f32,
+        window.resolution.scale_factor(),
+        native_size.map(|size| Vec2::new(size.width, size.height)),
+    );
+    for event in events.read() {
+        if event.window != window_entity {
+            continue;
+        }
+        let cursor = window
+            .physical_cursor_position()
+            .map(|pos| Vec2::new(pos.x, pos.y));
+        if command_bar_windowed_click_should_dismiss(open, event.button, event.state, cursor, frame)
+        {
+            commands.trigger(BinReceive::<CommandBarActionEvent> {
+                webview: modal_e,
+                payload: CommandBarActionEvent {
+                    action: "dismiss".to_string(),
+                    value: String::new(),
+                    target: None,
+                },
+            });
+            break;
+        }
+    }
+}
+
+fn dismiss_windowed_command_bar_from_native_monitor(
+    modal_q: Query<Entity, (With<Modal>, With<WebviewWindowed>)>,
+    mut commands: Commands,
+) {
+    if !take_native_command_bar_dismiss_requested() {
+        return;
+    }
+    let Ok(modal_e) = modal_q.single() else {
+        return;
+    };
+    commands.trigger(BinReceive::<CommandBarActionEvent> {
+        webview: modal_e,
+        payload: CommandBarActionEvent {
+            action: "dismiss".to_string(),
+            value: String::new(),
+            target: None,
+        },
+    });
 }
 
 fn pointer_button_from_mouse_button(button: MouseButton) -> Option<PointerButton> {
@@ -585,12 +677,40 @@ fn webview_should_use_windowed(mode: vmux_layout::scene::InteractionMode) -> boo
     cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User
 }
 
-/// When set, the layout chrome stays OSR (windowless) even in User mode so its transparent areas
-/// reveal the native glass window backdrop. Pages remain windowed. Read once from `VMUX_GLASS`.
-fn glass_experiment_enabled() -> bool {
-    use std::sync::OnceLock;
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("VMUX_GLASS").is_some())
+fn set_windowed_content_mesh_material(
+    material: &mut WebviewExtendStandardMaterial,
+    windowed: bool,
+) {
+    let alpha = if windowed { 0.0 } else { 1.0 };
+    material.base.base_color = material.base.base_color.with_alpha(alpha);
+    material.base.alpha_mode = if windowed {
+        AlphaMode::Blend
+    } else {
+        AlphaMode::Opaque
+    };
+}
+
+fn sync_windowed_content_mesh_materials(
+    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    browsers: Query<
+        (
+            &MeshMaterial3d<WebviewExtendStandardMaterial>,
+            Has<WebviewWindowed>,
+        ),
+        (
+            With<Browser>,
+            Without<LayoutCef>,
+            Without<Modal>,
+            Without<Header>,
+            Without<SideSheet>,
+        ),
+    >,
+) {
+    for (handle, windowed) in &browsers {
+        if let Some(mut material) = materials.get_mut(handle.id()) {
+            set_windowed_content_mesh_material(&mut material, windowed);
+        }
+    }
 }
 
 fn sync_cef_backend_for_interaction_mode(world: &mut World) {
@@ -601,13 +721,9 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
     let base_windowed = webview_should_use_windowed(mode);
     let mut query = world.query_filtered::<Entity, (With<Browser>, With<WebviewSource>)>();
     let entities: Vec<Entity> = query.iter(world).collect();
-    // The layout chrome and the command-bar modal stay OSR so their transparent areas reveal the
-    // native glass backdrop; only the page webviews are windowed.
-    let osr_only: Vec<Entity> = if glass_experiment_enabled() {
-        let mut q = world.query_filtered::<Entity, Or<(With<LayoutCef>, With<Modal>)>>();
+    let osr_only: Vec<Entity> = {
+        let mut q = world.query_filtered::<Entity, With<LayoutCef>>();
         q.iter(world).collect()
-    } else {
-        Vec::new()
     };
     let target_windowed = |entity: Entity| base_windowed && !osr_only.contains(&entity);
     let mut recreate = Vec::new();
@@ -659,6 +775,7 @@ fn sync_windowed_frames(
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
     browser_q: Query<
         (
             Entity,
@@ -676,18 +793,11 @@ fn sync_windowed_frames(
     >,
     child_of_q: Query<&ChildOf>,
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
-    modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
-    tab_q: Query<(), With<Tab>>,
-    pane_q: Query<(), With<Pane>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
 ) {
-    if vmux_layout::command_bar::handler::is_command_bar_open(&modal_q) {
-        for (entity, ..) in &browser_q {
-            browsers.set_windowed_hidden(&entity, true);
-        }
-        return;
-    }
+    let visible_pane_count =
+        visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
     for (entity, tf, self_computed, self_ui_gt, child_of) in &browser_q {
         if tf.scale.x <= 1.0e-3 {
             browsers.set_windowed_hidden(&entity, true);
@@ -705,19 +815,42 @@ fn sync_windowed_frames(
         let scale = 1.0 / computed.inverse_scale_factor.max(1.0e-6);
         browsers.set_windowed_hidden(&entity, false);
         browsers.set_windowed_frame(&entity, left, top, size_px.x, size_px.y, scale);
-        let pane_count = pane_count_for_browser(
-            entity,
-            &child_of_q,
-            &tab_q,
-            &pane_q,
-            &all_children,
-            &leaf_panes,
-        )
-        .unwrap_or(1);
-        let all_corners = layout_hidden.0 || pane_count > 1;
-        browsers.set_windowed_corner_radius(&entity, settings.layout.radius, scale, all_corners);
+        let all_corners = layout_hidden.0 || visible_pane_count > 1;
+        browsers.set_windowed_corner_radius(
+            &entity,
+            settings.layout.radius * scale,
+            scale,
+            all_corners,
+        );
+        let focus_ring_width = if focus.stack == Some(parent) && visible_pane_count > 1 {
+            settings.layout.focus_ring.width * scale
+        } else {
+            0.0
+        };
+        let focus_ring_color = &settings.layout.focus_ring.color;
+        browsers.set_windowed_focus_ring(
+            &entity,
+            focus_ring_width,
+            scale,
+            [focus_ring_color.r, focus_ring_color.g, focus_ring_color.b],
+        );
         browsers.raise_windowed_to_front(&entity);
     }
+}
+
+fn visible_pane_count_for_windowed_sync(
+    focused_tab: Option<Entity>,
+    all_children: &Query<&Children>,
+    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+) -> usize {
+    if let Some(tab) = focused_tab {
+        let mut leaves = Vec::new();
+        collect_leaf_panes(tab, all_children, leaf_panes, &mut leaves);
+        if !leaves.is_empty() {
+            return leaves.len();
+        }
+    }
+    leaf_panes.iter().count().max(1)
 }
 
 /// Position the native layout as a full-window view behind the native page(s). The layout is created
@@ -751,6 +884,113 @@ fn sync_windowed_chrome(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct WindowedHoverRefreshFrame {
+    left_px: f32,
+    top_px: f32,
+    width_px: f32,
+    height_px: f32,
+    scale: f32,
+}
+
+fn windowed_hover_refresh_frame(
+    computed: &ComputedNode,
+    ui_gt: &UiGlobalTransform,
+) -> Option<WindowedHoverRefreshFrame> {
+    let size_px = computed.size;
+    let scale = 1.0 / computed.inverse_scale_factor.max(1.0e-6);
+    if size_px.x <= 0.0
+        || size_px.y <= 0.0
+        || !size_px.x.is_finite()
+        || !size_px.y.is_finite()
+        || !scale.is_finite()
+        || scale <= 0.0
+    {
+        return None;
+    }
+    let center = ui_gt.transform_point2(Vec2::ZERO);
+    Some(WindowedHoverRefreshFrame {
+        left_px: center.x - size_px.x * 0.5,
+        top_px: center.y - size_px.y * 0.5,
+        width_px: size_px.x,
+        height_px: size_px.y,
+        scale,
+    })
+}
+
+fn windowed_hover_refresh_position(
+    cursor_px: Vec2,
+    frame: WindowedHoverRefreshFrame,
+) -> Option<Vec2> {
+    if cursor_px.x < frame.left_px
+        || cursor_px.x > frame.left_px + frame.width_px
+        || cursor_px.y < frame.top_px
+        || cursor_px.y > frame.top_px + frame.height_px
+    {
+        return None;
+    }
+    Some(Vec2::new(
+        (cursor_px.x - frame.left_px) / frame.scale,
+        (cursor_px.y - frame.top_px) / frame.scale,
+    ))
+}
+
+fn refresh_active_windowed_hover(
+    browsers: NonSend<Browsers>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
+    modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
+    active_q: Query<
+        (
+            Entity,
+            &Transform,
+            &ComputedNode,
+            &UiGlobalTransform,
+            Option<&HostWindow>,
+        ),
+        (
+            With<Browser>,
+            With<WebviewWindowed>,
+            With<CefKeyboardTarget>,
+            Without<LayoutCef>,
+            Without<Modal>,
+            Without<Header>,
+            Without<SideSheet>,
+        ),
+    >,
+) {
+    if vmux_layout::command_bar::handler::is_command_bar_open(&modal_q) {
+        return;
+    }
+    let Some((entity, transform, computed, ui_gt, host_window)) = active_q.iter().next() else {
+        return;
+    };
+    if transform.scale.x <= 1.0e-3 {
+        return;
+    }
+    let Some(window_entity) = host_window
+        .map(|host| host.0)
+        .or_else(|| primary_window.single().ok())
+    else {
+        return;
+    };
+    let Ok(window) = windows.get(window_entity) else {
+        return;
+    };
+    let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
+    else {
+        return;
+    };
+    let Some(frame) = windowed_hover_refresh_frame(computed, ui_gt) else {
+        return;
+    };
+    let Some(position) = windowed_hover_refresh_position(cursor_px, frame) else {
+        return;
+    };
+    browsers.send_mouse_move(&entity, buttons.get_pressed(), position, false);
+}
+
 #[derive(Clone, Copy, Debug)]
 struct CommandBarWindowedFrame {
     left_px: f32,
@@ -758,6 +998,11 @@ struct CommandBarWindowedFrame {
     width_px: f32,
     height_px: f32,
 }
+
+const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
+static NATIVE_COMMAND_BAR_CLICK_FRAME: LazyLock<Mutex<Option<CommandBarWindowedFrame>>> =
+    LazyLock::new(|| Mutex::new(None));
+static NATIVE_COMMAND_BAR_DISMISS_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 fn command_bar_windowed_frame(
     window_width_px: f32,
@@ -827,6 +1072,60 @@ fn hide_windowed_command_bar(browsers: &Browsers, entity: Entity) {
     );
 }
 
+fn command_bar_windowed_click_should_dismiss(
+    open: bool,
+    button: MouseButton,
+    state: ButtonState,
+    cursor: Option<Vec2>,
+    frame: Option<CommandBarWindowedFrame>,
+) -> bool {
+    if !open || button != MouseButton::Left || state != ButtonState::Pressed {
+        return false;
+    }
+    let (Some(cursor), Some(frame)) = (cursor, frame) else {
+        return false;
+    };
+    !command_bar_windowed_frame_contains(frame, cursor)
+}
+
+fn command_bar_windowed_frame_contains(frame: CommandBarWindowedFrame, cursor: Vec2) -> bool {
+    cursor.x >= frame.left_px
+        && cursor.x <= frame.left_px + frame.width_px
+        && cursor.y >= frame.top_px
+        && cursor.y <= frame.top_px + frame.height_px
+}
+
+fn set_native_command_bar_click_frame(frame: Option<CommandBarWindowedFrame>) {
+    let mut stored = NATIVE_COMMAND_BAR_CLICK_FRAME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *stored = frame;
+    if frame.is_none() {
+        NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(false, Ordering::Relaxed);
+    }
+}
+
+pub fn request_native_command_bar_dismiss_for_mouse_down(x_px: f32, y_px: f32) -> bool {
+    if !x_px.is_finite() || !y_px.is_finite() {
+        return false;
+    }
+    let frame = *NATIVE_COMMAND_BAR_CLICK_FRAME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(frame) = frame else {
+        return false;
+    };
+    if command_bar_windowed_frame_contains(frame, Vec2::new(x_px, y_px)) {
+        return false;
+    }
+    NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(true, Ordering::Relaxed);
+    true
+}
+
+pub fn take_native_command_bar_dismiss_requested() -> bool {
+    NATIVE_COMMAND_BAR_DISMISS_REQUESTED.swap(false, Ordering::Relaxed)
+}
+
 fn command_bar_windowed_view_should_show(
     display: Display,
     visibility: Visibility,
@@ -859,29 +1158,11 @@ fn sync_windowed_command_bar(
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     mut was_open: Local<bool>,
-    mut dbg: Local<Option<(bool, bool, bool, bool)>>,
 ) {
     let matched = modal_q.single();
-    {
-        let s = match &matched {
-            Ok((_, node, visibility, kbd, _, _)) => (
-                true,
-                node.display != Display::None,
-                **visibility != Visibility::Hidden,
-                *kbd,
-            ),
-            Err(_) => (false, false, false, false),
-        };
-        if *dbg != Some(s) {
-            info!(
-                "[wcmd] windowed_modal={} display_flex={} visible={} kbd_target={}",
-                s.0, s.1, s.2, s.3
-            );
-            *dbg = Some(s);
-        }
-    }
     let Ok((entity, node, visibility, has_keyboard_target, host_window, native_size)) = matched
     else {
+        set_native_command_bar_click_frame(None);
         *was_open = false;
         return;
     };
@@ -893,27 +1174,34 @@ fn sync_windowed_command_bar(
         has_keyboard_target,
     );
     if !open && !render_hidden {
+        set_native_command_bar_click_frame(None);
+        browsers.set_windowed_focus(&entity, false);
         hide_windowed_command_bar(&browsers, entity);
         *was_open = false;
         return;
     }
     if !browsers.has_browser(entity) {
+        set_native_command_bar_click_frame(None);
         return;
     }
     let window_entity = host_window
         .map(|h| h.0)
         .or_else(|| primary_window.single().ok());
     let Some(window_entity) = window_entity else {
+        set_native_command_bar_click_frame(None);
         hide_windowed_command_bar(&browsers, entity);
         return;
     };
     let Ok(window) = windows.get(window_entity) else {
+        set_native_command_bar_click_frame(None);
         hide_windowed_command_bar(&browsers, entity);
         return;
     };
     let scale = window.resolution.scale_factor();
     if render_hidden {
+        set_native_command_bar_click_frame(None);
         let frame = command_bar_hidden_windowed_frame();
+        browsers.set_windowed_focus(&entity, false);
         browsers.set_windowed_hidden(&entity, false);
         browsers.resize(&entity, Vec2::new(frame.width_px, frame.height_px), 1.0);
         browsers.set_windowed_frame(
@@ -933,9 +1221,11 @@ fn sync_windowed_command_bar(
         scale,
         measured,
     ) else {
+        set_native_command_bar_click_frame(None);
         hide_windowed_command_bar(&browsers, entity);
         return;
     };
+    set_native_command_bar_click_frame(Some(frame));
 
     browsers.set_windowed_frame(
         &entity,
@@ -945,6 +1235,7 @@ fn sync_windowed_command_bar(
         frame.height_px,
         scale,
     );
+    browsers.set_windowed_corner_radius(&entity, COMMAND_BAR_NATIVE_RADIUS_PX * scale, scale, true);
     browsers.resize(
         &entity,
         Vec2::new(frame.width_px / scale, frame.height_px / scale),
@@ -952,6 +1243,7 @@ fn sync_windowed_command_bar(
     );
     browsers.set_windowed_hidden(&entity, false);
     browsers.raise_windowed_to_front(&entity);
+    browsers.set_windowed_focus(&entity, true);
     if !*was_open {
         browsers.nudge_windowed_repaint(&entity);
         *was_open = true;
@@ -960,8 +1252,7 @@ fn sync_windowed_command_bar(
 
 fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Added<PageReady>>) {
     for entity in &ready {
-        let nudged = browsers.nudge_windowed_repaint(&entity);
-        info!("[repaint-nudge] e={entity:?} nudged={nudged}");
+        browsers.nudge_windowed_repaint(&entity);
     }
 }
 
@@ -1117,6 +1408,7 @@ fn sync_osr_webview_focus(
             Has<PendingCommandBarReveal>,
             Has<Modal>,
             Has<CefKeyboardTarget>,
+            Has<WebviewWindowed>,
         ),
         With<WebviewSource>,
     >,
@@ -1143,6 +1435,7 @@ fn sync_osr_webview_focus(
         pending_command_bar_reveal,
         is_modal,
         has_keyboard_target,
+        is_windowed,
     ) in webviews.iter()
     {
         if !browsers.has_browser(entity) {
@@ -1156,7 +1449,7 @@ fn sync_osr_webview_focus(
         ) {
             ready.push(entity);
             if is_modal && has_keyboard_target {
-                modal_keyboard_target = Some(entity);
+                modal_keyboard_target = Some((entity, is_windowed));
             }
         } else {
             browsers.set_osr_hidden(&entity);
@@ -1192,16 +1485,18 @@ fn sync_osr_webview_focus(
             *last_active = None;
             last_ready_set.clone_from(&ready);
         }
-    } else if *last_active == Some(active) && *last_ready_set == *ready {
+    } else if *last_active == active && *last_ready_set == *ready {
     } else {
         auxiliary.clear();
-        auxiliary.extend(ready.iter().copied().filter(|&e| e != active));
+        if let Some(active) = active {
+            auxiliary.extend(ready.iter().copied().filter(|&e| e != active));
+        }
         webview_debug_log(format!(
             "osr focus active={active:?} auxiliary={:?} ready={ready:?}",
             auxiliary.as_slice()
         ));
-        browsers.sync_osr_focus_to_active_pane(Some(active), auxiliary.as_slice());
-        *last_active = Some(active);
+        browsers.sync_osr_focus_to_active_pane(active, auxiliary.as_slice());
+        *last_active = active;
         last_ready_set.clone_from(&ready);
     }
     for &e in ready.iter() {
@@ -1258,11 +1553,18 @@ fn webview_osr_should_run(
 }
 
 fn choose_osr_active_webview(
-    modal_keyboard_target: Option<Entity>,
+    modal_keyboard_target: Option<(Entity, bool)>,
     active_stack: Option<Entity>,
     fallback: Entity,
-) -> Entity {
-    modal_keyboard_target.or(active_stack).unwrap_or(fallback)
+) -> Option<Entity> {
+    if modal_keyboard_target.is_some_and(|(_, is_windowed)| is_windowed) {
+        None
+    } else {
+        modal_keyboard_target
+            .map(|(entity, _)| entity)
+            .or(active_stack)
+            .or(Some(fallback))
+    }
 }
 
 fn should_show_osr_webview(
@@ -1353,12 +1655,46 @@ fn flush_pending_osr_textures(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LayoutWindowPadding {
+    top: f32,
+    right: f32,
+    bottom: f32,
+    left: f32,
+}
+
+fn val_px(value: Val) -> f32 {
+    match value {
+        Val::Px(px) => px,
+        _ => 0.0,
+    }
+}
+
+fn layout_window_padding_from_node(node: &Node) -> LayoutWindowPadding {
+    LayoutWindowPadding {
+        top: val_px(node.padding.top),
+        right: val_px(node.padding.right),
+        bottom: val_px(node.padding.bottom),
+        left: val_px(node.padding.left),
+    }
+}
+
+fn layout_window_padding_from_settings(settings: &AppSettings) -> LayoutWindowPadding {
+    LayoutWindowPadding {
+        top: settings.layout.window.pad_top(),
+        right: settings.layout.window.pad_right(),
+        bottom: settings.layout.window.pad_bottom(),
+        left: settings.layout.window.pad_left(),
+    }
+}
+
 fn push_layout_state_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     header_q: Query<Has<Open>, With<Header>>,
     side_sheet_q: Query<(&SideSheetPosition, Has<Open>), With<SideSheet>>,
+    window_q: Query<&Node, With<VmuxWindow>>,
     side_sheet_width: Res<SideSheetWidth>,
     settings: Res<AppSettings>,
     mut last: Local<String>,
@@ -1369,6 +1705,11 @@ fn push_layout_state_emit(
     if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
         return;
     }
+    let window_padding = window_q
+        .single()
+        .ok()
+        .map(layout_window_padding_from_node)
+        .unwrap_or_else(|| layout_window_padding_from_settings(&settings));
 
     let payload = LayoutStateEvent {
         header_open: header_q.iter().any(|is_open| is_open),
@@ -1379,6 +1720,10 @@ fn push_layout_state_emit(
         side_sheet_width: side_sheet_width.0,
         pane_gap: vmux_layout::event::PANE_GAP_PX,
         radius: settings.layout.radius,
+        window_pad_top: window_padding.top,
+        window_pad_right: window_padding.right,
+        window_pad_bottom: window_padding.bottom,
+        window_pad_left: window_padding.left,
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     if !should_emit_cached_payload(&body, &last, page_ready.is_changed()) {
@@ -2545,8 +2890,19 @@ mod tests {
         let modal = Entity::from_bits(2);
 
         assert_eq!(
-            choose_osr_active_webview(Some(modal), Some(pane), pane),
-            modal
+            choose_osr_active_webview(Some((modal, false)), Some(pane), pane),
+            Some(modal)
+        );
+    }
+
+    #[test]
+    fn windowed_command_bar_modal_suppresses_osr_focus_targets() {
+        let pane = Entity::from_bits(1);
+        let modal = Entity::from_bits(2);
+
+        assert_eq!(
+            choose_osr_active_webview(Some((modal, true)), Some(pane), pane),
+            None
         );
     }
 
@@ -2575,7 +2931,22 @@ mod tests {
     }
 
     #[test]
-    fn windowed_page_sync_hides_pages_while_command_bar_is_open() {
+    fn windowed_content_mesh_material_is_hidden() {
+        let mut material = WebviewExtendStandardMaterial::default();
+
+        set_windowed_content_mesh_material(&mut material, true);
+
+        assert_eq!(material.base.base_color.alpha(), 0.0);
+        assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
+
+        set_windowed_content_mesh_material(&mut material, false);
+
+        assert_eq!(material.base.base_color.alpha(), 1.0);
+        assert_eq!(material.base.alpha_mode, AlphaMode::Opaque);
+    }
+
+    #[test]
+    fn windowed_page_sync_keeps_pages_visible_while_command_bar_is_open() {
         let source = include_str!("lib.rs");
         let sync_fn = source
             .split("fn sync_windowed_frames")
@@ -2583,9 +2954,40 @@ mod tests {
             .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
             .unwrap_or_default();
 
-        assert!(sync_fn.contains("is_command_bar_open"));
-        assert!(sync_fn.contains("browsers.set_windowed_hidden(&entity, true);"));
-        assert!(sync_fn.contains("return;"));
+        assert!(!sync_fn.contains("is_command_bar_open"));
+        assert!(!sync_fn.contains("return;"));
+    }
+
+    #[test]
+    fn windowed_hover_refresh_position_maps_physical_cursor_to_webview_space() {
+        let frame = WindowedHoverRefreshFrame {
+            left_px: 100.0,
+            top_px: 50.0,
+            width_px: 400.0,
+            height_px: 300.0,
+            scale: 2.0,
+        };
+
+        assert_eq!(
+            windowed_hover_refresh_position(Vec2::new(300.0, 250.0), frame),
+            Some(Vec2::new(100.0, 100.0))
+        );
+    }
+
+    #[test]
+    fn windowed_hover_refresh_position_ignores_cursor_outside_frame() {
+        let frame = WindowedHoverRefreshFrame {
+            left_px: 100.0,
+            top_px: 50.0,
+            width_px: 400.0,
+            height_px: 300.0,
+            scale: 2.0,
+        };
+
+        assert_eq!(
+            windowed_hover_refresh_position(Vec2::new(99.0, 250.0), frame),
+            None
+        );
     }
 
     #[test]
@@ -2599,7 +3001,61 @@ mod tests {
 
         assert!(sync_fn.contains("settings: Res<AppSettings>"));
         assert!(sync_fn.contains("settings.layout.radius"));
-        assert!(sync_fn.contains("browsers.set_windowed_corner_radius(&entity"));
+        assert!(sync_fn.contains("browsers.set_windowed_corner_radius"));
+    }
+
+    #[test]
+    fn windowed_page_sync_rounds_all_corners_from_visible_tab_leaf_count() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_frames")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("visible_pane_count_for_windowed_sync"));
+        assert!(sync_fn.contains("let all_corners = layout_hidden.0 || visible_pane_count > 1"));
+    }
+
+    #[test]
+    fn windowed_page_sync_sets_focus_ring_on_active_split_page() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_frames")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("focus: Res<vmux_layout::stack::FocusedStack>"));
+        assert!(sync_fn.contains("browsers.set_windowed_focus_ring"));
+        assert!(sync_fn.contains("focus.stack == Some(parent)"));
+        assert!(sync_fn.contains("pane_count > 1"));
+    }
+
+    #[test]
+    fn windowed_page_sync_uses_native_focus_ring_for_terminals() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_frames")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .unwrap_or_default();
+
+        assert!(!sync_fn.contains("!is_terminal"));
+        assert!(sync_fn.contains("browsers.set_windowed_focus_ring"));
+    }
+
+    #[test]
+    fn windowed_page_sync_scales_native_radius_and_focus_ring_to_physical_pixels() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_frames")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("settings.layout.radius * scale"));
+        assert!(sync_fn.contains("settings.layout.focus_ring.width * scale"));
     }
 
     #[test]
@@ -2613,6 +3069,19 @@ mod tests {
 
         assert!(sync_fn.contains("browsers.raise_windowed_to_front(&entity);"));
         assert!(!sync_fn.contains("if !*was_open {\n        browsers.raise_windowed_to_front"));
+    }
+
+    #[test]
+    fn glass_mode_keeps_command_bar_windowed_above_native_pages() {
+        let source = include_str!("lib.rs");
+        let backend_fn = source
+            .split("fn sync_cef_backend_for_interaction_mode")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_frames").next())
+            .unwrap_or_default();
+
+        assert!(backend_fn.contains("With<LayoutCef>"));
+        assert!(!backend_fn.contains("With<Modal>"));
     }
 
     #[test]
@@ -2631,7 +3100,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_marks_every_cef_surface_windowed_on_macos() {
+    fn browser_mode_keeps_layout_osr_but_windows_pages_and_modal_on_macos() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
         app.insert_resource(vmux_layout::scene::InteractionMode::User);
@@ -2648,11 +3117,16 @@ mod tests {
             .world_mut()
             .spawn((Browser, WebviewSource::new("https://example.com/")))
             .id();
+        let terminal = app
+            .world_mut()
+            .spawn((Browser, Terminal, WebviewSource::new("vmux://terminal/")))
+            .id();
 
         sync_cef_backend_for_interaction_mode(app.world_mut());
 
+        assert!(app.world().get::<WebviewWindowed>(layout).is_none());
         assert_eq!(
-            app.world().get::<WebviewWindowed>(layout).is_some(),
+            app.world().get::<WebviewWindowed>(terminal).is_some(),
             cfg!(target_os = "macos")
         );
         assert_eq!(
@@ -2737,6 +3211,107 @@ mod tests {
 
         assert!((frame.top_px - 75.0).abs() < 0.01);
         assert!((frame.height_px - 409.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn windowed_command_bar_outside_click_dismisses() {
+        let frame = CommandBarWindowedFrame {
+            left_px: 100.0,
+            top_px: 50.0,
+            width_px: 200.0,
+            height_px: 100.0,
+        };
+
+        assert!(command_bar_windowed_click_should_dismiss(
+            true,
+            MouseButton::Left,
+            ButtonState::Pressed,
+            Some(Vec2::new(99.0, 80.0)),
+            Some(frame),
+        ));
+        assert!(!command_bar_windowed_click_should_dismiss(
+            true,
+            MouseButton::Left,
+            ButtonState::Pressed,
+            Some(Vec2::new(150.0, 80.0)),
+            Some(frame),
+        ));
+        assert!(!command_bar_windowed_click_should_dismiss(
+            true,
+            MouseButton::Right,
+            ButtonState::Pressed,
+            Some(Vec2::new(99.0, 80.0)),
+            Some(frame),
+        ));
+        assert!(!command_bar_windowed_click_should_dismiss(
+            false,
+            MouseButton::Left,
+            ButtonState::Pressed,
+            Some(Vec2::new(99.0, 80.0)),
+            Some(frame),
+        ));
+    }
+
+    #[test]
+    fn browser_plugin_wires_windowed_command_bar_outside_click_dismiss() {
+        let source = include_str!("lib.rs");
+        let plugin_build = source
+            .split("impl Plugin for BrowserPlugin")
+            .nth(1)
+            .and_then(|tail| tail.split("fn on_webview_ready_send_theme").next())
+            .unwrap_or_default();
+
+        assert!(plugin_build.contains("dismiss_windowed_command_bar_from_native_monitor"));
+        assert!(plugin_build.contains("dismiss_windowed_command_bar_on_outside_click"));
+        assert!(plugin_build.contains("run_if(on_message::<MouseButtonInput>)"));
+    }
+
+    #[test]
+    fn browser_plugin_wires_active_windowed_hover_refresh() {
+        let source = include_str!("lib.rs");
+        let plugin_build = source
+            .split("impl Plugin for BrowserPlugin")
+            .nth(1)
+            .and_then(|tail| tail.split("fn on_webview_ready_send_theme").next())
+            .unwrap_or_default();
+        let refresh_fn = source
+            .split("fn refresh_active_windowed_hover")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .unwrap_or_default();
+
+        assert!(plugin_build.contains("add_systems(Last, refresh_active_windowed_hover)"));
+        assert!(refresh_fn.contains("With<CefKeyboardTarget>"));
+        assert!(refresh_fn.contains("With<WebviewWindowed>"));
+        assert!(refresh_fn.contains("vmux_layout::pane::pane_hover_cursor_position"));
+        assert!(refresh_fn.contains("browsers.send_mouse_move"));
+    }
+
+    #[test]
+    fn native_command_bar_mouse_down_outside_requests_dismiss() {
+        set_native_command_bar_click_frame(Some(CommandBarWindowedFrame {
+            left_px: 100.0,
+            top_px: 50.0,
+            width_px: 200.0,
+            height_px: 100.0,
+        }));
+        assert!(!take_native_command_bar_dismiss_requested());
+
+        assert!(!request_native_command_bar_dismiss_for_mouse_down(
+            120.0, 60.0
+        ));
+        assert!(!take_native_command_bar_dismiss_requested());
+
+        assert!(request_native_command_bar_dismiss_for_mouse_down(
+            90.0, 60.0
+        ));
+        assert!(take_native_command_bar_dismiss_requested());
+        assert!(!take_native_command_bar_dismiss_requested());
+
+        set_native_command_bar_click_frame(None);
+        assert!(!request_native_command_bar_dismiss_for_mouse_down(
+            90.0, 60.0
+        ));
     }
 
     #[test]
@@ -2827,6 +3402,33 @@ mod tests {
     }
 
     #[test]
+    fn command_bar_windowed_sync_focuses_visible_native_modal() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_command_bar")
+            .nth(1)
+            .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("browsers.set_windowed_focus(&entity, true)"));
+        assert!(sync_fn.contains("browsers.set_windowed_focus(&entity, false)"));
+    }
+
+    #[test]
+    fn command_bar_windowed_sync_clips_native_view_to_shell_radius() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_command_bar")
+            .nth(1)
+            .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
+            .unwrap_or_default();
+
+        assert!(source.contains("const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0"));
+        assert!(sync_fn.contains("browsers.set_windowed_corner_radius"));
+        assert!(sync_fn.contains("COMMAND_BAR_NATIVE_RADIUS_PX * scale"));
+    }
+
+    #[test]
     fn active_browser_url_wins_over_stale_new_stack_placeholder() {
         let stack = Entity::from_bits(1);
         let rows = [StackRow {
@@ -2849,6 +3451,29 @@ mod tests {
         assert!(should_emit_cached_payload("tabs", "tabs", true));
         assert!(should_emit_cached_payload("tabs-2", "tabs", false));
         assert!(!should_emit_cached_payload("tabs", "tabs", false));
+    }
+
+    #[test]
+    fn layout_state_padding_reads_effective_window_node_padding() {
+        let node = Node {
+            padding: UiRect {
+                top: Val::Px(10.0),
+                right: Val::Px(11.0),
+                bottom: Val::Px(12.0),
+                left: Val::Px(13.0),
+            },
+            ..default()
+        };
+
+        assert_eq!(
+            layout_window_padding_from_node(&node),
+            LayoutWindowPadding {
+                top: 10.0,
+                right: 11.0,
+                bottom: 12.0,
+                left: 13.0,
+            }
+        );
     }
 
     mod browser_navigate_flow {

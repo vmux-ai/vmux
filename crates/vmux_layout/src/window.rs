@@ -19,7 +19,7 @@ use bevy::{
     render::render_resource::AsBindGroup,
     shader::ShaderRef,
     ui::{FlexDirection, UiTargetCamera},
-    window::PrimaryWindow,
+    window::{Monitor, PrimaryWindow, WindowMode},
     winit::WINIT_WINDOWS,
 };
 use bevy_cef::prelude::*;
@@ -182,7 +182,22 @@ fn handle_window_commands(
 
 /// One-shot resource: window has been sized to fill the screen.
 #[derive(Resource)]
-struct ScreenMaximized;
+pub(crate) struct ScreenMaximized;
+
+pub(crate) fn window_uses_full_padding(window: &Window, monitors: &Query<&Monitor>) -> bool {
+    matches!(
+        &window.mode,
+        WindowMode::BorderlessFullscreen(_) | WindowMode::Fullscreen(_, _)
+    ) || window_fills_monitor(window, monitors)
+}
+
+fn window_fills_monitor(window: &Window, monitors: &Query<&Monitor>) -> bool {
+    let size = window.resolution.physical_size();
+    monitors.iter().any(|monitor| {
+        let monitor_size = monitor.physical_size();
+        size.x >= monitor_size.x.saturating_sub(2) && size.y >= monitor_size.y.saturating_sub(2)
+    })
+}
 
 /// Size the window to fill the current monitor (runs once at startup).
 fn maximize_window_to_screen(
@@ -274,8 +289,8 @@ fn setup(
                 padding: UiRect {
                     top: Val::Px(0.0),
                     left: Val::Px(0.0),
-                    right: Val::Px(crate::event::WINDOW_PAD_PX),
-                    bottom: Val::Px(crate::event::WINDOW_PAD_PX),
+                    right: Val::Px(settings.window.pad_right()),
+                    bottom: Val::Px(settings.window.pad_bottom()),
                 },
                 column_gap: Val::Px(0.0),
                 ..default()
@@ -361,9 +376,9 @@ fn setup(
         Node {
             width: Val::Px(280.0),
             position_type: PositionType::Absolute,
-            right: Val::Px(crate::event::WINDOW_PAD_PX),
-            top: Val::Px(crate::event::WINDOW_PAD_PX),
-            bottom: Val::Px(crate::event::WINDOW_PAD_PX),
+            right: Val::Px(settings.window.pad_right()),
+            top: Val::Px(settings.window.pad_top()),
+            bottom: Val::Px(settings.window.pad_bottom()),
             display: Display::None,
             ..default()
         },
@@ -377,9 +392,9 @@ fn setup(
         Node {
             height: Val::Px(200.0),
             position_type: PositionType::Absolute,
-            left: Val::Px(crate::event::WINDOW_PAD_PX),
-            right: Val::Px(crate::event::WINDOW_PAD_PX),
-            bottom: Val::Px(crate::event::WINDOW_PAD_PX),
+            left: Val::Px(settings.window.pad_left()),
+            right: Val::Px(settings.window.pad_right()),
+            bottom: Val::Px(settings.window.pad_bottom()),
             display: Display::None,
             ..default()
         },
@@ -393,6 +408,7 @@ fn setup(
             Browser,
             WebviewTransparent,
             WebviewNativeLiquidGlass,
+            WebviewWindowedNativeFocus,
             bevy_cef::prelude::WebviewNativeOverlay,
             bevy_cef::prelude::CefIgnorePinchZoom,
         ),
@@ -620,6 +636,10 @@ fn apply_webview_material_defaults(
 /// settings once at Startup.
 fn sync_window_layout_to_settings(
     settings: Res<LayoutSettings>,
+    hidden: Option<Res<crate::toggle::LayoutHidden>>,
+    screen_maximized: Option<Res<ScreenMaximized>>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    monitors: Query<&Monitor>,
     mut window_q: Query<&mut Node, (With<VmuxWindow>, Without<SideSheet>, Without<MainColumn>)>,
     mut main_column_q: Query<
         &mut Node,
@@ -635,19 +655,28 @@ fn sync_window_layout_to_settings(
         return;
     }
 
-    let pad = crate::event::WINDOW_PAD_PX;
+    let pad_top = settings.window.pad_top();
+    let pad_right = settings.window.pad_right();
+    let pad_bottom = settings.window.pad_bottom();
+    let pad_left = settings.window.pad_left();
     let gap = crate::event::PANE_GAP_PX;
     let cfg_width = crate::event::SIDE_SHEET_WIDTH_PX;
+    let full_padding = hidden.as_deref().is_some_and(|hidden| hidden.0)
+        || screen_maximized.is_some()
+        || primary_window
+            .single()
+            .ok()
+            .is_some_and(|window| window_uses_full_padding(window, &monitors));
 
     // Root window: padding + flex-row column gap. Top and left are flush
     // with the window so the CEF shell / pane meet the system edge; right
     // and bottom keep a gap.
     if let Ok(mut node) = window_q.single_mut() {
         node.padding = UiRect {
-            top: Val::Px(0.0),
-            left: Val::Px(0.0),
-            right: Val::Px(pad),
-            bottom: Val::Px(pad),
+            top: Val::Px(if full_padding { pad_top } else { 0.0 }),
+            left: Val::Px(if full_padding { pad_left } else { 0.0 }),
+            right: Val::Px(pad_right),
+            bottom: Val::Px(pad_bottom),
         };
         node.column_gap = Val::Px(gap);
     }
@@ -673,14 +702,14 @@ fn sync_window_layout_to_settings(
                 node.width = Val::Px(live_width);
             }
             SideSheetPosition::Right => {
-                node.right = Val::Px(pad);
-                node.top = Val::Px(pad);
-                node.bottom = Val::Px(pad);
+                node.right = Val::Px(pad_right);
+                node.top = Val::Px(pad_top);
+                node.bottom = Val::Px(pad_bottom);
             }
             SideSheetPosition::Bottom => {
-                node.left = Val::Px(pad);
-                node.right = Val::Px(pad);
-                node.bottom = Val::Px(pad);
+                node.left = Val::Px(pad_left);
+                node.right = Val::Px(pad_right);
+                node.bottom = Val::Px(pad_bottom);
             }
         }
     }
@@ -1003,6 +1032,24 @@ mod tests {
     }
 
     #[test]
+    fn command_bar_modal_allows_windowed_native_focus() {
+        let mut app = setup_window_app();
+        app.update();
+
+        let modal = app
+            .world_mut()
+            .query_filtered::<Entity, With<Modal>>()
+            .single(app.world())
+            .expect("modal");
+
+        assert!(
+            app.world()
+                .get::<WebviewWindowedNativeFocus>(modal)
+                .is_some()
+        );
+    }
+
+    #[test]
     fn default_tab_requests_command_bar_open() {
         let _home = HomeEnvGuard::use_temp_home("default-tab");
         let mut app = App::new();
@@ -1036,5 +1083,59 @@ mod tests {
         let ctx = app.world().resource::<crate::NewStackContext>();
         assert!(ctx.stack.is_some());
         assert!(ctx.needs_open);
+    }
+
+    #[test]
+    fn window_padding_tracks_layout_window_settings() {
+        let source = include_str!("window.rs");
+        let sync_fn = source
+            .split("fn sync_window_layout_to_settings")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_main_column_gap_to_pane_count").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("settings.window.pad_top()"));
+        assert!(sync_fn.contains("settings.window.pad_right()"));
+        assert!(sync_fn.contains("settings.window.pad_bottom()"));
+        assert!(sync_fn.contains("settings.window.pad_left()"));
+    }
+
+    #[test]
+    fn screen_maximized_window_sync_applies_all_window_padding_edges() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(crate::toggle::LayoutHidden(false))
+            .insert_resource(ScreenMaximized)
+            .insert_resource(LayoutSettings {
+                radius: 0.0,
+                window: crate::settings::WindowSettings {
+                    padding: 16.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: crate::settings::PaneSettings { gap: 0.0 },
+                side_sheet: crate::settings::SideSheetSettings::default(),
+                focus_ring: crate::settings::FocusRingSettings::default(),
+            })
+            .insert_resource(SideSheetWidth(0.0))
+            .add_systems(Update, sync_window_layout_to_settings);
+        app.world_mut().spawn((
+            Window {
+                resolution: (1200, 800).into(),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        let root = app.world_mut().spawn((VmuxWindow, Node::default())).id();
+
+        app.update();
+
+        let node = app.world().get::<Node>(root).expect("window node");
+        assert_eq!(node.padding.top, Val::Px(16.0));
+        assert_eq!(node.padding.left, Val::Px(16.0));
+        assert_eq!(node.padding.right, Val::Px(16.0));
+        assert_eq!(node.padding.bottom, Val::Px(16.0));
     }
 }

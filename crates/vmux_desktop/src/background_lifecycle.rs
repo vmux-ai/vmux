@@ -5,7 +5,17 @@ use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEve
 use bevy_cef_core::prelude::{
     Browsers, MessageLoopWakePolicy, windowless_frame_interval_from_refresh_millihertz,
 };
+#[cfg(target_os = "macos")]
+use parking_lot::Mutex;
+#[cfg(target_os = "macos")]
+use std::ptr::NonNull;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
+#[cfg(target_os = "macos")]
+use std::time::Instant;
 
 use vmux_layout::scene::InteractionMode;
 use vmux_terminal as terminal;
@@ -15,6 +25,10 @@ const FOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
 const UNFOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
 const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_secs(60);
 const BACKGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_secs(1);
+#[cfg(target_os = "macos")]
+const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
+#[cfg(target_os = "macos")]
+const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
 
 #[derive(Message, Debug, Clone, Copy)]
 pub enum LifecycleEvent {
@@ -30,21 +44,178 @@ impl Plugin for BackgroundLifecyclePlugin {
         app.add_message::<LifecycleEvent>()
             .add_systems(Update, handle_lifecycle_events)
             .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
-            .add_systems(Update, keep_awake_while_revealing);
+            .add_systems(Update, keep_awake_while_revealing)
+            .add_systems(
+                Startup,
+                (
+                    install_native_mouse_wake_monitor,
+                    activate_primary_window_on_startup,
+                ),
+            );
     }
 }
 
-/// `react_to_device_events` is the high-frequency scroll/mouse-move wake source: winit ticks Bevy on
+#[cfg(target_os = "macos")]
+static NATIVE_MOUSE_WAKE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static LAST_NATIVE_MOUSE_WAKE: LazyLock<Mutex<Option<Instant>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+#[cfg(target_os = "macos")]
+fn activate_primary_window_on_startup(
+    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
+) {
+    let Ok(window_entity) = primary_window.single() else {
+        return;
+    };
+    activate_native_window(window_entity);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn activate_primary_window_on_startup() {}
+
+#[cfg(target_os = "macos")]
+fn activate_native_window(window_entity: Entity) {
+    use bevy::winit::WINIT_WINDOWS;
+    use objc2_app_kit::{NSApp, NSView};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return;
+    };
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
+        let Some(winit_window) = winit_windows.get_window(window_entity) else {
+            return;
+        };
+        let Ok(handle) = winit_window.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+            return;
+        };
+        let view: &NSView = unsafe { &*appkit.ns_view.as_ptr().cast::<NSView>() };
+        let Some(window) = view.window() else {
+            return;
+        };
+        let app = NSApp(mtm);
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(true);
+        window.makeKeyAndOrderFront(None);
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
+    use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
+
+    let Some(proxy) = proxy else {
+        return;
+    };
+    if NATIVE_MOUSE_WAKE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
+        return;
+    }
+    let proxy = (**proxy).clone();
+    let wake = Arc::new(move |min_interval: Duration| {
+        let should_wake = {
+            let mut last = LAST_NATIVE_MOUSE_WAKE.lock();
+            let now = Instant::now();
+            match *last {
+                Some(prev) if now.duration_since(prev) < min_interval => false,
+                _ => {
+                    *last = Some(now);
+                    true
+                }
+            }
+        };
+        if should_wake {
+            let _ = proxy.send_event(WinitUserEvent::WakeUp);
+        }
+    });
+    let local_wake = wake.clone();
+    let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+        let ev = unsafe { event.as_ref() };
+        let event_type = ev.r#type();
+        if event_type == NSEventType::LeftMouseDown
+            && let Some((x_px, y_px)) = event_location_in_window_physical_px(ev)
+        {
+            vmux_browser::request_native_command_bar_dismiss_for_mouse_down(x_px, y_px);
+        }
+        if event_type == NSEventType::MouseMoved {
+            let crosses_into_other_pane = event_location_in_window_physical_px(ev)
+                .and_then(|(x, y)| vmux_layout::pane::wake_target_for_cursor(x, y))
+                .is_some();
+            if crosses_into_other_pane {
+                local_wake(NATIVE_MOUSE_MOVE_WAKE_INTERVAL);
+            }
+        } else {
+            local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
+        }
+        event.as_ptr()
+    });
+    let global_wake = wake.clone();
+    let global_block = block2::RcBlock::new(move |_event: NonNull<NSEvent>| {
+        global_wake(NATIVE_MOUSE_MOVE_WAKE_INTERVAL);
+    });
+    let mask = NSEventMask::MouseMoved
+        | NSEventMask::LeftMouseDown
+        | NSEventMask::LeftMouseUp
+        | NSEventMask::LeftMouseDragged
+        | NSEventMask::RightMouseDown
+        | NSEventMask::RightMouseUp
+        | NSEventMask::RightMouseDragged
+        | NSEventMask::OtherMouseDown
+        | NSEventMask::OtherMouseUp
+        | NSEventMask::OtherMouseDragged;
+    let local_token =
+        unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &local_block) };
+    let global_token = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask, &global_block);
+    if local_token.is_some() || global_token.is_some() {
+        NATIVE_MOUSE_WAKE_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
+        if let Some(token) = local_token {
+            std::mem::forget(token);
+        }
+        if let Some(token) = global_token {
+            std::mem::forget(token);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_native_mouse_wake_monitor() {}
+
+#[cfg(target_os = "macos")]
+fn event_location_in_window_physical_px(event: &objc2_app_kit::NSEvent) -> Option<(f32, f32)> {
+    let mtm = objc2::MainThreadMarker::new()?;
+    let window = event.window(mtm)?;
+    let content = window.contentView()?;
+    let point = content.convertPoint_fromView(event.locationInWindow(), None);
+    let scale = window.backingScaleFactor();
+    let x = point.x * scale;
+    let y = point.y * scale;
+    if x.is_finite() && y.is_finite() {
+        Some((x as f32, y as f32))
+    } else {
+        None
+    }
+}
+
+/// In browse (User) mode the focused-window update mode is fully native-wake-driven: winit's content
+/// view is first responder and emits `CursorMoved` on every move (CEF keeps `acceptsMouseMovedEvents`
+/// on for in-page hover), so leaving `react_to_window_events` on would tick Bevy ~display-refresh
+/// times per second while the mouse moves. Instead both `react_to_device_events` and
+/// `react_to_window_events` are off in User mode, and the native NSEvent monitors
+/// ([`install_native_mouse_wake_monitor`], native keyboard) wake the loop for the input that matters
+/// (clicks, keys, and pane-crossing hover). Player mode keeps both on for the free camera.
 /// every raw HID report. In browse (User) mode native CEF views own scroll/input, so Bevy must NOT
 /// wake on those — only Player mode's free camera consumes `AccumulatedMouseMotion`. Window events
 /// (resize/focus, OSR chrome hover) and user events (CEF texture wake) stay on in both modes.
-pub(crate) fn foreground_winit_settings(react_to_device_events: bool) -> WinitSettings {
+pub(crate) fn foreground_winit_settings(player: bool) -> WinitSettings {
     WinitSettings {
         focused_mode: UpdateMode::Reactive {
             wait: FOCUSED_FRAME_INTERVAL,
-            react_to_device_events,
+            react_to_device_events: player,
             react_to_user_events: true,
-            react_to_window_events: true,
+            react_to_window_events: player,
         },
         unfocused_mode: UpdateMode::reactive_low_power(UNFOCUSED_FRAME_INTERVAL),
     }
@@ -260,23 +431,96 @@ mod tests {
         };
         assert_eq!(wait, Duration::from_secs(1));
         assert!(react_to_user_events);
-        assert!(react_to_window_events);
         assert_eq!(
             settings.unfocused_mode,
             UpdateMode::reactive_low_power(Duration::from_secs(1))
         );
-        // Browse mode: raw device-event wakes off (native CEF owns scroll); Player mode: on (free
-        // camera reads AccumulatedMouseMotion).
+        // Browse mode is fully native-wake-driven: both raw device-event and window-event wakes are
+        // off so the mouse moving (winit `CursorMoved`) does not tick Bevy. Player mode keeps both on
+        // for the free camera.
         assert!(!react_to_device_events);
+        assert!(!react_to_window_events);
         let player = foreground_winit_settings(true);
         let UpdateMode::Reactive {
             react_to_device_events: player_device,
+            react_to_window_events: player_window,
             ..
         } = player.focused_mode
         else {
             panic!("focused mode must be Reactive");
         };
         assert!(player_device);
+        assert!(player_window);
+    }
+
+    #[test]
+    fn native_mouse_motion_wakes_reactive_loop() {
+        let source = include_str!("background_lifecycle.rs");
+        let monitor = source
+            .split("fn install_native_mouse_wake_monitor")
+            .nth(1)
+            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
+            .unwrap_or_default();
+
+        assert!(monitor.contains("NSEventMask::MouseMoved"));
+        assert!(monitor.contains("NSEventMask::LeftMouseDown"));
+        assert!(monitor.contains("WinitUserEvent::WakeUp"));
+    }
+
+    #[test]
+    fn native_mouse_motion_wakes_before_window_is_key() {
+        let source = include_str!("background_lifecycle.rs");
+        let monitor = source
+            .split("fn install_native_mouse_wake_monitor")
+            .nth(1)
+            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
+            .unwrap_or_default();
+
+        assert!(monitor.contains("addLocalMonitorForEventsMatchingMask_handler"));
+        assert!(monitor.contains("addGlobalMonitorForEventsMatchingMask_handler"));
+    }
+
+    #[test]
+    fn native_mouse_scroll_does_not_wake_reactive_loop() {
+        let source = include_str!("background_lifecycle.rs");
+        let monitor = source
+            .split("fn install_native_mouse_wake_monitor")
+            .nth(1)
+            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
+            .unwrap_or_default();
+
+        assert!(!monitor.contains("NSEventMask::ScrollWheel"));
+    }
+
+    #[test]
+    fn startup_activates_primary_window_on_macos() {
+        let source = include_str!("background_lifecycle.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or_default();
+        let plugin_build = source
+            .split("impl Plugin for BackgroundLifecyclePlugin")
+            .nth(1)
+            .and_then(|tail| tail.split("#[cfg(target_os = \"macos\")]").next())
+            .unwrap_or_default();
+
+        assert!(plugin_build.contains("install_native_mouse_wake_monitor"));
+        assert!(plugin_build.contains("activate_primary_window_on_startup"));
+        assert!(source.contains("activateIgnoringOtherApps"));
+        assert!(source.contains("makeKeyAndOrderFront"));
+    }
+
+    #[test]
+    fn native_mouse_down_requests_command_bar_dismiss() {
+        let source = include_str!("background_lifecycle.rs");
+        let monitor = source
+            .split("fn install_native_mouse_wake_monitor")
+            .nth(1)
+            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
+            .unwrap_or_default();
+
+        assert!(monitor.contains("event_location_in_window_physical_px"));
+        assert!(monitor.contains("request_native_command_bar_dismiss_for_mouse_down"));
     }
 
     #[test]
