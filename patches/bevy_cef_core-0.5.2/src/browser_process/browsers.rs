@@ -10,13 +10,14 @@ use bevy::input::ButtonState;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy_remote::BrpMessage;
+#[cfg(target_os = "macos")]
+use cef::Rect;
 use cef::{
     Browser, BrowserHost, BrowserSettings, CefString, Client, CompositionUnderline,
     DictionaryValue, ImplBrowser, ImplBrowserHost, ImplDictionaryValue, ImplFrame, ImplListValue,
-    ImplProcessMessage, ImplRequestContext, MouseButtonType, ProcessId, Range, Rect,
-    RequestContext, RequestContextSettings, WindowInfo, binary_value_create,
-    browser_host_create_browser_sync, dictionary_value_create, process_message_create,
-    register_scheme_handler_factory,
+    ImplProcessMessage, ImplRequestContext, MouseButtonType, ProcessId, Range, RequestContext,
+    RequestContextSettings, WindowInfo, binary_value_create, browser_host_create_browser_sync,
+    dictionary_value_create, process_message_create, register_scheme_handler_factory,
 };
 use cef_dll_sys::{cef_event_flags_t, cef_mouse_button_type_t};
 #[allow(deprecated)]
@@ -72,6 +73,7 @@ pub struct WebviewBrowser {
     /// Last applied windowed (native) frame in points `(x, y, w, h)`. Used to skip redundant
     /// `setFrame`/`was_resized` calls — re-resizing CEF to the same size every frame clears its
     /// surface and leaves it blank until the next real paint.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     last_frame: Cell<Option<(f64, f64, f64, f64)>>,
     last_corner_radius: Cell<Option<f64>>,
     last_corner_radius_all_corners: Cell<Option<bool>>,
