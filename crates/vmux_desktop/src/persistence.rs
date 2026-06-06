@@ -220,9 +220,7 @@ fn is_stale_agent_url(url: &str) -> bool {
     if normalized == "vmux://agent" {
         return false;
     }
-    !vmux_agent::AgentKind::all()
-        .into_iter()
-        .any(|kind| url.starts_with(&kind.cli_url_prefix()))
+    vmux_agent::AgentUrl::parse(normalized).is_none()
 }
 
 fn space_is_prompt_only_empty_url(body: &str) -> bool {
@@ -766,8 +764,8 @@ mod tests {
     }
 
     #[test]
-    fn stale_agent_page_url_marks_space_stale() {
-        assert!(space_contains_stale_agent_url(
+    fn current_page_agent_url_does_not_mark_space_stale() {
+        assert!(!space_contains_stale_agent_url(
             r#"url: "vmux://agent/echo/echo/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
         ));
     }
@@ -780,7 +778,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_space_file_is_removed_before_load() {
+    fn current_page_agent_space_file_is_not_removed_before_load() {
         let dir = tempfile::tempdir().expect("tempdir");
         let space_dir = dir.path().join("profiles/personal/spaces/space-1");
         std::fs::create_dir_all(&space_dir).expect("space dir");
@@ -789,11 +787,11 @@ mod tests {
             &path,
             r#"url: "vmux://agent/echo/echo/edb5335d-20cf-4c3d-9433-8619c405a0f2""#,
         )
-        .expect("write stale space");
+        .expect("write space");
 
-        assert!(remove_stale_space_if_needed(&path));
-        assert!(!path.exists());
-        assert!(!space_dir.exists());
+        assert!(!remove_stale_space_if_needed(&path));
+        assert!(path.exists());
+        assert!(space_dir.exists());
     }
 
     #[test]
