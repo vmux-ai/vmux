@@ -3,7 +3,7 @@ use vmux_service::bundle;
 
 #[test]
 fn detects_bundled_when_exe_inside_app_macos() {
-    let exe = PathBuf::from("/Applications/Vmux.app/Contents/MacOS/vmux_desktop");
+    let exe = PathBuf::from("/Applications/Vmux.app/Contents/MacOS/Vmux");
     assert!(bundle::is_bundled_path(&exe));
 }
 
@@ -15,7 +15,7 @@ fn detects_not_bundled_when_target_debug() {
 
 #[test]
 fn bundle_root_resolves_app_path() {
-    let exe = PathBuf::from("/Applications/Vmux.app/Contents/MacOS/vmux_desktop");
+    let exe = PathBuf::from("/Applications/Vmux.app/Contents/MacOS/Vmux");
     assert_eq!(
         bundle::bundle_root_for(&exe).unwrap(),
         PathBuf::from("/Applications/Vmux.app")

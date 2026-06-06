@@ -63,11 +63,14 @@ static LAST_NATIVE_MOUSE_WAKE: LazyLock<Mutex<Option<Instant>>> =
 
 #[cfg(target_os = "macos")]
 fn activate_primary_window_on_startup(
-    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
+    primary_window: Query<(Entity, &Window), With<bevy::window::PrimaryWindow>>,
 ) {
-    let Ok(window_entity) = primary_window.single() else {
+    let Ok((window_entity, window)) = primary_window.single() else {
         return;
     };
+    if !window.visible {
+        return;
+    }
     activate_native_window(window_entity);
 }
 
@@ -75,7 +78,7 @@ fn activate_primary_window_on_startup(
 fn activate_primary_window_on_startup() {}
 
 #[cfg(target_os = "macos")]
-fn activate_native_window(window_entity: Entity) {
+pub(crate) fn activate_native_window(window_entity: Entity) {
     use bevy::winit::WINIT_WINDOWS;
     use objc2_app_kit::{NSApp, NSView};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -508,6 +511,17 @@ mod tests {
         assert!(plugin_build.contains("activate_primary_window_on_startup"));
         assert!(source.contains("activateIgnoringOtherApps"));
         assert!(source.contains("makeKeyAndOrderFront"));
+    }
+
+    #[test]
+    fn startup_activation_waits_for_visible_window() {
+        let source = include_str!("background_lifecycle.rs")
+            .split("fn activate_primary_window_on_startup")
+            .nth(1)
+            .and_then(|tail| tail.split("#[cfg(not(target_os = \"macos\"))]").next())
+            .unwrap_or_default();
+
+        assert!(source.contains("if !window.visible"));
     }
 
     #[test]

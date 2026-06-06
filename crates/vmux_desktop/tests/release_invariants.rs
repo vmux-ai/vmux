@@ -60,6 +60,14 @@ fn local_package_only_builds_app_bundle() {
 }
 
 #[test]
+fn cef_injection_uses_ci_cached_framework_path() {
+    let inject_script = include_str!("../../../scripts/inject-cef.sh");
+
+    assert!(inject_script.contains("--cef-framework \"$CEF_FRAMEWORK\""));
+    assert!(inject_script.contains("CEF_FRAMEWORK=\"${CEF_FRAMEWORK:-${HOME}/.local/share/Chromium Embedded Framework.framework}\""));
+}
+
+#[test]
 fn local_signing_uses_stable_codesigning_identity() {
     let signing_script = include_str!("../../../scripts/ensure-local-codesign-identity.sh");
 

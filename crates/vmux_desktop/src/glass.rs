@@ -7,10 +7,8 @@ impl Plugin for GlassPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<GlassState>()
             .init_non_send::<CommandBarOverlay>()
-            .add_systems(
-                Update,
-                (install_window_glass, sync_window_glass_visibility).chain(),
-            )
+            .add_systems(PreUpdate, install_window_glass)
+            .add_systems(Update, sync_window_glass_visibility)
             // Run after PostUpdate's `sync_windowed_frames` (which raises each page to front every
             // frame) so the overlay stays on top of the pages.
             .add_systems(Last, sync_command_bar_overlay);
@@ -26,7 +24,7 @@ struct GlassState {
 
 fn install_window_glass(
     mut state: NonSendMut<GlassState>,
-    window: Query<Entity, With<bevy::window::PrimaryWindow>>,
+    mut window: Query<(Entity, &mut Window), With<bevy::window::PrimaryWindow>>,
 ) {
     use bevy::winit::WINIT_WINDOWS;
     use objc2::{MainThreadMarker, rc::Retained, runtime::AnyClass};
@@ -42,7 +40,7 @@ fn install_window_glass(
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
-    let Ok(entity) = window.single() else {
+    let Ok((entity, mut window)) = window.single_mut() else {
         return;
     };
     let ns_view = WINIT_WINDOWS.with_borrow(|windows| {
@@ -67,6 +65,8 @@ fn install_window_glass(
     if AnyClass::get(c"NSGlassEffectView").is_none() {
         warn!("glass: NSGlassEffectView unavailable (needs macOS 26+)");
         state.installed = true;
+        window.visible = true;
+        crate::background_lifecycle::activate_native_window(entity);
         return;
     }
     let glass: Retained<NSGlassEffectView> = NSGlassEffectView::new(mtm);
@@ -80,6 +80,8 @@ fn install_window_glass(
     state.visible = true;
     state._glass = Some(glass);
     state.installed = true;
+    window.visible = true;
+    crate::background_lifecycle::activate_native_window(entity);
     info!("glass: NSGlassEffectView installed as window backdrop (behind content view)");
 }
 
@@ -214,5 +216,18 @@ mod tests {
     fn glass_backdrop_is_hidden_in_player_mode() {
         assert!(!glass_backdrop_visible(InteractionMode::Player));
         assert!(glass_backdrop_visible(InteractionMode::User));
+    }
+
+    #[test]
+    fn window_reveals_after_backdrop_install() {
+        let source = include_str!("glass.rs");
+        let install = source
+            .split("fn install_window_glass")
+            .nth(1)
+            .and_then(|tail| tail.split("fn glass_backdrop_visible").next())
+            .unwrap_or_default();
+
+        assert!(install.contains("window.visible = true"));
+        assert!(install.contains("activate_native_window"));
     }
 }

@@ -17,6 +17,7 @@ unset CEF_PATH
 
 APP_BUNDLE="${VMUX_APP_BUNDLE:-${ROOT}/target/release/Vmux.app}"
 BUNDLE_ID_BASE="${VMUX_BUNDLE_ID:-ai.vmux.desktop}"
+CEF_FRAMEWORK="${CEF_FRAMEWORK:-${HOME}/.local/share/Chromium Embedded Framework.framework}"
 HELPER_BIN="${ROOT}/target/release/bevy_cef_debug_render_process"
 
 if [[ ! -d "$APP_BUNDLE" ]]; then
@@ -43,13 +44,33 @@ if [[ ! -f "$HELPER_BIN" ]]; then
 fi
 
 echo "==> inject-cef: running bevy_cef_bundle_app"
-bevy_cef_bundle_app --app "$APP_BUNDLE" --bundle-id-base "$BUNDLE_ID_BASE" --helper-bin "$HELPER_BIN" --no-sign
+bevy_cef_bundle_app --app "$APP_BUNDLE" --bundle-id-base "$BUNDLE_ID_BASE" --bin-name Vmux --cef-framework "$CEF_FRAMEWORK" --helper-bin "$HELPER_BIN" --no-sign
 
 # Copy app icon (cargo-packager handles this via icons config, but ensure it's there)
 ICNS_SRC="$ROOT/packaging/macos/Vmux.icns"
 if [[ -f "$ICNS_SRC" && ! -f "$APP_BUNDLE/Contents/Resources/Vmux.icns" ]]; then
     mkdir -p "$APP_BUNDLE/Contents/Resources"
     cp -f "$ICNS_SRC" "$APP_BUNDLE/Contents/Resources/Vmux.icns"
+fi
+
+if [[ -f "$ICNS_SRC" ]]; then
+    CEF_HELPER_APPS=(
+        "Vmux Helper.app"
+        "Vmux Helper (GPU).app"
+        "Vmux Helper (Renderer).app"
+        "Vmux Helper (Plugin).app"
+        "Vmux Helper (Alerts).app"
+    )
+    for helper_name in "${CEF_HELPER_APPS[@]}"; do
+        helper_app="$APP_BUNDLE/Contents/Frameworks/$helper_name"
+        [[ -d "$helper_app" ]] || continue
+        mkdir -p "$helper_app/Contents/Resources"
+        cp -f "$ICNS_SRC" "$helper_app/Contents/Resources/Vmux.icns"
+        plist="$helper_app/Contents/Info.plist"
+        [[ -f "$plist" ]] || continue
+        /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile Vmux" "$plist" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string Vmux" "$plist"
+    done
 fi
 
 echo "==> inject-cef: done"
