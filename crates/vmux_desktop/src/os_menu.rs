@@ -1,13 +1,14 @@
 use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::window::WindowCloseRequested;
-use muda::{Menu, MenuEvent};
+use muda::{Menu, MenuEvent, MenuItem, MenuItemKind};
 use parking_lot::Mutex;
 use std::sync::LazyLock;
 use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, StackCommand, WriteAppCommands,
+    AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand, WriteAppCommands,
     build_native_root_menu, open::OpenCommand,
 };
+use vmux_layout::scene::InteractionMode;
 use vmux_setting::AppSettings;
 use vmux_terminal as terminal;
 use vmux_terminal::{PtyExited, Terminal};
@@ -36,8 +37,22 @@ const WINDOW_CLOSE_SUPPRESSION_WINDOW: std::time::Duration = std::time::Duration
 const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
     std::time::Duration::from_millis(1500);
 
-#[allow(dead_code)]
-struct OsMenuResource(Menu);
+struct OsMenuResource {
+    _menu: Menu,
+    interactive_mode: Option<InteractiveModeMenuItems>,
+}
+
+struct InteractiveModeMenuItems {
+    user: MenuItem,
+    player: MenuItem,
+}
+
+impl InteractiveModeMenuItems {
+    fn sync(&self, mode: &InteractionMode) {
+        self.user.set_enabled(*mode != InteractionMode::User);
+        self.player.set_enabled(*mode != InteractionMode::Player);
+    }
+}
 
 pub struct OsMenuPlugin;
 
@@ -52,6 +67,7 @@ impl Plugin for OsMenuPlugin {
                 Update,
                 (
                     forward_menu_events.in_set(WriteAppCommands),
+                    sync_interactive_mode_menu_items.after(ReadAppCommands),
                     remember_stack_close_commands.after(WriteAppCommands),
                     remember_native_page_open_commands.after(WriteAppCommands),
                     close_with_confirmation
@@ -66,6 +82,7 @@ impl Plugin for OsMenuPlugin {
 fn setup(world: &mut World) {
     let mut menu = Menu::new();
     build_native_root_menu(&mut menu).unwrap();
+    let interactive_mode = interactive_mode_menu_items(&menu);
 
     #[cfg(target_os = "macos")]
     menu.init_for_nsapp();
@@ -84,7 +101,51 @@ fn setup(world: &mut World) {
         }
     }));
 
-    world.insert_non_send(OsMenuResource(menu));
+    world.insert_non_send(OsMenuResource {
+        _menu: menu,
+        interactive_mode,
+    });
+}
+
+fn interactive_mode_menu_items(menu: &Menu) -> Option<InteractiveModeMenuItems> {
+    Some(InteractiveModeMenuItems {
+        user: find_menu_item(menu.items(), "interactive_mode_user")?,
+        player: find_menu_item(menu.items(), "interactive_mode_player")?,
+    })
+}
+
+fn find_menu_item(items: Vec<MenuItemKind>, id: &str) -> Option<MenuItem> {
+    for item in items {
+        if item.id().0 == id
+            && let Some(menu_item) = item.as_menuitem()
+        {
+            return Some(menu_item.clone());
+        }
+        if let Some(submenu) = item.as_submenu()
+            && let Some(menu_item) = find_menu_item(submenu.items(), id)
+        {
+            return Some(menu_item);
+        }
+    }
+    None
+}
+
+fn sync_interactive_mode_menu_items(
+    menu: Option<NonSend<OsMenuResource>>,
+    mode: Option<Res<InteractionMode>>,
+) {
+    let Some(mode) = mode else {
+        return;
+    };
+    if !mode.is_changed() {
+        return;
+    }
+    let Some(menu) = menu else {
+        return;
+    };
+    if let Some(items) = &menu.interactive_mode {
+        items.sync(&mode);
+    }
 }
 
 fn forward_menu_events(world: &mut World) {
@@ -370,5 +431,18 @@ mod tests {
         app.world_mut().run_schedule(Update);
 
         assert!(app.world().get::<Window>(window).unwrap().visible);
+    }
+
+    #[test]
+    fn interactive_mode_menu_disables_selected_mode() {
+        let source = include_str!("os_menu.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+
+        assert!(source.contains("interactive_mode_user"));
+        assert!(source.contains("interactive_mode_player"));
+        assert!(source.contains("set_enabled(*mode != InteractionMode::User)"));
+        assert!(source.contains("set_enabled(*mode != InteractionMode::Player)"));
     }
 }

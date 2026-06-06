@@ -155,8 +155,8 @@ impl Plugin for BrowserPlugin {
                     sync_keyboard_target,
                     sync_windowed_content_mesh_materials,
                     sync_children_to_ui,
-                    sync_windowed_frames,
                     sync_windowed_chrome,
+                    sync_windowed_frames,
                     sync_windowed_command_bar,
                     apply_repaint_nudge,
                     sync_cef_webview_resize_after_ui,
@@ -301,19 +301,26 @@ fn forward_layout_cef_cursor_move(
     layout_q: Query<Entity, With<LayoutCef>>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
     modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
+    mut was_in_region: Local<bool>,
 ) {
     if suppress.0 || !modal_pointer_targets.is_empty() {
         for _ in events.read() {}
+        *was_in_region = false;
         return;
     }
     let Ok(layout) = layout_q.single() else {
         for _ in events.read() {}
+        *was_in_region = false;
         return;
     };
     for event in events.read() {
-        if cef_pointer_regions_contains(event.position, &cef_regions) {
+        let in_region = cef_pointer_regions_contains(event.position, &cef_regions);
+        if in_region {
             browsers.send_mouse_move(&layout, buttons.get_pressed(), event.position, false);
+        } else if *was_in_region {
+            browsers.send_mouse_move(&layout, buttons.get_pressed(), event.position, true);
         }
+        *was_in_region = in_region;
     }
 }
 
@@ -677,17 +684,51 @@ fn webview_should_use_windowed(mode: vmux_layout::scene::InteractionMode) -> boo
     cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User
 }
 
+fn transform_near(a: &Transform, b: &Transform) -> bool {
+    a.translation.distance(b.translation) < 0.001
+        && a.scale.distance(b.scale) < 0.001
+        && a.rotation.dot(b.rotation).abs() > 0.9999
+}
+
+fn camera_supports_windowed_webviews(world: &mut World) -> bool {
+    let expected = {
+        let mut window_q = world.query_filtered::<&Window, With<PrimaryWindow>>();
+        let Ok(window) = window_q.single(world) else {
+            return true;
+        };
+        let height = window.resolution.height().max(1.0);
+        let aspect = window.resolution.width() / height;
+        vmux_layout::scene::frame_main_camera_transform(window, aspect, 0.0)
+    };
+    let camera = {
+        let mut camera_q =
+            world.query_filtered::<&Transform, With<vmux_layout::scene::MainCamera>>();
+        let Ok(camera) = camera_q.single(world) else {
+            return true;
+        };
+        *camera
+    };
+    transform_near(&camera, &expected)
+}
+
 fn set_windowed_content_mesh_material(
     material: &mut WebviewExtendStandardMaterial,
     windowed: bool,
 ) {
     let alpha = if windowed { 0.0 } else { 1.0 };
     material.base.base_color = material.base.base_color.with_alpha(alpha);
-    material.base.alpha_mode = if windowed {
+    material.base.alpha_mode =
+        webview_content_alpha_mode(alpha, material.extension.pane_corner_clip.x);
+}
+
+fn webview_content_alpha_mode(alpha: f32, radius: f32) -> AlphaMode {
+    if alpha < 1.0 {
         AlphaMode::Blend
+    } else if radius > 0.0 {
+        AlphaMode::AlphaToCoverage
     } else {
         AlphaMode::Opaque
-    };
+    }
 }
 
 fn sync_windowed_content_mesh_materials(
@@ -718,14 +759,11 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
         .get_resource::<vmux_layout::scene::InteractionMode>()
         .copied()
         .unwrap_or_default();
-    let base_windowed = webview_should_use_windowed(mode);
+    let base_windowed =
+        webview_should_use_windowed(mode) && camera_supports_windowed_webviews(world);
     let mut query = world.query_filtered::<Entity, (With<Browser>, With<WebviewSource>)>();
     let entities: Vec<Entity> = query.iter(world).collect();
-    let osr_only: Vec<Entity> = {
-        let mut q = world.query_filtered::<Entity, With<LayoutCef>>();
-        q.iter(world).collect()
-    };
-    let target_windowed = |entity: Entity| base_windowed && !osr_only.contains(&entity);
+    let target_windowed = |_entity: Entity| base_windowed;
     let mut recreate = Vec::new();
     {
         let browsers = world.non_send::<Browsers>();
@@ -795,12 +833,15 @@ fn sync_windowed_frames(
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
 ) {
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
+    let force_raise = layout_hidden.is_changed();
     for (entity, tf, self_computed, self_ui_gt, child_of) in &browser_q {
         if tf.scale.x <= 1.0e-3 {
             browsers.set_windowed_hidden(&entity, true);
+            last_raised_frame.remove(&entity);
             continue;
         }
         let parent = child_of.get();
@@ -834,7 +875,18 @@ fn sync_windowed_frames(
             scale,
             [focus_ring_color.r, focus_ring_color.g, focus_ring_color.b],
         );
-        browsers.raise_windowed_to_front(&entity);
+        if browsers.has_browser(entity) {
+            let key = (
+                left.round() as i32,
+                top.round() as i32,
+                size_px.x.round() as i32,
+                size_px.y.round() as i32,
+            );
+            let changed = last_raised_frame.insert(entity, key) != Some(key);
+            if force_raise || changed {
+                browsers.raise_windowed_to_front(&entity);
+            }
+        }
     }
 }
 
@@ -853,14 +905,12 @@ fn visible_pane_count_for_windowed_sync(
     leaf_panes.iter().count().max(1)
 }
 
-/// Position the native layout as a full-window view behind the native page(s). The layout is created
-/// before any page, so it stays the backmost sibling — no reorder needed. Its opaque header/sidebar
-/// show wherever the (inset) page doesn't cover; the page covers the content region on top.
 fn sync_windowed_chrome(
     browsers: NonSend<Browsers>,
     chrome_q: Query<(Entity, Option<&HostWindow>), (With<LayoutCef>, With<WebviewWindowed>)>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
+    mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
 ) {
     for (entity, host_window) in &chrome_q {
         let window_entity = host_window
@@ -880,7 +930,13 @@ fn sync_windowed_chrome(
         }
         browsers.set_windowed_hidden(&entity, false);
         browsers.set_windowed_frame(&entity, 0.0, 0.0, w, h, scale);
-        browsers.lower_windowed_to_back(&entity);
+        if browsers.has_browser(entity) {
+            let key = (0, 0, w.round() as i32, h.round() as i32);
+            let changed = last_raised_frame.insert(entity, key) != Some(key);
+            if changed {
+                browsers.raise_windowed_to_front(&entity);
+            }
+        }
     }
 }
 
@@ -1334,6 +1390,7 @@ fn pane_count_for_browser(
 fn sync_webview_pane_corner_clip(
     settings: Res<AppSettings>,
     layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
+    mode: Res<vmux_layout::scene::InteractionMode>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     tabs: Query<
         (
@@ -1341,7 +1398,7 @@ fn sync_webview_pane_corner_clip(
             &WebviewSize,
             &MeshMaterial3d<WebviewExtendStandardMaterial>,
         ),
-        With<Browser>,
+        (With<Browser>, Without<LayoutCef>, Without<Modal>),
     >,
     status: Query<(&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>), With<Header>>,
     side_sheet: Query<
@@ -1358,11 +1415,6 @@ fn sync_webview_pane_corner_clip(
     for (browser_e, size, mat_h) in &tabs {
         let w = size.0.x.max(1.0e-6);
         let h = size.0.y.max(1.0e-6);
-        // corner_mode = 1.0 → round bottom corners only, so the pane top
-        // sits flush against the url row above it. Switch to 0.0 (all
-        // corners) when the active tab is split (each pane floats as a
-        // card) or when the CEF shell is hidden (no url row above to merge
-        // with).
         let pane_count = pane_count_for_browser(
             browser_e,
             &child_of_q,
@@ -1372,13 +1424,17 @@ fn sync_webview_pane_corner_clip(
             &leaf_panes,
         )
         .unwrap_or(1);
-        let mode = if layout_hidden.0 || pane_count > 1 {
+        let corner_mode = if *mode == vmux_layout::scene::InteractionMode::Player
+            || layout_hidden.0
+            || pane_count > 1
+        {
             0.0
         } else {
             1.0
         };
         if let Some(mut mat) = materials.get_mut(mat_h.id()) {
-            mat.extension.pane_corner_clip = Vec4::new(r, w, h, mode);
+            mat.extension.pane_corner_clip = Vec4::new(r, w, h, corner_mode);
+            mat.base.alpha_mode = webview_content_alpha_mode(mat.base.base_color.alpha(), r);
         }
     }
     for (size, mat_h) in &status {
@@ -1386,6 +1442,7 @@ fn sync_webview_pane_corner_clip(
         let h = size.0.y.max(1.0e-6);
         if let Some(mut mat) = materials.get_mut(mat_h.id()) {
             mat.extension.pane_corner_clip = Vec4::new(r, w, h, 0.0);
+            mat.base.alpha_mode = webview_content_alpha_mode(mat.base.base_color.alpha(), r);
         }
     }
     for (size, mat_h) in &side_sheet {
@@ -1393,6 +1450,7 @@ fn sync_webview_pane_corner_clip(
         let h = size.0.y.max(1.0e-6);
         if let Some(mut mat) = materials.get_mut(mat_h.id()) {
             mat.extension.pane_corner_clip = Vec4::new(r, w, h, 0.0);
+            mat.base.alpha_mode = webview_content_alpha_mode(mat.base.base_color.alpha(), r);
         }
     }
 }
@@ -2055,6 +2113,7 @@ fn handle_browser_commands(
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     mut meta_q: Query<&mut PageMetadata, With<Browser>>,
     terminal_q: Query<(), With<Terminal>>,
+    term_scale_q: Query<&vmux_terminal::TerminalFontScale>,
     effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
@@ -2155,17 +2214,31 @@ fn handle_browser_commands(
             },
             BrowserCommand::View(view) => match view {
                 BrowserViewCommand::ZoomIn => {
-                    if let Ok(mut z) = zoom_q.get_mut(webview) {
+                    if is_terminal {
+                        let scale = term_scale_q.get(webview).map(|s| s.0).unwrap_or(1.0);
+                        commands
+                            .entity(webview)
+                            .insert(vmux_terminal::TerminalFontScale((scale + 0.1).min(3.0)));
+                    } else if let Ok(mut z) = zoom_q.get_mut(webview) {
                         z.0 += 0.5;
                     }
                 }
                 BrowserViewCommand::ZoomOut => {
-                    if let Ok(mut z) = zoom_q.get_mut(webview) {
+                    if is_terminal {
+                        let scale = term_scale_q.get(webview).map(|s| s.0).unwrap_or(1.0);
+                        commands
+                            .entity(webview)
+                            .insert(vmux_terminal::TerminalFontScale((scale - 0.1).max(0.5)));
+                    } else if let Ok(mut z) = zoom_q.get_mut(webview) {
                         z.0 -= 0.5;
                     }
                 }
                 BrowserViewCommand::ZoomReset => {
-                    if let Ok(mut z) = zoom_q.get_mut(webview) {
+                    if is_terminal {
+                        commands
+                            .entity(webview)
+                            .insert(vmux_terminal::TerminalFontScale(1.0));
+                    } else if let Ok(mut z) = zoom_q.get_mut(webview) {
                         z.0 = 0.0;
                     }
                 }
@@ -2320,9 +2393,11 @@ fn sync_page_metadata_to_tab(
         if status_q.contains(parent) || side_sheet_q.contains(parent) {
             continue;
         }
+        let content_is_web = meta.url.starts_with("http://") || meta.url.starts_with("https://");
         if parent_meta
             .as_ref()
             .is_some_and(|m| m.url.starts_with("vmux://agent/"))
+            && !content_is_web
         {
             continue;
         }
@@ -2907,7 +2982,7 @@ mod tests {
     }
 
     #[test]
-    fn windowed_chrome_sync_sends_layout_behind_pages() {
+    fn windowed_chrome_sync_raises_layout_above_bevy_view() {
         let source = include_str!("lib.rs");
         let sync_fn = source
             .split("fn sync_windowed_chrome")
@@ -2915,7 +2990,26 @@ mod tests {
             .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
             .unwrap_or_default();
 
-        assert!(sync_fn.contains("browsers.lower_windowed_to_back"));
+        assert!(sync_fn.contains("browsers.raise_windowed_to_front"));
+        assert!(!sync_fn.contains("browsers.lower_windowed_to_back"));
+    }
+
+    #[test]
+    fn native_layout_sync_runs_before_native_page_sync() {
+        let source = include_str!("lib.rs");
+        let post_update = source
+            .split("PostUpdate,")
+            .nth(1)
+            .and_then(|tail| tail.split(".chain()").next())
+            .unwrap_or_default();
+        let chrome_idx = post_update
+            .find("sync_windowed_chrome")
+            .expect("windowed chrome sync");
+        let page_idx = post_update
+            .find("sync_windowed_frames")
+            .expect("windowed page sync");
+
+        assert!(chrome_idx < page_idx);
     }
 
     #[test]
@@ -2943,6 +3037,108 @@ mod tests {
 
         assert_eq!(material.base.base_color.alpha(), 1.0);
         assert_eq!(material.base.alpha_mode, AlphaMode::Opaque);
+    }
+
+    fn test_app_settings_with_radius(radius: f32) -> AppSettings {
+        AppSettings {
+            browser: vmux_setting::BrowserSettings {
+                startup_url: "about:blank".to_string(),
+            },
+            layout: vmux_layout::settings::LayoutSettings {
+                radius,
+                window: vmux_layout::settings::WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: vmux_layout::settings::PaneSettings { gap: 0.0 },
+                side_sheet: vmux_layout::settings::SideSheetSettings::default(),
+                focus_ring: vmux_layout::settings::FocusRingSettings::default(),
+            },
+            shortcuts: vmux_setting::ShortcutSettings::default(),
+            terminal: None,
+            auto_update: false,
+            agent: vmux_setting::AgentSettings::default(),
+        }
+    }
+
+    #[test]
+    fn player_osr_pane_clip_uses_alpha_to_coverage_for_rounded_corners() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_app_settings_with_radius(12.0))
+            .insert_resource(vmux_layout::toggle::LayoutHidden(false))
+            .insert_resource(vmux_layout::scene::InteractionMode::Player)
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, sync_webview_pane_corner_clip);
+
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
+            .add(WebviewExtendStandardMaterial::default());
+        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(pane)))
+            .id();
+        app.world_mut().spawn((
+            Browser,
+            WebviewSize(Vec2::new(320.0, 240.0)),
+            MeshMaterial3d(handle.clone()),
+            ChildOf(stack),
+        ));
+
+        app.update();
+
+        let material = app
+            .world()
+            .resource::<Assets<WebviewExtendStandardMaterial>>()
+            .get(&handle)
+            .expect("webview material");
+
+        assert_eq!(
+            material.extension.pane_corner_clip,
+            Vec4::new(12.0, 320.0, 240.0, 0.0)
+        );
+        assert_eq!(material.base.alpha_mode, AlphaMode::AlphaToCoverage);
+    }
+
+    #[test]
+    fn layout_cef_shell_keeps_blend_material() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_app_settings_with_radius(12.0))
+            .insert_resource(vmux_layout::toggle::LayoutHidden(false))
+            .insert_resource(vmux_layout::scene::InteractionMode::Player)
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, sync_webview_pane_corner_clip);
+
+        let mut material = WebviewExtendStandardMaterial::default();
+        material.base.alpha_mode = AlphaMode::Blend;
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
+            .add(material);
+        app.world_mut().spawn((
+            Browser,
+            LayoutCef,
+            WebviewSize(Vec2::new(320.0, 240.0)),
+            MeshMaterial3d(handle.clone()),
+        ));
+
+        app.update();
+
+        let material = app
+            .world()
+            .resource::<Assets<WebviewExtendStandardMaterial>>()
+            .get(&handle)
+            .expect("webview material");
+
+        assert_eq!(material.extension.pane_corner_clip, Vec4::ZERO);
+        assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
     }
 
     #[test]
@@ -3072,7 +3268,7 @@ mod tests {
     }
 
     #[test]
-    fn glass_mode_keeps_command_bar_windowed_above_native_pages() {
+    fn browser_mode_does_not_force_layout_shell_osr() {
         let source = include_str!("lib.rs");
         let backend_fn = source
             .split("fn sync_cef_backend_for_interaction_mode")
@@ -3080,7 +3276,7 @@ mod tests {
             .and_then(|tail| tail.split("fn sync_windowed_frames").next())
             .unwrap_or_default();
 
-        assert!(backend_fn.contains("With<LayoutCef>"));
+        assert!(!backend_fn.contains("With<LayoutCef>"));
         assert!(!backend_fn.contains("With<Modal>"));
     }
 
@@ -3100,7 +3296,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_keeps_layout_osr_but_windows_pages_and_modal_on_macos() {
+    fn browser_mode_windows_layout_pages_and_modal_on_macos() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
         app.insert_resource(vmux_layout::scene::InteractionMode::User);
@@ -3124,7 +3320,10 @@ mod tests {
 
         sync_cef_backend_for_interaction_mode(app.world_mut());
 
-        assert!(app.world().get::<WebviewWindowed>(layout).is_none());
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(layout).is_some(),
+            cfg!(target_os = "macos")
+        );
         assert_eq!(
             app.world().get::<WebviewWindowed>(terminal).is_some(),
             cfg!(target_os = "macos")
@@ -3133,6 +3332,62 @@ mod tests {
             app.world().get::<WebviewWindowed>(modal).is_some(),
             cfg!(target_os = "macos")
         );
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(page).is_some(),
+            cfg!(target_os = "macos")
+        );
+    }
+
+    #[test]
+    fn browser_mode_disables_windowed_pages_when_camera_is_off_axis() {
+        let mut app = App::new();
+        app.world_mut().insert_non_send(Browsers::default());
+        app.insert_resource(vmux_layout::scene::InteractionMode::User);
+        app.world_mut().spawn((
+            Window {
+                resolution: (800, 600).into(),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        app.world_mut().spawn((
+            vmux_layout::scene::MainCamera,
+            Transform::from_xyz(2.0, 1.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ));
+        let page = app
+            .world_mut()
+            .spawn((
+                Browser,
+                WebviewWindowed,
+                WebviewSource::new("https://example.com/"),
+            ))
+            .id();
+
+        sync_cef_backend_for_interaction_mode(app.world_mut());
+
+        assert!(app.world().get::<WebviewWindowed>(page).is_none());
+    }
+
+    #[test]
+    fn browser_mode_keeps_windowed_pages_when_camera_is_home() {
+        let mut app = App::new();
+        app.world_mut().insert_non_send(Browsers::default());
+        app.insert_resource(vmux_layout::scene::InteractionMode::User);
+        let window = Window {
+            resolution: (800, 600).into(),
+            ..default()
+        };
+        let home = vmux_layout::scene::frame_main_camera_transform(&window, 800.0 / 600.0, 0.0);
+        app.world_mut().spawn((window, PrimaryWindow));
+        app.world_mut()
+            .spawn((vmux_layout::scene::MainCamera, home));
+        let page = app
+            .world_mut()
+            .spawn((Browser, WebviewSource::new("https://example.com/")))
+            .id();
+
+        sync_cef_backend_for_interaction_mode(app.world_mut());
+
         assert_eq!(
             app.world().get::<WebviewWindowed>(page).is_some(),
             cfg!(target_os = "macos")

@@ -33,6 +33,7 @@ pub struct PendingPaneClose;
 
 pub struct PanePlugin;
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 const HOVER_COOLDOWN_MS: u64 = 300;
 
 #[derive(Resource, Default)]
@@ -61,7 +62,6 @@ impl Plugin for PanePlugin {
             .add_systems(
                 Update,
                 (
-                    poll_cursor_pane_focus.before(crate::stack::ComputeFocusSet),
                     click_pane_in_player_mode,
                     pane_gap_drag_resize,
                     process_pending_pane_closes,
@@ -84,6 +84,11 @@ impl Plugin for PanePlugin {
                 publish_pane_hover_regions,
                 apply_pending_hover.before(crate::stack::ComputeFocusSet),
             ),
+        );
+        #[cfg(not(target_os = "macos"))]
+        app.add_systems(
+            Update,
+            poll_cursor_pane_focus.before(crate::stack::ComputeFocusSet),
         );
         register_zoom_hooks(app);
     }
@@ -1061,6 +1066,7 @@ fn on_pane_select(
     }
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn poll_cursor_pane_focus(
     mode: Res<crate::scene::InteractionMode>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,

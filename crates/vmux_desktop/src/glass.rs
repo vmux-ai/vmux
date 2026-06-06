@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use vmux_layout::scene::InteractionMode;
 
 pub(crate) struct GlassPlugin;
 
@@ -6,7 +7,10 @@ impl Plugin for GlassPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<GlassState>()
             .init_non_send::<CommandBarOverlay>()
-            .add_systems(Update, install_window_glass)
+            .add_systems(
+                Update,
+                (install_window_glass, sync_window_glass_visibility).chain(),
+            )
             // Run after PostUpdate's `sync_windowed_frames` (which raises each page to front every
             // frame) so the overlay stays on top of the pages.
             .add_systems(Last, sync_command_bar_overlay);
@@ -16,6 +20,7 @@ impl Plugin for GlassPlugin {
 #[derive(Default)]
 struct GlassState {
     installed: bool,
+    visible: bool,
     _glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
 }
 
@@ -72,9 +77,26 @@ fn install_window_glass(
         NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
     );
     parent.addSubview_positioned_relativeTo(glass_view, NSWindowOrderingMode::Below, Some(content));
+    state.visible = true;
     state._glass = Some(glass);
     state.installed = true;
     info!("glass: NSGlassEffectView installed as window backdrop (behind content view)");
+}
+
+fn glass_backdrop_visible(mode: InteractionMode) -> bool {
+    mode == InteractionMode::User
+}
+
+fn sync_window_glass_visibility(mut state: NonSendMut<GlassState>, mode: Res<InteractionMode>) {
+    let visible = glass_backdrop_visible(*mode);
+    if state.visible == visible {
+        return;
+    }
+    if let Some(glass) = &state._glass {
+        let glass_view: &objc2_app_kit::NSView = glass;
+        glass_view.setHidden(!visible);
+    }
+    state.visible = visible;
 }
 
 #[derive(Default)]
@@ -181,4 +203,16 @@ fn sync_command_bar_overlay(
     }
     // Raise above the native pages (re-add reorders to front; pages re-raise each frame).
     content.addSubview(&view);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_layout::scene::InteractionMode;
+
+    #[test]
+    fn glass_backdrop_is_hidden_in_player_mode() {
+        assert!(!glass_backdrop_visible(InteractionMode::Player));
+        assert!(glass_backdrop_visible(InteractionMode::User));
+    }
 }

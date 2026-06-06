@@ -2470,10 +2470,21 @@ fn on_term_resize(
     });
 }
 
+#[derive(Component, Clone, Copy, Debug)]
+pub struct TerminalFontScale(pub f32);
+
+impl Default for TerminalFontScale {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
 fn sync_terminal_theme(
     q: Query<Entity, With<Terminal>>,
     new_terminals: Query<Entity, Added<Terminal>>,
     newly_ready: Query<Entity, (With<Terminal>, Added<PageReady>)>,
+    changed_scale: Query<Entity, (With<Terminal>, Changed<TerminalFontScale>)>,
+    scale_q: Query<&TerminalFontScale>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     mut commands: Commands,
@@ -2504,12 +2515,16 @@ fn sync_terminal_theme(
     };
 
     let theme_changed = hash != *last_theme_hash;
-    if !theme_changed && new_terminals.is_empty() && newly_ready.is_empty() {
+    if !theme_changed
+        && new_terminals.is_empty()
+        && newly_ready.is_empty()
+        && changed_scale.is_empty()
+    {
         return;
     }
     *last_theme_hash = hash;
 
-    let event = crate::event::TermThemeEvent {
+    let base_event = crate::event::TermThemeEvent {
         foreground: colors.foreground,
         background: colors.background,
         cursor: colors.cursor,
@@ -2524,11 +2539,18 @@ fn sync_terminal_theme(
     let targets: Vec<Entity> = if theme_changed {
         q.iter().collect()
     } else {
-        new_terminals.iter().chain(newly_ready.iter()).collect()
+        new_terminals
+            .iter()
+            .chain(newly_ready.iter())
+            .chain(changed_scale.iter())
+            .collect()
     };
 
     for entity in targets {
         if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+            let scale = scale_q.get(entity).map(|s| s.0).unwrap_or(1.0);
+            let mut event = base_event.clone();
+            event.font_size = theme.font_size * scale;
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 TERM_THEME_EVENT,

@@ -351,13 +351,26 @@ pub enum ToggleLayoutCommand {
 }
 
 #[derive(
-    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+    OsSubMenuGroup, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq,
 )]
 pub enum SceneCommand {
+    #[menu(label = "Interactive Mode")]
+    InteractiveMode(SceneInteractiveModeCommand),
+}
+
+#[derive(
+    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
+)]
+pub enum SceneInteractiveModeCommand {
     #[default]
-    #[menu(id = "toggle_player_mode", label = "Toggle Player Mode")]
+    #[menu(id = "interactive_mode_user", label = "User")]
+    User,
+    #[menu(id = "interactive_mode_player", label = "Player")]
+    Player,
+    #[menu(id = "toggle_player_mode", label = "Toggle Player Mode", hidden)]
     #[shortcut(chord = "Ctrl+g, Enter")]
-    TogglePlayerMode,
+    #[mcp(skip)]
+    Toggle,
 }
 
 #[allow(dead_code)]
@@ -576,5 +589,29 @@ mod tests {
             AppCommand::from_menu_id("space_open"),
             Some(AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)))
         );
+    }
+
+    #[test]
+    fn scene_interactive_mode_menu_ids_resolve() {
+        assert_eq!(
+            AppCommand::from_menu_id("interactive_mode_user").map(|cmd| format!("{cmd:?}")),
+            Some("Scene(InteractiveMode(User))".to_string())
+        );
+        assert_eq!(
+            AppCommand::from_menu_id("interactive_mode_player").map(|cmd| format!("{cmd:?}")),
+            Some("Scene(InteractiveMode(Player))".to_string())
+        );
+    }
+
+    #[test]
+    fn scene_menu_nests_interactive_mode_selector() {
+        let source = include_str!("command.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+
+        assert!(source.contains("#[menu(label = \"Interactive Mode\")]"));
+        assert!(source.contains("interactive_mode_user"));
+        assert!(source.contains("interactive_mode_player"));
     }
 }

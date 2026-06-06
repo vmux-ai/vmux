@@ -86,6 +86,16 @@ fn window_surface_alpha(mode: crate::scene::InteractionMode) -> f32 {
     }
 }
 
+fn window_surface_alpha_mode(alpha: f32, radius: f32) -> AlphaMode {
+    if alpha < 1.0 {
+        AlphaMode::Blend
+    } else if radius > 0.0 {
+        AlphaMode::AlphaToCoverage
+    } else {
+        AlphaMode::Opaque
+    }
+}
+
 fn window_background_material(
     radius: f32,
     size_m: Vec2,
@@ -96,11 +106,7 @@ fn window_background_material(
         base: StandardMaterial {
             base_color: window_background_color().with_alpha(alpha),
             unlit: true,
-            alpha_mode: if alpha <= 0.0 {
-                AlphaMode::Blend
-            } else {
-                AlphaMode::Opaque
-            },
+            alpha_mode: window_surface_alpha_mode(alpha, radius),
             cull_mode: None,
             ..default()
         },
@@ -583,6 +589,8 @@ fn sync_window_surface_clip(
             let clip = &mut mat.extension.clip;
             if (clip.x - settings.radius).abs() > 0.01 {
                 clip.x = settings.radius;
+                mat.base.alpha_mode =
+                    window_surface_alpha_mode(mat.base.base_color.alpha(), settings.radius);
             }
         }
     }
@@ -600,11 +608,7 @@ fn sync_window_surface_alpha(
     for handle in &q {
         if let Some(mut mat) = materials.get_mut(handle) {
             mat.base.base_color = mat.base.base_color.with_alpha(alpha);
-            mat.base.alpha_mode = if alpha <= 0.0 {
-                AlphaMode::Blend
-            } else {
-                AlphaMode::Opaque
-            };
+            mat.base.alpha_mode = window_surface_alpha_mode(alpha, mat.extension.clip.x);
         }
     }
 }
@@ -769,6 +773,7 @@ pub fn fit_window_to_screen(
 
         if let Some(mut mat) = materials.get_mut(handle) {
             mat.extension.clip = Vec4::new(r, m.x, m.y, PIXELS_PER_METER);
+            mat.base.alpha_mode = window_surface_alpha_mode(mat.base.base_color.alpha(), r);
         }
     }
 }
@@ -844,15 +849,63 @@ mod tests {
     #[test]
     fn window_background_material_is_opaque_in_player_mode() {
         let material = window_background_material(
+            0.0,
+            Vec2::new(4.0, 3.0),
+            crate::scene::InteractionMode::Player,
+        );
+
+        assert_eq!(material.base.base_color.alpha(), 1.0);
+        assert_eq!(material.base.alpha_mode, AlphaMode::Opaque);
+        assert_eq!(material.base.cull_mode, None);
+        assert_eq!(material.base.specular_transmission, 0.0);
+        assert_eq!(material.base.diffuse_transmission, 0.0);
+    }
+
+    #[test]
+    fn window_background_material_alpha_to_coverage_for_rounded_player_corners() {
+        let material = window_background_material(
             12.0,
             Vec2::new(4.0, 3.0),
             crate::scene::InteractionMode::Player,
         );
 
-        assert_eq!(material.base.alpha_mode, AlphaMode::Opaque);
-        assert_eq!(material.base.cull_mode, None);
-        assert_eq!(material.base.specular_transmission, 0.0);
-        assert_eq!(material.base.diffuse_transmission, 0.0);
+        assert_eq!(material.base.base_color.alpha(), 1.0);
+        assert_eq!(material.base.alpha_mode, AlphaMode::AlphaToCoverage);
+    }
+
+    #[test]
+    fn sync_window_surface_alpha_preserves_rounded_player_corner_alpha_to_coverage() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(crate::scene::InteractionMode::User)
+            .init_resource::<Assets<WindowMaterial>>()
+            .add_systems(Update, sync_window_surface_alpha);
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<WindowMaterial>>()
+            .add(window_background_material(
+                12.0,
+                Vec2::new(4.0, 3.0),
+                crate::scene::InteractionMode::User,
+            ));
+        app.world_mut()
+            .spawn((WindowSurface, MeshMaterial3d(handle.clone())));
+
+        let mut mode = app
+            .world_mut()
+            .resource_mut::<crate::scene::InteractionMode>();
+        *mode = crate::scene::InteractionMode::Player;
+
+        app.update();
+
+        let material = app
+            .world()
+            .resource::<Assets<WindowMaterial>>()
+            .get(&handle)
+            .expect("window material");
+
+        assert_eq!(material.base.base_color.alpha(), 1.0);
+        assert_eq!(material.base.alpha_mode, AlphaMode::AlphaToCoverage);
     }
 
     #[test]
