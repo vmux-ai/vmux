@@ -4174,6 +4174,9 @@ mod tests {
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
+                .insert_resource(vmux_agent::plugin::AgentExecutableOverride(
+                    std::collections::HashMap::from([(vmux_core::agent::AgentKind::Claude, true)]),
+                ))
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
                 .init_resource::<Assets<Mesh>>()
@@ -4214,6 +4217,9 @@ mod tests {
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
+                .insert_resource(vmux_agent::plugin::AgentExecutableOverride(
+                    std::collections::HashMap::from([(vmux_core::agent::AgentKind::Codex, true)]),
+                ))
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
                 .init_resource::<Assets<Mesh>>()

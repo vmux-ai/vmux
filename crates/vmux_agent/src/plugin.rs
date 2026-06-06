@@ -43,6 +43,22 @@ pub use vmux_space::cwd::{default_space_dir, space_dir, valid_cwd};
 const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
     &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
 
+/// Per-[`AgentKind`] override for CLI executable resolution: `true` forces present, `false` forces
+/// missing, absent falls back to a real `PATH` lookup. Lets tests drive the spawn/setup-page flow
+/// without depending on which CLIs are installed on the host.
+#[derive(Resource, Clone, Default)]
+pub struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool>);
+
+fn resolve_agent_executable(
+    kind: AgentKind,
+    override_: Option<&AgentExecutableOverride>,
+) -> Option<PathBuf> {
+    if let Some(forced) = override_.and_then(|o| o.0.get(&kind).copied()) {
+        return forced.then(|| PathBuf::from(kind.executable()));
+    }
+    crate::exec::find_executable(kind.executable())
+}
+
 fn spawn_builtin_agent_providers(mut commands: Commands) {
     for kind in BUILTIN_AGENT_PROVIDERS {
         commands.spawn((
@@ -813,6 +829,7 @@ fn handle_spawn_agent_requests(
     mut reader: MessageReader<SpawnAgentInStackRequest>,
     settings: Res<AppSettings>,
     strategies: Option<Res<AgentStrategies>>,
+    exec_override: Option<Res<AgentExecutableOverride>>,
     children_q: Query<&Children>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -833,7 +850,27 @@ fn handle_spawn_agent_requests(
             );
             continue;
         };
-        match crate::build_agent_launch(req.kind, &req.cwd, req.session_id.as_deref(), strategies) {
+        let Some(exe_path) = resolve_agent_executable(req.kind, exec_override.as_deref()) else {
+            let message = format!("{} executable not found", req.kind.executable());
+            bevy::log::warn!("agent spawn ({:?}) failed: {message}", req.kind);
+            attach_agent_spawn_error_to_stack(
+                req.stack,
+                req.kind,
+                &message,
+                &children_q,
+                &mut commands,
+                &mut meshes,
+                &mut webview_mt,
+            );
+            continue;
+        };
+        match crate::build_agent_launch(
+            req.kind,
+            &req.cwd,
+            req.session_id.as_deref(),
+            strategies,
+            &exe_path,
+        ) {
             Ok(launch) => {
                 clear_stack_children(req.stack, &children_q, &mut commands);
                 let terminal = commands
@@ -1255,13 +1292,15 @@ mod tests {
 
     #[test]
     fn missing_vibe_cli_shows_setup_page_at_vibe_url() {
-        crate::exec::set_forced_missing(vec!["vibe".to_string()]);
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(strategies)
+            .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
+                (AgentKind::Vibe, false),
+            ])))
             .insert_resource(test_settings())
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
@@ -1300,6 +1339,5 @@ mod tests {
         assert_eq!(metas.len(), 1);
         assert_eq!(metas[0].title, "Set up Vibe CLI");
         assert_eq!(metas[0].url, "vmux://agent/vibe/setup");
-        crate::exec::set_forced_missing(Vec::new());
     }
 }
