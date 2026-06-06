@@ -75,8 +75,11 @@ pub struct WebviewBrowser {
     /// surface and leaves it blank until the next real paint.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     last_frame: Cell<Option<(f64, f64, f64, f64)>>,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     last_corner_radius: Cell<Option<f64>>,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     last_corner_radius_all_corners: Cell<Option<bool>>,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     last_focus_ring: Cell<Option<(f64, f64, f64, f64)>>,
     /// True for native (windowed) browsers. `set_focus(true)` makes a windowed browser's `NSView`
     /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die. Keyboard is
