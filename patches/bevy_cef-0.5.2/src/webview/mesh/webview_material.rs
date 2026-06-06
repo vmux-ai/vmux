@@ -71,8 +71,13 @@ fn send_render_textures(mut ew: MessageWriter<RenderTextureMessage>, browsers: N
     }
 }
 
-pub(crate) fn update_webview_image(texture: RenderTextureMessage, image: &mut Image) {
-    let buffer = std::sync::Arc::try_unwrap(texture.buffer).unwrap_or_else(|arc| (*arc).clone());
+/// (Re)allocate the surface image to match a CEF paint. Used only on the first frame and on size
+/// changes; steady-state same-size paints stream pixels via `write_texture` (see `texture_upload`)
+/// without touching the asset system.
+///
+/// Keeps [`RenderAssetUsages::all`]: the main-world copy must persist so the upload path can read
+/// the current surface size and so the prepared `GpuImage` is never unloaded between resizes.
+pub(crate) fn update_webview_image(texture: &RenderTextureMessage, image: &mut Image) {
     *image = Image::new(
         Extent3d {
             width: texture.width,
@@ -80,7 +85,7 @@ pub(crate) fn update_webview_image(texture: RenderTextureMessage, image: &mut Im
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        buffer,
+        (*texture.buffer).clone(),
         TextureFormat::Bgra8UnormSrgb,
         RenderAssetUsages::all(),
     );

@@ -38,7 +38,7 @@ pub fn handle_approval_reply(
             if reply.decision == ApprovalDecision::AllowAlways {
                 policy.auto.insert(name.clone());
             }
-            let task = crate::tool_dispatch::spawn_tool_task(call_id.clone(), name, args);
+            let task = crate::tool_dispatch::start_tool_task(call_id.clone(), name, args);
             *state = AgentRunState::RunningTool { call_id, task };
         }
         ApprovalDecision::Deny => {
@@ -59,8 +59,8 @@ mod tests {
 
     fn make_app() -> App {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        app.add_observer(handle_approval_reply);
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .add_observer(handle_approval_reply);
         app
     }
 

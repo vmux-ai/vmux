@@ -1,7 +1,6 @@
 use crate::common::WebviewSource;
-use crate::prelude::{
-    WebviewMaterial, WebviewSurface, update_webview_image, webview_placeholder_image,
-};
+use crate::prelude::{WebviewMaterial, WebviewSurface, webview_placeholder_image};
+use crate::webview::texture_upload::{WebviewTextureUploads, apply_webview_texture};
 use bevy::app::Plugin;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
@@ -19,7 +18,7 @@ fn ensure_extended_webview_placeholder<E: MaterialExtension>(
     webviews: Query<(Entity, &MeshMaterial3d<WebviewExtendedMaterial<E>>), With<WebviewSource>>,
 ) {
     for (entity, mesh_mat) in &webviews {
-        let Some(mat) = materials.get_mut(mesh_mat.id()) else {
+        let Some(mut mat) = materials.get_mut(mesh_mat.id()) else {
             continue;
         };
         if mat.base.surface.is_some() {
@@ -62,24 +61,24 @@ fn render<E: MaterialExtension>(
     mut er: MessageReader<RenderTextureMessage>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<WebviewExtendedMaterial<E>>>,
+    mut uploads: ResMut<WebviewTextureUploads>,
     webviews: Query<&MeshMaterial3d<WebviewExtendedMaterial<E>>>,
 ) {
     for texture in er.read() {
-        if let Ok(handle) = webviews.get(texture.webview)
-            && let Some(material) = materials.get_mut(handle.id())
-            && let Some(image) = {
-                let handle = material
-                    .base
-                    .surface
-                    .get_or_insert_with(|| images.add(webview_placeholder_image()));
-                commands
-                    .entity(texture.webview)
-                    .insert(WebviewSurface(handle.clone()));
-                images.get_mut(handle.id())
-            }
-        {
-            //OPTIMIZE: Avoid cloning the texture.
-            update_webview_image(texture.clone(), image);
-        }
+        let Ok(mat_handle) = webviews.get(texture.webview) else {
+            continue;
+        };
+        let Some(mut material) = materials.get_mut(mat_handle.id()) else {
+            continue;
+        };
+        let handle = material
+            .base
+            .surface
+            .get_or_insert_with(|| images.add(webview_placeholder_image()))
+            .clone();
+        commands
+            .entity(texture.webview)
+            .insert(WebviewSurface(handle.clone()));
+        apply_webview_texture(texture, &mut images, &handle, &mut uploads);
     }
 }

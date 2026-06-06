@@ -1,21 +1,21 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use bevy::scene::SceneFilter;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::browser::Browser;
+use vmux_browser::Browser;
 use vmux_core::PageMetadata;
 use vmux_layout::event::SERVICES_PAGE_URL;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
+use vmux_layout::space::Space;
 use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
-    space::Space,
     stack::Stack,
+    tab::Tab,
     window::Main,
 };
 use vmux_setting::AppSettings;
@@ -25,47 +25,6 @@ use vmux_space::event::SPACES_PAGE_URL;
 use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
-
-fn run_legacy_migration() {
-    migrate_tab_to_space_type_name(vmux_core::profile::shared_data_dir());
-}
-
-fn migrate_tab_to_space_type_name(root: std::path::PathBuf) {
-    let profiles = root.join("profiles");
-    let Ok(entries) = std::fs::read_dir(&profiles) else {
-        return;
-    };
-    for profile_entry in entries.flatten() {
-        let profile_dir = profile_entry.path();
-        if !profile_dir.is_dir() {
-            continue;
-        }
-        migrate_file(&profile_dir.join("space.ron"));
-        let Ok(space_entries) = std::fs::read_dir(profile_dir.join("spaces")) else {
-            continue;
-        };
-        for space_entry in space_entries.flatten() {
-            let space_dir = space_entry.path();
-            if space_dir.is_dir() {
-                migrate_file(&space_dir.join("space.ron"));
-            }
-        }
-    }
-}
-
-fn migrate_file(path: &std::path::Path) {
-    let Ok(content) = std::fs::read_to_string(path) else {
-        return;
-    };
-    let needle = "vmux_desktop::layout::tab::Tab";
-    if !content.contains(needle) {
-        return;
-    }
-    let migrated = content.replace(needle, "vmux_desktop::layout::tab::Space");
-    if std::fs::write(path, migrated).is_ok() {
-        info!("Migrated Tab -> Space type name in {path:?}");
-    }
-}
 
 pub(crate) struct PersistencePlugin;
 
@@ -80,7 +39,6 @@ impl Plugin for PersistencePlugin {
         .add_message::<vmux_space::SaveSpaceRequest>()
         .add_observer(save_on_default_event)
         .add_observer(load_on_default_event)
-        .add_systems(Startup, run_legacy_migration.before(load_space_on_startup))
         .add_systems(
             Startup,
             load_space_on_startup.in_set(LayoutStartupSet::Persistence),
@@ -139,7 +97,7 @@ fn mark_dirty_on_change(
     mut auto_save: ResMut<AutoSave>,
     added_stacks: Query<(), Added<Stack>>,
     added_panes: Query<(), Added<Pane>>,
-    added_tabs: Query<(), Added<Space>>,
+    added_tabs: Query<(), Added<Tab>>,
     removed_stacks: RemovedComponents<Stack>,
     removed_panes: RemovedComponents<Pane>,
     changed_meta: Query<(), (Changed<PageMetadata>, With<Stack>)>,
@@ -193,11 +151,13 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<Save>()
         .allow::<ChildOf>()
         .allow::<Children>()
+        .allow::<Name>()
         .allow::<Stack>()
-        .allow::<Space>()
+        .allow::<Tab>()
         .allow::<Pane>()
         .allow::<PaneSplit>()
         .allow::<PaneSize>()
+        .allow::<Space>()
         .allow::<Profile>()
         .allow::<Open>()
         .allow::<PageMetadata>()
@@ -213,23 +173,91 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
     commands.trigger_save(save);
 }
 
-/// Check if a session file exists and trigger load on startup.
+/// Check if a space file exists and trigger load on startup.
 pub(crate) fn load_space_on_startup(active: Res<ActiveSpace>, mut commands: Commands) {
     let path = space_path(&active);
-    let exists = path.exists();
+    let removed_stale = remove_stale_space_if_needed(&path);
+    let exists = path.exists() && !removed_stale;
     commands.insert_resource(SpaceFilePresent(exists));
     if exists {
-        info!("Loading session from {:?}", path);
+        info!("Loading space from {:?}", path);
         commands.trigger_load(LoadWorld::default_from_file(path));
+    } else {
+        commands.spawn(vmux_space::spaces::space_profile_bundle(&active.record));
     }
 }
 
+fn remove_stale_space_if_needed(path: &Path) -> bool {
+    let Ok(body) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    if !space_is_stale(&body) {
+        return false;
+    }
+    warn!("Removing stale space from {:?}", path);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::remove_dir_all(dir);
+    } else {
+        let _ = std::fs::remove_file(path);
+    }
+    true
+}
+
+fn space_is_stale(body: &str) -> bool {
+    space_contains_stale_agent_url(body) || space_is_prompt_only_empty_url(body)
+}
+
+fn space_contains_stale_agent_url(body: &str) -> bool {
+    body.split("vmux://agent/").skip(1).any(|tail| {
+        let suffix = tail.split('"').next().unwrap_or_default();
+        let url = format!("vmux://agent/{suffix}");
+        is_stale_agent_url(&url)
+    })
+}
+
+fn is_stale_agent_url(url: &str) -> bool {
+    let normalized = url.trim_end_matches('/');
+    if normalized == "vmux://agent" {
+        return false;
+    }
+    vmux_agent::AgentUrl::parse(normalized).is_none()
+}
+
+fn space_is_prompt_only_empty_url(body: &str) -> bool {
+    let urls = page_metadata_urls(body);
+    !urls.is_empty() && urls.iter().all(|url| url.trim().is_empty())
+}
+
+fn page_metadata_urls(body: &str) -> Vec<&str> {
+    let mut urls = Vec::new();
+    let mut in_page_metadata = false;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("\"vmux_header::system::PageMetadata\":") {
+            in_page_metadata = true;
+            continue;
+        }
+        if !in_page_metadata {
+            continue;
+        }
+        if let Some(rest) = trimmed.strip_prefix("url: \"")
+            && let Some((url, _)) = rest.split_once('"')
+        {
+            urls.push(url);
+        }
+        if trimmed == ")," {
+            in_page_metadata = false;
+        }
+    }
+    urls
+}
+
 /// Rebuild view components (Node, Transform, Browser, etc.) for entities
-/// that were loaded from session.ron. Loaded entities only have model
+/// that were loaded from space.ron. Loaded entities only have model
 /// components; this system adds the visual layer.
 pub(crate) fn rebuild_space_views(
     main_q: Query<Entity, With<Main>>,
-    tabs_need_view: Query<Entity, (With<Space>, Without<Node>)>,
+    tabs_need_view: Query<Entity, (With<Tab>, Without<Node>)>,
     splits_need_view: Query<(Entity, &PaneSplit), Without<Node>>,
     panes_need_view: Query<Entity, (With<Pane>, Without<PaneSplit>, Without<Node>)>,
     stacks_need_view: Query<
@@ -324,7 +352,6 @@ pub(crate) fn rebuild_space_views(
     // -- Stack: add absolute-fill node + spawn Browser child --
     let mut despawned = std::collections::HashSet::new();
     for (entity, meta, saved_launch) in &stacks_need_view {
-        // Discard empty tabs (no URL, no content) that were saved mid-session
         if meta.url.is_empty() {
             despawned.insert(entity);
             commands.entity(entity).despawn();
@@ -407,10 +434,13 @@ pub(crate) fn rebuild_space_views(
             {
                 commands.spawn((Settings::new(&mut meshes, &mut webview_mt), ChildOf(entity)));
             } else {
-                commands.spawn((
-                    Browser::new(&mut meshes, &mut webview_mt, &meta.url),
-                    ChildOf(entity),
-                ));
+                let browser = commands
+                    .spawn((
+                        Browser::new(&mut meshes, &mut webview_mt, &meta.url),
+                        ChildOf(entity),
+                    ))
+                    .id();
+                commands.entity(browser).insert(meta.clone());
             }
         }
     }
@@ -449,7 +479,7 @@ pub(crate) fn rebuild_space_views(
     }
 
     info!(
-        "Rebuilt session views: {} tabs, {} splits, {} panes, {} stacks",
+        "Rebuilt space views: {} tabs, {} splits, {} panes, {} stacks",
         tabs_need_view.iter().count(),
         splits_need_view.iter().count(),
         panes_need_view.iter().count(),
@@ -543,7 +573,6 @@ mod tests {
             shortcuts: ShortcutSettings::default(),
             terminal: None,
             auto_update: false,
-            startup_url: None,
             agent: vmux_setting::AgentSettings::default(),
         }
     }
@@ -551,20 +580,17 @@ mod tests {
     #[test]
     fn persisted_terminal_tab_reattaches_saved_process() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.init_resource::<vmux_agent::strategy::AgentStrategies>();
-        app.add_message::<vmux_core::agent::SpawnAgentInStackRequest>();
-        app.add_systems(Update, rebuild_space_views);
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .init_resource::<vmux_agent::strategy::AgentStrategies>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+            .add_systems(Update, rebuild_space_views);
 
         let main = app.world_mut().spawn(Main).id();
         app.world_mut().spawn(PrimaryWindow);
-        let space = app
-            .world_mut()
-            .spawn((Space::default(), ChildOf(main)))
-            .id();
+        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let saved_url = format!(
             "{}{}",
@@ -687,27 +713,24 @@ mod tests {
     }
 
     #[test]
-    fn runtime_loaded_session_rebuilds_browser_views() {
-        let _home = HomeEnvGuard::use_temp_home("runtime-loaded-session-rebuilds-browser-views");
+    fn runtime_loaded_space_rebuilds_browser_views() {
+        let _home = HomeEnvGuard::use_temp_home("runtime-loaded-space-rebuilds-browser-views");
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.insert_resource(test_settings());
-        app.insert_resource(ActiveSpace {
-            record: vmux_space::model::default_space_record(),
-        });
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.init_resource::<vmux_agent::strategy::AgentStrategies>();
-        app.add_plugins(PersistencePlugin);
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .insert_resource(ActiveSpace {
+                record: vmux_space::model::bootstrap_space_record(),
+            })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .init_resource::<vmux_agent::strategy::AgentStrategies>()
+            .add_plugins(PersistencePlugin);
 
         let main = app.world_mut().spawn(Main).id();
         app.world_mut().spawn(PrimaryWindow);
         app.update();
 
-        let space = app
-            .world_mut()
-            .spawn((Space::default(), ChildOf(main)))
-            .id();
+        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
         let tab = app
             .world_mut()
@@ -716,8 +739,8 @@ mod tests {
                 PageMetadata {
                     title: "Example".to_string(),
                     url: "https://example.com".to_string(),
-                    favicon_url: String::new(),
-                    bg_color: None,
+                    favicon_url: "https://example.com/favicon.ico".to_string(),
+                    bg_color: Some("#123456".to_string()),
                 },
                 ChildOf(pane),
             ))
@@ -729,10 +752,82 @@ mod tests {
         app.update();
 
         let children = app.world().get::<Children>(tab).unwrap();
-        assert!(
-            children
-                .iter()
-                .any(|entity| app.world().entity(entity).contains::<Browser>())
-        );
+        let browser = children
+            .iter()
+            .find(|entity| app.world().entity(*entity).contains::<Browser>())
+            .expect("browser child");
+        let meta = app.world().get::<PageMetadata>(browser).unwrap();
+        assert_eq!(meta.title, "Example");
+        assert_eq!(meta.url, "https://example.com");
+        assert_eq!(meta.favicon_url, "https://example.com/favicon.ico");
+        assert_eq!(meta.bg_color.as_deref(), Some("#123456"));
+    }
+
+    #[test]
+    fn current_page_agent_url_does_not_mark_space_stale() {
+        assert!(!space_contains_stale_agent_url(
+            r#"url: "vmux://agent/echo/echo/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
+        ));
+    }
+
+    #[test]
+    fn known_cli_agent_url_does_not_mark_space_stale() {
+        assert!(!space_contains_stale_agent_url(
+            r#"url: "vmux://agent/codex/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
+        ));
+    }
+
+    #[test]
+    fn current_page_agent_space_file_is_not_removed_before_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let space_dir = dir.path().join("profiles/personal/spaces/space-1");
+        std::fs::create_dir_all(&space_dir).expect("space dir");
+        let path = space_dir.join("space.ron");
+        std::fs::write(
+            &path,
+            r#"url: "vmux://agent/echo/echo/edb5335d-20cf-4c3d-9433-8619c405a0f2""#,
+        )
+        .expect("write space");
+
+        assert!(!remove_stale_space_if_needed(&path));
+        assert!(path.exists());
+        assert!(space_dir.exists());
+    }
+
+    #[test]
+    fn prompt_only_empty_url_space_is_removed_before_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let space_dir = dir.path().join("profiles/personal/spaces/space-1");
+        std::fs::create_dir_all(&space_dir).expect("space dir");
+        let path = space_dir.join("space.ron");
+        std::fs::write(
+            &path,
+            r#"
+(
+  resources: {},
+  entities: {
+    1: (
+      components: {
+        "vmux_desktop::layout::stack::Stack": (
+          scroll_x: 0.0,
+          scroll_y: 0.0,
+        ),
+        "vmux_header::system::PageMetadata": (
+          title: "",
+          url: "",
+          favicon_url: "",
+          bg_color: None,
+        ),
+      },
+    ),
+  },
+)
+"#,
+        )
+        .expect("write prompt-only space");
+
+        assert!(remove_stale_space_if_needed(&path));
+        assert!(!path.exists());
+        assert!(!space_dir.exists());
     }
 }

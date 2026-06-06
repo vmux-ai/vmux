@@ -10,17 +10,18 @@
 
   html,
   body {
-    @apply m-0 p-0 h-full w-full;
+    @apply m-0 p-0 h-full w-full overflow-x-hidden;
+    max-width: 100%;
   }
 
   html.dark body {
     --foreground: oklch(1 0 0);
     --muted-foreground: oklch(0.82 0 0);
     --sidebar-primary-foreground: oklch(1 0 0);
-    --glass: oklch(0.36 0 0 / 0.82);
-    --glass-hover: oklch(0.44 0 0 / 0.86);
-    --glass-active: oklch(0.50 0 0 / 0.90);
-    --glass-border: oklch(0.52 0 0 / 0.36);
+    --glass: transparent;
+    --glass-hover: oklch(1 0 0 / 0.08);
+    --glass-active: oklch(1 0 0 / 0.14);
+    --glass-border: oklch(1 0 0 / 0.20);
     color: var(--foreground);
     font-family: "Inter", system-ui, -apple-system, sans-serif;
   }
@@ -51,4 +52,3 @@
   background-size: 200% 100%;
   animation: loading-sweep 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
-

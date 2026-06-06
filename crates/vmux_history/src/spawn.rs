@@ -38,8 +38,7 @@ mod tests {
 
     fn app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CorePlugin);
+        app.add_plugins(MinimalPlugins).add_plugins(CorePlugin);
         app
     }
 
@@ -141,10 +140,10 @@ mod system_tests {
 
     fn app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CorePlugin);
-        app.add_message::<WebviewCommittedNavigationEvent>();
-        app.add_systems(Update, spawn_visits);
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(CorePlugin)
+            .add_message::<WebviewCommittedNavigationEvent>()
+            .add_systems(Update, spawn_visits);
         app
     }
 

@@ -5,7 +5,6 @@ use crate::listener_guard::GuardedListener;
 use dioxus::core::{Runtime, current_scope_id};
 use dioxus::prelude::*;
 use js_sys::Function;
-use serde::de::DeserializeOwned;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use wasm_bindgen::closure::Closure;
@@ -22,12 +21,7 @@ pub enum EventListenerError {
     ListenNotCallable,
     NoEmitMethod,
     EmitNotCallable,
-    /// Returned only from [`try_cef_emit_serde`].
-    #[allow(dead_code)]
     SerializePayload,
-    /// Returned only from [`try_cef_emit_serde`].
-    #[allow(dead_code)]
-    InvalidJson,
 }
 
 impl fmt::Display for EventListenerError {
@@ -36,12 +30,11 @@ impl fmt::Display for EventListenerError {
             Self::NoWindow => "no `window`",
             Self::NoCefGlobal => "no `window.cef` property",
             Self::CefNotInjected => "`window.cef` not ready",
-            Self::NoListenMethod => "no `cef.listen`",
-            Self::ListenNotCallable => "`cef.listen` is not a function",
-            Self::NoEmitMethod => "no `cef.emit`",
-            Self::EmitNotCallable => "`cef.emit` is not a function",
+            Self::NoListenMethod => "no `cef.binListen`",
+            Self::ListenNotCallable => "`cef.binListen` is not a function",
+            Self::NoEmitMethod => "no `cef.binEmit`",
+            Self::EmitNotCallable => "`cef.binEmit` is not a function",
             Self::SerializePayload => "failed to serialize emit payload",
-            Self::InvalidJson => "`JSON.parse` failed for emit payload",
         })
     }
 }
@@ -59,22 +52,6 @@ fn window_cef() -> Result<JsValue, EventListenerError> {
     Ok(cef)
 }
 
-fn decode_host_emit_js<T: DeserializeOwned>(e: &JsValue) -> Option<T> {
-    if let Some(s) = e.as_string().filter(|t| !t.is_empty()) {
-        if let Ok(v) = ron::de::from_str::<T>(&s) {
-            return Some(v);
-        }
-        if let Ok(v) = serde_json::from_str::<T>(&s) {
-            return Some(v);
-        }
-        return None;
-    }
-    let json = js_sys::JSON::stringify(e).ok()?;
-    let s = json.as_string()?;
-    serde_json::from_str(&s).ok()
-}
-
-#[allow(dead_code)]
 pub fn decode_bin_host_emit_js<T>(e: &JsValue) -> Option<T>
 where
     T: rkyv::Archive,
@@ -98,28 +75,6 @@ where
     rkyv::from_bytes::<T, rkyv::rancor::Error>(&bytes).ok()
 }
 
-fn cef_emit_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
-    let Ok(emit) = js_sys::Reflect::get(cef, &JsValue::from_str("emit")) else {
-        return Err(EventListenerError::NoEmitMethod);
-    };
-    emit.dyn_into::<Function>()
-        .map_err(|_| EventListenerError::EmitNotCallable)
-}
-
-pub fn try_cef_emit(payload: &JsValue) -> Result<(), EventListenerError> {
-    let cef = window_cef()?;
-    let emit_fn = cef_emit_fn(&cef)?;
-    let _ = emit_fn.call1(&cef, payload);
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub fn try_cef_emit_serde<T: serde::Serialize>(payload: &T) -> Result<(), EventListenerError> {
-    let json = serde_json::to_string(payload).map_err(|_| EventListenerError::SerializePayload)?;
-    let value = js_sys::JSON::parse(&json).map_err(|_| EventListenerError::InvalidJson)?;
-    try_cef_emit(&value)
-}
-
 fn cef_bin_emit_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
     let Ok(emit) = js_sys::Reflect::get(cef, &JsValue::from_str("binEmit")) else {
         return Err(EventListenerError::NoEmitMethod);
@@ -128,7 +83,6 @@ fn cef_bin_emit_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
         .map_err(|_| EventListenerError::EmitNotCallable)
 }
 
-#[allow(dead_code)]
 pub fn try_cef_bin_emit_rkyv<T>(payload: &T) -> Result<(), EventListenerError>
 where
     T: for<'a> rkyv::Serialize<
@@ -156,32 +110,6 @@ where
     Ok(())
 }
 
-pub fn try_cef_listen<T, F>(name: &str, on_event: F) -> Result<(), EventListenerError>
-where
-    T: DeserializeOwned + 'static,
-    F: FnMut(T) + 'static,
-{
-    let cef = window_cef()?;
-    let Ok(listen) = js_sys::Reflect::get(&cef, &JsValue::from_str("listen")) else {
-        return Err(EventListenerError::NoListenMethod);
-    };
-    let Ok(listen_fn) = listen.dyn_into::<Function>() else {
-        return Err(EventListenerError::ListenNotCallable);
-    };
-
-    let mut on_event = on_event;
-    let closure = Closure::wrap(Box::new(move |e: JsValue| {
-        if let Some(msg) = decode_host_emit_js::<T>(&e) {
-            on_event(msg);
-        }
-    }) as Box<dyn FnMut(JsValue)>);
-
-    let cb = closure.as_ref().unchecked_ref();
-    let _ = listen_fn.call2(&cef, &JsValue::from_str(name), cb);
-    closure.forget();
-    Ok(())
-}
-
 fn cef_bin_listen_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
     let Ok(listen) = js_sys::Reflect::get(cef, &JsValue::from_str("binListen")) else {
         return Err(EventListenerError::NoListenMethod);
@@ -191,7 +119,6 @@ fn cef_bin_listen_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
         .map_err(|_| EventListenerError::ListenNotCallable)
 }
 
-#[allow(dead_code)]
 pub fn try_cef_bin_listen<T, F>(name: &str, on_event: F) -> Result<(), EventListenerError>
 where
     T: rkyv::Archive + 'static,
@@ -256,60 +183,6 @@ pub struct BevyState {
     pub error: Signal<Option<String>>,
 }
 
-pub fn use_event_listener<T, F>(name: &'static str, on_event: F) -> BevyState
-where
-    T: DeserializeOwned + 'static,
-    F: FnMut(T) + 'static,
-{
-    let listener = use_hook(|| GuardedListener::new(on_event));
-    let listener_guard = listener.guard();
-    use_drop(move || listener_guard.deactivate());
-    let mut is_loading = use_signal(|| true);
-    let mut error = use_signal(|| None::<String>);
-    let mut is_listening = use_signal(|| false);
-    let retry_tick = use_signal(|| 0u32);
-
-    use_effect(move || {
-        let current_retry = retry_tick();
-        if is_listening() {
-            return;
-        }
-        let listener = listener.clone();
-        let Some(rt) = Runtime::try_current() else {
-            is_loading.set(false);
-            error.set(Some(
-                "use_event_listener: no Dioxus runtime (internal error)".into(),
-            ));
-            return;
-        };
-        let scope = current_scope_id();
-        match try_cef_listen::<T, _>(name, move |msg| {
-            let listener = listener.clone();
-            rt.in_scope(scope, || {
-                listener.call(msg);
-            });
-        }) {
-            Ok(()) => {
-                is_listening.set(true);
-                is_loading.set(false);
-                error.set(None);
-                match try_emit_page_ready() {
-                    Ok(()) => {}
-                    Err(e) => error.set(Some(format!("cef.emit failed: {e}"))),
-                }
-            }
-            Err(e) => {
-                is_loading.set(true);
-                error.set(Some(format!("cef.listen failed: {e}")));
-                schedule_listener_retry(retry_tick, current_retry);
-            }
-        }
-    });
-
-    BevyState { is_loading, error }
-}
-
-#[allow(dead_code)]
 pub fn use_bin_event_listener<T, F>(name: &'static str, on_event: F) -> BevyState
 where
     T: rkyv::Archive + 'static,

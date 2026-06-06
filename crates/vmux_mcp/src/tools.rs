@@ -162,11 +162,11 @@ pub enum DispatchTarget {
 fn read_layout_definition() -> ToolDefinition {
     ToolDefinition {
         name: "read_layout".into(),
-        description: "Returns the full vmux layout (spaces, recursive pane tree, focused). \
+        description: "Returns the full vmux layout (tabs, recursive pane tree, focused). \
 Call this FIRST before update_layout - you need the current tree (with ids) to construct a valid update. \
-Useful for: answering questions about what's open; finding the focused space/pane/tab; \
-reading a tab's url/kind so you can duplicate it elsewhere. \
-Terminal tabs appear as tabs with kind=\"terminal\"; browser tabs use kind=\"browser\"."
+Useful for: answering questions about what's open; finding the focused tab/pane/stack; \
+reading a stack's url/kind so you can duplicate it elsewhere. \
+Terminal stacks appear as stacks with kind=\"terminal\"; browser stacks use kind=\"browser\"."
             .into(),
         input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
     }
@@ -181,11 +181,11 @@ Use this for compound or structural changes that the per-action tools can't expr
 Workflow: (1) call read_layout, (2) mutate the returned tree, (3) submit it back here. \
 \
 Recipes: \
-- Add a new pane to a space: keep the existing root split's id, append a new pane (id: null) to its children. Do NOT wrap the existing pane in a new split - the space's root split is always present. \
-- Duplicate/mirror a tab: add a new pane (id: null) under the same parent, with a tab carrying the source tab's url. \
+- Add a new pane to a tab: keep the existing root split's id, append a new pane (id: null) to its children. Do NOT wrap the existing pane in a new split - the tab's root split is always present. \
+- Duplicate/mirror a stack: add a new pane (id: null) under the same parent, with a stack carrying the source stack's url. \
 - Swap two panes: reorder their entries in the parent split's children array. \
-- Move a tab to another pane: remove from source pane's tabs, add (same id) to target pane's tabs. \
-- Close a pane/tab: omit it from the submitted tree. \
+- Move a stack to another pane: remove from source pane's stacks, add (same id) to target pane's stacks. \
+- Close a pane/stack: omit it from the submitted tree. \
 - Resize a split: change flex_weights on the parent split. \
 - Equalize a split: set all flex_weights to the same value. \
 - Change focus: set the top-level focused triple. \
@@ -193,17 +193,17 @@ Recipes: \
 \
 Atomicity: all changes apply as one transaction. If validation fails (duplicate ids, malformed payload), nothing is applied. \
 \
-Identifiers use kind:value format (space:N, pane:N, split:N, tab:N). Omit id to create a new node; a new tab needs url (use vmux://terminal/ for a terminal, anything else loads as a browser), a new pane needs at least one tab, a new space needs name."
+Identifiers use kind:value format (tab:N, pane:N, split:N, stack:N). Omit id to create a new node; a new stack needs url (use vmux://terminal/ for a terminal, anything else loads as a browser), a new pane needs at least one stack, a new tab needs name."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
-            "required": ["spaces", "focused"],
+            "required": ["tabs", "focused"],
             "$defs": {
-                "Space": {
+                "Tab": {
                     "type": "object",
                     "required": ["name", "root"],
                     "properties": {
-                        "id": {"type": "string", "description": "space:<id>; omit to create"},
+                        "id": {"type": "string", "description": "tab:<id>; omit to create"},
                         "name": {"type": "string"},
                         "is_active": {"type": "boolean"},
                         "root": {"$ref": "#/$defs/LayoutNode"}
@@ -229,15 +229,15 @@ Identifiers use kind:value format (space:N, pane:N, split:N, tab:N). Omit id to 
                                 "kind": {"const": "pane"},
                                 "id": {"type": "string", "description": "pane:<id>; omit to create"},
                                 "is_zoomed": {"type": "boolean"},
-                                "tabs": {"type": "array", "items": {"$ref": "#/$defs/Tab"}}
+                                "stacks": {"type": "array", "items": {"$ref": "#/$defs/Stack"}}
                             }
                         }
                     ]
                 },
-                "Tab": {
+                "Stack": {
                     "type": "object",
                     "properties": {
-                        "id": {"type": "string", "description": "tab:<id>; omit to create"},
+                        "id": {"type": "string", "description": "stack:<id>; omit to create"},
                         "title": {"type": "string"},
                         "url": {"type": "string", "description": "Required when id is omitted"},
                         "is_loading": {"type": "boolean"},
@@ -246,13 +246,13 @@ Identifiers use kind:value format (space:N, pane:N, split:N, tab:N). Omit id to 
                 }
             },
             "properties": {
-                "spaces": {"type": "array", "items": {"$ref": "#/$defs/Space"}},
+                "tabs": {"type": "array", "items": {"$ref": "#/$defs/Tab"}},
                 "focused": {
                     "type": "object",
                     "properties": {
-                        "space": {"type": "string"},
+                        "tab": {"type": "string"},
                         "pane": {"type": "string"},
-                        "tab": {"type": "string"}
+                        "stack": {"type": "string"}
                     }
                 }
             }
@@ -550,13 +550,13 @@ mod tests {
     #[test]
     fn dispatch_update_layout_parses_payload() {
         let payload = serde_json::json!({
-            "spaces": [{
-                "id": "space:1",
+            "tabs": [{
+                "id": "tab:1",
                 "name": "Work",
                 "is_active": true,
-                "root": { "kind": "pane", "id": "pane:2", "tabs": [{ "id": "tab:3" }] }
+                "root": { "kind": "pane", "id": "pane:2", "stacks": [{ "id": "stack:3" }] }
             }],
-            "focused": { "space": "space:1", "pane": "pane:2", "tab": "tab:3" }
+            "focused": { "tab": "tab:1", "pane": "pane:2", "stack": "stack:3" }
         });
         let target = dispatch_from_tool_call("update_layout", payload).unwrap();
         assert!(matches!(

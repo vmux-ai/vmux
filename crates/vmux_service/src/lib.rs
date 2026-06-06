@@ -1,5 +1,8 @@
 pub mod event;
 
+#[cfg(target_arch = "wasm32")]
+pub mod page;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod agent_events;
 #[cfg(not(target_arch = "wasm32"))]
@@ -30,6 +33,10 @@ pub mod service;
 pub mod sm_app_service;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod supervisor;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest =
+    vmux_core::page::PageManifest { host: "services" };
 
 #[cfg(not(target_arch = "wasm32"))]
 mod paths;

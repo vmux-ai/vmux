@@ -38,8 +38,8 @@ mod tests {
 
     fn make_app() -> App {
         let mut app = App::new();
-        app.init_resource::<PidToEntity>();
-        app.add_systems(Update, (track_pid_inserts, track_pid_removals).chain());
+        app.init_resource::<PidToEntity>()
+            .add_systems(Update, (track_pid_inserts, track_pid_removals).chain());
         app
     }
 

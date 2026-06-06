@@ -12,6 +12,12 @@ impl Plugin for WebviewCoreComponentsPlugin {
             .register_type::<WebviewSource>()
             .register_type::<CefKeyboardTarget>()
             .register_type::<CefIgnorePinchZoom>()
+            .register_type::<WebviewWindowed>()
+            .register_type::<WebviewNativeLiquidGlass>()
+            .register_type::<WebviewOpaqueWindowedBackground>()
+            .register_type::<WebviewWindowedNativeFocus>()
+            .register_type::<WebviewMaxFrameRate>()
+            .register_type::<WebviewNativeOverlay>()
             .register_type::<HistorySwipeVisualOffset>()
             .register_type::<HostWindow>()
             .register_type::<ZoomLevel>()
@@ -48,11 +54,45 @@ pub struct CefSuppressKeyboardInput(pub bool);
 
 /// Marker: this webview should ignore pinch-to-zoom gestures.
 ///
-/// Useful for chrome / UI webviews where the host doesn't want the user to
+/// Useful for CEF / UI webviews where the host doesn't want the user to
 /// inadvertently zoom the layout.
 #[derive(Component, Debug, Clone, Copy, Default, Reflect)]
 #[reflect(Component, Default)]
 pub struct CefIgnorePinchZoom;
+
+/// Marker: create this webview as a **windowed** native CEF child view (Chromium renders,
+/// composites, scrolls, and handles input itself) instead of off-screen rendering into a Bevy
+/// mesh. macOS browse mode. Read at browser creation; toggling at runtime requires recreating the
+/// browser.
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewWindowed;
+
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewNativeLiquidGlass;
+
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewOpaqueWindowedBackground;
+
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewWindowedNativeFocus;
+
+/// Caps an OSR webview's windowless frame rate (fps). `sync_windowless_frame_rate` clamps the
+/// monitor-derived rate to this value, so a mostly-static surface (e.g. layout chrome) repaints —
+/// and forces a Bevy re-render — far less often. No effect on windowed webviews.
+#[derive(Component, Debug, Clone, Copy, Reflect)]
+#[reflect(Component)]
+pub struct WebviewMaxFrameRate(pub i32);
+
+/// Marker: route this OSR webview's accelerated IOSurface frames into `NativeOverlayFrames` (for a
+/// native overlay layer) instead of uploading them to its Bevy texture. Lets the surface be shown
+/// in a native view composited *above* windowed pages.
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewNativeOverlay;
 
 #[derive(Component, Debug, Clone, Reflect)]
 #[reflect(Component, Debug)]

@@ -58,6 +58,7 @@ pub enum LayoutCommand {
 pub enum StackCommand {
     #[default]
     #[menu(id = "stack_close", label = "Close Stack", accel = "super+w")]
+    #[shortcut(chord = "Ctrl+g, x")]
     Close,
     #[menu(id = "stack_next", label = "Next Stack", accel = "super+shift+n")]
     #[shortcut(direct = "Super+Shift+J")]
@@ -193,18 +194,21 @@ pub enum BrowserBarCommand {
         label = "Command Bar",
         accel = "super+k"
     )]
+    #[shortcut(direct = "Super+k")]
     OpenCommandBar,
     #[menu(
-        id = "browser_open_url_in_command_bar",
-        label = "Edit URL",
+        id = "browser_open_page_in_command_bar",
+        label = "Edit Page",
         accel = "super+l"
     )]
-    OpenUrlInCommandBar,
+    #[shortcut(direct = "Super+l")]
+    OpenPageInCommandBar,
     #[menu(
         id = "browser_open_path_bar",
         label = "Path Navigator",
         accel = "super+/"
     )]
+    #[shortcut(direct = "Super+/")]
     OpenPathBar,
     #[menu(id = "browser_open_commands", label = "Commands")]
     #[shortcut(direct = ">")]
@@ -240,8 +244,7 @@ pub enum PaneCommand {
     #[menu(id = "toggle_pane", label = "Next Pane\t<leader> o", hidden)]
     #[shortcut(chord = "Ctrl+g, o")]
     Toggle,
-    #[menu(id = "close_pane", label = "Close Pane\t<leader> x")]
-    #[shortcut(chord = "Ctrl+g, x")]
+    #[menu(id = "close_pane", label = "Close Pane")]
     Close,
     #[menu(id = "zoom_pane", label = "Zoom Pane\t<leader> z", hidden)]
     #[shortcut(chord = "Ctrl+g, z")]
@@ -343,17 +346,31 @@ pub enum TabCommand {
 pub enum ToggleLayoutCommand {
     #[default]
     #[menu(id = "toggle_layout", label = "Toggle Layout", accel = "super+shift+s")]
+    #[shortcut(direct = "Super+Shift+S")]
     Toggle,
+}
+
+#[derive(
+    OsSubMenuGroup, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq,
+)]
+pub enum SceneCommand {
+    #[menu(label = "Interactive Mode")]
+    InteractiveMode(SceneInteractiveModeCommand),
 }
 
 #[derive(
     OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
 )]
-pub enum SceneCommand {
+pub enum SceneInteractiveModeCommand {
     #[default]
-    #[menu(id = "toggle_player_mode", label = "Toggle Player Mode")]
+    #[menu(id = "interactive_mode_user", label = "User")]
+    User,
+    #[menu(id = "interactive_mode_player", label = "Player")]
+    Player,
+    #[menu(id = "toggle_player_mode", label = "Toggle Player Mode", hidden)]
     #[shortcut(chord = "Ctrl+g, Enter")]
-    TogglePlayerMode,
+    #[mcp(skip)]
+    Toggle,
 }
 
 #[allow(dead_code)]
@@ -416,6 +433,36 @@ mod tests {
                     modifiers: Modifiers::default(),
                 },
             ))
+        );
+    }
+
+    #[test]
+    fn leader_x_closes_stack_like_command_w() {
+        let leader_x = Shortcut::Chord(
+            KeyCombo {
+                key: KeyCode::KeyG,
+                modifiers: Modifiers {
+                    ctrl: true,
+                    ..Default::default()
+                },
+            },
+            KeyCombo {
+                key: KeyCode::KeyX,
+                modifiers: Modifiers::default(),
+            },
+        );
+        let ids: Vec<String> = AppCommand::default_shortcuts()
+            .into_iter()
+            .filter(|(shortcut, _)| shortcut == &leader_x)
+            .map(|(_, id)| id)
+            .collect();
+
+        assert_eq!(ids, vec!["stack_close".to_string()]);
+        assert_eq!(
+            AppCommand::from_menu_id("stack_close"),
+            Some(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close
+            )))
         );
     }
 
@@ -542,5 +589,29 @@ mod tests {
             AppCommand::from_menu_id("space_open"),
             Some(AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)))
         );
+    }
+
+    #[test]
+    fn scene_interactive_mode_menu_ids_resolve() {
+        assert_eq!(
+            AppCommand::from_menu_id("interactive_mode_user").map(|cmd| format!("{cmd:?}")),
+            Some("Scene(InteractiveMode(User))".to_string())
+        );
+        assert_eq!(
+            AppCommand::from_menu_id("interactive_mode_player").map(|cmd| format!("{cmd:?}")),
+            Some("Scene(InteractiveMode(Player))".to_string())
+        );
+    }
+
+    #[test]
+    fn scene_menu_nests_interactive_mode_selector() {
+        let source = include_str!("command.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+
+        assert!(source.contains("#[menu(label = \"Interactive Mode\")]"));
+        assert!(source.contains("interactive_mode_user"));
+        assert!(source.contains("interactive_mode_player"));
     }
 }

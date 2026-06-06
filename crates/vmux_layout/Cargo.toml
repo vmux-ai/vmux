@@ -1,6 +1,6 @@
 [package]
 name = "vmux_layout"
-description = "Bevy layout shell and single CEF chrome webview"
+description = "Bevy layout shell and single CEF layout webview"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -11,21 +11,8 @@ default = []
 debug = []
 web = []
 
-[[bin]]
-name = "vmux_layout_app"
-path = "src/main.rs"
-required-features = ["web"]
-
-[[bin]]
-name = "vmux_command_bar_app"
-path = "src/command_bar_app.rs"
-required-features = ["web"]
-
 [lib]
 path = "src/lib.rs"
-
-[build-dependencies]
-vmux_server = { path = "../vmux_server", features = ["build"] }
 
 [dependencies]
 rkyv = { workspace = true }
@@ -36,16 +23,13 @@ vmux_core = { path = "../vmux_core" }
 serde_json = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bevy = { workspace = true, features = [
-    "bevy_camera_controller",
-    "free_camera",
-] }
-bevy_asset = "0.18"
+bevy = { workspace = true }
+bevy_asset = "0.19.0-rc.2"
 bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
-bevy_render = "0.18"
+bevy_render = "0.19.0-rc.2"
 bevy_winit = { workspace = true }
 libc = "0.2"
 moonshine-save = { workspace = true }
@@ -55,7 +39,16 @@ ron = { workspace = true }
 uuid = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_history = { path = "../vmux_history" }
-vmux_server = { path = "../vmux_server" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = [
+    "NSApplication",
+    "NSEvent",
+    "NSView",
+    "NSWindow",
+] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
@@ -75,6 +68,8 @@ web-sys = { version = "0.3", features = [
     "HtmlInputElement",
     "KeyboardEvent",
     "KeyboardEventInit",
+    "ResizeObserver",
+    "ResizeObserverEntry",
     "ScrollIntoViewOptions",
     "ScrollLogicalPosition",
     "Window",

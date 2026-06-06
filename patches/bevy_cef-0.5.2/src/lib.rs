@@ -1,6 +1,6 @@
 #![allow(clippy::all)]
 
-mod chrome_state;
+mod cef_state;
 mod common;
 mod cursor_icon;
 mod keyboard;
@@ -12,7 +12,7 @@ mod system_param;
 mod webview;
 mod zoom;
 
-use crate::chrome_state::WebviewChromeStatePlugin;
+use crate::cef_state::WebviewCefStatePlugin;
 use crate::common::{LocalHostPlugin, MessageLoopPlugin, WebviewCoreComponentsPlugin};
 use crate::cursor_icon::SystemCursorIconPlugin;
 use crate::keyboard::KeyboardPlugin;
@@ -30,13 +30,13 @@ use bevy_remote::RemotePlugin;
 
 pub mod prelude {
     pub use crate::{
-        CefPlugin, RunOnMainThread, chrome_state::*, common::*, keyboard::CefKeyboardInputSet,
+        CefPlugin, RunOnMainThread, cef_state::*, common::*, keyboard::CefKeyboardInputSet,
         loading_state::*, navigation::*, popup_state::*, webview::prelude::*,
     };
     pub use bevy_cef_core::prelude::{
         Browsers, CefDiskProfileRoot, CefEmbeddedHost, CefEmbeddedHosts, CefEmbeddedPageConfig,
         CefExtensions, CefTransitionCore, CefTransitionQualifiers, CommandLineConfig,
-        WebviewChromeStateEvent, WebviewCommittedNavigationEvent, WebviewLoadingStateEvent,
+        WebviewCefStateEvent, WebviewCommittedNavigationEvent, WebviewLoadingStateEvent,
         WebviewPopupEvent, compile_time_cef_embedded_scheme, resolved_cef_embedded_page_config,
     };
 }
@@ -72,8 +72,8 @@ impl Plugin for CefPlugin {
         ));
         app.insert_resource(bevy_cef_core::prelude::CefDiskProfileRoot(
             self.root_cache_path.clone(),
-        ));
-        app.add_plugins((
+        ))
+        .add_plugins((
             LocalHostPlugin,
             MessageLoopPlugin {
                 config: self.command_line_config.clone(),
@@ -86,7 +86,7 @@ impl Plugin for CefPlugin {
             KeyboardPlugin,
             SystemCursorIconPlugin,
             WebviewLoadingStatePlugin,
-            WebviewChromeStatePlugin,
+            WebviewCefStatePlugin,
             WebviewPopupPlugin,
             NavigationPlugin,
             ZoomPlugin,

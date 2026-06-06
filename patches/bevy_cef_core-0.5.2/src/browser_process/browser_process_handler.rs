@@ -1,13 +1,11 @@
-use crate::prelude::{CefExtensions, EXTENSIONS_SWITCH, MessageLoopTimer};
+use crate::prelude::{CefExtensions, EXTENSIONS_SWITCH, MessageLoopTimer, MessageLoopWakePolicy};
 use cef::rc::{Rc, RcImpl};
 use cef::*;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 use winit::event_loop::EventLoopProxy;
 
 pub type WakeProxy = EventLoopProxy<bevy_winit::WinitUserEvent>;
-
-const WAKE_MIN_INTERVAL: Duration = Duration::from_millis(8);
 
 /// ## Reference
 ///
@@ -16,7 +14,7 @@ pub struct BrowserProcessHandlerBuilder {
     object: *mut RcImpl<cef_dll_sys::cef_browser_process_handler_t, Self>,
     message_loop_working_requester: Sender<MessageLoopTimer>,
     extensions: CefExtensions,
-    wake_request_tx: Option<Sender<()>>,
+    wake_request_tx: Option<Sender<MessageLoopTimer>>,
 }
 
 impl BrowserProcessHandlerBuilder {
@@ -24,8 +22,10 @@ impl BrowserProcessHandlerBuilder {
         message_loop_working_requester: Sender<MessageLoopTimer>,
         extensions: CefExtensions,
         wake_proxy: Option<WakeProxy>,
+        wake_policy: MessageLoopWakePolicy,
     ) -> BrowserProcessHandler {
-        let wake_request_tx = wake_proxy.map(spawn_wake_throttler);
+        let wake_request_tx =
+            wake_proxy.map(|proxy| spawn_wake_throttler(proxy, wake_policy.clone()));
 
         BrowserProcessHandler::new(Self {
             object: core::ptr::null_mut(),
@@ -36,20 +36,19 @@ impl BrowserProcessHandlerBuilder {
     }
 }
 
-fn spawn_wake_throttler(proxy: WakeProxy) -> Sender<()> {
-    let (tx, rx) = mpsc::channel::<()>();
+fn spawn_wake_throttler(
+    proxy: WakeProxy,
+    policy: MessageLoopWakePolicy,
+) -> Sender<MessageLoopTimer> {
+    let (tx, rx) = mpsc::channel::<MessageLoopTimer>();
     std::thread::Builder::new()
         .name("cef-wake-throttle".into())
         .spawn(move || {
             let mut last_fire: Option<Instant> = None;
-            while rx.recv().is_ok() {
-                if let Some(t) = last_fire {
-                    let elapsed = Instant::now().duration_since(t);
-                    if elapsed < WAKE_MIN_INTERVAL {
-                        std::thread::sleep(WAKE_MIN_INTERVAL - elapsed);
-                    }
+            while let Ok(timer) = rx.recv() {
+                if wait_for_wake_deadline(&rx, timer, last_fire, &policy).is_none() {
+                    break;
                 }
-                while rx.try_recv().is_ok() {}
                 let _ = proxy.send_event(bevy_winit::WinitUserEvent::WakeUp);
                 last_fire = Some(Instant::now());
             }
@@ -58,14 +57,74 @@ fn spawn_wake_throttler(proxy: WakeProxy) -> Sender<()> {
     tx
 }
 
+fn wait_for_wake_deadline(
+    rx: &mpsc::Receiver<MessageLoopTimer>,
+    mut timer: MessageLoopTimer,
+    last_fire: Option<Instant>,
+    policy: &MessageLoopWakePolicy,
+) -> Option<MessageLoopTimer> {
+    loop {
+        timer = drain_earliest_timer(rx, timer);
+        let deadline = wake_deadline(timer, last_fire, policy.min_wake_interval());
+        let now = Instant::now();
+        if deadline <= now {
+            return Some(timer);
+        }
+        match rx.recv_timeout(deadline - now) {
+            Ok(next) => {
+                timer = timer.earliest(next);
+            }
+            Err(RecvTimeoutError::Timeout) => return Some(timer),
+            Err(RecvTimeoutError::Disconnected) => return None,
+        }
+    }
+}
+
+fn drain_earliest_timer(
+    rx: &mpsc::Receiver<MessageLoopTimer>,
+    mut timer: MessageLoopTimer,
+) -> MessageLoopTimer {
+    while let Ok(next) = rx.try_recv() {
+        timer = timer.earliest(next);
+    }
+    timer
+}
+
+fn wake_deadline(
+    timer: MessageLoopTimer,
+    last_fire: Option<Instant>,
+    min_interval: Duration,
+) -> Instant {
+    let earliest_interval = last_fire
+        .and_then(|instant| instant.checked_add(min_interval))
+        .unwrap_or_else(Instant::now);
+    timer.fire_time().max(earliest_interval)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn cef_wake_throttle_caps_foreground_work_to_120hz() {
-        assert!(WAKE_MIN_INTERVAL >= Duration::from_millis(8));
-        assert!(WAKE_MIN_INTERVAL <= Duration::from_millis(9));
+    fn cef_wake_throttle_uses_policy_interval() {
+        let now = Instant::now();
+        let timer = MessageLoopTimer::new(0);
+        let deadline = wake_deadline(timer, Some(now), Duration::from_millis(250));
+
+        assert!(deadline >= now + Duration::from_millis(250));
+    }
+
+    #[test]
+    fn cef_wake_throttle_keeps_earliest_timer() {
+        let (tx, rx) = mpsc::channel();
+        let later = MessageLoopTimer::new(100);
+        let earlier = MessageLoopTimer::new(0);
+        tx.send(earlier).unwrap();
+
+        assert_eq!(
+            drain_earliest_timer(&rx, later).fire_time(),
+            earlier.fire_time()
+        );
     }
 }
 
@@ -126,11 +185,10 @@ impl ImplBrowserProcessHandler for BrowserProcessHandlerBuilder {
     }
 
     fn on_schedule_message_pump_work(&self, delay_ms: i64) {
-        let _ = self
-            .message_loop_working_requester
-            .send(MessageLoopTimer::new(delay_ms));
+        let timer = MessageLoopTimer::new(delay_ms);
+        let _ = self.message_loop_working_requester.send(timer);
         if let Some(tx) = &self.wake_request_tx {
-            let _ = tx.send(());
+            let _ = tx.send(timer);
         }
     }
 

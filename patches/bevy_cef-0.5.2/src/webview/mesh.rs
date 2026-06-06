@@ -11,6 +11,7 @@ use crate::webview::pinch_zoom::zoom_level_after_pinch;
 use crate::webview::webview_sprite::WebviewSpritePlugin;
 use bevy::input::gestures::PinchGesture;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_cef_core::prelude::*;
 use std::time::Instant;
@@ -30,6 +31,8 @@ impl Plugin for MeshWebviewPlugin {
             WebviewMaterialPlugin,
             WebviewExtendStandardMaterialPlugin,
             WebviewSpritePlugin,
+            crate::webview::texture_upload::WebviewTextureUploadPlugin,
+            crate::webview::accelerated_upload::WebviewAcceleratedUploadPlugin,
         ))
         .add_systems(
             Update,
@@ -45,7 +48,14 @@ impl Plugin for MeshWebviewPlugin {
 
 fn setup_observers(
     mut commands: Commands,
-    webviews: Query<Entity, (Added<WebviewSource>, Or<(With<Mesh3d>, With<Mesh2d>)>)>,
+    webviews: Query<
+        Entity,
+        (
+            Added<WebviewSource>,
+            Or<(With<Mesh3d>, With<Mesh2d>)>,
+            Without<WebviewWindowed>,
+        ),
+    >,
 ) {
     for entity in webviews.iter() {
         commands
@@ -109,8 +119,22 @@ fn on_mouse_wheel(
     browsers: NonSend<Browsers>,
     pointer: WebviewPointer,
     windows: Query<&Window>,
-    webviews_all: Query<Entity, (With<WebviewSource>, Or<(With<Mesh3d>, With<Mesh2d>)>)>,
-    webviews_targeted: Query<Entity, (With<WebviewSource>, With<CefPointerTarget>)>,
+    webviews_all: Query<
+        (Entity, Option<&Pickable>),
+        (
+            With<WebviewSource>,
+            Or<(With<Mesh3d>, With<Mesh2d>)>,
+            Without<WebviewWindowed>,
+        ),
+    >,
+    webviews_targeted: Query<
+        Entity,
+        (
+            With<WebviewSource>,
+            With<CefPointerTarget>,
+            Without<WebviewWindowed>,
+        ),
+    >,
     suppress: Res<CefSuppressPointerInput>,
     mut history_swipe: Local<HistorySwipeState>,
 ) {
@@ -129,7 +153,9 @@ fn on_mouse_wheel(
         let iter: Box<dyn Iterator<Item = Entity>> = if use_targets {
             Box::new(webviews_targeted.iter())
         } else {
-            Box::new(webviews_all.iter())
+            Box::new(webviews_all.iter().filter_map(|(entity, pickable)| {
+                accepts_untargeted_pointer(pickable).then_some(entity)
+            }))
         };
         for webview in iter {
             let Some(pos) = pointer.pointer_pos(webview, cursor_pos) else {
@@ -173,7 +199,7 @@ fn on_pinch_zoom(
     pointer: WebviewPointer,
     windows: Query<&Window>,
     mut webviews_all: Query<
-        (Entity, &mut ZoomLevel),
+        (Entity, &mut ZoomLevel, Option<&Pickable>),
         (
             With<WebviewSource>,
             Or<(With<Mesh3d>, With<Mesh2d>)>,
@@ -203,17 +229,38 @@ fn on_pinch_zoom(
         let candidates: Vec<Entity> = if use_targets {
             webviews_targeted.iter().collect()
         } else {
-            webviews_all.iter().map(|(entity, _)| entity).collect()
+            webviews_all
+                .iter()
+                .filter_map(|(entity, _, pickable)| {
+                    accepts_untargeted_pointer(pickable).then_some(entity)
+                })
+                .collect()
         };
         for webview in candidates {
             if pointer.pointer_pos(webview, cursor_pos).is_none() {
                 continue;
             }
-            let Ok((_, mut zoom_level)) = webviews_all.get_mut(webview) else {
+            let Ok((_, mut zoom_level, _)) = webviews_all.get_mut(webview) else {
                 continue;
             };
             zoom_level.0 = zoom_level_after_pinch(zoom_level.0, event.0 as f64);
             break;
         }
+    }
+}
+
+fn accepts_untargeted_pointer(pickable: Option<&Pickable>) -> bool {
+    pickable.is_none_or(|p| p != &Pickable::IGNORE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn untargeted_pointer_candidates_skip_ignored_pickables() {
+        assert!(!accepts_untargeted_pointer(Some(&Pickable::IGNORE)));
+        assert!(accepts_untargeted_pointer(Some(&Pickable::default())));
+        assert!(accepts_untargeted_pointer(None));
     }
 }

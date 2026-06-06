@@ -1,30 +1,32 @@
 use crate::event::COMMAND_BAR_PAGE_URL;
 use crate::{
-    Header, LayoutStartupSet, SpaceFilePresent,
+    Header, LayoutStartupSet, SpaceFilePresent, TabLayoutSpawnContent, TabLayoutSpawnRequest,
     cef::{Browser, layout_cef_bundle},
-    glass::{GlassCorners, GlassMaterial},
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
-    profile::Profile,
     scene::MainCamera,
     settings::LayoutSettings,
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
-    space::space_bundle,
     stack::stack_bundle,
+    tab::{Tab, tab_bundle},
     unit::{PIXELS_PER_METER, WindowExt},
 };
 use bevy::{
-    ecs::relationship::Relationship,
+    asset::{Asset, load_internal_asset, uuid_handle},
+    material::AlphaMode,
+    pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin, StandardMaterial},
     picking::Pickable,
     prelude::*,
-    render::alpha::AlphaMode,
+    render::render_resource::AsBindGroup,
+    shader::ShaderRef,
     ui::{FlexDirection, UiTargetCamera},
-    window::PrimaryWindow,
+    window::{Monitor, PrimaryWindow, WindowMode},
     winit::WINIT_WINDOWS,
 };
 use bevy_cef::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
+use vmux_core::page::ServerEmbedSet;
+use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt};
-use vmux_server::ServerEmbedSet;
 
 pub const SIDE_SHEET_TOP_PADDING_PX: f32 = 22.0;
 
@@ -34,6 +36,8 @@ pub const WEBVIEW_Z_HEADER: f32 = 0.022;
 pub const WEBVIEW_Z_SIDE_SHEET: f32 = 0.022;
 pub const WEBVIEW_Z_MODAL: f32 = 0.06;
 pub const WEBVIEW_MESH_DEPTH_BIAS: f32 = 0.0;
+
+const WINDOW_SHADER_HANDLE: Handle<Shader> = uuid_handle!("a3e43dbf-9f06-4d0b-8a17-ef8d5ad4d1f4");
 
 const _: () = {
     assert!(WEBVIEW_Z_MAIN <= 0.025);
@@ -46,50 +50,122 @@ const _: () = {
 
 pub struct WindowPlugin;
 
-fn window_glass_base_color() -> Color {
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone, PartialEq)]
+pub struct WindowCorners {
+    #[uniform(100)]
+    pub clip: Vec4,
+    #[uniform(101)]
+    pub corner_mode: Vec4,
+}
+
+impl Default for WindowCorners {
+    fn default() -> Self {
+        Self {
+            clip: Vec4::new(0.0, 1.0, 1.0, PIXELS_PER_METER),
+            corner_mode: Vec4::ZERO,
+        }
+    }
+}
+
+impl MaterialExtension for WindowCorners {
+    fn fragment_shader() -> ShaderRef {
+        WINDOW_SHADER_HANDLE.into()
+    }
+}
+
+pub type WindowMaterial = ExtendedMaterial<StandardMaterial, WindowCorners>;
+
+fn window_background_color() -> Color {
     Color::srgba(0.13, 0.13, 0.14, 1.0)
+}
+
+fn window_surface_alpha(mode: crate::scene::InteractionMode) -> f32 {
+    match mode {
+        crate::scene::InteractionMode::User => 0.0,
+        crate::scene::InteractionMode::Player => 1.0,
+    }
+}
+
+fn window_surface_alpha_mode(alpha: f32, radius: f32) -> AlphaMode {
+    if alpha < 1.0 {
+        AlphaMode::Blend
+    } else if radius > 0.0 {
+        AlphaMode::AlphaToCoverage
+    } else {
+        AlphaMode::Opaque
+    }
+}
+
+fn window_background_material(
+    radius: f32,
+    size_m: Vec2,
+    mode: crate::scene::InteractionMode,
+) -> WindowMaterial {
+    let alpha = window_surface_alpha(mode);
+    WindowMaterial {
+        base: StandardMaterial {
+            base_color: window_background_color().with_alpha(alpha),
+            unlit: true,
+            alpha_mode: window_surface_alpha_mode(alpha, radius),
+            cull_mode: None,
+            ..default()
+        },
+        extension: WindowCorners {
+            clip: Vec4::new(radius, size_m.x, size_m.y, PIXELS_PER_METER),
+            ..default()
+        },
+    }
 }
 
 impl Plugin for WindowPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Startup,
-            setup
-                .in_set(LayoutStartupSet::Window)
-                .after(crate::scene::setup)
-                .after(ServerEmbedSet),
-        )
-        .add_systems(
-            Startup,
-            spawn_default_space.in_set(LayoutStartupSet::DefaultSpace),
-        )
-        .add_systems(
-            Startup,
-            (
-                spawn_glass_panes,
-                crate::stack::open_startup_url_if_no_stacks,
-                fit_window_to_screen,
+        load_internal_asset!(app, WINDOW_SHADER_HANDLE, "window.wgsl", Shader::from_wgsl);
+
+        app.add_plugins(MaterialPlugin::<WindowMaterial>::default())
+            .add_systems(
+                Startup,
+                setup
+                    .in_set(LayoutStartupSet::Window)
+                    .after(crate::scene::setup)
+                    .after(ServerEmbedSet),
             )
-                .chain()
-                .in_set(LayoutStartupSet::Post),
-        )
-        .add_systems(
-            PostUpdate,
-            (
-                fit_window_to_screen,
-                sync_glass_pane_clip,
-                sync_window_layout_to_settings,
-                sync_main_column_gap_to_pane_count,
-            ),
-        )
-        .add_systems(
-            Update,
-            (
-                maximize_window_to_screen.run_if(not(resource_exists::<ScreenMaximized>)),
-                crate::stack::open_startup_url_if_no_stacks,
-            ),
-        )
-        .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
+            .add_systems(
+                Startup,
+                (request_default_layout, spawn_requested_tab_layouts)
+                    .chain()
+                    .in_set(LayoutStartupSet::DefaultTab),
+            )
+            .add_systems(
+                Startup,
+                (
+                    crate::stack::open_startup_url_if_no_stacks,
+                    fit_window_to_screen,
+                )
+                    .chain()
+                    .in_set(LayoutStartupSet::Post),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    fit_window_to_screen,
+                    sync_window_surface_clip,
+                    sync_window_surface_alpha,
+                    apply_webview_material_defaults,
+                    sync_window_layout_to_settings,
+                    sync_main_column_gap_to_pane_count,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    maximize_window_to_screen.run_if(not(resource_exists::<ScreenMaximized>)),
+                    crate::stack::open_startup_url_if_no_stacks.before(PageOpenSet::ResolveTarget),
+                    spawn_requested_tab_layouts
+                        .after(ReadAppCommands)
+                        .before(PageOpenSet::ResolveTarget),
+                ),
+            )
+            .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
     }
 }
 
@@ -112,7 +188,22 @@ fn handle_window_commands(
 
 /// One-shot resource: window has been sized to fill the screen.
 #[derive(Resource)]
-struct ScreenMaximized;
+pub(crate) struct ScreenMaximized;
+
+pub(crate) fn window_uses_full_padding(window: &Window, monitors: &Query<&Monitor>) -> bool {
+    matches!(
+        &window.mode,
+        WindowMode::BorderlessFullscreen(_) | WindowMode::Fullscreen(_, _)
+    ) || window_fills_monitor(window, monitors)
+}
+
+fn window_fills_monitor(window: &Window, monitors: &Query<&Monitor>) -> bool {
+    let size = window.resolution.physical_size();
+    monitors.iter().any(|monitor| {
+        let monitor_size = monitor.physical_size();
+        size.x >= monitor_size.x.saturating_sub(2) && size.y >= monitor_size.y.saturating_sub(2)
+    })
+}
 
 /// Size the window to fill the current monitor (runs once at startup).
 fn maximize_window_to_screen(
@@ -144,6 +235,7 @@ where
     M: Material,
 {
     marker: VmuxWindow,
+    surface: WindowSurface,
     mesh: Mesh3d,
     material: MeshMaterial3d<M>,
     transform: Transform,
@@ -164,7 +256,7 @@ pub struct MainColumn;
 pub struct Modal;
 
 #[derive(Component)]
-pub struct Glass;
+pub struct WindowSurface;
 
 fn setup(
     window: Single<&Window, With<PrimaryWindow>>,
@@ -172,8 +264,9 @@ fn setup(
     main_camera: Single<Entity, With<MainCamera>>,
     mut commands: Commands,
     settings: Res<LayoutSettings>,
+    mode: Res<crate::scene::InteractionMode>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<GlassMaterial>>,
+    mut materials: ResMut<Assets<WindowMaterial>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let m = window.meters();
@@ -182,25 +275,13 @@ fn setup(
     let root = commands
         .spawn(WindowBundle {
             marker: VmuxWindow,
+            surface: WindowSurface,
             mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-            material: MeshMaterial3d(materials.add(GlassMaterial {
-                base: StandardMaterial {
-                    base_color: window_glass_base_color(),
-                    unlit: true,
-                    alpha_mode: AlphaMode::Blend,
-                    cull_mode: None,
-                    perceptual_roughness: 0.23,
-                    specular_transmission: 0.9,
-                    diffuse_transmission: 1.0,
-                    thickness: 1.8,
-                    ior: 1.5,
-                    ..default()
-                },
-                extension: GlassCorners {
-                    clip: Vec4::new(settings.radius, m.x, m.y, PIXELS_PER_METER),
-                    ..default()
-                },
-            })),
+            material: MeshMaterial3d(materials.add(window_background_material(
+                settings.radius,
+                Vec2::new(m.x, m.y),
+                *mode,
+            ))),
             transform: Transform {
                 translation: Vec3::new(0.0, m.y * 0.5, 0.0),
                 scale: Vec3::new(m.x, m.y, 1.0),
@@ -214,8 +295,8 @@ fn setup(
                 padding: UiRect {
                     top: Val::Px(0.0),
                     left: Val::Px(0.0),
-                    right: Val::Px(crate::event::WINDOW_PAD_PX),
-                    bottom: Val::Px(crate::event::WINDOW_PAD_PX),
+                    right: Val::Px(settings.window.pad_right()),
+                    bottom: Val::Px(settings.window.pad_bottom()),
                 },
                 column_gap: Val::Px(0.0),
                 ..default()
@@ -273,7 +354,7 @@ fn setup(
         Transform::default(),
         GlobalTransform::default(),
         Node {
-            height: Val::Px(crate::event::CHROME_RESERVED_HEIGHT_PX),
+            height: Val::Px(crate::event::CEF_RESERVED_HEIGHT_PX),
             flex_shrink: 0.0,
             ..default()
         },
@@ -301,9 +382,9 @@ fn setup(
         Node {
             width: Val::Px(280.0),
             position_type: PositionType::Absolute,
-            right: Val::Px(crate::event::WINDOW_PAD_PX),
-            top: Val::Px(crate::event::WINDOW_PAD_PX),
-            bottom: Val::Px(crate::event::WINDOW_PAD_PX),
+            right: Val::Px(settings.window.pad_right()),
+            top: Val::Px(settings.window.pad_top()),
+            bottom: Val::Px(settings.window.pad_bottom()),
             display: Display::None,
             ..default()
         },
@@ -317,9 +398,9 @@ fn setup(
         Node {
             height: Val::Px(200.0),
             position_type: PositionType::Absolute,
-            left: Val::Px(crate::event::WINDOW_PAD_PX),
-            right: Val::Px(crate::event::WINDOW_PAD_PX),
-            bottom: Val::Px(crate::event::WINDOW_PAD_PX),
+            left: Val::Px(settings.window.pad_left()),
+            right: Val::Px(settings.window.pad_right()),
+            bottom: Val::Px(settings.window.pad_bottom()),
             display: Display::None,
             ..default()
         },
@@ -332,6 +413,9 @@ fn setup(
             HostWindow(pw),
             Browser,
             WebviewTransparent,
+            WebviewNativeLiquidGlass,
+            WebviewWindowedNativeFocus,
+            bevy_cef::prelude::WebviewNativeOverlay,
             bevy_cef::prelude::CefIgnorePinchZoom,
         ),
         Node {
@@ -346,15 +430,7 @@ fn setup(
         ZIndex(3),
         WebviewSource::new(COMMAND_BAR_PAGE_URL),
         Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-        MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-            base: StandardMaterial {
-                unlit: true,
-                alpha_mode: AlphaMode::Blend,
-                depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                ..default()
-            },
-            ..default()
-        })),
+        MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
         WebviewSize(Vec2::new(800.0, 600.0)),
         Transform::default(),
         GlobalTransform::default(),
@@ -369,133 +445,190 @@ fn setup(
     ));
 }
 
-/// Spawns the default session (Profile/Tab/Pane/Stack) if none was loaded.
-fn spawn_default_space(
+fn request_default_layout(
     main_q: Query<Entity, With<Main>>,
-    profile_q: Query<(), With<Profile>>,
+    tab_q: Query<(), With<Tab>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     space_file: Option<Res<SpaceFilePresent>>,
-    mut new_stack_ctx: ResMut<crate::NewStackContext>,
-    mut commands: Commands,
+    mut requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
-    // If profiles already exist (loaded from session.ron) or a session
-    // file is present (entities may still be arriving from the load
-    // observer), skip default session creation.
-    if !profile_q.is_empty() || space_file.as_deref().is_some_and(|s| s.0) {
+    if !tab_q.is_empty() || space_file.as_deref().is_some_and(|s| s.0) {
         return;
     }
 
     let Ok(main) = main_q.single() else { return };
-    spawn_default_space_layout(main, *primary_window, &mut new_stack_ctx, &mut commands);
+    requests.write(TabLayoutSpawnRequest {
+        main,
+        primary_window: *primary_window,
+        name: None,
+        content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+        clear_pending_stack: false,
+        focus: true,
+    });
 }
 
-pub struct SpawnedSessionLayout {
-    pub tab: Entity,
-    pub pane: Entity,
-    pub stack: Entity,
-}
+pub fn spawn_requested_tab_layouts(
+    mut reader: MessageReader<TabLayoutSpawnRequest>,
+    settings: Res<LayoutSettings>,
+    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
+    mut new_stack_ctx: ResMut<crate::NewStackContext>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut focus: Option<ResMut<crate::stack::FocusedStack>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        let tab_e = commands
+            .spawn((
+                tab_bundle(),
+                LastActivatedAt::now(),
+                CreatedAt::now(),
+                ChildOf(request.main),
+            ))
+            .id();
+        if let Some(name) = request.name.clone() {
+            commands.entity(tab_e).insert(Tab { name });
+        }
 
-pub fn spawn_space_layout(
-    main: Entity,
-    pw: Entity,
-    profile: Profile,
-    commands: &mut Commands,
-) -> SpawnedSessionLayout {
-    commands.spawn(profile);
-    let tab_e = commands
-        .spawn((
-            space_bundle(),
-            LastActivatedAt::now(),
-            CreatedAt::now(),
-            ChildOf(main),
-        ))
-        .id();
+        let gap = pane_split_gaps(PaneSplitDirection::Row, settings.pane.gap);
+        let split_root = commands
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                HostWindow(request.primary_window),
+                ZIndex(0),
+                Transform::default(),
+                GlobalTransform::default(),
+                Node {
+                    flex_grow: 1.0,
+                    min_height: Val::Px(0.0),
+                    column_gap: gap.column_gap,
+                    row_gap: gap.row_gap,
+                    ..default()
+                },
+                ChildOf(tab_e),
+            ))
+            .id();
 
-    let gap = pane_split_gaps(PaneSplitDirection::Row, crate::event::PANE_GAP_PX);
-    let split_root = commands
-        .spawn((
-            Pane,
-            PaneSplit {
-                direction: PaneSplitDirection::Row,
-            },
-            HostWindow(pw),
-            ZIndex(0),
-            Transform::default(),
-            GlobalTransform::default(),
-            Node {
-                flex_grow: 1.0,
-                min_height: Val::Px(0.0),
-                column_gap: gap.column_gap,
-                row_gap: gap.row_gap,
-                ..default()
-            },
-            ChildOf(tab_e),
-        ))
-        .id();
+        let leaf = commands
+            .spawn((
+                leaf_pane_bundle(),
+                LastActivatedAt::now(),
+                ChildOf(split_root),
+            ))
+            .id();
 
-    let leaf = commands
-        .spawn((
-            leaf_pane_bundle(),
-            LastActivatedAt::now(),
-            ChildOf(split_root),
-        ))
-        .id();
+        let stack = commands
+            .spawn((
+                stack_bundle(),
+                LastActivatedAt::now(),
+                CreatedAt::now(),
+                ChildOf(leaf),
+            ))
+            .id();
 
-    let stack = commands
-        .spawn((
-            stack_bundle(),
-            LastActivatedAt::now(),
-            CreatedAt::now(),
-            ChildOf(leaf),
-        ))
-        .id();
-    SpawnedSessionLayout {
-        tab: tab_e,
-        pane: leaf,
-        stack,
+        if request.clear_pending_stack
+            && let Some(old_stack) = new_stack_ctx.stack.take()
+        {
+            commands.entity(old_stack).despawn();
+        }
+        new_stack_ctx.previous_stack = None;
+        new_stack_ctx.dismiss_modal = false;
+
+        match &request.content {
+            TabLayoutSpawnContent::StartupUrlOrPrompt => {
+                let url = effective_startup_url
+                    .as_deref()
+                    .map(|u| u.0.clone())
+                    .unwrap_or_default();
+                if url.is_empty() {
+                    new_stack_ctx.stack = Some(stack);
+                    new_stack_ctx.needs_open = true;
+                } else {
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.needs_open = false;
+                    page_open_requests.write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(stack),
+                        url,
+                        request_id: None,
+                    });
+                }
+            }
+            TabLayoutSpawnContent::Url(url) => {
+                new_stack_ctx.stack = None;
+                new_stack_ctx.needs_open = false;
+                page_open_requests.write(PageOpenRequest {
+                    target: PageOpenTarget::Stack(stack),
+                    url: url.clone(),
+                    request_id: None,
+                });
+            }
+        }
+
+        if request.focus
+            && let Some(focus) = focus.as_deref_mut()
+        {
+            focus.tab = Some(tab_e);
+            focus.pane = Some(leaf);
+            focus.stack = Some(stack);
+        }
     }
 }
 
-pub fn spawn_default_space_layout(
-    main: Entity,
-    pw: Entity,
-    new_stack_ctx: &mut crate::NewStackContext,
-    commands: &mut Commands,
-) -> SpawnedSessionLayout {
-    let layout = spawn_space_layout(main, pw, Profile::default_profile(), commands);
-    new_stack_ctx.stack = Some(layout.stack);
-    new_stack_ctx.previous_stack = None;
-    new_stack_ctx.needs_open = true;
-    layout
+fn sync_window_surface_clip(
+    settings: Res<LayoutSettings>,
+    mut materials: ResMut<Assets<WindowMaterial>>,
+    q: Query<&MeshMaterial3d<WindowMaterial>, With<WindowSurface>>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    for handle in &q {
+        if let Some(mut mat) = materials.get_mut(handle) {
+            let clip = &mut mat.extension.clip;
+            if (clip.x - settings.radius).abs() > 0.01 {
+                clip.x = settings.radius;
+                mat.base.alpha_mode =
+                    window_surface_alpha_mode(mat.base.base_color.alpha(), settings.radius);
+            }
+        }
+    }
 }
 
-fn spawn_glass_panes() {}
-
-fn sync_glass_pane_clip(
-    q: Query<(&ChildOf, &MeshMaterial3d<GlassMaterial>), With<Glass>>,
-    parent_q: Query<&ComputedNode>,
-    settings: Res<LayoutSettings>,
-    mut materials: ResMut<Assets<GlassMaterial>>,
+fn sync_window_surface_alpha(
+    mode: Res<crate::scene::InteractionMode>,
+    mut materials: ResMut<Assets<WindowMaterial>>,
+    q: Query<&MeshMaterial3d<WindowMaterial>, With<WindowSurface>>,
 ) {
-    let r = settings.radius;
-    for (child_of, handle) in &q {
-        let Ok(computed) = parent_q.get(child_of.get()) else {
-            continue;
-        };
-        let size_logical = computed.size * computed.inverse_scale_factor;
-        if size_logical.x <= 0.0 || size_logical.y <= 0.0 {
-            continue;
+    if !mode.is_changed() {
+        return;
+    }
+    let alpha = window_surface_alpha(*mode);
+    for handle in &q {
+        if let Some(mut mat) = materials.get_mut(handle) {
+            mat.base.base_color = mat.base.base_color.with_alpha(alpha);
+            mat.base.alpha_mode = window_surface_alpha_mode(alpha, mat.extension.clip.x);
         }
-        let w_m = size_logical.x / PIXELS_PER_METER;
-        let h_m = size_logical.y / PIXELS_PER_METER;
-        if let Some(mat) = materials.get_mut(handle) {
-            let clip = &mut mat.extension.clip;
-            if (clip.x - r).abs() > 0.01
-                || (clip.y - w_m).abs() > 0.01
-                || (clip.z - h_m).abs() > 0.01
-            {
-                *clip = Vec4::new(r, w_m, h_m, PIXELS_PER_METER);
-            }
+    }
+}
+
+fn apply_webview_material_defaults(
+    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    q: Query<
+        &MeshMaterial3d<WebviewExtendStandardMaterial>,
+        Or<(
+            Added<WebviewSource>,
+            Changed<MeshMaterial3d<WebviewExtendStandardMaterial>>,
+        )>,
+    >,
+) {
+    for handle in &q {
+        if let Some(mut material) = materials.get_mut(handle) {
+            material.base.unlit = true;
+            material.base.alpha_mode = AlphaMode::Blend;
+            material.base.depth_bias = WEBVIEW_MESH_DEPTH_BIAS;
+            material.base.cull_mode = None;
         }
     }
 }
@@ -507,6 +640,10 @@ fn sync_glass_pane_clip(
 /// settings once at Startup.
 fn sync_window_layout_to_settings(
     settings: Res<LayoutSettings>,
+    hidden: Option<Res<crate::toggle::LayoutHidden>>,
+    screen_maximized: Option<Res<ScreenMaximized>>,
+    primary_window: Query<&Window, With<PrimaryWindow>>,
+    monitors: Query<&Monitor>,
     mut window_q: Query<&mut Node, (With<VmuxWindow>, Without<SideSheet>, Without<MainColumn>)>,
     mut main_column_q: Query<
         &mut Node,
@@ -522,19 +659,28 @@ fn sync_window_layout_to_settings(
         return;
     }
 
-    let pad = crate::event::WINDOW_PAD_PX;
+    let pad_top = settings.window.pad_top();
+    let pad_right = settings.window.pad_right();
+    let pad_bottom = settings.window.pad_bottom();
+    let pad_left = settings.window.pad_left();
     let gap = crate::event::PANE_GAP_PX;
     let cfg_width = crate::event::SIDE_SHEET_WIDTH_PX;
+    let full_padding = hidden.as_deref().is_some_and(|hidden| hidden.0)
+        || screen_maximized.is_some()
+        || primary_window
+            .single()
+            .ok()
+            .is_some_and(|window| window_uses_full_padding(window, &monitors));
 
     // Root window: padding + flex-row column gap. Top and left are flush
-    // with the window so the chrome / pane meet the system edge; right
+    // with the window so the CEF shell / pane meet the system edge; right
     // and bottom keep a gap.
     if let Ok(mut node) = window_q.single_mut() {
         node.padding = UiRect {
-            top: Val::Px(0.0),
-            left: Val::Px(0.0),
-            right: Val::Px(pad),
-            bottom: Val::Px(pad),
+            top: Val::Px(if full_padding { pad_top } else { 0.0 }),
+            left: Val::Px(if full_padding { pad_left } else { 0.0 }),
+            right: Val::Px(pad_right),
+            bottom: Val::Px(pad_bottom),
         };
         node.column_gap = Val::Px(gap);
     }
@@ -560,14 +706,14 @@ fn sync_window_layout_to_settings(
                 node.width = Val::Px(live_width);
             }
             SideSheetPosition::Right => {
-                node.right = Val::Px(pad);
-                node.top = Val::Px(pad);
-                node.bottom = Val::Px(pad);
+                node.right = Val::Px(pad_right);
+                node.top = Val::Px(pad_top);
+                node.bottom = Val::Px(pad_bottom);
             }
             SideSheetPosition::Bottom => {
-                node.left = Val::Px(pad);
-                node.right = Val::Px(pad);
-                node.bottom = Val::Px(pad);
+                node.left = Val::Px(pad_left);
+                node.right = Val::Px(pad_right);
+                node.bottom = Val::Px(pad_bottom);
             }
         }
     }
@@ -575,7 +721,7 @@ fn sync_window_layout_to_settings(
 
 /// Keep MainColumn's row_gap at 0 when the active tab has a single pane
 /// (so the url row sits flush against the pane content) and switch to
-/// PANE_GAP_PX when it's split (so panes visually separate from chrome).
+/// PANE_GAP_PX when it's split (so panes visually separate from CEF shell).
 fn sync_main_column_gap_to_pane_count(
     focus: Res<crate::stack::FocusedStack>,
     all_children: Query<&Children>,
@@ -609,9 +755,9 @@ fn sync_main_column_gap_to_pane_count(
 pub fn fit_window_to_screen(
     window: Single<&bevy::window::Window, With<PrimaryWindow>>,
     settings: Res<LayoutSettings>,
-    mut materials: ResMut<Assets<GlassMaterial>>,
+    mut materials: ResMut<Assets<WindowMaterial>>,
     mut last_size: Local<Vec2>,
-    mut q: Query<(&mut Transform, &MeshMaterial3d<GlassMaterial>), With<VmuxWindow>>,
+    mut q: Query<(&mut Transform, &MeshMaterial3d<WindowMaterial>), With<VmuxWindow>>,
 ) {
     let m = window.meters();
     if (m.x - last_size.x).abs() < 0.001 && (m.y - last_size.y).abs() < 0.001 {
@@ -625,8 +771,9 @@ pub fn fit_window_to_screen(
         tf.translation = Vec3::new(0.0, m.y * 0.5, 0.0);
         tf.scale = Vec3::new(m.x, m.y, 1.0);
 
-        if let Some(mat) = materials.get_mut(handle) {
+        if let Some(mut mat) = materials.get_mut(handle) {
             mat.extension.clip = Vec4::new(r, m.x, m.y, PIXELS_PER_METER);
+            mat.base.alpha_mode = window_surface_alpha_mode(mat.base.base_color.alpha(), r);
         }
     }
 }
@@ -634,6 +781,8 @@ pub fn fit_window_to_screen(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cef::LayoutCef;
+    use bevy::ecs::relationship::Relationship;
     use bevy_cef::prelude::WebviewExtendStandardMaterial;
 
     static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -674,11 +823,143 @@ mod tests {
     }
 
     #[test]
-    fn window_glass_uses_dark_finder_style_background() {
+    fn window_uses_dark_finder_style_background() {
         assert_eq!(
-            window_glass_base_color(),
+            window_background_color(),
             Color::srgba(0.13, 0.13, 0.14, 1.0)
         );
+    }
+
+    #[test]
+    fn window_surface_is_transparent_in_user_mode() {
+        assert_eq!(
+            window_surface_alpha(crate::scene::InteractionMode::User),
+            0.0
+        );
+    }
+
+    #[test]
+    fn window_surface_is_opaque_in_player_mode() {
+        assert_eq!(
+            window_surface_alpha(crate::scene::InteractionMode::Player),
+            1.0
+        );
+    }
+
+    #[test]
+    fn window_background_material_is_opaque_in_player_mode() {
+        let material = window_background_material(
+            0.0,
+            Vec2::new(4.0, 3.0),
+            crate::scene::InteractionMode::Player,
+        );
+
+        assert_eq!(material.base.base_color.alpha(), 1.0);
+        assert_eq!(material.base.alpha_mode, AlphaMode::Opaque);
+        assert_eq!(material.base.cull_mode, None);
+        assert_eq!(material.base.specular_transmission, 0.0);
+        assert_eq!(material.base.diffuse_transmission, 0.0);
+    }
+
+    #[test]
+    fn window_background_material_alpha_to_coverage_for_rounded_player_corners() {
+        let material = window_background_material(
+            12.0,
+            Vec2::new(4.0, 3.0),
+            crate::scene::InteractionMode::Player,
+        );
+
+        assert_eq!(material.base.base_color.alpha(), 1.0);
+        assert_eq!(material.base.alpha_mode, AlphaMode::AlphaToCoverage);
+    }
+
+    #[test]
+    fn sync_window_surface_alpha_preserves_rounded_player_corner_alpha_to_coverage() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(crate::scene::InteractionMode::User)
+            .init_resource::<Assets<WindowMaterial>>()
+            .add_systems(Update, sync_window_surface_alpha);
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<WindowMaterial>>()
+            .add(window_background_material(
+                12.0,
+                Vec2::new(4.0, 3.0),
+                crate::scene::InteractionMode::User,
+            ));
+        app.world_mut()
+            .spawn((WindowSurface, MeshMaterial3d(handle.clone())));
+
+        let mut mode = app
+            .world_mut()
+            .resource_mut::<crate::scene::InteractionMode>();
+        *mode = crate::scene::InteractionMode::Player;
+
+        app.update();
+
+        let material = app
+            .world()
+            .resource::<Assets<WindowMaterial>>()
+            .get(&handle)
+            .expect("window material");
+
+        assert_eq!(material.base.base_color.alpha(), 1.0);
+        assert_eq!(material.base.alpha_mode, AlphaMode::AlphaToCoverage);
+    }
+
+    #[test]
+    fn window_background_material_is_transparent_in_user_mode() {
+        let material = window_background_material(
+            12.0,
+            Vec2::new(4.0, 3.0),
+            crate::scene::InteractionMode::User,
+        );
+
+        assert_eq!(material.base.base_color.alpha(), 0.0);
+        assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
+    }
+
+    #[test]
+    fn window_background_material_keeps_corner_clip() {
+        let material = window_background_material(
+            12.0,
+            Vec2::new(4.0, 3.0),
+            crate::scene::InteractionMode::Player,
+        );
+
+        assert_eq!(
+            material.extension.clip,
+            Vec4::new(12.0, 4.0, 3.0, PIXELS_PER_METER)
+        );
+        assert_eq!(material.extension.corner_mode, Vec4::ZERO);
+    }
+
+    #[test]
+    fn apply_webview_material_defaults_renders_from_both_sides() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, apply_webview_material_defaults);
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
+            .add(WebviewExtendStandardMaterial::default());
+        app.world_mut().spawn((
+            WebviewSource::new("https://example.com/"),
+            MeshMaterial3d(handle.clone()),
+        ));
+        app.update();
+
+        let material = app
+            .world()
+            .resource::<Assets<WebviewExtendStandardMaterial>>()
+            .get(&handle)
+            .expect("webview material");
+
+        assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
+        assert_eq!(material.base.depth_bias, WEBVIEW_MESH_DEPTH_BIAS);
+        assert_eq!(material.base.cull_mode, None);
     }
 
     fn test_settings(gap: f32) -> LayoutSettings {
@@ -699,11 +980,12 @@ mod tests {
 
     fn setup_window_app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.insert_resource(test_settings(8.0));
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<GlassMaterial>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(crate::scene::InteractionMode::User)
+            .insert_resource(test_settings(8.0))
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WindowMaterial>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
         app.world_mut().spawn((
             Window {
                 resolution: (1200, 800).into(),
@@ -712,7 +994,7 @@ mod tests {
             PrimaryWindow,
         ));
         app.world_mut().spawn(crate::scene::MainCamera);
-        app.add_systems(Startup, (setup, spawn_glass_panes).chain());
+        app.add_systems(Startup, setup);
         app
     }
 
@@ -741,39 +1023,110 @@ mod tests {
     }
 
     #[test]
-    fn chrome_panels_do_not_spawn_separate_glass() {
+    fn setup_spawns_one_window_surface() {
         let mut app = setup_window_app();
         app.update();
 
         let count = app
             .world_mut()
-            .query_filtered::<Entity, With<Glass>>()
+            .query_filtered::<Entity, With<WindowSurface>>()
             .iter(app.world())
             .count();
 
-        assert_eq!(count, 0);
+        assert_eq!(count, 1);
     }
 
     #[test]
-    fn default_session_requests_command_bar_open() {
-        let _home = HomeEnvGuard::use_temp_home("default-session");
+    fn command_bar_modal_backend_is_mode_driven() {
+        let mut app = setup_window_app();
+        app.update();
+
+        let modal = app
+            .world_mut()
+            .query_filtered::<Entity, With<Modal>>()
+            .single(app.world())
+            .expect("modal");
+
+        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
+    }
+
+    #[test]
+    fn layout_chrome_uses_transparent_liquid_glass() {
+        let mut app = setup_window_app();
+        app.update();
+
+        let layout_shell = app
+            .world_mut()
+            .query_filtered::<Entity, With<LayoutCef>>()
+            .single(app.world())
+            .expect("layout shell");
+        let modal = app
+            .world_mut()
+            .query_filtered::<Entity, With<Modal>>()
+            .single(app.world())
+            .expect("modal");
+
+        assert!(
+            app.world()
+                .get::<WebviewOpaqueWindowedBackground>(layout_shell)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<WebviewNativeLiquidGlass>(layout_shell)
+                .is_some()
+        );
+        assert!(
+            app.world()
+                .get::<WebviewOpaqueWindowedBackground>(modal)
+                .is_none()
+        );
+        assert!(app.world().get::<WebviewNativeLiquidGlass>(modal).is_some());
+    }
+
+    #[test]
+    fn command_bar_modal_allows_windowed_native_focus() {
+        let mut app = setup_window_app();
+        app.update();
+
+        let modal = app
+            .world_mut()
+            .query_filtered::<Entity, With<Modal>>()
+            .single(app.world())
+            .expect("modal");
+
+        assert!(
+            app.world()
+                .get::<WebviewWindowedNativeFocus>(modal)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn default_tab_requests_command_bar_open() {
+        let _home = HomeEnvGuard::use_temp_home("default-tab");
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<crate::NewStackContext>();
-        app.insert_resource(LayoutSettings {
-            radius: 0.0,
-            window: crate::settings::WindowSettings {
-                padding: 0.0,
-                padding_top: None,
-                padding_right: None,
-                padding_bottom: None,
-                padding_left: None,
-            },
-            pane: crate::settings::PaneSettings { gap: 0.0 },
-            side_sheet: crate::settings::SideSheetSettings::default(),
-            focus_ring: crate::settings::FocusRingSettings::default(),
-        });
-        app.add_systems(Update, spawn_default_space);
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::NewStackContext>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(LayoutSettings {
+                radius: 0.0,
+                window: crate::settings::WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: crate::settings::PaneSettings { gap: 0.0 },
+                side_sheet: crate::settings::SideSheetSettings::default(),
+                focus_ring: crate::settings::FocusRingSettings::default(),
+            })
+            .add_systems(
+                Update,
+                (request_default_layout, spawn_requested_tab_layouts).chain(),
+            );
 
         app.world_mut().spawn(PrimaryWindow);
         app.world_mut().spawn(Main);
@@ -783,5 +1136,59 @@ mod tests {
         let ctx = app.world().resource::<crate::NewStackContext>();
         assert!(ctx.stack.is_some());
         assert!(ctx.needs_open);
+    }
+
+    #[test]
+    fn window_padding_tracks_layout_window_settings() {
+        let source = include_str!("window.rs");
+        let sync_fn = source
+            .split("fn sync_window_layout_to_settings")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_main_column_gap_to_pane_count").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("settings.window.pad_top()"));
+        assert!(sync_fn.contains("settings.window.pad_right()"));
+        assert!(sync_fn.contains("settings.window.pad_bottom()"));
+        assert!(sync_fn.contains("settings.window.pad_left()"));
+    }
+
+    #[test]
+    fn screen_maximized_window_sync_applies_all_window_padding_edges() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(crate::toggle::LayoutHidden(false))
+            .insert_resource(ScreenMaximized)
+            .insert_resource(LayoutSettings {
+                radius: 0.0,
+                window: crate::settings::WindowSettings {
+                    padding: 16.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: crate::settings::PaneSettings { gap: 0.0 },
+                side_sheet: crate::settings::SideSheetSettings::default(),
+                focus_ring: crate::settings::FocusRingSettings::default(),
+            })
+            .insert_resource(SideSheetWidth(0.0))
+            .add_systems(Update, sync_window_layout_to_settings);
+        app.world_mut().spawn((
+            Window {
+                resolution: (1200, 800).into(),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        let root = app.world_mut().spawn((VmuxWindow, Node::default())).id();
+
+        app.update();
+
+        let node = app.world().get::<Node>(root).expect("window node");
+        assert_eq!(node.padding.top, Val::Px(16.0));
+        assert_eq!(node.padding.left, Val::Px(16.0));
+        assert_eq!(node.padding.right, Val::Px(16.0));
+        assert_eq!(node.padding.bottom, Val::Px(16.0));
     }
 }

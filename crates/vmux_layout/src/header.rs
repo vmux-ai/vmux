@@ -1,5 +1,5 @@
 use super::Open;
-use crate::event::CHROME_RESERVED_HEIGHT_PX;
+use crate::event::CEF_RESERVED_HEIGHT_PX;
 use bevy::prelude::*;
 
 #[derive(Component)]
@@ -25,7 +25,7 @@ fn sync_header_visibility(
         if let Ok((mut vis, mut node)) = header_q.get_mut(entity) {
             *vis = Visibility::Inherited;
             node.display = Display::Flex;
-            node.height = Val::Px(CHROME_RESERVED_HEIGHT_PX);
+            node.height = Val::Px(CEF_RESERVED_HEIGHT_PX);
         }
     }
 

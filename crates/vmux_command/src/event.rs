@@ -18,6 +18,8 @@ pub const COMMAND_BAR_OPEN_EVENT: &str = "command-bar-open";
 pub struct CommandBarOpenEvent {
     #[serde(default)]
     pub open_id: u64,
+    #[serde(default)]
+    pub native_windowed: bool,
     pub url: String,
     #[serde(default)]
     pub space_name: String,
@@ -129,6 +131,24 @@ pub struct CommandBarReadyEvent;
 )]
 pub struct CommandBarRenderedEvent {
     pub open_id: u64,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct CommandBarSizeEvent {
+    pub width: u32,
+    pub height: u32,
 }
 
 pub fn command_bar_open_should_reset_input(current_open_id: u64, incoming_open_id: u64) -> bool {
@@ -352,6 +372,26 @@ mod tests {
     }
 
     #[test]
+    fn command_bar_open_event_defaults_to_osr_layout() {
+        let event = CommandBarOpenEvent::default();
+
+        assert!(!event.native_windowed);
+    }
+
+    #[test]
+    fn command_bar_open_event_carries_native_windowed() {
+        let event = CommandBarOpenEvent {
+            native_windowed: true,
+            ..Default::default()
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).expect("ser");
+        let recovered =
+            rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(&bytes).expect("de");
+
+        assert!(recovered.native_windowed);
+    }
+
+    #[test]
     fn command_bar_duplicate_open_id_does_not_reset_input() {
         assert!(!command_bar_open_should_reset_input(7, 7));
         assert!(command_bar_open_should_reset_input(7, 8));
@@ -396,7 +436,7 @@ mod tests {
             spaces: vec![CommandBarSpace {
                 id: "work".to_string(),
                 name: "Work".to_string(),
-                profile: "default".to_string(),
+                profile: "Personal".to_string(),
                 is_active: true,
                 tab_count: 2,
             }],

@@ -5,6 +5,8 @@
 )]
 
 pub mod event;
+#[cfg(target_arch = "wasm32")]
+pub mod page;
 pub mod render_model;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -28,6 +30,10 @@ pub mod shell_input;
 pub mod snapshot_updater;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod target;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest =
+    vmux_core::page::PageManifest { host: "terminal" };
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::*;

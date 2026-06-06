@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use bevy::{
     ecs::relationship::Relationship,
@@ -9,17 +10,20 @@ use bevy::{
     },
     picking::Pickable,
     prelude::*,
-    render::alpha::AlphaMode,
+    winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
-use vmux_command::{AppCommand, LayoutCommand, StackCommand, WriteAppCommands};
-use vmux_core::PageMetadata;
+use vmux_command::shortcut::{KeyCombo, Modifiers, Shortcut};
+use vmux_command::{
+    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneDirection, PaneOpenMode,
+    PaneTarget, StackCommand, WriteAppCommands,
+};
+use vmux_core::page::PageReady;
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, TerminalSpawnRequest};
+use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
-use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
 use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
-use vmux_server::{PageConfig, PageReady, Server};
 use vmux_service::{
     client::{ServiceHandle, ServiceWake},
     protocol::{ClientMessage, ProcessId, ServiceMessage},
@@ -87,6 +91,11 @@ pub struct TerminalModeMap {
 struct LocalCopyModeState {
     active: std::collections::HashSet<ProcessId>,
     input_states: std::collections::HashMap<ProcessId, CopyModeInputState>,
+}
+
+#[derive(Resource, Default)]
+struct TerminalWebShortcutState {
+    pending_prefix: Option<(KeyCombo, Instant)>,
 }
 
 #[derive(Default)]
@@ -179,6 +188,13 @@ pub struct RunShellRequest {
     pub mode: ShellMode,
 }
 
+#[derive(Message, Clone)]
+pub struct TerminalStackSpawnRequest {
+    pub pane: Entity,
+    pub cwd: Option<PathBuf>,
+    pub pending_input: Option<Vec<u8>>,
+}
+
 pub struct TerminalPlugin;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -207,10 +223,12 @@ pub fn format_terminal_url(
 
 impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.register_type::<crate::launch::TerminalLaunch>()
             .register_type::<crate::launch::TerminalKind>()
             .add_message::<TerminalSendRequest>()
             .add_message::<RunShellRequest>()
+            .add_message::<TerminalStackSpawnRequest>()
             .add_message::<TerminalSpawnRequest>()
             .add_message::<ProcessesMonitorSpawnRequest>()
             .init_resource::<pid::PidToEntity>()
@@ -218,11 +236,6 @@ impl Plugin for TerminalPlugin {
                 Update,
                 (pid::track_pid_inserts, pid::track_pid_removals).chain(),
             );
-        app.world_mut().resource_mut::<Server>().register(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-            &PageConfig::with_custom_host("terminal"),
-        );
-
         let service_wake = service_wake_callback(app);
         if let Some(handle) = ServiceHandle::connect_with_wake(service_wake.clone()) {
             tracing::info!("connected to existing service");
@@ -232,13 +245,17 @@ impl Plugin for TerminalPlugin {
             ensure_service_started();
             app.insert_resource(ServiceConnectRetry::new());
         }
-        app.insert_resource(ServiceWakeCallback(service_wake));
-
-        app.init_resource::<MouseSelectionState>()
+        app.insert_resource(ServiceWakeCallback(service_wake))
+            .init_resource::<MouseSelectionState>()
             .init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
+            .init_resource::<TerminalWebShortcutState>()
             .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
-            .add_plugins(BinEventEmitterPlugin::<(TermResizeEvent, TermMouseEvent)>::default())
+            .add_plugins(BinEventEmitterPlugin::<(
+                TermResizeEvent,
+                TermMouseEvent,
+                TermKeyEvent,
+            )>::default())
             .add_systems(
                 PreUpdate,
                 (
@@ -250,7 +267,12 @@ impl Plugin for TerminalPlugin {
         add_terminal_update_systems(app)
             .add_systems(
                 Update,
-                (handle_terminal_send_requests, handle_run_shell_requests).after(ServiceMessageSet),
+                (
+                    handle_terminal_send_requests,
+                    handle_run_shell_requests,
+                    respond_terminal_stack_spawn,
+                )
+                    .after(ServiceMessageSet),
             )
             .add_systems(
                 Update,
@@ -260,16 +282,15 @@ impl Plugin for TerminalPlugin {
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
             .add_observer(on_term_mouse)
+            .add_observer(on_term_key)
             .add_observer(on_restart_pty)
-            .add_observer(on_terminal_removed);
-
-        app.add_plugins(crate::processes_monitor::ProcessesMonitorPlugin);
-
-        app.add_systems(
-            Update,
-            crate::snapshot_updater::update_terminals_snapshot
-                .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
-        );
+            .add_observer(on_terminal_removed)
+            .add_plugins(crate::processes_monitor::ProcessesMonitorPlugin)
+            .add_systems(
+                Update,
+                crate::snapshot_updater::update_terminals_snapshot
+                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+            );
     }
 }
 
@@ -293,6 +314,10 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
         .add_systems(Update, respawn_shell_on_vibe_exit)
         .add_systems(
             Update,
+            handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
+        )
+        .add_systems(
+            Update,
             spawn_layout_requested_content.after(vmux_layout::stack::StackCommandSet),
         )
         .add_systems(
@@ -314,7 +339,6 @@ fn spawn_layout_requested_content(
     mut reader: MessageReader<LayoutSpawnRequest>,
     settings: Res<AppSettings>,
     active_space: Res<vmux_space::spaces::ActiveSpace>,
-    mut spawn_agent: MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -336,63 +360,125 @@ fn spawn_layout_requested_content(
                     .id();
                 commands.entity(terminal).insert(CefKeyboardTarget);
             }
-            LayoutSpawnRequest::OpenUrl { stack, url } => {
-                spawn_url_into_stack(
-                    *stack,
-                    url,
-                    &mut spawn_agent,
-                    &mut commands,
-                    &mut meshes,
-                    &mut webview_mt,
-                    &settings,
-                );
-            }
         }
     }
 }
 
-fn spawn_url_into_stack(
-    stack: Entity,
-    url: &str,
-    spawn_agent: &mut MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
+type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
+
+fn handle_terminal_page_open(
+    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
+    pid_to_entity: Option<Res<pid::PidToEntity>>,
+    child_of_q: Query<&ChildOf>,
+    children_q: Query<&Children>,
+    settings: Res<AppSettings>,
+    active_space: Res<vmux_space::spaces::ActiveSpace>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for (entity, task) in &tasks {
+        if task.url == TERMINAL_PAGE_URL.trim_end_matches('/')
+            || task.url.starts_with(TERMINAL_PAGE_URL)
+        {
+            match open_terminal_page(
+                task,
+                pid_to_entity.as_deref(),
+                &child_of_q,
+                &children_q,
+                &settings,
+                &active_space,
+                &mut commands,
+                &mut meshes,
+                &mut webview_mt,
+            ) {
+                Ok(()) => {
+                    commands.entity(entity).insert(PageOpenHandled);
+                }
+                Err(message) => {
+                    commands.entity(entity).insert(PageOpenError { message });
+                }
+            }
+        } else if task.url.starts_with(vmux_layout::event::SERVICES_PAGE_URL) {
+            clear_stack_children(task.stack, &children_q, &mut commands);
+            commands.entity(task.stack).insert(PageMetadata {
+                url: vmux_layout::event::SERVICES_PAGE_URL.to_string(),
+                title: "Background Services".to_string(),
+                bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+                ..default()
+            });
+            commands.spawn((
+                ProcessesMonitor::new(&mut meshes, &mut webview_mt),
+                ChildOf(task.stack),
+            ));
+            commands.entity(entity).insert(PageOpenHandled);
+        }
+    }
+}
+
+fn open_terminal_page(
+    task: &PageOpenTask,
+    pid_to_entity: Option<&pid::PidToEntity>,
+    child_of_q: &Query<&ChildOf>,
+    children_q: &Query<&Children>,
+    settings: &AppSettings,
+    active_space: &vmux_space::spaces::ActiveSpace,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) {
-    if url.starts_with(crate::event::TERMINAL_PAGE_URL) {
-        let terminal = commands
-            .spawn((
-                new_terminal_bundle(meshes, webview_mt, settings),
-                ChildOf(stack),
-            ))
-            .id();
-        commands.entity(terminal).insert(CefKeyboardTarget);
-    } else if let Some(kind) = vmux_core::agent::AgentKind::all()
-        .into_iter()
-        .find(|k| url.starts_with(&k.cli_url_prefix()))
-    {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
-        let id_part = url.strip_prefix(&kind.cli_url_prefix()).unwrap_or("");
-        let session_id = (!id_part.is_empty()).then(|| id_part.to_string());
-        spawn_agent.write(vmux_core::agent::SpawnAgentInStackRequest {
-            kind,
-            cwd,
-            session_id,
-            stack,
-        });
-    } else if url.starts_with(vmux_layout::event::SERVICES_PAGE_URL) {
-        commands.spawn((ProcessesMonitor::new(meshes, webview_mt), ChildOf(stack)));
-    } else if url.starts_with(vmux_space::event::SPACES_PAGE_URL) {
-        commands.spawn((
-            vmux_space::spaces::Spaces::new(meshes, webview_mt),
-            ChildOf(stack),
-        ));
+) -> Result<(), String> {
+    let parsed = url::Url::parse(&task.url)
+        .map_err(|e| format!("invalid terminal URL '{}': {e}", task.url))?;
+    let path = parsed.path().trim_start_matches('/');
+    if !path.is_empty() {
+        match path.parse::<u32>() {
+            Ok(pid) => {
+                if let Some(map) = pid_to_entity
+                    && let Some(&entity) = map.0.get(&pid)
+                {
+                    pid::focus_pane_entity(entity, commands, child_of_q);
+                    return Ok(());
+                }
+                warn!("no terminal pane for pid {pid}; spawning new");
+            }
+            Err(_) => return Err(format!("malformed terminal URL '{}'", task.url)),
+        }
+    }
+    let cwd_param = parsed
+        .query_pairs()
+        .find(|(k, _)| k == "cwd")
+        .map(|(_, v)| v.into_owned());
+    let cwd = if let Some(cwd) = cwd_param.as_deref() {
+        vmux_space::cwd::valid_cwd(cwd)?
     } else {
-        let browser_e = commands
-            .spawn((Browser::new(meshes, webview_mt, url), ChildOf(stack)))
-            .id();
-        commands.entity(browser_e).insert(CefKeyboardTarget);
+        Some(vmux_space::cwd::space_dir(&active_space.record.id))
+    };
+    clear_stack_children(task.stack, children_q, commands);
+    let title = cwd
+        .as_ref()
+        .map(|cwd| format!("Terminal ({})", cwd.display()))
+        .unwrap_or_else(|| "Terminal".to_string());
+    commands.entity(task.stack).insert(PageMetadata {
+        url: TERMINAL_PAGE_URL.to_string(),
+        title,
+        bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+        ..default()
+    });
+    let terminal = commands
+        .spawn((
+            new_terminal_bundle_with_cwd(meshes, webview_mt, settings, cwd.as_deref()),
+            ChildOf(task.stack),
+        ))
+        .id();
+    commands.entity(terminal).insert(CefKeyboardTarget);
+    Ok(())
+}
+
+fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
+    if let Ok(children) = children_q.get(stack) {
+        for child in children.iter() {
+            commands.entity(child).try_despawn();
+        }
     }
 }
 
@@ -509,15 +595,7 @@ pub fn new_terminal_bundle_with_cwd(
             ))),
         ),
         (
-            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                base: StandardMaterial {
-                    unlit: true,
-                    alpha_mode: AlphaMode::Blend,
-                    depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                    ..default()
-                },
-                ..default()
-            })),
+            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
             GlobalTransform::default(),
@@ -535,44 +613,50 @@ pub fn new_terminal_bundle_with_cwd(
     )
 }
 
-pub fn spawn_terminal_tab(
-    pane: Entity,
-    cwd: Option<&std::path::Path>,
-    pending_input: Option<Vec<u8>>,
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) -> Entity {
-    let tab = commands
-        .spawn((
-            vmux_layout::stack::stack_bundle(),
-            LastActivatedAt::now(),
-            ChildOf(pane),
-        ))
-        .id();
-    let title = cwd
-        .map(|cwd| format!("Terminal ({})", cwd.display()))
-        .unwrap_or_else(|| "Terminal".to_string());
-    commands.entity(tab).insert(PageMetadata {
-        url: TERMINAL_PAGE_URL.to_string(),
-        title,
-        bg_color: Some(vmux_layout::event::TERMINAL_CHROME_BG_COLOR.to_string()),
-        ..default()
-    });
-    let terminal = commands
-        .spawn((
-            new_terminal_bundle_with_cwd(meshes, webview_mt, settings, cwd),
-            ChildOf(tab),
-        ))
-        .id();
-    commands.entity(terminal).insert(CefKeyboardTarget);
-    if let Some(data) = pending_input {
-        commands
-            .entity(terminal)
-            .insert(PendingTerminalInput { data });
+fn respond_terminal_stack_spawn(
+    mut reader: MessageReader<TerminalStackSpawnRequest>,
+    settings: Res<AppSettings>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for request in reader.read() {
+        let stack = commands
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                LastActivatedAt::now(),
+                ChildOf(request.pane),
+            ))
+            .id();
+        let title = request
+            .cwd
+            .as_ref()
+            .map(|cwd| format!("Terminal ({})", cwd.display()))
+            .unwrap_or_else(|| "Terminal".to_string());
+        commands.entity(stack).insert(PageMetadata {
+            url: TERMINAL_PAGE_URL.to_string(),
+            title,
+            bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+            ..default()
+        });
+        let terminal = commands
+            .spawn((
+                new_terminal_bundle_with_cwd(
+                    &mut meshes,
+                    &mut webview_mt,
+                    &settings,
+                    request.cwd.as_deref(),
+                ),
+                ChildOf(stack),
+            ))
+            .id();
+        commands.entity(terminal).insert(CefKeyboardTarget);
+        if let Some(data) = request.pending_input.clone() {
+            commands
+                .entity(terminal)
+                .insert(PendingTerminalInput { data });
+        }
     }
-    terminal
 }
 
 pub fn reattach_terminal_bundle(
@@ -601,15 +685,7 @@ pub fn reattach_terminal_bundle(
             ))),
         ),
         (
-            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                base: StandardMaterial {
-                    unlit: true,
-                    alpha_mode: AlphaMode::Blend,
-                    depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                    ..default()
-                },
-                ..default()
-            })),
+            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
             GlobalTransform::default(),
@@ -1031,14 +1107,10 @@ fn poll_service_messages(
                     }
                 }
             }
-            ServiceMessage::ProcessExited {
-                process_id,
-                exit_code,
-            } => {
-                writers.process_exited.write(ProcessExitedEvent {
-                    process_id,
-                    exit_code,
-                });
+            ServiceMessage::ProcessExited { process_id, .. } => {
+                writers
+                    .process_exited
+                    .write(ProcessExitedEvent { process_id });
                 mode_map.modes.remove(&process_id);
                 set_local_copy_mode(&mut local_copy_mode, process_id, false);
                 mouse_state.per_process.remove(&process_id);
@@ -1649,6 +1721,323 @@ fn logical_key_to_bytes(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
     }
 }
 
+fn term_key_event_to_key(event: &TermKeyEvent) -> Key {
+    match event.key.as_str() {
+        "Enter" => Key::Enter,
+        "Backspace" => Key::Backspace,
+        "Tab" => Key::Tab,
+        "Escape" | "Esc" => Key::Escape,
+        " " | "Space" => Key::Space,
+        "ArrowUp" => Key::ArrowUp,
+        "ArrowDown" => Key::ArrowDown,
+        "ArrowRight" => Key::ArrowRight,
+        "ArrowLeft" => Key::ArrowLeft,
+        "Home" => Key::Home,
+        "End" => Key::End,
+        "PageUp" => Key::PageUp,
+        "PageDown" => Key::PageDown,
+        "Delete" => Key::Delete,
+        "Insert" => Key::Insert,
+        _ => {
+            let text = event.text.as_deref().unwrap_or(event.key.as_str());
+            Key::Character(text.into())
+        }
+    }
+}
+
+fn term_key_event_to_bytes(event: &TermKeyEvent) -> Vec<u8> {
+    if is_web_modifier_key_event(event) {
+        return Vec::new();
+    }
+    let ctrl = event.modifiers & MOD_CTRL != 0;
+    let alt = event.modifiers & MOD_ALT != 0;
+    let key = term_key_event_to_key(event);
+    logical_key_to_bytes(&key, ctrl, alt)
+}
+
+fn is_web_modifier_key_event(event: &TermKeyEvent) -> bool {
+    matches!(
+        event.key.as_str(),
+        "Shift" | "Control" | "Alt" | "Meta" | "OS" | "Fn" | "CapsLock"
+    ) || matches!(
+        event.code.as_str(),
+        "ShiftLeft"
+            | "ShiftRight"
+            | "ControlLeft"
+            | "ControlRight"
+            | "AltLeft"
+            | "AltRight"
+            | "MetaLeft"
+            | "MetaRight"
+            | "OSLeft"
+            | "OSRight"
+            | "CapsLock"
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TerminalWebShortcutAction {
+    Command(AppCommand),
+    Consume,
+    PassThrough,
+}
+
+struct TerminalWebShortcutMap {
+    bindings: Vec<(Shortcut, String)>,
+    chord_timeout_ms: u64,
+}
+
+fn terminal_web_shortcut_map(settings: Option<&AppSettings>) -> TerminalWebShortcutMap {
+    let mut map = TerminalWebShortcutMap {
+        bindings: AppCommand::default_shortcuts(),
+        chord_timeout_ms: 1000,
+    };
+
+    if let Some(settings) = settings {
+        map.chord_timeout_ms = settings.shortcuts.chord_timeout_ms;
+        if let Some(leader) = settings.shortcuts.leader.to_key_combo() {
+            for (binding, _) in &mut map.bindings {
+                if let Shortcut::Chord(prefix, _) = binding {
+                    *prefix = leader.clone();
+                }
+            }
+            for entry in &settings.shortcuts.bindings {
+                if let Some(binding) = entry.binding.to_shortcut_with_leader(&leader) {
+                    map.bindings.push((binding, entry.command.clone()));
+                }
+            }
+        } else {
+            for entry in &settings.shortcuts.bindings {
+                if let Some(binding) = entry.binding.to_shortcut() {
+                    map.bindings.push((binding, entry.command.clone()));
+                }
+            }
+        }
+    }
+
+    map
+}
+
+fn resolve_terminal_web_shortcut(
+    event: &TermKeyEvent,
+    settings: Option<&AppSettings>,
+    state: &mut TerminalWebShortcutState,
+) -> TerminalWebShortcutAction {
+    let Some(combo) = term_key_event_to_shortcut_combo(event) else {
+        return TerminalWebShortcutAction::PassThrough;
+    };
+    let map = terminal_web_shortcut_map(settings);
+    let now = Instant::now();
+    if let Some((_, started)) = state.pending_prefix.as_ref()
+        && now.duration_since(*started) > Duration::from_millis(map.chord_timeout_ms)
+    {
+        state.pending_prefix = None;
+    }
+
+    if let Some((prefix, _)) = state.pending_prefix.clone() {
+        if let Some(cmd) = terminal_web_chord_command(&map, &prefix, &combo) {
+            state.pending_prefix = None;
+            return TerminalWebShortcutAction::Command(cmd);
+        }
+        state.pending_prefix = None;
+    }
+
+    if let Some(cmd) = terminal_web_direct_command(&map, &combo)
+        && (combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key)
+    {
+        return TerminalWebShortcutAction::Command(cmd);
+    }
+
+    if terminal_web_has_chord_prefix(&map, &combo) {
+        state.pending_prefix = Some((combo, now));
+        return TerminalWebShortcutAction::Consume;
+    }
+
+    TerminalWebShortcutAction::PassThrough
+}
+
+fn term_key_event_to_shortcut_combo(event: &TermKeyEvent) -> Option<KeyCombo> {
+    if is_web_modifier_key_event(event) {
+        return None;
+    }
+    let key = shortcut_key_code_from_web_code(&event.code)?;
+    Some(KeyCombo {
+        key,
+        modifiers: Modifiers {
+            ctrl: event.modifiers & MOD_CTRL != 0,
+            shift: event.modifiers & MOD_SHIFT != 0,
+            alt: event.modifiers & MOD_ALT != 0,
+            super_key: event.modifiers & MOD_SUPER != 0,
+        },
+    })
+}
+
+fn terminal_web_direct_command(
+    map: &TerminalWebShortcutMap,
+    pressed: &KeyCombo,
+) -> Option<AppCommand> {
+    map.bindings
+        .iter()
+        .find_map(|(binding, cmd_id)| match binding {
+            Shortcut::Direct(combo) if combo == pressed => {
+                terminal_command_from_shortcut_id(cmd_id)
+            }
+            _ => None,
+        })
+}
+
+fn terminal_web_has_chord_prefix(map: &TerminalWebShortcutMap, pressed: &KeyCombo) -> bool {
+    map.bindings
+        .iter()
+        .any(|(binding, _)| matches!(binding, Shortcut::Chord(prefix, _) if prefix == pressed))
+}
+
+fn terminal_web_chord_command(
+    map: &TerminalWebShortcutMap,
+    prefix: &KeyCombo,
+    pressed: &KeyCombo,
+) -> Option<AppCommand> {
+    let effective = effective_terminal_web_chord_second(prefix, pressed);
+    map.bindings
+        .iter()
+        .find_map(|(binding, cmd_id)| match binding {
+            Shortcut::Chord(binding_prefix, second)
+                if binding_prefix == prefix && second == &effective =>
+            {
+                terminal_command_from_shortcut_id(cmd_id)
+            }
+            _ => None,
+        })
+}
+
+fn effective_terminal_web_chord_second(prefix: &KeyCombo, pressed: &KeyCombo) -> KeyCombo {
+    let mut effective = pressed.clone();
+    if prefix.modifiers.ctrl {
+        effective.modifiers.ctrl = false;
+    }
+    if prefix.modifiers.alt {
+        effective.modifiers.alt = false;
+    }
+    if prefix.modifiers.super_key {
+        effective.modifiers.super_key = false;
+    }
+    effective
+}
+
+fn terminal_command_from_shortcut_id(cmd_id: &str) -> Option<AppCommand> {
+    match cmd_id {
+        "split_v" => Some(AppCommand::Browser(BrowserCommand::Open(
+            OpenCommand::InPane {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: None,
+            },
+        ))),
+        "split_h" => Some(AppCommand::Browser(BrowserCommand::Open(
+            OpenCommand::InPane {
+                direction: PaneDirection::Bottom,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: None,
+            },
+        ))),
+        _ => AppCommand::from_menu_id(cmd_id),
+    }
+}
+
+fn shortcut_key_code_from_web_code(code: &str) -> Option<KeyCode> {
+    let key = key_code_from_web_code(code);
+    if matches!(
+        key,
+        KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified)
+    ) {
+        None
+    } else {
+        Some(key)
+    }
+}
+
+fn key_code_from_web_code(code: &str) -> KeyCode {
+    match code {
+        "KeyA" => KeyCode::KeyA,
+        "KeyB" => KeyCode::KeyB,
+        "KeyC" => KeyCode::KeyC,
+        "KeyD" => KeyCode::KeyD,
+        "KeyE" => KeyCode::KeyE,
+        "KeyF" => KeyCode::KeyF,
+        "KeyG" => KeyCode::KeyG,
+        "KeyH" => KeyCode::KeyH,
+        "KeyI" => KeyCode::KeyI,
+        "KeyJ" => KeyCode::KeyJ,
+        "KeyK" => KeyCode::KeyK,
+        "KeyL" => KeyCode::KeyL,
+        "KeyM" => KeyCode::KeyM,
+        "KeyN" => KeyCode::KeyN,
+        "KeyO" => KeyCode::KeyO,
+        "KeyP" => KeyCode::KeyP,
+        "KeyQ" => KeyCode::KeyQ,
+        "KeyR" => KeyCode::KeyR,
+        "KeyS" => KeyCode::KeyS,
+        "KeyT" => KeyCode::KeyT,
+        "KeyU" => KeyCode::KeyU,
+        "KeyV" => KeyCode::KeyV,
+        "KeyW" => KeyCode::KeyW,
+        "KeyX" => KeyCode::KeyX,
+        "KeyY" => KeyCode::KeyY,
+        "KeyZ" => KeyCode::KeyZ,
+        "Digit0" => KeyCode::Digit0,
+        "Digit1" => KeyCode::Digit1,
+        "Digit2" => KeyCode::Digit2,
+        "Digit3" => KeyCode::Digit3,
+        "Digit4" => KeyCode::Digit4,
+        "Digit5" => KeyCode::Digit5,
+        "Digit6" => KeyCode::Digit6,
+        "Digit7" => KeyCode::Digit7,
+        "Digit8" => KeyCode::Digit8,
+        "Digit9" => KeyCode::Digit9,
+        "Equal" => KeyCode::Equal,
+        "Minus" => KeyCode::Minus,
+        "Period" => KeyCode::Period,
+        "Comma" => KeyCode::Comma,
+        "Quote" => KeyCode::Quote,
+        "Semicolon" => KeyCode::Semicolon,
+        "Slash" => KeyCode::Slash,
+        "Backslash" => KeyCode::Backslash,
+        "Backquote" => KeyCode::Backquote,
+        "BracketLeft" => KeyCode::BracketLeft,
+        "BracketRight" => KeyCode::BracketRight,
+        "Enter" => KeyCode::Enter,
+        "Space" => KeyCode::Space,
+        "Tab" => KeyCode::Tab,
+        "Backspace" => KeyCode::Backspace,
+        "Delete" => KeyCode::Delete,
+        "Insert" => KeyCode::Insert,
+        "Home" => KeyCode::Home,
+        "End" => KeyCode::End,
+        "PageUp" => KeyCode::PageUp,
+        "PageDown" => KeyCode::PageDown,
+        "ArrowUp" => KeyCode::ArrowUp,
+        "ArrowDown" => KeyCode::ArrowDown,
+        "ArrowLeft" => KeyCode::ArrowLeft,
+        "ArrowRight" => KeyCode::ArrowRight,
+        "Escape" => KeyCode::Escape,
+        "F1" => KeyCode::F1,
+        "F2" => KeyCode::F2,
+        "F3" => KeyCode::F3,
+        "F4" => KeyCode::F4,
+        "F5" => KeyCode::F5,
+        "F6" => KeyCode::F6,
+        "F7" => KeyCode::F7,
+        "F8" => KeyCode::F8,
+        "F9" => KeyCode::F9,
+        "F10" => KeyCode::F10,
+        "F11" => KeyCode::F11,
+        "F12" => KeyCode::F12,
+        _ => KeyCode::Unidentified(bevy::input::keyboard::NativeKeyCode::Unidentified),
+    }
+}
+
 /// Handle mouse wheel scrolling — sends scroll input to service.
 fn handle_terminal_scroll(
     mut er: MessageReader<MouseWheel>,
@@ -1935,6 +2324,94 @@ fn on_term_mouse(
     }
 }
 
+fn on_term_key(
+    trigger: On<BinReceive<TermKeyEvent>>,
+    q: Query<&ProcessId, With<Terminal>>,
+    service: Option<Res<ServiceClient>>,
+    mode_map: Res<TerminalModeMap>,
+    mut local_copy_mode: ResMut<LocalCopyModeState>,
+    settings: Option<Res<AppSettings>>,
+    mut web_shortcuts: ResMut<TerminalWebShortcutState>,
+    mut app_commands: MessageWriter<AppCommand>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+) {
+    let entity = trigger.event_target();
+    let event = &trigger.payload;
+    match resolve_terminal_web_shortcut(event, settings.as_deref(), &mut web_shortcuts) {
+        TerminalWebShortcutAction::Command(cmd) => {
+            app_commands.write(cmd);
+            if let Some(proxy) = proxy.as_ref() {
+                let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
+            }
+            return;
+        }
+        TerminalWebShortcutAction::Consume => return,
+        TerminalWebShortcutAction::PassThrough => {}
+    }
+    if is_web_modifier_key_event(event) {
+        return;
+    }
+    let Some(service) = service else { return };
+    let Ok(pid) = q.get(entity) else { return };
+    let process_id = *pid;
+    let super_key = event.modifiers & MOD_SUPER != 0;
+    if super_key {
+        match event.code.as_str() {
+            "KeyV" => {
+                if let Some(text) = crate::clipboard::read_blocking()
+                    && !text.is_empty()
+                {
+                    let mut data = Vec::new();
+                    data.extend_from_slice(b"\x1b[200~");
+                    data.extend_from_slice(text.as_bytes());
+                    data.extend_from_slice(b"\x1b[201~");
+                    service
+                        .0
+                        .send(ClientMessage::ProcessInput { process_id, data });
+                }
+                return;
+            }
+            "KeyC" => {
+                service
+                    .0
+                    .send(ClientMessage::GetSelectionText { process_id });
+                return;
+            }
+            _ => return,
+        }
+    }
+
+    if is_copy_mode_active(&mode_map, &local_copy_mode, process_id) {
+        let key = term_key_event_to_key(event);
+        let mapped = map_copy_mode_keys_with_state(
+            &mut local_copy_mode,
+            process_id,
+            CopyModeKeyInput {
+                key: &key,
+                key_code: key_code_from_web_code(&event.code),
+                ctrl: event.modifiers & MOD_CTRL != 0,
+                shift: event.modifiers & MOD_SHIFT != 0,
+            },
+        );
+        for k in mapped {
+            if copy_mode_key_exits(k) {
+                set_local_copy_mode(&mut local_copy_mode, process_id, false);
+            }
+            service
+                .0
+                .send(ClientMessage::CopyModeKey { process_id, key: k });
+        }
+        return;
+    }
+
+    let data = term_key_event_to_bytes(event);
+    if !data.is_empty() {
+        service
+            .0
+            .send(ClientMessage::ProcessInput { process_id, data });
+    }
+}
+
 /// Mark dirty when webview becomes ready so initial viewport is sent.
 fn on_term_ready(
     trigger: On<Add, PageReady>,
@@ -1993,10 +2470,21 @@ fn on_term_resize(
     });
 }
 
+#[derive(Component, Clone, Copy, Debug)]
+pub struct TerminalFontScale(pub f32);
+
+impl Default for TerminalFontScale {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
 fn sync_terminal_theme(
     q: Query<Entity, With<Terminal>>,
     new_terminals: Query<Entity, Added<Terminal>>,
     newly_ready: Query<Entity, (With<Terminal>, Added<PageReady>)>,
+    changed_scale: Query<Entity, (With<Terminal>, Changed<TerminalFontScale>)>,
+    scale_q: Query<&TerminalFontScale>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     mut commands: Commands,
@@ -2027,12 +2515,16 @@ fn sync_terminal_theme(
     };
 
     let theme_changed = hash != *last_theme_hash;
-    if !theme_changed && new_terminals.is_empty() && newly_ready.is_empty() {
+    if !theme_changed
+        && new_terminals.is_empty()
+        && newly_ready.is_empty()
+        && changed_scale.is_empty()
+    {
         return;
     }
     *last_theme_hash = hash;
 
-    let event = crate::event::TermThemeEvent {
+    let base_event = crate::event::TermThemeEvent {
         foreground: colors.foreground,
         background: colors.background,
         cursor: colors.cursor,
@@ -2047,11 +2539,18 @@ fn sync_terminal_theme(
     let targets: Vec<Entity> = if theme_changed {
         q.iter().collect()
     } else {
-        new_terminals.iter().chain(newly_ready.iter()).collect()
+        new_terminals
+            .iter()
+            .chain(newly_ready.iter())
+            .chain(changed_scale.iter())
+            .collect()
     };
 
     for entity in targets {
         if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+            let scale = scale_q.get(entity).map(|s| s.0).unwrap_or(1.0);
+            let mut event = base_event.clone();
+            event.font_size = theme.font_size * scale;
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 TERM_THEME_EVENT,
@@ -2200,8 +2699,6 @@ fn copy_mode_key_exits(key: vmux_service::protocol::CopyModeKey) -> bool {
 #[derive(Message, Debug, Clone)]
 pub struct ProcessExitedEvent {
     pub process_id: ProcessId,
-    #[allow(dead_code)]
-    pub exit_code: Option<i32>,
 }
 
 fn respawn_shell_on_agent_exit_for_entity(
@@ -2308,10 +2805,8 @@ pub fn handle_run_shell_requests(
         ),
     >,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    settings: Res<AppSettings>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut terminal_stack_spawns: Option<MessageWriter<TerminalStackSpawnRequest>>,
 ) {
     for request in reader.read() {
         let crate::RunShellRequest { command, cwd, mode } = request.clone();
@@ -2322,18 +2817,15 @@ pub fn handle_run_shell_requests(
             commands
                 .entity(terminal)
                 .insert(PendingTerminalInput { data: input });
-        } else if let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane))
+        } else if let Some(terminal_stack_spawns) = terminal_stack_spawns.as_mut()
+            && let Some(pane) = focus.pane.filter(|pane| panes.contains(*pane))
             && let Ok(cwd_path) = vmux_space::cwd::valid_cwd(&cwd)
         {
-            spawn_terminal_tab(
+            terminal_stack_spawns.write(TerminalStackSpawnRequest {
                 pane,
-                cwd_path.as_deref(),
-                Some(input),
-                &mut commands,
-                &mut meshes,
-                &mut webview_mt,
-                &settings,
-            );
+                cwd: cwd_path,
+                pending_input: Some(input),
+            });
         }
     }
 }
@@ -2342,9 +2834,75 @@ pub fn handle_run_shell_requests(
 mod tests {
     use super::*;
     use bevy::ecs::schedule::Schedules;
+    use vmux_layout::settings::{
+        FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
+    };
+    use vmux_setting::{BrowserSettings, ShortcutSettings};
 
     fn process_id(byte: u8) -> ProcessId {
         ProcessId([byte; 16])
+    }
+
+    fn test_settings() -> AppSettings {
+        AppSettings {
+            browser: BrowserSettings {
+                startup_url: "about:blank".to_string(),
+            },
+            layout: LayoutSettings {
+                radius: 0.0,
+                window: WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: PaneSettings { gap: 0.0 },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            },
+            shortcuts: ShortcutSettings::default(),
+            terminal: None,
+            auto_update: false,
+            agent: vmux_setting::AgentSettings::default(),
+        }
+    }
+
+    #[test]
+    fn terminal_page_open_accepts_url_without_trailing_slash() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .init_resource::<vmux_space::spaces::ActiveSpace>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_terminal_page_open);
+
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: vmux_core::PageOpenId::new(),
+                stack,
+                url: "vmux://terminal".to_string(),
+                request_id: None,
+            })
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<PageOpenHandled>(task).is_some());
+        let mut terminals = app.world_mut().query_filtered::<&ChildOf, With<Terminal>>();
+        assert_eq!(
+            terminals
+                .iter(app.world())
+                .filter(|child_of| child_of.get() == stack)
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -2443,6 +3001,111 @@ mod tests {
         );
 
         assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn web_terminal_key_events_delegate_text_to_pty_bytes() {
+        let event = TermKeyEvent {
+            key: "a".to_string(),
+            code: "KeyA".to_string(),
+            modifiers: 0,
+            text: Some("a".to_string()),
+        };
+
+        assert_eq!(term_key_event_to_bytes(&event), b"a".to_vec());
+    }
+
+    #[test]
+    fn web_terminal_key_events_delegate_control_sequences() {
+        let event = TermKeyEvent {
+            key: "c".to_string(),
+            code: "KeyC".to_string(),
+            modifiers: MOD_CTRL,
+            text: None,
+        };
+
+        assert_eq!(term_key_event_to_bytes(&event), vec![3]);
+    }
+
+    #[test]
+    fn web_terminal_key_events_ignore_modifier_keys() {
+        let event = TermKeyEvent {
+            key: "Shift".to_string(),
+            code: "ShiftLeft".to_string(),
+            modifiers: MOD_SHIFT,
+            text: None,
+        };
+
+        assert!(term_key_event_to_bytes(&event).is_empty());
+    }
+
+    #[test]
+    fn web_terminal_shortcuts_emit_app_command_before_pty_input() {
+        let event = TermKeyEvent {
+            key: "l".to_string(),
+            code: "KeyL".to_string(),
+            modifiers: MOD_SUPER,
+            text: Some("l".to_string()),
+        };
+        let mut state = TerminalWebShortcutState::default();
+
+        assert_eq!(
+            resolve_terminal_web_shortcut(&event, None, &mut state),
+            TerminalWebShortcutAction::Command(AppCommand::Browser(
+                vmux_command::BrowserCommand::Bar(
+                    vmux_command::BrowserBarCommand::OpenPageInCommandBar
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn web_terminal_menu_accel_shortcuts_emit_app_command_before_pty_input() {
+        let event = TermKeyEvent {
+            key: "S".to_string(),
+            code: "KeyS".to_string(),
+            modifiers: MOD_SUPER | MOD_SHIFT,
+            text: Some("S".to_string()),
+        };
+        let mut state = TerminalWebShortcutState::default();
+
+        assert_eq!(
+            resolve_terminal_web_shortcut(&event, None, &mut state),
+            TerminalWebShortcutAction::Command(AppCommand::Layout(
+                vmux_command::LayoutCommand::ToggleLayout(
+                    vmux_command::ToggleLayoutCommand::Toggle
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn terminal_page_emits_key_events_from_native_webview() {
+        let source = include_str!("page.rs");
+
+        assert!(source.contains("emit_key("));
+        assert!(source.contains("onkeydown"));
+        assert!(source.contains("TermKeyEvent"));
+    }
+
+    #[test]
+    fn terminal_page_focus_does_not_draw_browser_outline() {
+        let source = include_str!("page.rs");
+
+        assert!(source.contains("outline:none"));
+    }
+
+    #[test]
+    fn terminal_web_shortcut_wakes_next_command_frame() {
+        let source = include_str!("plugin.rs");
+        let on_term_key = source
+            .split("fn on_term_key")
+            .nth(1)
+            .and_then(|tail| tail.split("fn on_term_ready").next())
+            .unwrap_or_default();
+
+        assert!(on_term_key.contains("EventLoopProxyWrapper"));
+        assert!(on_term_key.contains("WinitUserEvent::WakeUp"));
     }
 
     fn mouse_event(button: u8, col: u16, row: u16, pressed: bool, moving: bool) -> TermMouseEvent {

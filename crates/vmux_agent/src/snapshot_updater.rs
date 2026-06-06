@@ -81,8 +81,8 @@ mod tests {
     #[test]
     fn writes_empty_snapshot_when_no_resources() {
         let mut app = App::new();
-        app.init_resource::<CommandBarAgentsSnapshot>();
-        app.add_systems(Update, update_agents_snapshot);
+        app.init_resource::<CommandBarAgentsSnapshot>()
+            .add_systems(Update, update_agents_snapshot);
         app.update();
         let snap = app.world().resource::<CommandBarAgentsSnapshot>();
         assert!(snap.providers.is_empty());
@@ -92,8 +92,8 @@ mod tests {
     #[test]
     fn agent_sessions_snapshot_starts_empty() {
         let mut app = App::new();
-        app.init_resource::<CommandBarTerminalsSnapshot>();
-        app.add_systems(Update, update_agent_sessions_snapshot);
+        app.init_resource::<CommandBarTerminalsSnapshot>()
+            .add_systems(Update, update_agent_sessions_snapshot);
         app.update();
         let snap = app.world().resource::<CommandBarTerminalsSnapshot>();
         assert!(snap.agent_session_to_entity.is_empty());

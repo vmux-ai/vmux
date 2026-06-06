@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 pub fn active_profile_name() -> &'static str {
-    "default"
+    "personal"
 }
 
 pub fn shared_data_dir() -> PathBuf {
@@ -31,7 +31,7 @@ pub fn cef_cache_path() -> Option<String> {
 }
 
 pub fn default_space_dir() -> PathBuf {
-    space_dir("default")
+    space_dir("space-1")
 }
 
 pub fn space_dir(space_id: &str) -> PathBuf {

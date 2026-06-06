@@ -10,12 +10,9 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
     exit 1
 fi
 
-copy_webview_app() {
-    local host="$1"
-    local crate="$2"
-    local subdir="${3:-dist}"
-    local src="$ROOT/crates/$crate/$subdir"
-    local dest="$WEBVIEW_ROOT/$host"
+copy_shared_webview_app() {
+    local src="$ROOT/crates/vmux_server/dist"
+    local dest="$WEBVIEW_ROOT/_shared"
 
     if [[ ! -f "$src/index.html" ]]; then
         echo "copy-webview-assets: missing $src/index.html" >&2
@@ -29,11 +26,6 @@ copy_webview_app() {
 rm -rf "$WEBVIEW_ROOT"
 mkdir -p "$WEBVIEW_ROOT"
 
-copy_webview_app "layout" "vmux_layout" "dist-layout"
-copy_webview_app "command-bar" "vmux_layout" "dist-command-bar"
-copy_webview_app "terminal" "vmux_terminal"
-copy_webview_app "services" "vmux_service"
-copy_webview_app "history" "vmux_history"
-copy_webview_app "spaces" "vmux_space"
+copy_shared_webview_app
 
 echo "copy-webview-assets: copied webview assets to $WEBVIEW_ROOT"

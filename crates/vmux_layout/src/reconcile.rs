@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::protocol::{Focus, LayoutNode, LayoutSnapshot, NodeKind, Tab, parse_id};
+use crate::protocol::{Focus, LayoutNode, LayoutSnapshot, NodeKind, Stack as StackDto, parse_id};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ValidationError {
@@ -13,10 +13,10 @@ pub enum ValidationError {
         expected: NodeKind,
         got: NodeKind,
     },
-    NewTabMissingUrl,
-    NewTabMissingKind,
-    NewPaneMissingTabs,
-    NewSpaceMissingName,
+    NewStackMissingUrl,
+    NewStackMissingKind,
+    NewPaneMissingStacks,
+    NewTabMissingName,
     FlexWeightsLengthMismatch {
         children: usize,
         weights: usize,
@@ -29,14 +29,14 @@ pub fn validate(snapshot: &LayoutSnapshot) -> Result<(), ValidationError> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut all_ids: HashSet<String> = HashSet::new();
 
-    for space in &snapshot.spaces {
-        if let Some(id) = &space.id {
+    for tab in &snapshot.tabs {
+        if let Some(id) = &tab.id {
             let (kind, _) =
                 parse_id(id).map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
-            if kind != NodeKind::Space {
+            if kind != NodeKind::Tab {
                 return Err(ValidationError::WrongKindForPosition {
                     id: id.clone(),
-                    expected: NodeKind::Space,
+                    expected: NodeKind::Tab,
                     got: kind,
                 });
             }
@@ -44,10 +44,10 @@ pub fn validate(snapshot: &LayoutSnapshot) -> Result<(), ValidationError> {
                 return Err(ValidationError::DuplicateId(id.clone()));
             }
             all_ids.insert(id.clone());
-        } else if space.name.is_empty() {
-            return Err(ValidationError::NewSpaceMissingName);
+        } else if tab.name.is_empty() {
+            return Err(ValidationError::NewTabMissingName);
         }
-        validate_node(&space.root, &mut seen, &mut all_ids)?;
+        validate_node(&tab.root, &mut seen, &mut all_ids)?;
     }
 
     validate_focus(&snapshot.focused, &all_ids)?;
@@ -92,7 +92,7 @@ fn validate_node(
             }
             Ok(())
         }
-        LayoutNode::Pane { id, tabs, .. } => {
+        LayoutNode::Pane { id, stacks, .. } => {
             if let Some(id) = id {
                 let (kind, _) =
                     parse_id(id).map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
@@ -107,28 +107,28 @@ fn validate_node(
                     return Err(ValidationError::DuplicateId(id.clone()));
                 }
                 all_ids.insert(id.clone());
-            } else if tabs.is_empty() {
-                return Err(ValidationError::NewPaneMissingTabs);
+            } else if stacks.is_empty() {
+                return Err(ValidationError::NewPaneMissingStacks);
             }
-            for tab in tabs {
-                validate_tab(tab, seen, all_ids)?;
+            for stack in stacks {
+                validate_stack(stack, seen, all_ids)?;
             }
             Ok(())
         }
     }
 }
 
-fn validate_tab(
-    tab: &Tab,
+fn validate_stack(
+    stack: &StackDto,
     seen: &mut HashSet<String>,
     all_ids: &mut HashSet<String>,
 ) -> Result<(), ValidationError> {
-    if let Some(id) = &tab.id {
+    if let Some(id) = &stack.id {
         let (kind, _) = parse_id(id).map_err(|_| ValidationError::InvalidIdFormat(id.clone()))?;
-        if kind != NodeKind::Tab {
+        if kind != NodeKind::Stack {
             return Err(ValidationError::WrongKindForPosition {
                 id: id.clone(),
-                expected: NodeKind::Tab,
+                expected: NodeKind::Stack,
                 got: kind,
             });
         }
@@ -137,18 +137,18 @@ fn validate_tab(
         }
         all_ids.insert(id.clone());
     } else {
-        if tab.url.is_empty() {
-            return Err(ValidationError::NewTabMissingUrl);
+        if stack.url.is_empty() {
+            return Err(ValidationError::NewStackMissingUrl);
         }
-        if tab.kind.is_empty() {
-            return Err(ValidationError::NewTabMissingKind);
+        if stack.kind.is_empty() {
+            return Err(ValidationError::NewStackMissingKind);
         }
     }
     Ok(())
 }
 
 fn validate_focus(focus: &Focus, all_ids: &HashSet<String>) -> Result<(), ValidationError> {
-    for id in [&focus.space, &focus.pane, &focus.tab]
+    for id in [&focus.tab, &focus.pane, &focus.stack]
         .into_iter()
         .flatten()
     {
@@ -183,19 +183,19 @@ pub fn plan_diff(
     let mut actions_by_id: HashMap<String, NodeAction> = HashMap::new();
     let mut referenced: HashSet<String> = HashSet::new();
 
-    for space in &snapshot.spaces {
-        if let Some(id) = &space.id {
+    for tab in &snapshot.tabs {
+        if let Some(id) = &tab.id {
             referenced.insert(id.clone());
             let (_, value) = parse_id(id).expect("validated above");
             actions_by_id.insert(
                 id.clone(),
                 NodeAction::Match {
                     existing: value,
-                    desired_kind: NodeKind::Space,
+                    desired_kind: NodeKind::Tab,
                 },
             );
         }
-        plan_node(&space.root, &mut actions_by_id, &mut referenced);
+        plan_node(&tab.root, &mut actions_by_id, &mut referenced);
     }
 
     let mut missing: Vec<String> = referenced.difference(existing_ids).cloned().collect();
@@ -235,7 +235,7 @@ fn plan_node(
                 plan_node(c, actions_by_id, referenced);
             }
         }
-        LayoutNode::Pane { id, tabs, .. } => {
+        LayoutNode::Pane { id, stacks, .. } => {
             if let Some(id) = id {
                 referenced.insert(id.clone());
                 let (_, value) = parse_id(id).expect("validated");
@@ -247,7 +247,7 @@ fn plan_node(
                     },
                 );
             }
-            for t in tabs {
+            for t in stacks {
                 if let Some(tid) = &t.id {
                     referenced.insert(tid.clone());
                     let (_, value) = parse_id(tid).expect("validated");
@@ -255,7 +255,7 @@ fn plan_node(
                         tid.clone(),
                         NodeAction::Match {
                             existing: value,
-                            desired_kind: NodeKind::Tab,
+                            desired_kind: NodeKind::Stack,
                         },
                     );
                 }
@@ -277,9 +277,9 @@ use crate::protocol as proto;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::protocol::format_id;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::space::Space;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::stack::{Stack, stack_bundle};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::tab::Tab as LayoutTab;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{LayoutSpawnRequest, event::PANE_GAP_PX};
 #[cfg(not(target_arch = "wasm32"))]
@@ -287,7 +287,7 @@ use bevy::ecs::message::{MessageReader, MessageWriter, Messages};
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
-use vmux_core::PageMetadata;
+use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_history::LastActivatedAt;
 
@@ -321,7 +321,7 @@ pub struct LayoutSnapshotResponse {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn serve_snapshot_requests(
     mut reader: MessageReader<LayoutSnapshotRequest>,
-    spaces_q: Query<(Entity, &Space, Option<&Children>)>,
+    tabs_q: Query<(Entity, &LayoutTab, Option<&Children>)>,
     splits_q: Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
     leaves_q: Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
     stacks_q: Query<(Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<Stack>>,
@@ -332,7 +332,7 @@ pub fn serve_snapshot_requests(
 ) {
     for request in reader.read() {
         let snapshot = crate::snapshot::build_layout_snapshot(
-            &spaces_q,
+            &tabs_q,
             &splits_q,
             &leaves_q,
             &stacks_q,
@@ -374,7 +374,7 @@ pub fn apply_layout_requests(
 fn run_build_snapshot(world: &mut World) -> LayoutSnapshot {
     use bevy::ecs::system::SystemState;
     let mut state = SystemState::<(
-        Query<(Entity, &Space, Option<&Children>)>,
+        Query<(Entity, &LayoutTab, Option<&Children>)>,
         Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
         Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
         Query<(Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<Stack>>,
@@ -382,9 +382,9 @@ fn run_build_snapshot(world: &mut World) -> LayoutSnapshot {
         Query<&crate::pane::Zoomed>,
         Res<crate::stack::FocusedStack>,
     )>::new(world);
-    let (spaces, splits, leaves, stacks, pane_sizes, zoomed, focused) = state.get(world);
+    let (tabs, splits, leaves, stacks, pane_sizes, zoomed, focused) = state.get(world).unwrap();
     crate::snapshot::build_layout_snapshot(
-        &spaces,
+        &tabs,
         &splits,
         &leaves,
         &stacks,
@@ -410,37 +410,37 @@ pub fn apply_with_existing(
 
     let mut new_entities: std::collections::HashMap<*const proto::LayoutNode, Entity> =
         std::collections::HashMap::new();
-    for space in &snapshot.spaces {
-        let space_entity = match &space.id {
+    for tab in &snapshot.tabs {
+        let tab_entity = match &tab.id {
             Some(id) => match parse_id(id) {
                 Ok((_, value)) => Entity::from_bits(value),
                 Err(_) => continue,
             },
             None => {
                 let entity = world
-                    .spawn((crate::space::space_bundle(), LastActivatedAt::now()))
+                    .spawn((crate::tab::tab_bundle(), LastActivatedAt::now()))
                     .id();
-                if !space.name.is_empty()
-                    && let Some(mut tab) = world.get_mut::<Space>(entity)
+                if !tab.name.is_empty()
+                    && let Some(mut layout_tab) = world.get_mut::<LayoutTab>(entity)
                 {
-                    tab.name = space.name.clone();
+                    layout_tab.name = tab.name.clone();
                 }
                 entity
             }
         };
-        create_descendants(world, space_entity, &space.root, &mut new_entities);
+        materialize_descendants(world, tab_entity, &tab.root, &mut new_entities);
     }
 
-    for space in &snapshot.spaces {
-        if let Some(id) = &space.id
+    for tab in &snapshot.tabs {
+        if let Some(id) = &tab.id
             && let Ok((_, value)) = parse_id(id)
         {
-            let space_entity = Entity::from_bits(value);
-            apply_structure(world, Some(space_entity), &space.root, &new_entities);
+            let tab_entity = Entity::from_bits(value);
+            apply_structure(world, Some(tab_entity), &tab.root, &new_entities);
         }
     }
-    for space in &snapshot.spaces {
-        apply_space(world, space);
+    for tab in &snapshot.tabs {
+        apply_tab(world, tab);
     }
     let rescued: ApplyHashSet<String> = new_entities
         .iter()
@@ -465,7 +465,7 @@ pub fn apply_with_existing(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn create_descendants(
+fn materialize_descendants(
     world: &mut World,
     parent: Entity,
     node: &proto::LayoutNode,
@@ -478,7 +478,7 @@ fn create_descendants(
                 Err(_) => return,
             },
             None => {
-                if world.get::<Space>(parent).is_some()
+                if world.get::<LayoutTab>(parent).is_some()
                     && let Some(existing_root) = find_root_split_child(world, parent)
                 {
                     set_split_direction(world, existing_root, *direction);
@@ -507,7 +507,9 @@ fn create_descendants(
                 Err(_) => return,
             },
             None => {
-                let entity = spawn_leaf_pane(world, parent);
+                let entity = world
+                    .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
+                    .id();
                 new_entities.insert(node as *const _, entity);
                 entity
             }
@@ -517,13 +519,31 @@ fn create_descendants(
     match node {
         proto::LayoutNode::Split { children, .. } => {
             for c in children {
-                create_descendants(world, node_entity, c, new_entities);
+                materialize_descendants(world, node_entity, c, new_entities);
             }
         }
-        proto::LayoutNode::Pane { tabs, .. } => {
-            for t in tabs {
+        proto::LayoutNode::Pane { stacks, .. } => {
+            for t in stacks {
                 if t.id.is_none() {
-                    spawn_tab(world, node_entity, t);
+                    let stack = world
+                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(node_entity)))
+                        .id();
+                    match t.kind.as_str() {
+                        "terminal" => {
+                            world
+                                .resource_mut::<Messages<LayoutSpawnRequest>>()
+                                .write(LayoutSpawnRequest::Terminal { stack });
+                        }
+                        _ => {
+                            world.resource_mut::<Messages<PageOpenRequest>>().write(
+                                PageOpenRequest {
+                                    target: PageOpenTarget::Stack(stack),
+                                    url: t.url.clone(),
+                                    request_id: None,
+                                },
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -531,9 +551,9 @@ fn create_descendants(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn find_root_split_child(world: &World, space: Entity) -> Option<Entity> {
+fn find_root_split_child(world: &World, tab: Entity) -> Option<Entity> {
     world
-        .get::<Children>(space)?
+        .get::<Children>(tab)?
         .iter()
         .find(|&e| world.get::<PaneSplit>(e).is_some())
 }
@@ -559,35 +579,6 @@ fn set_split_direction(world: &mut World, entity: Entity, direction: proto::Spli
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_leaf_pane(world: &mut World, parent: Entity) -> Entity {
-    world
-        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(parent)))
-        .id()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn spawn_tab(world: &mut World, pane: Entity, tab: &proto::Tab) {
-    let stack = world
-        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-        .id();
-    match tab.kind.as_str() {
-        "terminal" => {
-            world
-                .resource_mut::<Messages<LayoutSpawnRequest>>()
-                .write(LayoutSpawnRequest::Terminal { stack });
-        }
-        _ => {
-            world.resource_mut::<Messages<LayoutSpawnRequest>>().write(
-                LayoutSpawnRequest::OpenUrl {
-                    stack,
-                    url: tab.url.clone(),
-                },
-            );
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 fn apply_close(world: &mut World, id: &str) {
     let Ok((_kind, value)) = parse_id(id) else {
         return;
@@ -601,9 +592,9 @@ fn apply_close(world: &mut World, id: &str) {
 #[cfg(not(target_arch = "wasm32"))]
 fn collect_existing_ids(world: &mut World) -> ApplyHashSet<String> {
     let mut out = ApplyHashSet::new();
-    let mut q_space = world.query_filtered::<Entity, With<Space>>();
-    for e in q_space.iter(world) {
-        out.insert(format_id(NodeKind::Space, e.to_bits()));
+    let mut q_tab = world.query_filtered::<Entity, With<LayoutTab>>();
+    for e in q_tab.iter(world) {
+        out.insert(format_id(NodeKind::Tab, e.to_bits()));
     }
     let mut q_split = world.query_filtered::<Entity, (With<Pane>, With<PaneSplit>)>();
     for e in q_split.iter(world) {
@@ -615,22 +606,22 @@ fn collect_existing_ids(world: &mut World) -> ApplyHashSet<String> {
     }
     let mut q_tab = world.query_filtered::<Entity, With<Stack>>();
     for e in q_tab.iter(world) {
-        out.insert(format_id(NodeKind::Tab, e.to_bits()));
+        out.insert(format_id(NodeKind::Stack, e.to_bits()));
     }
     out
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn apply_space(world: &mut World, space: &proto::Space) {
-    if let Some(id) = &space.id
+fn apply_tab(world: &mut World, tab: &proto::Tab) {
+    if let Some(id) = &tab.id
         && let Ok((_, value)) = parse_id(id)
     {
         let entity = Entity::from_bits(value);
-        if let Some(mut tab) = world.get_mut::<Space>(entity) {
-            tab.name = space.name.clone();
+        if let Some(mut layout_tab) = world.get_mut::<LayoutTab>(entity) {
+            layout_tab.name = tab.name.clone();
         }
     }
-    apply_node(world, &space.root);
+    apply_node(world, &tab.root);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -662,8 +653,8 @@ fn apply_structure(
                 apply_structure(world, Some(entity), c, new_entities);
             }
         }
-        proto::LayoutNode::Pane { tabs, .. } => {
-            for t in tabs {
+        proto::LayoutNode::Pane { stacks, .. } => {
+            for t in stacks {
                 if let Some(tid) = t.id.as_deref()
                     && let Ok((_, value)) = parse_id(tid)
                 {
@@ -735,8 +726,8 @@ fn apply_node(world: &mut World, node: &proto::LayoutNode) {
                 apply_node(world, c);
             }
         }
-        proto::LayoutNode::Pane { tabs, .. } => {
-            for t in tabs {
+        proto::LayoutNode::Pane { stacks, .. } => {
+            for t in stacks {
                 if let Some(tid) = &t.id
                     && let Ok((_, value)) = parse_id(tid)
                 {
@@ -757,13 +748,13 @@ fn apply_focus(world: &mut World, focus: &proto::Focus) {
     let Some(mut focused) = world.get_resource_mut::<crate::stack::FocusedStack>() else {
         return;
     };
-    if let Some(id) = focus.space.as_deref() {
+    if let Some(id) = focus.tab.as_deref() {
         focused.tab = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
     }
     if let Some(id) = focus.pane.as_deref() {
         focused.pane = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
     }
-    if let Some(id) = focus.tab.as_deref() {
+    if let Some(id) = focus.stack.as_deref() {
         focused.stack = parse_id(id).ok().map(|(_, v)| Entity::from_bits(v));
     }
 }
@@ -780,13 +771,13 @@ fn node_entity(node: &proto::LayoutNode) -> Option<Entity> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{Space as SpaceDto, SplitDirection};
+    use crate::protocol::{SplitDirection, Tab as TabDto};
 
-    fn pane(id: Option<&str>, tabs: Vec<Tab>) -> LayoutNode {
+    fn pane(id: Option<&str>, stacks: Vec<StackDto>) -> LayoutNode {
         LayoutNode::Pane {
             id: id.map(str::to_string),
             is_zoomed: false,
-            tabs,
+            stacks,
         }
     }
 
@@ -801,8 +792,8 @@ mod tests {
 
     fn snapshot(root: LayoutNode, focus: Focus) -> LayoutSnapshot {
         LayoutSnapshot {
-            spaces: vec![SpaceDto {
-                id: Some("space:1".into()),
+            tabs: vec![TabDto {
+                id: Some("tab:1".into()),
                 name: "S".into(),
                 is_active: true,
                 root,
@@ -816,15 +807,15 @@ mod tests {
         let snap = snapshot(
             pane(
                 Some("pane:2"),
-                vec![Tab {
-                    id: Some("tab:3".into()),
+                vec![StackDto {
+                    id: Some("stack:3".into()),
                     ..Default::default()
                 }],
             ),
             Focus {
-                space: Some("space:1".into()),
+                tab: Some("tab:1".into()),
                 pane: Some("pane:2".into()),
-                tab: Some("tab:3".into()),
+                stack: Some("stack:3".into()),
             },
         );
         assert!(validate(&snap).is_ok());
@@ -851,7 +842,7 @@ mod tests {
         let snap = snapshot(pane(None, vec![]), Focus::default());
         assert!(matches!(
             validate(&snap),
-            Err(ValidationError::NewPaneMissingTabs)
+            Err(ValidationError::NewPaneMissingStacks)
         ));
     }
 
@@ -860,7 +851,7 @@ mod tests {
         let snap = snapshot(
             pane(
                 None,
-                vec![Tab {
+                vec![StackDto {
                     id: None,
                     url: String::new(),
                     kind: "browser".into(),
@@ -871,7 +862,7 @@ mod tests {
         );
         assert!(matches!(
             validate(&snap),
-            Err(ValidationError::NewTabMissingUrl)
+            Err(ValidationError::NewStackMissingUrl)
         ));
     }
 
@@ -880,7 +871,7 @@ mod tests {
         let snap = snapshot(
             pane(
                 None,
-                vec![Tab {
+                vec![StackDto {
                     id: None,
                     url: "https://x".into(),
                     kind: String::new(),
@@ -891,7 +882,7 @@ mod tests {
         );
         assert!(matches!(
             validate(&snap),
-            Err(ValidationError::NewTabMissingKind)
+            Err(ValidationError::NewStackMissingKind)
         ));
     }
 
@@ -900,15 +891,15 @@ mod tests {
         let snap = snapshot(
             pane(
                 Some("pane:2"),
-                vec![Tab {
-                    id: Some("tab:3".into()),
+                vec![StackDto {
+                    id: Some("stack:3".into()),
                     ..Default::default()
                 }],
             ),
             Focus {
-                space: Some("space:1".into()),
+                tab: Some("tab:1".into()),
                 pane: Some("pane:99".into()),
-                tab: None,
+                stack: None,
             },
         );
         assert!(matches!(
@@ -919,7 +910,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_wrong_kind_in_position() {
-        let snap = snapshot(pane(Some("tab:2"), vec![]), Focus::default());
+        let snap = snapshot(pane(Some("stack:2"), vec![]), Focus::default());
         assert!(matches!(
             validate(&snap),
             Err(ValidationError::WrongKindForPosition { .. })
@@ -933,8 +924,8 @@ mod tests {
                 Some("split:1"),
                 vec![pane(
                     Some("pane:2"),
-                    vec![Tab {
-                        id: Some("tab:3".into()),
+                    vec![StackDto {
+                        id: Some("stack:3".into()),
                         ..Default::default()
                     }],
                 )],
@@ -953,24 +944,24 @@ mod tests {
         let snap = snapshot(
             pane(
                 Some("pane:2"),
-                vec![Tab {
-                    id: Some("tab:3".into()),
+                vec![StackDto {
+                    id: Some("stack:3".into()),
                     ..Default::default()
                 }],
             ),
             Focus {
-                space: Some("space:1".into()),
+                tab: Some("tab:1".into()),
                 pane: Some("pane:2".into()),
-                tab: Some("tab:3".into()),
+                stack: Some("stack:3".into()),
             },
         );
-        let existing: HashSet<String> = ["space:1", "pane:2", "tab:3"]
+        let existing: HashSet<String> = ["tab:1", "pane:2", "stack:3"]
             .into_iter()
             .map(String::from)
             .collect();
         let plan = plan_diff(&snap, &existing).unwrap();
         assert!(plan.actions_by_id.contains_key("pane:2"));
-        assert!(plan.actions_by_id.contains_key("tab:3"));
+        assert!(plan.actions_by_id.contains_key("stack:3"));
         assert!(plan.closes.is_empty());
     }
 
@@ -979,23 +970,23 @@ mod tests {
         let snap = snapshot(
             pane(
                 Some("pane:2"),
-                vec![Tab {
-                    id: Some("tab:3".into()),
+                vec![StackDto {
+                    id: Some("stack:3".into()),
                     ..Default::default()
                 }],
             ),
             Focus {
-                space: Some("space:1".into()),
+                tab: Some("tab:1".into()),
                 pane: Some("pane:2".into()),
-                tab: Some("tab:3".into()),
+                stack: Some("stack:3".into()),
             },
         );
-        let existing: HashSet<String> = ["space:1", "pane:2", "tab:3", "tab:4"]
+        let existing: HashSet<String> = ["tab:1", "pane:2", "stack:3", "stack:4"]
             .into_iter()
             .map(String::from)
             .collect();
         let plan = plan_diff(&snap, &existing).unwrap();
-        assert_eq!(plan.closes, vec!["tab:4".to_string()]);
+        assert_eq!(plan.closes, vec!["stack:4".to_string()]);
     }
 
     #[test]
@@ -1003,7 +994,7 @@ mod tests {
         let snap = snapshot(
             pane(
                 None,
-                vec![Tab {
+                vec![StackDto {
                     id: None,
                     url: "https://x".into(),
                     kind: "browser".into(),
@@ -1011,12 +1002,12 @@ mod tests {
                 }],
             ),
             Focus {
-                space: Some("space:1".into()),
+                tab: Some("tab:1".into()),
                 pane: None,
-                tab: None,
+                stack: None,
             },
         );
-        let existing: HashSet<String> = ["space:1"].into_iter().map(String::from).collect();
+        let existing: HashSet<String> = ["tab:1"].into_iter().map(String::from).collect();
         let plan = plan_diff(&snap, &existing).unwrap();
         assert!(plan.closes.is_empty());
         assert_eq!(plan.actions_by_id.len(), 1);
@@ -1027,25 +1018,22 @@ mod tests {
         let snap = snapshot(
             pane(
                 Some("pane:2"),
-                vec![Tab {
-                    id: Some("tab:99".into()),
+                vec![StackDto {
+                    id: Some("stack:99".into()),
                     ..Default::default()
                 }],
             ),
             Focus {
-                space: Some("space:1".into()),
+                tab: Some("tab:1".into()),
                 pane: Some("pane:2".into()),
-                tab: Some("tab:99".into()),
+                stack: Some("stack:99".into()),
             },
         );
-        let existing: HashSet<String> = ["space:1", "pane:2"]
-            .into_iter()
-            .map(String::from)
-            .collect();
+        let existing: HashSet<String> = ["tab:1", "pane:2"].into_iter().map(String::from).collect();
         match plan_diff(&snap, &existing) {
             Err(ValidationError::MissingReferencedEntity(ids)) => {
                 assert!(
-                    ids.contains(&"tab:99".to_string()),
+                    ids.contains(&"stack:99".to_string()),
                     "expected stale tab:99 in error, got {ids:?}"
                 );
             }
@@ -1056,7 +1044,7 @@ mod tests {
     #[test]
     fn plan_rejects_referenced_pane_id_not_in_existing() {
         let snap = snapshot(pane(Some("pane:42"), vec![]), Focus::default());
-        let existing: HashSet<String> = ["space:1"].into_iter().map(String::from).collect();
+        let existing: HashSet<String> = ["tab:1"].into_iter().map(String::from).collect();
         assert!(matches!(
             plan_diff(&snap, &existing),
             Err(ValidationError::MissingReferencedEntity(_))
@@ -1064,13 +1052,13 @@ mod tests {
     }
 
     use crate::pane::{Pane, PaneSplitDirection};
-    use crate::space::Space;
+    use crate::tab::Tab as LayoutTab;
 
     #[test]
     fn updating_split_direction_changes_component() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let split_e = app
             .world_mut()
             .spawn((
@@ -1078,15 +1066,15 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                ChildOf(space),
+                ChildOf(tab),
             ))
             .id();
         let _pane_a = app.world_mut().spawn((Pane, ChildOf(split_e))).id();
         let _pane_b = app.world_mut().spawn((Pane, ChildOf(split_e))).id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -1108,7 +1096,7 @@ mod tests {
     fn updating_flex_weights_writes_pane_size_flex_grow() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let split_e = app
             .world_mut()
             .spawn((
@@ -1116,7 +1104,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                ChildOf(space),
+                ChildOf(tab),
             ))
             .id();
         let pane_a = app
@@ -1129,8 +1117,8 @@ mod tests {
             .id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -1141,12 +1129,12 @@ mod tests {
                         proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, pane_a.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![],
+                            stacks: vec![],
                         },
                         proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, pane_b.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![],
+                            stacks: vec![],
                         },
                     ],
                 },
@@ -1163,7 +1151,7 @@ mod tests {
     fn moves_pane_to_new_parent() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let split_a = app
             .world_mut()
             .spawn((
@@ -1171,7 +1159,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                ChildOf(space),
+                ChildOf(tab),
             ))
             .id();
         let split_b = app
@@ -1181,15 +1169,15 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                ChildOf(space),
+                ChildOf(tab),
             ))
             .id();
         let moved = app.world_mut().spawn((Pane, ChildOf(split_a))).id();
         let _filler_b = app.world_mut().spawn((Pane, ChildOf(split_b))).id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -1203,7 +1191,7 @@ mod tests {
                         children: vec![proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, moved.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![],
+                            stacks: vec![],
                         }],
                     }],
                 },
@@ -1220,7 +1208,7 @@ mod tests {
     fn omitting_pane_from_snapshot_closes_it() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let split_e = app
             .world_mut()
             .spawn((
@@ -1228,15 +1216,15 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                ChildOf(space),
+                ChildOf(tab),
             ))
             .id();
         let keep = app.world_mut().spawn((Pane, ChildOf(split_e))).id();
         let drop_me = app.world_mut().spawn((Pane, ChildOf(split_e))).id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -1246,7 +1234,7 @@ mod tests {
                     children: vec![proto::LayoutNode::Pane {
                         id: Some(format_id(NodeKind::Pane, keep.to_bits())),
                         is_zoomed: false,
-                        tabs: vec![],
+                        stacks: vec![],
                     }],
                 },
             }],
@@ -1254,7 +1242,7 @@ mod tests {
         };
 
         let existing: std::collections::HashSet<String> = [
-            format_id(NodeKind::Space, space.to_bits()),
+            format_id(NodeKind::Tab, tab.to_bits()),
             format_id(NodeKind::Split, split_e.to_bits()),
             format_id(NodeKind::Pane, keep.to_bits()),
             format_id(NodeKind::Pane, drop_me.to_bits()),
@@ -1273,11 +1261,12 @@ mod tests {
     #[test]
     fn apply_returns_error_for_stale_tab_id_does_not_panic() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
-        let pane_e = app.world_mut().spawn((Pane, ChildOf(space))).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
+        let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let dead_stack = app
             .world_mut()
             .spawn((Stack::default(), ChildOf(pane_e)))
@@ -1285,15 +1274,15 @@ mod tests {
         app.world_mut().entity_mut(dead_stack).despawn();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Pane {
                     id: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
                     is_zoomed: false,
-                    tabs: vec![proto::Tab {
-                        id: Some(format_id(NodeKind::Tab, dead_stack.to_bits())),
+                    stacks: vec![proto::Stack {
+                        id: Some(format_id(NodeKind::Stack, dead_stack.to_bits())),
                         ..Default::default()
                     }],
                 },
@@ -1311,21 +1300,22 @@ mod tests {
     #[test]
     fn submitting_new_tab_id_none_spawns_stack_entity() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
-        let pane_e = app.world_mut().spawn((Pane, ChildOf(space))).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
+        let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Pane {
                     id: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
                     is_zoomed: false,
-                    tabs: vec![proto::Tab {
+                    stacks: vec![proto::Stack {
                         id: None,
                         url: "https://example.com".into(),
                         kind: "browser".into(),
@@ -1349,10 +1339,11 @@ mod tests {
     #[test]
     fn malformed_pane_id_skips_subtree_no_orphan_spawn() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
 
         let pane_count_before = app
             .world_mut()
@@ -1364,14 +1355,14 @@ mod tests {
         let bad_node = proto::LayoutNode::Pane {
             id: Some("pane:not_a_number".into()),
             is_zoomed: false,
-            tabs: vec![proto::Tab {
+            stacks: vec![proto::Stack {
                 id: None,
                 url: "https://example.com".into(),
                 kind: "browser".into(),
                 ..Default::default()
             }],
         };
-        create_descendants(app.world_mut(), space, &bad_node, &mut new_entities);
+        materialize_descendants(app.world_mut(), tab, &bad_node, &mut new_entities);
 
         let pane_count_after = app
             .world_mut()
@@ -1388,16 +1379,17 @@ mod tests {
             .query_filtered::<Entity, With<Stack>>()
             .iter(app.world())
             .count();
-        assert_eq!(stack_count, 0, "tabs under malformed pane must not spawn");
+        assert_eq!(stack_count, 0, "stacks under malformed pane must not spawn");
     }
 
     #[test]
     fn malformed_split_id_skips_subtree_no_orphan_spawn() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
 
         let split_count_before = app
             .world_mut()
@@ -1413,10 +1405,10 @@ mod tests {
             children: vec![proto::LayoutNode::Pane {
                 id: None,
                 is_zoomed: false,
-                tabs: vec![],
+                stacks: vec![],
             }],
         };
-        create_descendants(app.world_mut(), space, &bad_node, &mut new_entities);
+        materialize_descendants(app.world_mut(), tab, &bad_node, &mut new_entities);
 
         let split_count_after = app
             .world_mut()
@@ -1443,7 +1435,7 @@ mod tests {
     fn reordering_split_children_swaps_panes() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let split_e = app
             .world_mut()
             .spawn((
@@ -1451,7 +1443,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                ChildOf(space),
+                ChildOf(tab),
             ))
             .id();
         let pane_a = app.world_mut().spawn((Pane, ChildOf(split_e))).id();
@@ -1459,8 +1451,8 @@ mod tests {
         let pane_c = app.world_mut().spawn((Pane, ChildOf(split_e))).id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -1471,17 +1463,17 @@ mod tests {
                         proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, pane_c.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![],
+                            stacks: vec![],
                         },
                         proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, pane_a.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![],
+                            stacks: vec![],
                         },
                         proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, pane_b.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![],
+                            stacks: vec![],
                         },
                     ],
                 },
@@ -1506,40 +1498,40 @@ mod tests {
     #[test]
     fn focus_change_writes_focused_stack() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.insert_resource(crate::stack::FocusedStack::default());
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(crate::stack::FocusedStack::default());
 
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
-        let pane_e = app.world_mut().spawn((Pane, ChildOf(space))).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
+        let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let stack = app
             .world_mut()
             .spawn((Stack::default(), ChildOf(pane_e)))
             .id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Pane {
                     id: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
                     is_zoomed: false,
-                    tabs: vec![proto::Tab {
-                        id: Some(format_id(NodeKind::Tab, stack.to_bits())),
+                    stacks: vec![proto::Stack {
+                        id: Some(format_id(NodeKind::Stack, stack.to_bits())),
                         ..Default::default()
                     }],
                 },
             }],
             focused: proto::Focus {
-                space: Some(format_id(NodeKind::Space, space.to_bits())),
+                tab: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 pane: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
-                tab: Some(format_id(NodeKind::Tab, stack.to_bits())),
+                stack: Some(format_id(NodeKind::Stack, stack.to_bits())),
             },
         };
 
         apply(app.world_mut(), &snap).unwrap();
         let focused = app.world().resource::<crate::stack::FocusedStack>();
-        assert_eq!(focused.tab, Some(space));
+        assert_eq!(focused.tab, Some(tab));
         assert_eq!(focused.pane, Some(pane_e));
         assert_eq!(focused.stack, Some(stack));
     }
@@ -1547,12 +1539,13 @@ mod tests {
     #[test]
     fn apply_focus_preserves_existing_when_dto_fields_omitted() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.insert_resource(crate::stack::FocusedStack::default());
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(crate::stack::FocusedStack::default());
 
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
-        let pane_e = app.world_mut().spawn((Pane, ChildOf(space))).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
+        let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let stack = app
             .world_mut()
             .spawn((Stack::default(), ChildOf(pane_e)))
@@ -1560,21 +1553,21 @@ mod tests {
 
         {
             let mut f = app.world_mut().resource_mut::<crate::stack::FocusedStack>();
-            f.tab = Some(space);
+            f.tab = Some(tab);
             f.pane = Some(pane_e);
             f.stack = Some(stack);
         }
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Pane {
                     id: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
                     is_zoomed: false,
-                    tabs: vec![proto::Tab {
-                        id: Some(format_id(NodeKind::Tab, stack.to_bits())),
+                    stacks: vec![proto::Stack {
+                        id: Some(format_id(NodeKind::Stack, stack.to_bits())),
                         ..Default::default()
                     }],
                 },
@@ -1584,22 +1577,23 @@ mod tests {
 
         apply(app.world_mut(), &snap).unwrap();
         let f = app.world().resource::<crate::stack::FocusedStack>();
-        assert_eq!(f.tab, Some(space), "focused.tab must be preserved");
+        assert_eq!(f.tab, Some(tab), "focused.tab must be preserved");
         assert_eq!(f.pane, Some(pane_e), "focused.pane must be preserved");
         assert_eq!(f.stack, Some(stack), "focused.stack must be preserved");
     }
 
     #[test]
-    fn spawn_split_inserts_node_with_flex_direction() {
+    fn new_split_inserts_node_with_flex_direction() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
-        let pane_e = app.world_mut().spawn((Pane, ChildOf(space))).id();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
+        let pane_e = app.world_mut().spawn((Pane, ChildOf(tab))).id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -1610,12 +1604,12 @@ mod tests {
                         proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, pane_e.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![],
+                            stacks: vec![],
                         },
                         proto::LayoutNode::Pane {
                             id: None,
                             is_zoomed: false,
-                            tabs: vec![proto::Tab {
+                            stacks: vec![proto::Stack {
                                 id: None,
                                 url: "https://example.com".into(),
                                 kind: "browser".into(),
@@ -1645,13 +1639,14 @@ mod tests {
     #[test]
     fn new_split_wraps_existing_pane_without_converting_it() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let existing_pane = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(space)))
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
@@ -1659,8 +1654,8 @@ mod tests {
             .id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -1671,15 +1666,15 @@ mod tests {
                         proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, existing_pane.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![proto::Tab {
-                                id: Some(format_id(NodeKind::Tab, stack.to_bits())),
+                            stacks: vec![proto::Stack {
+                                id: Some(format_id(NodeKind::Stack, stack.to_bits())),
                                 ..Default::default()
                             }],
                         },
                         proto::LayoutNode::Pane {
                             id: None,
                             is_zoomed: false,
-                            tabs: vec![proto::Tab {
+                            stacks: vec![proto::Stack {
                                 id: None,
                                 url: "https://example.com".into(),
                                 kind: "browser".into(),
@@ -1693,9 +1688,9 @@ mod tests {
         };
 
         let existing: std::collections::HashSet<String> = [
-            format_id(NodeKind::Space, space.to_bits()),
+            format_id(NodeKind::Tab, tab.to_bits()),
             format_id(NodeKind::Pane, existing_pane.to_bits()),
-            format_id(NodeKind::Tab, stack.to_bits()),
+            format_id(NodeKind::Stack, stack.to_bits()),
         ]
         .into_iter()
         .collect();
@@ -1739,12 +1734,13 @@ mod tests {
     }
 
     #[test]
-    fn new_root_split_id_none_reuses_existing_root_split_of_space() {
+    fn new_root_split_id_none_reuses_existing_root_split_of_tab() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let existing_root = app
             .world_mut()
             .spawn((
@@ -1752,7 +1748,7 @@ mod tests {
                 PaneSplit {
                     direction: PaneSplitDirection::Row,
                 },
-                ChildOf(space),
+                ChildOf(tab),
             ))
             .id();
         let existing_leaf = app
@@ -1765,8 +1761,8 @@ mod tests {
             .id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -1777,15 +1773,15 @@ mod tests {
                         proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, existing_leaf.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![proto::Tab {
-                                id: Some(format_id(NodeKind::Tab, stack.to_bits())),
+                            stacks: vec![proto::Stack {
+                                id: Some(format_id(NodeKind::Stack, stack.to_bits())),
                                 ..Default::default()
                             }],
                         },
                         proto::LayoutNode::Pane {
                             id: None,
                             is_zoomed: false,
-                            tabs: vec![proto::Tab {
+                            stacks: vec![proto::Stack {
                                 id: None,
                                 url: "https://example.com".into(),
                                 kind: "browser".into(),
@@ -1799,10 +1795,10 @@ mod tests {
         };
 
         let existing: std::collections::HashSet<String> = [
-            format_id(NodeKind::Space, space.to_bits()),
+            format_id(NodeKind::Tab, tab.to_bits()),
             format_id(NodeKind::Split, existing_root.to_bits()),
             format_id(NodeKind::Pane, existing_leaf.to_bits()),
-            format_id(NodeKind::Tab, stack.to_bits()),
+            format_id(NodeKind::Stack, stack.to_bits()),
         ]
         .into_iter()
         .collect();
@@ -1835,16 +1831,16 @@ mod tests {
         use bevy::ecs::message::Messages;
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<LayoutSnapshotRequest>();
-        app.add_message::<LayoutSnapshotResponse>();
-        app.insert_resource(crate::stack::FocusedStack::default());
-        app.add_systems(Update, super::serve_snapshot_requests);
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LayoutSnapshotRequest>()
+            .add_message::<LayoutSnapshotResponse>()
+            .insert_resource(crate::stack::FocusedStack::default())
+            .add_systems(Update, super::serve_snapshot_requests);
 
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let _ = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), ChildOf(space)))
+            .spawn((leaf_pane_bundle(), ChildOf(tab)))
             .id();
 
         app.world_mut()
@@ -1861,7 +1857,7 @@ mod tests {
             .next()
             .expect("expected one response");
         assert_eq!(response.request_id, [7; 16]);
-        assert_eq!(response.snapshot.spaces.len(), 1);
+        assert_eq!(response.snapshot.tabs.len(), 1);
     }
 
     #[test]
@@ -1869,28 +1865,29 @@ mod tests {
         use bevy::ecs::message::Messages;
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<LayoutApplyRequest>();
-        app.add_message::<LayoutApplyResponse>();
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.insert_resource(crate::stack::FocusedStack::default());
-        app.add_systems(Update, super::apply_layout_requests);
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LayoutApplyRequest>()
+            .add_message::<LayoutApplyResponse>()
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(crate::stack::FocusedStack::default())
+            .add_systems(Update, super::apply_layout_requests);
 
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let pane = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), ChildOf(space)))
+            .spawn((leaf_pane_bundle(), ChildOf(tab)))
             .id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Pane {
                     id: Some(format_id(NodeKind::Pane, pane.to_bits())),
                     is_zoomed: false,
-                    tabs: vec![],
+                    stacks: vec![],
                 },
             }],
             focused: proto::Focus::default(),
@@ -1917,13 +1914,14 @@ mod tests {
     #[test]
     fn new_split_preserves_submitted_children_order_with_new_pane_first() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_message::<crate::LayoutSpawnRequest>();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
 
-        let space = app.world_mut().spawn(Space { name: "S".into() }).id();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
         let existing_pane = app
             .world_mut()
-            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(space)))
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
             .id();
         let stack = app
             .world_mut()
@@ -1931,8 +1929,8 @@ mod tests {
             .id();
 
         let snap = LayoutSnapshot {
-            spaces: vec![proto::Space {
-                id: Some(format_id(NodeKind::Space, space.to_bits())),
+            tabs: vec![proto::Tab {
+                id: Some(format_id(NodeKind::Tab, tab.to_bits())),
                 name: "S".into(),
                 is_active: true,
                 root: proto::LayoutNode::Split {
@@ -1943,7 +1941,7 @@ mod tests {
                         proto::LayoutNode::Pane {
                             id: None,
                             is_zoomed: false,
-                            tabs: vec![proto::Tab {
+                            stacks: vec![proto::Stack {
                                 id: None,
                                 url: "https://example.com".into(),
                                 kind: "browser".into(),
@@ -1953,8 +1951,8 @@ mod tests {
                         proto::LayoutNode::Pane {
                             id: Some(format_id(NodeKind::Pane, existing_pane.to_bits())),
                             is_zoomed: false,
-                            tabs: vec![proto::Tab {
-                                id: Some(format_id(NodeKind::Tab, stack.to_bits())),
+                            stacks: vec![proto::Stack {
+                                id: Some(format_id(NodeKind::Stack, stack.to_bits())),
                                 ..Default::default()
                             }],
                         },
@@ -1965,9 +1963,9 @@ mod tests {
         };
 
         let existing: std::collections::HashSet<String> = [
-            format_id(NodeKind::Space, space.to_bits()),
+            format_id(NodeKind::Tab, tab.to_bits()),
             format_id(NodeKind::Pane, existing_pane.to_bits()),
-            format_id(NodeKind::Tab, stack.to_bits()),
+            format_id(NodeKind::Stack, stack.to_bits()),
         ]
         .into_iter()
         .collect();

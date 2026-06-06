@@ -4,22 +4,13 @@ description = "Settings webview app"
 version.workspace = true
 edition.workspace = true
 publish = false
-build = "build.rs"
 
 [features]
 default = []
 web = []
 
-[[bin]]
-name = "vmux_setting_app"
-path = "src/main.rs"
-required-features = ["web"]
-
 [lib]
 path = "src/lib.rs"
-
-[build-dependencies]
-vmux_server = { path = "../vmux_server", features = ["build"] }
 
 [dependencies]
 rkyv = { workspace = true }
@@ -37,7 +28,6 @@ vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
-vmux_server = { path = "../vmux_server" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }

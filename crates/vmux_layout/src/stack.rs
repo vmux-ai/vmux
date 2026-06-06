@@ -1,9 +1,9 @@
 use crate::event::SERVICES_PAGE_URL;
 use crate::{
-    LayoutSpawnRequest, NewStackContext,
+    NewStackContext,
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
-    space::Space,
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
+    tab::Tab,
 };
 use bevy::{
     ecs::relationship::Relationship,
@@ -15,6 +15,7 @@ use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, ReadAppCommands, ServiceCommand,
     StackCommand,
 };
+use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_history::LastActivatedAt;
 
 /// Cached result of `focused_stack()`, computed once per frame in `Update`
@@ -123,7 +124,7 @@ pub fn active_stack_in_pane(
 }
 
 pub fn focused_stack(
-    tabs: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: &Query<&Children>,
     leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -138,7 +139,7 @@ pub fn focused_stack(
 
 fn compute_focused_stack(
     mut cached: ResMut<FocusedStack>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -178,7 +179,7 @@ pub fn stack_bundle() -> impl Bundle {
 
 fn handle_stack_commands(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -190,7 +191,7 @@ fn handle_stack_commands(
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
 
     mut new_stack_ctx: ResMut<NewStackContext>,
-    mut spawn_requests: MessageWriter<LayoutSpawnRequest>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
     mut pending_cursor_warp: ResMut<PendingCursorWarp>,
 ) {
@@ -230,12 +231,13 @@ fn handle_stack_commands(
                 commands.entity(stack).insert(vmux_core::PageMetadata {
                     url: SERVICES_PAGE_URL.to_string(),
                     title: "Background Services".to_string(),
-                    bg_color: Some(crate::event::TERMINAL_CHROME_BG_COLOR.to_string()),
+                    bg_color: Some(crate::event::TERMINAL_CEF_BG_COLOR.to_string()),
                     ..default()
                 });
-                spawn_requests.write(LayoutSpawnRequest::OpenUrl {
-                    stack,
+                page_open_requests.write(PageOpenRequest {
+                    target: PageOpenTarget::Stack(stack),
                     url: SERVICES_PAGE_URL.to_string(),
+                    request_id: None,
                 });
             }
             Dispatch::NewStackUrl(override_url) => {
@@ -251,7 +253,11 @@ fn handle_stack_commands(
                     let stack = commands
                         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
                         .id();
-                    spawn_requests.write(LayoutSpawnRequest::OpenUrl { stack, url });
+                    page_open_requests.write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(stack),
+                        url,
+                        request_id: None,
+                    });
                 } else {
                     if new_stack_ctx.stack.is_some() {
                         new_stack_ctx.needs_open = true;
@@ -297,86 +303,95 @@ fn handle_stack_commands(
                         continue;
                     }
 
-                    if leaf_panes.iter().count() <= 1 {
+                    if let Ok(parent) = child_of_q.get(pane).map(Relationship::get)
+                        && split_dir_q.contains(parent)
+                    {
                         commands.entity(active).despawn();
-                        let stack = commands
-                            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                            .id();
-                        new_stack_ctx.stack = Some(stack);
+                        let Ok(siblings) = pane_children.get(parent) else {
+                            continue;
+                        };
+                        let sibling = siblings.iter().find(|&e| {
+                            e != pane && (leaf_panes.contains(e) || split_dir_q.contains(e))
+                        });
+                        let Some(sibling) = sibling else {
+                            continue;
+                        };
+                        let sibling_children: Vec<Entity> = pane_children
+                            .get(sibling)
+                            .map(|c| c.iter().collect())
+                            .unwrap_or_default();
+
+                        for &child in &sibling_children {
+                            commands.entity(child).insert(ChildOf(parent));
+                        }
+
+                        let new_active_pane;
+                        if split_dir_q.contains(sibling) {
+                            new_active_pane =
+                                first_leaf_descendant(sibling, &pane_children, &leaf_panes);
+                            commands.entity(sibling).remove::<ChildOf>();
+                            commands.queue(move |world: &mut World| {
+                                world.despawn(sibling);
+                            });
+                        } else {
+                            new_active_pane = parent;
+                            commands.entity(parent).remove::<PaneSplit>();
+                            commands.entity(parent).insert(Node {
+                                flex_grow: 1.0,
+                                flex_basis: Val::Px(0.0),
+                                align_items: AlignItems::Stretch,
+                                justify_content: JustifyContent::Stretch,
+                                ..default()
+                            });
+                            commands.entity(sibling).despawn();
+                        }
+
+                        commands.entity(pane).despawn();
+                        commands
+                            .entity(new_active_pane)
+                            .insert(LastActivatedAt::now());
+                        let new_stack =
+                            active_stack_in_pane(new_active_pane, &pane_children, &stack_ts)
+                                .or_else(|| {
+                                    first_stack_in_pane(new_active_pane, &pane_children, &stack_q)
+                                })
+                                .or_else(|| {
+                                    sibling_children
+                                        .iter()
+                                        .copied()
+                                        .find(|&e| stack_q.contains(e))
+                                });
+                        if let Some(t) = new_stack {
+                            commands.entity(t).insert(LastActivatedAt::now());
+                        }
+                        if new_stack_ctx.stack == Some(active) {
+                            new_stack_ctx.stack = None;
+                        }
                         new_stack_ctx.previous_stack = None;
-                        new_stack_ctx.needs_open = true;
-                        continue;
-                    }
-
-                    let Ok(pane_co) = child_of_q.get(pane) else {
-                        continue;
-                    };
-                    let parent = pane_co.get();
-
-                    if !split_dir_q.contains(parent) {
-                        commands.entity(active).despawn();
+                        new_stack_ctx.needs_open = false;
                         continue;
                     }
 
                     commands.entity(active).despawn();
-
-                    let Ok(siblings) = pane_children.get(parent) else {
-                        continue;
-                    };
-                    let sibling = siblings.iter().find(|&e| {
-                        e != pane && (leaf_panes.contains(e) || split_dir_q.contains(e))
-                    });
-                    let Some(sibling) = sibling else {
-                        continue;
-                    };
-
-                    let sibling_children: Vec<Entity> = pane_children
-                        .get(sibling)
-                        .map(|c| c.iter().collect())
+                    let stack = commands
+                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+                        .id();
+                    new_stack_ctx.previous_stack = None;
+                    let startup_url = effective_startup_url
+                        .as_deref()
+                        .map(|u| u.0.clone())
                         .unwrap_or_default();
-
-                    for &child in &sibling_children {
-                        commands.entity(child).insert(ChildOf(parent));
-                    }
-
-                    let new_active_pane;
-                    if split_dir_q.contains(sibling) {
-                        new_active_pane =
-                            first_leaf_descendant(sibling, &pane_children, &leaf_panes);
-                        commands.entity(sibling).remove::<ChildOf>();
-                        commands.queue(move |world: &mut World| {
-                            world.despawn(sibling);
-                        });
+                    if startup_url.is_empty() {
+                        new_stack_ctx.stack = Some(stack);
+                        new_stack_ctx.needs_open = true;
                     } else {
-                        new_active_pane = parent;
-                        commands.entity(parent).remove::<PaneSplit>();
-                        commands.entity(parent).insert(Node {
-                            flex_grow: 1.0,
-                            flex_basis: Val::Px(0.0),
-                            align_items: AlignItems::Stretch,
-                            justify_content: JustifyContent::Stretch,
-                            ..default()
+                        new_stack_ctx.stack = None;
+                        new_stack_ctx.needs_open = false;
+                        page_open_requests.write(PageOpenRequest {
+                            target: PageOpenTarget::Stack(stack),
+                            url: startup_url,
+                            request_id: None,
                         });
-                        commands.entity(sibling).despawn();
-                    }
-
-                    commands.entity(pane).despawn();
-                    commands
-                        .entity(new_active_pane)
-                        .insert(LastActivatedAt::now());
-                    let new_stack =
-                        active_stack_in_pane(new_active_pane, &pane_children, &stack_ts)
-                            .or_else(|| {
-                                first_stack_in_pane(new_active_pane, &pane_children, &stack_q)
-                            })
-                            .or_else(|| {
-                                sibling_children
-                                    .iter()
-                                    .copied()
-                                    .find(|&e| stack_q.contains(e))
-                            });
-                    if let Some(t) = new_stack {
-                        commands.entity(t).insert(LastActivatedAt::now());
                     }
                     continue;
                 }
@@ -468,7 +483,7 @@ fn handle_stack_commands(
 fn close_tab_if_only_closing_stack(
     tab: Entity,
     closing_stack: Entity,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
     stack_q: &Query<Entity, With<Stack>>,
@@ -504,7 +519,7 @@ fn entity_tree_contains_stack_other_than(
 
 fn sibling_tabs(
     tab: Entity,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
 ) -> Vec<Entity> {
@@ -553,7 +568,7 @@ fn sync_stack_picking(
 }
 
 pub fn open_startup_url_if_no_stacks(
-    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -563,7 +578,7 @@ pub fn open_startup_url_if_no_stacks(
     closing_primary: Query<(), (With<PrimaryWindow>, With<ClosingWindow>)>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     mut new_stack_ctx: ResMut<NewStackContext>,
-    mut spawn_requests: MessageWriter<crate::LayoutSpawnRequest>,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
     if !closing_primary.is_empty() {
@@ -586,16 +601,20 @@ pub fn open_startup_url_if_no_stacks(
     let stack = commands
         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
-    let url = effective_startup_url
+    let startup_url = effective_startup_url
         .as_deref()
         .map(|u| u.0.clone())
         .unwrap_or_default();
-    if url.is_empty() {
+    if startup_url.is_empty() {
         new_stack_ctx.stack = Some(stack);
         new_stack_ctx.previous_stack = None;
         new_stack_ctx.needs_open = true;
     } else {
-        spawn_requests.write(crate::LayoutSpawnRequest::OpenUrl { stack, url });
+        page_open_requests.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url: startup_url,
+            request_id: None,
+        });
     }
 }
 
@@ -618,6 +637,7 @@ mod tests {
     use crate::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
+    use bevy::ecs::relationship::Relationship;
     use bevy::window::ClosingWindow;
     use bevy_cef::prelude::WebviewExtendStandardMaterial;
     use vmux_command::{CommandPlugin, WriteAppCommands};
@@ -639,28 +659,27 @@ mod tests {
     }
 
     #[test]
-    fn closing_last_tab_opens_command_bar_with_replacement_tab() {
+    fn closing_last_stack_without_startup_url_opens_command_bar_with_replacement_stack() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<LayoutSpawnRequest>();
-        app.init_resource::<NewStackContext>();
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.init_resource::<PendingCursorWarp>();
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<PendingCursorWarp>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
 
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let tab_e = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab_e)))
             .id();
-        let original_tab = app
+        let original_stack = app
             .world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
@@ -673,39 +692,38 @@ mod tests {
         app.update();
 
         assert!(!app.world().entity(window).contains::<ClosingWindow>());
-        assert!(app.world().get_entity(original_tab).is_err());
+        assert!(app.world().get_entity(original_stack).is_err());
 
         let ctx = app.world().resource::<NewStackContext>();
-        let Some(replacement_tab) = ctx.stack else {
-            panic!("expected replacement tab to open command bar");
+        let Some(replacement_stack) = ctx.stack else {
+            panic!("expected replacement stack to open command bar");
         };
         assert!(ctx.needs_open);
         assert_eq!(ctx.previous_stack, None);
         assert_eq!(
             app.world()
-                .get::<ChildOf>(replacement_tab)
+                .get::<ChildOf>(replacement_stack)
                 .map(Relationship::get),
             Some(pane)
         );
     }
 
     #[test]
-    fn closing_last_stack_in_tab_closes_tab_when_another_tab_exists() {
+    fn closing_last_stack_in_tab_closes_the_tab_when_another_tab_exists() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<LayoutSpawnRequest>();
-        app.init_resource::<NewStackContext>();
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.init_resource::<PendingCursorWarp>();
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<PendingCursorWarp>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
 
         let root = app.world_mut().spawn_empty().id();
         let remaining_tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(1), ChildOf(root)))
+            .spawn((Tab::default(), LastActivatedAt(1), ChildOf(root)))
             .id();
         let remaining_pane = app
             .world_mut()
@@ -719,14 +737,16 @@ mod tests {
 
         let closing_tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(2), ChildOf(root)))
+            .spawn((Tab::default(), LastActivatedAt(2), ChildOf(root)))
             .id();
         let closing_pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt(2), ChildOf(closing_tab)))
             .id();
-        app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(closing_pane)));
+        let closing_stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(closing_pane)))
+            .id();
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -737,6 +757,7 @@ mod tests {
         app.update();
 
         assert!(app.world().get_entity(closing_tab).is_err());
+        assert!(app.world().get_entity(closing_stack).is_err());
         assert!(app.world().get_entity(remaining_tab).is_ok());
         assert!(app.world().get::<LastActivatedAt>(remaining_tab).unwrap().0 > 1);
 
@@ -746,16 +767,80 @@ mod tests {
     }
 
     #[test]
+    fn closing_only_stack_in_split_pane_closes_pane() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<PendingCursorWarp>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let split = app
+            .world_mut()
+            .spawn((
+                crate::pane::split_root_bundle(crate::pane::PaneSplitDirection::Row),
+                ChildOf(tab),
+            ))
+            .id();
+        let active_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(split)))
+            .id();
+        let other_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(split)))
+            .id();
+        let original_stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(active_pane)))
+            .id();
+        let other_stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(other_pane)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
+
+        app.update();
+
+        assert!(app.world().get_entity(split).is_ok());
+        assert!(app.world().get_entity(active_pane).is_err());
+        assert!(app.world().get_entity(other_pane).is_err());
+        assert!(app.world().get_entity(original_stack).is_err());
+        assert!(app.world().get_entity(other_stack).is_ok());
+        assert_eq!(
+            app.world()
+                .get::<ChildOf>(other_stack)
+                .map(Relationship::get),
+            Some(split)
+        );
+        assert!(!app.world().entity(split).contains::<PaneSplit>());
+        assert_eq!(app.world().resource::<NewStackContext>().stack, None);
+        assert!(!app.world().resource::<NewStackContext>().needs_open);
+    }
+
+    #[test]
     fn empty_active_pane_opens_command_bar_even_when_other_tabs_have_stacks() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<NewStackContext>();
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_systems(Update, open_startup_url_if_no_stacks);
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<NewStackContext>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Update, open_startup_url_if_no_stacks);
 
         let old_tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt(1)))
             .id();
         let old_pane = app
             .world_mut()
@@ -766,7 +851,7 @@ mod tests {
 
         let active_tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(2)))
+            .spawn((Tab::default(), LastActivatedAt(2)))
             .id();
         let active_pane = app
             .world_mut()
@@ -789,14 +874,14 @@ mod tests {
     #[test]
     fn empty_active_pane_does_not_open_command_bar_when_tab_has_stacks() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<NewStackContext>();
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_systems(Update, open_startup_url_if_no_stacks);
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<NewStackContext>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Update, open_startup_url_if_no_stacks);
 
         let tab_e = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt(1)))
             .id();
         let pane_with_stack = app
             .world_mut()
@@ -820,14 +905,14 @@ mod tests {
     #[test]
     fn active_empty_stack_does_not_reopen_command_bar() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<NewStackContext>();
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.add_systems(Update, open_startup_url_if_no_stacks);
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<NewStackContext>()
+            .add_message::<PageOpenRequest>()
+            .add_systems(Update, open_startup_url_if_no_stacks);
 
         let tab_e = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt(1)))
+            .spawn((Tab::default(), LastActivatedAt(1)))
             .id();
         let pane = app
             .world_mut()
@@ -846,10 +931,10 @@ mod tests {
     }
 
     #[derive(Resource, Default)]
-    struct CollectedSpawns(Vec<LayoutSpawnRequest>);
+    struct CollectedSpawns(Vec<PageOpenRequest>);
 
     fn collect_spawn_requests(
-        mut reader: MessageReader<LayoutSpawnRequest>,
+        mut reader: MessageReader<PageOpenRequest>,
         mut collected: ResMut<CollectedSpawns>,
     ) {
         for req in reader.read() {
@@ -859,43 +944,81 @@ mod tests {
 
     fn build_app_with_collector() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_message::<LayoutSpawnRequest>();
-        app.init_resource::<NewStackContext>();
-        app.add_message::<crate::LayoutSpawnRequest>();
-        app.init_resource::<PendingCursorWarp>();
-        app.insert_resource(test_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<WebviewExtendStandardMaterial>>();
-        app.init_resource::<CollectedSpawns>();
-        app.add_systems(
-            Update,
-            (
-                handle_stack_commands.in_set(WriteAppCommands),
-                collect_spawn_requests.after(handle_stack_commands),
-            ),
-        );
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<PendingCursorWarp>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .init_resource::<CollectedSpawns>()
+            .add_systems(
+                Update,
+                (
+                    handle_stack_commands.in_set(WriteAppCommands),
+                    collect_spawn_requests.after(handle_stack_commands),
+                ),
+            );
         app
     }
 
-    fn spawn_hierarchy(app: &mut App) -> (Entity, Entity) {
+    fn build_hierarchy(app: &mut App) -> (Entity, Entity, Entity) {
         let tab = app
             .world_mut()
-            .spawn((Space::default(), LastActivatedAt::now()))
+            .spawn((Tab::default(), LastActivatedAt::now()))
             .id();
         let pane = app
             .world_mut()
             .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
             .id();
+        let stack =
+            app.world_mut()
+                .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
+        (tab, pane, stack.id())
+    }
+
+    #[test]
+    fn closing_last_stack_uses_startup_url_for_replacement_stack() {
+        let mut app = build_app_with_collector();
+        app.insert_resource(crate::settings::EffectiveStartupUrl(
+            "https://startup.test".into(),
+        ));
+        let (_tab, pane, original_stack) = build_hierarchy(&mut app);
+
         app.world_mut()
-            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
-        (tab, pane)
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
+
+        app.update();
+
+        assert!(app.world().get_entity(original_stack).is_err());
+        let ctx = app.world().resource::<NewStackContext>();
+        assert_eq!(ctx.stack, None);
+        assert!(!ctx.needs_open);
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1);
+        assert_eq!(collected.0[0].url, "https://startup.test");
+        match collected.0[0].target {
+            PageOpenTarget::Stack(replacement_stack) => {
+                assert_ne!(replacement_stack, original_stack);
+                assert_eq!(
+                    app.world()
+                        .get::<ChildOf>(replacement_stack)
+                        .map(Relationship::get),
+                    Some(pane)
+                );
+            }
+            _ => panic!("expected stack target"),
+        }
     }
 
     #[test]
     fn open_in_new_stack_with_explicit_url() {
         let mut app = build_app_with_collector();
-        let (_tab, pane) = spawn_hierarchy(&mut app);
+        let (_tab, pane, _stack) = build_hierarchy(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -910,26 +1033,25 @@ mod tests {
         let collected = app.world().resource::<CollectedSpawns>();
         assert_eq!(collected.0.len(), 1, "expected one spawn request");
         match &collected.0[0] {
-            LayoutSpawnRequest::OpenUrl { stack, url } => {
+            PageOpenRequest {
+                target: PageOpenTarget::Stack(stack),
+                url,
+                ..
+            } => {
                 assert_eq!(url, "https://example.com");
                 assert_eq!(
                     app.world().get::<ChildOf>(*stack).map(Relationship::get),
                     Some(pane),
                 );
             }
-            other => panic!("expected OpenUrl, got {other:?}"),
+            other => panic!("expected PageOpenRequest, got {other:?}"),
         }
     }
 
     #[test]
     fn open_in_new_stack_none_url_queues_empty_stack_for_command_bar() {
-        // url: None means the user invoked the shortcut without typing a URL.
-        // Handler spawns an empty stack and stashes it in NewStackContext so the
-        // command bar can open pre-filled. No LayoutSpawnRequest::OpenUrl is
-        // emitted until the user submits a URL (which produces a second
-        // OpenCommand::InNewStack { url: Some(...) } invocation).
         let mut app = build_app_with_collector();
-        let (_tab, pane) = spawn_hierarchy(&mut app);
+        let (_tab, pane, _stack) = build_hierarchy(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -959,7 +1081,7 @@ mod tests {
         app.insert_resource(crate::settings::EffectiveStartupUrl(
             "https://startup.test".into(),
         ));
-        let (_tab, _pane) = spawn_hierarchy(&mut app);
+        let (_tab, _pane, _stack) = build_hierarchy(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -971,11 +1093,6 @@ mod tests {
 
         let collected = app.world().resource::<CollectedSpawns>();
         assert_eq!(collected.0.len(), 1);
-        match &collected.0[0] {
-            LayoutSpawnRequest::OpenUrl { url, .. } => {
-                assert_eq!(url, "https://startup.test");
-            }
-            other => panic!("expected OpenUrl, got {other:?}"),
-        }
+        assert_eq!(collected.0[0].url, "https://startup.test");
     }
 }

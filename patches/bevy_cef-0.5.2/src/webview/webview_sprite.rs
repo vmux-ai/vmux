@@ -2,9 +2,9 @@ use crate::common::{
     CefIgnorePinchZoom, CefPointerTarget, CefSuppressPointerInput, HistorySwipeVisualOffset,
     WebviewSize, WebviewSource, ZoomLevel,
 };
-use crate::prelude::update_webview_image;
 use crate::webview::history_swipe::{HistorySwipeAction, HistorySwipeOutcome, HistorySwipeState};
 use crate::webview::pinch_zoom::zoom_level_after_pinch;
+use crate::webview::texture_upload::{WebviewTextureUploads, apply_webview_texture};
 use bevy::input::gestures::PinchGesture;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
@@ -38,13 +38,12 @@ impl Plugin for WebviewSpritePlugin {
 fn render(
     mut er: MessageReader<RenderTextureMessage>,
     mut images: ResMut<Assets<bevy::prelude::Image>>,
+    mut uploads: ResMut<WebviewTextureUploads>,
     webviews: Query<&Sprite, With<WebviewSource>>,
 ) {
     for texture in er.read() {
-        if let Ok(sprite) = webviews.get(texture.webview)
-            && let Some(image) = images.get_mut(sprite.image.id())
-        {
-            update_webview_image(texture.clone(), image);
+        if let Ok(sprite) = webviews.get(texture.webview) {
+            apply_webview_texture(texture, &mut images, &sprite.image, &mut uploads);
         }
     }
 }

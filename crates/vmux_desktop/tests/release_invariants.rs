@@ -20,13 +20,26 @@ fn dev_target_signs_then_runs_debug_binary() {
         makefile.contains("dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process")
     );
     assert!(makefile.contains("./scripts/sign-dev-mac.sh"));
-    assert!(makefile.contains("exec env -u CEF_PATH ./target/debug/vmux_desktop"));
+    assert!(makefile.contains("DYLD_LIBRARY_PATH=\"$$dylib_path\" ./target/debug/vmux_desktop"));
     assert!(makefile.contains("identity=\"$$(./scripts/ensure-local-codesign-identity.sh)\" &&"));
     assert!(!makefile.contains("run-mac:"));
     assert!(!makefile.contains("build-mac-debug"));
     assert!(!makefile.contains("sign-mac-debug"));
     assert!(!makefile.contains("package-local-mac"));
     assert!(!makefile.contains("package-release-mac"));
+}
+
+#[test]
+fn dev_target_keeps_service_out_of_desktop_dynamic_linking_build() {
+    let makefile = include_str!("../../../Makefile");
+
+    assert!(
+        makefile.contains("env -u CEF_PATH \"$(CARGO_BIN)\" build -p vmux_service -p vmux_cli")
+    );
+    assert!(
+        makefile.contains("env -u CEF_PATH \"$(CARGO_BIN)\" build -p vmux_desktop --features dev")
+    );
+    assert!(!makefile.contains("build -p vmux_desktop -p vmux_cli -p vmux_service --features dev"));
 }
 
 #[test]
@@ -81,4 +94,166 @@ fn dev_and_local_use_distinct_bundle_identifiers() {
     assert!(signing_script.contains("APP_IDENTIFIER=\"ai.vmux.desktop.dev\""));
     assert!(!signing_script.contains("ai.vmux.desktop.local"));
     assert!(package_script.contains("BUNDLE_ID=\"ai.vmux.desktop.$SHA\""));
+}
+
+fn workspace_bevy_spec() -> &'static str {
+    let manifest = include_str!("../../../Cargo.toml");
+    let deps = manifest
+        .split("[workspace.dependencies]")
+        .nth(1)
+        .expect("workspace dependencies block")
+        .split("\n\n")
+        .next()
+        .expect("workspace dependencies content");
+    let start = deps.find("bevy = {").expect("workspace bevy dependency");
+    let rest = &deps[start..];
+    let end = rest
+        .find("\nbevy_ecs =")
+        .expect("dependency after workspace bevy");
+
+    &rest[..end]
+}
+
+fn workspace_bevy_features() -> std::collections::BTreeSet<&'static str> {
+    workspace_bevy_spec()
+        .split("features = [")
+        .nth(1)
+        .expect("workspace bevy features")
+        .split(']')
+        .next()
+        .expect("workspace bevy features content")
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| line.trim_end_matches(',').trim_matches('"'))
+        .collect()
+}
+
+#[test]
+fn workspace_bevy_uses_explicit_feature_allowlist() {
+    let spec = workspace_bevy_spec();
+
+    assert!(spec.contains("default-features = false"));
+    assert!(!spec.contains("default-features = true"));
+
+    let expected = [
+        "std",
+        "multi_threaded",
+        "async_executor",
+        "bevy_animation",
+        "bevy_asset",
+        "bevy_log",
+        "bevy_winit",
+        "bevy_window",
+        "bevy_render",
+        "bevy_core_pipeline",
+        "bevy_pbr",
+        "bevy_post_process",
+        "bevy_mesh",
+        "bevy_sprite",
+        "bevy_ui",
+        "bevy_ui_render",
+        "bevy_image",
+        "bevy_scene",
+        "bevy_state",
+        "bevy_input_focus",
+        "bevy_picking",
+        "mesh_picking",
+        "sprite_picking",
+        "ui_picking",
+        "custom_cursor",
+        "reflect_auto_register",
+        "default_font",
+        "bevy_camera_controller",
+        "free_camera",
+        "https",
+        "x11",
+        "wayland",
+    ]
+    .into_iter()
+    .collect::<std::collections::BTreeSet<_>>();
+
+    assert_eq!(workspace_bevy_features(), expected);
+}
+
+#[test]
+fn workspace_bevy_does_not_enable_removed_heavy_features() {
+    let features = workspace_bevy_features();
+
+    for feature in [
+        "audio",
+        "bevy_audio",
+        "vorbis",
+        "gamepad",
+        "bevy_gilrs",
+        "bevy_gltf",
+        "gltf_animation",
+        "morph_animation",
+        "ktx2",
+        "smaa_luts",
+        "tonemapping_luts",
+        "sysinfo_plugin",
+        "webgl2",
+        "default_platform",
+        "bevy_text",
+        "png",
+    ] {
+        assert!(
+            !features.contains(feature),
+            "workspace bevy dependency should not enable feature {feature}"
+        );
+    }
+}
+
+#[test]
+fn patched_bevy_cef_does_not_reenable_bevy_default_bundles() {
+    fn dependency_block(manifest: &'static str, dependency: &str) -> &'static str {
+        let start = manifest
+            .find(dependency)
+            .unwrap_or_else(|| panic!("dependency block {dependency}"));
+        let rest = &manifest[start..];
+        let end = rest.find("\n\n").unwrap_or(rest.len());
+
+        &rest[..end]
+    }
+
+    for block in [
+        dependency_block(
+            include_str!("../../../patches/bevy_cef-0.5.2/Cargo.toml"),
+            "[dependencies.bevy]",
+        ),
+        dependency_block(
+            include_str!("../../../patches/bevy_cef_core-0.5.2/Cargo.toml"),
+            "[dependencies.bevy]",
+        ),
+        dependency_block(
+            include_str!("../../../patches/bevy_cef_core-0.5.2/Cargo.toml"),
+            "[dependencies.bevy_winit]",
+        ),
+    ] {
+        assert!(!block.contains("\"picking\""));
+        assert!(!block.contains("default-features = true"));
+    }
+}
+
+#[test]
+fn patched_bevy_cef_core_keeps_required_pointer_input_feature() {
+    let manifest = include_str!("../../../patches/bevy_cef_core-0.5.2/Cargo.toml");
+    let start = manifest
+        .find("[dependencies.bevy]")
+        .expect("bevy_cef_core bevy dependency");
+    let rest = &manifest[start..];
+    let end = rest.find("\n\n").unwrap_or(rest.len());
+    let bevy_block = &rest[..end];
+
+    assert!(bevy_block.contains("\"bevy_picking\""));
+}
+
+#[test]
+fn workspace_bevy_winit_does_not_reenable_default_platform() {
+    let manifest = include_str!("../../../Cargo.toml");
+
+    assert!(
+        manifest.contains("bevy_winit = { version = \"0.19.0-rc.2\", default-features = false")
+    );
 }

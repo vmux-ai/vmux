@@ -55,6 +55,12 @@ fn split_custom_scheme_host_and_tail(path_part: &str) -> Option<(&str, &str)> {
     }
 }
 
+/// Whether a normalized path tail looks like a concrete file (its last segment has an extension)
+/// rather than an SPA route. Routes (no extension) fall back to the host's default document.
+fn tail_has_extension(tail: &str) -> bool {
+    tail.rsplit('/').next().is_some_and(|seg| seg.contains('.'))
+}
+
 fn normalize_url_path_tail(path: &str) -> String {
     let mut parts = Vec::new();
     for part in path.split('/') {
@@ -93,7 +99,8 @@ pub(crate) fn asset_load_path_from_request_url_with(
         }
         let tail = normalize_url_path_tail(tail);
         if let Some(entry) = cfg.hosts.entry_for_host(host) {
-            if tail.is_empty() {
+            if tail.is_empty() || !tail_has_extension(&tail) {
+                // Root or SPA route (no file extension) → serve the host's default document.
                 format!("{EMBEDDED_SCHEME}{}", entry.default_document)
             } else {
                 let rel = Path::new(entry.default_document.as_str())

@@ -10,21 +10,23 @@ Use superpower. Invoke relevant skills BEFORE any response or action. Even a 1% 
 
 ## Pre-commit Checks
 
-NEVER commit or push without running fmt + clippy + test on the **changed crates only** (not the whole workspace) and confirming they pass.
+NEVER commit or push without running fmt + clippy + test on the Cargo workspace and confirming they pass.
 
-The `scripts/changed-crates.sh` script computes the set: crates whose files changed, plus crates whose tests `include_str!` from changed paths.
+Run tests during the edit loop when they support TDD, debugging, or behavior verification. Do not run cargo fmt, cargo clippy, make lint, make lint-fix, or other formatting/linting checks during the edit loop unless the user explicitly asks for an early check.
+
+Fmt, clippy, and linter checks are final-gate checks only. Never run them for exploration, after partial edits, or as a mid-task sanity check. Run them only immediately before a commit, push, or PR, then fix any failures and re-run the workspace checks.
+
+Do not treat "edits are complete" or "task is complete" as permission to run final gates. Final gates require an active commit, push, PR creation, or an explicit user request for checks in the current turn. If no commit/push/PR is requested, stop after edits and report that checks were not run.
 
 ```bash
-PKGS=$(BASE=origin/main ./scripts/changed-crates.sh)
-
-for pkg in $PKGS; do cargo fmt -p "$pkg" -- --check; done
-for pkg in $PKGS; do env -u CEF_PATH cargo clippy -p "$pkg" --all-targets -- -D warnings; done
-for pkg in $PKGS; do env -u CEF_PATH cargo test -p "$pkg"; done
+cargo fmt --all -- --check
+env -u CEF_PATH cargo clippy --workspace --exclude bevy_cef --exclude bevy_cef_core --exclude bevy_cef_debug_render_process --all-targets -- -D warnings
+env -u CEF_PATH cargo test --workspace --exclude bevy_cef --exclude bevy_cef_core --exclude bevy_cef_debug_render_process
 ```
 
 Run `make setup-hooks` once to install the pre-push hook that runs these checks automatically.
 
-If a change ripples into a downstream crate that is NOT in the changed set, lint/test that crate too.
+If a change affects an excluded patched CEF crate, run the appropriate package checks too.
 
 The `website/` directory is its own cargo workspace (separate `Cargo.lock`). When `website/**` changes, run fmt + clippy from inside `website/` against `wasm32-unknown-unknown`:
 
@@ -40,12 +42,15 @@ If any check fails, fix the issue before committing. Do not push broken code.
 
 ## Platform-Specific Code
 
-This project targets macOS (primary) and Linux (CI). When adding imports or code that uses platform-specific APIs (CEF, winit, AppKit), always add appropriate `#[cfg(...)]` gates. Run `cargo fmt` after adding cfg-gated imports -- rustfmt reorders them.
+This project targets macOS (primary) and Linux (CI). When adding imports or code that uses platform-specific APIs (CEF, winit, AppKit), always add appropriate `#[cfg(...)]` gates. Let the final fmt gate reorder cfg-gated imports.
 
 ## Rules
 
 - Do not add comments to code.
 - Do not use mod.rs files. Use the filename-based module pattern (e.g. `layout.rs` + `layout/` directory).
+- When configuring a Bevy `App` in plugins or tests, chain consecutive `App` builder calls in one expression (e.g. `app.add_plugins(...).init_resource::<T>().add_systems(...);`) instead of separate `app.*;` statements. Do not chain `app.world()`, `app.world_mut()`, `app.update()`, or control-flow-dependent mutations.
+- Prefer Bevy system + message integration over direct helper-function calls for cross-module behavior. Register message types and systems in plugins/tests, send typed messages, run schedules, and assert on resulting ECS state/messages instead of bypassing production flow with ad hoc helpers.
+- **Never use `bevy::winit::UpdateMode::Continuous`.** It causes 100-200% idle CPU. Use `UpdateMode::Reactive` or `UpdateMode::reactive_low_power`. If input/scroll/animation lags, the fix is to route the missing wake source through `EventLoopProxy::send_event(WinitUserEvent::WakeUp)` — not to switch to Continuous. The CEF wake throttler (`MessageLoopWakePolicy` + `cef-wake-throttle` thread) already wakes the loop at display refresh rate when CEF schedules pump work. A `no_continuous_update_mode` test in `vmux_desktop` enforces this.
 
 ## Linear
 
@@ -75,12 +80,12 @@ Always prefer `git rebase` over `git merge` when updating branches. Use `git pus
 
 ## Before Pushing / Opening PRs
 
-**Mandatory**: Run fmt + clippy + test on the **changed crates only** before every `git push` or PR creation. Do not push or open a PR if any check fails. Fix all errors first.
+**Mandatory**: Run fmt + clippy + test on the Cargo workspace before every `git push` or PR creation. Do not push or open a PR if any check fails. Fix all errors first.
 
-Use `scripts/changed-crates.sh` (see Pre-commit Checks above) to compute the changed-crate set and run the three loops. The repo-wide `make lint` / `make test` targets still exist (they iterate every workspace package) but are slow and intended for periodic full sweeps, not per-push validation.
+These checks are final-gate checks. Finish edits first, then run them once immediately before push/PR/commit. Do not run fmt, clippy, or linter checks earlier in the task unless the user explicitly asks for an early check. Tests may run earlier when they support TDD, debugging, or behavior verification. If final gates fail, fix the issue and re-run the workspace checks.
 
 ```sh
 make lint-fix  # auto-fix on every workspace package: runs fmt + clippy --fix
 ```
 
-If formatting fails, run `make lint-fix` to auto-format, then re-run the changed-crate loops.
+If formatting fails, run `make lint-fix` to auto-format, then re-run the workspace checks.

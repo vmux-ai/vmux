@@ -7,11 +7,17 @@ use crate::command_bar::keyboard::{
 use crate::command_bar::results::{
     CommandBarResultItem as ResultItem, SETTINGS_PAGE_URL, SPACES_PAGE_URL, filter_results,
 };
-use crate::command_bar::style::{command_bar_shell_class, result_item_class};
+use crate::command_bar::style::{
+    command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
+    command_bar_root_class, command_bar_shell_class, result_content_row_class,
+    result_history_url_class, result_item_class, result_list_class, result_primary_text_class,
+    result_secondary_text_class, result_shortcut_badge_class, result_terminal_path_class,
+    result_trailing_slot_class,
+};
 use dioxus::prelude::*;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarOpenEvent, CommandBarReadyEvent,
-    CommandBarRenderedEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
+    CommandBarRenderedEvent, CommandBarSizeEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
     HistorySuggestionsRequest, HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE,
     PathCompleteRequest, PathCompleteResponse, PathEntry, command_bar_open_should_ack,
     command_bar_open_should_reset_input, looks_like_url,
@@ -34,6 +40,8 @@ pub fn Page() -> Element {
     let mut current_open_id = use_signal(|| 0u64);
     let mut last_rendered_open_id = use_signal(|| 0u64);
     let mut ready_sent = use_signal(|| false);
+    let mut observed_size_open_id = use_signal(|| None::<u64>);
+    let mut outside_pointer_listener_installed = use_signal(|| false);
 
     let mut path_completions = use_signal(Vec::<PathEntry>::new);
     let mut history_suggestions = use_signal(Vec::<HistoryEntry>::new);
@@ -144,8 +152,43 @@ pub fn Page() -> Element {
         }
     });
 
+    use_effect(move || {
+        if outside_pointer_listener_installed() {
+            return;
+        }
+        if install_command_bar_outside_pointer_listener(is_open) {
+            outside_pointer_listener_installed.set(true);
+        }
+    });
+
+    use_effect(move || {
+        if !is_open() || !state().native_windowed {
+            return;
+        }
+        let open_id = current_open_id();
+        if observed_size_open_id() == Some(open_id) {
+            return;
+        }
+        if install_command_bar_size_observer() {
+            observed_size_open_id.set(Some(open_id));
+        }
+    });
+
+    use_effect(move || {
+        if !is_open() || !state().native_windowed {
+            return;
+        }
+        let _ = query();
+        let _ = selected();
+        let _ = nav_mode();
+        let _ = path_completions();
+        let _ = history_suggestions();
+        schedule_command_bar_size_emit();
+    });
+
     let CommandBarOpenEvent {
         url: _,
+        native_windowed,
         space_name,
         spaces,
         tabs,
@@ -271,7 +314,9 @@ pub fn Page() -> Element {
                 }
             }
             ResultItem::History { url, .. } => {
-                emit_action("navigate", url);
+                if !url.is_empty() {
+                    emit_action_with_target("open", url, open_target);
+                }
             }
         }
     };
@@ -282,15 +327,16 @@ pub fn Page() -> Element {
 
     rsx! {
         div {
-            class: "flex h-full w-full items-start justify-center pt-[15%]",
-            onclick: move |_| { is_open.set(false); emit_action("dismiss", ""); },
+            class: command_bar_root_class(native_windowed),
+            onclick: move |_| { dismiss_command_bar(is_open); },
             div {
-                class: command_bar_shell_class(),
+                id: "command-bar-shell",
+                class: command_bar_shell_class(native_windowed),
                 onclick: move |e| { e.stop_propagation(); },
                 // Inner glow overlay
                 div { class: "pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br from-white/20 to-transparent" }
                 div { class: "p-2",
-                    div { class: "flex items-center gap-2 rounded-lg bg-white/5 px-3",
+                    div { class: command_bar_input_row_class(),
                         if !space_name.is_empty() {
                             span {
                                 title: "{space_name}",
@@ -341,7 +387,7 @@ pub fn Page() -> Element {
                                 } }
                             }
                         }
-                        div { class: "relative flex-1",
+                        div { class: command_bar_input_wrap_class(),
                             if !ghost_text.is_empty() {
                                 div {
                                     class: "pointer-events-none absolute inset-0 flex items-center",
@@ -353,7 +399,7 @@ pub fn Page() -> Element {
                                 id: "command-bar-input",
                                 r#type: "text",
                                 "data-ghost": "{ghost_text}",
-                                class: "w-full py-2.5 text-base text-foreground bg-transparent outline-none placeholder:text-muted-foreground",
+                                class: command_bar_input_class(),
                                 placeholder: if is_new_tab {
                                     "Search or type a URL, or select Terminal..."
                                 } else {
@@ -415,10 +461,12 @@ pub fn Page() -> Element {
                                     } else if e.key() == Key::Escape
                                         || (ctrl && e.code() == Code::KeyC)
                                     {
-                                        is_open.set(false);
-                                        emit_action("dismiss", "");
+                                        dismiss_command_bar(is_open);
                                     } else if e.key() == Key::Enter {
-                                        if let Some(item) = results.get(sel) {
+                                        if should_open_typed_query_on_enter(open_target, nav_mode(), &q) {
+                                            is_open.set(false);
+                                            emit_action_with_target("open", &q, open_target);
+                                        } else if let Some(item) = results.get(sel) {
                                             execute(item);
                                         } else if !q.is_empty() {
                                             emit_action_with_target("open", &q, open_target);
@@ -430,7 +478,7 @@ pub fn Page() -> Element {
                     }
                 }
                 if !results.is_empty() {
-                    div { class: "max-h-80 overflow-y-auto border-t border-border",
+                    div { id: "command-bar-results", class: result_list_class(),
                         for (i, item) in results.iter().enumerate() {
                             div {
                                 key: "{i}",
@@ -442,84 +490,92 @@ pub fn Page() -> Element {
                                 },
                                 match item {
                                     ResultItem::Terminal { path } => rsx! {
-                                        div { class: "flex items-center gap-2",
+                                        div { class: result_content_row_class(),
                                             span { class: "shrink-0 text-base text-muted-foreground", ">_" }
                                             if path.is_empty() {
                                                 span { class: "text-base text-foreground", "Terminal" }
                                             } else {
-                                                span { class: "text-base text-foreground", "Open in Terminal" }
-                                                span { class: "ml-1 text-sm text-muted-foreground", "{path}" }
+                                                span { class: "shrink-0 text-base text-foreground", "Open in Terminal" }
+                                                span { class: result_terminal_path_class(), "{path}" }
                                             }
                                         }
+                                        span { class: result_trailing_slot_class() }
                                     },
                                     ResultItem::Stack { title, url, .. } => rsx! {
-                                        div { class: "flex min-w-0 flex-col",
-                                            span { class: "truncate text-base text-foreground", "{title}" }
-                                            span { class: "truncate text-sm text-muted-foreground", "{url}" }
+                                        div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                                            span { class: result_primary_text_class(), "{title}" }
+                                            span { class: result_secondary_text_class(), "{url}" }
                                         }
-                                        span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "Stack" }
+                                        span { class: result_trailing_slot_class(), "Stack" }
                                     },
                                     ResultItem::Space { name, profile, is_active, tab_count, .. } => rsx! {
-                                        div { class: "flex min-w-0 flex-col",
+                                        div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                             div { class: "flex min-w-0 items-center gap-2",
-                                                span { class: "truncate text-base text-foreground", "{name}" }
+                                                span { class: result_primary_text_class(), "{name}" }
                                                 if *is_active {
                                                     span { class: "rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300", "active" }
                                                 }
                                             }
-                                            span { class: "truncate text-sm text-muted-foreground", "{profile}" }
+                                            span { class: result_secondary_text_class(), "{profile}" }
                                         }
-                                        span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "{tab_count} tabs" }
+                                        span { class: result_trailing_slot_class(), "{tab_count} tabs" }
                                     },
                                     ResultItem::Command { name, shortcut, .. } => rsx! {
-                                        div { class: "flex items-center gap-2",
+                                        div { class: result_content_row_class(),
                                             span { class: "shrink-0 text-base text-muted-foreground", ">_" }
-                                            span { class: "text-base text-foreground", "{name}" }
+                                            span { class: result_primary_text_class(), "{name}" }
                                         }
-                                        span { class: "ml-2 shrink-0 rounded bg-muted px-1.5 py-0.5 text-sm text-muted-foreground", "{shortcut}" }
+                                        span { class: result_trailing_slot_class(),
+                                            if !shortcut.is_empty() {
+                                                span { class: result_shortcut_badge_class(), "{shortcut}" }
+                                            }
+                                        }
                                     },
                                     ResultItem::History { url, title, favicon_url, .. } => rsx! {
-                                        div { class: "flex items-center gap-2",
+                                        div { class: result_content_row_class(),
                                             Favicon {
                                                 favicon_url: favicon_url.clone(),
                                                 url: url.clone(),
                                                 class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
                                                 globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                                             }
-                                            span { class: "truncate text-base text-foreground",
+                                            span { class: "min-w-0 flex-1 truncate text-base text-foreground",
                                                 if title.is_empty() { "{url}" } else { "{title}" }
                                             }
-                                            span { class: "ml-auto truncate text-sm text-muted-foreground max-w-xs", "{url}" }
+                                            span { class: result_history_url_class(), "{url}" }
                                         }
+                                        span { class: result_trailing_slot_class() }
                                     },
                                     ResultItem::Navigate { url } => rsx! {
-                                        div { class: "flex items-center gap-2",
+                                        div { class: result_content_row_class(),
                                             Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                                                 circle { cx: "11", cy: "11", r: "8" }
                                                 path { d: "m21 21-4.3-4.3" }
                                             }
                                             if url == SPACES_PAGE_URL {
-                                                div { class: "flex min-w-0 flex-col",
-                                                    span { class: "truncate text-base text-foreground", "Spaces Page" }
-                                                    span { class: "truncate text-sm text-muted-foreground", "{url}" }
+                                                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                                                    span { class: result_primary_text_class(), "Spaces Page" }
+                                                    span { class: result_secondary_text_class(), "{url}" }
                                                 }
                                             } else if url == SETTINGS_PAGE_URL {
-                                                div { class: "flex min-w-0 flex-col",
-                                                    span { class: "truncate text-base text-foreground", "Settings" }
-                                                    span { class: "truncate text-sm text-muted-foreground", "{url}" }
+                                                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                                                    span { class: result_primary_text_class(), "Settings" }
+                                                    span { class: result_secondary_text_class(), "{url}" }
                                                 }
                                             } else if url.is_empty() {
                                                 span { class: "text-base text-foreground", "Search" }
                                             } else if looks_like_url(url) {
-                                                span { class: "min-w-0 break-all text-base text-foreground", "Open \"{url}\"" }
+                                                span { class: result_primary_text_class(), "Open \"{url}\"" }
                                             } else {
-                                                span { class: "min-w-0 break-all text-base text-foreground", "Search \"{url}\"" }
+                                                span { class: result_primary_text_class(), "Search \"{url}\"" }
                                             }
                                         }
                                         if url == SPACES_PAGE_URL || url == SETTINGS_PAGE_URL {
-                                            span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "New tab" }
+                                            span { class: result_trailing_slot_class(), "New tab" }
                                         } else if !url.is_empty() {
-                                            span { class: "ml-2 shrink-0 text-sm text-muted-foreground", "\u{21b5}" }
+                                            span { class: result_trailing_slot_class(), "\u{21b5}" }
+                                        } else {
+                                            span { class: result_trailing_slot_class() }
                                         }
                                     },
                                 }
@@ -540,6 +596,19 @@ fn looks_like_path(s: &str) -> bool {
         || s.contains('/') && !s.contains(' ') && !s.contains("://")
 }
 
+fn should_open_typed_query_on_enter(
+    open_target: Option<vmux_command::open_target::OpenTarget>,
+    nav_mode: bool,
+    query: &str,
+) -> bool {
+    matches!(
+        open_target,
+        Some(vmux_command::open_target::OpenTarget::InPlace)
+    ) && !nav_mode
+        && !query.trim().is_empty()
+        && !query.trim_start().starts_with('>')
+}
+
 fn emit_action(action: &str, value: &str) {
     emit_action_with_target(action, value, None);
 }
@@ -554,6 +623,71 @@ fn emit_action_with_target(
         value: value.to_string(),
         target,
     });
+}
+
+fn dismiss_command_bar(mut is_open: Signal<bool>) {
+    if !is_open() {
+        return;
+    }
+    is_open.set(false);
+    emit_action("dismiss", "");
+}
+
+fn install_command_bar_outside_pointer_listener(is_open: Signal<bool>) -> bool {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return false;
+    };
+    if js_sys::Reflect::get(
+        &document,
+        &JsValue::from_str("_commandBarOutsidePointerBound"),
+    )
+    .map(|v| v.is_truthy())
+    .unwrap_or(false)
+    {
+        return true;
+    }
+
+    let closure = Closure::wrap(Box::new(move |event: web_sys::Event| {
+        if !is_open() {
+            return;
+        }
+        let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let Some(shell) = document.get_element_by_id("command-bar-shell") else {
+            return;
+        };
+        let Some(target) = event.target() else {
+            return;
+        };
+        let inside_shell = target
+            .dyn_ref::<web_sys::Node>()
+            .is_some_and(|node| shell.contains(Some(node)));
+        if inside_shell {
+            return;
+        }
+        dismiss_command_bar(is_open);
+    }) as Box<dyn FnMut(web_sys::Event)>);
+
+    let options = web_sys::AddEventListenerOptions::new();
+    options.set_capture(true);
+    if document
+        .add_event_listener_with_callback_and_add_event_listener_options(
+            "pointerdown",
+            closure.as_ref().unchecked_ref(),
+            &options,
+        )
+        .is_err()
+    {
+        return false;
+    }
+    let _ = js_sys::Reflect::set(
+        &document,
+        &JsValue::from_str("_commandBarOutsidePointerBound"),
+        &JsValue::TRUE,
+    );
+    closure.forget();
+    true
 }
 
 fn focus_and_install_ctrl_bindings() {
@@ -579,6 +713,9 @@ fn focus_and_install_ctrl_bindings() {
 
     let input2 = input.clone();
     let closure = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
+        if handle_plain_meta_a(&e, &input2) {
+            return;
+        }
         if !e.ctrl_key() {
             return;
         }
@@ -688,11 +825,104 @@ fn focus_and_install_ctrl_bindings() {
     closure.forget();
 }
 
+fn handle_plain_meta_a(e: &web_sys::KeyboardEvent, input: &web_sys::HtmlInputElement) -> bool {
+    if !e.meta_key() || e.ctrl_key() || e.alt_key() || e.shift_key() || e.code() != "KeyA" {
+        return false;
+    }
+    e.prevent_default();
+    e.stop_immediate_propagation();
+    let len = input.value().len() as u32;
+    let _ = input.set_selection_range(0, len);
+    true
+}
+
 fn is_vmux_synthetic_dioxus_keydown(e: &KeyboardEvent) -> bool {
     e.data()
         .downcast::<web_sys::KeyboardEvent>()
         .map(is_vmux_synthetic_keydown)
         .unwrap_or(false)
+}
+
+fn emit_command_bar_size() {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(el) = document.get_element_by_id("command-bar-shell") else {
+        return;
+    };
+    let shell: web_sys::HtmlElement = el.unchecked_into();
+    let document_width = document
+        .document_element()
+        .map(|el| el.scroll_width())
+        .unwrap_or(0);
+    let body_width = document.body().map(|body| body.scroll_width()).unwrap_or(0);
+    let result_list_extra_height = command_bar_results_extra_height(&document);
+    let width = shell
+        .offset_width()
+        .max(shell.scroll_width())
+        .max(document_width)
+        .max(body_width)
+        .max(1) as u32;
+    let height = shell
+        .offset_height()
+        .max(shell.scroll_height() + result_list_extra_height)
+        .max(1) as u32;
+    let _ = try_cef_bin_emit_rkyv(&CommandBarSizeEvent { width, height });
+}
+
+fn command_bar_results_extra_height(document: &web_sys::Document) -> i32 {
+    let Some(el) = document.get_element_by_id("command-bar-results") else {
+        return 0;
+    };
+    let list: web_sys::HtmlElement = el.clone().unchecked_into();
+    let max_outer_height = web_sys::window()
+        .and_then(|window| window.get_computed_style(&el).ok().flatten())
+        .and_then(|style| style.get_property_value("max-height").ok())
+        .and_then(|value| css_px_value(&value))
+        .map(|height| height.ceil() as i32);
+    let border_height = (list.offset_height() - list.client_height()).max(0);
+    let natural_outer_height = list.scroll_height() + border_height;
+    let ideal_outer_height = max_outer_height
+        .map(|height| natural_outer_height.min(height))
+        .unwrap_or(natural_outer_height);
+    (ideal_outer_height - list.offset_height()).max(0)
+}
+
+fn css_px_value(value: &str) -> Option<f64> {
+    let value = value.trim().strip_suffix("px")?.parse::<f64>().ok()?;
+    value.is_finite().then_some(value.max(0.0))
+}
+
+fn schedule_command_bar_size_emit() {
+    emit_command_bar_size();
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::wrap(Box::new(move || {
+        emit_command_bar_size();
+    }) as Box<dyn FnMut()>);
+    let _ = window.request_animation_frame(callback.as_ref().unchecked_ref());
+    callback.forget();
+}
+
+fn install_command_bar_size_observer() -> bool {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return false;
+    };
+    let Some(el) = document.get_element_by_id("command-bar-shell") else {
+        return false;
+    };
+    schedule_command_bar_size_emit();
+    let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
+        schedule_command_bar_size_emit();
+    }) as Box<dyn FnMut(JsValue)>);
+    let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) else {
+        return false;
+    };
+    observer.observe(&el);
+    std::mem::forget(observer);
+    callback.forget();
+    true
 }
 
 fn is_vmux_synthetic_keydown(e: &web_sys::KeyboardEvent) -> bool {
@@ -742,5 +972,38 @@ fn dispatch_input_event(el: &web_sys::HtmlInputElement) {
     init.set_bubbles(true);
     if let Ok(evt) = web_sys::Event::new_with_event_init_dict("input", &init) {
         let _ = el.dispatch_event(&evt);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_command::open_target::OpenTarget;
+
+    #[test]
+    fn in_place_enter_opens_typed_query_without_nav_selection() {
+        assert!(should_open_typed_query_on_enter(
+            Some(OpenTarget::InPlace),
+            false,
+            "https://example.com"
+        ));
+    }
+
+    #[test]
+    fn in_place_enter_keeps_explicit_nav_selection() {
+        assert!(!should_open_typed_query_on_enter(
+            Some(OpenTarget::InPlace),
+            true,
+            "https://example.com"
+        ));
+    }
+
+    #[test]
+    fn command_query_enter_keeps_command_selection() {
+        assert!(!should_open_typed_query_on_enter(
+            Some(OpenTarget::InPlace),
+            false,
+            "> close"
+        ));
     }
 }

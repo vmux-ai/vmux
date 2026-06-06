@@ -88,8 +88,8 @@ mod url_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
-        app.insert_resource(strategies);
-        app.add_systems(Update, format_agent_url);
+        app.insert_resource(strategies)
+            .add_systems(Update, format_agent_url);
 
         let entity = app
             .world_mut()
@@ -111,8 +111,8 @@ mod url_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
-        app.insert_resource(strategies);
-        app.add_systems(Update, format_agent_url);
+        app.insert_resource(strategies)
+            .add_systems(Update, format_agent_url);
 
         let entity = app
             .world_mut()
@@ -208,8 +208,7 @@ mod tracking_tests {
 
     fn make_app() -> App {
         let mut app = App::new();
-        app.init_resource::<AgentSessionToEntity>();
-        app.add_systems(
+        app.init_resource::<AgentSessionToEntity>().add_systems(
             Update,
             (track_session_id_inserts, track_session_id_removals).chain(),
         );
@@ -340,9 +339,9 @@ mod discovery_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
-        app.insert_resource(strategies);
-        app.init_resource::<AgentSessionToEntity>();
-        app.add_systems(Update, discover_pending_agent_sessions);
+        app.insert_resource(strategies)
+            .init_resource::<AgentSessionToEntity>()
+            .add_systems(Update, discover_pending_agent_sessions);
 
         let pending = PendingAgentSession {
             kind: AgentKind::Vibe,
@@ -398,9 +397,9 @@ mod exit_tests {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(EndedStrategy));
-        app.insert_resource(strategies);
-        app.add_message::<AgentSessionExited>();
-        app.add_systems(Update, detect_file_end_time_exit);
+        app.insert_resource(strategies)
+            .add_message::<AgentSessionExited>()
+            .add_systems(Update, detect_file_end_time_exit);
 
         let entity = app
             .world_mut()

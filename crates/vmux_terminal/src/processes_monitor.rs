@@ -1,10 +1,8 @@
-use bevy::{
-    ecs::relationship::Relationship, picking::Pickable, prelude::*, render::alpha::AlphaMode,
-};
+use bevy::{ecs::relationship::Relationship, picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
+use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
-use vmux_server::PageReady;
 use vmux_service::event::*;
 use vmux_service::protocol::{ClientMessage, ProcessId};
 
@@ -14,9 +12,8 @@ use vmux_layout::{
     cef::Browser,
     event::SERVICES_PAGE_URL,
     pane::{Pane, PaneSplit},
-    space::Space,
     stack::{Stack, focused_stack, stack_bundle},
-    window::WEBVIEW_MESH_DEPTH_BIAS,
+    tab::Tab,
 };
 
 #[derive(Component)]
@@ -45,15 +42,7 @@ impl ProcessesMonitor {
                 ))),
             ),
             (
-                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                    base: StandardMaterial {
-                        unlit: true,
-                        alpha_mode: AlphaMode::Blend,
-                        depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                        ..default()
-                    },
-                    ..default()
-                })),
+                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
                 WebviewSize(Vec2::new(1280.0, 720.0)),
                 Transform::default(),
                 GlobalTransform::default(),
@@ -178,7 +167,7 @@ fn on_process_navigate(
     trigger: On<BinReceive<ProcessNavigateEvent>>,
     terminals: Query<(Entity, &ProcessId, &ChildOf), With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Space>>,
+    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,

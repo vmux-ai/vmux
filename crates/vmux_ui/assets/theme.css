@@ -99,10 +99,10 @@
   --glass-hover: oklch(1 0 0 / 0.35);
   --glass-active: oklch(1 0 0 / 0.45);
   --glass-border: oklch(1 0 0 / 0.30);
-  --chrome-surface: oklch(0.48 0 0 / 0.86);
-  --chrome-surface-hover: oklch(0.58 0 0 / 0.72);
-  --chrome-surface-active: oklch(0.64 0 0 / 0.78);
-  --chrome-surface-border: oklch(1 0 0 / 0.22);
+  --cef-surface: oklch(0.48 0 0 / 0.86);
+  --cef-surface-hover: oklch(0.58 0 0 / 0.72);
+  --cef-surface-active: oklch(0.64 0 0 / 0.78);
+  --cef-surface-border: oklch(1 0 0 / 0.22);
 }
 
 @theme inline {

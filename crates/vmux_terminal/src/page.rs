@@ -1,14 +1,14 @@
 #![allow(non_snake_case)]
 
+use crate::event::*;
+use crate::render_model::{
+    cursor_cell_style, span_background_overlay, span_classes, span_inline_style,
+    span_looks_like_suggestion,
+};
 use dioxus::html::Modifiers;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use unicode_width::UnicodeWidthChar;
-use vmux_terminal::event::*;
-use vmux_terminal::render_model::{
-    cursor_cell_style, span_background_overlay, span_classes, span_inline_style,
-    span_looks_like_suggestion,
-};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -167,15 +167,22 @@ pub fn Page() -> Element {
     rsx! {
         div {
             id: CONTAINER_ID,
+            tabindex: "0",
             class: "relative h-full w-full overflow-hidden bg-term-bg text-term-fg font-mono text-sm leading-tight select-none",
-            style: "{theme_style}{cell_style}",
+            style: "{theme_style}{cell_style}outline:none;",
 
             onmousedown: move |e: Event<MouseData>| {
                 e.prevent_default();
+                focus_terminal_container();
                 let dims = cell_dims();
                 if let Some((col, row)) = mouse_to_cell(&e, padding, dims) {
                     emit_mouse(trigger_button_id(&e), col, row, modifier_bits(&e), true, false);
                 }
+            },
+
+            onkeydown: move |e: Event<KeyboardData>| {
+                e.prevent_default();
+                emit_key(&e);
             },
 
             onmouseup: move |e: Event<MouseData>| {
@@ -541,6 +548,61 @@ fn modifier_bits(e: &Event<MouseData>) -> u8 {
         m |= MOD_SHIFT;
     }
     if mods.contains(Modifiers::META) {
+        m |= MOD_SUPER;
+    }
+    m
+}
+
+fn focus_terminal_container() {
+    let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(CONTAINER_ID))
+    else {
+        return;
+    };
+    let Ok(html) = el.dyn_into::<web_sys::HtmlElement>() else {
+        return;
+    };
+    let _ = html.focus();
+}
+
+fn emit_key(e: &Event<KeyboardData>) {
+    let data = e.data();
+    let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
+        return;
+    };
+    let key = raw.key();
+    if is_modifier_key_name(&key) {
+        return;
+    }
+    let text = (key.chars().count() == 1).then_some(key.clone());
+    let _ = try_cef_bin_emit_rkyv(&TermKeyEvent {
+        key,
+        code: raw.code(),
+        modifiers: key_modifier_bits(raw),
+        text,
+    });
+}
+
+fn is_modifier_key_name(key: &str) -> bool {
+    matches!(
+        key,
+        "Shift" | "Control" | "Alt" | "Meta" | "OS" | "Fn" | "CapsLock"
+    )
+}
+
+fn key_modifier_bits(e: &web_sys::KeyboardEvent) -> u8 {
+    let mut m = 0;
+    if e.ctrl_key() {
+        m |= MOD_CTRL;
+    }
+    if e.alt_key() {
+        m |= MOD_ALT;
+    }
+    if e.shift_key() {
+        m |= MOD_SHIFT;
+    }
+    if e.meta_key() {
         m |= MOD_SUPER;
     }
     m

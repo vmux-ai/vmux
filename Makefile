@@ -17,13 +17,19 @@ CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 # Header / history / UI library `dist/` folders are built by each crate’s `build.rs` via **`dx build`** when you compile `vmux_desktop` (needs `dioxus-cli` on PATH).
 
 dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process
-	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop -p vmux_cli -p vmux_service --features debug
+	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_service -p vmux_cli
+	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop --features dev
 	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
 	APPLE_SIGNING_IDENTITY="$$identity" \
 	APP_BINARY="target/debug/vmux_desktop" \
 	HELPER_BINARY="$(CEF_DEBUG_RENDER)" \
 	./scripts/sign-dev-mac.sh
-	exec env -u CEF_PATH ./target/debug/vmux_desktop
+	@rust_target_libdir="$$(rustc --print target-libdir)" && \
+	dylib_path="$$rust_target_libdir:$(CURDIR)/target/debug/deps" && \
+	if [ -n "$${DYLD_LIBRARY_PATH:-}" ]; then \
+		dylib_path="$$dylib_path:$$DYLD_LIBRARY_PATH"; \
+	fi; \
+	exec env -u CEF_PATH DYLD_LIBRARY_PATH="$$dylib_path" ./target/debug/vmux_desktop
 
 build: ensure-mac-deps
 	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop -p vmux_cli -p vmux_service --release
@@ -46,7 +52,7 @@ release: build-release
 
 # One-time CEF download (macOS paths; pin matches bevy_cef 0.5.x)
 setup-cef:
-	"$(CARGO_BIN)" install export-cef-dir@145.6.1+145.0.28 --force
+	"$(CARGO_BIN)" install export-cef-dir@148.2.0+148.0.8 --force
 	"$(EXPORT_CEF_BIN)" --force "$$HOME/.local/share"
 
 # Build from vmux-patched bevy_cef_core (required when adding CEF schemes such as vmux://).

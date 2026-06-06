@@ -19,8 +19,8 @@ struct TrayHandle {
 
 impl Plugin for TrayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_tray);
-        app.add_systems(Update, drain_tray_events);
+        app.add_systems(Startup, setup_tray)
+            .add_systems(Update, drain_tray_events);
     }
 }
 
@@ -41,6 +41,7 @@ fn setup_tray(world: &mut World) {
         .with_menu(Box::new(menu))
         .with_tooltip("Vmux")
         .with_icon(icon)
+        .with_icon_as_template(true)
         .build()
     {
         Ok(t) => t,
@@ -50,7 +51,7 @@ fn setup_tray(world: &mut World) {
         }
     };
 
-    world.insert_non_send_resource(TrayHandle {
+    world.insert_non_send(TrayHandle {
         _tray: tray,
         show_id,
         quit_id,
@@ -75,8 +76,25 @@ fn drain_tray_events(
 }
 
 fn load_tray_icon() -> tray_icon::Icon {
-    let rgba = vec![0u8; 16 * 16 * 4];
+    let rgba = tray_icon_rgba();
     tray_icon::Icon::from_rgba(rgba, 16, 16).expect("valid placeholder rgba")
+}
+
+fn tray_icon_rgba() -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(16 * 16 * 4);
+    for y in 0_i32..16 {
+        for x in 0_i32..16 {
+            let dy = y - 3;
+            let visible = (0..=10).contains(&dy)
+                && ((x - (3 + dy / 2)).abs() <= 1 || (x - (12 - dy / 2)).abs() <= 1);
+            if visible {
+                rgba.extend_from_slice(&[0, 0, 0, 255]);
+            } else {
+                rgba.extend_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+    }
+    rgba
 }
 
 #[cfg(test)]
@@ -100,5 +118,23 @@ mod tests {
             source.contains(&quit_needle),
             "tray must expose a 'Quit Vmux' menu item"
         );
+    }
+
+    #[test]
+    fn tray_icon_has_visible_pixels() {
+        let rgba = super::tray_icon_rgba();
+
+        assert_eq!(rgba.len(), 16 * 16 * 4);
+        assert!(
+            rgba.chunks_exact(4).any(|pixel| pixel[3] != 0),
+            "tray icon must not be fully transparent"
+        );
+    }
+
+    #[test]
+    fn tray_icon_uses_macos_template_mode() {
+        let source = include_str!("tray.rs");
+
+        assert!(source.contains("with_icon_as_template(true)"));
     }
 }

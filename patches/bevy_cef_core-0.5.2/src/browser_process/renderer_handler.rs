@@ -1,8 +1,12 @@
+#[cfg(target_os = "macos")]
+use super::keepalive::{IoSurfaceKeepAlive, RealIoSurfaceOps};
 use async_channel::{Receiver, Sender};
 use bevy::prelude::*;
+use cef::osr_texture_import::SharedTextureHandle;
 use cef::rc::{Rc, RcImpl};
 use cef::*;
 use cef_dll_sys::cef_paint_element_type_t;
+use std::any::Any;
 use std::cell::Cell;
 use std::os::raw::c_int;
 use std::sync::Arc;
@@ -29,6 +33,48 @@ pub struct RenderTextureMessage {
     /// Wrapped in `Arc` so the message survives Bevy's per-reader clone (3 consumers — mesh,
     /// extend-material, sprite) without copying the full BGRA buffer each time.
     pub buffer: Arc<Vec<u8>>,
+    /// Sub-regions of `buffer` that changed this paint, in pixels with an upper-left origin.
+    /// Empty means treat the whole frame as dirty (full upload).
+    pub dirty: Vec<WebviewDirtyRect>,
+}
+
+/// A changed sub-region of a webview paint, in pixels with an upper-left origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebviewDirtyRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+fn webview_dirty_rects(
+    rects: Option<&[cef::Rect]>,
+    width: u32,
+    height: u32,
+) -> Vec<WebviewDirtyRect> {
+    let Some(rects) = rects else {
+        return Vec::new();
+    };
+    let surface_w = width as i32;
+    let surface_h = height as i32;
+    rects
+        .iter()
+        .filter_map(|r| {
+            let left = r.x.max(0);
+            let top = r.y.max(0);
+            let right = r.x.saturating_add(r.width).min(surface_w);
+            let bottom = r.y.saturating_add(r.height).min(surface_h);
+            if right <= left || bottom <= top {
+                return None;
+            }
+            Some(WebviewDirtyRect {
+                x: left as u32,
+                y: top as u32,
+                width: (right - left) as u32,
+                height: (bottom - top) as u32,
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -38,6 +84,26 @@ pub enum RenderPaintElementType {
     /// The popup frame of the browser.
     Popup,
 }
+
+pub struct SendSharedTextureHandle(pub SharedTextureHandle);
+unsafe impl Send for SendSharedTextureHandle {}
+unsafe impl Sync for SendSharedTextureHandle {}
+
+pub struct AcceleratedFrame {
+    pub webview: Entity,
+    pub ty: RenderPaintElementType,
+    pub width: u32,
+    pub height: u32,
+    pub handle: SendSharedTextureHandle,
+    /// Raw `IOSurfaceRef` (as `usize`) backing this frame, kept alive by `keepalive`. Lets a native
+    /// overlay set it directly as a `CALayer`'s `contents` instead of importing into a GPU texture.
+    pub io_surface: usize,
+    pub keepalive: Arc<dyn Any + Send + Sync>,
+    pub dirty: Vec<WebviewDirtyRect>,
+}
+
+pub type AcceleratedSender = Sender<AcceleratedFrame>;
+pub type AcceleratedReceiver = Receiver<AcceleratedFrame>;
 
 pub type SharedViewSize = std::rc::Rc<Cell<Vec2>>;
 
@@ -51,6 +117,7 @@ pub struct RenderHandlerBuilder {
     object: *mut RcImpl<sys::cef_render_handler_t, Self>,
     webview: Entity,
     texture_sender: TextureSender,
+    accel_sender: AcceleratedSender,
     texture_wake: Option<TextureWake>,
     size: SharedViewSize,
     device_scale: SharedDeviceScaleFactor,
@@ -60,6 +127,7 @@ impl RenderHandlerBuilder {
     pub fn build(
         webview: Entity,
         texture_sender: TextureSender,
+        accel_sender: AcceleratedSender,
         texture_wake: Option<TextureWake>,
         size: SharedViewSize,
         device_scale: SharedDeviceScaleFactor,
@@ -68,6 +136,7 @@ impl RenderHandlerBuilder {
             object: std::ptr::null_mut(),
             webview,
             texture_sender,
+            accel_sender,
             texture_wake,
             size,
             device_scale,
@@ -101,6 +170,7 @@ impl Clone for RenderHandlerBuilder {
             object,
             webview: self.webview,
             texture_sender: self.texture_sender.clone(),
+            accel_sender: self.accel_sender.clone(),
             texture_wake: self.texture_wake.clone(),
             size: self.size.clone(),
             device_scale: self.device_scale.clone(),
@@ -140,7 +210,7 @@ impl ImplRenderHandler for RenderHandlerBuilder {
         &self,
         _browser: Option<&mut Browser>,
         type_: PaintElementType,
-        _dirty_rects: Option<&[cef::Rect]>,
+        dirty_rects: Option<&[cef::Rect]>,
         buffer: *const u8,
         width: c_int,
         height: c_int,
@@ -157,8 +227,54 @@ impl ImplRenderHandler for RenderHandlerBuilder {
             buffer: Arc::new(unsafe {
                 std::slice::from_raw_parts(buffer, (width * height * 4) as usize).to_vec()
             }),
+            dirty: webview_dirty_rects(dirty_rects, width as u32, height as u32),
         };
         send_render_texture(&self.texture_sender, self.texture_wake.as_ref(), texture);
+    }
+
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    fn on_accelerated_paint(
+        &self,
+        _browser: Option<&mut Browser>,
+        type_: PaintElementType,
+        dirty_rects: Option<&[cef::Rect]>,
+        info: Option<&AcceleratedPaintInfo>,
+    ) {
+        #[cfg(target_os = "macos")]
+        {
+            let Some(info) = info else {
+                return;
+            };
+            let ty = match type_.as_ref() {
+                cef_paint_element_type_t::PET_POPUP => RenderPaintElementType::Popup,
+                _ => RenderPaintElementType::View,
+            };
+            let width = info.extra.coded_size.width as u32;
+            let height = info.extra.coded_size.height as u32;
+            let keepalive: Arc<dyn Any + Send + Sync> =
+                Arc::new(IoSurfaceKeepAlive::<RealIoSurfaceOps>::retain(
+                    info.shared_texture_io_surface,
+                ));
+            let io_surface = info.shared_texture_io_surface as usize;
+            let frame = AcceleratedFrame {
+                webview: self.webview,
+                ty,
+                width,
+                height,
+                handle: SendSharedTextureHandle(SharedTextureHandle::new(info)),
+                io_surface,
+                keepalive,
+                dirty: webview_dirty_rects(dirty_rects, width, height),
+            };
+            let _ = self.accel_sender.send_blocking(frame);
+            if let Some(wake) = self.texture_wake.as_ref() {
+                wake();
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (type_, dirty_rects, info);
+        }
     }
 
     #[inline]
@@ -201,10 +317,52 @@ mod tests {
                 width: 1,
                 height: 1,
                 buffer: Arc::new(vec![0, 0, 0, 0]),
+                dirty: Vec::new(),
             },
         );
 
         assert!(rx.try_recv().is_ok());
         assert_eq!(wakes.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn dirty_rects_are_clamped_to_surface_bounds() {
+        let rects = [
+            cef::Rect {
+                x: -5,
+                y: 0,
+                width: 100,
+                height: 100,
+            },
+            cef::Rect {
+                x: 90,
+                y: 90,
+                width: 100,
+                height: 100,
+            },
+        ];
+        let dirty = webview_dirty_rects(Some(&rects), 100, 100);
+        assert_eq!(
+            dirty,
+            vec![
+                WebviewDirtyRect {
+                    x: 0,
+                    y: 0,
+                    width: 95,
+                    height: 100,
+                },
+                WebviewDirtyRect {
+                    x: 90,
+                    y: 90,
+                    width: 10,
+                    height: 10,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn missing_dirty_rects_mean_full_frame() {
+        assert!(webview_dirty_rects(None, 100, 100).is_empty());
     }
 }

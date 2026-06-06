@@ -1,12 +1,12 @@
 #![allow(non_snake_case)]
 
-use dioxus::prelude::*;
-use serde_json::{Map, Value};
-use vmux_setting::event::{
+use crate::event::{
     SETTINGS_LIST_EVENT, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent, SettingsListEvent,
     SettingsSchemaEvent,
 };
-use vmux_setting::schema::{SettingsSchema, WidgetKind};
+use crate::schema::{SettingsSchema, WidgetKind};
+use dioxus::prelude::*;
+use serde_json::{Map, Value};
 use vmux_ui::components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
 use vmux_ui::components::input::Input;
 use vmux_ui::dioxus_ext::attributes;

@@ -44,8 +44,8 @@ mod tests {
 
     fn make_app() -> App {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        app.add_systems(Update, dispatch_tool);
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .add_systems(Update, dispatch_tool);
         app
     }
 

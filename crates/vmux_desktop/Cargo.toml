@@ -6,17 +6,14 @@ description.workspace = true
 publish = false
 
 [features]
-debug = ["bevy_cef/debug"]
+dev = ["bevy_cef/debug", "bevy/dynamic_linking"]
 
 [[bin]]
 name = "vmux_desktop"
 path = "src/main.rs"
 
 [dependencies]
-bevy = { workspace = true, features = [
-    "bevy_camera_controller",
-    "free_camera",
-] }
+bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
 
@@ -30,6 +27,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 vmux_agent = { path = "../vmux_agent" }
+vmux_browser = { path = "../vmux_browser" }
 vmux_core = { path = "../vmux_core" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
@@ -44,6 +42,7 @@ vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_server = { path = "../vmux_server" }
+vmux_vibe_setup = { path = "../vmux_vibe_setup" }
 url = { workspace = true }
 
 rfd = { workspace = true }
@@ -52,6 +51,23 @@ tempfile = "3"
 semver = "1"
 cargo-packager-updater = "0.2"
 tray-icon = "0.24"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = [
+    "NSApplication",
+    "NSEvent",
+    "NSView",
+    "NSWindow",
+    "NSResponder",
+    "NSGraphics",
+    "NSColor",
+    "NSGlassEffectView",
+] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+objc2-quartz-core = { version = "0.3", features = ["CALayer", "objc2-core-foundation"] }
+block2 = "0.6"
+raw-window-handle = "0.6"
 
 [package.metadata.packager]
 product-name = "Vmux"

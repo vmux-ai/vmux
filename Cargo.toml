@@ -13,10 +13,46 @@ homepage = "https://vmux.ai"
 repository = "https://github.com/vmux-ai/vmux"
 
 [workspace.dependencies]
-bevy = { version = "0.18", default-features = true, features = ["https"] }
-bevy_ecs = { version = "0.18", default-features = true }
-bevy_reflect = { version = "0.18", default-features = true }
-bevy_winit = { version = "0.18", default-features = true }
+bevy = { version = "0.19.0-rc.2", default-features = false, features = [
+    "std",
+    "multi_threaded",
+    "async_executor",
+    "bevy_animation",
+    "bevy_asset",
+    "bevy_log",
+    "bevy_winit",
+    "bevy_window",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "bevy_post_process",
+    "bevy_mesh",
+    "bevy_sprite",
+    "bevy_ui",
+    "bevy_ui_render",
+    "bevy_image",
+    "bevy_scene",
+    "bevy_state",
+    "bevy_input_focus",
+    "bevy_picking",
+    "mesh_picking",
+    "sprite_picking",
+    "ui_picking",
+    "custom_cursor",
+    "reflect_auto_register",
+    "default_font",
+    "bevy_camera_controller",
+    "free_camera",
+    "https",
+    "x11",
+    "wayland",
+] }
+bevy_ecs = { version = "0.19.0-rc.2", default-features = true }
+bevy_reflect = { version = "0.19.0-rc.2", default-features = true }
+bevy_winit = { version = "0.19.0-rc.2", default-features = false, features = [
+    "x11",
+    "wayland",
+] }
 bevy_cef = "0.5.2"
 bevy_cef_core = "0.5.2"
 moonshine-save = "0.6.1"
@@ -48,7 +84,27 @@ rfd = "0.15"
 rkyv = { version = "0.8", features = ["alloc"] }
 uuid = { version = "1", features = ["v4", "serde", "js"] }
 
+# Dev builds of a Bevy + CEF app are unusably slow without optimizing dependencies.
+# Our crates stay at opt-level 1 for fast rebuilds; all deps compile at 3 (cached).
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# Hot CEF render/compositing path: optimize even in dev so the texture pipeline
+# isn't bottlenecked by an unoptimized build during development.
+[profile.dev.package.bevy_cef]
+opt-level = 3
+
+[profile.dev.package.bevy_cef_core]
+opt-level = 3
+
 [profile.release.package.vmux_history]
+opt-level = "z"
+codegen-units = 1
+
+[profile.release.package.vmux_server]
 opt-level = "z"
 codegen-units = 1
 
@@ -77,3 +133,5 @@ codegen-units = 1
 [patch.crates-io]
 bevy_cef = { path = "patches/bevy_cef-0.5.2" }
 bevy_cef_core = { path = "patches/bevy_cef_core-0.5.2" }
+moonshine-save = { path = "patches/moonshine-save-0.6.1" }
+moonshine-util = { path = "patches/moonshine-util-0.4.1" }

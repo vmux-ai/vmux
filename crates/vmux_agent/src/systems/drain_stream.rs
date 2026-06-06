@@ -79,7 +79,7 @@ pub fn drain_stream(
                             status: ToolStatus::Pending,
                         });
                         if policy.auto.contains(&p.name) {
-                            next_state = Some(spawn_running_tool(&p, args_value));
+                            next_state = Some(start_running_tool(&p, args_value));
                         } else {
                             commands.trigger(AgentApprovalRequest {
                                 session: entity,
@@ -150,9 +150,9 @@ fn push_tool_use_block(messages: &mut AgentMessages, p: &PartialToolUse) {
     });
 }
 
-fn spawn_running_tool(p: &PartialToolUse, args: serde_json::Value) -> AgentRunState {
+fn start_running_tool(p: &PartialToolUse, args: serde_json::Value) -> AgentRunState {
     let call_id = p.call_id.clone();
-    let task = crate::tool_dispatch::spawn_tool_task(call_id.clone(), p.name.clone(), args);
+    let task = crate::tool_dispatch::start_tool_task(call_id.clone(), p.name.clone(), args);
     AgentRunState::RunningTool { call_id, task }
 }
 
@@ -166,8 +166,8 @@ mod tests {
 
     fn make_app() -> App {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        app.add_systems(Update, drain_stream);
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .add_systems(Update, drain_stream);
         app
     }
 

@@ -37,9 +37,9 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.insert_resource(PageStrategyIndex::default());
-        app.add_observer(on_strategy_added);
-        app.add_observer(on_strategy_removed);
+        app.insert_resource(PageStrategyIndex::default())
+            .add_observer(on_strategy_added)
+            .add_observer(on_strategy_removed);
         app
     }
 
@@ -57,7 +57,7 @@ mod tests {
     }
 
     #[test]
-    fn spawn_inserts_into_index() {
+    fn insert_strategy_updates_index() {
         let mut app = test_app();
         let e = app.world_mut().spawn(strategy_bundle("p", "m")).id();
         app.update();

@@ -11,8 +11,8 @@
         bindings: [
             (command: "stack_next", binding: Direct((key: "Tab", ctrl: true))),
             (command: "stack_previous", binding: Direct((key: "Tab", ctrl: true, shift: true))),
-            (command: "split_v", binding: Leader((key: "%"))),
-            (command: "split_h", binding: Leader((key: "\""))),
+            (command: "open_in_pane_right", binding: Leader((key: "%"))),
+            (command: "open_in_pane_bottom", binding: Leader((key: "\""))),
             (command: "toggle_pane", binding: Leader((key: "o"))),
             (command: "close_pane", binding: Leader((key: "x"))),
             (command: "open_in_new_stack", binding: Leader((key: "c"))),

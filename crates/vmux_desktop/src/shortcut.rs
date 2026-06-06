@@ -2,7 +2,10 @@ use bevy::input::keyboard::KeyCode;
 use bevy::prelude::*;
 use std::time::Instant;
 pub(crate) use vmux_command::shortcut::{ChordState, KeyCombo, Modifiers, Shortcut};
-use vmux_command::{AppCommand, WriteAppCommands};
+use vmux_command::{
+    AppCommand, BrowserCommand, OpenCommand, PaneDirection, PaneOpenMode, PaneTarget,
+    WriteAppCommands,
+};
 use vmux_setting::{AppSettings, load_settings};
 
 pub struct ShortcutPlugin;
@@ -11,6 +14,16 @@ impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, init_shortcuts.after(load_settings))
             .add_systems(Update, process_key_input.in_set(WriteAppCommands));
+
+        #[cfg(target_os = "macos")]
+        app.add_systems(
+            Startup,
+            crate::native_keyboard::install_native_key_monitor.after(init_shortcuts),
+        )
+        .add_systems(
+            Update,
+            crate::native_keyboard::process_monitored_keys.in_set(WriteAppCommands),
+        );
     }
 }
 
@@ -53,6 +66,9 @@ fn init_shortcuts(mut commands: Commands, settings: Option<Res<AppSettings>>) {
             }
         }
     }
+
+    #[cfg(target_os = "macos")]
+    crate::native_keyboard::set_shortcut_map(map.clone());
 
     commands.insert_resource(map);
     commands.insert_resource(ChordState::default());
@@ -127,24 +143,24 @@ fn process_key_input(
     }
 }
 
-fn direct_command(bindings: &ShortcutMap, pressed: &KeyCombo) -> Option<AppCommand> {
+pub(crate) fn direct_command(bindings: &ShortcutMap, pressed: &KeyCombo) -> Option<AppCommand> {
     bindings
         .bindings
         .iter()
         .find_map(|(binding, cmd_id)| match binding {
-            Shortcut::Direct(combo) if combo == pressed => AppCommand::from_menu_id(cmd_id),
+            Shortcut::Direct(combo) if combo == pressed => command_from_shortcut_id(cmd_id),
             _ => None,
         })
 }
 
-fn has_chord_prefix(bindings: &ShortcutMap, pressed: &KeyCombo) -> bool {
+pub(crate) fn has_chord_prefix(bindings: &ShortcutMap, pressed: &KeyCombo) -> bool {
     bindings
         .bindings
         .iter()
         .any(|(binding, _)| matches!(binding, Shortcut::Chord(prefix, _) if prefix == pressed))
 }
 
-fn chord_command(
+pub(crate) fn chord_command(
     bindings: &ShortcutMap,
     prefix: &KeyCombo,
     pressed: &KeyCombo,
@@ -157,10 +173,32 @@ fn chord_command(
             Shortcut::Chord(binding_prefix, second)
                 if binding_prefix == prefix && second == &effective =>
             {
-                AppCommand::from_menu_id(cmd_id)
+                command_from_shortcut_id(cmd_id)
             }
             _ => None,
         })
+}
+
+fn command_from_shortcut_id(cmd_id: &str) -> Option<AppCommand> {
+    match cmd_id {
+        "split_v" => Some(AppCommand::Browser(BrowserCommand::Open(
+            OpenCommand::InPane {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: None,
+            },
+        ))),
+        "split_h" => Some(AppCommand::Browser(BrowserCommand::Open(
+            OpenCommand::InPane {
+                direction: PaneDirection::Bottom,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: None,
+            },
+        ))),
+        _ => AppCommand::from_menu_id(cmd_id),
+    }
 }
 
 fn effective_chord_second(prefix: &KeyCombo, pressed: &KeyCombo) -> KeyCombo {
@@ -216,29 +254,31 @@ fn is_modifier_key(key: KeyCode) -> bool {
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
-    use vmux_command::{CommandPlugin, LayoutCommand, SpaceCommand};
+    use vmux_command::{CommandPlugin, LayoutCommand, SpaceCommand, StackCommand};
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_setting::{AppSettings, BrowserSettings, KeyComboDef, ShortcutSettings};
+    use vmux_setting::{
+        AppSettings, BrowserSettings, KeyComboDef, ShortcutDef, ShortcutEntry, ShortcutSettings,
+    };
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_plugins(ShortcutPlugin);
-        app.insert_resource(ButtonInput::<KeyCode>::default());
-        app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_plugins(ShortcutPlugin)
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
         app.update();
         app
     }
 
     fn test_app_with_settings(settings: AppSettings) -> App {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin));
-        app.add_plugins(ShortcutPlugin);
-        app.insert_resource(settings);
-        app.insert_resource(ButtonInput::<KeyCode>::default());
-        app.insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_plugins(ShortcutPlugin)
+            .insert_resource(settings)
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
         app.update();
         app
     }
@@ -273,9 +313,58 @@ mod tests {
             },
             terminal: None,
             auto_update: false,
-            startup_url: None,
             agent: vmux_setting::AgentSettings::default(),
         }
+    }
+
+    fn split_settings_with_leader(key: &str) -> AppSettings {
+        let mut settings = test_settings_with_leader(key);
+        settings.shortcuts.bindings.push(ShortcutEntry {
+            command: "split_v".into(),
+            binding: ShortcutDef::Leader(KeyComboDef {
+                key: "%".into(),
+                ctrl: false,
+                shift: false,
+                alt: false,
+                super_key: false,
+            }),
+        });
+        settings.shortcuts.bindings.push(ShortcutEntry {
+            command: "split_h".into(),
+            binding: ShortcutDef::Leader(KeyComboDef {
+                key: "\"".into(),
+                ctrl: false,
+                shift: false,
+                alt: false,
+                super_key: false,
+            }),
+        });
+        settings
+    }
+
+    fn current_settings_with_leader(key: &str) -> AppSettings {
+        let mut settings = split_settings_with_leader(key);
+        settings.shortcuts.bindings.push(ShortcutEntry {
+            command: "toggle_pane".into(),
+            binding: ShortcutDef::Leader(KeyComboDef {
+                key: "o".into(),
+                ctrl: false,
+                shift: false,
+                alt: false,
+                super_key: false,
+            }),
+        });
+        settings.shortcuts.bindings.push(ShortcutEntry {
+            command: "close_pane".into(),
+            binding: ShortcutDef::Leader(KeyComboDef {
+                key: "x".into(),
+                ctrl: false,
+                shift: false,
+                alt: false,
+                super_key: false,
+            }),
+        });
+        settings
     }
 
     fn press(app: &mut App, key: KeyCode) {
@@ -508,6 +597,111 @@ mod tests {
         assert_eq!(
             commands,
             vec![AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))]
+        );
+    }
+
+    #[test]
+    fn configured_split_v_legacy_binding_emits_right_split() {
+        let mut app = test_app_with_settings(split_settings_with_leader("b"));
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyB);
+        app.update();
+        clear_input_frame(&mut app);
+
+        release(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::ControlLeft);
+        app.update();
+        clear_input_frame(&mut app);
+
+        press(&mut app, KeyCode::ShiftLeft);
+        press(&mut app, KeyCode::Digit5);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(
+            commands,
+            vec![AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InPane {
+                    direction: PaneDirection::Right,
+                    target: PaneTarget::NewSplit,
+                    mode: PaneOpenMode::NewStack,
+                    url: None,
+                }
+            ))]
+        );
+    }
+
+    #[test]
+    fn configured_legacy_leader_x_emits_stack_close() {
+        let mut app = test_app_with_settings(current_settings_with_leader("b"));
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyB);
+        app.update();
+        clear_input_frame(&mut app);
+
+        release(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::ControlLeft);
+        app.update();
+        clear_input_frame(&mut app);
+
+        press(&mut app, KeyCode::KeyX);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(
+            commands,
+            vec![AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close
+            ))]
+        );
+    }
+
+    #[test]
+    fn configured_split_h_legacy_binding_emits_bottom_split() {
+        let mut app = test_app_with_settings(split_settings_with_leader("b"));
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyB);
+        app.update();
+        clear_input_frame(&mut app);
+
+        release(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::ControlLeft);
+        app.update();
+        clear_input_frame(&mut app);
+
+        press(&mut app, KeyCode::ShiftLeft);
+        press(&mut app, KeyCode::Quote);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(
+            commands,
+            vec![AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InPane {
+                    direction: PaneDirection::Bottom,
+                    target: PaneTarget::NewSplit,
+                    mode: PaneOpenMode::NewStack,
+                    url: None,
+                }
+            ))]
         );
     }
 }

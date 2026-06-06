@@ -98,7 +98,7 @@ path = "examples/zoom_level.rs"
 version = "2.5"
 
 [dependencies.bevy]
-version = "0.18"
+version = "0.19.0-rc.2"
 features = [
     "bevy_log",
     "bevy_window",
@@ -106,7 +106,11 @@ features = [
     "bevy_sprite",
     "bevy_pbr",
     "bevy_winit",
-    "picking",
+    "bevy_picking",
+    "mesh_picking",
+    "sprite_picking",
+    "x11",
+    "wayland",
 ]
 default-features = false
 
@@ -114,15 +118,16 @@ default-features = false
 version = "0.5.2"
 
 [dependencies.bevy_remote]
-version = "0.18"
+version = "0.19.0-rc.2"
 
 [dependencies.bevy_picking]
-version = "0.18"
+version = "0.19.0-rc.2"
 default-features = false
 features = ["mesh_picking"]
 
 [dependencies.cef]
-version = "145.6.1"
+version = "148.2.0"
+features = ["accelerated_osr"]
 
 [dependencies.rkyv]
 workspace = true
@@ -138,7 +143,7 @@ features = ["derive"]
 version = "1"
 
 [dev-dependencies.bevy]
-version = "0.18"
+version = "0.19.0-rc.2"
 features = [
     "bevy_log",
     "bevy_window",
@@ -146,10 +151,12 @@ features = [
     "bevy_sprite",
     "bevy_pbr",
     "bevy_winit",
-    "picking",
+    "bevy_picking",
+    "mesh_picking",
+    "sprite_picking",
     "file_watcher",
 ]
-default-features = true
+default-features = false
 
 [target.'cfg(target_os = "macos")'.dependencies.objc]
 version = "0.2"

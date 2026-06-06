@@ -6,7 +6,10 @@
 )]
 
 mod background_lifecycle;
-mod browser;
+#[cfg(target_os = "macos")]
+mod glass;
+#[cfg(target_os = "macos")]
+mod native_keyboard;
 mod os_menu;
 mod persistence;
 
@@ -16,15 +19,13 @@ pub mod updater;
 use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
 use bevy::window::{CompositeAlphaMode, ExitCondition, Window as NativeWindow, WindowPlugin};
-use bevy::winit::WinitSettings;
-use std::time::Duration;
 
 use {
-    browser::BrowserPlugin, os_menu::OsMenuPlugin, persistence::PersistencePlugin,
-    shortcut::ShortcutPlugin, vmux_command::CommandPlugin, vmux_layout::LayoutPlugin,
-    vmux_layout::cef::LayoutCefPlugin, vmux_layout::command_bar::plugin::CommandBarPagePlugin,
-    vmux_server::ServerPlugin, vmux_service::plugin::ServicePlugin, vmux_setting::SettingsPlugin,
-    vmux_space::SpacePlugin, vmux_terminal::TerminalPlugin,
+    os_menu::OsMenuPlugin, persistence::PersistencePlugin, shortcut::ShortcutPlugin,
+    vmux_browser::BrowserPlugin, vmux_command::CommandPlugin, vmux_core::page::ServerPlugin,
+    vmux_layout::LayoutPlugin, vmux_layout::cef::LayoutCefPlugin,
+    vmux_service::plugin::ServicePlugin, vmux_setting::SettingsPlugin, vmux_space::SpacePlugin,
+    vmux_terminal::TerminalPlugin,
 };
 
 use vmux_agent::AgentPlugin;
@@ -65,45 +66,43 @@ impl Plugin for VmuxPlugin {
             ..default()
         };
 
-        // Continuous while focused: drives the bevy_cef external BeginFrame system
-        // every Bevy update so CEF paints align with host display refresh.
-        app.insert_resource(WinitSettings {
-            focused_mode: bevy::winit::UpdateMode::Continuous,
-            unfocused_mode: bevy::winit::UpdateMode::reactive_low_power(Duration::from_secs(1)),
-        })
-        .add_plugins((
-            vmux_core::CorePlugin,
-            DefaultPlugins
-                .set(WebAssetPlugin {
-                    silence_startup_warning: true,
-                })
-                .set(window_plugin)
-                .set(bevy::log::LogPlugin {
-                    filter: "bevy_camera_controller=warn".into(),
-                    ..default()
-                }),
-            ServerPlugin,
-            SettingsPlugin,
-            CommandPlugin,
-            ShortcutPlugin,
-            OsMenuPlugin,
-            TerminalPlugin,
-            ServicePlugin,
-            SpacePlugin,
-            vmux_history::HistoryPlugin,
-            LayoutCefPlugin,
-            CommandBarPagePlugin,
-            BrowserPlugin,
-        ))
-        .add_plugins((
-            AgentPlugin,
-            vmux_agent::PageAgentPlugin,
-            PersistencePlugin,
-            LayoutPlugin,
-            updater::VmuxUpdater::builder().build().plugin(),
-            background_lifecycle::BackgroundLifecyclePlugin,
-            tray::TrayPlugin,
-        ));
+        app.insert_resource(background_lifecycle::foreground_winit_settings(false))
+            .add_plugins((
+                vmux_core::CorePlugin,
+                DefaultPlugins
+                    .set(WebAssetPlugin {
+                        silence_startup_warning: true,
+                    })
+                    .set(window_plugin)
+                    .set(bevy::log::LogPlugin {
+                        filter: "bevy_camera_controller=warn".into(),
+                        ..default()
+                    }),
+                ServerPlugin,
+                SettingsPlugin,
+                CommandPlugin,
+                ShortcutPlugin,
+                OsMenuPlugin,
+                TerminalPlugin,
+                ServicePlugin,
+                SpacePlugin,
+                vmux_history::HistoryPlugin,
+                vmux_vibe_setup::VibeSetupPlugin,
+                LayoutCefPlugin,
+                BrowserPlugin,
+            ))
+            .add_plugins((
+                AgentPlugin,
+                vmux_agent::PageAgentPlugin,
+                PersistencePlugin,
+                LayoutPlugin,
+                updater::VmuxUpdater::builder().build().plugin(),
+                background_lifecycle::BackgroundLifecyclePlugin,
+                tray::TrayPlugin,
+            ));
+
+        #[cfg(target_os = "macos")]
+        app.add_plugins(glass::GlassPlugin);
     }
 }
 
@@ -128,12 +127,19 @@ mod tests {
     }
 
     #[test]
-    fn desktop_uses_single_layout_crate_for_chrome_and_layout() {
+    fn desktop_uses_single_layout_crate_for_cef_and_layout() {
         let source = include_str!("lib.rs");
 
         assert!(source.contains("vmux_layout::"));
         assert!(!source.contains(&["vmux_layout", "::footer"].concat()));
         assert!(!source.contains(&["vmux_", "header::HeaderPlugin"].concat()));
         assert!(!source.contains(&["vmux_", "side_sheet::SideSheetPlugin"].concat()));
+    }
+
+    #[test]
+    fn dev_build_has_no_tick_logger() {
+        let source = include_str!("lib.rs");
+
+        assert!(!source.contains(&["app", ".update", "():"].concat()));
     }
 }

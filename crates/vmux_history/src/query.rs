@@ -325,8 +325,7 @@ mod handler_tests {
     #[test]
     fn build_entries_no_query_orders_by_visit_created_at_desc() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CorePlugin);
+        app.add_plugins(MinimalPlugins).add_plugins(CorePlugin);
 
         let url_e = app
             .world_mut()
@@ -365,8 +364,7 @@ mod handler_tests {
     #[test]
     fn build_entries_with_query_filters_and_ranks() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CorePlugin);
+        app.add_plugins(MinimalPlugins).add_plugins(CorePlugin);
 
         let e1 = app
             .world_mut()
@@ -430,8 +428,7 @@ mod handler_tests {
     #[test]
     fn build_entries_pagination() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.add_plugins(CorePlugin);
+        app.add_plugins(MinimalPlugins).add_plugins(CorePlugin);
 
         let url_e = app
             .world_mut()

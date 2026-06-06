@@ -1,16 +1,14 @@
 use std::path::{Path, PathBuf};
 
-use bevy::{picking::Pickable, prelude::*, render::alpha::AlphaMode};
+use bevy::{picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::profile;
 use vmux_layout::cef::Browser;
-use vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS;
 
 use crate::event::{SPACES_PAGE_URL, SpaceRow};
 use crate::model::{
-    DEFAULT_SPACE_ID, SpaceRecord, SpaceRegistry, default_space_record, registry_path,
-    space_layout_path_for,
+    SpaceRecord, SpaceRegistry, bootstrap_space_record, registry_path, space_layout_path_for,
 };
 
 #[derive(Resource, Clone, Debug)]
@@ -23,11 +21,9 @@ impl Default for ActiveSpace {
         let registry = read_space_registry_from(&profile::shared_data_dir());
         let record = registry
             .spaces
-            .iter()
-            .find(|space| space.id == DEFAULT_SPACE_ID)
+            .first()
             .cloned()
-            .or_else(|| registry.spaces.first().cloned())
-            .unwrap_or_else(default_space_record);
+            .unwrap_or_else(bootstrap_space_record);
         Self { record }
     }
 }
@@ -48,16 +44,19 @@ pub fn read_space_registry_from(root: &Path) -> SpaceRegistry {
         .and_then(|body| ron::de::from_str::<SpaceRegistry>(&body).ok())
         .unwrap_or_default();
     if registry.spaces.is_empty() {
-        registry.spaces.push(default_space_record());
-    }
-    if !registry
-        .spaces
-        .iter()
-        .any(|space| space.id == DEFAULT_SPACE_ID)
-    {
-        registry.spaces.insert(0, default_space_record());
+        registry.spaces.push(bootstrap_space_record());
     }
     registry
+}
+
+pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
+    (
+        vmux_layout::space::Space,
+        vmux_layout::profile::Profile {
+            name: record.profile.clone(),
+        },
+        Name::new(record.name.clone()),
+    )
 }
 
 pub fn registry_space_summaries() -> Vec<(String, String, String)> {
@@ -117,15 +116,7 @@ impl Spaces {
                 ))),
             ),
             (
-                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                    base: StandardMaterial {
-                        unlit: true,
-                        alpha_mode: AlphaMode::Blend,
-                        depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                        ..default()
-                    },
-                    ..default()
-                })),
+                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
                 WebviewSize(Vec2::new(1280.0, 720.0)),
                 Transform::default(),
                 GlobalTransform::default(),
@@ -141,5 +132,26 @@ impl Spaces {
                 Pickable::default(),
             ),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{BOOTSTRAP_PROFILE_NAME, BOOTSTRAP_SPACE_NAME, bootstrap_space_record};
+
+    #[test]
+    fn space_profile_bundle_spawns_space_name_and_profile_name() {
+        let mut app = App::new();
+        app.world_mut()
+            .spawn(space_profile_bundle(&bootstrap_space_record()));
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<(&Name, &vmux_layout::profile::Profile), With<vmux_layout::space::Space>>();
+        let (name, profile) = query.single(app.world()).unwrap();
+
+        assert_eq!(name.as_str(), BOOTSTRAP_SPACE_NAME);
+        assert_eq!(profile.name, BOOTSTRAP_PROFILE_NAME);
     }
 }

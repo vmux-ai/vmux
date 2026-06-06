@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeKind {
-    Space,
+    Tab,
     Pane,
     Split,
-    Tab,
+    Stack,
 }
 
 #[derive(
@@ -40,11 +40,11 @@ pub enum SplitDirection {
 )]
 pub struct Focus {
     #[serde(default)]
-    pub space: Option<String>,
+    pub tab: Option<String>,
     #[serde(default)]
     pub pane: Option<String>,
     #[serde(default)]
-    pub tab: Option<String>,
+    pub stack: Option<String>,
 }
 
 #[derive(
@@ -59,7 +59,7 @@ pub struct Focus {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct Tab {
+pub struct Stack {
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
@@ -104,7 +104,7 @@ pub enum LayoutNode {
         #[serde(default)]
         is_zoomed: bool,
         #[serde(default)]
-        tabs: Vec<Tab>,
+        stacks: Vec<Stack>,
     },
 }
 
@@ -118,7 +118,7 @@ pub enum LayoutNode {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct Space {
+pub struct Tab {
     pub id: Option<String>,
     pub name: String,
     #[serde(default)]
@@ -137,16 +137,16 @@ pub struct Space {
     rkyv::Deserialize,
 )]
 pub struct LayoutSnapshot {
-    pub spaces: Vec<Space>,
+    pub tabs: Vec<Tab>,
     pub focused: Focus,
 }
 
 pub fn format_id(kind: NodeKind, value: u64) -> String {
     match kind {
-        NodeKind::Space => format!("space:{value}"),
+        NodeKind::Tab => format!("tab:{value}"),
         NodeKind::Pane => format!("pane:{value}"),
         NodeKind::Split => format!("split:{value}"),
-        NodeKind::Tab => format!("tab:{value}"),
+        NodeKind::Stack => format!("stack:{value}"),
     }
 }
 
@@ -155,10 +155,10 @@ pub fn parse_id(s: &str) -> Result<(NodeKind, u64), String> {
         .split_once(':')
         .ok_or_else(|| format!("id missing ':' separator: {s:?}"))?;
     let kind = match prefix {
-        "space" => NodeKind::Space,
+        "tab" => NodeKind::Tab,
         "pane" => NodeKind::Pane,
         "split" => NodeKind::Split,
-        "tab" => NodeKind::Tab,
+        "stack" => NodeKind::Stack,
         other => return Err(format!("unknown id prefix {other:?} in {s:?}")),
     };
     let value: u64 = rest
@@ -174,10 +174,10 @@ mod tests {
     #[test]
     fn parse_id_round_trips_each_kind() {
         for (kind, value) in [
-            (NodeKind::Space, 1_u64),
+            (NodeKind::Tab, 1_u64),
             (NodeKind::Pane, 42),
             (NodeKind::Split, 17),
-            (NodeKind::Tab, 9999),
+            (NodeKind::Stack, 9999),
         ] {
             let formatted = format_id(kind, value);
             let (parsed_kind, parsed_value) = parse_id(&formatted).unwrap();
@@ -204,20 +204,20 @@ mod tests {
     #[test]
     fn layout_snapshot_json_round_trip_minimal() {
         let snapshot = LayoutSnapshot {
-            spaces: vec![Space {
-                id: Some("space:1".into()),
+            tabs: vec![Tab {
+                id: Some("tab:1".into()),
                 name: "Work".into(),
                 is_active: true,
                 root: LayoutNode::Pane {
                     id: Some("pane:2".into()),
                     is_zoomed: false,
-                    tabs: vec![],
+                    stacks: vec![],
                 },
             }],
             focused: Focus {
-                space: Some("space:1".into()),
+                tab: Some("tab:1".into()),
                 pane: Some("pane:2".into()),
-                tab: None,
+                stack: None,
             },
         };
         let json = serde_json::to_string(&snapshot).unwrap();
@@ -230,7 +230,7 @@ mod tests {
         let pane = LayoutNode::Pane {
             id: Some("pane:7".into()),
             is_zoomed: true,
-            tabs: vec![],
+            stacks: vec![],
         };
         let json = serde_json::to_value(&pane).unwrap();
         assert_eq!(json["kind"], "pane");
@@ -254,8 +254,8 @@ mod tests {
     #[test]
     fn rkyv_round_trip_preserves_tree() {
         let snapshot = LayoutSnapshot {
-            spaces: vec![Space {
-                id: Some("space:1".into()),
+            tabs: vec![Tab {
+                id: Some("tab:1".into()),
                 name: "S".into(),
                 is_active: true,
                 root: LayoutNode::Split {
@@ -266,8 +266,8 @@ mod tests {
                         LayoutNode::Pane {
                             id: Some("pane:10".into()),
                             is_zoomed: false,
-                            tabs: vec![Tab {
-                                id: Some("tab:abc".into()),
+                            stacks: vec![Stack {
+                                id: Some("stack:12".into()),
                                 title: "T".into(),
                                 url: "https://x".into(),
                                 kind: "browser".into(),
@@ -278,7 +278,7 @@ mod tests {
                         LayoutNode::Pane {
                             id: Some("pane:11".into()),
                             is_zoomed: false,
-                            tabs: vec![],
+                            stacks: vec![],
                         },
                     ],
                 },

@@ -6,6 +6,8 @@
 
 pub mod command_bar;
 pub mod event;
+#[cfg(target_arch = "wasm32")]
+pub mod page;
 pub mod protocol;
 pub mod reconcile;
 #[cfg(not(target_arch = "wasm32"))]
@@ -15,8 +17,6 @@ pub mod snapshot;
 pub mod cef;
 #[cfg(not(target_arch = "wasm32"))]
 mod focus_ring;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod glass;
 #[cfg(not(target_arch = "wasm32"))]
 mod header;
 #[cfg(not(target_arch = "wasm32"))]
@@ -34,18 +34,16 @@ pub mod unit;
 #[cfg(not(target_arch = "wasm32"))]
 mod webview_reveal;
 
-#[allow(dead_code)]
-#[cfg(not(target_arch = "wasm32"))]
-pub mod drag;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pane;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod side_sheet;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod space;
-#[allow(dead_code)]
 #[cfg(not(target_arch = "wasm32"))]
-pub mod swap;
+mod swap;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod tab;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod target;
 #[cfg(not(target_arch = "wasm32"))]
@@ -57,7 +55,7 @@ pub mod window;
 use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use cef::{
-    Browser, LayoutCef, Loading, NavigationState, apply_chrome_state_from_cef,
+    Browser, LayoutCef, Loading, NavigationState, apply_cef_state_from_webview,
     mirror_metadata_to_url,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -70,11 +68,20 @@ pub use webview_reveal::PendingWebviewReveal;
 pub use window::fit_window_to_screen;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest =
+    vmux_core::page::PageManifest { host: "layout" };
+#[cfg(not(target_arch = "wasm32"))]
+pub const COMMAND_BAR_PAGE_MANIFEST: vmux_core::page::PageManifest =
+    vmux_core::page::PageManifest {
+        host: "command-bar",
+    };
+
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LayoutStartupSet {
     Window,
     Persistence,
-    DefaultSpace,
+    DefaultTab,
     Post,
 }
 
@@ -105,7 +112,24 @@ pub struct SpaceFilePresent(pub bool);
 #[derive(Message, Clone, Debug)]
 pub enum LayoutSpawnRequest {
     Terminal { stack: Entity },
-    OpenUrl { stack: Entity, url: String },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug)]
+pub enum TabLayoutSpawnContent {
+    StartupUrlOrPrompt,
+    Url(String),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone, Debug)]
+pub struct TabLayoutSpawnRequest {
+    pub main: Entity,
+    pub primary_window: Entity,
+    pub name: Option<String>,
+    pub content: TabLayoutSpawnContent,
+    pub clear_pending_stack: bool,
+    pub focus: bool,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -113,6 +137,7 @@ pub enum LayoutSpawnRequest {
 pub struct BrowserNavigateRequest {
     pub url: String,
     pub pane: Option<String>,
+    pub request_id: Option<[u8; 16]>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -6,7 +6,7 @@ use crate::{
     window::{VmuxWindow, WEBVIEW_Z_FOCUS_RING},
 };
 use bevy::{
-    asset::*, pbr::MaterialPlugin, picking::Pickable, prelude::*, render::alpha::AlphaMode,
+    asset::*, material::AlphaMode, pbr::MaterialPlugin, picking::Pickable, prelude::*,
     render::render_resource::AsBindGroup, shader::ShaderRef, ui::UiGlobalTransform,
     window::PrimaryWindow,
 };
@@ -175,7 +175,7 @@ fn sync_focus_ring_to_active_pane(
         .map(|children| children.iter().any(|e| loading_q.contains(e)))
         .unwrap_or(false);
 
-    if let Some(m) = ring_materials.get_mut(&mat_h.0) {
+    if let Some(mut m) = ring_materials.get_mut(&mat_h.0) {
         *m = build_focus_ring_material(w_i, h_i, &settings, time.elapsed_secs(), is_loading);
     }
 }
@@ -198,7 +198,7 @@ fn tick_focus_ring_gradient_time(
         if m.gradient_params.x <= 0.5 {
             continue;
         };
-        let Some(m) = materials.get_mut(id) else {
+        let Some(mut m) = materials.get_mut(id) else {
             continue;
         };
         m.gradient_params.w = t;
@@ -271,11 +271,11 @@ mod tests {
     #[test]
     fn focus_ring_does_not_capture_pointer_events() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.insert_resource(test_layout_settings());
-        app.init_resource::<Assets<Mesh>>();
-        app.init_resource::<Assets<FocusRingMaterial>>();
-        app.add_systems(Startup, spawn_focus_ring);
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_layout_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<FocusRingMaterial>>()
+            .add_systems(Startup, spawn_focus_ring);
         app.update();
 
         let pickable = app

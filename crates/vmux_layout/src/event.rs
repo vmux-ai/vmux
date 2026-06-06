@@ -48,14 +48,22 @@ pub struct LayoutStateEvent {
     pub pane_gap: f32,
     #[serde(default)]
     pub radius: f32,
+    #[serde(default)]
+    pub window_pad_top: f32,
+    #[serde(default = "default_window_pad")]
+    pub window_pad_right: f32,
+    #[serde(default = "default_window_pad")]
+    pub window_pad_bottom: f32,
+    #[serde(default)]
+    pub window_pad_left: f32,
 }
 
 impl LayoutStateEvent {
-    pub fn main_chrome_left(&self) -> f32 {
+    pub fn main_cef_left(&self) -> f32 {
         if self.side_sheet_open {
-            self.side_sheet_width + self.pane_gap
+            self.window_pad_left + self.side_sheet_width + self.pane_gap
         } else {
-            0.0
+            self.window_pad_left
         }
     }
 
@@ -91,6 +99,10 @@ fn default_pane_gap() -> f32 {
     8.0
 }
 
+fn default_window_pad() -> f32 {
+    WINDOW_PAD_PX
+}
+
 pub const HEADER_HEIGHT_PX: f32 = 72.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
@@ -98,19 +110,19 @@ pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 /// lights when the side sheet is closed.
 pub const TRAFFIC_LIGHTS_PAD_PX: f32 = 80.0;
 
-/// Vertical space the chrome reserves in the layout above the pane.
-/// The chrome puts tabs at the very top (traffic lights sit on the
+/// Vertical space the CEF shell reserves in the layout above the pane.
+/// The CEF shell puts tabs at the very top (traffic lights sit on the
 /// left of the tab row, in the reserved padding) so no extra titlebar
 /// strip is needed.
-pub const CHROME_RESERVED_HEIGHT_PX: f32 = HEADER_HEIGHT_PX;
+pub const CEF_RESERVED_HEIGHT_PX: f32 = HEADER_HEIGHT_PX;
 
 /// Hardcoded window edge padding (px). Not user-configurable.
 pub const WINDOW_PAD_PX: f32 = 4.0;
 
 /// Default page bg color for terminal-like stacks (terminals, processes,
-/// agent CLIs). Matches catppuccin-mocha `base` so the chrome url row
+/// agent CLIs). Matches catppuccin-mocha `base` so the CEF URL row
 /// blends with the terminal surface below it.
-pub const TERMINAL_CHROME_BG_COLOR: &str = "#1e1e2e";
+pub const TERMINAL_CEF_BG_COLOR: &str = "#1e1e2e";
 
 /// Gap (px) between split panes inside a tab.
 pub const PANE_GAP_PX: f32 = 4.0;
@@ -123,7 +135,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn main_chrome_left_includes_side_sheet_gap_when_open() {
+    fn main_cef_left_includes_side_sheet_gap_when_open() {
         let open = LayoutStateEvent {
             side_sheet_open: true,
             side_sheet_width: 280.0,
@@ -137,8 +149,27 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(open.main_chrome_left(), 288.0);
-        assert_eq!(closed.main_chrome_left(), 0.0);
+        assert_eq!(open.main_cef_left(), 288.0);
+        assert_eq!(closed.main_cef_left(), 0.0);
+    }
+
+    #[test]
+    fn main_cef_left_includes_effective_window_left_padding() {
+        let closed = LayoutStateEvent {
+            side_sheet_open: false,
+            window_pad_left: 16.0,
+            ..Default::default()
+        };
+        let open = LayoutStateEvent {
+            side_sheet_open: true,
+            side_sheet_width: 280.0,
+            pane_gap: 8.0,
+            window_pad_left: 16.0,
+            ..Default::default()
+        };
+
+        assert_eq!(closed.main_cef_left(), 16.0);
+        assert_eq!(open.main_cef_left(), 304.0);
     }
 
     #[test]
@@ -399,25 +430,6 @@ pub enum SplitDirection {
     Column,
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum Edge {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum LayoutNode {
     Split {
@@ -430,26 +442,5 @@ pub enum LayoutNode {
         id: u64,
         is_active: bool,
         stacks: Vec<StackNode>,
-    },
-}
-
-#[cfg_attr(not(target_arch = "wasm32"), derive(bevy_ecs::message::Message))]
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind")]
-pub enum SideSheetDragCommand {
-    MoveStack {
-        from_pane: u64,
-        from_index: usize,
-        to_pane: u64,
-        to_index: usize,
-    },
-    SwapPane {
-        pane: u64,
-        target: u64,
-    },
-    SplitPane {
-        dragged: u64,
-        target: u64,
-        edge: Edge,
     },
 }

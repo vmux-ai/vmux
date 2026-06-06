@@ -148,6 +148,11 @@ impl PageBuilder {
             self.manifest_dir.join("../vmux_ui/assets/fonts"),
         ];
         v.extend(self.extra_tracked.iter().cloned());
+        for p in &self.extra_tracked {
+            if p.is_dir() {
+                collect_files(p, &mut v);
+            }
+        }
         collect_rs_files(&self.manifest_dir.join("src"), &mut v);
         collect_rs_files(&workspace_root.join("crates/vmux_ui/src"), &mut v);
         v.sort();
@@ -223,6 +228,20 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
         if p.is_dir() {
             collect_rs_files(&p, out);
         } else if p.extension().is_some_and(|x| x == "rs") {
+            out.push(p);
+        }
+    }
+}
+
+fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            collect_files(&p, out);
+        } else if p.is_file() {
             out.push(p);
         }
     }
@@ -633,4 +652,38 @@ fn remove_stale_prefixed_css_assets(dist_assets: &Path, stale_prefixes: &[&str])
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tracks_rs_files_under_extra_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "vmux-page-builder-track-test-{}",
+            std::process::id()
+        ));
+        let manifest_dir = root.join("crates/vmux_server");
+        let layout_src = root.join("crates/vmux_layout/src");
+        let nested_src = layout_src.join("nested");
+        fs::create_dir_all(manifest_dir.join("assets")).unwrap();
+        fs::create_dir_all(manifest_dir.join("src")).unwrap();
+        fs::create_dir_all(&nested_src).unwrap();
+        fs::write(manifest_dir.join("Cargo.toml"), "").unwrap();
+        fs::write(manifest_dir.join("Dioxus.toml"), "").unwrap();
+        fs::write(manifest_dir.join("assets/index.html"), "").unwrap();
+        fs::write(manifest_dir.join("assets/index.css"), "").unwrap();
+        fs::write(manifest_dir.join("src/lib.rs"), "").unwrap();
+        fs::write(layout_src.join("page.rs"), "").unwrap();
+        fs::write(nested_src.join("pane.rs"), "").unwrap();
+
+        let tracked = PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
+            .track_manifest_rel_paths(&["../vmux_layout/src"])
+            .tracked_paths();
+
+        let _ = fs::remove_dir_all(&root);
+        assert!(tracked.contains(&manifest_dir.join("../vmux_layout/src/page.rs")));
+        assert!(tracked.contains(&manifest_dir.join("../vmux_layout/src/nested/pane.rs")));
+    }
 }

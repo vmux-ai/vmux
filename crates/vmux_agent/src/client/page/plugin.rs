@@ -39,12 +39,12 @@ impl Plugin for PageAgentPlugin {
         {
             app.insert_resource(crate::client::page::strategy_index::PageStrategyIndex::default());
         }
-        app.add_observer(crate::client::page::strategy_indexer::on_strategy_added);
-        app.add_observer(crate::client::page::strategy_indexer::on_strategy_removed);
-        app.add_plugins(crate::providers::anthropic_plugin::AnthropicPlugin);
-        app.add_plugins(crate::providers::mistral_plugin::MistralPlugin);
-        app.add_plugins(crate::providers::openai_plugin::OpenAiPlugin);
-        app.add_plugins(crate::echo_plugin::EchoPlugin);
+        app.add_observer(crate::client::page::strategy_indexer::on_strategy_added)
+            .add_observer(crate::client::page::strategy_indexer::on_strategy_removed)
+            .add_plugins(crate::providers::anthropic_plugin::AnthropicPlugin)
+            .add_plugins(crate::providers::mistral_plugin::MistralPlugin)
+            .add_plugins(crate::providers::openai_plugin::OpenAiPlugin)
+            .add_plugins(crate::echo_plugin::EchoPlugin);
     }
 }
 
@@ -65,9 +65,9 @@ mod tests {
     #[test]
     fn plugin_builds_without_panic() {
         let mut app = App::new();
-        app.add_plugins(bevy::app::TaskPoolPlugin::default());
-        app.init_resource::<BinIpcEventRawBuffer>();
-        app.add_plugins(PageAgentPlugin);
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .init_resource::<BinIpcEventRawBuffer>()
+            .add_plugins(PageAgentPlugin);
         app.update();
     }
 }

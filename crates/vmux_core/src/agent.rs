@@ -117,7 +117,7 @@ pub struct PageAgentAttachRequest {
 }
 
 #[derive(Message, Debug, Clone)]
-pub struct PageAgentSpawnTabRequest {
+pub struct PageAgentSpawnStackRequest {
     pub pane: Entity,
     pub provider: String,
     pub model: String,

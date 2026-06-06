@@ -7,13 +7,14 @@ use bevy::{
     camera::PerspectiveProjection,
     camera::Projection,
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState},
+    core_pipeline::tonemapping::Tonemapping,
     math::curve::easing::EasingCurve,
     post_process::bloom::Bloom,
     prelude::*,
     window::PrimaryWindow,
 };
 use bevy_cef::prelude::CefKeyboardTarget;
-use vmux_command::{AppCommand, ReadAppCommands, SceneCommand};
+use vmux_command::{AppCommand, ReadAppCommands, SceneCommand, SceneInteractiveModeCommand};
 
 pub const FOV_Y: f32 = std::f32::consts::FRAC_PI_4;
 
@@ -87,7 +88,7 @@ impl Plugin for ScenePlugin {
             .add_systems(
                 Update,
                 (
-                    on_toggle_player_mode.in_set(ReadAppCommands),
+                    on_interactive_mode_command.in_set(ReadAppCommands),
                     suppress_free_camera_when_pane_active,
                     tick_mode_transition,
                     fade_bloom_and_light,
@@ -116,6 +117,7 @@ pub fn setup(mut commands: Commands, window: Single<&Window, With<PrimaryWindow>
     commands.spawn((
         MainCamera,
         Camera3d::default(),
+        Tonemapping::SomewhatBoringDisplayTransform,
         Projection::Perspective(PerspectiveProjection {
             fov: FOV_Y,
             ..default()
@@ -126,6 +128,7 @@ pub fn setup(mut commands: Commands, window: Single<&Window, With<PrimaryWindow>
             friction: 25.0,
             walk_speed: 0.5,
             run_speed: 5.0,
+            mouse_key_cursor_grab: MouseButton::Left,
             ..default()
         },
         state,
@@ -174,10 +177,7 @@ fn update_camera_home(
 }
 
 // ---------------------------------------------------------------------------
-// Toggle command handler
-// ---------------------------------------------------------------------------
-
-fn on_toggle_player_mode(
+fn on_interactive_mode_command(
     mut reader: MessageReader<AppCommand>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut state: Single<&mut FreeCameraState, With<MainCamera>>,
@@ -189,57 +189,94 @@ fn on_toggle_player_mode(
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let AppCommand::Scene(SceneCommand::TogglePlayerMode) = *cmd else {
+        let AppCommand::Scene(SceneCommand::InteractiveMode(command)) = *cmd else {
             continue;
         };
+        let target = match command {
+            SceneInteractiveModeCommand::User => InteractionMode::User,
+            SceneInteractiveModeCommand::Player => InteractionMode::Player,
+            SceneInteractiveModeCommand::Toggle => match *mode {
+                InteractionMode::User => InteractionMode::Player,
+                InteractionMode::Player => InteractionMode::User,
+            },
+        };
 
-        // Ignore command during active transition
         if transition.is_some() {
             continue;
         }
+        if *mode == target {
+            continue;
+        }
 
-        match *mode {
+        match target {
             InteractionMode::User => {
-                // Store home transform
-                let home =
-                    frame_main_camera_transform(&window, window.aspect(), camera_margin_px());
-                commands.insert_resource(CameraHome(home));
-
-                *mode = InteractionMode::Player;
-                suppress.0 = true;
-
-                // Remove keyboard targets so free camera keys work
-                for e in &kb_targets {
-                    commands.entity(e).remove::<CefKeyboardTarget>();
-                }
-
-                // Spawn bloom with 0 intensity (fade system will animate it)
-                let mut bloom = Bloom::NATURAL;
-                bloom.intensity = 0.0;
-                commands.entity(*camera).insert(bloom);
-
-                // Spawn sunlight with 0 illuminance
-                commands.spawn((
-                    SceneSunlight,
-                    DirectionalLight {
-                        illuminance: 0.0,
-                        shadows_enabled: false,
-                        color: Color::srgb(1.0, 0.98, 0.95),
-                        ..default()
-                    },
-                    Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.6, 0.4, 0.0)),
-                ));
-
-                // Start transition timer
-                commands.insert_resource(ModeTransition::new(TransitionDirection::EnterPlayer));
-
-                // FreeCameraState.enabled is set by complete_mode_transition
-                // after the fade-in finishes.
-            }
-            InteractionMode::Player => {
                 start_exit_transition(&mut state, &mut suppress, &mut commands, *camera);
             }
+            InteractionMode::Player => {
+                start_enter_transition(
+                    &window,
+                    &kb_targets,
+                    &mut mode,
+                    &mut suppress,
+                    &mut commands,
+                    *camera,
+                );
+            }
         }
+    }
+}
+
+fn start_enter_transition(
+    window: &Window,
+    kb_targets: &Query<Entity, With<CefKeyboardTarget>>,
+    mode: &mut ResMut<InteractionMode>,
+    suppress: &mut ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
+    commands: &mut Commands,
+    camera: Entity,
+) {
+    let home = frame_main_camera_transform(window, window.aspect(), camera_margin_px());
+    commands.insert_resource(CameraHome(home));
+
+    **mode = InteractionMode::Player;
+    suppress.0 = true;
+
+    for e in kb_targets {
+        commands.entity(e).remove::<CefKeyboardTarget>();
+    }
+
+    let mut bloom = Bloom::NATURAL;
+    bloom.intensity = 0.0;
+    commands.entity(camera).insert(bloom);
+
+    commands.spawn((
+        SceneSunlight,
+        DirectionalLight {
+            illuminance: 0.0,
+            shadow_maps_enabled: false,
+            color: Color::srgb(1.0, 0.98, 0.95),
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.6, 0.4, 0.0)),
+    ));
+
+    commands.insert_resource(ModeTransition::new(TransitionDirection::EnterPlayer));
+}
+
+fn reset_free_camera_state(state: &mut FreeCameraState) {
+    state.enabled = false;
+    state.pitch = 0.0;
+    state.yaw = 0.0;
+    state.speed_multiplier = 1.0;
+    state.velocity = Vec3::ZERO;
+    state.rotation_curve = None;
+}
+
+fn frame_window_transform(window: &Window) -> Transform {
+    let m = window.meters();
+    Transform {
+        translation: Vec3::new(0.0, m.y * 0.5, 0.0),
+        scale: Vec3::new(m.x, m.y, 1.0),
+        ..default()
     }
 }
 
@@ -250,7 +287,7 @@ fn start_exit_transition(
     _camera_entity: Entity,
 ) {
     // Disable free camera immediately so WASD stops during transition
-    state.enabled = false;
+    reset_free_camera_state(state);
     suppress.0 = false;
 
     // Start the exit transition timer
@@ -387,6 +424,11 @@ fn complete_mode_transition(
     mut mode: ResMut<InteractionMode>,
     home: Option<Res<CameraHome>>,
     mut transform: Single<&mut Transform, With<MainCamera>>,
+    window: Single<&Window, With<PrimaryWindow>>,
+    mut window_transform_q: Query<
+        &mut Transform,
+        (With<crate::window::VmuxWindow>, Without<MainCamera>),
+    >,
     mut commands: Commands,
 ) {
     let Some(ref transition) = transition else {
@@ -404,6 +446,7 @@ fn complete_mode_transition(
         TransitionDirection::ExitPlayer => {
             // Animation done, clean up
             *mode = InteractionMode::User;
+            reset_free_camera_state(&mut state);
 
             commands.entity(*camera).remove::<Bloom>();
 
@@ -414,6 +457,11 @@ fn complete_mode_transition(
             // Snap to exact home transform
             if let Some(ref home) = home {
                 **transform = home.0;
+            }
+
+            let window_transform = frame_window_transform(&window);
+            for mut transform in &mut window_transform_q {
+                *transform = window_transform;
             }
 
             // Remove animation components
@@ -477,5 +525,105 @@ mod tests {
     #[test]
     fn camera_margin_is_zero() {
         assert_eq!(camera_margin_px(), 0.0);
+    }
+
+    #[test]
+    fn main_camera_uses_non_lut_tonemapping() {
+        let mut app = App::new();
+        app.register_required_components::<
+            Camera3d,
+            bevy::core_pipeline::tonemapping::Tonemapping,
+        >()
+            .add_systems(Update, setup);
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+        app.update();
+
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&bevy::core_pipeline::tonemapping::Tonemapping, With<MainCamera>>();
+        let tonemapping = query.single(app.world()).expect("main camera tonemapping");
+
+        assert_eq!(
+            *tonemapping,
+            bevy::core_pipeline::tonemapping::Tonemapping::SomewhatBoringDisplayTransform
+        );
+    }
+
+    #[test]
+    fn main_camera_grabs_cursor_with_left_mouse_drag() {
+        let mut app = App::new();
+        app.register_required_components::<Camera3d, FreeCamera>()
+            .add_systems(Update, setup);
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+        app.update();
+
+        let config = app
+            .world_mut()
+            .query_filtered::<&FreeCamera, With<MainCamera>>()
+            .single(app.world())
+            .expect("main camera free camera config");
+
+        assert_eq!(config.mouse_key_cursor_grab, MouseButton::Left);
+    }
+
+    #[test]
+    fn exiting_player_mode_resets_free_camera_state() {
+        let mut app = App::new();
+        let mut transition = ModeTransition::new(TransitionDirection::ExitPlayer);
+        transition
+            .timer
+            .tick(std::time::Duration::from_secs_f32(TRANSITION_DURATION));
+        let home = Transform::from_xyz(1.0, 2.0, 3.0);
+        let mut state = FreeCameraState::default();
+        state.enabled = false;
+        state.pitch = 1.0;
+        state.yaw = 2.0;
+        state.speed_multiplier = 3.0;
+        state.velocity = Vec3::new(4.0, 5.0, 6.0);
+
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(InteractionMode::Player)
+            .insert_resource(transition)
+            .insert_resource(CameraHome(home))
+            .add_systems(Update, complete_mode_transition);
+        app.world_mut()
+            .spawn((Window::default(), PrimaryWindow, Transform::default()));
+        app.world_mut()
+            .spawn((MainCamera, Transform::default(), state, Bloom::NATURAL));
+        let window_entity = app
+            .world_mut()
+            .spawn((
+                crate::window::VmuxWindow,
+                Transform::from_xyz(9.0, 9.0, 9.0).with_scale(Vec3::splat(9.0)),
+            ))
+            .id();
+
+        app.update();
+
+        let state = app
+            .world_mut()
+            .query_filtered::<&FreeCameraState, With<MainCamera>>()
+            .single(app.world())
+            .expect("main camera state");
+        assert!(!state.enabled);
+        assert_eq!(state.pitch, 0.0);
+        assert_eq!(state.yaw, 0.0);
+        assert_eq!(state.speed_multiplier, 1.0);
+        assert_eq!(state.velocity, Vec3::ZERO);
+        assert!(state.rotation_curve.is_none());
+
+        let window = app
+            .world_mut()
+            .query_filtered::<&Window, With<PrimaryWindow>>()
+            .single(app.world())
+            .expect("primary window");
+        let expected_window_transform = frame_window_transform(window);
+        let window_transform = app
+            .world()
+            .get::<Transform>(window_entity)
+            .expect("window transform");
+        assert_eq!(*window_transform, expected_window_transform);
     }
 }

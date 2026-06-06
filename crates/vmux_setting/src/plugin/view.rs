@@ -1,17 +1,14 @@
-use std::path::PathBuf;
-
-use bevy::{picking::Pickable, prelude::*, render::alpha::AlphaMode};
+use bevy::{picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_command::command::{AppCommand, LayoutCommand, WindowCommand};
 use vmux_core::PageMetadata;
+use vmux_core::page::PageReady;
 use vmux_history::{CreatedAt, LastActivatedAt};
 use vmux_layout::{
     Browser,
     pane::{Pane, PaneSplit},
     stack::{FocusedStack, stack_bundle},
-    window::WEBVIEW_MESH_DEPTH_BIAS,
 };
-use vmux_server::{PageConfig, PageReady, Server};
 
 use crate::event::{
     SETTINGS_LIST_EVENT, SETTINGS_PAGE_URL, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent,
@@ -46,15 +43,7 @@ impl Settings {
                 ))),
             ),
             (
-                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial {
-                    base: StandardMaterial {
-                        unlit: true,
-                        alpha_mode: AlphaMode::Blend,
-                        depth_bias: WEBVIEW_MESH_DEPTH_BIAS,
-                        ..default()
-                    },
-                    ..default()
-                })),
+                MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
                 WebviewSize(Vec2::new(1280.0, 720.0)),
                 Transform::default(),
                 GlobalTransform::default(),
@@ -86,13 +75,6 @@ pub(crate) fn reset_sent_markers_on_page_ready(
         .entity(entity)
         .remove::<SettingsListSent>()
         .remove::<SettingsSchemaSent>();
-}
-
-pub(crate) fn register_settings_page(registry: &mut Server) {
-    registry.register(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-        &PageConfig::with_custom_host("settings"),
-    );
 }
 
 #[derive(Component)]
@@ -226,13 +208,13 @@ fn build_settings_schema() -> SettingsSchema {
                 id: "general".to_string(),
                 title: "General".to_string(),
                 description: None,
-                synthetic_keys: vec!["auto_update".to_string(), "startup_url".to_string()],
+                synthetic_keys: vec!["auto_update".to_string()],
                 root_path: String::new(),
             },
             SectionSpec {
                 id: "layout".to_string(),
                 title: "Layout".to_string(),
-                description: Some("Window chrome, panes, sidebar, and focus ring.".to_string()),
+                description: Some("Window CEF shell, panes, sidebar, and focus ring.".to_string()),
                 synthetic_keys: vec![],
                 root_path: "layout".to_string(),
             },
@@ -256,7 +238,7 @@ fn build_settings_schema() -> SettingsSchema {
                 id: "browser".to_string(),
                 title: "Browser".to_string(),
                 description: None,
-                synthetic_keys: vec![],
+                synthetic_keys: vec!["startup_url".to_string()],
                 root_path: "browser".to_string(),
             },
         ],
@@ -270,11 +252,18 @@ fn build_settings_schema() -> SettingsSchema {
                 },
             ),
             field(
-                "startup_url",
+                "browser",
+                FieldSpec {
+                    order: vec!["startup_url".into()],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "browser.startup_url",
                 FieldSpec {
                     label: Some("Startup URL".into()),
-                    hint: Some("Empty defaults to vmux://vibe/.".into()),
-                    placeholder: Some("vmux://vibe/".into()),
+                    hint: Some("Empty opens the command bar prompt.".into()),
+                    placeholder: Some("https://example.com".into()),
                     ..Default::default()
                 },
             ),

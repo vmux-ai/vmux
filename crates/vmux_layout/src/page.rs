@@ -1,11 +1,11 @@
 #![allow(non_snake_case)]
 
-use dioxus::prelude::*;
-use vmux_layout::event::{
+use crate::event::{
     HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
     PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent,
     TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
+use dioxus::prelude::*;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{GlobeIcon, favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
@@ -34,14 +34,18 @@ pub fn Page() -> Element {
         }
     });
     let side_sheet_vars = format!(
-        "--vmux-side-sheet-width:{}px;--vmux-side-sheet-pad-top:{}px;",
+        "--vmux-side-sheet-width:{}px;--vmux-side-sheet-left:{}px;--vmux-side-sheet-top:{}px;--vmux-side-sheet-bottom:{}px;--vmux-side-sheet-pad-top:{}px;",
         state.side_sheet_width,
-        vmux_layout::event::url_bar_top(),
+        state.window_pad_left,
+        state.window_pad_top,
+        state.window_pad_bottom,
+        crate::event::url_bar_top(),
     );
     let header_vars = format!(
-        "--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;",
-        state.main_chrome_left(),
-        vmux_layout::event::WINDOW_PAD_PX,
+        "--vmux-header-top:{}px;--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;",
+        state.window_pad_top,
+        state.main_cef_left(),
+        state.window_pad_right,
         state.header_height,
         state.tab_row_pad_left(),
     );
@@ -50,7 +54,7 @@ pub fn Page() -> Element {
         div { class: "fixed inset-0 pointer-events-none text-foreground",
             if state.side_sheet_open {
                 aside {
-                    class: "pointer-events-auto fixed left-0 top-0 bottom-0 min-h-0 overflow-hidden w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
+                    class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-hidden w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
                     style: "{side_sheet_vars}",
                     div { class: "flex h-full min-h-0 flex-col",
                         SideSheetView {}
@@ -59,7 +63,7 @@ pub fn Page() -> Element {
             }
             if state.header_visible() {
                 div {
-                    class: "pointer-events-auto fixed top-0 left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
+                    class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
                     style: "{header_vars}",
                     HeaderView {}
                 }
@@ -160,7 +164,7 @@ fn HeaderView() -> Element {
     let tabs_loading = (tabs_listener.is_loading)();
     let tabs_error = (tabs_listener.error)();
 
-    let (url_row_style, url_row_class) = url_row_chrome(active_bg_color.as_deref());
+    let (url_row_style, url_row_class) = url_row_cef(active_bg_color.as_deref());
 
     rsx! {
         div {
@@ -225,7 +229,7 @@ fn HeaderView() -> Element {
     }
 }
 
-fn url_row_chrome(bg_color: Option<&str>) -> (String, String) {
+fn url_row_cef(bg_color: Option<&str>) -> (String, String) {
     if let Some(color) = bg_color {
         let text_class = text_color_class_for_bg(color);
         (
@@ -363,6 +367,7 @@ fn Tab(tab: TabRow) -> Element {
         before:[background:radial-gradient(circle_at_top_left,transparent_0,transparent_8px,var(--tab-bg)_8px)] \
         after:content-[''] after:absolute after:bottom-0 after:-right-2 after:h-2 after:w-2 after:pointer-events-none \
         after:[background:radial-gradient(circle_at_top_right,transparent_0,transparent_8px,var(--tab-bg)_8px)]";
+    let tab_box_classes = "group flex h-10 w-52 min-w-52 max-w-52 basis-52 shrink-0 grow-0 -mb-[3px] pb-[3px] cursor-pointer items-center gap-2 px-3.5";
 
     let (tab_style, tab_class, title_class, close_class) = if is_active {
         if let Some(ref color) = tab.bg_color {
@@ -370,9 +375,9 @@ fn Tab(tab: TabRow) -> Element {
             (
                 format!("--tab-bg:{color};"),
                 format!(
-                    "{skirt_classes} group flex h-10 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-2 rounded-t-md px-3.5 bg-[var(--tab-bg)] {text_class}"
+                    "{skirt_classes} {tab_box_classes} rounded-t-md bg-[var(--tab-bg)] {text_class}"
                 ),
-                format!("min-w-0 truncate text-ui font-medium {text_class}"),
+                format!("min-w-0 flex-1 truncate text-ui font-medium {text_class}"),
                 format!(
                     "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/20 {text_class}"
                 ),
@@ -381,17 +386,19 @@ fn Tab(tab: TabRow) -> Element {
             (
                 "--tab-bg:var(--glass);".to_string(),
                 format!(
-                    "{skirt_classes} glass group flex h-10 min-w-0 max-w-[200px] -mb-[3px] pb-[3px] items-center gap-2 rounded-t-md border-b-0 px-3.5"
+                    "{skirt_classes} {tab_box_classes} glass rounded-t-md border-b-0"
                 ),
-                "min-w-0 truncate text-ui font-medium text-foreground".to_string(),
+                "min-w-0 flex-1 truncate text-ui font-medium text-foreground".to_string(),
                 "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
             )
         }
     } else {
         (
             String::new(),
-            "group flex h-10 min-w-0 max-w-[200px] items-center gap-2 rounded-md px-3.5 text-muted-foreground hover:bg-glass-hover hover:text-foreground".to_string(),
-            "min-w-0 truncate text-ui".to_string(),
+            format!(
+                "{tab_box_classes} rounded-md text-muted-foreground hover:bg-glass-hover hover:px-4 hover:text-foreground"
+            ),
+            "min-w-0 flex-1 truncate text-ui".to_string(),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
     };
@@ -400,16 +407,15 @@ fn Tab(tab: TabRow) -> Element {
         div {
             class: "{tab_class}",
             style: "{tab_style}",
-            button {
-                r#type: "button",
+            onclick: move |_| {
+                let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
+                    command: "switch".to_string(),
+                    tab_id: Some(id_switch.clone()),
+                });
+            },
+            div {
                 title: "{tooltip}",
-                class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2.5",
-                onclick: move |_| {
-                    let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
-                        command: "switch".to_string(),
-                        tab_id: Some(id_switch.clone()),
-                    });
-                },
+                class: "flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden",
                 StackIcon {
                     url: tab.url.clone(),
                     title: display_title.clone(),
@@ -423,7 +429,12 @@ fn Tab(tab: TabRow) -> Element {
                 aria_label: "Close tab",
                 title: "Close tab",
                 class: "{close_class}",
+                onmousedown: move |evt| {
+                    evt.prevent_default();
+                    evt.stop_propagation();
+                },
                 onclick: move |evt| {
+                    evt.prevent_default();
                     evt.stop_propagation();
                     let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
                         command: "close".to_string(),
@@ -577,7 +588,7 @@ fn NewStackRow(pane_id: u64) -> Element {
             r#type: "button",
             class: "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
+                let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                     command: "new_stack".to_string(),
                     pane_id: pane_id.to_string(),
                     stack_index: 0,
@@ -612,7 +623,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
             },
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
+                let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                     command: "activate_stack".to_string(),
                     pane_id: pane_id.to_string(),
                     stack_index,
@@ -632,9 +643,14 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 aria_label: "Close stack",
                 title: "Close stack",
                 class: "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10",
-                onclick: move |evt| {
+                onmousedown: move |evt| {
+                    evt.prevent_default();
                     evt.stop_propagation();
-                    let _ = try_cef_bin_emit_rkyv(&vmux_layout::event::SideSheetCommandEvent {
+                },
+                onclick: move |evt| {
+                    evt.prevent_default();
+                    evt.stop_propagation();
+                    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                         command: "close_stack".to_string(),
                         pane_id: pane_id.to_string(),
                         stack_index,
