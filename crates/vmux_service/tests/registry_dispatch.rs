@@ -26,6 +26,22 @@ fn ensure_running_calls_legacy_cleanup_for_sm_app_service_path() {
 }
 
 #[test]
+fn ensure_running_replaces_embedded_agent_registration() {
+    let source = include_str!("../src/registry.rs");
+    let unregister = source
+        .find("unregister_agent(bundle::EMBEDDED_AGENT_PLIST)")
+        .expect("SmAppService branch must unregister the embedded agent before re-registering it");
+    let register = source
+        .find("register_agent(bundle::EMBEDDED_AGENT_PLIST)")
+        .expect("SmAppService branch must register the embedded agent");
+
+    assert!(
+        unregister < register,
+        "SmAppService branch must replace stale embedded agent registrations before kickstart"
+    );
+}
+
+#[test]
 fn ensure_running_kickstarts_after_register_for_sm_app_service_path() {
     let source = include_str!("../src/registry.rs");
     assert!(

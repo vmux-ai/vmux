@@ -51,6 +51,11 @@ pub fn ensure_running(profile: &str, exe: &Path) -> Result<(), RegistrationError
                 if let Err(e) = crate::sm_app_service::unregister_main_app() {
                     tracing::debug!(error = %e, "unregister main app login item (ignored)");
                 }
+                if let Err(e) =
+                    crate::sm_app_service::unregister_agent(bundle::EMBEDDED_AGENT_PLIST)
+                {
+                    tracing::debug!(error = %e, "unregister embedded agent (ignored)");
+                }
                 crate::sm_app_service::register_agent(bundle::EMBEDDED_AGENT_PLIST)?;
                 crate::launchd::kickstart(bundle::EMBEDDED_AGENT_LABEL)?;
                 Ok(())
