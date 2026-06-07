@@ -323,10 +323,20 @@ mod tests {
     }
 
     #[test]
-    fn layout_css_keeps_glass_background_transparent() {
+    fn layout_css_gives_chrome_controls_readable_glass_background() {
         let css = include_str!("../../assets/index.css");
 
-        assert!(css.contains("--glass: transparent;"));
+        assert!(css.contains("--glass: oklch(0.18 0 0 / 0.82);"));
+        assert!(!css.contains("--glass: transparent;"));
+        assert!(!css.contains("--glass: oklch(0.36 0 0 / 0.82);"));
+    }
+
+    #[test]
+    fn bundled_layout_css_gives_chrome_controls_readable_glass_background() {
+        let css = include_str!("../../../vmux_server/assets/index.css");
+
+        assert!(css.contains("--glass: oklch(0.18 0 0 / 0.82);"));
+        assert!(!css.contains("--glass: transparent;"));
         assert!(!css.contains("--glass: oklch(0.36 0 0 / 0.82);"));
     }
 }

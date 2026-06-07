@@ -63,6 +63,7 @@ objc2-app-kit = { version = "0.3", features = [
     "NSGraphics",
     "NSColor",
     "NSGlassEffectView",
+    "NSPanel",
 ] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer", "objc2-core-foundation"] }
@@ -77,12 +78,12 @@ copyright = "Copyright 2024-2025 Junichi Sugiura. MIT License."
 homepage = "https://vmux.ai"
 formats = ["app", "dmg"]
 icons = ["../../packaging/macos/Vmux.icns"]
-before-packaging-command = "env -u CEF_PATH cargo build -p vmux_desktop -p vmux_cli -p vmux_service -p bevy_cef_debug_render_process --release"
+before-packaging-command = "bash ../../scripts/build-package-binaries.sh"
 before-each-package-command = "bash ../../scripts/before-each-package.sh"
 binaries = [
-    { path = "vmux_desktop", main = true },
+    { path = "Vmux", main = true },
     { path = "vmux" },
-    { path = "vmux_service" },
+    { path = "Vmux Service" },
 ]
 
 [package.metadata.packager.dmg]

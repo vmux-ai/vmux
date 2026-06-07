@@ -74,8 +74,8 @@ fn queue_accelerated_uploads(
         }
     }
     for (webview, mut frame) in latest {
-        // Native-overlay webviews don't blit to a Bevy texture; hand the newest frame to the overlay.
-        if overlay_webviews.contains(webview) {
+        let overlay = overlay_webviews.contains(webview);
+        if overlay {
             if let Ok(mut overlay) = overlay_frames.0.lock() {
                 overlay.insert(webview, frame);
             }
@@ -116,10 +116,21 @@ fn extract_accelerated_uploads(
     main: Extract<Res<WebviewAcceleratedQueue>>,
     mut extracted: ResMut<ExtractedAcceleratedUploads>,
 ) {
-    extracted.0.clear();
     if let Ok(mut pending) = main.0.lock() {
         extracted.0.append(&mut pending);
     }
+    coalesce_pending_accelerated_uploads(&mut extracted.0);
+}
+
+fn coalesce_pending_accelerated_uploads(uploads: &mut Vec<PendingAcceleratedUpload>) {
+    if uploads.len() < 2 {
+        return;
+    }
+    let mut latest = HashMap::new();
+    for upload in uploads.drain(..) {
+        latest.insert(upload.frame.webview, upload);
+    }
+    uploads.extend(latest.into_values());
 }
 
 fn upload_accelerated_textures(
@@ -128,16 +139,20 @@ fn upload_accelerated_textures(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
 ) {
-    for upload in extracted.0.drain(..) {
-        let PendingAcceleratedUpload { image, frame } = upload;
-        let Some(gpu) = gpu_images.get(image) else {
+    let uploads = std::mem::take(&mut extracted.0);
+    let mut retry = Vec::new();
+    for upload in uploads {
+        let Some(gpu) = gpu_images.get(upload.image) else {
+            retry.push(upload);
             continue;
         };
-        if gpu.texture_descriptor.size.width != frame.width
-            || gpu.texture_descriptor.size.height != frame.height
+        if gpu.texture_descriptor.size.width != upload.frame.width
+            || gpu.texture_descriptor.size.height != upload.frame.height
         {
+            retry.push(upload);
             continue;
         }
+        let PendingAcceleratedUpload { frame, .. } = upload;
         let AcceleratedFrame {
             handle,
             keepalive,
@@ -190,5 +205,35 @@ fn upload_accelerated_textures(
         render_queue.on_submitted_work_done(move || {
             drop((keepalive, src));
         });
+    }
+    if !retry.is_empty() {
+        extracted.0.extend(retry);
+        coalesce_pending_accelerated_uploads(&mut extracted.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn accelerated_uploads_survive_gpu_asset_resize_lag() {
+        let source = include_str!("accelerated_upload.rs");
+        let extract = source
+            .split("fn extract_accelerated_uploads")
+            .nth(1)
+            .and_then(|tail| tail.split("fn upload_accelerated_textures").next())
+            .expect("extract system source");
+        let upload = source
+            .split("fn upload_accelerated_textures")
+            .nth(1)
+            .expect("upload system source");
+
+        assert!(
+            !extract.contains("extracted.0.clear();"),
+            "deferred accelerated uploads must survive extract frames"
+        );
+        assert!(
+            upload.contains("retry.push(upload);"),
+            "GPU-size misses must retry instead of dropping one-shot frames"
+        );
     }
 }

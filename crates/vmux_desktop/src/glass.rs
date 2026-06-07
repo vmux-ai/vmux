@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+use vmux_core::page::PageReady;
+use vmux_layout::cef::LayoutCef;
 use vmux_layout::scene::InteractionMode;
 
 pub(crate) struct GlassPlugin;
@@ -6,14 +8,19 @@ pub(crate) struct GlassPlugin;
 impl Plugin for GlassPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<GlassState>()
+            .init_non_send::<LayoutOverlay>()
             .init_non_send::<CommandBarOverlay>()
+            .add_systems(PreUpdate, install_window_glass)
+            .add_systems(Update, sync_window_glass_visibility)
             .add_systems(
-                Update,
-                (install_window_glass, sync_window_glass_visibility).chain(),
-            )
-            // Run after PostUpdate's `sync_windowed_frames` (which raises each page to front every
-            // frame) so the overlay stays on top of the pages.
-            .add_systems(Last, sync_command_bar_overlay);
+                Last,
+                (
+                    reveal_window_after_layout_ready,
+                    sync_layout_overlay,
+                    sync_command_bar_overlay,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -21,7 +28,10 @@ impl Plugin for GlassPlugin {
 struct GlassState {
     installed: bool,
     visible: bool,
+    revealed: bool,
     _glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
+    _backdrop_window: Option<objc2::rc::Retained<objc2_app_kit::NSPanel>>,
+    _parent_window: Option<objc2::rc::Retained<objc2_app_kit::NSWindow>>,
 }
 
 fn install_window_glass(
@@ -29,11 +39,13 @@ fn install_window_glass(
     window: Query<Entity, With<bevy::window::PrimaryWindow>>,
 ) {
     use bevy::winit::WINIT_WINDOWS;
-    use objc2::{MainThreadMarker, rc::Retained, runtime::AnyClass};
+    use objc2::{ClassType, MainThreadMarker, MainThreadOnly, rc::Retained, runtime::AnyClass};
     use objc2_app_kit::{
-        NSAutoresizingMaskOptions, NSGlassEffectView, NSGlassEffectViewStyle, NSView,
-        NSWindowOrderingMode,
+        NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSGlassEffectView,
+        NSGlassEffectViewStyle, NSPanel, NSView, NSWindowCollectionBehavior, NSWindowOrderingMode,
+        NSWindowStyleMask,
     };
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     if state.installed {
@@ -58,10 +70,7 @@ fn install_window_glass(
         return;
     };
     let content: &NSView = unsafe { &*ns_view.as_ptr().cast::<NSView>() };
-    // Insert glass as a sibling *behind* the winit content view (its NSWindow frame view), so the
-    // transparent Bevy/OSR surface composites over it. A content-view subview would render in front
-    // of the OSR layer and hide the chrome.
-    let Some(parent) = (unsafe { content.superview() }) else {
+    let Some(parent_window) = content.window() else {
         return;
     };
     if AnyClass::get(c"NSGlassEffectView").is_none() {
@@ -69,18 +78,66 @@ fn install_window_glass(
         state.installed = true;
         return;
     }
+    let frame = parent_window.frame();
+    let backdrop_window = NSPanel::initWithContentRect_styleMask_backing_defer(
+        NSPanel::alloc(mtm),
+        frame,
+        NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel,
+        NSBackingStoreType::Buffered,
+        false,
+    );
+    let clear_color = NSColor::clearColor();
+    let backdrop: &objc2_app_kit::NSWindow = backdrop_window.as_super();
+    backdrop.setOpaque(false);
+    backdrop.setBackgroundColor(Some(&clear_color));
+    backdrop.setHasShadow(false);
+    backdrop.setIgnoresMouseEvents(true);
+    backdrop.setCanHide(false);
+    backdrop.setHidesOnDeactivate(false);
+    backdrop_window.setFloatingPanel(false);
+    backdrop_window.setBecomesKeyOnlyIfNeeded(true);
+    backdrop.setCollectionBehavior(
+        NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::FullScreenAuxiliary
+            | NSWindowCollectionBehavior::IgnoresCycle,
+    );
     let glass: Retained<NSGlassEffectView> = NSGlassEffectView::new(mtm);
-    glass.setStyle(NSGlassEffectViewStyle::Regular);
+    glass.setStyle(NSGlassEffectViewStyle::Clear);
+    glass.setTintColor(Some(&NSColor::clearColor()));
     let glass_view: &NSView = &glass;
-    glass_view.setFrame(parent.bounds());
+    glass_view.setFrame(NSRect::new(
+        NSPoint::new(0.0, 0.0),
+        NSSize::new(frame.size.width, frame.size.height),
+    ));
     glass_view.setAutoresizingMask(
         NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
     );
-    parent.addSubview_positioned_relativeTo(glass_view, NSWindowOrderingMode::Below, Some(content));
+    backdrop.setContentView(Some(glass_view));
+    unsafe {
+        parent_window.addChildWindow_ordered(backdrop, NSWindowOrderingMode::Below);
+    }
     state.visible = true;
     state._glass = Some(glass);
+    state._backdrop_window = Some(backdrop_window);
+    state._parent_window = Some(parent_window);
     state.installed = true;
-    info!("glass: NSGlassEffectView installed as window backdrop (behind content view)");
+    info!("glass: NSGlassEffectView installed in nonactivating child-window backdrop");
+}
+
+fn reveal_window_after_layout_ready(
+    mut state: NonSendMut<GlassState>,
+    mut window: Query<(Entity, &mut Window), With<bevy::window::PrimaryWindow>>,
+    layout_ready: Query<(), (With<LayoutCef>, With<PageReady>)>,
+) {
+    if state.revealed || !state.installed || layout_ready.is_empty() {
+        return;
+    }
+    let Ok((entity, mut window)) = window.single_mut() else {
+        return;
+    };
+    window.visible = true;
+    state.revealed = true;
+    crate::background_lifecycle::activate_native_window(entity);
 }
 
 fn glass_backdrop_visible(mode: InteractionMode) -> bool {
@@ -88,7 +145,15 @@ fn glass_backdrop_visible(mode: InteractionMode) -> bool {
 }
 
 fn sync_window_glass_visibility(mut state: NonSendMut<GlassState>, mode: Res<InteractionMode>) {
+    use objc2::ClassType;
+
     let visible = glass_backdrop_visible(*mode);
+    if let (Some(backdrop_window), Some(parent_window)) =
+        (&state._backdrop_window, &state._parent_window)
+    {
+        let backdrop_window: &objc2_app_kit::NSWindow = backdrop_window.as_super();
+        backdrop_window.setFrame_display(parent_window.frame(), false);
+    }
     if state.visible == visible {
         return;
     }
@@ -97,6 +162,13 @@ fn sync_window_glass_visibility(mut state: NonSendMut<GlassState>, mode: Res<Int
         glass_view.setHidden(!visible);
     }
     state.visible = visible;
+}
+
+#[derive(Default)]
+struct LayoutOverlay {
+    layer: Option<objc2::rc::Retained<objc2_quartz_core::CALayer>>,
+    shown: bool,
+    held: Option<bevy_cef_core::prelude::AcceleratedFrame>,
 }
 
 #[derive(Default)]
@@ -119,6 +191,87 @@ fn primary_content_view_ptr(entity: Entity) -> Option<*mut core::ffi::c_void> {
             _ => None,
         }
     })
+}
+
+fn sync_layout_overlay(
+    mut state: NonSendMut<LayoutOverlay>,
+    layout_e_q: Query<Entity, With<LayoutCef>>,
+    window_q: Query<Entity, With<bevy::window::PrimaryWindow>>,
+    windows: Query<&bevy::window::Window>,
+    mode: Res<InteractionMode>,
+    overlay_frames: Res<bevy_cef::prelude::NativeOverlayFrames>,
+) {
+    use objc2::{MainThreadMarker, rc::Retained, runtime::AnyObject};
+    use objc2_app_kit::{NSColor, NSView};
+    use objc2_quartz_core::CALayer;
+
+    if *mode != InteractionMode::User {
+        if state.shown {
+            if let Some(layer) = &state.layer {
+                layer.setHidden(true);
+            }
+            state.shown = false;
+            state.held = None;
+        }
+        return;
+    }
+    let Some(_mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let (Ok(window_e), Ok(layout_e)) = (window_q.single(), layout_e_q.single()) else {
+        return;
+    };
+    let next = overlay_frames
+        .0
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(&layout_e));
+    if next.is_none() && state.held.is_none() {
+        return;
+    }
+    let Some(ns_view) = primary_content_view_ptr(window_e) else {
+        return;
+    };
+    let content: &NSView = unsafe { &*ns_view.cast::<NSView>() };
+    content.setWantsLayer(true);
+    let Some(host_layer) = content.layer() else {
+        return;
+    };
+    let clear_color = NSColor::clearColor();
+    host_layer.setOpaque(false);
+    host_layer.setBackgroundColor(Some(&clear_color.CGColor()));
+    let bounds = content.bounds();
+
+    if state.layer.is_none() {
+        let layer: Retained<objc2_quartz_core::CALayer> = CALayer::new();
+        layer.setOpaque(false);
+        layer.setBackgroundColor(Some(&clear_color.CGColor()));
+        layer.setZPosition(100.0);
+        host_layer.addSublayer(&layer);
+        state.layer = Some(layer);
+    }
+    let Some(layer) = state.layer.clone() else {
+        return;
+    };
+    layer.setOpaque(false);
+    layer.setBackgroundColor(Some(&clear_color.CGColor()));
+    layer.setFrame(bounds);
+    layer.setContentsScale(
+        windows
+            .get(window_e)
+            .map(|w| w.resolution.scale_factor() as f64)
+            .unwrap_or(2.0),
+    );
+
+    if let Some(frame) = next {
+        let io_surface = frame.io_surface as *mut AnyObject;
+        if !io_surface.is_null() {
+            unsafe { layer.setContents(Some(&*io_surface)) };
+            state.held = Some(frame);
+        }
+    }
+    layer.setHidden(false);
+    state.shown = true;
 }
 
 /// A2: show the command bar's OSR IOSurface in a full-window native overlay composited **above** the
@@ -214,5 +367,160 @@ mod tests {
     fn glass_backdrop_is_hidden_in_player_mode() {
         assert!(!glass_backdrop_visible(InteractionMode::Player));
         assert!(glass_backdrop_visible(InteractionMode::User));
+    }
+
+    #[test]
+    fn glass_install_does_not_reveal_window() {
+        let source = include_str!("glass.rs");
+        let install = source
+            .split("fn install_window_glass")
+            .nth(1)
+            .and_then(|tail| tail.split("fn reveal_window_after_layout_ready").next())
+            .unwrap_or_default();
+
+        assert!(!install.contains("window.visible = true"));
+        assert!(!install.contains("activate_native_window"));
+    }
+
+    #[test]
+    fn window_backdrop_uses_clear_glass_style() {
+        let source = include_str!("glass.rs");
+        let install = source
+            .split("fn install_window_glass")
+            .nth(1)
+            .and_then(|tail| tail.split("fn reveal_window_after_layout_ready").next())
+            .unwrap_or_default();
+
+        assert!(install.contains("NSGlassEffectViewStyle::Clear"));
+        assert!(!install.contains("NSGlassEffectViewStyle::Regular"));
+    }
+
+    #[test]
+    fn window_backdrop_uses_clear_glass_tint() {
+        let source = include_str!("glass.rs");
+        let install = source
+            .split("fn install_window_glass")
+            .nth(1)
+            .and_then(|tail| tail.split("fn reveal_window_after_layout_ready").next())
+            .unwrap_or_default();
+
+        assert!(install.contains("glass.setTintColor(Some(&NSColor::clearColor()))"));
+    }
+
+    #[test]
+    fn window_backdrop_lives_in_nonactivating_child_window() {
+        let source = include_str!("glass.rs");
+        let install = source
+            .split("fn install_window_glass")
+            .nth(1)
+            .and_then(|tail| tail.split("fn reveal_window_after_layout_ready").next())
+            .unwrap_or_default();
+
+        assert!(install.contains("NSPanel"));
+        assert!(install.contains("NSWindowStyleMask::NonactivatingPanel"));
+        assert!(install.contains("setIgnoresMouseEvents(true)"));
+        assert!(install.contains("addChildWindow_ordered"));
+        assert!(install.contains("NSWindowOrderingMode::Below"));
+    }
+
+    #[test]
+    fn window_backdrop_tracks_parent_window_frame() {
+        let source = include_str!("glass.rs");
+        let sync = source
+            .split("fn sync_window_glass_visibility")
+            .nth(1)
+            .and_then(|tail| {
+                tail.split("#[derive(Default)]\nstruct LayoutOverlay")
+                    .next()
+            })
+            .unwrap_or_default();
+
+        assert!(sync.contains("backdrop_window.setFrame_display(parent_window.frame(), false)"));
+    }
+
+    #[test]
+    fn desktop_enables_nspanel_binding_for_glass_backdrop() {
+        let manifest = include_str!("../Cargo.toml");
+
+        assert!(manifest.contains("\"NSPanel\""));
+    }
+
+    #[test]
+    fn layout_overlay_uses_layer_for_hit_test_passthrough() {
+        let source = include_str!("glass.rs");
+        let overlay = source
+            .split("fn sync_layout_overlay")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_command_bar_overlay").next())
+            .unwrap_or_default();
+
+        assert!(overlay.contains("Retained<objc2_quartz_core::CALayer>"));
+        assert!(overlay.contains("CALayer::new()"));
+        assert!(overlay.contains("addSublayer"));
+        assert!(overlay.contains("layer.setContents"));
+        assert!(!overlay.contains("NSView::initWithFrame"));
+    }
+
+    #[test]
+    fn layout_overlay_keeps_host_and_overlay_layers_transparent() {
+        let source = include_str!("glass.rs");
+        let overlay = source
+            .split("fn sync_layout_overlay")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_command_bar_overlay").next())
+            .unwrap_or_default();
+
+        assert!(overlay.contains("host_layer.setOpaque(false)"));
+        assert!(overlay.contains("host_layer.setBackgroundColor(Some(&clear_color.CGColor()))"));
+        assert!(overlay.contains("layer.setBackgroundColor(Some(&clear_color.CGColor()))"));
+    }
+
+    fn reveal_test_app(layout_ready: bool) -> App {
+        let mut app = App::new();
+        app.add_systems(Update, reveal_window_after_layout_ready);
+        app.world_mut().insert_non_send(GlassState {
+            installed: true,
+            ..default()
+        });
+        app.world_mut().spawn((
+            Window {
+                visible: false,
+                ..default()
+            },
+            bevy::window::PrimaryWindow,
+        ));
+        let mut layout = app.world_mut().spawn((LayoutCef,));
+        if layout_ready {
+            layout.insert(PageReady::default());
+        }
+        app
+    }
+
+    #[test]
+    fn startup_window_stays_hidden_until_layout_ready() {
+        let mut app = reveal_test_app(false);
+
+        app.update();
+
+        let window = app
+            .world_mut()
+            .query_filtered::<&Window, With<bevy::window::PrimaryWindow>>()
+            .single(app.world())
+            .expect("primary window");
+        assert!(!window.visible);
+    }
+
+    #[test]
+    fn startup_window_reveals_after_layout_ready() {
+        let mut app = reveal_test_app(true);
+
+        app.update();
+
+        let window = app
+            .world_mut()
+            .query_filtered::<&Window, With<bevy::window::PrimaryWindow>>()
+            .single(app.world())
+            .expect("primary window");
+        assert!(window.visible);
     }
 }

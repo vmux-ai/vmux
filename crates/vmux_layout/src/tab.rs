@@ -7,6 +7,7 @@ use crate::{
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     prelude::*,
+    ui::UiSystems,
     window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
@@ -33,7 +34,7 @@ impl Plugin for TabPlugin {
                     .in_set(ReadAppCommands)
                     .in_set(TabCommandSet),
             )
-            .add_systems(PostUpdate, sync_tab_visibility);
+            .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout));
     }
 }
 
@@ -355,6 +356,18 @@ mod tests {
         let id = target.to_bits().to_string();
 
         assert_eq!(tab_target(Some(&id), [other, target]), Some(target));
+    }
+
+    #[test]
+    fn tab_visibility_sync_runs_before_ui_layout() {
+        let source = include_str!("tab.rs");
+        let plugin = source
+            .split("impl Plugin for TabPlugin")
+            .nth(1)
+            .and_then(|tail| tail.split("#[derive(Component").next())
+            .unwrap_or_default();
+
+        assert!(plugin.contains("sync_tab_visibility.before(UiSystems::Layout)"));
     }
 
     fn test_settings() -> LayoutSettings {

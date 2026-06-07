@@ -18,7 +18,7 @@
     --foreground: oklch(1 0 0);
     --muted-foreground: oklch(0.82 0 0);
     --sidebar-primary-foreground: oklch(1 0 0);
-    --glass: transparent;
+    --glass: oklch(0.18 0 0 / 0.82);
     --glass-hover: oklch(1 0 0 / 0.08);
     --glass-active: oklch(1 0 0 / 0.14);
     --glass-border: oklch(1 0 0 / 0.20);

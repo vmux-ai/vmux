@@ -4,7 +4,9 @@ use vmux_service::registry::{Backend, choose_backend};
 
 #[test]
 fn bundled_path_chooses_sm_app_service() {
-    let exe = PathBuf::from("/Applications/Vmux.app/Contents/MacOS/vmux_service");
+    let exe = PathBuf::from(
+        "/Applications/Vmux.app/Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service",
+    );
     assert!(matches!(choose_backend(&exe), Backend::SmAppService { .. }));
 }
 

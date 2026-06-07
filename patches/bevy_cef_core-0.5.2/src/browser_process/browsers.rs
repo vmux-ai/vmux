@@ -140,11 +140,18 @@ impl Browsers {
         background_color: Option<u32>,
         windowless_frame_rate: i32,
         windowed: bool,
+        shared_texture: bool,
         native_liquid_glass: bool,
         allow_native_focus: bool,
     ) {
         let _ = native_liquid_glass;
+        // Only consumed by the macOS windowless window-info below; non-macOS OSR is CPU-only.
+        let _ = shared_texture;
         let windowless_frame_rate = normalize_windowless_frame_rate(windowless_frame_rate);
+        info!(
+            "cef_create_browser webview={webview:?} uri={_uri} size={}x{} scale={device_scale_factor} windowed={windowed} bg={background_color:?} fps={windowless_frame_rate} native_liquid_glass={native_liquid_glass} allow_native_focus={allow_native_focus}",
+            webview_size.x, webview_size.y
+        );
         webview_debug_log(format!(
             "Browsers::create_browser entity={webview:?} uri={_uri} size={webview_size:?} scale={device_scale_factor} disk_profile={} bg={background_color:?} fps={windowless_frame_rate} allow_native_focus={allow_native_focus}",
             disk_profile_root.is_some_and(|s| !s.trim().is_empty())
@@ -251,7 +258,7 @@ impl Browsers {
                     windowless_rendering_enabled: true as _,
                     external_begin_frame_enabled: false as _,
                     parent_view: parent,
-                    shared_texture_enabled: true as _,
+                    shared_texture_enabled: shared_texture as _,
                     ..Default::default()
                 }
             }
@@ -647,7 +654,8 @@ impl Browsers {
         let frame = view.frame();
         let hidden = view.isHidden();
         let glass = NSGlassEffectView::new(mtm);
-        glass.setStyle(NSGlassEffectViewStyle::Regular);
+        glass.setStyle(NSGlassEffectViewStyle::Clear);
+        glass.setTintColor(Some(&NSColor::clearColor()));
         let glass_view: &NSView = glass.as_super();
         Self::make_view_tree_transparent(glass_view, &clear_color);
         glass_view.setFrame(frame);
@@ -693,6 +701,23 @@ impl Browsers {
         for i in 0..sublayers.count() {
             let child = sublayers.objectAtIndex(i);
             Self::make_layer_tree_transparent(&child, clear_color);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn refresh_windowed_transparency(browser: &WebviewBrowser, view: &objc2_app_kit::NSView) {
+        use objc2::ClassType;
+        if browser.native_liquid_glass.is_none() {
+            return;
+        }
+        let clear_color = objc2_app_kit::NSColor::clearColor();
+        Self::make_view_tree_transparent(view, &clear_color);
+        if let Some(glass_view) = browser
+            .native_liquid_glass
+            .as_ref()
+            .map(|glass| glass.as_super())
+        {
+            Self::make_view_tree_transparent(glass_view, &clear_color);
         }
     }
 
@@ -757,6 +782,7 @@ impl Browsers {
             (parent_h - top_px as f64 / s - h).max(0.0)
         };
         let frame = (x, y, w, h);
+        Self::refresh_windowed_transparency(browser, view);
         if browser.last_frame.get() == Some(frame) {
             return;
         }
@@ -768,11 +794,7 @@ impl Browsers {
         } else {
             view.setFrame(rect);
         }
-        let clear_color = objc2_app_kit::NSColor::clearColor();
-        Self::make_view_tree_transparent(view, &clear_color);
-        if let Some(glass_view) = glass_view {
-            Self::make_view_tree_transparent(glass_view, &clear_color);
-        }
+        Self::refresh_windowed_transparency(browser, view);
         browser.host.was_resized();
     }
 
@@ -967,6 +989,7 @@ impl Browsers {
         if let Some(glass) = &browser.native_liquid_glass {
             view.setFrame(glass.as_super().bounds());
         }
+        Self::refresh_windowed_transparency(browser, view);
         browser.host.was_resized();
         browser.last_frame.set(None);
         true
@@ -982,6 +1005,10 @@ impl Browsers {
     /// The browser will be removed from the hash map after closing.
     pub fn close(&mut self, webview: &Entity) {
         if let Some(browser) = self.browsers.remove(webview) {
+            info!(
+                "cef_close_browser webview={webview:?} windowed={}",
+                browser.windowed
+            );
             #[cfg(target_os = "macos")]
             {
                 use objc2::ClassType;
@@ -1621,9 +1648,28 @@ mod tests {
             })
             .unwrap_or_default();
 
-        assert!(create_fn.contains("NSGlassEffectViewStyle::Regular"));
+        assert!(create_fn.contains("NSGlassEffectViewStyle::Clear"));
+        assert!(!create_fn.contains("NSGlassEffectViewStyle::Regular"));
         assert!(create_fn.contains("glass.setContentView(Some(view))"));
         assert!(create_fn.contains("view.setFrame(glass_view.bounds())"));
+    }
+
+    #[test]
+    fn native_liquid_glass_uses_clear_tint() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        let create_fn = implementation
+            .split("fn create_native_liquid_glass")
+            .nth(1)
+            .and_then(|tail| {
+                tail.split("#[cfg(target_os = \"macos\")]\n    pub fn set_windowed_frame")
+                    .next()
+            })
+            .unwrap_or_default();
+
+        assert!(create_fn.contains("glass.setTintColor(Some(&NSColor::clearColor()))"));
     }
 
     #[test]
@@ -1662,6 +1708,48 @@ mod tests {
         assert!(implementation.contains("for i in 0..sublayers.count()"));
         assert!(implementation.contains("let child = sublayers.objectAtIndex(i)"));
         assert!(implementation.contains("Self::make_layer_tree_transparent(&child, clear_color)"));
+    }
+
+    #[test]
+    fn windowed_frame_refreshes_transparency_before_same_frame_return() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        let set_frame_fn = implementation
+            .split("#[cfg(target_os = \"macos\")]\n    pub fn set_windowed_frame")
+            .nth(1)
+            .and_then(|tail| {
+                tail.split("#[cfg(not(target_os = \"macos\"))]\n    pub fn set_windowed_frame")
+                    .next()
+            })
+            .unwrap_or_default();
+        let refresh_idx = set_frame_fn
+            .find("Self::refresh_windowed_transparency")
+            .expect("windowed transparency refresh");
+        let cache_idx = set_frame_fn
+            .find("browser.last_frame.get() == Some(frame)")
+            .expect("same frame cache check");
+
+        assert!(refresh_idx < cache_idx);
+    }
+
+    #[test]
+    fn windowed_repaint_nudge_refreshes_transparency() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        let nudge_fn = implementation
+            .split("#[cfg(target_os = \"macos\")]\n    pub fn nudge_windowed_repaint")
+            .nth(1)
+            .and_then(|tail| {
+                tail.split("#[cfg(not(target_os = \"macos\"))]\n    pub fn nudge_windowed_repaint")
+                    .next()
+            })
+            .unwrap_or_default();
+
+        assert!(nudge_fn.contains("Self::refresh_windowed_transparency"));
     }
 
     #[test]

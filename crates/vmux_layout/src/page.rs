@@ -16,12 +16,68 @@ pub fn Page() -> Element {
     use_theme();
 
     let mut layout_state = use_signal(LayoutStateEvent::default);
-    let _layout_listener =
+    let mut layout_state_received = use_signal(|| false);
+    let layout_listener =
         use_bin_event_listener::<LayoutStateEvent, _>(LAYOUT_STATE_EVENT, move |data| {
+            layout_state_received.set(true);
             layout_state.set(data);
         });
 
+    let mut stacks_state = use_signal(StacksHostEvent::default);
+    let mut stacks_state_received = use_signal(|| false);
+    let stacks_listener = use_bin_event_listener::<StacksHostEvent, _>(STACKS_EVENT, move |data| {
+        stacks_state_received.set(true);
+        stacks_state.set(data);
+    });
+
+    let mut tabs_state = use_signal(TabsHostEvent::default);
+    let mut tabs_state_received = use_signal(|| false);
+    let tabs_listener = use_bin_event_listener::<TabsHostEvent, _>(TABS_EVENT, move |data| {
+        tabs_state_received.set(true);
+        tabs_state.set(data);
+    });
+
+    let mut reload_key = use_signal(|| 0u32);
+    let _reload_listener = use_bin_event_listener::<ReloadEvent, _>(RELOAD_EVENT, move |_| {
+        reload_key.set(reload_key() + 1);
+    });
+
+    let mut pane_tree_state = use_signal(PaneTreeEvent::default);
+    let mut pane_tree_state_received = use_signal(|| false);
+    let pane_tree_listener =
+        use_bin_event_listener::<PaneTreeEvent, _>(PANE_TREE_EVENT, move |data| {
+            pane_tree_state_received.set(true);
+            pane_tree_state.set(data);
+        });
+
+    let mut spaces_state = use_signal(vmux_core::event::space::SpacesListEvent::default);
+    let mut spaces_state_received = use_signal(|| false);
+    let spaces_listener = use_bin_event_listener::<vmux_core::event::space::SpacesListEvent, _>(
+        vmux_core::event::space::SPACES_LIST_EVENT,
+        move |data| {
+            spaces_state_received.set(true);
+            spaces_state.set(data);
+        },
+    );
+
     let state = layout_state();
+    let stacks = stacks_state();
+    let tabs = tabs_state();
+    let PaneTreeEvent { panes } = pane_tree_state();
+    let active_space = spaces_state().spaces.into_iter().find(|s| s.is_active);
+    let layout_error = (layout_listener.error)();
+    let stacks_error = (stacks_listener.error)();
+    let tabs_error = (tabs_listener.error)();
+    let pane_tree_error = (pane_tree_listener.error)();
+    let spaces_error = (spaces_listener.error)();
+    let chrome_ready = layout_chrome_ready(
+        &state,
+        listener_ready(layout_state_received(), &layout_error),
+        listener_ready(stacks_state_received(), &stacks_error),
+        listener_ready(tabs_state_received(), &tabs_error),
+        listener_ready(pane_tree_state_received(), &pane_tree_error),
+        listener_ready(spaces_state_received(), &spaces_error),
+    );
     let radius_px = state.radius;
     use_effect(move || {
         if let Some(doc) = web_sys::window().and_then(|w| w.document())
@@ -52,63 +108,51 @@ pub fn Page() -> Element {
 
     rsx! {
         div { class: "fixed inset-0 pointer-events-none text-foreground",
-            if state.side_sheet_open {
+            if chrome_ready && state.side_sheet_open {
                 aside {
                     class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-hidden w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
                     style: "{side_sheet_vars}",
                     div { class: "flex h-full min-h-0 flex-col",
-                        SideSheetView {}
+                        SideSheetView {
+                            panes,
+                            active_space,
+                            pane_tree_error: pane_tree_error.clone(),
+                        }
                     }
                 }
             }
-            if state.header_visible() {
+            if chrome_ready && state.header_visible() {
                 div {
                     class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
                     style: "{header_vars}",
-                    HeaderView {}
+                    HeaderView {
+                        stacks_state: stacks,
+                        tabs_state: tabs,
+                        reload_key: reload_key(),
+                        stacks_error: stacks_error.clone(),
+                        tabs_error: tabs_error.clone(),
+                    }
                 }
             }
         }
     }
 }
 
-fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
-    let trimmed = s.trim();
-    if let Some(rest) = trimmed.strip_prefix('#')
-        && rest.len() == 6
-    {
-        let r = u8::from_str_radix(&rest[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&rest[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&rest[4..6], 16).ok()?;
-        return Some((r, g, b));
-    }
-    if let Some(inner) = trimmed
-        .strip_prefix("rgb(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
-        let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
-        if parts.len() == 3 {
-            return Some((
-                parts[0].parse().ok()?,
-                parts[1].parse().ok()?,
-                parts[2].parse().ok()?,
-            ));
-        }
-    }
-    None
+fn listener_ready(received: bool, error: &Option<String>) -> bool {
+    received || error.is_some()
 }
 
-fn text_color_class_for_bg(bg: &str) -> &'static str {
-    parse_rgb(bg)
-        .map(|(r, g, b)| {
-            let lum = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
-            if lum > 128.0 {
-                "text-zinc-900"
-            } else {
-                "text-zinc-100"
-            }
-        })
-        .unwrap_or("text-foreground")
+fn layout_chrome_ready(
+    state: &LayoutStateEvent,
+    layout_ready: bool,
+    stacks_ready: bool,
+    tabs_ready: bool,
+    pane_tree_ready: bool,
+    spaces_ready: bool,
+) -> bool {
+    layout_ready
+        && (!state.header_visible() || (stacks_ready && tabs_ready))
+        && (!state.side_sheet_open || (pane_tree_ready && spaces_ready))
 }
 
 fn favicon_src_for_stack_node(stack: &StackNode) -> Option<String> {
@@ -134,35 +178,22 @@ fn format_address(stack: &StackRow) -> String {
 }
 
 #[component]
-fn HeaderView() -> Element {
-    let mut stacks_state = use_signal(StacksHostEvent::default);
-    let listener = use_bin_event_listener::<StacksHostEvent, _>(STACKS_EVENT, move |data| {
-        stacks_state.set(data);
-    });
-
-    let mut tabs_state = use_signal(TabsHostEvent::default);
-    let tabs_listener = use_bin_event_listener::<TabsHostEvent, _>(TABS_EVENT, move |data| {
-        tabs_state.set(data);
-    });
-
-    let mut reload_key = use_signal(|| 0u32);
-    let _reload_listener = use_bin_event_listener::<ReloadEvent, _>(RELOAD_EVENT, move |_| {
-        reload_key.set(reload_key() + 1);
-    });
-
+fn HeaderView(
+    stacks_state: StacksHostEvent,
+    tabs_state: TabsHostEvent,
+    reload_key: u32,
+    stacks_error: Option<String>,
+    tabs_error: Option<String>,
+) -> Element {
     let StacksHostEvent {
         stacks,
         can_go_back,
         can_go_forward,
         is_zoomed: _,
-    } = stacks_state();
-    let TabsHostEvent { tabs } = tabs_state();
+    } = stacks_state;
+    let TabsHostEvent { tabs } = tabs_state;
     let active_row = stacks.iter().find(|t| t.is_active).cloned();
     let active_bg_color = active_row.as_ref().and_then(|r| r.bg_color.clone());
-    let listener_loading = (listener.is_loading)();
-    let listener_error = (listener.error)();
-    let tabs_loading = (tabs_listener.is_loading)();
-    let tabs_error = (tabs_listener.error)();
 
     let (url_row_style, url_row_class) = url_row_cef(active_bg_color.as_deref());
 
@@ -170,9 +201,7 @@ fn HeaderView() -> Element {
         div {
             class: "flex h-full min-h-0 min-w-0 flex-col text-foreground",
             div { class: "flex min-w-0 shrink-0 items-center gap-1 pl-[var(--vmux-tab-row-pad-left)] pr-2",
-                if tabs_loading {
-                    span { class: "text-ui text-muted-foreground", "Connecting..." }
-                } else if let Some(err) = tabs_error {
+                if let Some(err) = tabs_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
                     div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pl-2",
@@ -192,9 +221,7 @@ fn HeaderView() -> Element {
             div {
                 class: "{url_row_class}",
                 style: "{url_row_style}",
-                if listener_loading {
-                    span { class: "text-ui text-muted-foreground", "Connecting..." }
-                } else if let Some(err) = listener_error {
+                if let Some(err) = stacks_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
                     NavButton { label: "Back", command: "prev_page", disabled: !can_go_back,
@@ -212,7 +239,7 @@ fn HeaderView() -> Element {
                     NavButton { label: "Reload", command: "reload", disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()),
                         span {
                             key: "{reload_key}",
-                            class: if reload_key() > 0 { "inline-flex animate-spin-once" } else { "inline-flex" },
+                            class: if reload_key > 0 { "inline-flex animate-spin-once" } else { "inline-flex" },
                             Icon { class: "h-4 w-4",
                                 path { d: "M21 12a9 9 0 11-3-6.7L21 8" }
                                 path { d: "M21 3v5h-5" }
@@ -229,21 +256,11 @@ fn HeaderView() -> Element {
     }
 }
 
-fn url_row_cef(bg_color: Option<&str>) -> (String, String) {
-    if let Some(color) = bg_color {
-        let text_class = text_color_class_for_bg(color);
-        (
-            format!("--vmux-url-bg:{color};"),
-            format!(
-                "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] px-2 bg-[var(--vmux-url-bg)] {text_class}"
-            ),
-        )
-    } else {
-        (
-            String::new(),
-            "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
-        )
-    }
+fn url_row_cef(_bg_color: Option<&str>) -> (String, String) {
+    (
+        String::new(),
+        "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
+    )
 }
 
 #[component]
@@ -370,28 +387,12 @@ fn Tab(tab: TabRow) -> Element {
     let tab_box_classes = "group flex h-10 w-52 min-w-52 max-w-52 basis-52 shrink-0 grow-0 -mb-[3px] pb-[3px] cursor-pointer items-center gap-2 px-3.5";
 
     let (tab_style, tab_class, title_class, close_class) = if is_active {
-        if let Some(ref color) = tab.bg_color {
-            let text_class = text_color_class_for_bg(color);
-            (
-                format!("--tab-bg:{color};"),
-                format!(
-                    "{skirt_classes} {tab_box_classes} rounded-t-md bg-[var(--tab-bg)] {text_class}"
-                ),
-                format!("min-w-0 flex-1 truncate text-ui font-medium {text_class}"),
-                format!(
-                    "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/20 {text_class}"
-                ),
-            )
-        } else {
-            (
-                "--tab-bg:var(--glass);".to_string(),
-                format!(
-                    "{skirt_classes} {tab_box_classes} glass rounded-t-md border-b-0"
-                ),
-                "min-w-0 flex-1 truncate text-ui font-medium text-foreground".to_string(),
-                "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
-            )
-        }
+        (
+            "--tab-bg:var(--glass);".to_string(),
+            format!("{skirt_classes} {tab_box_classes} glass rounded-t-md border-b-0"),
+            "min-w-0 flex-1 truncate text-ui font-medium text-foreground".to_string(),
+            "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
+        )
     } else {
         (
             String::new(),
@@ -473,23 +474,11 @@ fn NewTabButton() -> Element {
 }
 
 #[component]
-fn SideSheetView() -> Element {
-    let mut tree_state = use_signal(PaneTreeEvent::default);
-    let listener = use_bin_event_listener::<PaneTreeEvent, _>(PANE_TREE_EVENT, move |data| {
-        tree_state.set(data);
-    });
-
-    let mut spaces_state = use_signal(vmux_core::event::space::SpacesListEvent::default);
-    let _spaces_listener = use_bin_event_listener::<vmux_core::event::space::SpacesListEvent, _>(
-        vmux_core::event::space::SPACES_LIST_EVENT,
-        move |data| {
-            spaces_state.set(data);
-        },
-    );
-
-    let PaneTreeEvent { panes } = tree_state();
-    let active_space = spaces_state().spaces.into_iter().find(|s| s.is_active);
-
+fn SideSheetView(
+    panes: Vec<PaneNode>,
+    active_space: Option<vmux_core::event::space::SpaceRow>,
+    pane_tree_error: Option<String>,
+) -> Element {
     rsx! {
         div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3 pt-2 text-foreground",
             if let Some(space) = active_space {
@@ -497,11 +486,7 @@ fn SideSheetView() -> Element {
                     SideSheetSpaceRow { key: "{space.id}", space }
                 }
             }
-            if (listener.is_loading)() {
-                div { class: "flex items-center px-2 py-1",
-                    span { class: "text-ui text-muted-foreground", "Connecting..." }
-                }
-            } else if let Some(err) = (listener.error)() {
+            if let Some(err) = pane_tree_error {
                 div { class: "flex items-center px-2 py-1",
                     span { class: "text-ui text-destructive", "{err}" }
                 }
@@ -662,5 +647,68 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(header_open: bool, side_sheet_open: bool) -> LayoutStateEvent {
+        LayoutStateEvent {
+            header_open,
+            side_sheet_open,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn chrome_waits_for_layout_state() {
+        assert!(!layout_chrome_ready(
+            &state(false, false),
+            false,
+            true,
+            true,
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn chrome_waits_for_header_state_when_header_visible() {
+        let visible = state(true, false);
+
+        assert!(!layout_chrome_ready(
+            &visible, true, false, true, true, true
+        ));
+        assert!(!layout_chrome_ready(
+            &visible, true, true, false, true, true
+        ));
+        assert!(layout_chrome_ready(&visible, true, true, true, true, true));
+    }
+
+    #[test]
+    fn chrome_waits_for_side_sheet_state_when_side_sheet_visible() {
+        let visible = state(false, true);
+
+        assert!(!layout_chrome_ready(
+            &visible, true, true, true, false, true
+        ));
+        assert!(!layout_chrome_ready(
+            &visible, true, true, true, true, false
+        ));
+        assert!(layout_chrome_ready(&visible, true, true, true, true, true));
+    }
+
+    #[test]
+    fn chrome_can_be_ready_when_chrome_is_closed() {
+        assert!(layout_chrome_ready(
+            &state(false, false),
+            true,
+            false,
+            false,
+            false,
+            false
+        ));
     }
 }

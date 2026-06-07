@@ -46,6 +46,7 @@ esac
 aux_identifier() {
     local name="$1"
     case "$name" in
+        "Vmux Service") printf 'ai.vmux.service%s' "$IDENT_SUFFIX" ;;
         vmux_service) printf 'ai.vmux.service%s' "$IDENT_SUFFIX" ;;
         vmux)         printf 'ai.vmux.cli%s'     "$IDENT_SUFFIX" ;;
         *)            printf 'ai.vmux.%s%s' "$name" "$IDENT_SUFFIX" ;;
@@ -93,8 +94,13 @@ if [ -d "$APP_BUNDLE/Contents/Frameworks/Chromium Embedded Framework.framework" 
         "$APP_BUNDLE/Contents/Frameworks/Chromium Embedded Framework.framework"
 fi
 
-# Sign all CEF Helper app bundles
-find "$APP_BUNDLE/Contents/Frameworks" -name "*.app" -type d | while read -r helper; do
+NESTED_APP_DIRS=("$APP_BUNDLE/Contents/Frameworks")
+if [[ -d "$APP_BUNDLE/Contents/Library" ]]; then
+    NESTED_APP_DIRS+=("$APP_BUNDLE/Contents/Library")
+fi
+
+# Sign all CEF and service helper app bundles
+find "${NESTED_APP_DIRS[@]}" -name "*.app" -type d | while read -r helper; do
     echo "  Signing: ${helper#$APP_BUNDLE/}"
     codesign --force --verify --verbose \
         ${CODESIGN_KEYCHAIN_ARGS[@]+"${CODESIGN_KEYCHAIN_ARGS[@]}"} \

@@ -43,6 +43,21 @@ fn dev_target_keeps_service_out_of_desktop_dynamic_linking_build() {
 }
 
 #[test]
+fn dev_target_stops_existing_debug_desktop_before_cef_initialize() {
+    let makefile = include_str!("../../../Makefile");
+    let stop_idx = makefile
+        .find("target/debug/vmux_desktop")
+        .expect("debug desktop stop");
+    let run_idx = makefile
+        .find("exec env -u CEF_PATH")
+        .expect("debug desktop run");
+
+    assert!(makefile.contains("pkill -f \"target/debug/vmux_desktop\""));
+    assert!(makefile.contains("pkill -f \"bevy_cef_debug_render_process\""));
+    assert!(stop_idx < run_idx);
+}
+
+#[test]
 fn local_package_uses_per_sha_bundle_name() {
     let package_script = include_str!("../../../scripts/package.sh");
 
@@ -57,6 +72,14 @@ fn local_package_only_builds_app_bundle() {
 
     assert!(package_script.contains("cargo packager --release --formats app"));
     assert!(package_script.contains("if [[ \"$PROFILE\" == \"local\" ]]"));
+}
+
+#[test]
+fn cef_injection_uses_ci_cached_framework_path() {
+    let inject_script = include_str!("../../../scripts/inject-cef.sh");
+
+    assert!(inject_script.contains("--cef-framework \"$CEF_FRAMEWORK\""));
+    assert!(inject_script.contains("CEF_FRAMEWORK=\"${CEF_FRAMEWORK:-${HOME}/.local/share/Chromium Embedded Framework.framework}\""));
 }
 
 #[test]

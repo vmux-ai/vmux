@@ -62,14 +62,32 @@ pub fn plist_path(profile: &str) -> PathBuf {
 /// (where it points to the daemon binary alongside them) so identity checks
 /// agree on the same target file.
 pub fn daemon_binary_path() -> std::io::Result<PathBuf> {
-    let mut p = std::env::current_exe()?;
-    if p.file_name().and_then(|n| n.to_str()) == Some("vmux_service") {
-        Ok(p)
-    } else {
-        p.pop();
-        p.push("vmux_service");
-        Ok(p)
+    Ok(daemon_binary_path_for_exe(&std::env::current_exe()?))
+}
+
+fn daemon_binary_path_for_exe(exe: &Path) -> PathBuf {
+    if matches!(
+        exe.file_name().and_then(|n| n.to_str()),
+        Some("vmux_service" | "Vmux Service")
+    ) {
+        return exe.to_path_buf();
     }
+
+    if let Some(root) = crate::bundle::bundle_root_for(exe) {
+        return root
+            .join("Contents")
+            .join("Library")
+            .join("LoginItems")
+            .join("Vmux Service.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("Vmux Service");
+    }
+
+    let mut p = exe.to_path_buf();
+    p.pop();
+    p.push("vmux_service");
+    p
 }
 
 /// Identity for the daemon binary. Changes when the binary path, size,
@@ -126,6 +144,37 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         assert_ne!(old_identity, new_identity);
+    }
+
+    #[test]
+    fn bundled_main_app_resolves_named_service_app_executable() {
+        let exe = PathBuf::from("/Applications/Vmux.app/Contents/MacOS/Vmux");
+
+        assert_eq!(
+            daemon_binary_path_for_exe(&exe),
+            PathBuf::from(
+                "/Applications/Vmux.app/Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service"
+            )
+        );
+    }
+
+    #[test]
+    fn bundled_service_app_resolves_to_self() {
+        let exe = PathBuf::from(
+            "/Applications/Vmux.app/Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service",
+        );
+
+        assert_eq!(daemon_binary_path_for_exe(&exe), exe);
+    }
+
+    #[test]
+    fn unbundled_debug_app_resolves_legacy_service_binary() {
+        let exe = PathBuf::from("/Users/x/repo/target/debug/vmux_desktop");
+
+        assert_eq!(
+            daemon_binary_path_for_exe(&exe),
+            PathBuf::from("/Users/x/repo/target/debug/vmux_service")
+        );
     }
 
     #[test]

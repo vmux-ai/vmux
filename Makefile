@@ -24,6 +24,8 @@ dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process
 	APP_BINARY="target/debug/vmux_desktop" \
 	HELPER_BINARY="$(CEF_DEBUG_RENDER)" \
 	./scripts/sign-dev-mac.sh
+	@pkill -f "target/debug/vmux_desktop" 2>/dev/null || true
+	@pkill -f "bevy_cef_debug_render_process" 2>/dev/null || true
 	@rust_target_libdir="$$(rustc --print target-libdir)" && \
 	dylib_path="$$rust_target_libdir:$(CURDIR)/target/debug/deps" && \
 	if [ -n "$${DYLD_LIBRARY_PATH:-}" ]; then \

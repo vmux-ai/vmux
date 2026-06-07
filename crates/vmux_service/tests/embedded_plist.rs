@@ -6,8 +6,8 @@ fn embedded_plist_uses_bundle_program_relative_path() {
         "embedded plist must use BundleProgram, not ProgramArguments"
     );
     assert!(
-        xml.contains("Contents/MacOS/vmux_service"),
-        "BundleProgram path must be Contents/MacOS/vmux_service"
+        xml.contains("Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service"),
+        "BundleProgram path must point at the bundled Vmux Service.app executable"
     );
     assert!(
         !xml.contains("/usr/local/") && !xml.contains("$HOME"),
@@ -50,4 +50,15 @@ fn embedded_plist_associates_with_parent_bundle() {
         xml.contains("<string>ai.vmux.desktop</string>"),
         "AssociatedBundleIdentifiers must include the parent app bundle id ai.vmux.desktop"
     );
+}
+
+#[test]
+fn embed_script_creates_named_service_app_with_icon() {
+    let script = include_str!("../../../scripts/embed-launch-agent-plist.sh");
+    assert!(script.contains("Vmux Service.app"));
+    assert!(script.contains("CFBundleDisplayName"));
+    assert!(script.contains("CFBundleIconFile"));
+    assert!(script.contains("Vmux.icns"));
+    assert!(script.contains("Contents/MacOS/Vmux Service"));
+    assert!(script.contains("Contents/Resources/Vmux.icns"));
 }

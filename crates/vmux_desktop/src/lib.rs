@@ -45,6 +45,7 @@ fn primary_window_config(title: String) -> NativeWindow {
         movable_by_window_background: false,
         fullsize_content_view: true,
         ime_enabled: true,
+        visible: !cfg!(target_os = "macos"),
         ..default()
     }
 }
@@ -115,6 +116,13 @@ mod tests {
         let window = primary_window_config("Vmux".to_string());
 
         assert!(window.ime_enabled);
+    }
+
+    #[test]
+    fn primary_window_starts_hidden_on_macos_until_backdrop_is_ready() {
+        let window = primary_window_config("Vmux".to_string());
+
+        assert_eq!(window.visible, !cfg!(target_os = "macos"));
     }
 
     #[test]

@@ -7,7 +7,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>Vmux</string>
 	<key>CFBundleExecutable</key>
-	<string>vmux_desktop</string>
+	<string>Vmux</string>
 	<key>CFBundleIdentifier</key>
 	<string>ai.vmux.desktop</string>
 	<key>CFBundleInfoDictionaryVersion</key>
