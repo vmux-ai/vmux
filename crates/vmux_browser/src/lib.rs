@@ -553,6 +553,7 @@ fn sync_children_to_ui(
             Option<&HistorySwipeVisualOffset>,
             Has<PendingWebviewReveal>,
             Has<PendingCommandBarReveal>,
+            Has<LayoutCef>,
         ),
         With<Browser>,
     >,
@@ -584,6 +585,7 @@ fn sync_children_to_ui(
         history_swipe_visual,
         pending_webview_reveal,
         pending_command_bar_reveal,
+        is_layout_cef,
     ) in browser_q.iter_mut()
     {
         let parent = child_of.get();
@@ -651,7 +653,7 @@ fn sync_children_to_ui(
         let ty = -delta_px.y / glass_size_px.y;
         let z = if modal.is_some() {
             WEBVIEW_Z_MODAL
-        } else if status.is_some() {
+        } else if is_layout_cef || status.is_some() {
             WEBVIEW_Z_HEADER
         } else if side_sheet.is_some() {
             WEBVIEW_Z_SIDE_SHEET
@@ -690,6 +692,36 @@ fn transform_near(a: &Transform, b: &Transform) -> bool {
         && a.rotation.dot(b.rotation).abs() > 0.9999
 }
 
+#[derive(Clone, Copy, PartialEq)]
+struct WindowedBackendSignature {
+    width: f32,
+    height: f32,
+    scale: f32,
+}
+
+#[derive(Resource, Default)]
+struct WindowedBackendCameraState {
+    mismatch: Option<WindowedBackendSignature>,
+}
+
+fn windowed_backend_signature(world: &mut World) -> Option<WindowedBackendSignature> {
+    let mut window_q = world.query_filtered::<&Window, With<PrimaryWindow>>();
+    let Ok(window) = window_q.single(world) else {
+        return None;
+    };
+    Some(WindowedBackendSignature {
+        width: window.resolution.width(),
+        height: window.resolution.height(),
+        scale: window.resolution.scale_factor(),
+    })
+}
+
+fn clear_windowed_backend_camera_state(world: &mut World) {
+    if let Some(mut state) = world.get_resource_mut::<WindowedBackendCameraState>() {
+        state.mismatch = None;
+    }
+}
+
 fn camera_supports_windowed_webviews(world: &mut World) -> bool {
     let expected = {
         let mut window_q = world.query_filtered::<&Window, With<PrimaryWindow>>();
@@ -709,6 +741,31 @@ fn camera_supports_windowed_webviews(world: &mut World) -> bool {
         *camera
     };
     transform_near(&camera, &expected)
+}
+
+fn windowed_backend_should_use_windowed(
+    world: &mut World,
+    mode: vmux_layout::scene::InteractionMode,
+) -> bool {
+    if !webview_should_use_windowed(mode) {
+        clear_windowed_backend_camera_state(world);
+        return false;
+    }
+    if camera_supports_windowed_webviews(world) {
+        clear_windowed_backend_camera_state(world);
+        return true;
+    }
+    let Some(signature) = windowed_backend_signature(world) else {
+        clear_windowed_backend_camera_state(world);
+        return true;
+    };
+    if !world.contains_resource::<WindowedBackendCameraState>() {
+        world.insert_resource(WindowedBackendCameraState::default());
+    }
+    let mut state = world.resource_mut::<WindowedBackendCameraState>();
+    let should_keep_windowed = state.mismatch != Some(signature);
+    state.mismatch = Some(signature);
+    should_keep_windowed
 }
 
 fn set_windowed_content_mesh_material(
@@ -759,19 +816,27 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
         .get_resource::<vmux_layout::scene::InteractionMode>()
         .copied()
         .unwrap_or_default();
-    let base_windowed =
-        webview_should_use_windowed(mode) && camera_supports_windowed_webviews(world);
-    let mut query = world.query_filtered::<Entity, (With<Browser>, With<WebviewSource>)>();
-    let entities: Vec<Entity> = query.iter(world).collect();
-    let target_windowed = |_entity: Entity| base_windowed;
+    let base_windowed = windowed_backend_should_use_windowed(world, mode);
+    let mut query = world.query_filtered::<(Entity, Has<LayoutCef>, Has<WebviewNativeOverlay>), (
+        With<Browser>,
+        With<WebviewSource>,
+    )>();
+    let entities: Vec<(Entity, bool, bool)> = query.iter(world).collect();
+    let target_windowed = |_entity: Entity, is_layout: bool| base_windowed && !is_layout;
+    let target_native_overlay = |is_layout: bool| {
+        cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User && is_layout
+    };
     let mut recreate = Vec::new();
     {
         let browsers = world.non_send::<Browsers>();
-        for &entity in &entities {
-            if browsers
-                .is_windowed(&entity)
-                .is_some_and(|actual| actual != target_windowed(entity))
-            {
+        for &(entity, is_layout, actual_native_overlay) in &entities {
+            let has_browser = browsers.has_browser(entity);
+            let actual_windowed = browsers.is_windowed(&entity);
+            let want_windowed = target_windowed(entity, is_layout);
+            let want_native_overlay = target_native_overlay(is_layout);
+            let needs_recreate = actual_windowed.is_some_and(|actual| actual != want_windowed)
+                || has_browser && actual_native_overlay != want_native_overlay;
+            if needs_recreate {
                 recreate.push(entity);
             }
         }
@@ -782,11 +847,14 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
             browsers.close(entity);
         }
     }
-    for entity in entities {
-        let want_windowed = target_windowed(entity);
+    for (entity, is_layout, _) in entities {
+        let want_windowed = target_windowed(entity, is_layout);
+        let want_native_overlay = target_native_overlay(is_layout);
         let marker_matches = world.get::<WebviewWindowed>(entity).is_some() == want_windowed;
+        let overlay_matches =
+            world.get::<WebviewNativeOverlay>(entity).is_some() == want_native_overlay;
         let needs_recreate = recreate.contains(&entity);
-        if marker_matches && !needs_recreate {
+        if marker_matches && overlay_matches && !needs_recreate {
             continue;
         }
         let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
@@ -796,6 +864,11 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
             entity_mut.insert(WebviewWindowed);
         } else {
             entity_mut.remove::<WebviewWindowed>();
+        }
+        if want_native_overlay {
+            entity_mut.insert(WebviewNativeOverlay);
+        } else {
+            entity_mut.remove::<WebviewNativeOverlay>();
         }
         if needs_recreate {
             entity_mut
@@ -834,16 +907,19 @@ fn sync_windowed_frames(
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
+    mut last_visible_pages: Local<Vec<Entity>>,
 ) {
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
     let force_raise = layout_hidden.is_changed();
+    let mut hidden = Vec::new();
+    let mut visible = Vec::new();
     for (entity, tf, self_computed, self_ui_gt, child_of) in &browser_q {
         if tf.scale.x <= 1.0e-3 {
-            browsers.set_windowed_hidden(&entity, true);
-            last_raised_frame.remove(&entity);
+            hidden.push(entity);
             continue;
         }
+        visible.push(entity);
         let parent = child_of.get();
         let pane_entity = child_of_q.get(parent).map(|co| co.get()).unwrap_or(parent);
         let (computed, ui_gt) = pane_rect
@@ -854,7 +930,10 @@ fn sync_windowed_frames(
         let left = center.x - size_px.x * 0.5;
         let top = center.y - size_px.y * 0.5;
         let scale = 1.0 / computed.inverse_scale_factor.max(1.0e-6);
-        browsers.set_windowed_hidden(&entity, false);
+        let was_shown = last_raised_frame.contains_key(&entity);
+        if !was_shown {
+            browsers.set_windowed_hidden(&entity, false);
+        }
         browsers.set_windowed_frame(&entity, left, top, size_px.x, size_px.y, scale);
         let all_corners = layout_hidden.0 || visible_pane_count > 1;
         browsers.set_windowed_corner_radius(
@@ -883,11 +962,17 @@ fn sync_windowed_frames(
                 size_px.y.round() as i32,
             );
             let changed = last_raised_frame.insert(entity, key) != Some(key);
-            if force_raise || changed {
+            let became_visible = !last_visible_pages.contains(&entity);
+            if force_raise || changed || became_visible {
                 browsers.raise_windowed_to_front(&entity);
             }
         }
     }
+    let shown: Vec<Entity> = last_raised_frame.keys().copied().collect();
+    for entity in windowed_pages_to_hide_before_first_show(&hidden, &shown) {
+        browsers.set_windowed_hidden(&entity, true);
+    }
+    *last_visible_pages = visible;
 }
 
 fn visible_pane_count_for_windowed_sync(
@@ -903,6 +988,14 @@ fn visible_pane_count_for_windowed_sync(
         }
     }
     leaf_panes.iter().count().max(1)
+}
+
+fn windowed_pages_to_hide_before_first_show(hidden: &[Entity], shown: &[Entity]) -> Vec<Entity> {
+    hidden
+        .iter()
+        .copied()
+        .filter(|entity| !shown.contains(entity))
+        .collect()
 }
 
 fn sync_windowed_chrome(
@@ -1467,6 +1560,7 @@ fn sync_osr_webview_focus(
             Has<Modal>,
             Has<CefKeyboardTarget>,
             Has<WebviewWindowed>,
+            Has<LayoutCef>,
         ),
         With<WebviewSource>,
     >,
@@ -1484,6 +1578,7 @@ fn sync_osr_webview_focus(
     mut last_ready_set: Local<Vec<Entity>>,
 ) {
     ready.clear();
+    let mut layout_shells = Vec::new();
     let mut modal_keyboard_target = None;
     for (
         entity,
@@ -1494,6 +1589,7 @@ fn sync_osr_webview_focus(
         is_modal,
         has_keyboard_target,
         is_windowed,
+        is_layout,
     ) in webviews.iter()
     {
         if !browsers.has_browser(entity) {
@@ -1506,6 +1602,9 @@ fn sync_osr_webview_focus(
             pending_reveal || pending_command_bar_reveal,
         ) {
             ready.push(entity);
+            if is_layout {
+                layout_shells.push(entity);
+            }
             if is_modal && has_keyboard_target {
                 modal_keyboard_target = Some((entity, is_windowed));
             }
@@ -1546,9 +1645,9 @@ fn sync_osr_webview_focus(
     } else if *last_active == active && *last_ready_set == *ready {
     } else {
         auxiliary.clear();
-        if let Some(active) = active {
-            auxiliary.extend(ready.iter().copied().filter(|&e| e != active));
-        }
+        let (active, next_auxiliary) =
+            osr_focus_targets(ready.as_slice(), active, |e| layout_shells.contains(&e));
+        auxiliary.extend(next_auxiliary);
         webview_debug_log(format!(
             "osr focus active={active:?} auxiliary={:?} ready={ready:?}",
             auxiliary.as_slice()
@@ -1623,6 +1722,20 @@ fn choose_osr_active_webview(
             .or(active_stack)
             .or(Some(fallback))
     }
+}
+
+fn osr_focus_targets(
+    ready: &[Entity],
+    active: Option<Entity>,
+    mut is_layout: impl FnMut(Entity) -> bool,
+) -> (Option<Entity>, Vec<Entity>) {
+    let active = active.filter(|&e| !is_layout(e));
+    let auxiliary = ready
+        .iter()
+        .copied()
+        .filter(|&e| Some(e) != active)
+        .collect();
+    (active, auxiliary)
 }
 
 fn should_show_osr_webview(
@@ -2951,6 +3064,84 @@ mod tests {
     }
 
     #[test]
+    fn layout_shell_osr_renders_above_player_page_osr() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<vmux_layout::NewStackContext>()
+            .add_systems(Update, sync_children_to_ui);
+
+        let glass = app
+            .world_mut()
+            .spawn((
+                VmuxWindow,
+                ComputedNode {
+                    size: Vec2::new(1200.0, 800.0),
+                    ..default()
+                },
+                UiGlobalTransform::default(),
+            ))
+            .id();
+        let layout = app
+            .world_mut()
+            .spawn((
+                Browser,
+                LayoutCef,
+                Transform::default(),
+                ComputedNode {
+                    size: Vec2::new(1200.0, 800.0),
+                    ..default()
+                },
+                bevy::ui::ComputedStackIndex(0),
+                UiGlobalTransform::default(),
+                WebviewSize(Vec2::ONE),
+                ChildOf(glass),
+            ))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(1)))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((
+                Pane,
+                ComputedNode {
+                    size: Vec2::new(1200.0, 740.0),
+                    ..default()
+                },
+                UiGlobalTransform::default(),
+                ChildOf(tab),
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .id();
+        let page = app
+            .world_mut()
+            .spawn((
+                Browser,
+                Transform::default(),
+                ComputedNode {
+                    size: Vec2::new(1200.0, 740.0),
+                    ..default()
+                },
+                bevy::ui::ComputedStackIndex(0),
+                UiGlobalTransform::default(),
+                WebviewSize(Vec2::ONE),
+                ChildOf(stack),
+            ))
+            .id();
+
+        app.update();
+
+        let layout_z = app.world().get::<Transform>(layout).unwrap().translation.z;
+        let page_z = app.world().get::<Transform>(page).unwrap().translation.z;
+
+        assert!(layout_z > page_z);
+    }
+
+    #[test]
     fn pending_reveal_webviews_keep_cef_running() {
         assert!(webview_osr_should_run(
             Vec2::ZERO,
@@ -2978,6 +3169,29 @@ mod tests {
         assert_eq!(
             choose_osr_active_webview(Some((modal, true)), Some(pane), pane),
             None
+        );
+    }
+
+    #[test]
+    fn layout_shell_is_auxiliary_osr_focus_target() {
+        let active = Entity::from_bits(1);
+        let layout = Entity::from_bits(2);
+        let sidecar = Entity::from_bits(3);
+
+        assert_eq!(
+            osr_focus_targets(&[active, layout, sidecar], Some(active), |e| e == layout),
+            (Some(active), vec![layout, sidecar])
+        );
+    }
+
+    #[test]
+    fn layout_shell_is_not_active_osr_focus_target() {
+        let layout = Entity::from_bits(1);
+        let sidecar = Entity::from_bits(2);
+
+        assert_eq!(
+            osr_focus_targets(&[layout, sidecar], Some(layout), |e| e == layout),
+            (None, vec![layout, sidecar])
         );
     }
 
@@ -3022,6 +3236,30 @@ mod tests {
             .unwrap_or_default();
 
         assert!(sync_fn.contains("browsers.raise_windowed_to_front"));
+    }
+
+    #[test]
+    fn windowed_page_sync_raises_visible_pages_without_hiding_shown_pages() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_frames")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("browsers.raise_windowed_to_front(&entity)"));
+        assert!(sync_fn.contains("windowed_pages_to_hide_before_first_show"));
+    }
+
+    #[test]
+    fn shown_windowed_pages_stay_visible_when_inactive() {
+        let shown = Entity::from_bits(1);
+        let never_shown = Entity::from_bits(2);
+
+        assert_eq!(
+            windowed_pages_to_hide_before_first_show(&[shown, never_shown], &[shown]),
+            vec![never_shown]
+        );
     }
 
     #[test]
@@ -3268,7 +3506,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_does_not_force_layout_shell_osr() {
+    fn browser_mode_keeps_layout_shell_osr_for_wallpaper_glass() {
         let source = include_str!("lib.rs");
         let backend_fn = source
             .split("fn sync_cef_backend_for_interaction_mode")
@@ -3276,8 +3514,23 @@ mod tests {
             .and_then(|tail| tail.split("fn sync_windowed_frames").next())
             .unwrap_or_default();
 
-        assert!(!backend_fn.contains("With<LayoutCef>"));
+        assert!(backend_fn.contains("Has<LayoutCef>"));
+        assert!(backend_fn.contains("!is_layout"));
+        assert!(backend_fn.contains("WebviewNativeOverlay"));
         assert!(!backend_fn.contains("With<Modal>"));
+    }
+
+    #[test]
+    fn layout_overlay_mode_change_recreates_browser() {
+        let source = include_str!("lib.rs");
+        let backend_fn = source
+            .split("fn sync_cef_backend_for_interaction_mode")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_frames").next())
+            .unwrap_or_default();
+
+        assert!(backend_fn.contains("actual_native_overlay != want_native_overlay"));
+        assert!(backend_fn.contains("browsers.has_browser(entity)"));
     }
 
     #[test]
@@ -3296,7 +3549,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_windows_layout_pages_and_modal_on_macos() {
+    fn browser_mode_keeps_layout_osr_and_windows_pages_and_modal_on_macos() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
         app.insert_resource(vmux_layout::scene::InteractionMode::User);
@@ -3320,8 +3573,9 @@ mod tests {
 
         sync_cef_backend_for_interaction_mode(app.world_mut());
 
+        assert!(app.world().get::<WebviewWindowed>(layout).is_none());
         assert_eq!(
-            app.world().get::<WebviewWindowed>(layout).is_some(),
+            app.world().get::<WebviewNativeOverlay>(layout).is_some(),
             cfg!(target_os = "macos")
         );
         assert_eq!(
@@ -3364,8 +3618,46 @@ mod tests {
             .id();
 
         sync_cef_backend_for_interaction_mode(app.world_mut());
+        sync_cef_backend_for_interaction_mode(app.world_mut());
 
         assert!(app.world().get::<WebviewWindowed>(page).is_none());
+    }
+
+    #[test]
+    fn browser_mode_keeps_windowed_pages_for_first_resize_camera_mismatch() {
+        let mut app = App::new();
+        app.world_mut().insert_non_send(Browsers::default());
+        app.insert_resource(vmux_layout::scene::InteractionMode::User);
+        let old_window = Window {
+            resolution: (800, 600).into(),
+            ..default()
+        };
+        let stale_home =
+            vmux_layout::scene::frame_main_camera_transform(&old_window, 800.0 / 600.0, 0.0);
+        app.world_mut().spawn((
+            Window {
+                resolution: (1200, 900).into(),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        app.world_mut()
+            .spawn((vmux_layout::scene::MainCamera, stale_home));
+        let page = app
+            .world_mut()
+            .spawn((
+                Browser,
+                WebviewWindowed,
+                WebviewSource::new("https://example.com/"),
+            ))
+            .id();
+
+        sync_cef_backend_for_interaction_mode(app.world_mut());
+
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(page).is_some(),
+            cfg!(target_os = "macos")
+        );
     }
 
     #[test]

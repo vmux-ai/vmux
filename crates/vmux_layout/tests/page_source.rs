@@ -47,7 +47,7 @@ fn header_tabs_use_same_fixed_width_for_active_and_inactive_states() {
     assert!(!tab.contains("max-w-[200px]"));
     assert!(!tab.contains("w-[200px]"));
     assert_eq!(tab.matches(footprint).count(), 1);
-    assert_eq!(tab.matches("{tab_box_classes}").count(), 3);
+    assert_eq!(tab.matches("{tab_box_classes}").count(), 2);
     assert!(!tab.contains("width:200px"));
     assert!(!tab.contains("flex:0 0"));
     assert!(tab.contains("before:-left-2"));
@@ -115,6 +115,29 @@ fn layout_page_gates_header_and_side_sheet_until_host_state_arrives() {
     assert!(source.contains("let chrome_ready = layout_chrome_ready"));
     assert!(source.contains("if chrome_ready && state.side_sheet_open"));
     assert!(source.contains("if chrome_ready && state.header_visible()"));
+}
+
+#[test]
+fn header_url_row_uses_glass_instead_of_page_bg_color() {
+    let source = include_str!("../src/page.rs");
+    let url_row = source
+        .split("fn url_row_cef")
+        .nth(1)
+        .and_then(|rest| rest.split("#[component]\nfn HeaderAddressBar").next())
+        .expect("url row helper");
+
+    assert!(url_row.contains("bg-glass"));
+    assert!(!url_row.contains("bg-[var(--vmux-url-bg)]"));
+    assert!(!url_row.contains("--vmux-url-bg:{color};"));
+}
+
+#[test]
+fn active_tab_uses_glass_instead_of_page_bg_color() {
+    let tab = tab_component_source();
+
+    assert!(tab.contains("glass rounded-t-md"));
+    assert!(!tab.contains("bg-[var(--tab-bg)]"));
+    assert!(!tab.contains("--tab-bg:{color};"));
 }
 
 #[test]

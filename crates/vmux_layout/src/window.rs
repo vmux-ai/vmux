@@ -1051,7 +1051,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_chrome_uses_transparent_liquid_glass() {
+    fn layout_chrome_uses_transparent_osr_native_overlay() {
         let mut app = setup_window_app();
         app.update();
 
@@ -1071,10 +1071,21 @@ mod tests {
                 .get::<WebviewOpaqueWindowedBackground>(layout_shell)
                 .is_none()
         );
+        assert!(app.world().get::<WebviewWindowed>(layout_shell).is_none());
         assert!(
             app.world()
-                .get::<WebviewNativeLiquidGlass>(layout_shell)
+                .get::<WebviewTransparent>(layout_shell)
                 .is_some()
+        );
+        assert!(
+            app.world()
+                .get::<WebviewNativeOverlay>(layout_shell)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<WebviewMaxFrameRate>(layout_shell)
+                .is_none()
         );
         assert!(
             app.world()

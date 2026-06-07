@@ -155,45 +155,6 @@ fn layout_chrome_ready(
         && (!state.side_sheet_open || (pane_tree_ready && spaces_ready))
 }
 
-fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
-    let trimmed = s.trim();
-    if let Some(rest) = trimmed.strip_prefix('#')
-        && rest.len() == 6
-    {
-        let r = u8::from_str_radix(&rest[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&rest[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&rest[4..6], 16).ok()?;
-        return Some((r, g, b));
-    }
-    if let Some(inner) = trimmed
-        .strip_prefix("rgb(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
-        let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
-        if parts.len() == 3 {
-            return Some((
-                parts[0].parse().ok()?,
-                parts[1].parse().ok()?,
-                parts[2].parse().ok()?,
-            ));
-        }
-    }
-    None
-}
-
-fn text_color_class_for_bg(bg: &str) -> &'static str {
-    parse_rgb(bg)
-        .map(|(r, g, b)| {
-            let lum = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
-            if lum > 128.0 {
-                "text-zinc-900"
-            } else {
-                "text-zinc-100"
-            }
-        })
-        .unwrap_or("text-foreground")
-}
-
 fn favicon_src_for_stack_node(stack: &StackNode) -> Option<String> {
     favicon_src_for_url(&stack.favicon_url, &stack.url)
 }
@@ -295,21 +256,11 @@ fn HeaderView(
     }
 }
 
-fn url_row_cef(bg_color: Option<&str>) -> (String, String) {
-    if let Some(color) = bg_color {
-        let text_class = text_color_class_for_bg(color);
-        (
-            format!("--vmux-url-bg:{color};"),
-            format!(
-                "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] px-2 bg-[var(--vmux-url-bg)] {text_class}"
-            ),
-        )
-    } else {
-        (
-            String::new(),
-            "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
-        )
-    }
+fn url_row_cef(_bg_color: Option<&str>) -> (String, String) {
+    (
+        String::new(),
+        "flex min-w-0 flex-1 shrink-0 items-center gap-1 rounded-t-[var(--radius)] px-2 bg-glass backdrop-blur-xl backdrop-saturate-150 text-foreground".to_string(),
+    )
 }
 
 #[component]
@@ -436,28 +387,12 @@ fn Tab(tab: TabRow) -> Element {
     let tab_box_classes = "group flex h-10 w-52 min-w-52 max-w-52 basis-52 shrink-0 grow-0 -mb-[3px] pb-[3px] cursor-pointer items-center gap-2 px-3.5";
 
     let (tab_style, tab_class, title_class, close_class) = if is_active {
-        if let Some(ref color) = tab.bg_color {
-            let text_class = text_color_class_for_bg(color);
-            (
-                format!("--tab-bg:{color};"),
-                format!(
-                    "{skirt_classes} {tab_box_classes} rounded-t-md bg-[var(--tab-bg)] {text_class}"
-                ),
-                format!("min-w-0 flex-1 truncate text-ui font-medium {text_class}"),
-                format!(
-                    "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/20 {text_class}"
-                ),
-            )
-        } else {
-            (
-                "--tab-bg:var(--glass);".to_string(),
-                format!(
-                    "{skirt_classes} {tab_box_classes} glass rounded-t-md border-b-0"
-                ),
-                "min-w-0 flex-1 truncate text-ui font-medium text-foreground".to_string(),
-                "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
-            )
-        }
+        (
+            "--tab-bg:var(--glass);".to_string(),
+            format!("{skirt_classes} {tab_box_classes} glass rounded-t-md border-b-0"),
+            "min-w-0 flex-1 truncate text-ui font-medium text-foreground".to_string(),
+            "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
+        )
     } else {
         (
             String::new(),

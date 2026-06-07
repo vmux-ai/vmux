@@ -63,6 +63,7 @@ objc2-app-kit = { version = "0.3", features = [
     "NSGraphics",
     "NSColor",
     "NSGlassEffectView",
+    "NSPanel",
 ] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer", "objc2-core-foundation"] }

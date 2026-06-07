@@ -2,8 +2,8 @@ use crate::cef_state::WebviewCefStateSender;
 use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
     BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, WebviewMaxFrameRate,
-    WebviewNativeLiquidGlass, WebviewOpaqueWindowedBackground, WebviewSize, WebviewSource,
-    WebviewTransparent, WebviewWindowed, WebviewWindowedNativeFocus,
+    WebviewNativeLiquidGlass, WebviewNativeOverlay, WebviewOpaqueWindowedBackground, WebviewSize,
+    WebviewSource, WebviewTransparent, WebviewWindowed, WebviewWindowedNativeFocus,
 };
 use crate::cursor_icon::SystemCursorIconSender;
 use crate::loading_state::{WebviewCommittedNavigationSender, WebviewLoadingStateSender};
@@ -277,6 +277,7 @@ fn create_webview(
             Has<WebviewNativeLiquidGlass>,
             Has<WebviewOpaqueWindowedBackground>,
             Has<WebviewWindowedNativeFocus>,
+            Has<WebviewNativeOverlay>,
         ),
         With<ResolvedWebviewUri>,
     >,
@@ -296,6 +297,7 @@ fn create_webview(
             native_liquid_glass,
             opaque_windowed_background,
             windowed_native_focus,
+            native_overlay,
         ) in
             webviews.iter()
         {
@@ -355,6 +357,11 @@ fn create_webview(
                 },
                 windowless_frame_rate,
                 windowed,
+                // Transparent OSR webviews that render to a Bevy mesh (not a native overlay) must use
+                // CPU paint: the accelerated shared-texture path blits transparent surfaces to black
+                // on the mesh. The layout is the only such case (transparent + mesh in player mode);
+                // it routes through the native overlay (accelerated) in user mode.
+                !transparent || native_overlay,
                 native_liquid_glass,
                 windowed && windowed_native_focus,
             );
