@@ -145,6 +145,8 @@ impl Browsers {
         allow_native_focus: bool,
     ) {
         let _ = native_liquid_glass;
+        // Only consumed by the macOS windowless window-info below; non-macOS OSR is CPU-only.
+        let _ = shared_texture;
         let windowless_frame_rate = normalize_windowless_frame_rate(windowless_frame_rate);
         info!(
             "cef_create_browser webview={webview:?} uri={_uri} size={}x{} scale={device_scale_factor} windowed={windowed} bg={background_color:?} fps={windowless_frame_rate} native_liquid_glass={native_liquid_glass} allow_native_focus={allow_native_focus}",
