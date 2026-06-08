@@ -302,7 +302,7 @@ end tell
     let _ = fs::remove_file(&rw_dmg_base);
 
     // 7. Build the final compressed DMG from the staged directory.
-    tracing::debug!("Creating compressed UDZO DMG from staged tempdir");
+    tracing::debug!("Creating compressed ULFO DMG from staged tempdir");
     Command::new("hdiutil")
         .args(["create", "-srcfolder"])
         .arg(stage_dir)
@@ -312,9 +312,7 @@ end tell
             "-volname",
             &config.product_name,
             "-format",
-            "UDZO",
-            "-imagekey",
-            "zlib-level=9",
+            "ULFO",
             "-ov",
         ])
         .arg(&dmg_path)

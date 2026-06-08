@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "cargo-packager"
-version = "0.11.8"
+version = "0.11.9"
 authors = [
     "CrabNebula Ltd.",
     "Tauri Programme within The Commons Conservancy",
