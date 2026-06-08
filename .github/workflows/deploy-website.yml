@@ -21,6 +21,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   TAILWINDCSS_VERSION: "4.2.4"
+  BINARYEN_VERSION: "127"
+  DX_HOME: ${{ github.workspace }}/.dx
 
 jobs:
   deploy:
@@ -49,6 +51,12 @@ jobs:
           path: ~/.local/bin/tailwindcss
           key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
 
+      - name: Cache binaryen
+        uses: actions/cache@v4
+        with:
+          path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
+          key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
+
       - name: Add ~/.local/bin to PATH
         run: |
           mkdir -p "$HOME/.local/bin"
@@ -56,6 +64,9 @@ jobs:
 
       - name: Install dioxus-cli
         run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
+
+      - name: Install Binaryen
+        run: ./scripts/install-dioxus-binaryen.sh
 
       - name: Install Tailwind CSS
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh

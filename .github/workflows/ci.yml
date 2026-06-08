@@ -18,6 +18,8 @@ env:
   TAILWINDCSS_VERSION: "4.2.4"
   CEF_VERSION: "145.6.1+145.0.28"
   DIOXUS_CLI_VERSION: "0.7.4"
+  BINARYEN_VERSION: "127"
+  DX_HOME: ${{ github.workspace }}/.dx
 
 jobs:
   lint:
@@ -250,12 +252,21 @@ jobs:
           path: ~/.cargo/bin
           key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-v3
 
+      - name: Cache binaryen
+        uses: actions/cache@v4
+        with:
+          path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
+          key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
+
       - name: Install dioxus-cli
         run: |
           if ! dx --version 2>/dev/null | grep -q "${{ env.DIOXUS_CLI_VERSION }}"; then
             cargo install dioxus-cli --locked --version "${{ env.DIOXUS_CLI_VERSION }}" --force
           fi
           dx --version
+
+      - name: Install binaryen
+        run: ./scripts/install-dioxus-binaryen.sh
 
       - name: Build website
         working-directory: website
@@ -326,6 +337,12 @@ jobs:
           path: ~/.cargo/bin
           key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp0.11.8-cef${{ env.CEF_VERSION }}-v3
 
+      - name: Cache binaryen
+        uses: actions/cache@v4
+        with:
+          path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
+          key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
+
       - name: Cache CEF framework
         uses: actions/cache@v4
         with:
@@ -356,6 +373,9 @@ jobs:
             cargo install dioxus-cli --locked --version "${{ env.DIOXUS_CLI_VERSION }}" --force
           fi
           dx --version
+
+      - name: Install binaryen
+        run: ./scripts/install-dioxus-binaryen.sh
 
       - name: Install bevy_cef tools
         run: |
