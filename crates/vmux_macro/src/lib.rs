@@ -344,7 +344,9 @@ mod tests {
             }
         };
 
-        impl_os_menu(input).expect("os menu should generate").to_string()
+        impl_os_menu(input)
+            .expect("os menu should generate")
+            .to_string()
     }
 
     #[test]
@@ -359,14 +361,19 @@ mod tests {
         assert!(tokens.contains("version : Some (about_version)"));
         assert!(tokens.contains("copyright : Some (:: std :: string :: String :: new ())"));
         assert!(!tokens.contains("short_version"));
-        assert!(tokens.contains(":: muda :: PredefinedMenuItem :: about (None , Some (about_metadata))"));
+        assert!(
+            tokens
+                .contains(":: muda :: PredefinedMenuItem :: about (None , Some (about_metadata))")
+        );
     }
 
     #[test]
     fn os_menu_release_about_metadata_omits_commit_hash() {
         let tokens = os_menu_tokens();
 
-        assert!(tokens.contains("\"release\" => format ! (\"v{}\" , env ! (\"CARGO_PKG_VERSION\"))"));
+        assert!(
+            tokens.contains("\"release\" => format ! (\"v{}\" , env ! (\"CARGO_PKG_VERSION\"))")
+        );
     }
 
     #[test]
