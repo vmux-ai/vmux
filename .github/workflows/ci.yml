@@ -17,6 +17,7 @@ env:
   CARGO_TERM_COLOR: always
   TAILWINDCSS_VERSION: "4.2.4"
   CEF_VERSION: "145.6.1+145.0.28"
+  DIOXUS_CLI_VERSION: "0.7.4"
 
 jobs:
   lint:
@@ -66,7 +67,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx0.7.4-cef${{ env.CEF_VERSION }}-v2
+          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cef${{ env.CEF_VERSION }}-v3
 
       - name: Cache CEF framework
         uses: actions/cache@v4
@@ -104,9 +105,11 @@ jobs:
           fi
 
       - name: Install dioxus-cli
-        uses: taiki-e/install-action@v2
-        with:
-          tool: dioxus-cli@0.7.4
+        run: |
+          if ! dx --version 2>/dev/null | grep -q "${{ env.DIOXUS_CLI_VERSION }}"; then
+            cargo install dioxus-cli --locked --version "${{ env.DIOXUS_CLI_VERSION }}" --force
+          fi
+          dx --version
 
       - name: Install tailwindcss
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
@@ -160,7 +163,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx0.7.4-cef${{ env.CEF_VERSION }}-v2
+          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cef${{ env.CEF_VERSION }}-v3
 
       - name: Cache CEF framework
         uses: actions/cache@v4
@@ -187,9 +190,11 @@ jobs:
           fi
 
       - name: Install dioxus-cli
-        uses: taiki-e/install-action@v2
-        with:
-          tool: dioxus-cli@0.7.4
+        run: |
+          if ! dx --version 2>/dev/null | grep -q "${{ env.DIOXUS_CLI_VERSION }}"; then
+            cargo install dioxus-cli --locked --version "${{ env.DIOXUS_CLI_VERSION }}" --force
+          fi
+          dx --version
 
       - name: Install tailwindcss
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
@@ -243,12 +248,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx0.7.4
+          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-v3
 
       - name: Install dioxus-cli
-        uses: taiki-e/install-action@v2
-        with:
-          tool: dioxus-cli@0.7.4
+        run: |
+          if ! dx --version 2>/dev/null | grep -q "${{ env.DIOXUS_CLI_VERSION }}"; then
+            cargo install dioxus-cli --locked --version "${{ env.DIOXUS_CLI_VERSION }}" --force
+          fi
+          dx --version
 
       - name: Build website
         working-directory: website
@@ -317,7 +324,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx0.7.4-cp0.11.8-cef${{ env.CEF_VERSION }}
+          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp0.11.8-cef${{ env.CEF_VERSION }}-v3
 
       - name: Cache CEF framework
         uses: actions/cache@v4
@@ -344,9 +351,11 @@ jobs:
           fi
 
       - name: Install dioxus-cli
-        uses: taiki-e/install-action@v2
-        with:
-          tool: dioxus-cli@0.7.4
+        run: |
+          if ! dx --version 2>/dev/null | grep -q "${{ env.DIOXUS_CLI_VERSION }}"; then
+            cargo install dioxus-cli --locked --version "${{ env.DIOXUS_CLI_VERSION }}" --force
+          fi
+          dx --version
 
       - name: Install bevy_cef tools
         run: |
