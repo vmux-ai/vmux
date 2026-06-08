@@ -65,6 +65,10 @@ if [[ -d "$CEF_RESOURCES" ]]; then
         fi
     done < <(find "$CEF_RESOURCES" -maxdepth 1 -name "*.lproj" -print0)
     echo "==> inject-cef: trimmed $removed non-English locale packs"
+    if [[ ! -d "$CEF_RESOURCES/en.lproj" ]]; then
+        echo "inject-cef: ERROR: en.lproj missing after locale trim (keep-list stale?)" >&2
+        exit 1
+    fi
 fi
 
 # Copy app icon (cargo-packager handles this via icons config, but ensure it's there)
