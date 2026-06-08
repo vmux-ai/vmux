@@ -34,7 +34,7 @@ esac
 TMP="$(mktemp -t tailwindcss.XXXXXX)"
 trap 'rm -f "$TMP"' EXIT
 
-curl -fsSL -o "$TMP" "https://github.com/tailwindlabs/tailwindcss/releases/download/v${VERSION}/${ASSET}"
+curl --retry 5 --retry-delay 2 --retry-max-time 120 -fsSL -o "$TMP" "https://github.com/tailwindlabs/tailwindcss/releases/download/v${VERSION}/${ASSET}"
 chmod +x "$TMP"
 mkdir -p "$INSTALL_DIR"
 

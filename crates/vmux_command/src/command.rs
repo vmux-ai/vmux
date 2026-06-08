@@ -143,12 +143,14 @@ pub enum BrowserNavigationCommand {
     #[menu(id = "browser_next_page", label = "Forward", accel = "super+]")]
     NextPage,
     #[menu(id = "browser_reload", label = "Reload", accel = "super+r")]
+    #[shortcut(direct = "Super+r")]
     Reload,
     #[menu(
         id = "browser_hard_reload",
         label = "Hard Reload",
         accel = "super+shift+r"
     )]
+    #[shortcut(direct = "Super+Shift+R")]
     HardReload,
     #[menu(id = "browser_stop", label = "Stop Loading", accel = "super+.", hidden)]
     Stop,
@@ -523,6 +525,37 @@ mod tests {
                 BrowserNavigationCommand::PrevPage
             )))
         ));
+    }
+
+    #[test]
+    fn browser_reload_has_direct_shortcut_for_native_webviews() {
+        let reload = Shortcut::Direct(KeyCombo {
+            key: KeyCode::KeyR,
+            modifiers: Modifiers {
+                super_key: true,
+                ..Default::default()
+            },
+        });
+        let hard_reload = Shortcut::Direct(KeyCombo {
+            key: KeyCode::KeyR,
+            modifiers: Modifiers {
+                shift: true,
+                super_key: true,
+                ..Default::default()
+            },
+        });
+        let shortcuts = AppCommand::default_shortcuts();
+
+        assert!(
+            shortcuts
+                .iter()
+                .any(|(shortcut, id)| shortcut == &reload && id == "browser_reload")
+        );
+        assert!(
+            shortcuts
+                .iter()
+                .any(|(shortcut, id)| shortcut == &hard_reload && id == "browser_hard_reload")
+        );
     }
 
     #[test]

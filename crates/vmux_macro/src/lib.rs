@@ -293,6 +293,17 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     "dev" => format!("Vmux Dev ({})", env!("VMUX_GIT_HASH")),
                     other => format!("Vmux ({})", other),
                 };
+                let about_version = match env!("VMUX_BUILD_PROFILE") {
+                    "release" => format!("v{}", env!("CARGO_PKG_VERSION")),
+                    "local" => format!("v{} ({})", env!("CARGO_PKG_VERSION"), env!("VMUX_GIT_HASH")),
+                    "dev" => format!("v{} ({})", env!("CARGO_PKG_VERSION"), env!("VMUX_GIT_HASH")),
+                    _ => format!("v{}", env!("CARGO_PKG_VERSION")),
+                };
+                let about_metadata = ::muda::AboutMetadata {
+                    version: Some(about_version),
+                    copyright: Some(::std::string::String::new()),
+                    ..::std::default::Default::default()
+                };
                 let mut app_native_submenu = ::muda::Submenu::new(&app_name, true);
                 let quit_label = format!("Quit {}", &app_name);
                 let quit_item = ::muda::MenuItem::with_id(
@@ -302,7 +313,7 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     ::core::option::Option::Some("super+q".parse().unwrap()),
                 );
                 app_native_submenu.append_items(&[
-                    &::muda::PredefinedMenuItem::about(None, None),
+                    &::muda::PredefinedMenuItem::about(None, Some(about_metadata)),
                     &::muda::PredefinedMenuItem::separator(),
                     &quit_item,
                 ])?;
@@ -1630,4 +1641,56 @@ fn accel_to_display(accel: &str) -> String {
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn os_menu_tokens() -> String {
+        let input: DeriveInput = syn::parse_quote! {
+            enum SampleMenu {
+                #[menu(label = "Sample")]
+                Sample(SampleCommand),
+            }
+        };
+
+        impl_os_menu(input)
+            .expect("os menu should generate")
+            .to_string()
+    }
+
+    #[test]
+    fn os_menu_about_metadata_displays_version_under_title() {
+        let tokens = os_menu_tokens();
+
+        assert!(tokens.contains(":: muda :: AboutMetadata"));
+        assert!(tokens.contains("env ! (\"CARGO_PKG_VERSION\")"));
+        assert!(tokens.contains("env ! (\"VMUX_GIT_HASH\")"));
+        assert!(tokens.contains("\"local\" => format ! (\"v{} ({})\""));
+        assert!(tokens.contains("\"dev\" => format ! (\"v{} ({})\""));
+        assert!(tokens.contains("version : Some (about_version)"));
+        assert!(tokens.contains("copyright : Some (:: std :: string :: String :: new ())"));
+        assert!(!tokens.contains("short_version"));
+        assert!(
+            tokens
+                .contains(":: muda :: PredefinedMenuItem :: about (None , Some (about_metadata))")
+        );
+    }
+
+    #[test]
+    fn os_menu_release_about_metadata_omits_commit_hash() {
+        let tokens = os_menu_tokens();
+
+        assert!(
+            tokens.contains("\"release\" => format ! (\"v{}\" , env ! (\"CARGO_PKG_VERSION\"))")
+        );
+    }
+
+    #[test]
+    fn os_menu_about_metadata_keeps_native_title() {
+        let tokens = os_menu_tokens();
+
+        assert!(!tokens.contains("name : Some"));
+    }
 }

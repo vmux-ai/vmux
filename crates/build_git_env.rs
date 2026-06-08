@@ -3,7 +3,7 @@ use std::process::Command;
 
 pub fn emit() {
     let hash = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
+        .args(["rev-parse", "--short=7", "HEAD"])
         .output()
         .ok()
         .filter(|o| o.status.success())
