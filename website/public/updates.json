@@ -1,17 +1,17 @@
 {
-  "version": "v0.0.12",
-  "pub_date": "2026-06-07T19:20:49Z",
+  "version": "v0.0.13",
+  "pub_date": "2026-06-08T09:29:56Z",
   "platforms": {
     "macos-aarch64": {
-      "url": "https://github.com/vmux-ai/vmux/releases/download/v0.0.12/Vmux-v0.0.12-aarch64-apple-darwin.app.tar.gz",
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVUN1lFWllXRE5HTzZLVHFlTStMcTg2U08yRkJlUVlENjd4TG5EWk13UjlUNUVaNmtHQ1NTZy9aempjOGtzUDcrT2NzOE8yZGNQZGtyUVlUSk5VSHNnMmQ3cFVFb0JvblFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgwODU3NTI1CWZpbGU6Vm11eC12MC4wLjEyLWFhcmNoNjQtYXBwbGUtZGFyd2luLmFwcC50YXIuZ3oKUFpLcTZtSFBtMlQ2Rlp4V1ZrLzZtUjAyQ2ZkdjdyY0o1a2tSc3M5cFhFSVFXRVAwTFFzYVh5bDZ3VXFEWkI4L0dCWVJFNkxOSXh0ajY4KzlzOSswQWc9PQo=",
+      "url": "https://github.com/vmux-ai/vmux/releases/download/v0.0.13/Vmux-v0.0.13-aarch64-apple-darwin.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVUN1lFWllXRE5HTzRsYWhCelZjNW12TWJaN2JSa0hkZlBPaTlDY2JtaEJ3bDM5MmR4SWR5U25oWDRxanJvL0NxUURObG11WGtiRDlnK1hjaG8rTFQ1T3B0ZXFXK2t2Z1FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgwOTA4NzE0CWZpbGU6Vm11eC12MC4wLjEzLWFhcmNoNjQtYXBwbGUtZGFyd2luLmFwcC50YXIuZ3oKOFd5bUNXV3VmUkNQNzZ1b3FvU1UxY3BUc3B4dWl3LzViWk9EZ0o0ejlRbm1tL0ROL09odGkwUmNGM0ZxcXRqdCs2YTdUQlBwSENNekpHajNMNTl5Qnc9PQo=",
       "format": "app"
     }
   },
   "downloads": {
     "macos-aarch64": {
-      "url": "https://github.com/vmux-ai/vmux/releases/download/v0.0.12/Vmux_0.0.12_aarch64.dmg",
-      "filename": "Vmux_0.0.12_aarch64.dmg"
+      "url": "https://github.com/vmux-ai/vmux/releases/download/v0.0.13/Vmux_0.0.13_aarch64.dmg",
+      "filename": "Vmux_0.0.13_aarch64.dmg"
     }
   }
 }
