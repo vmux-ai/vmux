@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-packager"
-version = "0.11.8"
+version = "0.11.9"
 dependencies = [
  "ar",
  "base64",
