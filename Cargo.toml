@@ -100,6 +100,10 @@ opt-level = 3
 [profile.dev.package.bevy_cef_core]
 opt-level = 3
 
+[profile.release]
+strip = true
+lto = "thin"
+
 [profile.release.package.vmux_history]
 opt-level = "z"
 codegen-units = 1
