@@ -16,6 +16,20 @@ pub fn choose_backend(exe: &Path) -> Backend {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum StartMode {
+    Register,
+    SpawnDetached,
+}
+
+pub fn start_mode_for(exe: &Path) -> StartMode {
+    if bundle::bundle_root_for(exe).is_some() {
+        StartMode::Register
+    } else {
+        StartMode::SpawnDetached
+    }
+}
+
 #[derive(Debug)]
 pub enum RegistrationError {
     Io(std::io::Error),
