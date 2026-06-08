@@ -10,39 +10,17 @@ Use superpower. Invoke relevant skills BEFORE any response or action. Even a 1% 
 
 ## Pre-commit Checks
 
-NEVER commit or push without running fmt + clippy + test on the Cargo workspace and confirming they pass.
+CI runs fmt, clippy, and tests for PRs.
 
-Run tests during the edit loop when they support TDD, debugging, or behavior verification. Do not run cargo fmt, cargo clippy, make lint, make lint-fix, or other formatting/linting checks during the edit loop unless the user explicitly asks for an early check.
-
-Fmt, clippy, and linter checks are final-gate checks only. Never run them for exploration, after partial edits, or as a mid-task sanity check. Run them only immediately before a commit, push, or PR, then fix any failures and re-run the workspace checks.
-
-Do not treat "edits are complete" or "task is complete" as permission to run final gates. Final gates require an active commit, push, PR creation, or an explicit user request for checks in the current turn. If no commit/push/PR is requested, stop after edits and report that checks were not run.
-
-```bash
-cargo fmt --all -- --check
-env -u CEF_PATH cargo clippy --workspace --exclude bevy_cef --exclude bevy_cef_core --exclude bevy_cef_debug_render_process --all-targets -- -D warnings
-env -u CEF_PATH cargo test --workspace --exclude bevy_cef --exclude bevy_cef_core --exclude bevy_cef_debug_render_process
-```
-
-Run `make setup-hooks` once to install the pre-push hook that runs these checks automatically.
+Run targeted tests during the edit loop when they support TDD, debugging, or behavior verification. Run broader local checks only when the user asks.
 
 If a change affects an excluded patched CEF crate, run the appropriate package checks too.
-
-The `website/` directory is its own cargo workspace (separate `Cargo.lock`). When `website/**` changes, run fmt + clippy from inside `website/` against `wasm32-unknown-unknown`:
-
-```bash
-cd website
-cargo fmt -- --check
-env -u CEF_PATH cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings
-```
-
-There is no host-runnable test target for `vmux_website` (it builds for `wasm32-unknown-unknown`); skip `cargo test` here unless wasm-bindgen-test is wired up.
 
 If any check fails, fix the issue before committing. Do not push broken code.
 
 ## Platform-Specific Code
 
-This project targets macOS (primary) and Linux (CI). When adding imports or code that uses platform-specific APIs (CEF, winit, AppKit), always add appropriate `#[cfg(...)]` gates. Let the final fmt gate reorder cfg-gated imports.
+This project targets macOS (primary) and Linux (CI). When adding imports or code that uses platform-specific APIs (CEF, winit, AppKit), always add appropriate `#[cfg(...)]` gates. Let rustfmt reorder cfg-gated imports.
 
 ## Rules
 
@@ -77,15 +55,3 @@ Worktree directory: `.worktrees/` (already in `.gitignore`).
 ## Git
 
 Always prefer `git rebase` over `git merge` when updating branches. Use `git push --force-with-lease` after rebasing.
-
-## Before Pushing / Opening PRs
-
-**Mandatory**: Run fmt + clippy + test on the Cargo workspace before every `git push` or PR creation. Do not push or open a PR if any check fails. Fix all errors first.
-
-These checks are final-gate checks. Finish edits first, then run them once immediately before push/PR/commit. Do not run fmt, clippy, or linter checks earlier in the task unless the user explicitly asks for an early check. Tests may run earlier when they support TDD, debugging, or behavior verification. If final gates fail, fix the issue and re-run the workspace checks.
-
-```sh
-make lint-fix  # auto-fix on every workspace package: runs fmt + clippy --fix
-```
-
-If formatting fails, run `make lint-fix` to auto-format, then re-run the workspace checks.

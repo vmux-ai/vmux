@@ -67,6 +67,14 @@ fn local_package_uses_per_sha_bundle_name() {
 }
 
 #[test]
+fn build_git_env_uses_github_style_short_hash() {
+    let source = include_str!("../../build_git_env.rs");
+
+    assert!(source.contains("\"--short=7\""));
+    assert!(!source.contains("\"--short\", \"HEAD\""));
+}
+
+#[test]
 fn local_package_only_builds_app_bundle() {
     let package_script = include_str!("../../../scripts/package.sh");
 
