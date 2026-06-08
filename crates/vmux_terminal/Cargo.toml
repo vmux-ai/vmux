@@ -32,7 +32,7 @@ vmux_service = { path = "../vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 
-[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

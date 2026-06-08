@@ -805,39 +805,42 @@ fn ensure_service_started() {
             return;
         }
     };
-    #[cfg(target_os = "macos")]
-    {
-        let profile = vmux_service::current_profile();
-        if let Err(e) = vmux_service::registry::ensure_running(profile, &binary) {
-            tracing::error!(error = ?e, "service registration failed");
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        use std::os::unix::process::CommandExt;
-        let log_dir = vmux_service::service_dir();
-        let _ = std::fs::create_dir_all(&log_dir);
-        let stderr_cfg = match std::fs::File::create(vmux_service::log_path()) {
-            Ok(f) => std::process::Stdio::from(f),
-            Err(e) => {
-                tracing::warn!(error = %e, "could not create service log; stderr will be discarded");
-                std::process::Stdio::null()
+    match vmux_service::registry::start_mode_for(&binary) {
+        vmux_service::registry::StartMode::Register => {
+            let profile = vmux_service::current_profile();
+            if let Err(e) = vmux_service::registry::ensure_running(profile, &binary) {
+                tracing::error!(error = ?e, "service registration failed");
             }
-        };
-        let spawn_result = unsafe {
-            std::process::Command::new(&binary)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(stderr_cfg)
-                .pre_exec(|| {
-                    libc::setsid();
-                    Ok(())
-                })
-                .spawn()
-        };
-        if let Err(e) = spawn_result {
-            tracing::error!(error = %e, "failed to spawn vmux_service (non-macOS fallback)");
         }
+        vmux_service::registry::StartMode::SpawnDetached => spawn_detached_service(&binary),
+    }
+}
+
+#[cfg(unix)]
+fn spawn_detached_service(binary: &std::path::Path) {
+    use std::os::unix::process::CommandExt;
+    let log_dir = vmux_service::service_dir();
+    let _ = std::fs::create_dir_all(&log_dir);
+    let stderr_cfg = match std::fs::File::create(vmux_service::log_path()) {
+        Ok(f) => std::process::Stdio::from(f),
+        Err(e) => {
+            tracing::warn!(error = %e, "could not create service log; stderr will be discarded");
+            std::process::Stdio::null()
+        }
+    };
+    let spawn_result = unsafe {
+        std::process::Command::new(binary)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(stderr_cfg)
+            .pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            })
+            .spawn()
+    };
+    if let Err(e) = spawn_result {
+        tracing::error!(error = %e, "failed to spawn vmux_service");
     }
 }
 
