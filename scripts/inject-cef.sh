@@ -46,6 +46,31 @@ fi
 echo "==> inject-cef: running bevy_cef_bundle_app"
 bevy_cef_bundle_app --app "$APP_BUNDLE" --bundle-id-base "$BUNDLE_ID_BASE" --bin-name Vmux --cef-framework "$CEF_FRAMEWORK" --helper-bin "$HELPER_BIN" --no-sign
 
+# Trim non-English Chromium locale packs to cut bundle size. Must run before
+# the app is (re)signed/notarized below, since editing the framework
+# invalidates its upstream signature.
+CEF_RESOURCES="$APP_BUNDLE/Contents/Frameworks/Chromium Embedded Framework.framework/Resources"
+if [[ -d "$CEF_RESOURCES" ]]; then
+    keep_locales=("en.lproj" "en_GB.lproj" "Base.lproj")
+    removed=0
+    while IFS= read -r -d '' lproj; do
+        base="$(basename "$lproj")"
+        keep=0
+        for k in "${keep_locales[@]}"; do
+            [[ "$base" == "$k" ]] && keep=1 && break
+        done
+        if [[ "$keep" -eq 0 ]]; then
+            rm -rf "$lproj"
+            removed=$((removed + 1))
+        fi
+    done < <(find "$CEF_RESOURCES" -maxdepth 1 -name "*.lproj" -print0)
+    echo "==> inject-cef: trimmed $removed non-English locale packs"
+    if [[ ! -d "$CEF_RESOURCES/en.lproj" ]]; then
+        echo "inject-cef: ERROR: en.lproj missing after locale trim (keep-list stale?)" >&2
+        exit 1
+    fi
+fi
+
 # Copy app icon (cargo-packager handles this via icons config, but ensure it's there)
 ICNS_SRC="$ROOT/packaging/macos/Vmux.icns"
 if [[ -f "$ICNS_SRC" && ! -f "$APP_BUNDLE/Contents/Resources/Vmux.icns" ]]; then

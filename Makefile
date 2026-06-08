@@ -9,7 +9,7 @@ DX_BIN := $(or $(shell command -v dx 2>/dev/null),$(HOME)/.cargo/bin/dx)
 CARGO_PACKAGER_BIN := $(or $(shell command -v cargo-packager 2>/dev/null),$(HOME)/.cargo/bin/cargo-packager)
 BEVY_CEF_BUNDLE_APP_BIN := $(or $(shell command -v bevy_cef_bundle_app 2>/dev/null),$(HOME)/.cargo/bin/bevy_cef_bundle_app)
 DX_VERSION := 0.7.4
-CARGO_PACKAGER_VERSION := 0.11.8
+CARGO_PACKAGER_VERSION := 0.11.9
 BEVY_CEF_BUNDLE_APP_VERSION := 0.8.1
 CEF_VERSION := $(shell awk -F'"' '/^name = "cef"$$/{getline; print $$2; exit}' Cargo.lock)
 CEF_FRAMEWORK_DIR := $(HOME)/.local/share/Chromium Embedded Framework.framework
@@ -141,7 +141,7 @@ ensure-package-deps:
 	@cp_version="$$( ("$(CARGO_PACKAGER_BIN)" --version 2>/dev/null || true) | awk '{print $$2}' )"; \
 	if [ "$$cp_version" != "$(CARGO_PACKAGER_VERSION)" ]; then \
 		echo "Installing cargo-packager $(CARGO_PACKAGER_VERSION) (found: $${cp_version:-missing})..."; \
-		"$(CARGO_BIN)" install cargo-packager --locked --version "$(CARGO_PACKAGER_VERSION)"; \
+		"$(CARGO_BIN)" install --path patches/cargo-packager-0.11.8 --locked --force; \
 	fi
 	@bcb_version="$$( ("$(BEVY_CEF_BUNDLE_APP_BIN)" --version 2>/dev/null || true) | awk '{print $$2}' )"; \
 	if [ "$$bcb_version" != "$(BEVY_CEF_BUNDLE_APP_VERSION)" ]; then \

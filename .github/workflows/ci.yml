@@ -362,7 +362,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp0.11.8-cef${{ env.CEF_VERSION }}-v3
+          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp0.11.9-cef${{ env.CEF_VERSION }}-v3
 
       - name: Cache binaryen
         uses: actions/cache@v4
@@ -411,8 +411,8 @@ jobs:
 
       - name: Install cargo-packager (patched for macOS Tahoe)
         run: |
-          if ! cargo-packager --version 2>/dev/null | grep -q '0.11.8'; then
-            cargo install --path patches/cargo-packager-0.11.8
+          if ! cargo-packager --version 2>/dev/null | grep -q '0.11.9'; then
+            cargo install --path patches/cargo-packager-0.11.8 --locked --force
           fi
 
       - name: Install tailwindcss

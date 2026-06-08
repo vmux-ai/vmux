@@ -106,6 +106,7 @@ impl PageBuilder {
             );
             let public = dx_web_public_dir(&workspace_root, self.dx_bin, release);
             copy_dx_public_to_dist(&public, &dist);
+            let _ = fs::write(dist.join(DIST_PROFILE_MARKER), profile_tag(release));
         }
         if dist.is_dir()
             && let Err(e) = finish_cef_embedded_webview_dist(
@@ -172,6 +173,10 @@ impl PageBuilder {
         let Some(wasm_mtime) = newest_bg_wasm_mtime(&dist) else {
             return true;
         };
+        let marker = fs::read_to_string(dist.join(DIST_PROFILE_MARKER)).ok();
+        if dist_profile_mismatch(marker.as_deref(), release) {
+            return true;
+        }
         if !index.is_file() {
             return true;
         }
@@ -284,6 +289,16 @@ pub fn resolve_dx_executable() -> PathBuf {
          Or set DX=/path/to/dx\n\
          (vmux does not use npm for web bundles; optional Tailwind is a standalone `tailwindcss` binary.)"
     );
+}
+
+pub const DIST_PROFILE_MARKER: &str = ".dx-profile";
+
+pub fn profile_tag(release: bool) -> &'static str {
+    if release { "release" } else { "debug" }
+}
+
+pub fn dist_profile_mismatch(existing_marker: Option<&str>, release: bool) -> bool {
+    existing_marker.map(str::trim) != Some(profile_tag(release))
 }
 
 pub fn dx_web_public_dir(workspace_root: &Path, bin_name: &str, release: bool) -> PathBuf {
@@ -657,6 +672,31 @@ fn remove_stale_prefixed_css_assets(dist_assets: &Path, stale_prefixes: &[&str])
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profile_tag_maps_release_flag() {
+        assert_eq!(profile_tag(true), "release");
+        assert_eq!(profile_tag(false), "debug");
+    }
+
+    #[test]
+    fn mismatch_true_when_marker_missing() {
+        assert!(dist_profile_mismatch(None, true));
+        assert!(dist_profile_mismatch(None, false));
+    }
+
+    #[test]
+    fn mismatch_true_when_marker_differs() {
+        assert!(dist_profile_mismatch(Some("debug"), true));
+        assert!(dist_profile_mismatch(Some("release"), false));
+    }
+
+    #[test]
+    fn mismatch_false_when_marker_matches() {
+        assert!(!dist_profile_mismatch(Some("release"), true));
+        assert!(!dist_profile_mismatch(Some("debug"), false));
+        assert!(!dist_profile_mismatch(Some("release\n"), true));
+    }
 
     #[test]
     fn tracks_rs_files_under_extra_directories() {
