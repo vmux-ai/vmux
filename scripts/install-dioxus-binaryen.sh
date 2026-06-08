@@ -43,7 +43,7 @@ fi
 TMP_DIR="$(mktemp -d -t binaryen.XXXXXX)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-curl -fsSL -o "$TMP_DIR/binaryen.tar.gz" "https://github.com/WebAssembly/binaryen/releases/download/version_${VERSION}/${ASSET}"
+curl --retry 5 --retry-delay 2 --retry-max-time 120 -fsSL -o "$TMP_DIR/binaryen.tar.gz" "https://github.com/WebAssembly/binaryen/releases/download/version_${VERSION}/${ASSET}"
 rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 tar -xzf "$TMP_DIR/binaryen.tar.gz" --strip-components 1 -C "$INSTALL_DIR"
