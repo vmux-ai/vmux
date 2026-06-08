@@ -412,7 +412,7 @@ jobs:
       - name: Install cargo-packager (patched for macOS Tahoe)
         run: |
           if ! cargo-packager --version 2>/dev/null | grep -q '0.11.9'; then
-            cargo install --path patches/cargo-packager-0.11.8
+            cargo install --path patches/cargo-packager-0.11.8 --locked --force
           fi
 
       - name: Install tailwindcss
