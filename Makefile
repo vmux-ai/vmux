@@ -11,6 +11,7 @@ BEVY_CEF_BUNDLE_APP_BIN := $(or $(shell command -v bevy_cef_bundle_app 2>/dev/nu
 DX_VERSION := 0.7.4
 CARGO_PACKAGER_VERSION := 0.11.8
 BEVY_CEF_BUNDLE_APP_VERSION := 0.8.1
+CEF_VERSION := $(shell awk -F'"' '/^name = "cef"$$/{getline; print $$2; exit}' Cargo.lock)
 CEF_FRAMEWORK_DIR := $(HOME)/.local/share/Chromium Embedded Framework.framework
 CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 
@@ -52,9 +53,10 @@ build-release: ensure-mac-deps ensure-package-deps
 release: build-release
 	open "target/release/Vmux.app"
 
-# One-time CEF download (macOS paths; pin matches bevy_cef 0.5.x)
+# One-time CEF download (macOS paths; version derived from the cef crate in Cargo.lock)
 setup-cef:
-	"$(CARGO_BIN)" install export-cef-dir@148.2.0+148.0.8 --force
+	@test -n "$(CEF_VERSION)" || { echo "could not resolve cef crate version from Cargo.lock"; exit 1; }
+	"$(CARGO_BIN)" install export-cef-dir@$(CEF_VERSION) --force
 	"$(EXPORT_CEF_BIN)" --force "$$HOME/.local/share"
 
 # Build from vmux-patched bevy_cef_core (required when adding CEF schemes such as vmux://).

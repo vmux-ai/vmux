@@ -16,15 +16,37 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   TAILWINDCSS_VERSION: "4.2.4"
-  CEF_VERSION: "145.6.1+145.0.28"
   DIOXUS_CLI_VERSION: "0.7.4"
   BINARYEN_VERSION: "127"
   DX_HOME: ${{ github.workspace }}/.dx
 
 jobs:
+  cef-version:
+    name: Resolve CEF version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve cef crate version from Cargo.lock
+        id: resolve
+        run: |
+          set -euo pipefail
+          version=$(awk -F'"' '/^name = "cef"$/{getline; print $2; exit}' Cargo.lock)
+          if [ -z "${version:-}" ]; then
+            echo "::error file=Cargo.lock::could not resolve 'cef' crate version"
+            exit 1
+          fi
+          echo "Resolved CEF version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    needs: cef-version
+    env:
+      CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -122,6 +144,9 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    needs: cef-version
+    env:
+      CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -274,11 +299,13 @@ jobs:
 
   build-mac:
     name: Build macOS App
-    needs: changes
+    needs: [changes, cef-version]
     if: needs.changes.outputs.packaging == 'true'
     runs-on: macos-latest
     permissions:
       contents: write
+    env:
+      CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -402,6 +429,50 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VMUX_UPDATE_PUBLIC_KEY: ${{ secrets.VMUX_UPDATE_PUBLIC_KEY }}
         run: ./scripts/build-mac-release.sh
+
+      - name: Smoke test bundled app
+        if: env.PREP_DONE != '1'
+        run: |
+          set -uo pipefail
+          app="target/release/Vmux.app"
+          bin="$app/Contents/MacOS/Vmux"
+          plist="$app/Contents/Frameworks/Chromium Embedded Framework.framework/Resources/Info.plist"
+
+          want="${CEF_VERSION##*+}"
+          got=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$plist" 2>/dev/null || true)
+          echo "Bundled CEF framework: ${got:-<none>} | cef crate: $CEF_VERSION (expect prefix $want)"
+          case "$got" in
+            "$want" | "$want".*) ;;
+            *)
+              echo "::error::Bundled CEF (${got:-<none>}) does not match cef crate ($CEF_VERSION)"
+              exit 1
+              ;;
+          esac
+
+          HOME="$(mktemp -d)"
+          export HOME
+          log="$(mktemp)"
+          "$bin" >"$log" 2>&1 &
+          pid=$!
+          rc=0
+          sleep 25
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "Vmux survived the 25s startup window — OK"
+          else
+            wait "$pid"
+            code=$?
+            echo "::error::Vmux exited during startup (exit $code) — startup crash"
+            rc=1
+          fi
+
+          kill "$pid" 2>/dev/null || true
+          pkill -f "Vmux.app/Contents/MacOS/Vmux" 2>/dev/null || true
+          pkill -f "vmux_service" 2>/dev/null || true
+          pkill -f "Chromium Embedded Framework" 2>/dev/null || true
+
+          echo "----- startup log -----"
+          cat "$log" || true
+          exit $rc
 
       - name: Upload .dmg artifact
         if: env.PREP_DONE != '1' && env.IS_RELEASE_PR != '1'
