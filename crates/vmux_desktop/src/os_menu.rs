@@ -9,15 +9,6 @@ use vmux_command::{
     build_native_root_menu, open::OpenCommand,
 };
 use vmux_layout::scene::InteractionMode;
-use vmux_setting::AppSettings;
-use vmux_terminal as terminal;
-use vmux_terminal::{PtyExited, Terminal};
-
-/// Resource: window entity awaiting quit confirmation dialog.
-#[derive(Resource, Default)]
-pub(crate) struct PendingWindowClose {
-    pub window: Option<Entity>,
-}
 
 /// When a menu key-equivalent last fired. ⌘W triggers the `stack_close` menu item *and* Chromium's
 /// built-in ⌘W (`performClose:` → `WindowCloseRequested`). The red traffic-light button is the only
@@ -58,8 +49,7 @@ pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PendingWindowClose>()
-            .init_resource::<LastMenuCommandAt>()
+        app.init_resource::<LastMenuCommandAt>()
             .init_resource::<LastStackCloseAt>()
             .init_resource::<LastNativePageOpenAt>()
             .add_systems(Startup, setup)
@@ -70,10 +60,9 @@ impl Plugin for OsMenuPlugin {
                     sync_interactive_mode_menu_items.after(ReadAppCommands),
                     remember_stack_close_commands.after(WriteAppCommands),
                     remember_native_page_open_commands.after(WriteAppCommands),
-                    close_with_confirmation
+                    hide_window_on_close_request
                         .after(remember_stack_close_commands)
                         .after(remember_native_page_open_commands),
-                    process_pending_window_close,
                 ),
             );
     }
@@ -207,15 +196,9 @@ fn remember_native_page_open_commands(
     }
 }
 
-/// Replacement for bevy's `close_when_requested` that shows a confirmation
-/// dialog when terminals are still running. Defers the dialog to the
-/// exclusive `show_pending_close_dialogs` system to avoid deadlocks.
-fn close_with_confirmation(
+fn hide_window_on_close_request(
     mut closed: MessageReader<WindowCloseRequested>,
     mut windows: Query<&mut Window>,
-    settings: Res<AppSettings>,
-    live_terminals: Query<(), (With<Terminal>, Without<PtyExited>)>,
-    mut pending: ResMut<PendingWindowClose>,
     last_menu_command: Res<LastMenuCommandAt>,
     last_stack_close: Res<LastStackCloseAt>,
     last_native_page_open: Res<LastNativePageOpenAt>,
@@ -249,41 +232,9 @@ fn close_with_confirmation(
             );
             continue;
         }
-        let should_confirm = terminal::should_confirm_close(&settings);
-        let live_terminal_count = live_terminals.iter().count();
-        info!(
-            target: "vmux_desktop::window_close",
-            window = ?event.window,
-            should_confirm,
-            live_terminal_count,
-            "handling WindowCloseRequested"
-        );
-        if should_confirm && live_terminal_count > 0 {
-            pending.window = Some(event.window);
-        } else if let Ok(mut window) = windows.get_mut(event.window) {
+        if let Ok(mut window) = windows.get_mut(event.window) {
             window.visible = false;
         }
-    }
-}
-
-/// Exclusive system: processes pending window close confirmation by showing
-/// a native dialog on the main thread.
-fn process_pending_window_close(world: &mut World) {
-    let window = world.resource::<PendingWindowClose>().window;
-    let Some(window) = window else {
-        return;
-    };
-
-    world.resource_mut::<PendingWindowClose>().window = None;
-
-    let mut query = world.query_filtered::<(), (With<Terminal>, Without<PtyExited>)>();
-    let count = query.iter(world).count();
-
-    if (count == 0 || terminal::confirm_quit_dialog(count))
-        && let Ok(mut entity_mut) = world.get_entity_mut(window)
-        && let Some(mut win) = entity_mut.get_mut::<Window>()
-    {
-        win.visible = false;
     }
 }
 
@@ -295,7 +246,7 @@ mod tests {
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_setting::{AgentSettings, BrowserSettings, ShortcutSettings};
+    use vmux_setting::{AgentSettings, AppSettings, BrowserSettings, ShortcutSettings};
 
     fn test_settings() -> AppSettings {
         AppSettings {
@@ -352,6 +303,39 @@ mod tests {
             source.contains("window.visible = false") || source.contains(".visible = false"),
             "expected the close handler to set window.visible = false"
         );
+    }
+
+    #[test]
+    fn window_close_hides_without_quit_confirmation() {
+        let source = include_str!("os_menu.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+
+        assert!(
+            !source.contains("PendingWindowClose"),
+            "window close must not route through a confirmation dialog"
+        );
+        assert!(!source.contains("process_pending_window_close"));
+        assert!(!source.contains("should_confirm"));
+        assert!(!source.contains("confirm_quit_dialog"));
+    }
+
+    #[test]
+    fn unsuppressed_window_close_hides_window() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<WindowCloseRequested>()
+            .insert_resource(test_settings());
+
+        let window = app.world_mut().spawn(Window::default()).id();
+        app.world_mut()
+            .resource_mut::<Messages<WindowCloseRequested>>()
+            .write(WindowCloseRequested { window });
+
+        app.world_mut().run_schedule(Update);
+
+        assert!(!app.world().get::<Window>(window).unwrap().visible);
     }
 
     #[test]
