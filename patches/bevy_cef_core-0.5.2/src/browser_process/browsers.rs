@@ -22,7 +22,9 @@ use cef::{
 use cef_dll_sys::{cef_event_flags_t, cef_mouse_button_type_t};
 #[allow(deprecated)]
 use raw_window_handle::RawWindowHandle;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
+#[cfg(target_os = "macos")]
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Once;
 use std::time::Duration;
