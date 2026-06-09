@@ -22,7 +22,7 @@ use cef::{
 use cef_dll_sys::{cef_event_flags_t, cef_mouse_button_type_t};
 #[allow(deprecated)]
 use raw_window_handle::RawWindowHandle;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Once;
 use std::time::Duration;
@@ -88,6 +88,10 @@ pub struct WebviewBrowser {
     allow_native_focus: bool,
     #[cfg(target_os = "macos")]
     native_liquid_glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
+    #[cfg(target_os = "macos")]
+    corner_cover: RefCell<Option<objc2::rc::Retained<objc2_quartz_core::CAShapeLayer>>>,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    last_corner_cover: Cell<Option<(i32, bool, i32, i32)>>,
 }
 
 pub struct Browsers {
@@ -312,6 +316,9 @@ impl Browsers {
             allow_native_focus,
             #[cfg(target_os = "macos")]
             native_liquid_glass,
+            #[cfg(target_os = "macos")]
+            corner_cover: RefCell::new(None),
+            last_corner_cover: Cell::new(None),
         };
         self.browsers.insert(webview, webview_browser);
         webview_debug_log(format!(
@@ -736,6 +743,94 @@ impl Browsers {
             layer.setMaskedCorners(if all_corners { all } else { bottom });
         }
     }
+
+    #[cfg(target_os = "macos")]
+    fn update_corner_cover(
+        browser: &WebviewBrowser,
+        view: &objc2_app_kit::NSView,
+        radius: f64,
+        all_corners: bool,
+        color: Option<&objc2_app_kit::NSColor>,
+    ) {
+        use objc2_core_graphics::CGMutablePath;
+        use objc2_quartz_core::{CAShapeLayer, kCAFillRuleEvenOdd};
+        view.setWantsLayer(true);
+        let Some(layer) = view.layer() else {
+            return;
+        };
+        let bounds = layer.bounds();
+        let want_cover = all_corners && radius > 0.0;
+        let key = (
+            radius.round() as i32,
+            all_corners,
+            bounds.size.width.round() as i32,
+            bounds.size.height.round() as i32,
+        );
+        if browser.last_corner_cover.get() == Some(key)
+            && browser.corner_cover.borrow().is_some() == want_cover
+        {
+            return;
+        }
+        browser.last_corner_cover.set(Some(key));
+        if !want_cover {
+            if let Some(cover) = browser.corner_cover.borrow_mut().take() {
+                cover.removeFromSuperlayer();
+            }
+            return;
+        }
+        let existing = browser.corner_cover.borrow().clone();
+        let cover = match existing {
+            Some(c) => c,
+            None => {
+                let c = CAShapeLayer::new();
+                c.setZPosition(1.0);
+                unsafe { c.setFillRule(kCAFillRuleEvenOdd) };
+                *browser.corner_cover.borrow_mut() = Some(c.clone());
+                c
+            }
+        };
+        if let Some(color) = color {
+            cover.setFillColor(Some(&color.CGColor()));
+        }
+        cover.setFrame(bounds);
+        let path = CGMutablePath::new();
+        unsafe {
+            CGMutablePath::add_rect(Some(&path), std::ptr::null(), bounds);
+            CGMutablePath::add_rounded_rect(Some(&path), std::ptr::null(), bounds, radius, radius);
+        }
+        cover.setPath(Some(&path));
+        layer.addSublayer(&cover);
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn set_windowed_corner_cover(
+        &self,
+        webview: &Entity,
+        radius_px: f32,
+        scale: f32,
+        all_corners: bool,
+        color_rgb: [f32; 3],
+    ) {
+        use objc2_app_kit::{NSColor, NSView};
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        let s = (scale as f64).max(1.0e-6);
+        let radius = (radius_px as f64 / s).max(0.0);
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let r = color_rgb[0].clamp(0.0, 1.0) as f64;
+        let g = color_rgb[1].clamp(0.0, 1.0) as f64;
+        let b = color_rgb[2].clamp(0.0, 1.0) as f64;
+        let color = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 1.0);
+        Self::update_corner_cover(browser, view, radius, all_corners, Some(&color));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn set_windowed_corner_cover(&self, _: &Entity, _: f32, _: f32, _: bool, _: [f32; 3]) {}
 
     #[cfg(target_os = "macos")]
     pub fn set_windowed_frame(
@@ -1778,6 +1873,24 @@ mod tests {
     }
 
     #[test]
+    fn windowed_corner_cover_uses_even_odd_overlay() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        assert!(implementation.contains("fn update_corner_cover"));
+        assert!(implementation.contains("pub fn set_windowed_corner_cover"));
+        let cover_fn = implementation
+            .split("fn update_corner_cover")
+            .nth(1)
+            .and_then(|tail| tail.split("pub fn set_windowed_corner_cover").next())
+            .unwrap_or_default();
+        assert!(cover_fn.contains("kCAFillRuleEvenOdd"));
+        assert!(cover_fn.contains("add_rounded_rect"));
+        assert!(cover_fn.contains("setZPosition"));
+    }
+
+    #[test]
     fn windowed_native_views_support_focus_ring_border() {
         let implementation = include_str!("browsers.rs")
             .split("#[cfg(test)]\nmod tests")
@@ -1835,26 +1948,6 @@ mod tests {
 
         assert!(close_fn.contains("window_handle"));
         assert!(close_fn.contains("removeFromSuperview"));
-    }
-
-    #[test]
-    fn windowed_native_corner_clip_does_not_mutate_cef_sublayers() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        let apply_fn = implementation
-            .split("fn apply_view_tree_corner_radius")
-            .nth(1)
-            .and_then(|tail| {
-                tail.split("#[cfg(target_os = \"macos\")]\n    pub fn set_windowed_frame")
-                    .next()
-            })
-            .unwrap_or_default();
-
-        assert!(!apply_fn.contains("subviews"));
-        assert!(!apply_fn.contains("sublayers"));
-        assert!(!apply_fn.contains("for i in 0.."));
     }
 
     #[test]

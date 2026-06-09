@@ -1,6 +1,7 @@
 use crate::{
     cef::Loading,
     pane::{Pane, PaneSplit},
+    scene::InteractionMode,
     settings::LayoutSettings,
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
     window::{VmuxWindow, WEBVIEW_Z_FOCUS_RING},
@@ -88,6 +89,7 @@ fn sync_focus_ring_to_active_pane(
     pane_layout: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     glass: Single<(&ComputedNode, &UiGlobalTransform, &Transform), With<VmuxWindow>>,
     settings: Res<LayoutSettings>,
+    mode: Res<InteractionMode>,
     time: Res<Time>,
     mut ring_q: Query<
         (
@@ -108,6 +110,11 @@ fn sync_focus_ring_to_active_pane(
     let Ok((mut tf, mat_h, mut visibility)) = ring_q.single_mut() else {
         return;
     };
+
+    if cfg!(target_os = "macos") && *mode == InteractionMode::User {
+        *visibility = Visibility::Hidden;
+        return;
+    }
 
     let active_pane = focus.pane;
     let Some(active_entity) = active_pane else {
@@ -266,6 +273,18 @@ mod tests {
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),
         }
+    }
+
+    #[test]
+    fn mesh_focus_ring_hidden_in_windowed_user_mode() {
+        let src = include_str!("focus_ring.rs");
+        let sync = src
+            .split("fn sync_focus_ring_to_active_pane")
+            .nth(1)
+            .and_then(|t| t.split("fn tick_focus_ring_gradient_time").next())
+            .unwrap_or_default();
+        assert!(sync.contains("InteractionMode::User"));
+        assert!(sync.contains("target_os = \"macos\""));
     }
 
     #[test]

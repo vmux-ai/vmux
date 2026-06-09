@@ -887,6 +887,7 @@ fn sync_windowed_frames(
     settings: Res<AppSettings>,
     layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
     focus: Res<vmux_layout::stack::FocusedStack>,
+    clear_color: Res<ClearColor>,
     browser_q: Query<
         (
             Entity,
@@ -930,8 +931,8 @@ fn sync_windowed_frames(
         let left = center.x - size_px.x * 0.5;
         let top = center.y - size_px.y * 0.5;
         let scale = 1.0 / computed.inverse_scale_factor.max(1.0e-6);
-        let was_shown = last_raised_frame.contains_key(&entity);
-        if !was_shown {
+        let became_visible = !last_visible_pages.contains(&entity);
+        if became_visible {
             browsers.set_windowed_hidden(&entity, false);
         }
         browsers.set_windowed_frame(&entity, left, top, size_px.x, size_px.y, scale);
@@ -954,6 +955,14 @@ fn sync_windowed_frames(
             scale,
             [focus_ring_color.r, focus_ring_color.g, focus_ring_color.b],
         );
+        let cover_rgb = clear_color.0.to_srgba();
+        browsers.set_windowed_corner_cover(
+            &entity,
+            settings.layout.radius * scale,
+            scale,
+            all_corners,
+            [cover_rgb.red, cover_rgb.green, cover_rgb.blue],
+        );
         if browsers.has_browser(entity) {
             let key = (
                 left.round() as i32,
@@ -962,14 +971,13 @@ fn sync_windowed_frames(
                 size_px.y.round() as i32,
             );
             let changed = last_raised_frame.insert(entity, key) != Some(key);
-            let became_visible = !last_visible_pages.contains(&entity);
             if force_raise || changed || became_visible {
                 browsers.raise_windowed_to_front(&entity);
             }
         }
     }
-    let shown: Vec<Entity> = last_raised_frame.keys().copied().collect();
-    for entity in windowed_pages_to_hide_before_first_show(&hidden, &shown) {
+    let ever_shown: Vec<Entity> = last_raised_frame.keys().copied().collect();
+    for entity in windowed_pages_to_hide(&hidden, &last_visible_pages, &ever_shown) {
         browsers.set_windowed_hidden(&entity, true);
     }
     *last_visible_pages = visible;
@@ -990,11 +998,15 @@ fn visible_pane_count_for_windowed_sync(
     leaf_panes.iter().count().max(1)
 }
 
-fn windowed_pages_to_hide_before_first_show(hidden: &[Entity], shown: &[Entity]) -> Vec<Entity> {
+fn windowed_pages_to_hide(
+    hidden: &[Entity],
+    prev_visible: &[Entity],
+    ever_shown: &[Entity],
+) -> Vec<Entity> {
     hidden
         .iter()
         .copied()
-        .filter(|entity| !shown.contains(entity))
+        .filter(|entity| prev_visible.contains(entity) || !ever_shown.contains(entity))
         .collect()
 }
 
@@ -3239,7 +3251,7 @@ mod tests {
     }
 
     #[test]
-    fn windowed_page_sync_raises_visible_pages_without_hiding_shown_pages() {
+    fn windowed_page_sync_raises_visible_pages_and_hides_inactive() {
         let source = include_str!("lib.rs");
         let sync_fn = source
             .split("fn sync_windowed_frames")
@@ -3248,17 +3260,22 @@ mod tests {
             .unwrap_or_default();
 
         assert!(sync_fn.contains("browsers.raise_windowed_to_front(&entity)"));
-        assert!(sync_fn.contains("windowed_pages_to_hide_before_first_show"));
+        assert!(sync_fn.contains("windowed_pages_to_hide("));
     }
 
     #[test]
-    fn shown_windowed_pages_stay_visible_when_inactive() {
-        let shown = Entity::from_bits(1);
-        let never_shown = Entity::from_bits(2);
+    fn windowed_pages_hide_on_deactivate_and_first_show() {
+        let just_deactivated = Entity::from_bits(1);
+        let still_inactive = Entity::from_bits(2);
+        let never_shown = Entity::from_bits(3);
+
+        let hidden = [just_deactivated, still_inactive, never_shown];
+        let prev_visible = [just_deactivated];
+        let ever_shown = [just_deactivated, still_inactive];
 
         assert_eq!(
-            windowed_pages_to_hide_before_first_show(&[shown, never_shown], &[shown]),
-            vec![never_shown]
+            windowed_pages_to_hide(&hidden, &prev_visible, &ever_shown),
+            vec![just_deactivated, never_shown]
         );
     }
 
@@ -3464,6 +3481,19 @@ mod tests {
         assert!(sync_fn.contains("browsers.set_windowed_focus_ring"));
         assert!(sync_fn.contains("focus.stack == Some(parent)"));
         assert!(sync_fn.contains("pane_count > 1"));
+    }
+
+    #[test]
+    fn windowed_page_sync_covers_corners_over_remote_content() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_frames")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("browsers.set_windowed_corner_cover"));
+        assert!(sync_fn.contains("clear_color.0.to_srgba()"));
     }
 
     #[test]
