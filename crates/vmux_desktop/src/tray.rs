@@ -13,25 +13,31 @@ pub(crate) struct TrayPlugin;
 
 struct TrayHandle {
     _tray: TrayIcon,
+    show: MenuItem,
+    hide: MenuItem,
     show_id: String,
+    hide_id: String,
     quit_id: String,
+    last_any_visible: Option<bool>,
 }
 
 impl Plugin for TrayPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_tray)
-            .add_systems(Update, drain_tray_events);
+            .add_systems(Update, (drain_tray_events, sync_tray_menu_state));
     }
 }
 
 fn setup_tray(world: &mut World) {
     let menu = Menu::new();
-    let show = MenuItem::new("Show Vmux", true, None);
-    let quit = MenuItem::new("Quit Vmux", true, None);
+    let show = MenuItem::new("Show", false, None);
+    let hide = MenuItem::new("Hide", true, None);
+    let quit = MenuItem::new("Quit", true, None);
     let show_id = show.id().0.clone();
+    let hide_id = hide.id().0.clone();
     let quit_id = quit.id().0.clone();
 
-    if let Err(e) = menu.append_items(&[&show, &quit]) {
+    if let Err(e) = menu.append_items(&[&show, &hide, &quit]) {
         tracing::error!(error = %e, "failed to append tray menu items");
         return;
     }
@@ -53,8 +59,12 @@ fn setup_tray(world: &mut World) {
 
     world.insert_non_send(TrayHandle {
         _tray: tray,
+        show,
+        hide,
         show_id,
+        hide_id,
         quit_id,
+        last_any_visible: None,
     });
 }
 
@@ -67,12 +77,30 @@ fn drain_tray_events(
     for event_id in drained {
         if event_id == handle.show_id {
             events.write(LifecycleEvent::ShowAllWindows);
+        } else if event_id == handle.hide_id {
+            events.write(LifecycleEvent::HideAllWindows);
         } else if event_id == handle.quit_id {
             events.write(LifecycleEvent::QuitVmux);
         } else {
             tracing::debug!(id = %event_id, "unhandled tray menu event id");
         }
     }
+}
+
+fn sync_tray_menu_state(handle: Option<NonSendMut<TrayHandle>>, windows: Query<&Window>) {
+    let Some(mut handle) = handle else { return };
+    let any_visible = windows.iter().any(|w| w.visible);
+    if handle.last_any_visible == Some(any_visible) {
+        return;
+    }
+    handle.last_any_visible = Some(any_visible);
+    let (show_enabled, hide_enabled) = tray_visibility_enabled(any_visible);
+    handle.show.set_enabled(show_enabled);
+    handle.hide.set_enabled(hide_enabled);
+}
+
+fn tray_visibility_enabled(any_visible: bool) -> (bool, bool) {
+    (!any_visible, any_visible)
 }
 
 fn load_tray_icon() -> tray_icon::Icon {
@@ -108,16 +136,50 @@ mod tests {
             source.contains(&tray_builder) || source.contains(&tray_type),
             "tray.rs must wire tray-icon, not be a stub"
         );
-        let show_needle = ["\"Show", " Vm", "ux\""].concat();
+        let show_needle = ["\"Sh", "ow\""].concat();
         assert!(
             source.contains(&show_needle),
-            "tray must expose a 'Show Vmux' menu item"
+            "tray must expose a 'Show' menu item"
         );
-        let quit_needle = ["\"Quit", " Vm", "ux\""].concat();
+        let hide_needle = ["\"Hi", "de\""].concat();
+        assert!(
+            source.contains(&hide_needle),
+            "tray must expose a 'Hide' menu item"
+        );
+        let quit_needle = ["\"Qu", "it\""].concat();
         assert!(
             source.contains(&quit_needle),
-            "tray must expose a 'Quit Vmux' menu item"
+            "tray must expose a 'Quit' menu item"
         );
+    }
+
+    #[test]
+    fn tray_visibility_enabled_toggles_show_and_hide() {
+        assert_eq!(super::tray_visibility_enabled(true), (false, true));
+        assert_eq!(super::tray_visibility_enabled(false), (true, false));
+    }
+
+    #[test]
+    fn hide_event_routes_to_hide_all_windows() {
+        let source = include_str!("tray.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+
+        assert!(source.contains("hide_id"));
+        assert!(source.contains("LifecycleEvent::HideAllWindows"));
+    }
+
+    #[test]
+    fn tray_syncs_enabled_state_with_window_visibility() {
+        let source = include_str!("tray.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production source");
+
+        assert!(source.contains("sync_tray_menu_state"));
+        assert!(source.contains("set_enabled"));
+        assert!(source.contains("tray_visibility_enabled"));
     }
 
     #[test]
