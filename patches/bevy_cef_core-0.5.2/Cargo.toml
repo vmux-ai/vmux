@@ -116,4 +116,8 @@ features = ["NSGeometry"]
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-quartz-core]
 version = "0.3"
-features = ["CALayer", "objc2-core-graphics"]
+features = ["CALayer", "CAShapeLayer", "objc2-core-graphics"]
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-core-graphics]
+version = "0.3"
+features = ["CGPath"]
