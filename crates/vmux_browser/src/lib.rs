@@ -2519,10 +2519,12 @@ fn sync_page_metadata_to_tab(
             continue;
         }
         let content_is_web = meta.url.starts_with("http://") || meta.url.starts_with("https://");
+        let content_is_agent = meta.url.starts_with("vmux://agent/");
         if parent_meta
             .as_ref()
             .is_some_and(|m| m.url.starts_with("vmux://agent/"))
             && !content_is_web
+            && !content_is_agent
         {
             continue;
         }
@@ -3003,6 +3005,44 @@ mod tests {
         assert!(should_show_osr_webview(true, false, true, false, false));
         assert!(should_show_osr_webview(true, true, false, false, false));
         assert!(should_show_osr_webview(true, true, true, false, true));
+    }
+
+    #[test]
+    fn agent_cli_url_redirects_tab_to_session_id() {
+        let mut app = App::new();
+        app.add_systems(Update, sync_page_metadata_to_tab);
+
+        let stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "vmux://agent/vibe/".to_string(),
+                    ..default()
+                },
+            ))
+            .id();
+        let child = app
+            .world_mut()
+            .spawn((
+                Browser,
+                PageMetadata {
+                    url: "vmux://agent/vibe/".to_string(),
+                    ..default()
+                },
+                ChildOf(stack),
+            ))
+            .id();
+
+        app.update();
+
+        app.world_mut().get_mut::<PageMetadata>(child).unwrap().url =
+            "vmux://agent/vibe/abc-123".to_string();
+
+        app.update();
+
+        let stack_url = app.world().get::<PageMetadata>(stack).unwrap().url.clone();
+        assert_eq!(stack_url, "vmux://agent/vibe/abc-123");
     }
 
     #[test]
