@@ -46,12 +46,10 @@ pub(crate) fn compute_host_focus_intent(
     terminal_q: Query<(), With<Terminal>>,
     modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
     mut intent: ResMut<HostFocusIntent>,
-    mut last_logged: Local<Option<HostFocusIntent>>,
 ) {
-    let command_bar_open = is_command_bar_open(&modal_q);
     // While the command bar owns native focus, leave content focus alone — otherwise we would
     // re-steal first-responder from the command bar every frame.
-    let next = if *mode != InteractionMode::User || command_bar_open {
+    let next = if *mode != InteractionMode::User || is_command_bar_open(&modal_q) {
         HostFocusIntent::Unmanaged
     } else {
         let active = focus.stack.and_then(|stack| {
@@ -65,15 +63,6 @@ pub(crate) fn compute_host_focus_intent(
         let is_terminal = active.is_some_and(|webview| terminal_q.contains(webview));
         host_focus_intent(active, is_terminal)
     };
-
-    if *last_logged != Some(next) {
-        info!(
-            target: "vmux::host_focus",
-            "intent {:?} -> {:?} (stack={:?} command_bar_open={command_bar_open})",
-            *last_logged, next, focus.stack
-        );
-        *last_logged = Some(next);
-    }
     set_intent(&mut intent, next);
 }
 
@@ -83,24 +72,13 @@ fn set_intent(intent: &mut ResMut<HostFocusIntent>, next: HostFocusIntent) {
     }
 }
 
-pub(crate) fn apply_windowed_host_focus(
-    intent: Res<HostFocusIntent>,
-    browsers: NonSend<Browsers>,
-    mut last_focused: Local<Option<Entity>>,
-) {
-    let HostFocusIntent::Windowed(webview) = *intent else {
-        *last_focused = None;
-        return;
-    };
-    if !browsers.has_browser(webview) {
-        // Browser not created yet (page just opened); retry next frame.
-        *last_focused = None;
-        return;
-    }
-    browsers.set_windowed_focus(&webview, true);
-    if *last_focused != Some(webview) {
-        info!(target: "vmux::host_focus", "windowed focus -> {webview:?}");
-        *last_focused = Some(webview);
+pub(crate) fn apply_windowed_host_focus(intent: Res<HostFocusIntent>, browsers: NonSend<Browsers>) {
+    // Runs every frame so a page that becomes active before its browser exists still gets focused
+    // once the browser is created. `set_windowed_focus` is a no-op until then.
+    if let HostFocusIntent::Windowed(webview) = *intent
+        && browsers.has_browser(webview)
+    {
+        browsers.set_windowed_focus(&webview, true);
     }
 }
 

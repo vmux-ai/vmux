@@ -7,9 +7,11 @@ use vmux_browser::HostFocusIntent;
 /// macOS first-responder so Bevy delivers keys (terminal → PTY, layout shortcuts). A previously
 /// focused windowed web page or the command bar leaves its native `NSView` as first-responder,
 /// which blacks out the host keyboard — so while [`HostFocusIntent::WinitHost`] is active we hand
-/// first-responder back to the winit content view. Re-asserted every frame (not just on the
-/// transition) because a closing command bar / page can resign a frame *after* the intent flips,
-/// which a one-shot reclaim would miss. `makeFirstResponder` is skipped when winit already holds it.
+/// first-responder back to the winit content view.
+///
+/// The reclaim is retried each frame *until it sticks*, then stops: the active page/command bar can
+/// resign a frame after the intent flips (so a one-shot reclaim would miss it), but re-asserting
+/// every frame fights the page for first-responder and breaks input.
 pub(crate) fn apply_winit_host_focus(
     _non_send: NonSendMarker,
     intent: Res<HostFocusIntent>,
@@ -20,9 +22,6 @@ pub(crate) fn apply_winit_host_focus(
         *reclaimed = false;
         return;
     }
-    // Retry each frame until the reclaim sticks (the active windowed page/command bar may resign a
-    // frame after the intent flips), then stop — re-asserting every frame fights the page for
-    // first-responder and breaks input.
     if *reclaimed {
         return;
     }
@@ -30,15 +29,9 @@ pub(crate) fn apply_winit_host_focus(
         return;
     };
     match reclaim_first_responder(window_entity) {
-        ReclaimOutcome::AlreadyWinit => *reclaimed = true,
-        ReclaimOutcome::Reclaimed => {
-            info!(target: "vmux::host_focus", "winit reclaim ok (window={window_entity:?})");
-            *reclaimed = true;
-        }
-        ReclaimOutcome::Failed => {
-            info!(target: "vmux::host_focus", "winit reclaim FAILED (window={window_entity:?}) — retrying");
-        }
-        ReclaimOutcome::NoView => {}
+        ReclaimOutcome::AlreadyWinit | ReclaimOutcome::Reclaimed => *reclaimed = true,
+        // Window/view not ready or the current responder refused to resign — retry next frame.
+        ReclaimOutcome::Failed | ReclaimOutcome::NoView => {}
     }
 }
 
