@@ -180,7 +180,10 @@ impl Plugin for BrowserPlugin {
                     host_focus::apply_windowed_host_focus,
                 )
                     .chain()
-                    .after(sync_keyboard_target),
+                    // Must run after the active windowed page is shown + raised, otherwise
+                    // set_focus lands on a hidden/back view and never sticks.
+                    .after(sync_windowed_frames)
+                    .after(sync_windowed_command_bar),
             );
     }
 }

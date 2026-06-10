@@ -27,6 +27,7 @@ pub(crate) fn apply_winit_host_focus(
     let Ok(window_entity) = primary.single() else {
         return;
     };
+    info!(target: "vmux::host_focus", "winit reclaim first responder (window={window_entity:?})");
     reclaim_first_responder(window_entity);
     *last = Some(current);
 }
