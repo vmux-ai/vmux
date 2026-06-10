@@ -1028,6 +1028,39 @@ impl Browsers {
     #[cfg(not(target_os = "macos"))]
     pub fn raise_windowed_to_front(&self, _: &Entity) {}
 
+    /// Set the `zPosition` of a windowed browser's native view (the liquid-glass container when
+    /// present). The layout chrome composites as a sibling `CALayer` at `zPosition` 100, and a plain
+    /// windowed view sits at 0 — so `raise_windowed_to_front` (subview order) cannot lift the
+    /// command-bar modal above the sidebar/header overlay. A higher `zPosition` can.
+    #[cfg(target_os = "macos")]
+    pub fn set_windowed_z_position(&self, webview: &Entity, z: f64) {
+        use objc2::ClassType;
+        use objc2_app_kit::NSView;
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        if !browser.windowed {
+            return;
+        }
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let target = browser
+            .native_liquid_glass
+            .as_ref()
+            .map(|glass| glass.as_super())
+            .unwrap_or(view);
+        target.setWantsLayer(true);
+        if let Some(layer) = target.layer() {
+            layer.setZPosition(z);
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn set_windowed_z_position(&self, _: &Entity, _: f64) {}
+
     #[cfg(target_os = "macos")]
     pub fn lower_windowed_to_back(&self, webview: &Entity) {
         use objc2::ClassType;

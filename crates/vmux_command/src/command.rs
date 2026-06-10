@@ -409,6 +409,37 @@ mod tests {
     use bevy::input::keyboard::KeyCode;
 
     #[test]
+    fn menu_accelerators_are_registered_as_global_shortcuts() {
+        let shortcuts = AppCommand::default_shortcuts();
+        let has_super = |k: KeyCode| {
+            shortcuts.iter().any(|(s, _)| {
+                matches!(s, Shortcut::Direct(c) if c.key == k && c.modifiers.super_key
+                    && !c.modifiers.shift && !c.modifiers.ctrl && !c.modifiers.alt)
+            })
+        };
+        // Accelerator-only menu commands must also reach the universal shortcut layer so they fire
+        // when a terminal/layout holds focus (winit swallows menu key-equivalents there).
+        assert!(
+            has_super(KeyCode::KeyT),
+            "cmd+T (new tab) must be a global shortcut"
+        );
+        assert!(
+            has_super(KeyCode::KeyN),
+            "cmd+N (new stack) must be a global shortcut"
+        );
+        assert!(
+            has_super(KeyCode::KeyW),
+            "cmd+W (close stack) must be a global shortcut"
+        );
+        assert_eq!(
+            AppCommand::from_menu_id("open_in_new_tab"),
+            Some(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewTab { url: None }
+            )))
+        );
+    }
+
+    #[test]
     fn hidden_commands_can_have_default_shortcuts() {
         assert_eq!(
             AppCommand::from_menu_id("terminal_copy_mode"),

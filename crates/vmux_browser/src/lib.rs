@@ -1,5 +1,8 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+mod host_focus;
+pub use host_focus::HostFocusIntent;
+
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     input::{
@@ -168,7 +171,20 @@ impl Plugin for BrowserPlugin {
                     .after(UiSystems::Layout)
                     .before(render_standard_materials),
             )
-            .add_systems(Last, refresh_active_windowed_hover);
+            .add_systems(Last, refresh_active_windowed_hover)
+            .init_resource::<HostFocusIntent>()
+            .add_systems(
+                PostUpdate,
+                (
+                    host_focus::compute_host_focus_intent,
+                    host_focus::apply_windowed_host_focus,
+                )
+                    .chain()
+                    // Must run after the active windowed page is shown + raised, otherwise
+                    // set_focus lands on a hidden/back view and never sticks.
+                    .after(sync_windowed_frames)
+                    .after(sync_windowed_command_bar),
+            );
     }
 }
 
@@ -1161,6 +1177,9 @@ struct CommandBarWindowedFrame {
 }
 
 const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
+/// `zPosition` for the windowed command bar, above the layout chrome overlay (`zPosition` 100) so
+/// the sidebar/header/stack panel never covers it.
+const COMMAND_BAR_NATIVE_Z: f64 = 200.0;
 static NATIVE_COMMAND_BAR_CLICK_FRAME: LazyLock<Mutex<Option<CommandBarWindowedFrame>>> =
     LazyLock::new(|| Mutex::new(None));
 static NATIVE_COMMAND_BAR_DISMISS_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -1404,6 +1423,9 @@ fn sync_windowed_command_bar(
     );
     browsers.set_windowed_hidden(&entity, false);
     browsers.raise_windowed_to_front(&entity);
+    // The layout chrome (sidebar/header/stack panel) composites as a native overlay at zPosition
+    // 100; raise alone (subview order) leaves the command bar under it. Lift it above.
+    browsers.set_windowed_z_position(&entity, COMMAND_BAR_NATIVE_Z);
     browsers.set_windowed_focus(&entity, true);
     if !*was_open {
         browsers.nudge_windowed_repaint(&entity);

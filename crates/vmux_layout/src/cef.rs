@@ -99,6 +99,7 @@ impl Browser {
         (
             Self,
             WebviewWindowed,
+            WebviewWindowedNativeFocus,
             WebviewOpaqueWindowedBackground,
             vmux_core::PageMetadata {
                 title: url.to_string(),
@@ -135,6 +136,7 @@ impl Browser {
         (
             Self,
             WebviewWindowed,
+            WebviewWindowedNativeFocus,
             WebviewOpaqueWindowedBackground,
             vmux_core::PageMetadata {
                 title: title.to_string(),
@@ -256,6 +258,29 @@ mod tests {
             app.world()
                 .get::<WebviewOpaqueWindowedBackground>(page)
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn page_cef_allows_native_first_responder() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Startup, build_test_page);
+        app.update();
+
+        let page = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Browser>, Without<LayoutCef>)>()
+            .single(app.world())
+            .expect("page CEF");
+
+        assert!(
+            app.world()
+                .get::<WebviewWindowedNativeFocus>(page)
+                .is_some(),
+            "windowed web pages must allow native first-responder so they are typeable without a click"
         );
     }
 }

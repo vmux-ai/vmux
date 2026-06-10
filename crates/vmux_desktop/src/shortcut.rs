@@ -21,6 +21,10 @@ impl Plugin for ShortcutPlugin {
             crate::native_keyboard::install_native_key_monitor.after(init_shortcuts),
         )
         .add_systems(
+            Startup,
+            crate::event_tap::install_event_tap.after(init_shortcuts),
+        )
+        .add_systems(
             Update,
             crate::native_keyboard::process_monitored_keys.in_set(WriteAppCommands),
         );

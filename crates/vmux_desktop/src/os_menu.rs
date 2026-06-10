@@ -71,6 +71,7 @@ impl Plugin for OsMenuPlugin {
 fn setup(world: &mut World) {
     let mut menu = Menu::new();
     build_native_root_menu(&mut menu).unwrap();
+    append_standard_edit_menu(&menu);
     let interactive_mode = interactive_mode_menu_items(&menu);
 
     #[cfg(target_os = "macos")]
@@ -94,6 +95,31 @@ fn setup(world: &mut World) {
         _menu: menu,
         interactive_mode,
     });
+}
+
+/// CEF/Chromium on macOS routes web-content editing shortcuts (Select All, Cut, Copy, Paste, Undo,
+/// Redo) through the application's standard Edit menu — without it, cmd+A / cmd+C / cmd+V etc. do
+/// nothing in web text inputs. The predefined items use the standard responder-chain selectors and
+/// auto-disable when a non-text view (winit content view for terminals) holds first responder, so
+/// terminal clipboard handling is unaffected.
+fn append_standard_edit_menu(menu: &Menu) {
+    use muda::{PredefinedMenuItem, Submenu};
+
+    let undo = PredefinedMenuItem::undo(None);
+    let redo = PredefinedMenuItem::redo(None);
+    let sep = PredefinedMenuItem::separator();
+    let cut = PredefinedMenuItem::cut(None);
+    let copy = PredefinedMenuItem::copy(None);
+    let paste = PredefinedMenuItem::paste(None);
+    let select_all = PredefinedMenuItem::select_all(None);
+    let Ok(edit) = Submenu::with_items(
+        "Edit",
+        true,
+        &[&undo, &redo, &sep, &cut, &copy, &paste, &select_all],
+    ) else {
+        return;
+    };
+    let _ = menu.append(&edit);
 }
 
 fn interactive_mode_menu_items(menu: &Menu) -> Option<InteractiveModeMenuItems> {
