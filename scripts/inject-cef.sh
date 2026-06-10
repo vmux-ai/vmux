@@ -44,7 +44,7 @@ if [[ ! -f "$HELPER_BIN" ]]; then
 fi
 
 echo "==> inject-cef: running bevy_cef_bundle_app"
-bevy_cef_bundle_app --app "$APP_BUNDLE" --bundle-id-base "$BUNDLE_ID_BASE" --bin-name Vmux --cef-framework "$CEF_FRAMEWORK" --helper-bin "$HELPER_BIN" --no-sign
+bevy_cef_bundle_app --app "$APP_BUNDLE" --bundle-id-base "$BUNDLE_ID_BASE" --bin-name vmux_desktop --cef-framework "$CEF_FRAMEWORK" --helper-bin "$HELPER_BIN" --no-sign
 
 # Trim non-English Chromium locale packs to cut bundle size. Must run before
 # the app is (re)signed/notarized below, since editing the framework
@@ -80,11 +80,11 @@ fi
 
 if [[ -f "$ICNS_SRC" ]]; then
     CEF_HELPER_APPS=(
-        "Vmux Helper.app"
-        "Vmux Helper (GPU).app"
-        "Vmux Helper (Renderer).app"
-        "Vmux Helper (Plugin).app"
-        "Vmux Helper (Alerts).app"
+        "vmux_desktop Helper.app"
+        "vmux_desktop Helper (GPU).app"
+        "vmux_desktop Helper (Renderer).app"
+        "vmux_desktop Helper (Plugin).app"
+        "vmux_desktop Helper (Alerts).app"
     )
     for helper_name in "${CEF_HELPER_APPS[@]}"; do
         helper_app="$APP_BUNDLE/Contents/Frameworks/$helper_name"

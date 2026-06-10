@@ -435,7 +435,7 @@ jobs:
         run: |
           set -uo pipefail
           app="target/release/Vmux.app"
-          bin="$app/Contents/MacOS/Vmux"
+          bin="$app/Contents/MacOS/vmux_desktop"
           plist="$app/Contents/Frameworks/Chromium Embedded Framework.framework/Resources/Info.plist"
 
           want="${CEF_VERSION##*+}"
@@ -466,7 +466,7 @@ jobs:
           fi
 
           kill "$pid" 2>/dev/null || true
-          pkill -f "Vmux.app/Contents/MacOS/Vmux" 2>/dev/null || true
+          pkill -f "Vmux.app/Contents/MacOS/vmux_desktop" 2>/dev/null || true
           pkill -f "vmux_service" 2>/dev/null || true
           pkill -f "Chromium Embedded Framework" 2>/dev/null || true
 
@@ -486,7 +486,7 @@ jobs:
         if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
         run: |
           cd target/release/Vmux.app/Contents/MacOS
-          tar czf "$GITHUB_WORKSPACE/target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz" Vmux
+          tar czf "$GITHUB_WORKSPACE/target/release/vmux-v${VERSION}-aarch64-apple-darwin.tar.gz" vmux_desktop
 
       - name: Create app bundle tarball
         if: env.PREP_DONE != '1' && env.IS_RELEASE_PR == '1'
