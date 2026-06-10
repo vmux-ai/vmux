@@ -23,12 +23,12 @@ pub(crate) fn set_shortcut_map(map: ShortcutMap) {
     *SHORTCUT_MAP.lock() = Some(map);
 }
 
-enum KeyAction {
+pub(crate) enum KeyAction {
     Consume(Option<AppCommand>),
     PassThrough,
 }
 
-fn decide(
+pub(crate) fn decide(
     map: &ShortcutMap,
     pending: &mut Option<(KeyCombo, Instant)>,
     combo: KeyCombo,
@@ -63,13 +63,17 @@ fn decide(
     KeyAction::PassThrough
 }
 
-fn classify(combo: KeyCombo) -> KeyAction {
+pub(crate) fn classify(combo: KeyCombo) -> KeyAction {
     let guard = SHORTCUT_MAP.lock();
     let Some(map) = guard.as_ref() else {
         return KeyAction::PassThrough;
     };
     let mut pending = PENDING_PREFIX.lock();
     decide(map, &mut pending, combo, Instant::now())
+}
+
+pub(crate) fn push_command(cmd: AppCommand) {
+    PENDING_COMMANDS.lock().push(cmd);
 }
 
 fn translate(key_code: u16, flags: NSEventModifierFlags) -> Option<KeyCombo> {
@@ -83,7 +87,7 @@ fn translate(key_code: u16, flags: NSEventModifierFlags) -> Option<KeyCombo> {
     Some(KeyCombo { key, modifiers })
 }
 
-fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
+pub(crate) fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
     let key = match vk {
         0x00 => KeyCode::KeyA,
         0x01 => KeyCode::KeyS,

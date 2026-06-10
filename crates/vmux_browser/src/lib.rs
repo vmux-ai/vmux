@@ -1,5 +1,8 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+mod host_focus;
+pub use host_focus::HostFocusIntent;
+
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     input::{
@@ -168,7 +171,17 @@ impl Plugin for BrowserPlugin {
                     .after(UiSystems::Layout)
                     .before(render_standard_materials),
             )
-            .add_systems(Last, refresh_active_windowed_hover);
+            .add_systems(Last, refresh_active_windowed_hover)
+            .init_resource::<HostFocusIntent>()
+            .add_systems(
+                PostUpdate,
+                (
+                    host_focus::compute_host_focus_intent,
+                    host_focus::apply_windowed_host_focus,
+                )
+                    .chain()
+                    .after(sync_keyboard_target),
+            );
     }
 }
 
