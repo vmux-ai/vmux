@@ -147,6 +147,13 @@ pub struct TerminalModeFlags {
     pub alt_screen: bool,
 }
 
+const AGENT_LOADING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct AgentLoading {
+    pub since: Instant,
+}
+
 /// Triggered to restart the terminal process for a terminal entity.
 #[derive(Event)]
 pub struct RestartPty {
@@ -291,6 +298,13 @@ impl Plugin for TerminalPlugin {
                 Update,
                 crate::snapshot_updater::update_terminals_snapshot
                     .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+            )
+            .add_systems(
+                Update,
+                (
+                    arm_agent_loading,
+                    clear_agent_loading.after(poll_service_messages),
+                ),
             );
     }
 }
@@ -1123,7 +1137,8 @@ fn poll_service_messages(
                         commands
                             .entity(entity)
                             .insert(ProcessExited)
-                            .remove::<CloseRequiresConfirmation>();
+                            .remove::<CloseRequiresConfirmation>()
+                            .remove::<AgentLoading>();
                         let tab = child_of.get();
                         commands.entity(tab).insert(LastActivatedAt::now());
                         writers
@@ -2418,6 +2433,61 @@ fn on_term_key(
     }
 }
 
+fn arm_agent_loading(
+    newly_ready: Query<
+        (Entity, &vmux_core::agent::AgentSession),
+        (With<Terminal>, Added<PageReady>),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, session) in &newly_ready {
+        commands.entity(entity).insert(AgentLoading {
+            since: Instant::now(),
+        });
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            TERM_LOADING_EVENT,
+            &crate::event::TermLoadingEvent {
+                loading: true,
+                label: session.kind.display_name().to_string(),
+            },
+        ));
+    }
+}
+
+fn clear_agent_loading(
+    loading_q: Query<
+        (
+            Entity,
+            &ProcessId,
+            &vmux_core::agent::AgentSession,
+            &AgentLoading,
+        ),
+        With<Terminal>,
+    >,
+    mode_map: Res<TerminalModeMap>,
+    mut commands: Commands,
+) {
+    for (entity, pid, session, loading) in &loading_q {
+        let alt_screen = mode_map
+            .modes
+            .get(pid)
+            .map(|m| m.alt_screen)
+            .unwrap_or(false);
+        if alt_screen || loading.since.elapsed() >= AGENT_LOADING_TIMEOUT {
+            commands.entity(entity).remove::<AgentLoading>();
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                TERM_LOADING_EVENT,
+                &crate::event::TermLoadingEvent {
+                    loading: false,
+                    label: session.kind.display_name().to_string(),
+                },
+            ));
+        }
+    }
+}
+
 /// Mark dirty when webview becomes ready so initial viewport is sent.
 fn on_term_ready(
     trigger: On<Add, PageReady>,
@@ -2840,6 +2910,9 @@ pub fn handle_run_shell_requests(
 mod tests {
     use super::*;
     use bevy::ecs::schedule::Schedules;
+    use std::time::{Duration, Instant};
+    use vmux_core::agent::{AgentKind, AgentSession};
+    use vmux_core::page::PageReady;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -3573,5 +3646,107 @@ mod tests {
         let new_id = world.get::<ProcessId>(entity).copied().unwrap();
         assert_ne!(new_id, original_id);
         assert!(world.get::<PendingServiceCreate>(entity).is_some());
+    }
+
+    #[test]
+    fn agent_terminal_armed_loading_on_page_ready() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, arm_agent_loading);
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                PageReady {},
+            ))
+            .id();
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_some());
+    }
+
+    #[test]
+    fn agent_loading_cleared_when_alt_screen_active() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<TerminalModeMap>()
+            .add_systems(Update, clear_agent_loading);
+        let pid = ProcessId::new();
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                pid,
+                AgentLoading {
+                    since: Instant::now(),
+                },
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<TerminalModeMap>()
+            .modes
+            .insert(
+                pid,
+                TerminalModeFlags {
+                    mouse_capture: false,
+                    copy_mode: false,
+                    alt_screen: true,
+                },
+            );
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_none());
+    }
+
+    #[test]
+    fn agent_loading_cleared_after_timeout() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<TerminalModeMap>()
+            .add_systems(Update, clear_agent_loading);
+        let pid = ProcessId::new();
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                pid,
+                AgentLoading {
+                    since: Instant::now() - AGENT_LOADING_TIMEOUT - Duration::from_secs(1),
+                },
+            ))
+            .id();
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_none());
+    }
+
+    #[test]
+    fn agent_loading_retained_while_starting() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<TerminalModeMap>()
+            .add_systems(Update, clear_agent_loading);
+        let pid = ProcessId::new();
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                pid,
+                AgentLoading {
+                    since: Instant::now(),
+                },
+            ))
+            .id();
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_some());
     }
 }
