@@ -616,6 +616,23 @@ fn impl_leaf_shortcuts(
             continue;
         }
 
+        // Menu accelerators are global shortcuts too: register them in the decide map so they fire
+        // even when a non-CEF view (terminal/layout) holds first responder and the macOS menu
+        // key-equivalent is swallowed by winit. Skip when the variant already declares an explicit
+        // direct shortcut (avoids a duplicate combo).
+        if let (Some(accel), Some(menu_id)) = (&menu_props.accel, &menu_props.id) {
+            let has_explicit_direct = bind_props
+                .bindings
+                .iter()
+                .any(|b| matches!(b, Binding::Direct(_)));
+            if !has_explicit_direct && let Some(combo_tokens) = accel_to_combo_tokens(accel) {
+                let menu_id_str = menu_id.as_str();
+                binding_entries.push(quote! {
+                    (crate::shortcut::Shortcut::Direct(#combo_tokens), ::std::string::String::from(#menu_id_str))
+                });
+            }
+        }
+
         if bind_props.bindings.is_empty() {
             continue;
         }
@@ -826,6 +843,50 @@ fn parse_key_combo_tokens(
     let key_ident = format_ident!("{}", key_str);
 
     Ok(quote! {
+        crate::shortcut::KeyCombo {
+            key: ::bevy::input::keyboard::KeyCode::#key_ident,
+            modifiers: crate::shortcut::Modifiers {
+                ctrl: #ctrl,
+                shift: #shift,
+                alt: #alt,
+                super_key: #super_key,
+            },
+        }
+    })
+}
+
+/// Parse a muda menu accelerator (e.g. `"super+shift+n"`, `"super+["`) into a [`KeyCombo`] token
+/// stream so menu accelerators can also be registered as global shortcuts. Returns `None` for any
+/// accelerator that isn't a single-character key the shortcut layer understands, so unconvertible
+/// accelerators stay menu-only instead of breaking the build.
+fn accel_to_combo_tokens(accel: &str) -> Option<proc_macro2::TokenStream> {
+    let mut ctrl = false;
+    let mut shift = false;
+    let mut alt = false;
+    let mut super_key = false;
+    let mut key: Option<ResolvedKey> = None;
+
+    for part in accel.split('+') {
+        let part = part.trim();
+        match part.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => ctrl = true,
+            "shift" => shift = true,
+            "alt" | "option" => alt = true,
+            "super" | "cmd" | "command" | "meta" | "cmdorctrl" => super_key = true,
+            _ => {
+                let chars: Vec<char> = part.chars().collect();
+                if key.is_some() || chars.len() != 1 {
+                    return None;
+                }
+                key = Some(resolve_char_literal(chars[0])?);
+            }
+        }
+    }
+
+    let key = key?;
+    let shift = shift || key.implicit_shift;
+    let key_ident = format_ident!("{}", key.key_code);
+    Some(quote! {
         crate::shortcut::KeyCombo {
             key: ::bevy::input::keyboard::KeyCode::#key_ident,
             modifiers: crate::shortcut::Modifiers {
