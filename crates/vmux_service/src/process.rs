@@ -95,7 +95,7 @@ pub struct Process {
     /// Last copy-mode value emitted in a viewport patch.
     last_viewport_copy_mode: Option<bool>,
     /// Last broadcast (mouse_capture, copy_mode) flags.
-    last_terminal_mode: Option<(bool, bool)>,
+    last_terminal_mode: Option<(bool, bool, bool)>,
     /// Active copy-mode state (cursor, anchor, visual state). None when not in copy mode.
     copy_mode: Option<CopyModeState>,
 }
@@ -526,13 +526,15 @@ impl Process {
         use alacritty_terminal::term::TermMode;
         let mouse_capture = self.term.mode().intersects(TermMode::MOUSE_MODE);
         let copy_mode = self.copy_mode.is_some();
-        let cur = (mouse_capture, copy_mode);
+        let alt_screen = self.term.mode().contains(TermMode::ALT_SCREEN);
+        let cur = (mouse_capture, copy_mode, alt_screen);
         if self.last_terminal_mode != Some(cur) {
             self.last_terminal_mode = Some(cur);
             let _ = self.patch_tx.send(ServiceMessage::TerminalMode {
                 process_id: self.id,
                 mouse_capture,
                 copy_mode,
+                alt_screen,
             });
         }
     }
@@ -1693,6 +1695,48 @@ mod tests {
         process.kill();
 
         assert_eq!(*captured.lock().unwrap(), b"\x1b[<64;7;5M".to_vec());
+    }
+
+    #[test]
+    fn terminal_mode_broadcasts_alt_screen_toggle() {
+        let (wake_tx, _) = mpsc::unbounded_channel();
+        let mut process = Process::new_with_wake(
+            ProcessId::new(),
+            "/bin/sh".to_string(),
+            vec![],
+            String::new(),
+            Vec::new(),
+            12,
+            8,
+            wake_tx,
+        )
+        .expect("process should spawn");
+
+        let mut rx = process.subscribe();
+
+        process.process_output_for_test(b"\x1b[?1049h");
+        process.maybe_broadcast_mode();
+
+        let mut alt_on = None;
+        while let Ok(msg) = rx.try_recv() {
+            if let ServiceMessage::TerminalMode { alt_screen, .. } = msg {
+                alt_on = Some(alt_screen);
+            }
+        }
+        assert_eq!(alt_on, Some(true), "entering alt screen broadcasts alt_screen=true");
+
+        process.process_output_for_test(b"\x1b[?1049l");
+        process.maybe_broadcast_mode();
+
+        let mut alt_off = None;
+        while let Ok(msg) = rx.try_recv() {
+            if let ServiceMessage::TerminalMode { alt_screen, .. } = msg {
+                alt_off = Some(alt_screen);
+            }
+        }
+        assert_eq!(alt_off, Some(false), "leaving alt screen broadcasts alt_screen=false");
+
+        process.kill();
     }
 
     #[test]

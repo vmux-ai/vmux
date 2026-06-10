@@ -144,6 +144,7 @@ impl<'a> CopyModeKeyInput<'a> {
 pub struct TerminalModeFlags {
     pub mouse_capture: bool,
     pub copy_mode: bool,
+    pub alt_screen: bool,
 }
 
 /// Triggered to restart the terminal process for a terminal entity.
@@ -1180,12 +1181,14 @@ fn poll_service_messages(
                 process_id,
                 mouse_capture,
                 copy_mode,
+                alt_screen,
             } => {
                 mode_map.modes.insert(
                     process_id,
                     TerminalModeFlags {
                         mouse_capture,
                         copy_mode,
+                        alt_screen,
                     },
                 );
                 set_local_copy_mode(&mut local_copy_mode, process_id, copy_mode);
@@ -3387,6 +3390,7 @@ mod tests {
             TerminalModeFlags {
                 mouse_capture: false,
                 copy_mode: false,
+                alt_screen: false,
             },
         );
         set_local_copy_mode(&mut local_copy_mode, process_id, false);
