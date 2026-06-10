@@ -9,6 +9,7 @@ pub const TERM_RESIZE_EVENT: &str = "term_resize";
 
 pub const TERM_THEME_EVENT: &str = "term_theme";
 pub const TERM_TITLE_EVENT: &str = "term_title";
+pub const TERM_LOADING_EVENT: &str = "term_loading";
 pub const SERVICE_UNAVAILABLE_EVENT: &str = "service_unavailable";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
@@ -64,6 +65,14 @@ pub struct TermThemeEvent {
     pub cursor_style: String,
     #[serde(default)]
     pub cursor_blink: bool,
+}
+
+#[derive(
+    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct TermLoadingEvent {
+    pub loading: bool,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -410,5 +419,18 @@ mod tests {
         let recovered =
             rkyv::from_bytes::<TermTitleEvent, rkyv::rancor::Error>(&bytes).expect("deserialize");
         assert_eq!(original.title, recovered.title);
+    }
+
+    #[test]
+    fn term_loading_event_rkyv_roundtrip() {
+        let original = TermLoadingEvent {
+            loading: true,
+            label: "Vibe".to_string(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
+        let recovered =
+            rkyv::from_bytes::<TermLoadingEvent, rkyv::rancor::Error>(&bytes).expect("deserialize");
+        assert_eq!(original.loading, recovered.loading);
+        assert_eq!(original.label, recovered.label);
     }
 }
