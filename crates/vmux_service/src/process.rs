@@ -94,7 +94,7 @@ pub struct Process {
     last_selection: Option<TermSelectionRange>,
     /// Last copy-mode value emitted in a viewport patch.
     last_viewport_copy_mode: Option<bool>,
-    /// Last broadcast (mouse_capture, copy_mode) flags.
+    /// Last broadcast (mouse_capture, copy_mode, alt_screen) flags.
     last_terminal_mode: Option<(bool, bool, bool)>,
     /// Active copy-mode state (cursor, anchor, visual state). None when not in copy mode.
     copy_mode: Option<CopyModeState>,
@@ -521,7 +521,7 @@ impl Process {
         }
     }
 
-    /// Broadcast TerminalMode whenever mouse-capture or copy-mode changes.
+    /// Broadcast TerminalMode whenever mouse-capture, copy-mode, or alt-screen changes.
     fn maybe_broadcast_mode(&mut self) {
         use alacritty_terminal::term::TermMode;
         let mouse_capture = self.term.mode().intersects(TermMode::MOUSE_MODE);
