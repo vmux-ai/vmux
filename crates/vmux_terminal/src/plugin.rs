@@ -1303,7 +1303,20 @@ fn handle_terminal_keyboard(
     );
 
     if target_processes.is_empty() {
-        for _ in er.read() {}
+        let mut dropped = 0usize;
+        for ev in er.read() {
+            if ev.state == ButtonState::Pressed {
+                dropped += 1;
+            }
+        }
+        if dropped > 0 {
+            bevy::log::info!(
+                target: "vmux::host_focus",
+                "terminal_kbd: dropped {dropped} key(s) — no target (kb_targets_empty={} stack={:?})",
+                keyboard_targets.is_empty(),
+                focus.stack
+            );
+        }
         return;
     };
     let active_process_id = target_processes.first().copied();
@@ -1421,6 +1434,12 @@ fn handle_terminal_keyboard(
         if bytes.is_empty() {
             continue;
         }
+        bevy::log::info!(
+            target: "vmux::host_focus",
+            "terminal_kbd: send key={:?} to {} target(s)",
+            event.key_code,
+            target_processes.len()
+        );
         for process_id in &target_processes {
             service.0.send(ClientMessage::ProcessInput {
                 process_id: *process_id,

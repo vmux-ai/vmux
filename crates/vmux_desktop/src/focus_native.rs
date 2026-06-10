@@ -14,24 +14,43 @@ pub(crate) fn apply_winit_host_focus(
     _non_send: NonSendMarker,
     intent: Res<HostFocusIntent>,
     primary: Query<Entity, With<PrimaryWindow>>,
-    mut announced: Local<bool>,
+    mut reclaimed: Local<bool>,
 ) {
     if *intent != HostFocusIntent::WinitHost {
-        *announced = false;
+        *reclaimed = false;
+        return;
+    }
+    // Retry each frame until the reclaim sticks (the active windowed page/command bar may resign a
+    // frame after the intent flips), then stop — re-asserting every frame fights the page for
+    // first-responder and breaks input.
+    if *reclaimed {
         return;
     }
     let Ok(window_entity) = primary.single() else {
         return;
     };
-    if reclaim_first_responder(window_entity) && !*announced {
-        info!(target: "vmux::host_focus", "winit reclaim first responder (window={window_entity:?})");
-        *announced = true;
+    match reclaim_first_responder(window_entity) {
+        ReclaimOutcome::AlreadyWinit => *reclaimed = true,
+        ReclaimOutcome::Reclaimed => {
+            info!(target: "vmux::host_focus", "winit reclaim ok (window={window_entity:?})");
+            *reclaimed = true;
+        }
+        ReclaimOutcome::Failed => {
+            info!(target: "vmux::host_focus", "winit reclaim FAILED (window={window_entity:?}) — retrying");
+        }
+        ReclaimOutcome::NoView => {}
     }
 }
 
-/// Make the winit content view the window's first responder. Returns `true` if it actually changed
-/// (i.e. winit did not already hold it).
-fn reclaim_first_responder(window_entity: Entity) -> bool {
+enum ReclaimOutcome {
+    AlreadyWinit,
+    Reclaimed,
+    Failed,
+    NoView,
+}
+
+/// Make the winit content view the window's first responder.
+fn reclaim_first_responder(window_entity: Entity) -> ReclaimOutcome {
     use bevy::winit::WINIT_WINDOWS;
     use objc2_app_kit::{NSResponder, NSView};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -46,11 +65,11 @@ fn reclaim_first_responder(window_entity: Entity) -> bool {
         }
     });
     let Some(view_ptr) = view_ptr else {
-        return false;
+        return ReclaimOutcome::NoView;
     };
     let view: &NSView = unsafe { &*view_ptr.cast::<NSView>() };
     let Some(window) = view.window() else {
-        return false;
+        return ReclaimOutcome::NoView;
     };
     let responder: &NSResponder = view;
     if let Some(current) = window.firstResponder()
@@ -59,7 +78,11 @@ fn reclaim_first_responder(window_entity: Entity) -> bool {
             responder as *const NSResponder,
         )
     {
-        return false;
+        return ReclaimOutcome::AlreadyWinit;
     }
-    window.makeFirstResponder(Some(responder))
+    if window.makeFirstResponder(Some(responder)) {
+        ReclaimOutcome::Reclaimed
+    } else {
+        ReclaimOutcome::Failed
+    }
 }
