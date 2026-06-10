@@ -305,7 +305,7 @@ fn impl_os_menu(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     ..::std::default::Default::default()
                 };
                 let mut app_native_submenu = ::muda::Submenu::new(&app_name, true);
-                let quit_label = format!("Quit {}", &app_name);
+                let quit_label = "Close Vmux".to_string();
                 let quit_item = ::muda::MenuItem::with_id(
                     "app_quit",
                     &quit_label,

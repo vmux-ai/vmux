@@ -23,6 +23,18 @@ pub(crate) struct LastStackCloseAt(pub Option<std::time::Instant>);
 #[derive(Resource, Default)]
 pub(crate) struct LastNativePageOpenAt(pub Option<std::time::Instant>);
 
+/// Tracks whether the app menu's Close item is currently enabled, so the sync system only touches the
+/// native item when the visible-window state actually flips. Starts `true` to match the menu item's
+/// build-time default (the primary window is visible at startup).
+#[derive(Resource)]
+pub(crate) struct CloseMenuItemEnabled(pub bool);
+
+impl Default for CloseMenuItemEnabled {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
 static PENDING_MENU_EVENTS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 const WINDOW_CLOSE_SUPPRESSION_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
 const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
@@ -31,6 +43,7 @@ const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
 struct OsMenuResource {
     _menu: Menu,
     interactive_mode: Option<InteractiveModeMenuItems>,
+    close_window: Option<MenuItem>,
 }
 
 struct InteractiveModeMenuItems {
@@ -52,6 +65,7 @@ impl Plugin for OsMenuPlugin {
         app.init_resource::<LastMenuCommandAt>()
             .init_resource::<LastStackCloseAt>()
             .init_resource::<LastNativePageOpenAt>()
+            .init_resource::<CloseMenuItemEnabled>()
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
@@ -63,6 +77,7 @@ impl Plugin for OsMenuPlugin {
                     hide_window_on_close_request
                         .after(remember_stack_close_commands)
                         .after(remember_native_page_open_commands),
+                    sync_close_menu_item.after(hide_window_on_close_request),
                 ),
             );
     }
@@ -73,6 +88,7 @@ fn setup(world: &mut World) {
     build_native_root_menu(&mut menu).unwrap();
     append_standard_edit_menu(&menu);
     let interactive_mode = interactive_mode_menu_items(&menu);
+    let close_window = find_menu_item(menu.items(), "app_quit");
 
     #[cfg(target_os = "macos")]
     menu.init_for_nsapp();
@@ -94,6 +110,7 @@ fn setup(world: &mut World) {
     world.insert_non_send(OsMenuResource {
         _menu: menu,
         interactive_mode,
+        close_window,
     });
 }
 
@@ -160,6 +177,23 @@ fn sync_interactive_mode_menu_items(
     };
     if let Some(items) = &menu.interactive_mode {
         items.sync(&mode);
+    }
+}
+
+fn sync_close_menu_item(
+    menu: Option<NonSend<OsMenuResource>>,
+    windows: Query<&Window>,
+    mut enabled: ResMut<CloseMenuItemEnabled>,
+) {
+    let any_visible = windows.iter().any(|w| w.visible);
+    if enabled.0 == any_visible {
+        return;
+    }
+    enabled.0 = any_visible;
+    if let Some(menu) = menu
+        && let Some(item) = &menu.close_window
+    {
+        item.set_enabled(any_visible);
     }
 }
 
@@ -441,6 +475,35 @@ mod tests {
         app.world_mut().run_schedule(Update);
 
         assert!(app.world().get::<Window>(window).unwrap().visible);
+    }
+
+    #[test]
+    fn close_menu_item_disabled_when_all_windows_hidden() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, OsMenuPlugin))
+            .add_message::<WindowCloseRequested>()
+            .insert_resource(test_settings());
+
+        let window = app.world_mut().spawn(Window::default()).id();
+        app.world_mut().run_schedule(Update);
+        assert!(
+            app.world().resource::<CloseMenuItemEnabled>().0,
+            "a visible window means Close is enabled"
+        );
+
+        app.world_mut().get_mut::<Window>(window).unwrap().visible = false;
+        app.world_mut().run_schedule(Update);
+        assert!(
+            !app.world().resource::<CloseMenuItemEnabled>().0,
+            "all windows hidden means Close is disabled"
+        );
+
+        app.world_mut().get_mut::<Window>(window).unwrap().visible = true;
+        app.world_mut().run_schedule(Update);
+        assert!(
+            app.world().resource::<CloseMenuItemEnabled>().0,
+            "showing a window re-enables Close"
+        );
     }
 
     #[test]

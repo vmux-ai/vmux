@@ -13,10 +13,8 @@ pub(crate) struct TrayPlugin;
 
 struct TrayHandle {
     _tray: TrayIcon,
-    show: MenuItem,
-    hide: MenuItem,
-    show_id: String,
-    hide_id: String,
+    toggle: MenuItem,
+    toggle_id: String,
     quit_id: String,
     last_any_visible: Option<bool>,
 }
@@ -30,14 +28,12 @@ impl Plugin for TrayPlugin {
 
 fn setup_tray(world: &mut World) {
     let menu = Menu::new();
-    let show = MenuItem::new("Show", false, None);
-    let hide = MenuItem::new("Hide", true, None);
-    let quit = MenuItem::new("Quit", true, None);
-    let show_id = show.id().0.clone();
-    let hide_id = hide.id().0.clone();
+    let toggle = MenuItem::new(toggle_label(true), true, None);
+    let quit = MenuItem::new("Quit Vmux", true, None);
+    let toggle_id = toggle.id().0.clone();
     let quit_id = quit.id().0.clone();
 
-    if let Err(e) = menu.append_items(&[&show, &hide, &quit]) {
+    if let Err(e) = menu.append_items(&[&toggle, &quit]) {
         tracing::error!(error = %e, "failed to append tray menu items");
         return;
     }
@@ -59,10 +55,8 @@ fn setup_tray(world: &mut World) {
 
     world.insert_non_send(TrayHandle {
         _tray: tray,
-        show,
-        hide,
-        show_id,
-        hide_id,
+        toggle,
+        toggle_id,
         quit_id,
         last_any_visible: None,
     });
@@ -70,15 +64,15 @@ fn setup_tray(world: &mut World) {
 
 fn drain_tray_events(
     handle: Option<NonSend<TrayHandle>>,
+    windows: Query<&Window>,
     mut events: MessageWriter<LifecycleEvent>,
 ) {
     let Some(handle) = handle else { return };
     let drained = std::mem::take(&mut *PENDING_TRAY_EVENTS.lock());
+    let any_visible = windows.iter().any(|w| w.visible);
     for event_id in drained {
-        if event_id == handle.show_id {
-            events.write(LifecycleEvent::ShowAllWindows);
-        } else if event_id == handle.hide_id {
-            events.write(LifecycleEvent::HideAllWindows);
+        if event_id == handle.toggle_id {
+            events.write(toggle_lifecycle_event(any_visible));
         } else if event_id == handle.quit_id {
             events.write(LifecycleEvent::QuitVmux);
         } else {
@@ -94,13 +88,23 @@ fn sync_tray_menu_state(handle: Option<NonSendMut<TrayHandle>>, windows: Query<&
         return;
     }
     handle.last_any_visible = Some(any_visible);
-    let (show_enabled, hide_enabled) = tray_visibility_enabled(any_visible);
-    handle.show.set_enabled(show_enabled);
-    handle.hide.set_enabled(hide_enabled);
+    handle.toggle.set_text(toggle_label(any_visible));
 }
 
-fn tray_visibility_enabled(any_visible: bool) -> (bool, bool) {
-    (!any_visible, any_visible)
+fn toggle_label(any_visible: bool) -> &'static str {
+    if any_visible {
+        "Close Window"
+    } else {
+        "Open Window"
+    }
+}
+
+fn toggle_lifecycle_event(any_visible: bool) -> LifecycleEvent {
+    if any_visible {
+        LifecycleEvent::HideAllWindows
+    } else {
+        LifecycleEvent::ShowAllWindows
+    }
 }
 
 fn load_tray_icon() -> tray_icon::Icon {
@@ -136,50 +140,52 @@ mod tests {
             source.contains(&tray_builder) || source.contains(&tray_type),
             "tray.rs must wire tray-icon, not be a stub"
         );
-        let show_needle = ["\"Sh", "ow\""].concat();
+        let open_needle = ["\"Open ", "Window\""].concat();
         assert!(
-            source.contains(&show_needle),
-            "tray must expose a 'Show' menu item"
+            source.contains(&open_needle),
+            "tray toggle must expose an 'Open Window' label"
         );
-        let hide_needle = ["\"Hi", "de\""].concat();
+        let close_needle = ["\"Close ", "Window\""].concat();
         assert!(
-            source.contains(&hide_needle),
-            "tray must expose a 'Hide' menu item"
+            source.contains(&close_needle),
+            "tray toggle must expose a 'Close Window' label"
         );
-        let quit_needle = ["\"Qu", "it\""].concat();
+        let quit_needle = ["\"Quit ", "Vmux\""].concat();
         assert!(
             source.contains(&quit_needle),
-            "tray must expose a 'Quit' menu item"
+            "tray must expose a 'Quit Vmux' menu item"
         );
     }
 
     #[test]
-    fn tray_visibility_enabled_toggles_show_and_hide() {
-        assert_eq!(super::tray_visibility_enabled(true), (false, true));
-        assert_eq!(super::tray_visibility_enabled(false), (true, false));
+    fn toggle_label_reflects_visibility() {
+        assert_eq!(super::toggle_label(true), "Close Window");
+        assert_eq!(super::toggle_label(false), "Open Window");
     }
 
     #[test]
-    fn hide_event_routes_to_hide_all_windows() {
-        let source = include_str!("tray.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source");
-
-        assert!(source.contains("hide_id"));
-        assert!(source.contains("LifecycleEvent::HideAllWindows"));
+    fn toggle_event_routes_by_visibility() {
+        use super::LifecycleEvent;
+        assert!(matches!(
+            super::toggle_lifecycle_event(true),
+            LifecycleEvent::HideAllWindows
+        ));
+        assert!(matches!(
+            super::toggle_lifecycle_event(false),
+            LifecycleEvent::ShowAllWindows
+        ));
     }
 
     #[test]
-    fn tray_syncs_enabled_state_with_window_visibility() {
+    fn tray_syncs_toggle_label_with_window_visibility() {
         let source = include_str!("tray.rs")
             .split("#[cfg(test)]")
             .next()
             .expect("production source");
 
         assert!(source.contains("sync_tray_menu_state"));
-        assert!(source.contains("set_enabled"));
-        assert!(source.contains("tray_visibility_enabled"));
+        assert!(source.contains("set_text"));
+        assert!(source.contains("toggle_label"));
     }
 
     #[test]
