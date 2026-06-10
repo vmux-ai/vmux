@@ -5,34 +5,33 @@ use vmux_browser::HostFocusIntent;
 
 /// When the active page is a terminal (OSR) or there is none, the winit host window must own
 /// macOS first-responder so Bevy delivers keys (terminal → PTY, layout shortcuts). A previously
-/// focused windowed web page leaves its native `NSView` as first-responder, which blacks out the
-/// host keyboard — so on the transition into [`HostFocusIntent::WinitHost`] we explicitly hand
-/// first-responder back to the winit content view. Only acted on transition to avoid re-stealing
-/// focus from in-page text fields every frame.
+/// focused windowed web page or the command bar leaves its native `NSView` as first-responder,
+/// which blacks out the host keyboard — so while [`HostFocusIntent::WinitHost`] is active we hand
+/// first-responder back to the winit content view. Re-asserted every frame (not just on the
+/// transition) because a closing command bar / page can resign a frame *after* the intent flips,
+/// which a one-shot reclaim would miss. `makeFirstResponder` is skipped when winit already holds it.
 pub(crate) fn apply_winit_host_focus(
     _non_send: NonSendMarker,
     intent: Res<HostFocusIntent>,
     primary: Query<Entity, With<PrimaryWindow>>,
-    mut last: Local<Option<HostFocusIntent>>,
+    mut announced: Local<bool>,
 ) {
-    let current = *intent;
-    if current != HostFocusIntent::WinitHost {
-        *last = Some(current);
+    if *intent != HostFocusIntent::WinitHost {
+        *announced = false;
         return;
     }
-    if *last == Some(current) {
-        return;
-    }
-    // Retry on later frames until the window exists, so an early transition isn't dropped.
     let Ok(window_entity) = primary.single() else {
         return;
     };
-    info!(target: "vmux::host_focus", "winit reclaim first responder (window={window_entity:?})");
-    reclaim_first_responder(window_entity);
-    *last = Some(current);
+    if reclaim_first_responder(window_entity) && !*announced {
+        info!(target: "vmux::host_focus", "winit reclaim first responder (window={window_entity:?})");
+        *announced = true;
+    }
 }
 
-fn reclaim_first_responder(window_entity: Entity) {
+/// Make the winit content view the window's first responder. Returns `true` if it actually changed
+/// (i.e. winit did not already hold it).
+fn reclaim_first_responder(window_entity: Entity) -> bool {
     use bevy::winit::WINIT_WINDOWS;
     use objc2_app_kit::{NSResponder, NSView};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -47,12 +46,20 @@ fn reclaim_first_responder(window_entity: Entity) {
         }
     });
     let Some(view_ptr) = view_ptr else {
-        return;
+        return false;
     };
     let view: &NSView = unsafe { &*view_ptr.cast::<NSView>() };
     let Some(window) = view.window() else {
-        return;
+        return false;
     };
     let responder: &NSResponder = view;
-    window.makeFirstResponder(Some(responder));
+    if let Some(current) = window.firstResponder()
+        && core::ptr::eq(
+            (&*current) as *const NSResponder,
+            responder as *const NSResponder,
+        )
+    {
+        return false;
+    }
+    window.makeFirstResponder(Some(responder))
 }
