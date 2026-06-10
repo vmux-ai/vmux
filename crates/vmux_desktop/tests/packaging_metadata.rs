@@ -1,23 +1,24 @@
-//! Verify cargo-packager metadata embeds vmux_service in the bundle.
+//! Verify cargo-packager metadata embeds vmux_service in the bundle and that
+//! the main executable name does not case-collide with the vmux CLI.
 
 #[test]
-fn packager_binaries_use_user_facing_names() {
+fn packager_binaries_avoid_case_insensitive_collision() {
     let toml = include_str!("../Cargo.toml");
     assert!(
-        toml.contains(r#"{ path = "Vmux", main = true }"#),
-        "packager metadata must install the app executable as Vmux"
+        toml.contains(r#"{ path = "vmux_desktop", main = true }"#),
+        "main executable must be vmux_desktop so it does not case-collide with the vmux CLI"
+    );
+    assert!(
+        toml.contains(r#"{ path = "vmux" }"#),
+        "packager metadata must install the CLI executable as vmux"
     );
     assert!(
         toml.contains(r#"{ path = "Vmux Service" }"#),
         "packager metadata must install the service executable as Vmux Service"
     );
     assert!(
-        !toml.contains(r#"{ path = "vmux_desktop", main = true }"#),
-        "packager metadata must not expose vmux_desktop in the app bundle"
-    );
-    assert!(
-        !toml.contains(r#"{ path = "vmux_service" }"#),
-        "packager metadata must not expose vmux_service in the app bundle"
+        !toml.contains(r#"{ path = "Vmux", main = true }"#),
+        "main executable must not be Vmux (case-insensitive clash with the vmux CLI)"
     );
 }
 
@@ -30,25 +31,30 @@ fn before_packaging_command_prepares_named_binaries() {
         .expect("before-packaging-command line present");
     assert!(
         line.contains("scripts/build-package-binaries.sh"),
-        "before-packaging-command must prepare user-facing binary names: {line}"
+        "before-packaging-command must prepare the bundled binaries: {line}"
     );
     let script = include_str!("../../../scripts/build-package-binaries.sh");
-    assert!(script.contains("target/release/vmux_desktop"));
-    assert!(script.contains("target/release/Vmux"));
-    assert!(script.contains("target/release/vmux_service"));
-    assert!(script.contains("target/release/Vmux Service"));
+    assert!(script.contains("-p vmux_desktop"));
+    assert!(script.contains("-p vmux_cli"));
+    assert!(script.contains(r#"target/release/Vmux Service"#));
+    assert!(
+        !script.contains("target/release/vmux_desktop target/release/Vmux"),
+        "must not copy the GUI binary over the vmux name (case-insensitive clash)"
+    );
 }
 
 #[test]
-fn macos_bundle_scripts_expect_user_facing_helper_names_and_icons() {
+fn macos_bundle_layout_uses_collision_safe_names() {
     let layout_script = include_str!("../../../scripts/test-bundle-layout.sh");
     let required_block = layout_script.split("FORBIDDEN=(").next().unwrap();
-    assert!(required_block.contains("Contents/MacOS/Vmux"));
+    assert!(required_block.contains("Contents/MacOS/vmux_desktop"));
+    assert!(required_block.contains("Contents/MacOS/vmux"));
+    assert!(required_block.contains(
+        "Contents/Frameworks/vmux_desktop Helper.app/Contents/MacOS/vmux_desktop Helper"
+    ));
     assert!(
-        required_block.contains("Contents/Frameworks/Vmux Helper.app/Contents/MacOS/Vmux Helper")
-    );
-    assert!(
-        required_block.contains("Contents/Frameworks/Vmux Helper.app/Contents/Resources/Vmux.icns")
+        required_block
+            .contains("Contents/Frameworks/vmux_desktop Helper.app/Contents/Resources/Vmux.icns")
     );
     assert!(
         required_block
@@ -58,16 +64,14 @@ fn macos_bundle_scripts_expect_user_facing_helper_names_and_icons() {
         required_block
             .contains("Contents/Library/LoginItems/Vmux Service.app/Contents/Resources/Vmux.icns")
     );
-    assert!(!required_block.contains("Contents/MacOS/vmux_desktop"));
-    assert!(!required_block.contains("Contents/MacOS/vmux_service"));
-    assert!(!required_block.contains("vmux_desktop Helper.app"));
+    assert!(!required_block.contains("Contents/Frameworks/Vmux Helper.app/"));
 }
 
 #[test]
 fn cef_injection_uses_named_helper_base_and_icon() {
     let inject_script = include_str!("../../../scripts/inject-cef.sh");
-    assert!(inject_script.contains("--bin-name Vmux"));
-    assert!(inject_script.contains("Vmux Helper.app"));
+    assert!(inject_script.contains("--bin-name vmux_desktop"));
+    assert!(inject_script.contains("vmux_desktop Helper.app"));
     assert!(inject_script.contains("CFBundleIconFile"));
     assert!(inject_script.contains("Vmux.icns"));
 }
@@ -88,7 +92,9 @@ fn generated_info_plist_uses_named_executable() {
         .nth(1)
         .expect("CFBundleExecutable key");
     assert!(
-        after_key.trim_start().starts_with("<string>Vmux</string>"),
-        "CFBundleExecutable must be Vmux so helper processes are named Vmux Helper"
+        after_key
+            .trim_start()
+            .starts_with("<string>vmux_desktop</string>"),
+        "CFBundleExecutable must be vmux_desktop to match the bundled main binary"
     );
 }
