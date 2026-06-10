@@ -1177,6 +1177,9 @@ struct CommandBarWindowedFrame {
 }
 
 const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
+/// `zPosition` for the windowed command bar, above the layout chrome overlay (`zPosition` 100) so
+/// the sidebar/header/stack panel never covers it.
+const COMMAND_BAR_NATIVE_Z: f64 = 200.0;
 static NATIVE_COMMAND_BAR_CLICK_FRAME: LazyLock<Mutex<Option<CommandBarWindowedFrame>>> =
     LazyLock::new(|| Mutex::new(None));
 static NATIVE_COMMAND_BAR_DISMISS_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -1420,6 +1423,9 @@ fn sync_windowed_command_bar(
     );
     browsers.set_windowed_hidden(&entity, false);
     browsers.raise_windowed_to_front(&entity);
+    // The layout chrome (sidebar/header/stack panel) composites as a native overlay at zPosition
+    // 100; raise alone (subview order) leaves the command bar under it. Lift it above.
+    browsers.set_windowed_z_position(&entity, COMMAND_BAR_NATIVE_Z);
     browsers.set_windowed_focus(&entity, true);
     if !*was_open {
         browsers.nudge_windowed_repaint(&entity);
