@@ -68,7 +68,15 @@ pub struct TermThemeEvent {
 }
 
 #[derive(
-    Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 pub struct TermLoadingEvent {
     pub loading: bool,
@@ -430,7 +438,6 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
         let recovered =
             rkyv::from_bytes::<TermLoadingEvent, rkyv::rancor::Error>(&bytes).expect("deserialize");
-        assert_eq!(original.loading, recovered.loading);
-        assert_eq!(original.label, recovered.label);
+        assert_eq!(original, recovered);
     }
 }
