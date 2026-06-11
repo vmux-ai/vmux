@@ -4,11 +4,11 @@ set -euo pipefail
 APP="${1:?usage: $0 <path-to-Vmux.app>}"
 
 REQUIRED=(
-    "Contents/MacOS/Vmux"
+    "Contents/MacOS/vmux_desktop"
     "Contents/MacOS/vmux"
-    "Contents/Frameworks/Vmux Helper.app/Contents/MacOS/Vmux Helper"
-    "Contents/Frameworks/Vmux Helper.app/Contents/Resources/Vmux.icns"
-    "Contents/Frameworks/Vmux Helper (Renderer).app/Contents/MacOS/Vmux Helper (Renderer)"
+    "Contents/Frameworks/vmux_desktop Helper.app/Contents/MacOS/vmux_desktop Helper"
+    "Contents/Frameworks/vmux_desktop Helper.app/Contents/Resources/Vmux.icns"
+    "Contents/Frameworks/vmux_desktop Helper (Renderer).app/Contents/MacOS/vmux_desktop Helper (Renderer)"
     "Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service"
     "Contents/Library/LoginItems/Vmux Service.app/Contents/Resources/Vmux.icns"
     "Contents/Library/LaunchAgents/ai.vmux.service.plist"
@@ -29,9 +29,8 @@ if grep -q '{{PROFILE}}' "$APP/Contents/Library/LaunchAgents/ai.vmux.service.pli
 fi
 
 FORBIDDEN=(
-    "Contents/MacOS/vmux_desktop"
     "Contents/MacOS/vmux_service"
-    "Contents/Frameworks/vmux_desktop Helper.app"
+    "Contents/Frameworks/Vmux Helper.app"
 )
 
 for path in "${FORBIDDEN[@]}"; do
@@ -40,5 +39,10 @@ for path in "${FORBIDDEN[@]}"; do
         exit 1
     fi
 done
+
+if cmp -s "$APP/Contents/MacOS/vmux" "$APP/Contents/MacOS/vmux_desktop"; then
+    echo "COLLISION: Contents/MacOS/vmux is identical to vmux_desktop (case-insensitive name clash)" >&2
+    exit 1
+fi
 
 echo "OK: bundle layout correct"

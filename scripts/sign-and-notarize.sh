@@ -116,7 +116,7 @@ done
 find "$APP_BUNDLE/Contents/MacOS" -type f -perm +111 | while read -r binary; do
     file "$binary" | grep -q "Mach-O" || continue
     name="$(basename "$binary")"
-    [ "$name" = "Vmux" ] && continue
+    [ "$name" = "vmux_desktop" ] && continue
     ident="$(aux_identifier "$name")"
     echo "  Signing: ${binary#$APP_BUNDLE/} (identifier=$ident)"
     codesign --force --verify --verbose \

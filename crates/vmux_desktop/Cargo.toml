@@ -87,7 +87,7 @@ icons = ["../../packaging/macos/Vmux.icns"]
 before-packaging-command = "bash ../../scripts/build-package-binaries.sh"
 before-each-package-command = "bash ../../scripts/before-each-package.sh"
 binaries = [
-    { path = "Vmux", main = true },
+    { path = "vmux_desktop", main = true },
     { path = "vmux" },
     { path = "Vmux Service" },
 ]
