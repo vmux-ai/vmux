@@ -13,6 +13,10 @@ impl Plugin for GlassPlugin {
             .add_systems(PreUpdate, install_window_glass)
             .add_systems(Update, sync_window_glass_visibility)
             .add_systems(
+                Update,
+                handle_toggle_fullscreen_command.in_set(vmux_command::ReadAppCommands),
+            )
+            .add_systems(
                 Last,
                 (
                     reveal_window_after_layout_ready,
@@ -144,10 +148,89 @@ fn glass_backdrop_visible(mode: InteractionMode) -> bool {
     mode == InteractionMode::User
 }
 
-fn sync_window_glass_visibility(mut state: NonSendMut<GlassState>, mode: Res<InteractionMode>) {
-    use objc2::ClassType;
+/// Toggle native macOS fullscreen when the `ToggleFullscreen` command fires (Ctrl+Cmd+F).
+/// vmux hides the native window buttons, so this is the entry point into/out of fullscreen.
+fn handle_toggle_fullscreen_command(
+    state: NonSend<GlassState>,
+    mut reader: MessageReader<vmux_command::AppCommand>,
+) {
+    use vmux_command::{AppCommand, LayoutCommand, WindowCommand};
 
-    let visible = glass_backdrop_visible(*mode);
+    let toggle = reader.read().any(|cmd| {
+        matches!(
+            cmd,
+            AppCommand::Layout(LayoutCommand::Window(WindowCommand::ToggleFullscreen))
+        )
+    });
+    if toggle && let Some(parent_window) = &state._parent_window {
+        parent_window.toggleFullScreen(None);
+    }
+}
+
+fn sync_window_glass_visibility(
+    mut state: NonSendMut<GlassState>,
+    mode: Res<InteractionMode>,
+    mut clear_color: ResMut<ClearColor>,
+    mut window_q: Query<&mut bevy::window::Window, With<bevy::window::PrimaryWindow>>,
+    terminal_focus_q: Query<
+        (),
+        (
+            With<vmux_terminal::Terminal>,
+            With<bevy_cef::prelude::CefKeyboardTarget>,
+        ),
+    >,
+    modal_open_q: Query<
+        (&Node, Has<bevy_cef::prelude::CefKeyboardTarget>),
+        With<vmux_layout::window::Modal>,
+    >,
+) {
+    use objc2::ClassType;
+    use objc2_app_kit::NSWindowStyleMask;
+
+    let bevy_fullscreen = window_q
+        .single()
+        .map(|w| {
+            matches!(
+                w.mode,
+                bevy::window::WindowMode::BorderlessFullscreen(_)
+                    | bevy::window::WindowMode::Fullscreen(..)
+            )
+        })
+        .unwrap_or(false);
+    let native_fullscreen = state
+        ._parent_window
+        .as_ref()
+        .is_some_and(|w| w.styleMask().contains(NSWindowStyleMask::FullScreen));
+    let fullscreen = bevy_fullscreen || native_fullscreen;
+
+    let [r, g, b] = vmux_layout::window::WINDOW_BACKGROUND_SRGB;
+    let want_clear = if fullscreen {
+        Color::srgb(r, g, b)
+    } else {
+        Color::NONE
+    };
+    if clear_color.0 != want_clear {
+        clear_color.0 = want_clear;
+    }
+
+    let terminal_focused = !terminal_focus_q.is_empty();
+    let command_bar_open = vmux_layout::command_bar::handler::is_command_bar_open(&modal_open_q);
+    crate::native_keyboard::set_escape_exits_fullscreen(
+        fullscreen && !terminal_focused && !command_bar_open,
+    );
+
+    if crate::native_keyboard::take_exit_fullscreen_request() {
+        if native_fullscreen {
+            if let Some(parent_window) = &state._parent_window {
+                parent_window.toggleFullScreen(None);
+            }
+        } else if let Ok(mut window) = window_q.single_mut() {
+            window.mode = bevy::window::WindowMode::Windowed;
+        }
+        return;
+    }
+
+    let visible = glass_backdrop_visible(*mode) && !fullscreen;
     if let (Some(backdrop_window), Some(parent_window)) =
         (&state._backdrop_window, &state._parent_window)
     {
