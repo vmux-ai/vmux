@@ -75,8 +75,11 @@ impl MaterialExtension for WindowCorners {
 
 pub type WindowMaterial = ExtendedMaterial<StandardMaterial, WindowCorners>;
 
+pub const WINDOW_BACKGROUND_SRGB: [f32; 3] = [0.13, 0.13, 0.14];
+
 fn window_background_color() -> Color {
-    Color::srgba(0.13, 0.13, 0.14, 1.0)
+    let [r, g, b] = WINDOW_BACKGROUND_SRGB;
+    Color::srgba(r, g, b, 1.0)
 }
 
 fn window_surface_alpha(mode: crate::scene::InteractionMode) -> f32 {

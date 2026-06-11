@@ -1,5 +1,6 @@
 use std::ptr::NonNull;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use bevy::input::keyboard::KeyCode;
@@ -19,8 +20,26 @@ static PENDING_PREFIX: LazyLock<Mutex<Option<(KeyCombo, Instant)>>> =
 static PENDING_COMMANDS: LazyLock<Mutex<Vec<AppCommand>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 
+static ESC_EXITS_FULLSCREEN: AtomicBool = AtomicBool::new(false);
+static EXIT_FULLSCREEN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
 pub(crate) fn set_shortcut_map(map: ShortcutMap) {
     *SHORTCUT_MAP.lock() = Some(map);
+}
+
+pub(crate) fn set_escape_exits_fullscreen(value: bool) {
+    ESC_EXITS_FULLSCREEN.store(value, Ordering::Relaxed);
+}
+
+pub(crate) fn take_exit_fullscreen_request() -> bool {
+    EXIT_FULLSCREEN_REQUESTED.swap(false, Ordering::Relaxed)
+}
+
+fn is_bare_escape(combo: &KeyCombo) -> bool {
+    combo.key == KeyCode::Escape
+        && !combo.modifiers.ctrl
+        && !combo.modifiers.alt
+        && !combo.modifiers.super_key
 }
 
 pub(crate) enum KeyAction {
@@ -64,6 +83,10 @@ pub(crate) fn decide(
 }
 
 pub(crate) fn classify(combo: KeyCombo) -> KeyAction {
+    if is_bare_escape(&combo) && ESC_EXITS_FULLSCREEN.load(Ordering::Relaxed) {
+        EXIT_FULLSCREEN_REQUESTED.store(true, Ordering::Relaxed);
+        return KeyAction::Consume(None);
+    }
     let guard = SHORTCUT_MAP.lock();
     let Some(map) = guard.as_ref() else {
         return KeyAction::PassThrough;
@@ -269,6 +292,14 @@ mod tests {
             _ => panic!("expected SelectLeft"),
         }
         assert!(pending.is_none());
+    }
+
+    #[test]
+    fn bare_escape_detected_only_without_modifiers() {
+        assert!(is_bare_escape(&combo(KeyCode::Escape, false)));
+        assert!(!is_bare_escape(&combo(KeyCode::Escape, true)));
+        assert!(!is_bare_escape(&super_combo(KeyCode::Escape)));
+        assert!(!is_bare_escape(&combo(KeyCode::KeyH, false)));
     }
 
     #[test]
