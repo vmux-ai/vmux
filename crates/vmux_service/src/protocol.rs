@@ -351,6 +351,7 @@ pub enum ServiceMessage {
         process_id: ProcessId,
         mouse_capture: bool,
         copy_mode: bool,
+        alt_screen: bool,
     },
     AgentCommand {
         request_id: AgentRequestId,

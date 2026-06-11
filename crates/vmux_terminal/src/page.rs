@@ -29,6 +29,7 @@ pub fn Page() -> Element {
     let mut copy_mode = use_signal(|| false);
     let mut theme = use_signal(|| None::<TermThemeEvent>);
     let mut service_error = use_signal(String::new);
+    let mut loading = use_signal(|| None::<String>);
 
     let _err_listener = use_bin_event_listener::<ServiceUnavailableEvent, _>(
         SERVICE_UNAVAILABLE_EVENT,
@@ -108,6 +109,11 @@ pub fn Page() -> Element {
             {
                 doc.set_title(&evt.title);
             }
+        });
+
+    let _loading_listener =
+        use_bin_event_listener::<TermLoadingEvent, _>(TERM_LOADING_EVENT, move |evt| {
+            loading.set(if evt.loading { Some(evt.label) } else { None });
         });
 
     // Cell dimensions (char_width, char_height), updated by resize observer.
@@ -239,12 +245,37 @@ pub fn Page() -> Element {
             }
 
             {
-                let waiting = rows.read().is_empty() && service_error.read().is_empty();
+                let waiting = rows.read().is_empty()
+                    && service_error.read().is_empty()
+                    && loading.read().is_none();
                 waiting.then(|| rsx! {
                     div {
                         class: "absolute inset-0 z-40 flex items-center justify-center text-sm",
                         style: "color:#888;",
                         "Loading…"
+                    }
+                })
+            }
+
+            {
+                let label = loading.read().clone();
+                label.map(|label| rsx! {
+                    div {
+                        class: "absolute inset-0 z-40 flex flex-col items-center justify-center pointer-events-none bg-term-bg",
+                        div {
+                            class: "mb-3 text-sm",
+                            style: "color:var(--term-fg);opacity:0.75;",
+                            "{label}"
+                        }
+                        div {
+                            class: "h-2 w-40 rounded-md animate-pulse",
+                            style: "background:var(--term-fg);opacity:0.12;",
+                        }
+                        div {
+                            class: "mt-2 text-xs",
+                            style: "color:var(--term-fg);opacity:0.4;",
+                            "starting…"
+                        }
                     }
                 })
             }
