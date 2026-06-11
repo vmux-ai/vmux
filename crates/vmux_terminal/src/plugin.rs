@@ -2436,7 +2436,7 @@ fn on_term_key(
 fn arm_agent_loading(
     newly_ready: Query<
         (Entity, &vmux_core::agent::AgentSession),
-        (With<Terminal>, Added<PageReady>),
+        (With<Terminal>, Added<PageReady>, Without<AgentLoading>),
     >,
     mut commands: Commands,
 ) {
@@ -3748,5 +3748,15 @@ mod tests {
             .id();
         app.update();
         assert!(app.world().get::<AgentLoading>(e).is_some());
+    }
+
+    #[test]
+    fn arm_agent_loading_ignores_non_agent_terminal() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, arm_agent_loading);
+        let e = app.world_mut().spawn((Terminal, PageReady {})).id();
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_none());
     }
 }
