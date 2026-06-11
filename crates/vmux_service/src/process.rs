@@ -1723,7 +1723,11 @@ mod tests {
                 alt_on = Some(alt_screen);
             }
         }
-        assert_eq!(alt_on, Some(true), "entering alt screen broadcasts alt_screen=true");
+        assert_eq!(
+            alt_on,
+            Some(true),
+            "entering alt screen broadcasts alt_screen=true"
+        );
 
         process.process_output_for_test(b"\x1b[?1049l");
         process.maybe_broadcast_mode();
@@ -1734,7 +1738,11 @@ mod tests {
                 alt_off = Some(alt_screen);
             }
         }
-        assert_eq!(alt_off, Some(false), "leaving alt screen broadcasts alt_screen=false");
+        assert_eq!(
+            alt_off,
+            Some(false),
+            "leaving alt screen broadcasts alt_screen=false"
+        );
 
         process.kill();
     }
