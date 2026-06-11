@@ -304,6 +304,7 @@ impl Plugin for TerminalPlugin {
                 (
                     arm_agent_loading,
                     clear_agent_loading.after(poll_service_messages),
+                    reset_terminal_title_on_agent_removed,
                 ),
             );
     }
@@ -2498,6 +2499,20 @@ fn clear_agent_loading(
     }
 }
 
+fn reset_terminal_title_on_agent_removed(
+    mut removed: RemovedComponents<vmux_core::agent::AgentSession>,
+    mut q: Query<(&ProcessId, &mut PageMetadata), With<Terminal>>,
+) {
+    for entity in removed.read() {
+        if let Ok((pid, mut meta)) = q.get_mut(entity) {
+            let title = format!("Terminal ({})", &pid.to_string()[..8]);
+            if meta.title != title {
+                meta.title = title;
+            }
+        }
+    }
+}
+
 /// Mark dirty when webview becomes ready so initial viewport is sent.
 fn on_term_ready(
     trigger: On<Add, PageReady>,
@@ -3768,5 +3783,35 @@ mod tests {
         let e = app.world_mut().spawn((Terminal, PageReady {})).id();
         app.update();
         assert!(app.world().get::<AgentLoading>(e).is_none());
+    }
+
+    #[test]
+    fn terminal_title_resets_to_plain_when_agent_session_removed() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, reset_terminal_title_on_agent_removed);
+        let pid = ProcessId::new();
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                pid,
+                PageMetadata {
+                    title: "Vibe (abc12345)".to_string(),
+                    url: "vmux://agent/vibe/abc12345".to_string(),
+                    favicon_url: String::new(),
+                    bg_color: None,
+                },
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+            ))
+            .id();
+        app.update();
+        app.world_mut().entity_mut(e).remove::<AgentSession>();
+        app.update();
+        let expected = format!("Terminal ({})", &pid.to_string()[..8]);
+        let title = app.world().get::<PageMetadata>(e).unwrap().title.clone();
+        assert_eq!(title, expected);
     }
 }

@@ -44,7 +44,24 @@ pub fn format_agent_url(
         if meta.url != next {
             meta.url = next;
         }
+        let title = match sid {
+            Some(SessionId(id)) => format!("{} ({})", agent.kind.display_name(), truncate_sid(id)),
+            None => agent.kind.display_name().to_string(),
+        };
+        if meta.title != title {
+            meta.title = title;
+        }
     }
+}
+
+fn truncate_sid(id: &str) -> String {
+    let chars: Vec<char> = id.chars().collect();
+    if chars.len() <= 12 {
+        return id.to_string();
+    }
+    let head: String = chars[..6].iter().collect();
+    let tail: String = chars[chars.len() - 4..].iter().collect();
+    format!("{head}…{tail}")
 }
 
 #[cfg(test)]
@@ -126,6 +143,89 @@ mod url_tests {
         app.update();
         let url = &app.world().get::<PageMetadata>(entity).unwrap().url;
         assert_eq!(url, "vmux://agent/vibe/");
+    }
+
+    #[test]
+    fn format_agent_url_sets_title_with_short_session_id() {
+        let mut app = App::new();
+        let mut strategies = AgentStrategies::default();
+        strategies.register_cli(Box::new(VibeStrategy));
+        app.insert_resource(strategies)
+            .add_systems(Update, format_agent_url);
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                SessionId("abc12345".into()),
+                empty_meta(),
+            ))
+            .id();
+        app.update();
+        let title = &app.world().get::<PageMetadata>(entity).unwrap().title;
+        assert_eq!(title, "Vibe (abc12345)");
+    }
+
+    #[test]
+    fn format_agent_url_truncates_long_session_id_in_title() {
+        let mut app = App::new();
+        let mut strategies = AgentStrategies::default();
+        strategies.register_cli(Box::new(VibeStrategy));
+        app.insert_resource(strategies)
+            .add_systems(Update, format_agent_url);
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                SessionId("550e8400e29b41d4a716446655440000".into()),
+                empty_meta(),
+            ))
+            .id();
+        app.update();
+        let title = &app.world().get::<PageMetadata>(entity).unwrap().title;
+        assert_eq!(title, "Vibe (550e84…0000)");
+    }
+
+    #[test]
+    fn format_agent_url_sets_bare_name_title_when_no_session_id() {
+        let mut app = App::new();
+        let mut strategies = AgentStrategies::default();
+        strategies.register_cli(Box::new(VibeStrategy));
+        app.insert_resource(strategies)
+            .add_systems(Update, format_agent_url);
+
+        let entity = app
+            .world_mut()
+            .spawn((
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                empty_meta(),
+            ))
+            .id();
+        app.update();
+        let title = &app.world().get::<PageMetadata>(entity).unwrap().title;
+        assert_eq!(title, "Vibe");
+    }
+
+    #[test]
+    fn truncate_sid_keeps_short_ids() {
+        assert_eq!(truncate_sid("abc"), "abc");
+        assert_eq!(truncate_sid("abcdefghijkl"), "abcdefghijkl");
+    }
+
+    #[test]
+    fn truncate_sid_middle_truncates_long_ids() {
+        assert_eq!(truncate_sid("abcdefghijklm"), "abcdef…jklm");
+        assert_eq!(
+            truncate_sid("550e8400e29b41d4a716446655440000"),
+            "550e84…0000"
+        );
     }
 }
 
