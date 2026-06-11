@@ -1139,6 +1139,16 @@ fn poll_service_messages(
                             .insert(ProcessExited)
                             .remove::<CloseRequiresConfirmation>()
                             .remove::<AgentLoading>();
+                        if let Ok(session) = agent_sessions.get(entity) {
+                            commands.trigger(BinHostEmitEvent::from_rkyv(
+                                entity,
+                                TERM_LOADING_EVENT,
+                                &crate::event::TermLoadingEvent {
+                                    loading: false,
+                                    label: session.kind.display_name().to_string(),
+                                },
+                            ));
+                        }
                         let tab = child_of.get();
                         commands.entity(tab).insert(LastActivatedAt::now());
                         writers
