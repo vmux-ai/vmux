@@ -323,7 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_css_gives_chrome_controls_readable_glass_background() {
+    fn layout_css_gives_controls_readable_glass_background() {
         let css = include_str!("../../assets/index.css");
 
         assert!(css.contains("--glass: oklch(0.18 0 0 / 0.82);"));
@@ -332,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn bundled_layout_css_gives_chrome_controls_readable_glass_background() {
+    fn bundled_layout_css_gives_controls_readable_glass_background() {
         let css = include_str!("../../../vmux_server/assets/index.css");
 
         assert!(css.contains("--glass: oklch(0.18 0 0 / 0.82);"));

@@ -211,7 +211,7 @@ fn event_location_in_window_physical_px(event: &objc2_app_kit::NSEvent) -> Optio
 /// (clicks, keys, and pane-crossing hover). Player mode keeps both on for the free camera.
 /// every raw HID report. In browse (User) mode native CEF views own scroll/input, so Bevy must NOT
 /// wake on those — only Player mode's free camera consumes `AccumulatedMouseMotion`. Window events
-/// (resize/focus, OSR chrome hover) and user events (CEF texture wake) stay on in both modes.
+/// (resize/focus, OSR layout hover) and user events (CEF texture wake) stay on in both modes.
 pub(crate) fn foreground_winit_settings(player: bool) -> WinitSettings {
     WinitSettings {
         focused_mode: UpdateMode::Reactive {

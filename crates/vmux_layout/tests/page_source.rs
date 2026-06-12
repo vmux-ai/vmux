@@ -111,10 +111,10 @@ fn layout_page_offsets_header_and_side_sheet_by_window_padding() {
 fn layout_page_gates_header_and_side_sheet_until_host_state_arrives() {
     let source = include_str!("../src/page.rs");
 
-    assert!(source.contains("layout_chrome_ready"));
-    assert!(source.contains("let chrome_ready = layout_chrome_ready"));
-    assert!(source.contains("if chrome_ready && state.side_sheet_open"));
-    assert!(source.contains("if chrome_ready && state.header_visible()"));
+    assert!(source.contains("layout_overlay_ready"));
+    assert!(source.contains("let overlay_ready = layout_overlay_ready"));
+    assert!(source.contains("if overlay_ready && state.side_sheet_open"));
+    assert!(source.contains("if overlay_ready && state.header_visible()"));
 }
 
 #[test]

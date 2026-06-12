@@ -70,7 +70,7 @@ pub fn Page() -> Element {
     let tabs_error = (tabs_listener.error)();
     let pane_tree_error = (pane_tree_listener.error)();
     let spaces_error = (spaces_listener.error)();
-    let chrome_ready = layout_chrome_ready(
+    let overlay_ready = layout_overlay_ready(
         &state,
         listener_ready(layout_state_received(), &layout_error),
         listener_ready(stacks_state_received(), &stacks_error),
@@ -108,7 +108,7 @@ pub fn Page() -> Element {
 
     rsx! {
         div { class: "fixed inset-0 pointer-events-none text-foreground",
-            if chrome_ready && state.side_sheet_open {
+            if overlay_ready && state.side_sheet_open {
                 aside {
                     class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-hidden w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
                     style: "{side_sheet_vars}",
@@ -121,7 +121,7 @@ pub fn Page() -> Element {
                     }
                 }
             }
-            if chrome_ready && state.header_visible() {
+            if overlay_ready && state.header_visible() {
                 div {
                     class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
                     style: "{header_vars}",
@@ -142,7 +142,7 @@ fn listener_ready(received: bool, error: &Option<String>) -> bool {
     received || error.is_some()
 }
 
-fn layout_chrome_ready(
+fn layout_overlay_ready(
     state: &LayoutStateEvent,
     layout_ready: bool,
     stacks_ready: bool,
@@ -663,8 +663,8 @@ mod tests {
     }
 
     #[test]
-    fn chrome_waits_for_layout_state() {
-        assert!(!layout_chrome_ready(
+    fn overlay_waits_for_layout_state() {
+        assert!(!layout_overlay_ready(
             &state(false, false),
             false,
             true,
@@ -675,34 +675,34 @@ mod tests {
     }
 
     #[test]
-    fn chrome_waits_for_header_state_when_header_visible() {
+    fn overlay_waits_for_header_state_when_header_visible() {
         let visible = state(true, false);
 
-        assert!(!layout_chrome_ready(
+        assert!(!layout_overlay_ready(
             &visible, true, false, true, true, true
         ));
-        assert!(!layout_chrome_ready(
+        assert!(!layout_overlay_ready(
             &visible, true, true, false, true, true
         ));
-        assert!(layout_chrome_ready(&visible, true, true, true, true, true));
+        assert!(layout_overlay_ready(&visible, true, true, true, true, true));
     }
 
     #[test]
-    fn chrome_waits_for_side_sheet_state_when_side_sheet_visible() {
+    fn overlay_waits_for_side_sheet_state_when_side_sheet_visible() {
         let visible = state(false, true);
 
-        assert!(!layout_chrome_ready(
+        assert!(!layout_overlay_ready(
             &visible, true, true, true, false, true
         ));
-        assert!(!layout_chrome_ready(
+        assert!(!layout_overlay_ready(
             &visible, true, true, true, true, false
         ));
-        assert!(layout_chrome_ready(&visible, true, true, true, true, true));
+        assert!(layout_overlay_ready(&visible, true, true, true, true, true));
     }
 
     #[test]
-    fn chrome_can_be_ready_when_chrome_is_closed() {
-        assert!(layout_chrome_ready(
+    fn overlay_can_be_ready_when_overlay_is_closed() {
+        assert!(layout_overlay_ready(
             &state(false, false),
             true,
             false,
