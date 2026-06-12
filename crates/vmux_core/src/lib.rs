@@ -68,6 +68,10 @@ pub struct PageMetadata {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Debug)]
+pub struct OscTitle(pub String);
+
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component)]
 #[require(Save)]

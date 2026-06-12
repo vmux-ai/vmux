@@ -20,7 +20,9 @@ use vmux_command::{
 };
 use vmux_core::page::PageReady;
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, TerminalSpawnRequest};
-use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
+use vmux_core::{
+    OscTitle, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
+};
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
 use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
@@ -327,6 +329,9 @@ fn on_terminal_removed(
 
 fn add_terminal_update_systems(app: &mut App) -> &mut App {
     app.add_message::<ProcessExitedEvent>()
+        .add_message::<OscTitleChanged>()
+        .add_systems(Update, apply_osc_title.after(poll_service_messages))
+        .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
         .add_systems(Update, respawn_shell_on_vibe_exit)
         .add_systems(
             Update,
@@ -960,6 +965,7 @@ struct PollServiceWriters<'w> {
     agent_commands: MessageWriter<'w, vmux_service::agent_events::AgentCommandRequest>,
     agent_queries: MessageWriter<'w, vmux_service::agent_events::AgentQueryRequest>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
+    osc_title: MessageWriter<'w, OscTitleChanged>,
 }
 
 fn poll_service_messages(
@@ -1077,6 +1083,10 @@ fn poll_service_messages(
                 }
             }
             ServiceMessage::ProcessTitle { process_id, title } => {
+                writers.osc_title.write(OscTitleChanged {
+                    process_id,
+                    title: title.clone(),
+                });
                 for (entity, pid, _) in &terminals {
                     if *pid == process_id {
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
@@ -2802,6 +2812,45 @@ pub struct ProcessExitedEvent {
     pub process_id: ProcessId,
 }
 
+#[derive(Message, Debug, Clone)]
+pub struct OscTitleChanged {
+    pub process_id: ProcessId,
+    pub title: String,
+}
+
+pub fn apply_osc_title(
+    mut reader: MessageReader<OscTitleChanged>,
+    mut commands: Commands,
+    terminals: Query<(Entity, &ProcessId, Option<&OscTitle>), With<Terminal>>,
+) {
+    for ev in reader.read() {
+        let Some((entity, _, current)) =
+            terminals.iter().find(|(_, pid, _)| **pid == ev.process_id)
+        else {
+            continue;
+        };
+        if ev.title.is_empty() {
+            if current.is_some() {
+                commands.entity(entity).remove::<OscTitle>();
+            }
+        } else if current.map(|o| o.0.as_str()) != Some(ev.title.as_str()) {
+            commands.entity(entity).insert(OscTitle(ev.title.clone()));
+        }
+    }
+}
+
+pub fn clear_osc_title_on_exit(
+    mut reader: MessageReader<ProcessExitedEvent>,
+    mut commands: Commands,
+    terminals: Query<(Entity, &ProcessId), (With<Terminal>, With<OscTitle>)>,
+) {
+    for ev in reader.read() {
+        if let Some((entity, _)) = terminals.iter().find(|(_, pid)| **pid == ev.process_id) {
+            commands.entity(entity).remove::<OscTitle>();
+        }
+    }
+}
+
 fn respawn_shell_on_agent_exit_for_entity(
     commands: &mut Commands,
     entity: Entity,
@@ -3813,5 +3862,59 @@ mod tests {
         let expected = format!("Terminal ({})", &pid.to_string()[..8]);
         let title = app.world().get::<PageMetadata>(e).unwrap().title.clone();
         assert_eq!(title, expected);
+    }
+
+    #[test]
+    fn apply_osc_title_sets_and_clears() {
+        use bevy::ecs::message::Messages;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OscTitleChanged>()
+            .add_systems(Update, apply_osc_title);
+        let pid = ProcessId::new();
+        let e = app.world_mut().spawn((Terminal, pid)).id();
+
+        app.world_mut()
+            .resource_mut::<Messages<OscTitleChanged>>()
+            .write(OscTitleChanged {
+                process_id: pid,
+                title: "claude — repo".to_string(),
+            });
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<vmux_core::OscTitle>(e)
+                .map(|o| o.0.clone()),
+            Some("claude — repo".to_string())
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<OscTitleChanged>>()
+            .write(OscTitleChanged {
+                process_id: pid,
+                title: String::new(),
+            });
+        app.update();
+        assert!(app.world().get::<vmux_core::OscTitle>(e).is_none());
+    }
+
+    #[test]
+    fn clear_osc_title_on_exit_removes_override() {
+        use bevy::ecs::message::Messages;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<ProcessExitedEvent>()
+            .add_systems(Update, clear_osc_title_on_exit);
+        let pid = ProcessId::new();
+        let e = app
+            .world_mut()
+            .spawn((Terminal, pid, vmux_core::OscTitle("working".to_string())))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<ProcessExitedEvent>>()
+            .write(ProcessExitedEvent { process_id: pid });
+        app.update();
+        assert!(app.world().get::<vmux_core::OscTitle>(e).is_none());
     }
 }
