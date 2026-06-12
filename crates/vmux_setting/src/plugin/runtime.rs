@@ -94,20 +94,20 @@ pub fn resolve_startup_url(settings: &AppSettings) -> String {
 }
 
 pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> std::path::PathBuf {
-    let candidate = settings
-        .spaces
-        .get(space_id)
-        .and_then(|o| o.startup_dir.as_deref())
-        .or(settings.browser.startup_dir.as_deref())
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    if let Some(dir) = candidate {
-        let path = std::path::PathBuf::from(dir);
-        if path.is_dir() {
-            return path;
-        }
-    }
-    vmux_core::profile::space_dir(space_id)
+    let pick = |opt: Option<&str>| -> Option<std::path::PathBuf> {
+        opt.map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_dir())
+    };
+    pick(
+        settings
+            .spaces
+            .get(space_id)
+            .and_then(|o| o.startup_dir.as_deref()),
+    )
+    .or_else(|| pick(settings.browser.startup_dir.as_deref()))
+    .unwrap_or_else(|| vmux_core::profile::space_dir(space_id))
 }
 
 pub fn serialize_settings_to_ron(settings: &AppSettings) -> Result<String, String> {
@@ -925,8 +925,24 @@ mod tests {
     }
 
     #[test]
-    fn resolve_startup_dir_falls_through_on_nonexistent_dir() {
+    fn resolve_startup_dir_invalid_per_space_cascades_to_valid_global() {
+        let glob = tempfile::tempdir().unwrap();
         let mut s = base_settings();
+        s.browser.startup_dir = Some(glob.path().to_string_lossy().into());
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some("/no/such/dir/xyz-vmux".into()),
+            },
+        );
+        assert_eq!(resolve_startup_dir(&s, "work"), glob.path());
+    }
+
+    #[test]
+    fn resolve_startup_dir_all_invalid_falls_through_to_builtin() {
+        let mut s = base_settings();
+        s.browser.startup_dir = Some("/no/such/global/xyz-vmux".into());
         s.spaces.insert(
             "work".into(),
             SpaceOverrides {
