@@ -24,7 +24,7 @@ use vmux_command::{
     LayoutCommand, ReadAppCommands, StackCommand, event::CommandBarActionEvent, open::OpenCommand,
 };
 use vmux_core::{
-    CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenId,
+    CefPageAttachRequest, OscTitle, PageMetadata, PageOpenError, PageOpenHandled, PageOpenId,
     PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
     page::{PageManifest, PageReady},
 };
@@ -2239,6 +2239,13 @@ fn active_stack_in_tab(
         .map(|(e, _)| e)
 }
 
+fn effective_title<'a>(osc: Option<&'a OscTitle>, default: &'a str) -> &'a str {
+    match osc {
+        Some(OscTitle(t)) if !t.is_empty() => t,
+        _ => default,
+    }
+}
+
 fn first_browser_meta<'a>(
     stack: Entity,
     stack_children: &Query<&Children>,
@@ -3013,6 +3020,14 @@ fn cef_root_cache_path() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effective_title_prefers_nonempty_osc() {
+        use vmux_core::OscTitle;
+        assert_eq!(effective_title(Some(&OscTitle("osc".to_string())), "def"), "osc");
+        assert_eq!(effective_title(Some(&OscTitle(String::new())), "def"), "def");
+        assert_eq!(effective_title(None, "def"), "def");
+    }
 
     #[test]
     fn osr_webview_hides_when_window_is_hidden() {
