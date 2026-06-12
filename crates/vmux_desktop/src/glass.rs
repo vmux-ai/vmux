@@ -294,7 +294,6 @@ fn sync_layout_overlay(
                 layer.setHidden(true);
             }
             state.shown = false;
-            state.held = None;
         }
         return;
     }
