@@ -7,7 +7,7 @@ cask "vmux" do
   desc "AI-native workspace combining browser and terminal panes"
   homepage "https://vmux.ai"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "Vmux.app"
 
