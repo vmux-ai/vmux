@@ -1054,7 +1054,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_chrome_uses_transparent_osr_native_overlay() {
+    fn layout_uses_transparent_osr_native_overlay() {
         let mut app = setup_window_app();
         app.update();
 

@@ -158,7 +158,7 @@ impl Plugin for BrowserPlugin {
                     sync_keyboard_target,
                     sync_windowed_content_mesh_materials,
                     sync_children_to_ui,
-                    sync_windowed_chrome,
+                    sync_windowed_layout,
                     sync_windowed_frames,
                     sync_windowed_command_bar,
                     apply_repaint_nudge,
@@ -1026,14 +1026,14 @@ fn windowed_pages_to_hide(
         .collect()
 }
 
-fn sync_windowed_chrome(
+fn sync_windowed_layout(
     browsers: NonSend<Browsers>,
-    chrome_q: Query<(Entity, Option<&HostWindow>), (With<LayoutCef>, With<WebviewWindowed>)>,
+    layout_q: Query<(Entity, Option<&HostWindow>), (With<LayoutCef>, With<WebviewWindowed>)>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
 ) {
-    for (entity, host_window) in &chrome_q {
+    for (entity, host_window) in &layout_q {
         let window_entity = host_window
             .map(|h| h.0)
             .or_else(|| primary_window.single().ok());
@@ -1177,7 +1177,7 @@ struct CommandBarWindowedFrame {
 }
 
 const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
-/// `zPosition` for the windowed command bar, above the layout chrome overlay (`zPosition` 100) so
+/// `zPosition` for the windowed command bar, above the layout overlay (`zPosition` 100) so
 /// the sidebar/header/stack panel never covers it.
 const COMMAND_BAR_NATIVE_Z: f64 = 200.0;
 static NATIVE_COMMAND_BAR_CLICK_FRAME: LazyLock<Mutex<Option<CommandBarWindowedFrame>>> =
@@ -1423,7 +1423,7 @@ fn sync_windowed_command_bar(
     );
     browsers.set_windowed_hidden(&entity, false);
     browsers.raise_windowed_to_front(&entity);
-    // The layout chrome (sidebar/header/stack panel) composites as a native overlay at zPosition
+    // The layout (sidebar/header/stack panel) composites as a native overlay at zPosition
     // 100; raise alone (subview order) leaves the command bar under it. Lift it above.
     browsers.set_windowed_z_position(&entity, COMMAND_BAR_NATIVE_Z);
     browsers.set_windowed_focus(&entity, true);
@@ -3270,10 +3270,10 @@ mod tests {
     }
 
     #[test]
-    fn windowed_chrome_sync_raises_layout_above_bevy_view() {
+    fn windowed_layout_sync_raises_layout_above_bevy_view() {
         let source = include_str!("lib.rs");
         let sync_fn = source
-            .split("fn sync_windowed_chrome")
+            .split("fn sync_windowed_layout")
             .nth(1)
             .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
             .unwrap_or_default();
@@ -3290,14 +3290,14 @@ mod tests {
             .nth(1)
             .and_then(|tail| tail.split(".chain()").next())
             .unwrap_or_default();
-        let chrome_idx = post_update
-            .find("sync_windowed_chrome")
-            .expect("windowed chrome sync");
+        let layout_idx = post_update
+            .find("sync_windowed_layout")
+            .expect("windowed layout sync");
         let page_idx = post_update
             .find("sync_windowed_frames")
             .expect("windowed page sync");
 
-        assert!(chrome_idx < page_idx);
+        assert!(layout_idx < page_idx);
     }
 
     #[test]
@@ -3306,7 +3306,7 @@ mod tests {
         let sync_fn = source
             .split("fn sync_windowed_frames")
             .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
         assert!(sync_fn.contains("browsers.raise_windowed_to_front"));
@@ -3318,7 +3318,7 @@ mod tests {
         let sync_fn = source
             .split("fn sync_windowed_frames")
             .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
         assert!(sync_fn.contains("browsers.raise_windowed_to_front(&entity)"));
@@ -3464,7 +3464,7 @@ mod tests {
         let sync_fn = source
             .split("fn sync_windowed_frames")
             .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
         assert!(!sync_fn.contains("is_command_bar_open"));
@@ -3509,7 +3509,7 @@ mod tests {
         let sync_fn = source
             .split("fn sync_windowed_frames")
             .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
         assert!(sync_fn.contains("settings: Res<AppSettings>"));
@@ -3523,7 +3523,7 @@ mod tests {
         let sync_fn = source
             .split("fn sync_windowed_frames")
             .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
         assert!(sync_fn.contains("visible_pane_count_for_windowed_sync"));
@@ -3536,7 +3536,7 @@ mod tests {
         let sync_fn = source
             .split("fn sync_windowed_frames")
             .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
         assert!(sync_fn.contains("focus: Res<vmux_layout::stack::FocusedStack>"));
@@ -3551,7 +3551,7 @@ mod tests {
         let sync_fn = source
             .split("fn sync_windowed_frames")
             .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
         assert!(sync_fn.contains("browsers.set_windowed_corner_cover"));
@@ -3564,7 +3564,7 @@ mod tests {
         let sync_fn = source
             .split("fn sync_windowed_frames")
             .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
         assert!(!sync_fn.contains("!is_terminal"));
@@ -3577,7 +3577,7 @@ mod tests {
         let sync_fn = source
             .split("fn sync_windowed_frames")
             .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
         assert!(sync_fn.contains("settings.layout.radius * scale"));
@@ -3916,7 +3916,7 @@ mod tests {
         let refresh_fn = source
             .split("fn refresh_active_windowed_hover")
             .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_chrome").next())
+            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
         assert!(plugin_build.contains("add_systems(Last, refresh_active_windowed_hover)"));
