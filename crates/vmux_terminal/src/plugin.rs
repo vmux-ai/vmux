@@ -962,6 +962,7 @@ struct PollServiceWriters<'w> {
     agent_commands: MessageWriter<'w, vmux_service::agent_events::AgentCommandRequest>,
     agent_queries: MessageWriter<'w, vmux_service::agent_events::AgentQueryRequest>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
+    osc_title: MessageWriter<'w, OscTitleChanged>,
 }
 
 fn poll_service_messages(
@@ -1079,6 +1080,10 @@ fn poll_service_messages(
                 }
             }
             ServiceMessage::ProcessTitle { process_id, title } => {
+                writers.osc_title.write(OscTitleChanged {
+                    process_id,
+                    title: title.clone(),
+                });
                 for (entity, pid, _) in &terminals {
                     if *pid == process_id {
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
