@@ -98,6 +98,7 @@ impl Plugin for BrowserPlugin {
                     .after(spawn_popup_stacks)
                     .before(CefSystems::CreateAndResize),
             )
+            .add_systems(Update, sync_layout_mesh_visibility)
             .add_systems(
                 PreUpdate,
                 (
@@ -823,6 +824,38 @@ fn sync_windowed_content_mesh_materials(
     for (handle, windowed) in &browsers {
         if let Some(mut material) = materials.get_mut(handle.id()) {
             set_windowed_content_mesh_material(&mut material, windowed);
+        }
+    }
+}
+
+/// In User mode the layout chrome is presented by the native overlay (accelerated, with glass), but
+/// the OSR mesh still holds the last Player-mode (cpu-painted) frame and would draw it on top of the
+/// page views — the duplicate. Make the mesh render invisible in User; in Player the overlay is
+/// hidden and the mesh presents the (transparent) 3D layout, so render it.
+///
+/// This toggles the material's alpha rather than `Visibility`: the OSR focus pipeline treats a
+/// `Visibility::Hidden` webview as hidden and tells CEF to stop rendering it, which would starve the
+/// overlay. Keeping the entity visible (only the material transparent) leaves OSR running. Alpha
+/// mode stays `Blend` so Player keeps its transparency (pages show through the layout).
+fn sync_layout_mesh_visibility(
+    mode: Res<vmux_layout::scene::InteractionMode>,
+    layout_q: Query<&MeshMaterial3d<WebviewExtendStandardMaterial>, With<LayoutCef>>,
+    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    let want_alpha = if *mode == vmux_layout::scene::InteractionMode::User {
+        0.0
+    } else {
+        1.0
+    };
+    for mat_handle in &layout_q {
+        let Some(mut material) = materials.get_mut(mat_handle.id()) else {
+            continue;
+        };
+        if material.base.alpha_mode != AlphaMode::Blend {
+            material.base.alpha_mode = AlphaMode::Blend;
+        }
+        if material.base.base_color.alpha() != want_alpha {
+            material.base.base_color.set_alpha(want_alpha);
         }
     }
 }
@@ -3066,6 +3099,60 @@ mod tests {
         assert!(should_show_osr_webview(true, false, true, false, false));
         assert!(should_show_osr_webview(true, true, false, false, false));
         assert!(should_show_osr_webview(true, true, true, false, true));
+    }
+
+    fn layout_material_after_mode(
+        mode: vmux_layout::scene::InteractionMode,
+        initial_alpha: f32,
+    ) -> WebviewExtendStandardMaterial {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .insert_resource(mode)
+            .add_systems(Update, sync_layout_mesh_visibility);
+        let mut material = WebviewExtendStandardMaterial::default();
+        material.base.alpha_mode = AlphaMode::Blend;
+        material.base.base_color.set_alpha(initial_alpha);
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
+            .add(material);
+        app.world_mut()
+            .spawn((LayoutCef, MeshMaterial3d(handle.clone())));
+
+        app.update();
+
+        app.world()
+            .resource::<Assets<WebviewExtendStandardMaterial>>()
+            .get(handle.id())
+            .expect("layout material")
+            .clone()
+    }
+
+    #[test]
+    fn user_mode_makes_layout_mesh_invisible() {
+        let mat = layout_material_after_mode(vmux_layout::scene::InteractionMode::User, 1.0);
+        assert_eq!(
+            mat.base.base_color.alpha(),
+            0.0,
+            "User mode hides the layout OSR mesh (the overlay presents the chrome) so it does not duplicate"
+        );
+        assert_eq!(mat.base.alpha_mode, AlphaMode::Blend);
+    }
+
+    #[test]
+    fn player_mode_makes_layout_mesh_visible_and_transparent() {
+        let mat = layout_material_after_mode(vmux_layout::scene::InteractionMode::Player, 0.0);
+        assert_eq!(
+            mat.base.base_color.alpha(),
+            1.0,
+            "Player mode renders the layout via the mesh, so it must be visible"
+        );
+        assert_eq!(
+            mat.base.alpha_mode,
+            AlphaMode::Blend,
+            "Player keeps Blend so pages show through the layout's transparent areas"
+        );
     }
 
     #[test]
