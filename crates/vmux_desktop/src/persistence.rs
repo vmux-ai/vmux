@@ -220,7 +220,16 @@ fn is_stale_agent_url(url: &str) -> bool {
     if normalized == "vmux://agent" {
         return false;
     }
+    if is_bare_agent_kind_url(normalized) {
+        return false;
+    }
     vmux_agent::AgentUrl::parse(normalized).is_none()
+}
+
+fn is_bare_agent_kind_url(normalized: &str) -> bool {
+    vmux_agent::AgentKind::all()
+        .into_iter()
+        .any(|kind| normalized == kind.cli_url_prefix().trim_end_matches('/'))
 }
 
 fn space_is_prompt_only_empty_url(body: &str) -> bool {
@@ -774,6 +783,20 @@ mod tests {
     fn known_cli_agent_url_does_not_mark_space_stale() {
         assert!(!space_contains_stale_agent_url(
             r#"url: "vmux://agent/codex/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
+        ));
+    }
+
+    #[test]
+    fn bare_cli_agent_url_does_not_mark_space_stale() {
+        assert!(!space_contains_stale_agent_url(
+            r#"url: "vmux://agent/vibe/""#
+        ));
+    }
+
+    #[test]
+    fn unknown_kind_agent_url_marks_space_stale() {
+        assert!(space_contains_stale_agent_url(
+            r#"url: "vmux://agent/bogus/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
         ));
     }
 
