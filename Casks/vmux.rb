@@ -5,9 +5,9 @@ cask "vmux" do
   url "https://github.com/vmux-ai/vmux/releases/download/v0.0.15/Vmux_0.0.15_aarch64.dmg"
   name "Vmux"
   desc "AI-native workspace combining browser and terminal panes"
-  homepage "https://vmux.ai"
+  homepage "https://vmux.ai/"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "Vmux.app"
 
