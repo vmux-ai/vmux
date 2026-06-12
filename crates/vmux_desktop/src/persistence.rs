@@ -565,6 +565,7 @@ mod tests {
         AppSettings {
             browser: BrowserSettings {
                 startup_url: "about:blank".to_string(),
+                startup_dir: None,
             },
             layout: LayoutSettings {
                 radius: 0.0,
@@ -583,6 +584,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
+            spaces: Default::default(),
         }
     }
 

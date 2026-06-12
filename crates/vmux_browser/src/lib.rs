@@ -3486,6 +3486,7 @@ mod tests {
         AppSettings {
             browser: vmux_setting::BrowserSettings {
                 startup_url: "about:blank".to_string(),
+                startup_dir: None,
             },
             layout: vmux_layout::settings::LayoutSettings {
                 radius,
@@ -3504,6 +3505,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
+            spaces: Default::default(),
         }
     }
 
@@ -4265,6 +4267,7 @@ mod tests {
             AppSettings {
                 browser: BrowserSettings {
                     startup_url: "about:blank".to_string(),
+                    startup_dir: None,
                 },
                 layout: LayoutSettings {
                     radius: 0.0,
@@ -4283,6 +4286,7 @@ mod tests {
                 terminal: None,
                 auto_update: false,
                 agent: vmux_setting::AgentSettings::default(),
+                spaces: Default::default(),
             }
         }
 

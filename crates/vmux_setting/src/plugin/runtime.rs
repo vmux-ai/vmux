@@ -38,6 +38,16 @@ pub struct AppSettings {
     pub auto_update: bool,
     #[serde(default = "default_agent_settings")]
     pub agent: AgentSettings,
+    #[serde(default)]
+    pub spaces: std::collections::BTreeMap<String, SpaceOverrides>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct SpaceOverrides {
+    #[serde(default)]
+    pub startup_url: Option<String>,
+    #[serde(default)]
+    pub startup_dir: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -200,11 +210,14 @@ impl KeyComboDef {
 pub struct BrowserSettings {
     #[serde(default = "default_browser_startup_url")]
     pub startup_url: String,
+    #[serde(default)]
+    pub startup_dir: Option<String>,
 }
 
 fn default_browser_settings() -> BrowserSettings {
     BrowserSettings {
         startup_url: default_browser_startup_url(),
+        startup_dir: None,
     }
 }
 
@@ -664,6 +677,7 @@ mod tests {
         AppSettings {
             browser: BrowserSettings {
                 startup_url: default_browser_startup_url(),
+                startup_dir: None,
             },
             layout: LayoutSettings {
                 radius: 0.0,
@@ -682,6 +696,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             agent: crate::plugin::runtime::AgentSettings::default(),
+            spaces: Default::default(),
         }
     }
 
@@ -837,5 +852,31 @@ mod tests {
         let h3 = settings_content_hash(b"world");
         assert_eq!(h1, h2);
         assert_ne!(h1, h3);
+    }
+
+    #[test]
+    fn app_settings_spaces_roundtrip_through_ron() {
+        let mut s = base_settings();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: Some("https://work.example".into()),
+                startup_dir: Some("/tmp/work".into()),
+            },
+        );
+        let ron = ron::ser::to_string_pretty(&s, ron::ser::PrettyConfig::default()).unwrap();
+        let back: AppSettings = ron::de::from_str(&ron).unwrap();
+        assert_eq!(
+            back.spaces["work"].startup_url.as_deref(),
+            Some("https://work.example")
+        );
+        assert_eq!(back.spaces["work"].startup_dir.as_deref(), Some("/tmp/work"));
+    }
+
+    #[test]
+    fn embedded_settings_have_empty_spaces_and_no_global_startup_dir() {
+        let s = load_embedded_settings();
+        assert!(s.spaces.is_empty());
+        assert!(s.browser.startup_dir.is_none());
     }
 }
