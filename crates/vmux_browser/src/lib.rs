@@ -1966,7 +1966,15 @@ fn push_stacks_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    browser_q: Query<(&PageMetadata, &ChildOf, Option<&NavigationState>), With<Browser>>,
+    browser_q: Query<
+        (
+            &PageMetadata,
+            &ChildOf,
+            Option<&NavigationState>,
+            Option<&OscTitle>,
+        ),
+        With<Browser>,
+    >,
     stack_q: Query<(), With<Stack>>,
     zoomed_q: Query<(), With<vmux_layout::pane::Zoomed>>,
     new_stack_ctx: Res<vmux_layout::NewStackContext>,
@@ -1992,7 +2000,7 @@ fn push_stacks_host_emit(
     let mut can_go_forward = false;
     let _ = active_stack_opt.is_none();
     if let Some(active_stack_entity) = active_stack_opt {
-        for (meta, child_of, nav_state) in &browser_q {
+        for (meta, child_of, nav_state, osc) in &browser_q {
             let stack_entity = child_of.get();
             let stack_pane = child_of_q.get(stack_entity).ok().map(|co| co.get());
             if stack_pane != active_pane {
@@ -2004,7 +2012,7 @@ fn push_stacks_host_emit(
                 can_go_forward = ns.can_go_forward;
             }
             rows.push(StackRow {
-                title: meta.title.clone(),
+                title: effective_title(osc, &meta.title).to_string(),
                 url: meta.url.clone(),
                 favicon_url: meta.favicon_url.clone(),
                 is_active,
@@ -2053,7 +2061,7 @@ fn push_pane_tree_emit(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
     stack_children: Query<&Children>,
-    browser_meta: Query<(&PageMetadata, Has<Loading>), With<Browser>>,
+    browser_meta: Query<(&PageMetadata, Has<Loading>, Option<&OscTitle>), With<Browser>>,
     mut last: Local<String>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
@@ -2089,14 +2097,14 @@ fn push_pane_tree_emit(
                 let mut found_browser = false;
                 if let Ok(stack_kids) = stack_children.get(child) {
                     for browser_e in stack_kids.iter() {
-                        if let Ok((meta, loading)) = browser_meta.get(browser_e) {
+                        if let Ok((meta, loading, osc)) = browser_meta.get(browser_e) {
                             let is_new_stack = new_stack_ctx.stack == Some(child)
                                 && (meta.url.is_empty() || meta.url == "about:blank");
                             stacks.push(StackNode {
                                 title: if is_new_stack {
                                     "New Stack".to_string()
                                 } else {
-                                    meta.title.clone()
+                                    effective_title(osc, &meta.title).to_string()
                                 },
                                 url: if is_new_stack {
                                     String::new()
@@ -2163,7 +2171,7 @@ fn push_tabs_host_emit(
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_children: Query<&Children>,
-    browser_meta: Query<&PageMetadata, With<Browser>>,
+    browser_meta: Query<(&PageMetadata, Option<&OscTitle>), With<Browser>>,
     mut last: Local<String>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
@@ -2192,9 +2200,19 @@ fn push_tabs_host_emit(
                 &pane_children,
                 &stack_ts,
             );
-            let meta = active_stack
-                .and_then(|s| first_browser_meta(s, &stack_children, &browser_meta))
-                .cloned()
+            let found =
+                active_stack.and_then(|s| first_browser_meta(s, &stack_children, &browser_meta));
+            let title = found
+                .map(|(meta, osc)| effective_title(osc, &meta.title).to_string())
+                .unwrap_or_default();
+            let (url, favicon_url, bg_color) = found
+                .map(|(meta, _)| {
+                    (
+                        meta.url.clone(),
+                        meta.favicon_url.clone(),
+                        meta.bg_color.clone(),
+                    )
+                })
                 .unwrap_or_default();
             let name = if tab.name.is_empty() {
                 "Tab".to_string()
@@ -2205,10 +2223,10 @@ fn push_tabs_host_emit(
                 id: entity.to_bits().to_string(),
                 name,
                 is_active: Some(entity) == active_tab,
-                bg_color: meta.bg_color.clone(),
-                title: meta.title.clone(),
-                url: meta.url.clone(),
-                favicon_url: meta.favicon_url.clone(),
+                bg_color,
+                title,
+                url,
+                favicon_url,
             }
         })
         .collect();
@@ -2249,8 +2267,8 @@ fn effective_title<'a>(osc: Option<&'a OscTitle>, default: &'a str) -> &'a str {
 fn first_browser_meta<'a>(
     stack: Entity,
     stack_children: &Query<&Children>,
-    browser_meta: &'a Query<&PageMetadata, With<Browser>>,
-) -> Option<&'a PageMetadata> {
+    browser_meta: &'a Query<(&PageMetadata, Option<&OscTitle>), With<Browser>>,
+) -> Option<(&'a PageMetadata, Option<&'a OscTitle>)> {
     let kids = stack_children.get(stack).ok()?;
     kids.iter().find_map(|c| browser_meta.get(c).ok())
 }
@@ -3024,8 +3042,14 @@ mod tests {
     #[test]
     fn effective_title_prefers_nonempty_osc() {
         use vmux_core::OscTitle;
-        assert_eq!(effective_title(Some(&OscTitle("osc".to_string())), "def"), "osc");
-        assert_eq!(effective_title(Some(&OscTitle(String::new())), "def"), "def");
+        assert_eq!(
+            effective_title(Some(&OscTitle("osc".to_string())), "def"),
+            "osc"
+        );
+        assert_eq!(
+            effective_title(Some(&OscTitle(String::new())), "def"),
+            "def"
+        );
         assert_eq!(effective_title(None, "def"), "def");
     }
 
