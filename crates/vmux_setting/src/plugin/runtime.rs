@@ -93,6 +93,28 @@ pub fn resolve_startup_url(settings: &AppSettings) -> String {
     }
 }
 
+pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> std::path::PathBuf {
+    let candidate = settings
+        .spaces
+        .get(space_id)
+        .and_then(|o| o.startup_dir.as_deref())
+        .or(settings.browser.startup_dir.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(dir) = candidate {
+        let path = std::path::PathBuf::from(dir);
+        if path.is_dir() {
+            return path;
+        }
+    }
+    vmux_core::profile::space_dir(space_id)
+}
+
+pub fn serialize_settings_to_ron(settings: &AppSettings) -> Result<String, String> {
+    ron::ser::to_string_pretty(settings, ron::ser::PrettyConfig::default())
+        .map_err(|e| format!("RON serialize failed: {e}"))
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ShortcutSettings {
     #[serde(default = "default_leader")]
@@ -878,5 +900,50 @@ mod tests {
         let s = load_embedded_settings();
         assert!(s.spaces.is_empty());
         assert!(s.browser.startup_dir.is_none());
+    }
+
+    #[test]
+    fn resolve_startup_dir_prefers_per_space_then_global_then_builtin() {
+        let per = tempfile::tempdir().unwrap();
+        let glob = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.browser.startup_dir = Some(glob.path().to_string_lossy().into());
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(per.path().to_string_lossy().into()),
+            },
+        );
+        assert_eq!(resolve_startup_dir(&s, "work"), per.path());
+        assert_eq!(resolve_startup_dir(&s, "other"), glob.path());
+        s.browser.startup_dir = None;
+        assert_eq!(
+            resolve_startup_dir(&s, "space-1"),
+            vmux_core::profile::space_dir("space-1")
+        );
+    }
+
+    #[test]
+    fn resolve_startup_dir_falls_through_on_nonexistent_dir() {
+        let mut s = base_settings();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some("/no/such/dir/xyz-vmux".into()),
+            },
+        );
+        assert_eq!(
+            resolve_startup_dir(&s, "work"),
+            vmux_core::profile::space_dir("work")
+        );
+    }
+
+    #[test]
+    fn serialize_settings_to_ron_reparses() {
+        let s = base_settings();
+        let ron = serialize_settings_to_ron(&s).unwrap();
+        let _back: AppSettings = ron::de::from_str(&ron).unwrap();
     }
 }
