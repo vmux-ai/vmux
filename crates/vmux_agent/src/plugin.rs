@@ -984,12 +984,14 @@ fn handle_spawn_agent_requests(
             );
             continue;
         };
+        let process_id = ProcessId::new();
         match crate::build_agent_launch(
             req.kind,
             &req.cwd,
             req.session_id.as_deref(),
             strategies,
             &exe_path,
+            process_id,
         ) {
             Ok(launch) => {
                 clear_stack_children(req.stack, &children_q, &mut commands);
@@ -1007,7 +1009,7 @@ fn handle_spawn_agent_requests(
                 commands
                     .entity(terminal)
                     .insert(CefKeyboardTarget)
-                    .insert((launch, AgentSession { kind: req.kind }));
+                    .insert((launch, AgentSession { kind: req.kind }, process_id));
                 if let Some(id) = req.session_id.clone() {
                     commands.entity(terminal).insert(SessionId(id));
                 } else {
