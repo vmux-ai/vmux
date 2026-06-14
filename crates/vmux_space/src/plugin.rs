@@ -569,13 +569,19 @@ fn reconcile_space_overrides(
         return;
     }
     let registry = read_space_registry_from(&profile::shared_data_dir());
-    if seed_missing_overrides(&mut settings.spaces, &registry) {
-        match vmux_setting::serialize_settings_to_ron(&settings) {
-            Ok(ron_bytes) => {
-                writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
-            }
-            Err(e) => bevy::log::warn!("reconcile_space_overrides: serialize failed: {e}"),
+    let missing = registry
+        .spaces
+        .iter()
+        .any(|space| !settings.spaces.contains_key(&space.id));
+    if !missing {
+        return;
+    }
+    seed_missing_overrides(&mut settings.spaces, &registry);
+    match vmux_setting::serialize_settings_to_ron(&settings) {
+        Ok(ron_bytes) => {
+            writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
         }
+        Err(e) => bevy::log::warn!("reconcile_space_overrides: serialize failed: {e}"),
     }
 }
 
@@ -1096,6 +1102,50 @@ mod tests {
         assert!(focus.tab.is_some());
         assert!(focus.pane.is_some());
         assert!(focus.stack.is_some());
+    }
+
+    fn mark_active_changed(mut active: ResMut<ActiveSpace>) {
+        active.set_changed();
+    }
+
+    #[test]
+    fn reconcile_does_not_continuously_mark_settings_changed() {
+        let _home = HomeEnvGuard::use_temp_home("reconcile-no-thrash");
+        write_space_registry_to(
+            &profile::shared_data_dir(),
+            &SpaceRegistry {
+                spaces: vec![bootstrap_space_record(), work_space_record()],
+            },
+        );
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<vmux_setting::SettingsWriteRequest>()
+            .insert_resource(test_settings())
+            .insert_resource(ActiveSpace {
+                record: work_space_record(),
+            })
+            .add_systems(
+                Update,
+                (mark_active_changed, reconcile_space_overrides).chain(),
+            );
+
+        app.update();
+        app.update();
+
+        let before = app
+            .world()
+            .resource_ref::<vmux_setting::AppSettings>()
+            .last_changed();
+        app.update();
+        let after = app
+            .world()
+            .resource_ref::<vmux_setting::AppSettings>()
+            .last_changed();
+
+        assert_eq!(
+            before, after,
+            "reconcile must not re-mark AppSettings changed once seeding has settled"
+        );
     }
 
     #[test]
