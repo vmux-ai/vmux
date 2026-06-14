@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-pub use vmux_core::agent::McpServerConfig;
 use vmux_core::ProcessId;
+pub use vmux_core::agent::McpServerConfig;
 
 use crate::exec;
 

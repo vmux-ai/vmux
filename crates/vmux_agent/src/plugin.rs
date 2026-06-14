@@ -4,9 +4,9 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
 use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_core::agent::{
-    AgentKind, AgentProviderTargetKind, PageAgentAttachDefaultRequest,
-    PageAgentAttachRequest, PageAgentSpawnDefaultRequest, PageAgentSpawnStackRequest,
-    RestartAgentPty, SpawnAgentInStackRequest,
+    AgentKind, AgentProviderTargetKind, PageAgentAttachDefaultRequest, PageAgentAttachRequest,
+    PageAgentSpawnDefaultRequest, PageAgentSpawnStackRequest, RestartAgentPty,
+    SpawnAgentInStackRequest,
 };
 use vmux_core::{
     LastActivatedAt, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask, Ready,
@@ -102,6 +102,7 @@ impl Plugin for AgentPlugin {
             .add_message::<TerminalStackSpawnRequest>()
             .add_message::<ProcessStackSpawnRequest>()
             .add_message::<RestartAgentPty>()
+            .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
             .add_systems(Startup, session::start_agent_session_watchers)
             .add_systems(
                 Update,
@@ -1006,10 +1007,11 @@ fn handle_spawn_agent_requests(
                         ChildOf(req.stack),
                     ))
                     .id();
-                commands
-                    .entity(terminal)
-                    .insert(CefKeyboardTarget)
-                    .insert((launch, AgentSession { kind: req.kind }, process_id));
+                commands.entity(terminal).insert(CefKeyboardTarget).insert((
+                    launch,
+                    AgentSession { kind: req.kind },
+                    process_id,
+                ));
                 if let Some(id) = req.session_id.clone() {
                     commands.entity(terminal).insert(SessionId(id));
                 } else {
@@ -1237,18 +1239,16 @@ fn handle_restart_agent_pty(
 
         let (command, args, cwd, env) = match launch.as_deref() {
             Some(l) => {
-                let (rebuilt_args, rebuilt_env) = match strategies
-                    .as_deref()
-                    .and_then(|s| s.get_cli(session.kind))
-                {
-                    Some(strategy) => rebuilt_args_env_for_restart(
-                        l,
-                        strategy,
-                        session_id.map(|s| s.0.as_str()),
-                        new_id,
-                    ),
-                    None => (l.args.clone(), l.env.clone()),
-                };
+                let (rebuilt_args, rebuilt_env) =
+                    match strategies.as_deref().and_then(|s| s.get_cli(session.kind)) {
+                        Some(strategy) => rebuilt_args_env_for_restart(
+                            l,
+                            strategy,
+                            session_id.map(|s| s.0.as_str()),
+                            new_id,
+                        ),
+                        None => (l.args.clone(), l.env.clone()),
+                    };
                 (l.command.clone(), rebuilt_args, l.cwd.clone(), rebuilt_env)
             }
             None => (String::new(), vec![], String::new(), Vec::new()),

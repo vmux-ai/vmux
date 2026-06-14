@@ -687,7 +687,11 @@ mod tests {
             other => panic!("expected OpenBeside, got {other:?}"),
         }
         assert!(dispatch_with_anchor("focus_self", serde_json::json!({}), None).is_err());
-        assert!(tool_definitions().iter().any(|d| d.name == "open_beside_me"));
+        assert!(
+            tool_definitions()
+                .iter()
+                .any(|d| d.name == "open_beside_me")
+        );
         assert!(tool_definitions().iter().any(|d| d.name == "focus_self"));
     }
 

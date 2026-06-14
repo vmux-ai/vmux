@@ -285,9 +285,9 @@ use crate::{LayoutSpawnRequest, event::PANE_GAP_PX};
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::ecs::message::{MessageReader, MessageWriter, Messages};
 #[cfg(not(target_arch = "wasm32"))]
-use bevy::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
 use bevy::ecs::relationship::Relationship;
+#[cfg(not(target_arch = "wasm32"))]
+use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 #[cfg(not(target_arch = "wasm32"))]
