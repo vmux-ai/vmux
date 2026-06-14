@@ -652,7 +652,7 @@ mod tests {
         let request_id = AgentRequestId::new();
         assert!(pending.lock().await.remove(&request_id).is_none());
 
-        let _ = AgentQuery::ReadLayout;
+        let _ = AgentQuery::ReadLayout { anchor: None };
     }
 
     #[tokio::test]

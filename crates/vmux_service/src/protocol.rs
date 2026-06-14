@@ -30,6 +30,14 @@ pub enum AgentShellMode {
     Active,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AgentPaneDirection {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentCommand {
     AppCommand {
@@ -81,6 +89,14 @@ pub enum AgentCommand {
         space_id: Option<String>,
         name: Option<String>,
     },
+    OpenBeside {
+        anchor: ProcessId,
+        direction: AgentPaneDirection,
+        url: String,
+    },
+    FocusSelf {
+        anchor: ProcessId,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -96,7 +112,7 @@ pub enum AgentCommandResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentQuery {
-    ReadLayout,
+    ReadLayout { anchor: Option<ProcessId> },
     GetSettings,
     ListSpaces,
 }
@@ -134,6 +150,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::SpaceCommand { command, .. } if command.trim().is_empty() => {
             Err("space_command.command is empty")
+        }
+        AgentCommand::OpenBeside { url, .. } if url.trim().is_empty() => {
+            Err("open_beside_me.url is empty")
         }
         _ => Ok(()),
     }
@@ -453,11 +472,32 @@ mod tests {
 
     #[test]
     fn agent_query_read_layout_rkyv_round_trip() {
-        let q = AgentQuery::ReadLayout;
+        let q = AgentQuery::ReadLayout { anchor: None };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
         let recovered: AgentQuery =
             rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
-        assert_eq!(recovered, AgentQuery::ReadLayout);
+        assert_eq!(recovered, AgentQuery::ReadLayout { anchor: None });
+    }
+
+    #[test]
+    fn open_beside_round_trips_and_validates() {
+        let cmd = AgentCommand::OpenBeside {
+            anchor: ProcessId::new(),
+            direction: AgentPaneDirection::Right,
+            url: "vmux://terminal/".into(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
+        let back: AgentCommand =
+            rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, cmd);
+        assert!(validate_agent_command(&cmd).is_ok());
+
+        let empty = AgentCommand::OpenBeside {
+            anchor: ProcessId::new(),
+            direction: AgentPaneDirection::Right,
+            url: "  ".into(),
+        };
+        assert!(validate_agent_command(&empty).is_err());
     }
 
     #[test]

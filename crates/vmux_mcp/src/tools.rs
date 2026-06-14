@@ -334,7 +334,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 pub fn dispatch_from_tool_call(name: &str, arguments: Value) -> Result<DispatchTarget, String> {
     if name == "read_layout" {
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::ReadLayout,
+            vmux_service::protocol::AgentQuery::ReadLayout { anchor: None },
         ));
     }
     if name == "update_layout" {
@@ -595,7 +595,7 @@ mod tests {
         let target = dispatch_from_tool_call("read_layout", serde_json::json!({})).unwrap();
         assert!(matches!(
             target,
-            DispatchTarget::Query(AgentQuery::ReadLayout)
+            DispatchTarget::Query(AgentQuery::ReadLayout { .. })
         ));
     }
 

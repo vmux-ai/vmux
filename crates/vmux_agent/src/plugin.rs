@@ -139,6 +139,7 @@ impl Plugin for AgentPlugin {
                 (
                     forward_history_open_intent,
                     handle_agent_commands,
+                    handle_agent_self_commands,
                     handle_agent_queries,
                     detect_agent_session_process_exit,
                 )
@@ -439,6 +440,9 @@ fn handle_agent_commands(
                     });
                 AgentCommandResult::Ok
             }
+            ServiceAgentCommand::OpenBeside { .. } | ServiceAgentCommand::FocusSelf { .. } => {
+                continue;
+            }
         };
         if let Some(service) = service.as_ref() {
             service.0.send(ClientMessage::AgentCommandResponse {
@@ -446,6 +450,73 @@ fn handle_agent_commands(
                 result,
             });
         }
+    }
+}
+
+fn resolve_self_pane(
+    anchor: ProcessId,
+    agent_terms: &Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
+    child_of_q: &Query<&ChildOf>,
+) -> Option<(Entity, Entity)> {
+    use bevy::ecs::relationship::Relationship;
+    let (term, _, term_co) = agent_terms.iter().find(|(_, pid, _)| **pid == anchor)?;
+    let stack = term_co.get();
+    let pane = child_of_q.get(stack).ok()?.get();
+    Some((term, pane))
+}
+
+fn handle_agent_self_commands(
+    mut reader: MessageReader<AgentCommandRequest>,
+    agent_terms: Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
+    child_of_q: Query<&ChildOf>,
+    mut open_beside_writer: MessageWriter<vmux_layout::OpenBesideRequest>,
+    mut commands: Commands,
+    service: Option<Res<ServiceClient>>,
+) {
+    use vmux_service::protocol::{AgentCommandResult, AgentPaneDirection, ClientMessage};
+    let Some(service) = service else {
+        for _ in reader.read() {}
+        return;
+    };
+    for request in reader.read() {
+        let result = match &request.command {
+            ServiceAgentCommand::OpenBeside {
+                anchor,
+                direction,
+                url,
+            } => match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
+                None => AgentCommandResult::Error("self process not found".to_string()),
+                Some((_, pane)) => {
+                    let dir = match direction {
+                        AgentPaneDirection::Top => vmux_command::open::PaneDirection::Top,
+                        AgentPaneDirection::Right => vmux_command::open::PaneDirection::Right,
+                        AgentPaneDirection::Bottom => vmux_command::open::PaneDirection::Bottom,
+                        AgentPaneDirection::Left => vmux_command::open::PaneDirection::Left,
+                    };
+                    open_beside_writer.write(vmux_layout::OpenBesideRequest {
+                        pane,
+                        direction: dir,
+                        url: url.clone(),
+                        request_id: request.request_id.0,
+                    });
+                    AgentCommandResult::Ok
+                }
+            },
+            ServiceAgentCommand::FocusSelf { anchor } => {
+                match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
+                    None => AgentCommandResult::Error("self process not found".to_string()),
+                    Some((term, _)) => {
+                        vmux_core::focus_pane_entity(term, &mut commands, &child_of_q);
+                        AgentCommandResult::Ok
+                    }
+                }
+            }
+            _ => continue,
+        };
+        service.0.send(ClientMessage::AgentCommandResponse {
+            request_id: request.request_id,
+            result,
+        });
     }
 }
 
@@ -558,10 +629,10 @@ fn handle_agent_queries(
 
     for request in reader.read() {
         match request.query {
-            AgentQuery::ReadLayout => {
+            AgentQuery::ReadLayout { anchor } => {
                 layout_snapshot_writer.write(vmux_layout::reconcile::LayoutSnapshotRequest {
                     request_id: request.request_id.0,
-                    anchor: None,
+                    anchor,
                 });
             }
             AgentQuery::GetSettings => {
@@ -1296,6 +1367,7 @@ mod tests {
             .add_message::<vmux_layout::BrowserGoBackRequest>()
             .add_message::<vmux_layout::BrowserGoForwardRequest>()
             .add_message::<vmux_layout::OpenInNewStackRequest>()
+            .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
             .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
             .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
