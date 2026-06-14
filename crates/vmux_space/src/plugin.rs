@@ -65,7 +65,12 @@ impl Plugin for SpacePlugin {
                 Update,
                 crate::snapshot_updater::update_spaces_snapshot
                     .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
-            );
+            )
+            .add_systems(
+                Startup,
+                reconcile_space_overrides.after(vmux_setting::SettingsLoadSet),
+            )
+            .add_systems(Update, reconcile_space_overrides);
     }
 }
 
@@ -535,6 +540,42 @@ fn respond_spaces_spawn(
             .spawn(crate::spaces::Spaces::new(&mut meshes, &mut webview_mt))
             .id();
         commands.entity(entity).insert(ChildOf(req.target_stack));
+    }
+}
+
+pub(crate) fn seed_missing_overrides(
+    spaces: &mut std::collections::BTreeMap<String, vmux_setting::SpaceOverrides>,
+    registry: &SpaceRegistry,
+) -> bool {
+    let mut added = false;
+    for space in &registry.spaces {
+        if !spaces.contains_key(&space.id) {
+            spaces.insert(space.id.clone(), vmux_setting::SpaceOverrides::default());
+            added = true;
+        }
+    }
+    added
+}
+
+fn reconcile_space_overrides(
+    settings: Option<ResMut<vmux_setting::AppSettings>>,
+    active: Option<Res<ActiveSpace>>,
+    mut writes: MessageWriter<vmux_setting::SettingsWriteRequest>,
+) {
+    let (Some(mut settings), Some(active)) = (settings, active) else {
+        return;
+    };
+    if !(settings.is_changed() || active.is_changed()) {
+        return;
+    }
+    let registry = read_space_registry_from(&profile::shared_data_dir());
+    if seed_missing_overrides(&mut settings.spaces, &registry) {
+        match vmux_setting::serialize_settings_to_ron(&settings) {
+            Ok(ron_bytes) => {
+                writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
+            }
+            Err(e) => bevy::log::warn!("reconcile_space_overrides: serialize failed: {e}"),
+        }
     }
 }
 
@@ -1055,5 +1096,48 @@ mod tests {
         assert!(focus.tab.is_some());
         assert!(focus.pane.is_some());
         assert!(focus.stack.is_some());
+    }
+
+    #[test]
+    fn seed_adds_missing_and_reports_change() {
+        let mut spaces = std::collections::BTreeMap::new();
+        let registry = crate::model::SpaceRegistry {
+            spaces: vec![
+                crate::model::SpaceRecord {
+                    id: "a".into(),
+                    name: "A".into(),
+                    profile: "P".into(),
+                },
+                crate::model::SpaceRecord {
+                    id: "b".into(),
+                    name: "B".into(),
+                    profile: "P".into(),
+                },
+            ],
+        };
+        assert!(seed_missing_overrides(&mut spaces, &registry));
+        assert_eq!(spaces.len(), 2);
+        assert!(spaces.contains_key("a") && spaces.contains_key("b"));
+    }
+
+    #[test]
+    fn seed_preserves_existing_and_reports_no_change() {
+        let mut spaces = std::collections::BTreeMap::new();
+        spaces.insert(
+            "a".into(),
+            vmux_setting::SpaceOverrides {
+                startup_url: Some("x".into()),
+                startup_dir: None,
+            },
+        );
+        let registry = crate::model::SpaceRegistry {
+            spaces: vec![crate::model::SpaceRecord {
+                id: "a".into(),
+                name: "A".into(),
+                profile: "P".into(),
+            }],
+        };
+        assert!(!seed_missing_overrides(&mut spaces, &registry));
+        assert_eq!(spaces["a"].startup_url.as_deref(), Some("x"));
     }
 }
