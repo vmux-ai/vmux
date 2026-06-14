@@ -41,7 +41,8 @@ pub(crate) struct SplashPlugin;
 impl Plugin for SplashPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<SplashState>()
-            .add_systems(Startup, show_splash);
+            .add_systems(Startup, show_splash)
+            .add_systems(Last, dismiss_splash);
     }
 }
 
@@ -151,6 +152,46 @@ fn show_splash(mut state: NonSendMut<SplashState>) {
 
     state.window = Some(panel);
     state.created_at = Some(Instant::now());
+}
+
+fn dismiss_splash(
+    mut state: NonSendMut<SplashState>,
+    window_q: Query<&Window, With<bevy::window::PrimaryWindow>>,
+) {
+    use objc2::ClassType;
+    use objc2_app_kit::{NSAnimatablePropertyContainer, NSWindow};
+
+    if state.window.is_none() {
+        return;
+    }
+    let visible = window_q.single().map(|w| w.visible).unwrap_or(false);
+    let elapsed = state.created_at.map(|t| t.elapsed()).unwrap_or_default();
+    let action = splash_decision(visible, state.dismissed, elapsed);
+
+    match action {
+        SplashAction::None => {
+            let close = state
+                .fade_started
+                .is_some_and(|t| t.elapsed() >= std::time::Duration::from_millis(280));
+            if close {
+                if let Some(panel) = state.window.take() {
+                    let window: &NSWindow = panel.as_super();
+                    window.close();
+                }
+            }
+        }
+        SplashAction::Fade | SplashAction::Force => {
+            if action == SplashAction::Force {
+                warn!("splash: window did not reveal within timeout; dismissing splash");
+            }
+            if let Some(panel) = state.window.as_ref() {
+                let window: &NSWindow = panel.as_super();
+                window.animator().setAlphaValue(0.0);
+            }
+            state.dismissed = true;
+            state.fade_started = Some(Instant::now());
+        }
+    }
 }
 
 #[cfg(test)]
