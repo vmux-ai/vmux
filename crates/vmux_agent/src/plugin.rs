@@ -322,7 +322,9 @@ fn handle_agent_commands(
                         let cwd_path = cwd_opt.unwrap_or_else(|| {
                             active_space
                                 .as_ref()
-                                .map(|s| space_dir(&s.record.id))
+                                .map(|s| {
+                                    vmux_setting::resolve_startup_dir(&sp.settings, &s.record.id)
+                                })
                                 .unwrap_or_else(default_space_dir)
                         });
                         if command.trim().is_empty() {

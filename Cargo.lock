@@ -9729,6 +9729,7 @@ dependencies = [
  "rfd",
  "rkyv",
  "serde",
+ "tempfile",
  "tracing",
  "unicode-width",
  "url",

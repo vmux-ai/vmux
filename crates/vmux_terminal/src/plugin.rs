@@ -367,7 +367,7 @@ fn spawn_layout_requested_content(
     for request in reader.read() {
         match request {
             LayoutSpawnRequest::Terminal { stack } => {
-                let cwd = vmux_space::cwd::space_dir(&active_space.record.id);
+                let cwd = vmux_setting::resolve_startup_dir(&settings, &active_space.record.id);
                 let terminal = commands
                     .spawn((
                         new_terminal_bundle_with_cwd(
@@ -472,7 +472,10 @@ fn open_terminal_page(
     let cwd = if let Some(cwd) = cwd_param.as_deref() {
         vmux_space::cwd::valid_cwd(cwd)?
     } else {
-        Some(vmux_space::cwd::space_dir(&active_space.record.id))
+        Some(vmux_setting::resolve_startup_dir(
+            &settings,
+            &active_space.record.id,
+        ))
     };
     clear_stack_children(task.stack, children_q, commands);
     let title = cwd
@@ -3058,6 +3061,46 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn open_terminal_page_uses_per_space_startup_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = test_settings();
+        settings.spaces.insert(
+            "space-1".into(),
+            vmux_setting::SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(dir.path().to_string_lossy().into()),
+            },
+        );
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(settings)
+            .init_resource::<vmux_space::spaces::ActiveSpace>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_terminal_page_open);
+
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://terminal".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        let mut launches = app
+            .world_mut()
+            .query_filtered::<&crate::launch::TerminalLaunch, With<Terminal>>();
+        let launch = launches.iter(app.world()).next().expect("terminal spawned");
+        assert_eq!(launch.cwd, dir.path().to_string_lossy());
     }
 
     #[test]
