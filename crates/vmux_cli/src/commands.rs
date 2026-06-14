@@ -13,6 +13,9 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    Mcp,
+    Mcp {
+        #[arg(long)]
+        anchor: Option<String>,
+    },
     Service(service::ServiceArgs),
 }
