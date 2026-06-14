@@ -916,7 +916,10 @@ mod tests {
             back.spaces["work"].startup_url.as_deref(),
             Some("https://work.example")
         );
-        assert_eq!(back.spaces["work"].startup_dir.as_deref(), Some("/tmp/work"));
+        assert_eq!(
+            back.spaces["work"].startup_dir.as_deref(),
+            Some("/tmp/work")
+        );
     }
 
     #[test]

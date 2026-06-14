@@ -473,7 +473,7 @@ fn open_terminal_page(
         vmux_space::cwd::valid_cwd(cwd)?
     } else {
         Some(vmux_setting::resolve_startup_dir(
-            &settings,
+            settings,
             &active_space.record.id,
         ))
     };
