@@ -518,6 +518,7 @@ mod tests {
                         kind: "browser".into(),
                         is_loading: false,
                         favicon_url: String::new(),
+                        is_self: false,
                     }],
                 },
             }],

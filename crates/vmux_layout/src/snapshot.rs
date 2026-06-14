@@ -17,6 +17,7 @@ pub fn build_layout_snapshot(
     pane_sizes_q: &Query<&PaneSize>,
     zoomed_q: &Query<&Zoomed>,
     focused: &FocusedStack,
+    self_stack: Option<Entity>,
 ) -> LayoutSnapshot {
     let active_tab = focused.tab;
     let tabs = tabs_q
@@ -33,6 +34,7 @@ pub fn build_layout_snapshot(
                         stacks_q,
                         pane_sizes_q,
                         zoomed_leaf,
+                        self_stack,
                     )
                 })
                 .unwrap_or(LayoutNode::Pane {
@@ -68,6 +70,7 @@ fn build_node(
     stacks_q: &Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
     pane_sizes_q: &Query<&PaneSize>,
     zoomed_leaf: Option<Entity>,
+    self_stack: Option<Entity>,
 ) -> LayoutNode {
     if let Ok((split_entity, split, children)) = splits_q.get(entity) {
         let child_entities: Vec<Entity> = children.map(|c| c.iter().collect()).unwrap_or_default();
@@ -90,6 +93,7 @@ fn build_node(
                     stacks_q,
                     pane_sizes_q,
                     zoomed_leaf,
+                    self_stack,
                 )
             })
             .collect();
@@ -108,7 +112,9 @@ fn build_node(
             .map(|c| {
                 c.iter()
                     .filter_map(|child| stacks_q.get(child).ok())
-                    .map(|(stack_entity, _stack_children, page)| build_stack(stack_entity, page))
+                    .map(|(stack_entity, _stack_children, page)| {
+                        build_stack(stack_entity, page, self_stack)
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -125,7 +131,11 @@ fn build_node(
     }
 }
 
-fn build_stack(stack_entity: Entity, page: Option<&PageMetadata>) -> StackDto {
+fn build_stack(
+    stack_entity: Entity,
+    page: Option<&PageMetadata>,
+    self_stack: Option<Entity>,
+) -> StackDto {
     let url = page.map(|p| p.url.clone()).unwrap_or_default();
     let kind = if url.starts_with("vmux://terminal/") {
         "terminal"
@@ -139,6 +149,7 @@ fn build_stack(stack_entity: Entity, page: Option<&PageMetadata>) -> StackDto {
         kind: kind.to_string(),
         is_loading: false,
         favicon_url: page.map(|p| p.favicon_url.clone()).unwrap_or_default(),
+        is_self: Some(stack_entity) == self_stack,
     }
 }
 
@@ -155,6 +166,55 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(FocusedStack::default());
         app
+    }
+
+    #[test]
+    fn self_stack_is_marked_is_self() {
+        use bevy::ecs::system::SystemState;
+        let mut app = make_app();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
+        let leaf = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(leaf)))
+            .id();
+        app.world_mut().entity_mut(stack).insert(PageMetadata {
+            url: "vmux://terminal/x".into(),
+            title: String::new(),
+            favicon_url: String::new(),
+            bg_color: None,
+        });
+
+        let world = app.world_mut();
+        let mut state: SystemState<(
+            Query<(Entity, &LayoutTab, Option<&Children>)>,
+            Query<(Entity, &PaneSplit, Option<&Children>), With<Pane>>,
+            Query<(Entity, Option<&Children>), (With<Pane>, Without<PaneSplit>)>,
+            Query<(Entity, Option<&Children>, Option<&PageMetadata>), With<Stack>>,
+            Query<&PaneSize>,
+            Query<&Zoomed>,
+            Res<FocusedStack>,
+        )> = SystemState::new(world);
+        let (tabs_q, splits_q, leaves_q, stacks_q, pane_sizes_q, zoomed_q, focused) =
+            state.get(world).unwrap();
+        let snap = build_layout_snapshot(
+            &tabs_q,
+            &splits_q,
+            &leaves_q,
+            &stacks_q,
+            &pane_sizes_q,
+            &zoomed_q,
+            &focused,
+            Some(stack),
+        );
+
+        let LayoutNode::Pane { stacks, .. } = &snap.tabs[0].root else {
+            panic!("expected pane");
+        };
+        assert!(stacks[0].is_self);
     }
 
     #[test]
@@ -197,6 +257,7 @@ mod tests {
                         &pane_sizes_q,
                         &zoomed_q,
                         &focused,
+                        None,
                     )
                 },
             )
@@ -249,6 +310,7 @@ mod tests {
                         &pane_sizes_q,
                         &zoomed_q,
                         &focused,
+                        None,
                     )
                 },
             )
@@ -282,6 +344,7 @@ mod tests {
                         &pane_sizes,
                         &zoomed_q,
                         &focused,
+                        None,
                     )
                 },
             )
@@ -336,6 +399,7 @@ mod tests {
                         &pane_sizes,
                         &zoomed_q,
                         &focused,
+                        None,
                     )
                 },
             )
@@ -402,6 +466,7 @@ mod tests {
                         &pane_sizes,
                         &zoomed_q,
                         &focused,
+                        None,
                     )
                 },
             )
@@ -478,6 +543,7 @@ mod tests {
                         &pane_sizes_q,
                         &zoomed_q,
                         &focused,
+                        None,
                     )
                 },
             )

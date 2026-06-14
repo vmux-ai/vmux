@@ -287,6 +287,8 @@ use bevy::ecs::message::{MessageReader, MessageWriter, Messages};
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
+use bevy::ecs::relationship::Relationship;
+#[cfg(not(target_arch = "wasm32"))]
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_history::LastActivatedAt;
@@ -309,6 +311,7 @@ pub struct LayoutApplyResponse {
 #[derive(Message, Clone)]
 pub struct LayoutSnapshotRequest {
     pub request_id: [u8; 16],
+    pub anchor: Option<vmux_core::ProcessId>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -328,9 +331,16 @@ pub fn serve_snapshot_requests(
     pane_sizes_q: Query<&PaneSize>,
     zoomed_q: Query<&crate::pane::Zoomed>,
     focused: Res<crate::stack::FocusedStack>,
+    agent_terms: Query<(&vmux_core::ProcessId, &ChildOf), With<vmux_core::agent::AgentSession>>,
     mut writer: MessageWriter<LayoutSnapshotResponse>,
 ) {
     for request in reader.read() {
+        let self_stack = request.anchor.and_then(|anchor| {
+            agent_terms
+                .iter()
+                .find(|(pid, _)| **pid == anchor)
+                .map(|(_, co)| co.get())
+        });
         let snapshot = crate::snapshot::build_layout_snapshot(
             &tabs_q,
             &splits_q,
@@ -339,6 +349,7 @@ pub fn serve_snapshot_requests(
             &pane_sizes_q,
             &zoomed_q,
             &focused,
+            self_stack,
         );
         writer.write(LayoutSnapshotResponse {
             request_id: request.request_id,
@@ -391,6 +402,7 @@ fn run_build_snapshot(world: &mut World) -> LayoutSnapshot {
         &pane_sizes,
         &zoomed,
         &focused,
+        None,
     )
 }
 
@@ -1847,6 +1859,7 @@ mod tests {
             .resource_mut::<Messages<LayoutSnapshotRequest>>()
             .write(LayoutSnapshotRequest {
                 request_id: [7; 16],
+                anchor: None,
             });
         app.update();
 

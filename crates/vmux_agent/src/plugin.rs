@@ -561,6 +561,7 @@ fn handle_agent_queries(
             AgentQuery::ReadLayout => {
                 layout_snapshot_writer.write(vmux_layout::reconcile::LayoutSnapshotRequest {
                     request_id: request.request_id.0,
+                    anchor: None,
                 });
             }
             AgentQuery::GetSettings => {
