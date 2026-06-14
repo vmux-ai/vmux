@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
 use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_core::agent::{
-    AgentKind, AgentProviderTargetKind, McpServerConfig, PageAgentAttachDefaultRequest,
+    AgentKind, AgentProviderTargetKind, PageAgentAttachDefaultRequest,
     PageAgentAttachRequest, PageAgentSpawnDefaultRequest, PageAgentSpawnStackRequest,
     RestartAgentPty, SpawnAgentInStackRequest,
 };
@@ -1188,6 +1188,29 @@ fn respond_page_agent_attach_default(
     }
 }
 
+fn rebuilt_args_env_for_restart(
+    launch: &TerminalLaunch,
+    strategy: &dyn crate::client::cli::strategy::CliAgentStrategy,
+    session_id: Option<&str>,
+    new_id: ProcessId,
+) -> (Vec<String>, Vec<(String, String)>) {
+    let Ok(mcp_cfg) = crate::mcp::resolve(std::path::Path::new(&launch.cwd), new_id) else {
+        return (launch.args.clone(), launch.env.clone());
+    };
+    let args = strategy.build_args(&mcp_cfg, session_id);
+    let fresh = strategy.build_env(&mcp_cfg);
+    let fresh_keys: std::collections::HashSet<String> =
+        fresh.iter().map(|(k, _)| k.clone()).collect();
+    let mut env: Vec<(String, String)> = launch
+        .env
+        .iter()
+        .filter(|(k, _)| !fresh_keys.contains(k))
+        .cloned()
+        .collect();
+    env.extend(fresh);
+    (args, env)
+}
+
 fn handle_restart_agent_pty(
     mut reader: MessageReader<RestartAgentPty>,
     mut q: Query<(
@@ -1210,31 +1233,27 @@ fn handle_restart_agent_pty(
         service
             .0
             .send(ClientMessage::KillProcess { process_id: *pid });
+        let new_id = ProcessId::new();
 
         let (command, args, cwd, env) = match launch.as_deref() {
             Some(l) => {
-                let mut updated_args = l.args.clone();
-                if let Some(strats) = strategies.as_deref()
-                    && let Some(strategy) = strats.get_cli(session.kind)
+                let (rebuilt_args, rebuilt_env) = match strategies
+                    .as_deref()
+                    .and_then(|s| s.get_cli(session.kind))
                 {
-                    let mcp = McpServerConfig {
-                        command: l.command.clone(),
-                        args: vec![],
-                        cwd: None,
-                    };
-                    updated_args = strategy.build_args(&mcp, session_id.map(|s| s.0.as_str()));
-                }
-                (
-                    l.command.clone(),
-                    updated_args,
-                    l.cwd.clone(),
-                    l.env.clone(),
-                )
+                    Some(strategy) => rebuilt_args_env_for_restart(
+                        l,
+                        strategy,
+                        session_id.map(|s| s.0.as_str()),
+                        new_id,
+                    ),
+                    None => (l.args.clone(), l.env.clone()),
+                };
+                (l.command.clone(), rebuilt_args, l.cwd.clone(), rebuilt_env)
             }
             None => (String::new(), vec![], String::new(), Vec::new()),
         };
 
-        let new_id = ProcessId::new();
         service.0.send(ClientMessage::CreateProcess {
             process_id: new_id,
             command: command.clone(),
@@ -1251,6 +1270,7 @@ fn handle_restart_agent_pty(
         *pid = new_id;
         if let Some(l) = launch.as_mut() {
             l.args = args;
+            l.env = env;
         }
     }
 }
@@ -1293,6 +1313,32 @@ mod tests {
     #[test]
     fn blank_cwd_is_accepted() {
         assert_eq!(valid_cwd("").unwrap(), None);
+    }
+
+    #[test]
+    fn restart_rebuilds_args_with_new_anchor() {
+        let temp = std::env::temp_dir().join(format!("vmux-restart-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(temp.join("Cargo.toml"), b"[workspace]\n").unwrap();
+        let launch = TerminalLaunch {
+            command: "/usr/local/bin/claude".into(),
+            args: vec!["--mcp-config".into(), "OLD".into()],
+            cwd: temp.to_string_lossy().to_string(),
+            env: vec![],
+            kind: vmux_core::terminal::TerminalKind::Claude,
+        };
+        let new_id = ProcessId::new();
+        let (args, _env) = rebuilt_args_env_for_restart(
+            &launch,
+            &crate::client::cli::claude::ClaudeStrategy,
+            None,
+            new_id,
+        );
+        let _ = std::fs::remove_dir_all(&temp);
+        let joined = args.join(" ");
+        assert!(joined.contains("--anchor"), "args carry --anchor: {joined}");
+        assert!(joined.contains(&new_id.to_string()), "anchor is the new id");
+        assert!(!joined.contains("OLD"), "old args replaced");
     }
 
     #[test]
