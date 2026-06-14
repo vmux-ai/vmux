@@ -17,6 +17,9 @@ mod native_keyboard;
 mod os_menu;
 mod persistence;
 
+#[cfg(target_os = "macos")]
+mod splash;
+
 pub(crate) mod shortcut;
 mod tray;
 pub mod updater;
