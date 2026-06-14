@@ -763,6 +763,26 @@ fn direction_to_split(direction: &PaneDirection) -> PaneSplitDirection {
     }
 }
 
+fn split_leaf_into_two(
+    commands: &mut Commands,
+    active: Entity,
+    split_dir: PaneSplitDirection,
+    existing_tabs: &[Entity],
+) -> Entity {
+    let pane1 = commands
+        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
+        .id();
+    let p2 = commands
+        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
+        .id();
+    for tab in existing_tabs {
+        commands.entity(*tab).insert(ChildOf(pane1));
+    }
+    commands.entity(active).insert(split_root_bundle(split_dir));
+    commands.entity(p2).insert(LastActivatedAt::now());
+    p2
+}
+
 fn is_after_direction(direction: &PaneDirection) -> bool {
     matches!(direction, PaneDirection::Right | PaneDirection::Bottom)
 }
@@ -872,17 +892,8 @@ fn handle_open_in_pane(
                             .get(active)
                             .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                             .unwrap_or_default();
-                        let pane1 = commands
-                            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
-                            .id();
-                        let p2 = commands
-                            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
-                            .id();
-                        for tab in &existing_tabs {
-                            commands.entity(*tab).insert(ChildOf(pane1));
-                        }
-                        commands.entity(active).insert(split_root_bundle(split_dir));
-                        commands.entity(p2).insert(LastActivatedAt::now());
+                        let p2 =
+                            split_leaf_into_two(&mut commands, active, split_dir, &existing_tabs);
                         (p2, true)
                     }
                 }
@@ -892,17 +903,7 @@ fn handle_open_in_pane(
                     .get(active)
                     .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                     .unwrap_or_default();
-                let pane1 = commands
-                    .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
-                    .id();
-                let p2 = commands
-                    .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
-                    .id();
-                for tab in &existing_tabs {
-                    commands.entity(*tab).insert(ChildOf(pane1));
-                }
-                commands.entity(active).insert(split_root_bundle(split_dir));
-                commands.entity(p2).insert(LastActivatedAt::now());
+                let p2 = split_leaf_into_two(&mut commands, active, split_dir, &existing_tabs);
                 (p2, true)
             }
         };
@@ -2921,6 +2922,53 @@ mod tests {
         );
 
         assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn split_leaf_into_two_reparents_tabs_and_splits() {
+        use bevy_ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let active = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now()))
+            .id();
+        let existing = app
+            .world_mut()
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(active)))
+            .id();
+
+        let p2 = app
+            .world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      children: Query<&Children, With<Pane>>,
+                      tabq: Query<Entity, With<Stack>>| {
+                    let existing_tabs: Vec<Entity> = children
+                        .get(active)
+                        .map(|c| c.iter().filter(|&e| tabq.contains(e)).collect())
+                        .unwrap_or_default();
+                    split_leaf_into_two(
+                        &mut commands,
+                        active,
+                        PaneSplitDirection::Row,
+                        &existing_tabs,
+                    )
+                },
+            )
+            .unwrap();
+
+        let world = app.world_mut();
+        assert!(
+            world.get::<PaneSplit>(active).is_some(),
+            "active became a split root"
+        );
+        assert_ne!(
+            world.entity(existing).get::<ChildOf>().unwrap().get(),
+            active,
+            "stack reparented off active"
+        );
+        assert!(world.get::<PaneSplit>(p2).is_none(), "p2 is a leaf");
     }
 
     #[test]
