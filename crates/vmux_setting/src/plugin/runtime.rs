@@ -10,17 +10,6 @@ pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
 };
 
-pub(crate) fn update_effective_startup_url(
-    settings: Option<Res<AppSettings>>,
-    mut effective: ResMut<vmux_layout::settings::EffectiveStartupUrl>,
-) {
-    if let Some(settings) = settings.as_ref()
-        && (settings.is_changed() || effective.0.is_empty())
-    {
-        effective.0 = resolve_startup_url(settings);
-    }
-}
-
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SettingsLoadSet;
 
@@ -84,12 +73,18 @@ fn default_provider_kind() -> String {
     "vibe".to_string()
 }
 
-pub fn resolve_startup_url(settings: &AppSettings) -> String {
-    let url = settings.browser.startup_url.trim();
-    if url.is_empty() || url == "vmux://agent/" || url == "vmux://agent" {
+pub fn resolve_startup_url(settings: &AppSettings, space_id: &str) -> String {
+    let per_space = settings
+        .spaces
+        .get(space_id)
+        .and_then(|o| o.startup_url.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let chosen = per_space.unwrap_or_else(|| settings.browser.startup_url.trim());
+    if chosen.is_empty() || chosen == "vmux://agent/" || chosen == "vmux://agent" {
         default_browser_startup_url()
     } else {
-        url.to_string()
+        chosen.to_string()
     }
 }
 
@@ -726,33 +721,62 @@ mod tests {
     fn resolve_startup_url_returns_browser_override() {
         let mut s = base_settings();
         s.browser.startup_url = "vmux://services/".into();
-        assert_eq!(resolve_startup_url(&s), "vmux://services/");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "vmux://services/");
     }
 
     #[test]
     fn resolve_startup_url_defaults_to_google() {
         let s = base_settings();
-        assert_eq!(resolve_startup_url(&s), "https://www.google.com");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
     }
 
     #[test]
     fn resolve_startup_url_uses_google_for_empty_browser_url() {
         let mut s = base_settings();
         s.browser.startup_url.clear();
-        assert_eq!(resolve_startup_url(&s), "https://www.google.com");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
     }
 
     #[test]
     fn resolve_startup_url_treats_legacy_agent_default_as_google() {
         let mut s = base_settings();
         s.browser.startup_url = "vmux://agent/".into();
-        assert_eq!(resolve_startup_url(&s), "https://www.google.com");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
     }
 
     #[test]
     fn embedded_settings_default_to_google() {
         let s = load_embedded_settings();
-        assert_eq!(resolve_startup_url(&s), "https://www.google.com");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
+    }
+
+    #[test]
+    fn resolve_startup_url_prefers_per_space_override() {
+        let mut s = base_settings();
+        s.browser.startup_url = "https://global.example".into();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: Some("https://work.example".into()),
+                startup_dir: None,
+            },
+        );
+        assert_eq!(resolve_startup_url(&s, "work"), "https://work.example");
+        assert_eq!(resolve_startup_url(&s, "other"), "https://global.example");
+    }
+
+    #[test]
+    fn resolve_startup_url_blank_per_space_falls_to_global() {
+        let mut s = base_settings();
+        s.browser.startup_url = "https://global.example".into();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: Some("   ".into()),
+                startup_dir: None,
+            },
+        );
+        assert_eq!(resolve_startup_url(&s, "work"), "https://global.example");
     }
 
     #[test]
