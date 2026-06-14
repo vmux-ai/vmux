@@ -110,7 +110,7 @@ impl Plugin for VmuxPlugin {
             ));
 
         #[cfg(target_os = "macos")]
-        app.add_plugins(glass::GlassPlugin)
+        app.add_plugins((glass::GlassPlugin, splash::SplashPlugin))
             .add_systems(Last, focus_native::apply_winit_host_focus);
     }
 }
