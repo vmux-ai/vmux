@@ -53,6 +53,8 @@ impl Plugin for PanePlugin {
             .add_systems(Update, on_pane_select.in_set(ReadAppCommands))
             .add_systems(Update, handle_pane_commands.in_set(ReadAppCommands))
             .add_systems(Update, handle_open_in_pane.in_set(ReadAppCommands))
+            .add_message::<OpenBesideRequest>()
+            .add_systems(Update, handle_open_beside_requests)
             .add_systems(
                 Update,
                 handle_zoom_command
@@ -781,6 +783,41 @@ fn split_leaf_into_two(
     commands.entity(active).insert(split_root_bundle(split_dir));
     commands.entity(p2).insert(LastActivatedAt::now());
     p2
+}
+
+#[derive(Message, Clone)]
+pub struct OpenBesideRequest {
+    pub pane: Entity,
+    pub direction: PaneDirection,
+    pub url: String,
+    pub request_id: [u8; 16],
+}
+
+pub fn handle_open_beside_requests(
+    mut reader: MessageReader<OpenBesideRequest>,
+    pane_children: Query<&Children, With<Pane>>,
+    tab_filter: Query<Entity, With<Stack>>,
+    mut commands: Commands,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut new_stack_ctx: ResMut<NewStackContext>,
+) {
+    for req in reader.read() {
+        let existing_tabs: Vec<Entity> = pane_children
+            .get(req.pane)
+            .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+            .unwrap_or_default();
+        let split_dir = direction_to_split(&req.direction);
+        let p2 = split_leaf_into_two(&mut commands, req.pane, split_dir, &existing_tabs);
+        let new_stack = commands
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(p2)))
+            .id();
+        open_or_prompt_stack(
+            new_stack,
+            Some(req.url.clone()),
+            &mut new_stack_ctx,
+            &mut page_open_requests,
+        );
+    }
 }
 
 fn is_after_direction(direction: &PaneDirection) -> bool {
@@ -2969,6 +3006,38 @@ mod tests {
             "stack reparented off active"
         );
         assert!(world.get::<PaneSplit>(p2).is_none(), "p2 is a leaf");
+    }
+
+    #[test]
+    fn open_beside_splits_the_given_pane() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OpenBesideRequest>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .add_systems(Update, handle_open_beside_requests);
+        let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
+        let anchor_pane = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        app.world_mut()
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(anchor_pane)));
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: anchor_pane,
+                direction: PaneDirection::Right,
+                url: "vmux://terminal/".into(),
+                request_id: [0u8; 16],
+            });
+        app.update();
+
+        let world = app.world_mut();
+        assert!(world.get::<PaneSplit>(anchor_pane).is_some());
+        let kids = world.entity(anchor_pane).get::<Children>().unwrap();
+        assert_eq!(kids.iter().count(), 2);
     }
 
     #[test]
