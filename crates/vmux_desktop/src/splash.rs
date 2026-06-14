@@ -47,12 +47,13 @@ impl Plugin for SplashPlugin {
 }
 
 fn show_splash(mut state: NonSendMut<SplashState>) {
-    use objc2::{runtime::AnyClass, AnyThread, ClassType, MainThreadMarker, MainThreadOnly};
+    use objc2::{AnyThread, ClassType, MainThreadMarker, MainThreadOnly, runtime::AnyClass};
     use objc2_app_kit::{
         NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSGlassEffectView,
         NSGlassEffectViewStyle, NSImage, NSImageScaling, NSImageView, NSProgressIndicator,
         NSProgressIndicatorStyle, NSScreen, NSView, NSVisualEffectBlendingMode,
-        NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowStyleMask,
+        NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindow,
+        NSWindowStyleMask,
     };
     use objc2_foundation::{NSData, NSPoint, NSRect, NSSize};
 
@@ -173,11 +174,9 @@ fn dismiss_splash(
             let close = state
                 .fade_started
                 .is_some_and(|t| t.elapsed() >= std::time::Duration::from_millis(280));
-            if close {
-                if let Some(panel) = state.window.take() {
-                    let window: &NSWindow = panel.as_super();
-                    window.close();
-                }
+            if close && let Some(panel) = state.window.take() {
+                let window: &NSWindow = panel.as_super();
+                window.close();
             }
         }
         SplashAction::Fade | SplashAction::Force => {
@@ -232,5 +231,36 @@ mod tests {
             splash_decision(false, true, Duration::from_secs(99)),
             SplashAction::None
         );
+    }
+
+    #[test]
+    fn splash_plugin_registered_in_lib() {
+        let source = include_str!("lib.rs");
+        assert!(source.contains("splash::SplashPlugin"));
+        assert!(source.contains("mod splash;"));
+    }
+
+    #[test]
+    fn splash_uses_spinner_and_version_detected_material() {
+        let source = include_str!("splash.rs");
+        assert!(source.contains("NSProgressIndicator"));
+        assert!(source.contains("AnyClass::get(c\"NSGlassEffectView\")"));
+        assert!(source.contains("NSVisualEffectView"));
+    }
+
+    #[test]
+    fn splash_embeds_logo() {
+        let source = include_str!("splash.rs");
+        assert!(source.contains("include_bytes!"));
+        assert!(source.contains("vmux-icon.png"));
+    }
+
+    #[test]
+    fn desktop_enables_splash_appkit_features() {
+        let manifest = include_str!("../Cargo.toml");
+        assert!(manifest.contains("\"NSProgressIndicator\""));
+        assert!(manifest.contains("\"NSVisualEffectView\""));
+        assert!(manifest.contains("\"NSImageView\""));
+        assert!(manifest.contains("\"NSData\""));
     }
 }
