@@ -2,6 +2,7 @@ use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use vmux_browser::HostFocusIntent;
+use vmux_layout::stack::FocusedStack;
 
 /// When the active page is a terminal (OSR) or there is none, the winit host window must own
 /// macOS first-responder so Bevy delivers keys (terminal → PTY, layout shortcuts). A previously
@@ -15,9 +16,15 @@ use vmux_browser::HostFocusIntent;
 pub(crate) fn apply_winit_host_focus(
     _non_send: NonSendMarker,
     intent: Res<HostFocusIntent>,
+    focus: Res<FocusedStack>,
     primary: Query<Entity, With<PrimaryWindow>>,
     mut reclaimed: Local<bool>,
+    mut last_stack: Local<Option<Entity>>,
 ) {
+    if focus.stack != *last_stack {
+        *last_stack = focus.stack;
+        *reclaimed = false;
+    }
     if *intent != HostFocusIntent::WinitHost {
         *reclaimed = false;
         return;
