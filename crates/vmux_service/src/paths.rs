@@ -36,6 +36,11 @@ pub fn log_path() -> PathBuf {
     profile_file("log")
 }
 
+/// Path to the per-profile desktop crash log: vmux-{profile}-crash.log
+pub fn crash_log_path() -> PathBuf {
+    service_dir().join(format!("vmux-{}-crash.log", current_profile()))
+}
+
 /// LaunchAgent label for the given profile.
 ///
 /// `release` drops the suffix; `local` expands to the build-time git SHA so
@@ -224,6 +229,16 @@ mod tests {
                 "expected {name} to start with {suffix}"
             );
         }
+    }
+
+    #[test]
+    fn crash_log_path_shares_profile_suffix() {
+        let p = crash_log_path();
+        let name = p.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("vmux-"), "got {name}");
+        assert!(name.ends_with("-crash.log"), "got {name}");
+        assert!(name.contains(current_profile()), "got {name}");
+        assert_eq!(p.parent().unwrap(), service_dir());
     }
 
     #[test]
