@@ -2,7 +2,7 @@ use serde::Serialize;
 use serde_json::Value;
 use vmux_command::command::AppCommand;
 use vmux_macro::McpTool;
-use vmux_service::protocol::{AgentCommand, AgentShellMode};
+use vmux_service::protocol::AgentCommand;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,21 +17,6 @@ pub enum McpParamTool {
     #[mcp(description = "Open the Vmux command bar.")]
     OpenCommandBar {
         #[mcp(enum_values = ["default", "commands", "path"])]
-        mode: Option<String>,
-    },
-    #[mcp(
-        description = "Spawn a process in a new visible Vmux tab. If `command` is omitted, the user's default shell is launched. If `args` is provided as a single string, it is split on whitespace. If `cwd` is omitted, the active space's directory (~/.vmux/<space>) is used. Useful for opening claude/vibe/codex/nvim/etc. directly without going through a shell."
-    )]
-    NewTerminalTab {
-        cwd: Option<String>,
-        command: Option<String>,
-        args: Option<String>,
-    },
-    #[mcp(description = "Run a shell command in a visible Vmux terminal.")]
-    RunShell {
-        command: String,
-        cwd: Option<String>,
-        #[mcp(enum_values = ["new_tab", "active"])]
         mode: Option<String>,
     },
     #[mcp(
@@ -88,34 +73,6 @@ impl McpParamTool {
                 Ok(AgentCommand::AppCommand {
                     id: id.to_string(),
                     args_json: String::new(),
-                })
-            }
-            McpParamTool::NewTerminalTab { cwd, command, args } => {
-                let args_vec = args
-                    .unwrap_or_default()
-                    .split_whitespace()
-                    .map(|s| s.to_string())
-                    .collect();
-                Ok(AgentCommand::NewTerminalTab {
-                    cwd: cwd.unwrap_or_default(),
-                    command: command.unwrap_or_default(),
-                    args: args_vec,
-                    env: vec![],
-                })
-            }
-            McpParamTool::RunShell { command, cwd, mode } => {
-                if command.trim().is_empty() {
-                    return Err("run_shell.command is empty".to_string());
-                }
-                let mode = match mode.as_deref().unwrap_or("new_tab") {
-                    "new_tab" => AgentShellMode::NewTab,
-                    "active" => AgentShellMode::Active,
-                    other => return Err(format!("unknown shell mode: {other}")),
-                };
-                Ok(AgentCommand::RunShell {
-                    command,
-                    cwd: cwd.unwrap_or_default(),
-                    mode,
                 })
             }
             McpParamTool::BrowserNavigate { url, pane } => {
@@ -554,10 +511,16 @@ mod tests {
     fn list_tools_includes_auto_generated_and_handwritten() {
         let names = tool_names();
 
-        for hand in ["open_command_bar", "new_terminal_tab", "run_shell"] {
+        for hand in ["open_command_bar", "open_page", "run", "read_terminal"] {
             assert!(
                 names.contains(&hand.to_string()),
                 "missing hand-written {hand}"
+            );
+        }
+        for removed_tool in ["new_terminal_tab", "run_shell", "in_pane"] {
+            assert!(
+                !names.contains(&removed_tool.to_string()),
+                "superseded tool {removed_tool} should no longer appear in MCP tools"
             );
         }
         for auto in ["terminal_clear", "browser_reload"] {
@@ -616,11 +579,6 @@ mod tests {
     #[test]
     fn browser_navigate_missing_url_returns_error() {
         assert!(dispatch_from_tool_call("browser_navigate", serde_json::json!({})).is_err());
-    }
-
-    #[test]
-    fn empty_run_shell_command_returns_tool_error() {
-        assert!(dispatch_from_tool_call("run_shell", serde_json::json!({"command": ""})).is_err());
     }
 
     #[test]
@@ -685,8 +643,6 @@ mod tests {
             .collect();
         for expected in [
             "open_command_bar",
-            "new_terminal_tab",
-            "run_shell",
             "browser_navigate",
             "terminal_send",
             "select_tab",
@@ -985,43 +941,14 @@ mod tests {
     #[test]
     fn open_command_tools_are_exposed() {
         let names = tool_names();
-        for expected in [
-            "in_place",
-            "in_new_stack",
-            "in_pane",
-            "in_new_tab",
-            "in_new_space",
-        ] {
+        for expected in ["in_place", "in_new_stack", "in_new_tab", "in_new_space"] {
             assert!(
                 names.contains(&expected.to_string()),
                 "missing OpenCommand tool: {expected}"
             );
         }
-    }
-
-    #[test]
-    fn in_pane_tool_has_direction_enum() {
-        let defs = tool_definitions();
-        let in_pane = defs
-            .iter()
-            .find(|d| d.name == "in_pane")
-            .expect("in_pane tool present");
-        let props = in_pane
-            .input_schema
-            .get("properties")
-            .expect("properties key");
-        let dir = props.get("direction").expect("direction property");
-        let enum_vals = dir.get("enum").expect("direction has enum constraint");
-        assert_eq!(
-            enum_vals,
-            &serde_json::json!(["top", "right", "bottom", "left"])
-        );
-        let required = in_pane.input_schema.get("required").expect("required key");
-        let required_arr = required.as_array().expect("required is array");
-        assert!(
-            required_arr.iter().any(|v| v.as_str() == Some("direction")),
-            "direction must be required"
-        );
+        // in_pane is hidden (superseded by open_page).
+        assert!(!names.contains(&"in_pane".to_string()));
     }
 
     #[test]

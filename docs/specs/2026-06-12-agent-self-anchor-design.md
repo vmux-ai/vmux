@@ -14,11 +14,11 @@ The model is **Live Share with a coworker**: the agent acts in *visible, shared,
 
 **Read-back = "read the visible terminal"** (Live Share): the agent reads scrollback like the user does — no clean stdout/exit capture. Feasible because the service already broadcasts `ProcessOutput` (raw bytes) + `ProcessExited { exit_code }`; future optimization (clean `{output, exit}` for a fresh `run` terminal, or OSC-133 shell-integration markers for existing shells) is purely additive at the read layer.
 
-**Still pending (next increments on this branch):**
-1. `read_terminal { terminal }` — return a terminal's scrollback text; answered by the **service** rendering the `Process` `Term` (reuse `snapshot`/`snapshot_text`).
-2. `run { terminal }` — run in an existing terminal (by handle), not just a new one.
-3. **Terminal handle = `ProcessId`** exposed as `process_id` on terminal `Stack` DTOs in `read_layout`, and returned by `run`, so the agent can target/read specific terminals.
-4. Remove the now-superseded `in_pane`, `run_shell`, `new_terminal_tab` MCP tools (keep `browser_navigate` — that's *navigate an existing browser*, a different job).
+**Implemented (across the increments on this branch):**
+1. `read_terminal { terminal }` — returns a terminal's scrollback text; answered by the **service** rendering the `Process` `Term` (short-circuits `AgentQuery::ReadTerminal` in `server.rs`).
+2. `run { terminal }` — runs in an existing terminal (by handle) via `ClientMessage::ProcessInput`, not just a new one.
+3. **Terminal handle = `ProcessId`** exposed as `process_id` on terminal `Stack` DTOs in `read_layout` (filled in a post-pass in `serve_snapshot_requests`), and returned by `run`, so the agent can target/read specific terminals.
+4. Removed the superseded `in_pane` (`#[mcp(skip)]`), `run_shell`, `new_terminal_tab` MCP tools (kept `browser_navigate` — that's *navigate an existing browser*, a different job). The internal `AgentCommand::RunShell`/`NewTerminalTab` variants remain but are no longer reachable from the agent surface.
 
 The sections below describe the original `open_beside_me`/`focus_self` design; the anchor (`ProcessId`) + `is_self` foundation is unchanged and still current.
 
