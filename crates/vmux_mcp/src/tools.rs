@@ -63,6 +63,16 @@ pub enum McpParamTool {
         description = "Search vmux browsing history. Returns up to `limit` entries ranked by frecency."
     )]
     BrowserHistorySearch { query: String, limit: Option<u32> },
+    #[mcp(
+        description = "Create a new space and switch to it. If `name` is omitted, an auto-generated name is used."
+    )]
+    CreateSpace { name: Option<String> },
+    #[mcp(
+        description = "Rename a space by id (the id is stable; only the display name changes). Use list_spaces to discover ids."
+    )]
+    RenameSpace { space_id: String, name: String },
+    #[mcp(description = "Delete a space by id. Use list_spaces to discover ids.")]
+    DeleteSpace { space_id: String },
 }
 
 impl McpParamTool {
@@ -148,6 +158,34 @@ impl McpParamTool {
                 }
                 let limit = limit.unwrap_or(20).min(100);
                 Ok(AgentCommand::BrowserHistorySearch { query, limit })
+            }
+            McpParamTool::CreateSpace { name } => Ok(AgentCommand::SpaceCommand {
+                command: "new".to_string(),
+                space_id: None,
+                name: name.filter(|n| !n.trim().is_empty()),
+            }),
+            McpParamTool::RenameSpace { space_id, name } => {
+                if space_id.trim().is_empty() {
+                    return Err("rename_space.space_id is empty".into());
+                }
+                if name.trim().is_empty() {
+                    return Err("rename_space.name is empty".into());
+                }
+                Ok(AgentCommand::SpaceCommand {
+                    command: "rename".to_string(),
+                    space_id: Some(space_id),
+                    name: Some(name),
+                })
+            }
+            McpParamTool::DeleteSpace { space_id } => {
+                if space_id.trim().is_empty() {
+                    return Err("delete_space.space_id is empty".into());
+                }
+                Ok(AgentCommand::SpaceCommand {
+                    command: "delete".to_string(),
+                    space_id: Some(space_id),
+                    name: None,
+                })
             }
         }
     }
@@ -268,6 +306,14 @@ fn get_settings_definition() -> ToolDefinition {
     }
 }
 
+fn list_spaces_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "list_spaces".into(),
+        description: "List all spaces as a JSON array of { id, name, profile, is_active }. Use the `id` with rename_space / delete_space.".into(),
+        input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
+    }
+}
+
 pub fn tool_definitions() -> Vec<ToolDefinition> {
     let mut defs: Vec<ToolDefinition> = AppCommand::mcp_tool_entries()
         .into_iter()
@@ -281,6 +327,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(read_layout_definition());
     defs.push(update_layout_definition());
     defs.push(get_settings_definition());
+    defs.push(list_spaces_definition());
     defs
 }
 
@@ -301,6 +348,11 @@ pub fn dispatch_from_tool_call(name: &str, arguments: Value) -> Result<DispatchT
     if name == "get_settings" {
         return Ok(DispatchTarget::Query(
             vmux_service::protocol::AgentQuery::GetSettings,
+        ));
+    }
+    if name == "list_spaces" {
+        return Ok(DispatchTarget::Query(
+            vmux_service::protocol::AgentQuery::ListSpaces,
         ));
     }
     if let Some(parsed) = McpParamTool::from_mcp_call(name, arguments.clone()) {
@@ -630,6 +682,55 @@ mod tests {
             target,
             DispatchTarget::Query(AgentQuery::GetSettings)
         ));
+    }
+
+    #[test]
+    fn list_spaces_dispatches_to_query() {
+        let target = dispatch_from_tool_call("list_spaces", serde_json::json!({})).unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Query(AgentQuery::ListSpaces)
+        ));
+    }
+
+    #[test]
+    fn rename_space_dispatches_to_space_command() {
+        let target = dispatch_from_tool_call(
+            "rename_space",
+            serde_json::json!({"space_id": "work", "name": "Client A"}),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::SpaceCommand {
+                command,
+                space_id,
+                name,
+            }) => {
+                assert_eq!(command, "rename");
+                assert_eq!(space_id.as_deref(), Some("work"));
+                assert_eq!(name.as_deref(), Some("Client A"));
+            }
+            other => panic!("expected SpaceCommand, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn create_space_dispatches_to_space_command() {
+        let target =
+            dispatch_from_tool_call("create_space", serde_json::json!({"name": "Work"})).unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::SpaceCommand { command, name, .. }) => {
+                assert_eq!(command, "new");
+                assert_eq!(name.as_deref(), Some("Work"));
+            }
+            other => panic!("expected SpaceCommand, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_space_empty_id_returns_error() {
+        let result = dispatch_from_tool_call("delete_space", serde_json::json!({"space_id": ""}));
+        assert!(result.is_err());
     }
 
     #[test]

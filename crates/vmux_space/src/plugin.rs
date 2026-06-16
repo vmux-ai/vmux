@@ -26,6 +26,15 @@ pub struct SaveSpaceRequest {
     pub path: PathBuf,
 }
 
+/// A space CRUD request from a non-web source (e.g. the agent/MCP). Relayed into
+/// the same `SpaceCommandEvent` flow the web spaces page uses.
+#[derive(Message, Clone)]
+pub struct SpaceCommandRequest {
+    pub command: String,
+    pub space_id: Option<String>,
+    pub name: Option<String>,
+}
+
 pub struct SpacePlugin;
 
 impl Plugin for SpacePlugin {
@@ -33,6 +42,8 @@ impl Plugin for SpacePlugin {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.init_resource::<ActiveSpace>()
             .add_message::<SaveSpaceRequest>()
+            .add_message::<SpaceCommandRequest>()
+            .add_systems(Update, relay_space_command_requests)
             .add_systems(Startup, ensure_space_registry)
             .add_systems(
                 Startup,
@@ -151,6 +162,15 @@ fn ensure_space_registry() {
         return;
     }
     write_space_registry_to(&root, &read_space_registry_from(&root));
+}
+
+fn rename_space_record(registry: &mut SpaceRegistry, id: &str, name: &str) -> bool {
+    if let Some(space) = registry.spaces.iter_mut().find(|space| space.id == id) {
+        space.name = name.to_string();
+        true
+    } else {
+        false
+    }
 }
 
 fn delete_space_record(registry: &mut SpaceRegistry, id: &str) -> Option<SpaceRecord> {
@@ -315,6 +335,22 @@ fn apply_pending_space_switch(
     }
 }
 
+fn relay_space_command_requests(
+    mut reader: MessageReader<SpaceCommandRequest>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        commands.trigger(BinReceive {
+            webview: Entity::PLACEHOLDER,
+            payload: SpaceCommandEvent {
+                command: request.command.clone(),
+                space_id: request.space_id.clone(),
+                name: request.name.clone(),
+            },
+        });
+    }
+}
+
 fn on_space_command(
     trigger: On<BinReceive<SpaceCommandEvent>>,
     mut active: ResMut<ActiveSpace>,
@@ -391,6 +427,22 @@ fn on_space_command(
             record: target,
             delay_frames: 1,
         });
+        return;
+    }
+
+    if evt.command == "rename" {
+        let Some(id) = evt.space_id.as_deref() else {
+            return;
+        };
+        let Some(name) = evt.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) else {
+            return;
+        };
+        if rename_space_record(&mut registry, id, name) {
+            write_space_registry_to(&root, &registry);
+            if active.record.id == id {
+                active.record.name = name.to_string();
+            }
+        }
         return;
     }
 
@@ -691,6 +743,34 @@ mod tests {
 
         assert_eq!(deleted.id, "work");
         assert_eq!(registry.spaces, vec![bootstrap_space_record()]);
+    }
+
+    #[test]
+    fn rename_space_record_changes_name_keeps_id() {
+        let mut registry = SpaceRegistry {
+            spaces: vec![
+                bootstrap_space_record(),
+                SpaceRecord {
+                    id: "work".to_string(),
+                    name: "Work".to_string(),
+                    profile: BOOTSTRAP_PROFILE_NAME.to_string(),
+                },
+            ],
+        };
+
+        assert!(rename_space_record(&mut registry, "work", "Client A"));
+
+        let renamed = registry.spaces.iter().find(|s| s.id == "work").unwrap();
+        assert_eq!(renamed.name, "Client A");
+        assert_eq!(renamed.id, "work");
+    }
+
+    #[test]
+    fn rename_space_record_unknown_id_is_noop() {
+        let mut registry = SpaceRegistry {
+            spaces: vec![bootstrap_space_record()],
+        };
+        assert!(!rename_space_record(&mut registry, "nope", "X"));
     }
 
     #[test]

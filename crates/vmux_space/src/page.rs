@@ -10,6 +10,7 @@ pub fn Page() -> Element {
     use_theme();
     let mut state = use_signal(SpacesListEvent::default);
     let mut selected = use_signal(|| 0usize);
+    let mut new_name = use_signal(String::new);
 
     let _listener = use_bin_event_listener::<SpacesListEvent, _>(SPACES_LIST_EVENT, move |data| {
         selected.set(0);
@@ -74,12 +75,29 @@ pub fn Page() -> Element {
                     h1 { class: "text-lg font-semibold", "Spaces" }
                     div { class: "mt-1 truncate text-xs text-muted-foreground", "{active_name}" }
                 }
-                button {
-                    class: "rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:border-foreground/30 hover:bg-muted",
-                    onclick: move |_| {
-                        emit_command("new", None, Some(format!("Space {}", count + 1)));
-                    },
-                    "New"
+                div { class: "flex shrink-0 items-center gap-2",
+                    input {
+                        class: "w-44 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/30",
+                        r#type: "text",
+                        placeholder: "New space name",
+                        value: "{new_name}",
+                        oninput: move |e| new_name.set(e.value()),
+                        onkeydown: move |e| {
+                            e.stop_propagation();
+                            if e.key() == Key::Enter {
+                                emit_command("new", None, Some(new_space_name(&new_name(), count)));
+                                new_name.set(String::new());
+                            }
+                        },
+                    }
+                    button {
+                        class: "rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:border-foreground/30 hover:bg-muted",
+                        onclick: move |_| {
+                            emit_command("new", None, Some(new_space_name(&new_name(), count)));
+                            new_name.set(String::new());
+                        },
+                        "New"
+                    }
                 }
             }
             div { class: "min-h-0 flex-1 overflow-y-auto p-3",
@@ -99,6 +117,15 @@ pub fn Page() -> Element {
                 }
             }
         }
+    }
+}
+
+fn new_space_name(typed: &str, count: usize) -> String {
+    let trimmed = typed.trim();
+    if trimmed.is_empty() {
+        format!("Space {}", count + 1)
+    } else {
+        trimmed.to_string()
     }
 }
 

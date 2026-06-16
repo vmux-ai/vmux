@@ -188,6 +188,11 @@ fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult
                 "content": [{"type": "text", "text": json_str}]
             })
         }
+        AgentQueryResult::Spaces(json_str) => {
+            json!({
+                "content": [{"type": "text", "text": json_str}]
+            })
+        }
         AgentQueryResult::Error(message) => {
             json!({
                 "isError": true,

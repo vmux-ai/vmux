@@ -265,6 +265,12 @@ pub struct AgentLookups<'w> {
     pub active_space: Option<Res<'w, ActiveSpace>>,
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct AgentSpaceWriters<'w> {
+    layout_apply: MessageWriter<'w, vmux_layout::reconcile::LayoutApplyRequest>,
+    space_command: MessageWriter<'w, vmux_space::SpaceCommandRequest>,
+}
+
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
@@ -281,7 +287,7 @@ fn handle_agent_commands(
     lookups: AgentLookups,
     mut sp: SettingsParams,
     service: Option<Res<vmux_service::client::ServiceClient>>,
-    mut layout_apply_writer: MessageWriter<vmux_layout::reconcile::LayoutApplyRequest>,
+    mut writers: AgentSpaceWriters,
 ) {
     let active_space = lookups.active_space.as_deref();
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
@@ -392,10 +398,12 @@ fn handle_agent_commands(
                 }
             }
             ServiceAgentCommand::UpdateLayout { layout } => {
-                layout_apply_writer.write(vmux_layout::reconcile::LayoutApplyRequest {
-                    request_id: request.request_id.0,
-                    snapshot: layout.clone(),
-                });
+                writers
+                    .layout_apply
+                    .write(vmux_layout::reconcile::LayoutApplyRequest {
+                        request_id: request.request_id.0,
+                        snapshot: layout.clone(),
+                    });
                 continue;
             }
             ServiceAgentCommand::BrowserGoBack { pane } => {
@@ -415,6 +423,20 @@ fn handle_agent_commands(
             ServiceAgentCommand::OpenInNewStack { url } => {
                 open_in_new_stack_writer
                     .write(vmux_layout::OpenInNewStackRequest { url: url.clone() });
+                AgentCommandResult::Ok
+            }
+            ServiceAgentCommand::SpaceCommand {
+                command,
+                space_id,
+                name,
+            } => {
+                writers
+                    .space_command
+                    .write(vmux_space::SpaceCommandRequest {
+                        command: command.clone(),
+                        space_id: space_id.clone(),
+                        name: name.clone(),
+                    });
                 AgentCommandResult::Ok
             }
         };
@@ -529,6 +551,7 @@ fn handle_agent_queries(
     mut reader: MessageReader<AgentQueryRequest>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
+    active_space: Option<Res<ActiveSpace>>,
     mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
 ) {
     let Some(service) = service else { return };
@@ -546,6 +569,29 @@ fn handle_agent_queries(
                 service.0.send(ClientMessage::AgentQueryResponse {
                     request_id: request.request_id,
                     result,
+                });
+            }
+            AgentQuery::ListSpaces => {
+                let registry = vmux_space::spaces::read_space_registry_from(
+                    &vmux_core::profile::shared_data_dir(),
+                );
+                let active_id = active_space.as_ref().map(|a| a.record.id.clone());
+                let rows: Vec<serde_json::Value> = registry
+                    .spaces
+                    .iter()
+                    .map(|space| {
+                        serde_json::json!({
+                            "id": space.id,
+                            "name": space.name,
+                            "profile": space.profile,
+                            "is_active": active_id.as_deref() == Some(space.id.as_str()),
+                        })
+                    })
+                    .collect();
+                let json = serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string());
+                service.0.send(ClientMessage::AgentQueryResponse {
+                    request_id: request.request_id,
+                    result: AgentQueryResult::Spaces(json),
                 });
             }
         }
@@ -1256,6 +1302,7 @@ mod tests {
             .add_message::<vmux_terminal::TerminalSendRequest>()
             .add_message::<vmux_terminal::RunShellRequest>()
             .add_message::<vmux_setting::SettingsWriteRequest>()
+            .add_message::<vmux_space::SpaceCommandRequest>()
             .add_message::<vmux_history::query::HistoryOpenIntent>()
             .add_systems(Update, vmux_terminal::handle_terminal_send_requests)
             .insert_resource(FocusedStack::default())
