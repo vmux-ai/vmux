@@ -16,14 +16,15 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
-    CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent, CommandBarSpace,
-    CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
+    CommandBarPage, CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent,
+    CommandBarSpace, CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
+    PathCompleteResponse, PathEntry,
 };
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    AgentProviderSummary, CommandBarAgentsSnapshot, CommandBarSettingsSnapshot,
-    CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
+    AgentProviderSummary, CommandBarAgentsSnapshot, CommandBarPagesSnapshot,
+    CommandBarSettingsSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
 };
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
@@ -527,6 +528,7 @@ fn handle_open_command_bar(
         ResMut<NewStackContext>,
         Option<Res<crate::settings::EffectiveStartupUrl>>,
         MessageWriter<PageOpenRequest>,
+        Res<CommandBarPagesSnapshot>,
     )>,
     mut commands: Commands,
 ) {
@@ -544,6 +546,7 @@ fn handle_open_command_bar(
         })
         .collect();
     let startup_url = snapshot_params.p3().map(|url| url.0.clone());
+    let pages = snapshot_params.p5().pages.clone();
 
     let request =
         command_bar_open_request(reader.read().cloned(), &spaces_snapshot.spaces_page_url);
@@ -874,6 +877,7 @@ fn handle_open_command_bar(
         bar_tabs,
         bar_commands,
         target,
+        pages,
     );
     let event = BinHostEmitEvent::from_rkyv(modal_e, COMMAND_BAR_OPEN_EVENT, &payload);
     let payload_bytes = event.payload.clone();
@@ -926,6 +930,7 @@ fn command_bar_open_payload(
     tabs: Vec<CommandBarTab>,
     commands: Vec<CommandBarCommandEntry>,
     target: Option<vmux_command::open_target::OpenTarget>,
+    pages: Vec<CommandBarPage>,
 ) -> CommandBarOpenEvent {
     CommandBarOpenEvent {
         open_id,
@@ -935,7 +940,7 @@ fn command_bar_open_payload(
         spaces,
         tabs,
         commands,
-        pages: Vec::new(),
+        pages,
         target,
     }
 }
@@ -2016,6 +2021,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             None,
+            Vec::new(),
         );
 
         assert_eq!(payload.space_name, "Work");
@@ -2041,6 +2047,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             None,
+            Vec::new(),
         );
 
         assert_eq!(payload.spaces, spaces);
