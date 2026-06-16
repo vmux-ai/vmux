@@ -1302,6 +1302,7 @@ mod tests {
             .add_message::<vmux_terminal::TerminalSendRequest>()
             .add_message::<vmux_terminal::RunShellRequest>()
             .add_message::<vmux_setting::SettingsWriteRequest>()
+            .add_message::<vmux_space::SpaceCommandRequest>()
             .add_message::<vmux_history::query::HistoryOpenIntent>()
             .add_systems(Update, vmux_terminal::handle_terminal_send_requests)
             .insert_resource(FocusedStack::default())
