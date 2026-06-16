@@ -1,6 +1,18 @@
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
-use vmux_service::protocol::{AgentCommand, ClientMessage, ServiceMessage};
+use std::time::{Duration, Instant};
+use vmux_service::protocol::{
+    AgentCommand, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage, ServiceMessage,
+};
+
+/// How long `run` waits for a command to finish before returning a partial
+/// result. Kept under vibe's 60s default MCP tool timeout.
+const RUN_BLOCK_TIMEOUT: Duration = Duration::from_secs(50);
+/// Interval between terminal reads while waiting for the completion marker.
+const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);
+/// Grace period for the terminal to be created before a "process not found"
+/// read is treated as a real error.
+const RUN_CREATE_GRACE: Duration = Duration::from_secs(3);
 
 pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
     let mut line = String::new();
@@ -98,8 +110,190 @@ async fn tool_call_result(
         .unwrap_or_else(|| json!({}));
 
     match crate::tools::dispatch_with_anchor(name, arguments, anchor)? {
+        crate::tools::DispatchTarget::Command(AgentCommand::Run {
+            anchor,
+            command,
+            direction,
+            focus,
+            terminal,
+            ..
+        }) => {
+            let token = run_token();
+            let run = AgentCommand::Run {
+                anchor,
+                command,
+                direction,
+                focus,
+                terminal,
+                done_marker: Some(token.clone()),
+            };
+            run_blocking(run, &token).await
+        }
         crate::tools::DispatchTarget::Command(command) => run_agent_command(command).await,
         crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
+    }
+}
+
+fn run_token() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("v{nanos:x}")
+}
+
+/// Parse the exit code from a line containing `__VMUX_DONE_<token>_<digits>__`.
+/// Returns `None` for the echoed command line (which carries the unresolved
+/// `%s`/`($env...)` placeholder rather than digits).
+fn marker_code(line: &str, token: &str) -> Option<i32> {
+    let prefix = format!("__VMUX_DONE_{token}_");
+    let start = line.find(&prefix)? + prefix.len();
+    let rest = &line[start..];
+    let end = rest.find("__")?;
+    rest[..end].parse::<i32>().ok()
+}
+
+/// Find the resolved completion marker anywhere in `text` and return its exit code.
+fn parse_done_marker(text: &str, token: &str) -> Option<i32> {
+    text.lines().rev().find_map(|line| marker_code(line, token))
+}
+
+/// Extract command output from the full terminal buffer: the lines between the
+/// echoed command (the first line carrying the token) and the resolved marker
+/// line, with both boundary lines removed.
+fn clean_run_output(text: &str, token: &str) -> String {
+    let token_pat = format!("__VMUX_DONE_{token}");
+    let lines: Vec<&str> = text.lines().collect();
+    let end = lines
+        .iter()
+        .position(|line| marker_code(line, token).is_some())
+        .unwrap_or(lines.len());
+    let start = lines[..end]
+        .iter()
+        .rposition(|line| line.contains(&token_pat))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    lines[start..end].join("\n").trim_end().to_string()
+}
+
+fn run_result(pid: &str, exit: Option<i32>, output: &str, timed_out: bool) -> Value {
+    let mut text = format!("terminal: {pid}\n");
+    match exit {
+        Some(code) => text.push_str(&format!("exit: {code}\n")),
+        None if timed_out => text.push_str(&format!(
+            "note: still running after {}s; call read_terminal({pid}) to read more\n",
+            RUN_BLOCK_TIMEOUT.as_secs()
+        )),
+        None => {}
+    }
+    text.push_str("output:\n");
+    text.push_str(output);
+    json!({ "content": [{"type": "text", "text": text}] })
+}
+
+/// Send `run`, then block (polling the full terminal buffer) until the command's
+/// completion marker appears, returning the output + exit code in one response.
+async fn run_blocking(run: AgentCommand, token: &str) -> Result<Value, String> {
+    let connection = vmux_service::client::ServiceConnection::connect()
+        .await
+        .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
+
+    let request_id = AgentRequestId::new();
+    connection
+        .send(&ClientMessage::AgentCommand {
+            request_id,
+            command: run,
+        })
+        .await
+        .map_err(|error| format!("cannot send run command: {error}"))?;
+
+    let pid = loop {
+        let Some(message) = connection
+            .recv()
+            .await
+            .map_err(|error| format!("cannot read service response: {error}"))?
+        else {
+            return Err("vmux_service disconnected".to_string());
+        };
+        match message {
+            ServiceMessage::AgentCommandResult {
+                request_id: received,
+                result,
+            } if received == request_id => {
+                use vmux_service::protocol::AgentCommandResult;
+                match result {
+                    AgentCommandResult::Text(pid) => break pid,
+                    AgentCommandResult::Error(message) => return Err(message),
+                    other => return Err(format!("run: unexpected result: {other:?}")),
+                }
+            }
+            ServiceMessage::Error { message } => return Err(message),
+            _ => {}
+        }
+    };
+
+    let process_id = pid
+        .parse::<vmux_service::protocol::ProcessId>()
+        .map_err(|_| format!("run: service returned an invalid terminal id: {pid}"))?;
+
+    let start = Instant::now();
+    let deadline = start + RUN_BLOCK_TIMEOUT;
+    let mut last_text = String::new();
+    let mut got_text = false;
+    loop {
+        let query_id = AgentRequestId::new();
+        connection
+            .send(&ClientMessage::AgentQuery {
+                request_id: query_id,
+                query: AgentQuery::ReadTerminalFull { process_id },
+            })
+            .await
+            .map_err(|error| format!("cannot poll terminal: {error}"))?;
+
+        let read = loop {
+            let Some(message) = connection
+                .recv()
+                .await
+                .map_err(|error| format!("cannot read terminal poll: {error}"))?
+            else {
+                return Err("vmux_service disconnected".to_string());
+            };
+            match message {
+                ServiceMessage::AgentQueryResult {
+                    request_id: received,
+                    result,
+                } if received == query_id => break result,
+                ServiceMessage::Error { message } => {
+                    return Err(message);
+                }
+                _ => {}
+            }
+        };
+
+        match read {
+            AgentQueryResult::Text(text) => {
+                got_text = true;
+                last_text = text;
+                if let Some(code) = parse_done_marker(&last_text, token) {
+                    let output = clean_run_output(&last_text, token);
+                    return Ok(run_result(&pid, Some(code), &output, false));
+                }
+            }
+            AgentQueryResult::Error(message) => {
+                // The terminal may not be created yet; tolerate "process not
+                // found" during the grace window, but surface a persistent error.
+                if !got_text && start.elapsed() > RUN_CREATE_GRACE {
+                    return Err(message);
+                }
+            }
+            other => return Err(format!("run: unexpected terminal read: {other:?}")),
+        }
+
+        if Instant::now() >= deadline {
+            let output = clean_run_output(&last_text, token);
+            return Ok(run_result(&pid, None, &output, true));
+        }
+        tokio::time::sleep(RUN_POLL_INTERVAL).await;
     }
 }
 
@@ -238,5 +432,61 @@ mod tests {
         let request = read_json_line(&mut lines).unwrap().unwrap();
 
         assert_eq!(request["method"], "tools/list");
+    }
+
+    #[test]
+    fn marker_code_parses_resolved_exit_only() {
+        assert_eq!(marker_code("__VMUX_DONE_tok_0__", "tok"), Some(0));
+        assert_eq!(
+            marker_code("prefix __VMUX_DONE_tok_130__ suffix", "tok"),
+            Some(130)
+        );
+        // Echoed command line carries the unresolved placeholder, not digits.
+        assert_eq!(
+            marker_code("ls; printf '__VMUX_DONE_tok_%s__' \"$?\"", "tok"),
+            None
+        );
+        assert_eq!(
+            marker_code("__VMUX_DONE_tok_($env.LAST_EXIT_CODE)__", "tok"),
+            None
+        );
+        // Wrong token never matches.
+        assert_eq!(marker_code("__VMUX_DONE_other_0__", "tok"), None);
+    }
+
+    #[test]
+    fn parse_done_marker_finds_code_ignoring_echo() {
+        let text =
+            "$ ls; printf '__VMUX_DONE_tok_%s__' \"$?\"\nfile_a\nfile_b\n__VMUX_DONE_tok_0__\n$ ";
+        assert_eq!(parse_done_marker(text, "tok"), Some(0));
+        assert_eq!(parse_done_marker("nothing here", "tok"), None);
+    }
+
+    #[test]
+    fn clean_run_output_strips_echo_and_marker() {
+        let text =
+            "$ ls; printf '__VMUX_DONE_tok_%s__' \"$?\"\nfile_a\nfile_b\n__VMUX_DONE_tok_0__\n$ ";
+        assert_eq!(clean_run_output(text, "tok"), "file_a\nfile_b");
+    }
+
+    #[test]
+    fn clean_run_output_timeout_keeps_output_after_echo() {
+        // No resolved marker yet (command still running).
+        let text = "$ sleep 9; printf '__VMUX_DONE_tok_%s__' \"$?\"\nworking...";
+        assert_eq!(clean_run_output(text, "tok"), "working...");
+    }
+
+    #[test]
+    fn run_result_shapes_text() {
+        let done = run_result("pid7", Some(1), "boom", false);
+        let text = done["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("terminal: pid7"));
+        assert!(text.contains("exit: 1"));
+        assert!(text.contains("output:\nboom"));
+
+        let timeout = run_result("pid7", None, "partial", true);
+        let text = timeout["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("still running"));
+        assert!(text.contains("read_terminal(pid7)"));
     }
 }

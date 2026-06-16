@@ -1323,6 +1323,30 @@ impl Process {
         }
     }
 
+    /// Full terminal text: scrollback history plus the visible screen, joined by
+    /// `\n` with trailing spaces stripped per line and trailing blank lines
+    /// removed. Reads the rendered alacritty grid, so the text carries no ANSI.
+    pub fn full_text(&self) -> String {
+        let grid = self.term.grid();
+        let num_cols = grid.columns();
+        let top = grid.topmost_line().0;
+        let bottom = grid.bottommost_line().0;
+
+        let mut lines: Vec<String> = Vec::new();
+        for line_idx in top..=bottom {
+            let row = &grid[Line(line_idx)];
+            let mut text = String::with_capacity(num_cols);
+            for col in 0..num_cols {
+                text.push(row[Column(col)].c);
+            }
+            lines.push(text.trim_end().to_string());
+        }
+        while lines.last().is_some_and(|line| line.is_empty()) {
+            lines.pop();
+        }
+        lines.join("\n")
+    }
+
     pub fn info(&self) -> ProcessInfo {
         ProcessInfo {
             id: self.id,
@@ -1646,6 +1670,47 @@ mod tests {
 
         assert!(text.contains(&cwd));
         assert!(!text.contains(&format!("cd {cwd}")));
+    }
+
+    #[test]
+    fn full_text_includes_scrolled_off_history() {
+        let (wake_tx, _) = mpsc::unbounded_channel();
+        let mut process = Process::new_with_wake(
+            ProcessId::new(),
+            "/bin/sh".to_string(),
+            vec![],
+            String::new(),
+            Vec::new(),
+            80,
+            24,
+            wake_tx,
+        )
+        .expect("process should spawn");
+
+        drain_process_output(&mut process, Duration::from_millis(300));
+        // Screen is 24 rows; printing ~60 lines scrolls FIRSTLINE into history.
+        process.write_input(
+            b"echo FIRSTLINE; for i in $(seq 1 60); do echo pad_$i; done; echo LASTLINE\r",
+        );
+        let _ = wait_for_snapshot_text(&mut process, "LASTLINE");
+        drain_process_output(&mut process, Duration::from_millis(200));
+
+        let visible = snapshot_text(process.snapshot());
+        let full = process.full_text();
+        process.kill();
+
+        assert!(
+            full.contains("LASTLINE"),
+            "full_text should include last line"
+        );
+        assert!(
+            full.contains("FIRSTLINE"),
+            "full_text should include scrolled-off first line; full=\n{full}"
+        );
+        assert!(
+            !visible.contains("FIRSTLINE"),
+            "visible snapshot should not include scrolled-off line; visible=\n{visible}"
+        );
     }
 
     fn drain_process_output(process: &mut Process, duration: Duration) {

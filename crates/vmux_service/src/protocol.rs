@@ -103,6 +103,10 @@ pub enum AgentCommand {
         /// Run in this existing terminal (its `ProcessId`); `None` opens a new
         /// terminal beside the agent.
         terminal: Option<ProcessId>,
+        /// When set, the GUI appends a shell-aware completion print using this
+        /// token so the caller can detect command completion + exit code in the
+        /// terminal output. `None` keeps the legacy fire-and-forget behavior.
+        done_marker: Option<String>,
     },
 }
 
@@ -120,8 +124,18 @@ pub enum AgentCommandResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentQuery {
-    ReadLayout { anchor: Option<ProcessId> },
-    ReadTerminal { process_id: ProcessId },
+    ReadLayout {
+        anchor: Option<ProcessId>,
+    },
+    ReadTerminal {
+        process_id: ProcessId,
+    },
+    /// Like `ReadTerminal` but returns the full scrollback history plus the
+    /// visible screen as plain text (used to capture a command's complete
+    /// output, not just the current viewport).
+    ReadTerminalFull {
+        process_id: ProcessId,
+    },
     GetSettings,
     ListSpaces,
 }

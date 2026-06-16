@@ -298,12 +298,15 @@ fn run_definition() -> ToolDefinition {
         name: "run".into(),
         description:
             "Run a shell command in a visible terminal the user can watch live and take over. \
+Blocks until the command finishes and returns its full output plus the exit code \
+(`terminal: <id>`, `exit: <code>`, `output: ...`). If it has not finished within ~50s, returns the \
+output so far with a note to call read_terminal for the rest. \
 By default opens a new terminal in a pane beside YOUR pane; pass `terminal` (a terminal id from a \
-previous run or from read_layout's process_id) to run in that existing terminal instead. \
+previous run or from read_layout's process_id) to run in that existing terminal instead — reuse the \
+id instead of opening a new terminal for every command. \
 direction|focus apply only when opening a new terminal (direction default right; \
 focus default false = keep focus on your own pane). \
-The command is typed into an interactive shell, so the terminal stays usable afterwards. \
-Returns the terminal's id; pass it to read_terminal to read the output, or to run again."
+The command is typed into an interactive shell, so the terminal stays usable afterwards."
                 .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -431,6 +434,7 @@ pub fn dispatch_with_anchor(
             direction,
             focus,
             terminal,
+            done_marker: None,
         }));
     }
     if name == "read_terminal" {

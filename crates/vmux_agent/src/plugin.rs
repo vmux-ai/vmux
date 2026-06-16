@@ -481,11 +481,58 @@ fn to_pane_direction(
     }
 }
 
+fn agent_terminal_shell(settings: &AppSettings) -> String {
+    settings
+        .terminal
+        .as_ref()
+        .map(|t| t.resolve_theme(&t.default_theme).shell)
+        .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()))
+}
+
+/// Wrap a `run` command so the shell prints a completion marker carrying the
+/// exit code once the command finishes (success OR failure). `token` is a unique
+/// per-run id; the printed marker is `__VMUX_DONE_<token>_<exit_code>__`.
+///
+/// posix/fish chain with `;` (which continues after a non-zero command). nushell
+/// aborts the rest of a `;` line when an external command fails, so it needs a
+/// `try`/`catch` wrapper to always print the marker and recover the exit code
+/// from the caught error.
+fn command_with_marker(shell: &str, command: &str, token: &str) -> String {
+    let base = std::path::Path::new(shell)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(shell);
+    match base {
+        "nu" | "nushell" => format!(
+            "try {{ {command}; print \"\\n__VMUX_DONE_{token}_0__\" }} catch {{ |e| print $\"\\n__VMUX_DONE_{token}_($e.exit_code? | default 1)__\" }}"
+        ),
+        "fish" => format!("{command}; printf '\\n__VMUX_DONE_{token}_%s__\\n' $status"),
+        _ => format!("{command}; printf '\\n__VMUX_DONE_{token}_%s__\\n' \"$?\""),
+    }
+}
+
+fn run_command_line(command: &str, token: Option<&str>, settings: &AppSettings) -> String {
+    match token {
+        Some(token) => command_with_marker(&agent_terminal_shell(settings), command, token),
+        None => command.to_string(),
+    }
+}
+
+fn run_terminal_cwd(agent_launch_cwd: Option<&str>, active_space: Option<&ActiveSpace>) -> PathBuf {
+    if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
+        return path;
+    }
+    active_space
+        .map(|s| space_dir(&s.record.id))
+        .unwrap_or_else(default_space_dir)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     agent_terms: Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
     child_of_q: Query<&ChildOf>,
+    launch_q: Query<&TerminalLaunch>,
     pane_children: Query<&Children, With<Pane>>,
     tab_filter: Query<Entity, With<vmux_layout::stack::Stack>>,
     mut open_beside_writer: MessageWriter<vmux_layout::OpenBesideRequest>,
@@ -493,6 +540,7 @@ fn handle_agent_self_commands(
     mut commands: Commands,
     service: Option<Res<ServiceClient>>,
     active_space: Option<Res<ActiveSpace>>,
+    settings: Res<AppSettings>,
 ) {
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
     let Some(service) = service else {
@@ -525,8 +573,10 @@ fn handle_agent_self_commands(
                 direction,
                 focus,
                 terminal,
+                done_marker,
             } => {
-                let mut data = command.clone().into_bytes();
+                let mut data =
+                    run_command_line(command, done_marker.as_deref(), &settings).into_bytes();
                 data.push(b'\r');
                 match terminal {
                     Some(pid) => {
@@ -538,7 +588,7 @@ fn handle_agent_self_commands(
                     }
                     None => match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
                         None => AgentCommandResult::Error("self process not found".to_string()),
-                        Some((_, pane)) => {
+                        Some((term, pane)) => {
                             let existing_tabs: Vec<Entity> = pane_children
                                 .get(pane)
                                 .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
@@ -554,10 +604,9 @@ fn handle_agent_self_commands(
                                 *focus,
                             );
                             let new_pid = ProcessId::new();
-                            let cwd = active_space
-                                .as_deref()
-                                .map(|s| space_dir(&s.record.id))
-                                .unwrap_or_else(default_space_dir);
+                            let agent_cwd = launch_q.get(term).ok().map(|l| l.cwd.clone());
+                            let cwd =
+                                run_terminal_cwd(agent_cwd.as_deref(), active_space.as_deref());
                             terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
                                 pane: p2,
                                 cwd: Some(cwd),
@@ -733,8 +782,9 @@ fn handle_agent_queries(
                     result: AgentQueryResult::Spaces(json),
                 });
             }
-            // ReadTerminal is answered by the service directly; it never reaches the GUI.
-            AgentQuery::ReadTerminal { .. } => {}
+            // ReadTerminal/ReadTerminalFull are answered by the service directly;
+            // they never reach the GUI.
+            AgentQuery::ReadTerminal { .. } | AgentQuery::ReadTerminalFull { .. } => {}
         }
     }
 }
@@ -1641,5 +1691,57 @@ mod tests {
             spawns[0].cwd, dir,
             "claude page cwd resolves to space startup_dir"
         );
+    }
+
+    #[test]
+    fn run_terminal_cwd_inherits_agent_launch_dir() {
+        let dir = std::env::temp_dir().join(format!("vmux-run-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let got = run_terminal_cwd(Some(&dir.to_string_lossy()), None);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(got, dir);
+    }
+
+    #[test]
+    fn run_terminal_cwd_falls_back_when_agent_cwd_missing() {
+        assert_eq!(run_terminal_cwd(Some(""), None), default_space_dir());
+        assert_eq!(run_terminal_cwd(None, None), default_space_dir());
+    }
+
+    #[test]
+    fn command_with_marker_is_shell_aware() {
+        // nushell aborts `;` on failure, so it wraps in try/catch and reads the
+        // exit code from the caught error.
+        assert_eq!(
+            command_with_marker("/opt/homebrew/bin/nu", "ls", "abc"),
+            "try { ls; print \"\\n__VMUX_DONE_abc_0__\" } catch { |e| print $\"\\n__VMUX_DONE_abc_($e.exit_code? | default 1)__\" }"
+        );
+        assert_eq!(
+            command_with_marker("/usr/local/bin/fish", "ls", "abc"),
+            "ls; printf '\\n__VMUX_DONE_abc_%s__\\n' $status"
+        );
+        assert_eq!(
+            command_with_marker("/bin/zsh", "ls", "abc"),
+            "ls; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$?\""
+        );
+        // Unknown shells fall back to posix syntax.
+        assert_eq!(
+            command_with_marker("/bin/bash", "ls", "abc"),
+            "ls; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$?\""
+        );
+    }
+
+    #[test]
+    fn run_command_line_noop_when_token_absent() {
+        let settings = test_settings();
+        assert_eq!(run_command_line("ls -la", None, &settings), "ls -la");
+    }
+
+    #[test]
+    fn run_command_line_embeds_marker_when_token_present() {
+        let settings = test_settings();
+        let out = run_command_line("ls -la", Some("tok9"), &settings);
+        assert!(out.contains("ls -la"), "got: {out}");
+        assert!(out.contains("__VMUX_DONE_tok9_"), "got: {out}");
     }
 }
