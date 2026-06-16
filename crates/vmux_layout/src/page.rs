@@ -667,15 +667,15 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
 fn UpdateNoticeFooter(version: String) -> Element {
     rsx! {
         div {
-            class: "shrink-0 mt-2 flex items-center gap-2 rounded-md glass px-3 py-2 text-foreground",
-            span { class: "inline-block h-2 w-2 shrink-0 rounded-full bg-green-500" }
-            div { class: "min-w-0 flex-1",
-                div { class: "text-ui font-medium", "New version available" }
-                div { class: "truncate text-xs text-muted-foreground", "{version}" }
+            class: "shrink-0 mt-2 flex flex-col gap-2 rounded-md glass px-3 py-2 text-foreground",
+            div { class: "flex items-center gap-2",
+                span { class: "inline-block h-2 w-2 shrink-0 rounded-full bg-green-500" }
+                span { class: "min-w-0 flex-1 text-ui font-medium", "New version available" }
+                span { class: "shrink-0 text-xs text-muted-foreground", "{version}" }
             }
             button {
                 r#type: "button",
-                class: "shrink-0 cursor-pointer rounded-md bg-primary px-2.5 py-1 text-ui font-medium text-primary-foreground hover:opacity-90",
+                class: "w-full cursor-pointer rounded-md bg-primary px-2.5 py-1.5 text-ui font-medium text-primary-foreground hover:opacity-90",
                 onclick: move |_| {
                     let _ = try_cef_bin_emit_rkyv(&crate::event::RestartRequestEvent);
                 },
