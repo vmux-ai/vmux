@@ -79,9 +79,13 @@ fn page_matches(page: &CommandBarPage, search_lower: &str) -> bool {
 }
 
 fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarResultItem> {
-    pages
+    let mut matched: Vec<&CommandBarPage> = pages
         .iter()
         .filter(|page| page_matches(page, search_lower))
+        .collect();
+    matched.sort_by_key(|page| page.title.to_lowercase());
+    matched
+        .into_iter()
         .map(|page| CommandBarResultItem::Page {
             url: page.url.clone(),
             title: page.title.clone(),
@@ -462,6 +466,19 @@ mod tests {
             .position(|r| matches!(r, CommandBarResultItem::Command { .. }))
             .expect("command present");
         assert!(last_page < first_command, "pages must come before commands");
+    }
+
+    #[test]
+    fn pages_listed_alphabetically() {
+        let results = filter_results("", &[], &[], &[], &sample_pages(), false, &[]);
+        let titles: Vec<String> = results
+            .iter()
+            .filter_map(|r| match r {
+                CommandBarResultItem::Page { title, .. } => Some(title.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(titles, vec!["History", "Settings", "Spaces", "Vibe"]);
     }
 
     #[test]
