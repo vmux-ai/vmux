@@ -370,12 +370,11 @@ pub(crate) struct SettingsWatcher {
 fn data_dir() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "macos")]
     {
-        std::env::var_os("HOME")
-            .map(|home| std::path::PathBuf::from(home).join("Library/Application Support/Vmux"))
+        std::env::var_os("HOME").map(|_| vmux_core::profile::shared_data_dir())
     }
     #[cfg(not(target_os = "macos"))]
     {
-        Some(std::env::temp_dir().join("Vmux"))
+        Some(vmux_core::profile::shared_data_dir())
     }
 }
 
