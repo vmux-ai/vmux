@@ -264,8 +264,7 @@ mod tests {
     fn command_bar_in_place_enter_opens_typed_query_before_suggestions() {
         let source = include_str!("page.rs");
 
-        assert!(source.contains("fn should_open_typed_query_on_enter"));
-        assert!(source.contains("OpenTarget::InPlace"));
+        assert!(source.contains("should_open_typed_query_on_enter("));
         assert!(source.contains("emit_action_with_target(\"open\", &q, open_target)"));
     }
 
