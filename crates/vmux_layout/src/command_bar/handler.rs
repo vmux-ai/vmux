@@ -69,6 +69,14 @@ pub struct PendingCommandBarReveal {
     payload: Option<Vec<u8>>,
 }
 
+impl PendingCommandBarReveal {
+    /// True once a real open is in flight (open_id != 0). The prewarm placeholder
+    /// (open_id == 0) is idle and must not keep the event loop awake.
+    pub fn is_active(&self) -> bool {
+        self.open_id != 0
+    }
+}
+
 const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
 const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
 
@@ -2499,6 +2507,26 @@ mod tests {
     #[test]
     fn normalize_url_preserves_vmux_protocol() {
         assert_eq!(normalize_url("vmux://terminal/123"), "vmux://terminal/123");
+    }
+
+    #[test]
+    fn pending_reveal_is_active_only_with_real_open_id() {
+        assert!(
+            !PendingCommandBarReveal {
+                frames: 0,
+                open_id: 0,
+                payload: None,
+            }
+            .is_active()
+        );
+        assert!(
+            PendingCommandBarReveal {
+                frames: 0,
+                open_id: 7,
+                payload: None,
+            }
+            .is_active()
+        );
     }
 
     #[test]

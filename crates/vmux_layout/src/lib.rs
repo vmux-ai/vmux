@@ -59,6 +59,8 @@ pub use cef::{
     mirror_metadata_to_url,
 };
 #[cfg(not(target_arch = "wasm32"))]
+pub use command_bar::handler::PendingCommandBarReveal;
+#[cfg(not(target_arch = "wasm32"))]
 pub use header::Header;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::LayoutPlugin;
