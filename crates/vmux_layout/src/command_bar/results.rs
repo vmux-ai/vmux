@@ -1,12 +1,6 @@
-use vmux_command::event::{CommandBarCommandEntry, CommandBarSpace, CommandBarTab, HistoryEntry};
-
-const SPACES_QUERY: &str = "vmux://spaces";
-pub const SPACES_PAGE_URL: &str = "vmux://spaces/";
-const SPACES_QUERY_PREFIX: &str = SPACES_PAGE_URL;
-
-const SETTINGS_QUERY: &str = "vmux://settings";
-pub const SETTINGS_PAGE_URL: &str = "vmux://settings/";
-const SETTINGS_QUERY_PREFIX: &str = SETTINGS_PAGE_URL;
+use vmux_command::event::{
+    CommandBarCommandEntry, CommandBarPage, CommandBarSpace, CommandBarTab, HistoryEntry,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandBarResultItem {
@@ -30,6 +24,11 @@ pub enum CommandBarResultItem {
         id: String,
         name: String,
         shortcut: String,
+    },
+    Page {
+        url: String,
+        title: String,
+        icon: String,
     },
     Navigate {
         url: String,
@@ -68,48 +67,45 @@ fn space_matches(space: &CommandBarSpace, search_lower: &str) -> bool {
         || space.profile.to_lowercase().contains(search_lower)
 }
 
-fn space_query(q: &str) -> Option<&str> {
-    if q == SPACES_QUERY {
-        Some("")
-    } else {
-        q.strip_prefix(SPACES_QUERY_PREFIX)
-    }
-}
-
-fn settings_query(q: &str) -> Option<&str> {
-    if q == SETTINGS_QUERY {
-        Some("")
-    } else {
-        q.strip_prefix(SETTINGS_QUERY_PREFIX)
-    }
-}
-
-fn spaces_page_matches(search_lower: &str) -> bool {
+fn page_matches(page: &CommandBarPage, search_lower: &str) -> bool {
     search_lower.is_empty()
-        || "spaces".contains(search_lower)
-        || SPACES_PAGE_URL.contains(search_lower)
-}
-
-fn settings_page_matches(search_lower: &str) -> bool {
-    search_lower.is_empty()
-        || "settings".contains(search_lower)
-        || SETTINGS_PAGE_URL.contains(search_lower)
-}
-
-fn space_results(spaces: &[CommandBarSpace], search_lower: &str) -> Vec<CommandBarResultItem> {
-    let mut results = Vec::new();
-    if spaces_page_matches(search_lower) {
-        results.push(CommandBarResultItem::Navigate {
-            url: SPACES_PAGE_URL.to_string(),
-        });
-    }
-    results.extend(
-        spaces
+        || page.title.to_lowercase().contains(search_lower)
+        || page.url.to_lowercase().contains(search_lower)
+        || page
+            .keywords
             .iter()
-            .filter(|space| space_matches(space, search_lower))
-            .map(space_result),
-    );
-    results
+            .any(|k| k.to_lowercase().contains(search_lower))
+}
+
+fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarResultItem> {
+    pages
+        .iter()
+        .filter(|page| page_matches(page, search_lower))
+        .map(|page| CommandBarResultItem::Page {
+            url: page.url.clone(),
+            title: page.title.clone(),
+            icon: page.icon.clone(),
+        })
+        .collect()
+}
+
+fn space_list_items(spaces: &[CommandBarSpace], search_lower: &str) -> Vec<CommandBarResultItem> {
+    spaces
+        .iter()
+        .filter(|space| space_matches(space, search_lower))
+        .map(space_result)
+        .collect()
+}
+
+fn query_targets_spaces_page(q: &str, pages: &[CommandBarPage]) -> bool {
+    let Some(url) = pages
+        .iter()
+        .find(|p| p.host == "spaces")
+        .map(|p| p.url.as_str())
+    else {
+        return false;
+    };
+    q == url || q == url.trim_end_matches('/') || q.starts_with(url)
 }
 
 fn command_results(
@@ -127,23 +123,15 @@ pub fn filter_results(
     tabs: &[CommandBarTab],
     commands: &[CommandBarCommandEntry],
     spaces: &[CommandBarSpace],
+    pages: &[CommandBarPage],
     new_tab: bool,
     history: &[HistoryEntry],
 ) -> Vec<CommandBarResultItem> {
     let q = query.trim();
-    if let Some(search) = space_query(q) {
-        let search_lower = search.trim().to_lowercase();
-        let mut items = space_results(spaces, &search_lower);
-        if search_lower.is_empty() {
-            items.extend(command_results(commands));
-        }
-        return items;
-    }
 
-    if settings_query(q).is_some() {
-        let mut items = vec![CommandBarResultItem::Navigate {
-            url: SETTINGS_PAGE_URL.to_string(),
-        }];
+    if query_targets_spaces_page(q, pages) {
+        let mut items = page_results(pages, &q.to_lowercase());
+        items.extend(space_list_items(spaces, ""));
         items.extend(command_results(commands));
         return items;
     }
@@ -202,12 +190,8 @@ pub fn filter_results(
     }
 
     if !starts_with_cmd && !is_path {
-        items.extend(space_results(spaces, &search_lower));
-        if settings_page_matches(&search_lower) {
-            items.push(CommandBarResultItem::Navigate {
-                url: SETTINGS_PAGE_URL.to_string(),
-            });
-        }
+        items.extend(page_results(pages, &search_lower));
+        items.extend(space_list_items(spaces, &search_lower));
     }
 
     if !starts_with_cmd || !search.is_empty() {
@@ -274,6 +258,32 @@ mod tests {
         }
     }
 
+    fn sample_pages() -> Vec<CommandBarPage> {
+        vec![
+            CommandBarPage {
+                host: "settings".into(),
+                url: "vmux://settings/".into(),
+                title: "Settings".into(),
+                keywords: vec!["preferences".into()],
+                icon: "settings".into(),
+            },
+            CommandBarPage {
+                host: "spaces".into(),
+                url: "vmux://spaces/".into(),
+                title: "Spaces".into(),
+                keywords: vec!["space".into()],
+                icon: "layers".into(),
+            },
+            CommandBarPage {
+                host: "history".into(),
+                url: "vmux://history/".into(),
+                title: "History".into(),
+                keywords: vec!["recent".into()],
+                icon: "clock".into(),
+            },
+        ]
+    }
+
     #[test]
     fn spaces_url_lists_all_spaces() {
         let spaces = vec![
@@ -286,32 +296,22 @@ mod tests {
             &[],
             &[] as &[CommandBarCommandEntry],
             &spaces,
+            &sample_pages(),
             false,
             &[],
         );
 
-        assert_eq!(
-            results,
-            vec![
-                CommandBarResultItem::Navigate {
-                    url: SPACES_PAGE_URL.to_string(),
-                },
-                CommandBarResultItem::Space {
-                    id: "space-1".to_string(),
-                    name: "Space 1".to_string(),
-                    profile: "Personal".to_string(),
-                    is_active: false,
-                    tab_count: 0,
-                },
-                CommandBarResultItem::Space {
-                    id: "work".to_string(),
-                    name: "Work".to_string(),
-                    profile: "Personal".to_string(),
-                    is_active: true,
-                    tab_count: 3,
-                },
-            ]
-        );
+        assert!(results.contains(&CommandBarResultItem::Page {
+            url: "vmux://spaces/".into(),
+            title: "Spaces".into(),
+            icon: "layers".into(),
+        }));
+        assert!(results.iter().any(|r| matches!(
+            r, CommandBarResultItem::Space { id, .. } if id == "space-1"
+        )));
+        assert!(results.iter().any(|r| matches!(
+            r, CommandBarResultItem::Space { id, .. } if id == "work"
+        )));
     }
 
     #[test]
@@ -322,10 +322,12 @@ mod tests {
             shortcut: "super+k".to_string(),
         }];
 
-        let results = filter_results("vmux://spaces/", &[], &commands, &[], false, &[]);
+        let results = filter_results("vmux://spaces/", &[], &commands, &[], &sample_pages(), false, &[]);
 
-        assert!(results.contains(&CommandBarResultItem::Navigate {
-            url: SPACES_PAGE_URL.to_string(),
+        assert!(results.contains(&CommandBarResultItem::Page {
+            url: "vmux://spaces/".into(),
+            title: "Spaces".into(),
+            icon: "layers".into(),
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
             id: "browser_open_command_bar".to_string(),
@@ -342,10 +344,12 @@ mod tests {
             shortcut: "<leader> s".to_string(),
         }];
 
-        let results = filter_results("spaces", &[], &commands, &[], false, &[]);
+        let results = filter_results("spaces", &[], &commands, &[], &sample_pages(), false, &[]);
 
-        assert!(results.contains(&CommandBarResultItem::Navigate {
-            url: SPACES_PAGE_URL.to_string(),
+        assert!(results.contains(&CommandBarResultItem::Page {
+            url: "vmux://spaces/".into(),
+            title: "Spaces".into(),
+            icon: "layers".into(),
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
             id: "space_open".to_string(),
@@ -362,11 +366,41 @@ mod tests {
         ];
         let tabs: Vec<CommandBarTab> = Vec::new();
 
-        let results = filter_results("client", &tabs, &[], &spaces, false, &[]);
+        let results = filter_results("client", &tabs, &[], &spaces, &sample_pages(), false, &[]);
 
-        assert!(matches!(
-            results.first(),
-            Some(CommandBarResultItem::Space { id, .. }) if id == "client"
-        ));
+        assert!(results.iter().any(|r| matches!(
+            r, CommandBarResultItem::Space { id, .. } if id == "client"
+        )));
+    }
+
+    #[test]
+    fn page_matched_by_keyword() {
+        let results = filter_results("preferences", &[], &[], &[], &sample_pages(), false, &[]);
+        assert!(results.contains(&CommandBarResultItem::Page {
+            url: "vmux://settings/".into(),
+            title: "Settings".into(),
+            icon: "settings".into(),
+        }));
+    }
+
+    #[test]
+    fn settings_page_reachable_by_name() {
+        let results = filter_results("setti", &[], &[], &[], &sample_pages(), false, &[]);
+        assert!(results.iter().any(|r| matches!(
+            r,
+            CommandBarResultItem::Page { title, .. } if title == "Settings"
+        )));
+    }
+
+    #[test]
+    fn empty_query_has_no_pages() {
+        let results = filter_results("", &[], &[], &[], &sample_pages(), false, &[]);
+        assert!(!results.iter().any(|r| matches!(r, CommandBarResultItem::Page { .. })));
+    }
+
+    #[test]
+    fn command_prefix_excludes_pages() {
+        let results = filter_results("> set", &[], &[], &[], &sample_pages(), false, &[]);
+        assert!(!results.iter().any(|r| matches!(r, CommandBarResultItem::Page { .. })));
     }
 }

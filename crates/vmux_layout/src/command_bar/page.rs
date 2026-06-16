@@ -4,9 +4,7 @@ use crate::command_bar::keyboard::{
     CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code,
     ignore_physical_rerouted_ctrl_keydown,
 };
-use crate::command_bar::results::{
-    CommandBarResultItem as ResultItem, SETTINGS_PAGE_URL, SPACES_PAGE_URL, filter_results,
-};
+use crate::command_bar::results::{CommandBarResultItem as ResultItem, filter_results};
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
     command_bar_root_class, command_bar_shell_class, result_content_row_class,
@@ -193,6 +191,7 @@ pub fn Page() -> Element {
         spaces,
         tabs,
         commands,
+        pages,
         target: open_target,
         ..
     } = state();
@@ -200,7 +199,7 @@ pub fn Page() -> Element {
     let is_new_tab = is_new_stack();
     let results = {
         let history = history_suggestions();
-        let mut r = filter_results(&q, &tabs, &commands, &spaces, is_new_tab, &history);
+        let mut r = filter_results(&q, &tabs, &commands, &spaces, &pages, is_new_tab, &history);
         let completions = if looks_like_path(q.trim()) {
             path_completions()
         } else {
@@ -244,6 +243,7 @@ pub fn Page() -> Element {
             Some(ResultItem::Navigate { url }) => url.clone(),
             Some(ResultItem::Stack { url, .. }) => url.clone(),
             Some(ResultItem::Space { name, .. }) => name.clone(),
+            Some(ResultItem::Page { title, .. }) => title.clone(),
             Some(ResultItem::Terminal { path }) if path.is_empty() => "Terminal".to_string(),
             Some(ResultItem::Terminal { path }) => path.clone(),
             Some(ResultItem::History { title, url, .. }) => {
@@ -308,6 +308,11 @@ pub fn Page() -> Element {
             ResultItem::Space { id, .. } => {
                 emit_action("space", id);
             }
+            ResultItem::Page { url, .. } => {
+                if !url.is_empty() {
+                    emit_action_with_target("open", url, open_target);
+                }
+            }
             ResultItem::Navigate { url } => {
                 if !url.is_empty() {
                     emit_action_with_target("open", url, open_target);
@@ -353,6 +358,7 @@ pub fn Page() -> Element {
                                     Some(ResultItem::Terminal { .. }) => (false, true, false),
                                     Some(ResultItem::Stack { .. }) => (false, false, true),
                                     Some(ResultItem::Space { .. }) => (false, false, false),
+                                    Some(ResultItem::Page { .. }) => (false, false, false),
                                     Some(ResultItem::Navigate { url }) => {
                                         let is_u = url.contains("://") || (url.contains('.') && !url.contains(' '));
                                         (false, false, is_u)
@@ -546,23 +552,23 @@ pub fn Page() -> Element {
                                         }
                                         span { class: result_trailing_slot_class() }
                                     },
+                                    ResultItem::Page { url, title, icon } => rsx! {
+                                        div { class: result_content_row_class(),
+                                            {page_icon(icon)}
+                                            div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                                                span { class: result_primary_text_class(), "{title}" }
+                                                span { class: result_secondary_text_class(), "{url}" }
+                                            }
+                                        }
+                                        span { class: result_trailing_slot_class(), "New tab" }
+                                    },
                                     ResultItem::Navigate { url } => rsx! {
                                         div { class: result_content_row_class(),
                                             Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                                                 circle { cx: "11", cy: "11", r: "8" }
                                                 path { d: "m21 21-4.3-4.3" }
                                             }
-                                            if url == SPACES_PAGE_URL {
-                                                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                                    span { class: result_primary_text_class(), "Spaces Page" }
-                                                    span { class: result_secondary_text_class(), "{url}" }
-                                                }
-                                            } else if url == SETTINGS_PAGE_URL {
-                                                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                                    span { class: result_primary_text_class(), "Settings" }
-                                                    span { class: result_secondary_text_class(), "{url}" }
-                                                }
-                                            } else if url.is_empty() {
+                                            if url.is_empty() {
                                                 span { class: "text-base text-foreground", "Search" }
                                             } else if looks_like_url(url) {
                                                 span { class: result_primary_text_class(), "Open \"{url}\"" }
@@ -570,9 +576,7 @@ pub fn Page() -> Element {
                                                 span { class: result_primary_text_class(), "Search \"{url}\"" }
                                             }
                                         }
-                                        if url == SPACES_PAGE_URL || url == SETTINGS_PAGE_URL {
-                                            span { class: result_trailing_slot_class(), "New tab" }
-                                        } else if !url.is_empty() {
+                                        if !url.is_empty() {
                                             span { class: result_trailing_slot_class(), "\u{21b5}" }
                                         } else {
                                             span { class: result_trailing_slot_class() }
@@ -594,6 +598,39 @@ fn looks_like_path(s: &str) -> bool {
         || s.starts_with("./")
         || s.starts_with("../")
         || s.contains('/') && !s.contains(' ') && !s.contains("://")
+}
+
+fn page_icon(icon: &str) -> Element {
+    let icon_class = "h-4 w-4 shrink-0 text-muted-foreground";
+    match icon {
+        "settings" => rsx! { Icon { class: icon_class,
+            circle { cx: "12", cy: "12", r: "3" }
+            path { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" }
+        } },
+        "layers" => rsx! { Icon { class: icon_class,
+            path { d: "M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" }
+            path { d: "m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" }
+            path { d: "m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" }
+        } },
+        "clock" => rsx! { Icon { class: icon_class,
+            circle { cx: "12", cy: "12", r: "10" }
+            path { d: "M12 6v6l4 2" }
+        } },
+        "activity" => rsx! { Icon { class: icon_class,
+            path { d: "M22 12h-4l-3 9L9 3l-3 9H2" }
+        } },
+        "sparkles" => rsx! { Icon { class: icon_class,
+            path { d: "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" }
+        } },
+        "terminal" => rsx! { Icon { class: icon_class,
+            path { d: "m4 17 6-6-6-6" }
+            path { d: "M12 19h8" }
+        } },
+        _ => rsx! { Icon { class: icon_class,
+            path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+            path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+        } },
+    }
 }
 
 fn should_open_typed_query_on_enter(
