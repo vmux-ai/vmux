@@ -95,8 +95,11 @@ pub enum AgentCommand {
         url: String,
         focus: bool,
     },
-    FocusSelf {
+    Run {
         anchor: ProcessId,
+        command: String,
+        direction: AgentPaneDirection,
+        focus: bool,
     },
 }
 
@@ -154,6 +157,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::OpenBeside { url, .. } if url.trim().is_empty() => {
             Err("open_beside_me.url is empty")
+        }
+        AgentCommand::Run { command, .. } if command.trim().is_empty() => {
+            Err("run.command is empty")
         }
         _ => Ok(()),
     }

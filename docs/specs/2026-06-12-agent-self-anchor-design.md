@@ -4,6 +4,24 @@ Give each CLI agent (vibe / claude / codex) a stable handle to its **own** pane,
 
 This is spec #4 of that arc. The next spec, #1 (run a command in a terminal next to the agent, with output read back), builds directly on the primitive defined here.
 
+## Revision (v2): `open_page` / `run` / `read_terminal` agent surface
+
+The model is **Live Share with a coworker**: the agent acts in *visible, shared, interactive* terminals the user can take over. The agent's open/run MCP surface consolidates to self-relative verbs (all resolved via the `ProcessId` anchor below):
+
+- **`open_page { url, direction?=right, focus?=true }`** — open a page (terminal `vmux://terminal/`, else browser) in a new pane beside the agent. (Renamed from the original `open_beside_me`; internal protocol/command names still read `OpenBeside`.)
+- **`run { command, direction?=right, focus?=false }`** — open a terminal beside the agent and **type `command` into an interactive shell** (so the user watches live and can take over; the shell persists after the command). `focus` defaults false (the agent is driving). Reuses `split_leaf_into_two` + `TerminalStackSpawnRequest { pending_input }`.
+- `focus_self` is **removed** — redundant with `update_layout`'s `focused` triple.
+
+**Read-back = "read the visible terminal"** (Live Share): the agent reads scrollback like the user does — no clean stdout/exit capture. Feasible because the service already broadcasts `ProcessOutput` (raw bytes) + `ProcessExited { exit_code }`; future optimization (clean `{output, exit}` for a fresh `run` terminal, or OSC-133 shell-integration markers for existing shells) is purely additive at the read layer.
+
+**Still pending (next increments on this branch):**
+1. `read_terminal { terminal }` — return a terminal's scrollback text; answered by the **service** rendering the `Process` `Term` (reuse `snapshot`/`snapshot_text`).
+2. `run { terminal }` — run in an existing terminal (by handle), not just a new one.
+3. **Terminal handle = `ProcessId`** exposed as `process_id` on terminal `Stack` DTOs in `read_layout`, and returned by `run`, so the agent can target/read specific terminals.
+4. Remove the now-superseded `in_pane`, `run_shell`, `new_terminal_tab` MCP tools (keep `browser_navigate` — that's *navigate an existing browser*, a different job).
+
+The sections below describe the original `open_beside_me`/`focus_self` design; the anchor (`ProcessId`) + `is_self` foundation is unchanged and still current.
+
 ## Motivation
 
 vmux already injects its MCP server into all three CLIs (vibe via `VIBE_MCP_SERVERS`, claude via `--mcp-config`, codex via `-c mcp_servers.vmux`), and they already have layout tools (`read_layout`, `update_layout`, `open_in_*`, `new_terminal_tab`, `run_shell`). Two gaps block the IDE experience:

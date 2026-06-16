@@ -314,15 +314,14 @@ fn list_spaces_definition() -> ToolDefinition {
     }
 }
 
-fn open_beside_me_definition() -> ToolDefinition {
+fn open_page_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "open_beside_me".into(),
-        description: "Open a url in a new pane directly beside YOUR pane (the agent calling this). \
+        name: "open_page".into(),
+        description: "Open a page in a new pane directly beside YOUR pane (the agent calling this). \
 direction is one of right|left|top|bottom (default right). url uses the same rules as browser_navigate \
 (vmux://terminal/ opens a terminal; anything else loads as a browser). \
 focus (default true): true moves focus to the new pane (use when the human will interact with it); \
-false keeps focus on your own pane (use when you will drive the new pane yourself, e.g. run a command in it). \
-Returns ok; call read_layout to learn new ids."
+false keeps focus on your own pane."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -337,11 +336,27 @@ Returns ok; call read_layout to learn new ids."
     }
 }
 
-fn focus_self_definition() -> ToolDefinition {
+fn run_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "focus_self".into(),
-        description: "Move keyboard focus to YOUR pane (the agent calling this).".into(),
-        input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
+        name: "run".into(),
+        description:
+            "Open a terminal in a new pane beside YOUR pane and run a shell command in it, \
+so the user can watch it live and take over the terminal. \
+direction is one of right|left|top|bottom (default right). \
+focus (default false): false keeps focus on your own pane (you are driving the command); \
+true moves focus to the new terminal (use when you want the user to interact with it). \
+The command is typed into an interactive shell, so the terminal stays usable after it finishes."
+                .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["command"],
+            "additionalProperties": false,
+            "properties": {
+                "command": {"type": "string"},
+                "direction": {"enum": ["right", "left", "top", "bottom"]},
+                "focus": {"type": "boolean"}
+            }
+        }),
     }
 }
 
@@ -359,8 +374,8 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(update_layout_definition());
     defs.push(get_settings_definition());
     defs.push(list_spaces_definition());
-    defs.push(open_beside_me_definition());
-    defs.push(focus_self_definition());
+    defs.push(open_page_definition());
+    defs.push(run_definition());
     defs
 }
 
@@ -374,28 +389,31 @@ pub fn dispatch_with_anchor(
     anchor: Option<vmux_service::protocol::ProcessId>,
 ) -> Result<DispatchTarget, String> {
     use vmux_service::protocol::AgentPaneDirection;
-    if name == "open_beside_me" {
-        let anchor = anchor
-            .ok_or("open_beside_me requires an agent anchor (not available to this client)")?;
+    fn parse_direction(arguments: &Value) -> Result<AgentPaneDirection, String> {
+        match arguments
+            .get("direction")
+            .and_then(Value::as_str)
+            .unwrap_or("right")
+        {
+            "right" => Ok(AgentPaneDirection::Right),
+            "left" => Ok(AgentPaneDirection::Left),
+            "top" => Ok(AgentPaneDirection::Top),
+            "bottom" => Ok(AgentPaneDirection::Bottom),
+            other => Err(format!("unknown direction: {other}")),
+        }
+    }
+    if name == "open_page" {
+        let anchor =
+            anchor.ok_or("open_page requires an agent anchor (not available to this client)")?;
         let url = arguments
             .get("url")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
         if url.trim().is_empty() {
-            return Err("open_beside_me.url is empty".to_string());
+            return Err("open_page.url is empty".to_string());
         }
-        let direction = match arguments
-            .get("direction")
-            .and_then(Value::as_str)
-            .unwrap_or("right")
-        {
-            "right" => AgentPaneDirection::Right,
-            "left" => AgentPaneDirection::Left,
-            "top" => AgentPaneDirection::Top,
-            "bottom" => AgentPaneDirection::Bottom,
-            other => return Err(format!("unknown direction: {other}")),
-        };
+        let direction = parse_direction(&arguments)?;
         let focus = arguments
             .get("focus")
             .and_then(Value::as_bool)
@@ -407,10 +425,27 @@ pub fn dispatch_with_anchor(
             focus,
         }));
     }
-    if name == "focus_self" {
-        let anchor =
-            anchor.ok_or("focus_self requires an agent anchor (not available to this client)")?;
-        return Ok(DispatchTarget::Command(AgentCommand::FocusSelf { anchor }));
+    if name == "run" {
+        let anchor = anchor.ok_or("run requires an agent anchor (not available to this client)")?;
+        let command = arguments
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if command.trim().is_empty() {
+            return Err("run.command is empty".to_string());
+        }
+        let direction = parse_direction(&arguments)?;
+        let focus = arguments
+            .get("focus")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        return Ok(DispatchTarget::Command(AgentCommand::Run {
+            anchor,
+            command,
+            direction,
+            focus,
+        }));
     }
     if name == "read_layout" {
         return Ok(DispatchTarget::Query(
@@ -680,10 +715,10 @@ mod tests {
     }
 
     #[test]
-    fn open_beside_me_dispatch_uses_anchor() {
+    fn open_page_dispatch_uses_anchor() {
         let anchor = vmux_service::protocol::ProcessId::new();
         let target = dispatch_with_anchor(
-            "open_beside_me",
+            "open_page",
             serde_json::json!({"direction": "right", "url": "vmux://terminal/"}),
             Some(anchor),
         )
@@ -695,13 +730,37 @@ mod tests {
             }
             other => panic!("expected OpenBeside, got {other:?}"),
         }
-        assert!(dispatch_with_anchor("focus_self", serde_json::json!({}), None).is_err());
         assert!(
-            tool_definitions()
-                .iter()
-                .any(|d| d.name == "open_beside_me")
+            dispatch_with_anchor("open_page", serde_json::json!({"url": ""}), Some(anchor))
+                .is_err()
         );
-        assert!(tool_definitions().iter().any(|d| d.name == "focus_self"));
+        assert!(dispatch_with_anchor("open_page", serde_json::json!({"url": "x"}), None).is_err());
+        assert!(tool_definitions().iter().any(|d| d.name == "open_page"));
+        assert!(tool_definitions().iter().any(|d| d.name == "run"));
+    }
+
+    #[test]
+    fn run_dispatch_uses_anchor() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_with_anchor(
+            "run",
+            serde_json::json!({"command": "echo hi"}),
+            Some(anchor),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::Run {
+                anchor: a, command, ..
+            }) => {
+                assert_eq!(a, anchor);
+                assert_eq!(command, "echo hi");
+            }
+            other => panic!("expected Run, got {other:?}"),
+        }
+        assert!(
+            dispatch_with_anchor("run", serde_json::json!({"command": " "}), Some(anchor)).is_err()
+        );
+        assert!(dispatch_with_anchor("run", serde_json::json!({"command": "x"}), None).is_err());
     }
 
     #[test]

@@ -758,14 +758,14 @@ fn handle_pane_commands(
     }
 }
 
-fn direction_to_split(direction: &PaneDirection) -> PaneSplitDirection {
+pub fn direction_to_split(direction: &PaneDirection) -> PaneSplitDirection {
     match direction {
         PaneDirection::Left | PaneDirection::Right => PaneSplitDirection::Row,
         PaneDirection::Top | PaneDirection::Bottom => PaneSplitDirection::Column,
     }
 }
 
-fn split_leaf_into_two(
+pub fn split_leaf_into_two(
     commands: &mut Commands,
     active: Entity,
     split_dir: PaneSplitDirection,

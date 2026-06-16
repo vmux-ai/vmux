@@ -441,7 +441,7 @@ fn handle_agent_commands(
                     });
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::OpenBeside { .. } | ServiceAgentCommand::FocusSelf { .. } => {
+            ServiceAgentCommand::OpenBeside { .. } | ServiceAgentCommand::Run { .. } => {
                 continue;
             }
         };
@@ -466,15 +466,32 @@ fn resolve_self_pane(
     Some((term, pane))
 }
 
+fn to_pane_direction(
+    d: &vmux_service::protocol::AgentPaneDirection,
+) -> vmux_command::open::PaneDirection {
+    use vmux_command::open::PaneDirection;
+    use vmux_service::protocol::AgentPaneDirection as D;
+    match d {
+        D::Top => PaneDirection::Top,
+        D::Right => PaneDirection::Right,
+        D::Bottom => PaneDirection::Bottom,
+        D::Left => PaneDirection::Left,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     agent_terms: Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
     child_of_q: Query<&ChildOf>,
+    pane_children: Query<&Children, With<Pane>>,
+    tab_filter: Query<Entity, With<vmux_layout::stack::Stack>>,
     mut open_beside_writer: MessageWriter<vmux_layout::OpenBesideRequest>,
+    mut terminal_stack_spawn_writer: MessageWriter<TerminalStackSpawnRequest>,
     mut commands: Commands,
     service: Option<Res<ServiceClient>>,
 ) {
-    use vmux_service::protocol::{AgentCommandResult, AgentPaneDirection, ClientMessage};
+    use vmux_service::protocol::{AgentCommandResult, ClientMessage};
     let Some(service) = service else {
         for _ in reader.read() {}
         return;
@@ -489,15 +506,9 @@ fn handle_agent_self_commands(
             } => match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
                 None => AgentCommandResult::Error("self process not found".to_string()),
                 Some((_, pane)) => {
-                    let dir = match direction {
-                        AgentPaneDirection::Top => vmux_command::open::PaneDirection::Top,
-                        AgentPaneDirection::Right => vmux_command::open::PaneDirection::Right,
-                        AgentPaneDirection::Bottom => vmux_command::open::PaneDirection::Bottom,
-                        AgentPaneDirection::Left => vmux_command::open::PaneDirection::Left,
-                    };
                     open_beside_writer.write(vmux_layout::OpenBesideRequest {
                         pane,
-                        direction: dir,
+                        direction: to_pane_direction(direction),
                         url: url.clone(),
                         request_id: request.request_id.0,
                         focus: *focus,
@@ -505,15 +516,37 @@ fn handle_agent_self_commands(
                     AgentCommandResult::Ok
                 }
             },
-            ServiceAgentCommand::FocusSelf { anchor } => {
-                match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
-                    None => AgentCommandResult::Error("self process not found".to_string()),
-                    Some((term, _)) => {
-                        vmux_core::focus_pane_entity(term, &mut commands, &child_of_q);
-                        AgentCommandResult::Ok
-                    }
+            ServiceAgentCommand::Run {
+                anchor,
+                command,
+                direction,
+                focus,
+            } => match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
+                None => AgentCommandResult::Error("self process not found".to_string()),
+                Some((_, pane)) => {
+                    let existing_tabs: Vec<Entity> = pane_children
+                        .get(pane)
+                        .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+                        .unwrap_or_default();
+                    let split_dir =
+                        vmux_layout::pane::direction_to_split(&to_pane_direction(direction));
+                    let p2 = vmux_layout::pane::split_leaf_into_two(
+                        &mut commands,
+                        pane,
+                        split_dir,
+                        &existing_tabs,
+                        *focus,
+                    );
+                    let mut data = command.clone().into_bytes();
+                    data.push(b'\n');
+                    terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
+                        pane: p2,
+                        cwd: None,
+                        pending_input: Some(data),
+                    });
+                    AgentCommandResult::Ok
                 }
-            }
+            },
             _ => continue,
         };
         service.0.send(ClientMessage::AgentCommandResponse {

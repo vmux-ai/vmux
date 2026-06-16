@@ -44,8 +44,8 @@ fn mcp_tools_list_includes_self_anchor_tools() {
         .write_stdin(stdin)
         .assert()
         .success()
-        .stdout(contains("\"open_beside_me\""))
-        .stdout(contains("\"focus_self\""));
+        .stdout(contains("\"open_page\""))
+        .stdout(contains("\"run\""));
 }
 
 #[test]
