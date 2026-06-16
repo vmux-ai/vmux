@@ -30,6 +30,7 @@ fn splash_decision(visible: bool, dismissed: bool, elapsed: Duration) -> SplashA
 #[derive(Default)]
 struct SplashState {
     window: Option<Retained<NSPanel>>,
+    status_label: Option<Retained<objc2_app_kit::NSTextField>>,
     shown: bool,
     dismissed: bool,
     created_at: Option<Instant>,
@@ -42,20 +43,20 @@ impl Plugin for SplashPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<SplashState>()
             .add_systems(Startup, show_splash)
-            .add_systems(Last, dismiss_splash);
+            .add_systems(Last, (update_splash_text, dismiss_splash).chain());
     }
 }
 
 fn show_splash(mut state: NonSendMut<SplashState>) {
-    use objc2::{AnyThread, ClassType, MainThreadMarker, MainThreadOnly, runtime::AnyClass};
+    use objc2::{ClassType, MainThreadMarker, MainThreadOnly, runtime::AnyClass};
     use objc2_app_kit::{
-        NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSGlassEffectView,
-        NSGlassEffectViewStyle, NSImage, NSImageScaling, NSImageView, NSProgressIndicator,
-        NSProgressIndicatorStyle, NSScreen, NSView, NSVisualEffectBlendingMode,
-        NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindow,
-        NSWindowCollectionBehavior, NSWindowStyleMask,
+        NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSFont, NSGlassEffectView,
+        NSGlassEffectViewStyle, NSProgressIndicator, NSProgressIndicatorStyle, NSScreen,
+        NSTextAlignment, NSTextField, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
+        NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowCollectionBehavior,
+        NSWindowStyleMask,
     };
-    use objc2_foundation::{NSData, NSPoint, NSRect, NSSize};
+    use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
     if state.shown {
         return;
@@ -127,18 +128,16 @@ fn show_splash(mut state: NonSendMut<SplashState>) {
         container.addSubview(view);
     }
 
-    let bytes: &[u8] = include_bytes!("../../../packaging/macos/vmux-icon.png");
-    let data = NSData::with_bytes(bytes);
-    if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
-        const LOGO: f64 = 96.0;
-        let logo = NSImageView::imageViewWithImage(&image, mtm);
-        logo.setFrame(NSRect::new(
-            NSPoint::new((W - LOGO) / 2.0, (H - LOGO) / 2.0 + 24.0),
-            NSSize::new(LOGO, LOGO),
-        ));
-        logo.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
-        container.addSubview(&logo);
-    }
+    const TITLE_H: f64 = 40.0;
+    let title = NSTextField::labelWithString(&NSString::from_str("Vmux"), mtm);
+    title.setFrame(NSRect::new(
+        NSPoint::new(0.0, (H - TITLE_H) / 2.0 + 40.0),
+        NSSize::new(W, TITLE_H),
+    ));
+    title.setAlignment(NSTextAlignment::Center);
+    title.setFont(Some(&NSFont::boldSystemFontOfSize(28.0)));
+    title.setTextColor(Some(&NSColor::labelColor()));
+    container.addSubview(&title);
 
     const SPIN: f64 = 32.0;
     let spinner = NSProgressIndicator::initWithFrame(
@@ -152,6 +151,18 @@ fn show_splash(mut state: NonSendMut<SplashState>) {
     spinner.setIndeterminate(true);
     unsafe { spinner.startAnimation(None) };
     container.addSubview(&spinner);
+
+    const STATUS_H: f64 = 20.0;
+    let status = NSTextField::labelWithString(&NSString::from_str("Starting..."), mtm);
+    status.setFrame(NSRect::new(
+        NSPoint::new(0.0, (H - STATUS_H) / 2.0 - 96.0),
+        NSSize::new(W, STATUS_H),
+    ));
+    status.setAlignment(NSTextAlignment::Center);
+    status.setFont(Some(&NSFont::systemFontOfSize(12.0)));
+    status.setTextColor(Some(&NSColor::secondaryLabelColor()));
+    container.addSubview(&status);
+    state.status_label = Some(status);
 
     window.setContentView(Some(&container));
     window.orderFrontRegardless();
@@ -195,6 +206,13 @@ fn dismiss_splash(
             state.dismissed = true;
             state.fade_started = Some(Instant::now());
         }
+    }
+}
+
+fn update_splash_text(state: NonSend<SplashState>, status: Res<crate::boot_status::SplashStatus>) {
+    use objc2_foundation::NSString;
+    if let Some(label) = &state.status_label {
+        label.setStringValue(&NSString::from_str(&status.phase.display()));
     }
 }
 
@@ -254,10 +272,12 @@ mod tests {
     }
 
     #[test]
-    fn splash_embeds_logo() {
+    fn splash_shows_title_and_status_label() {
         let source = include_str!("splash.rs");
-        assert!(source.contains("include_bytes!"));
-        assert!(source.contains("vmux-icon.png"));
+        assert!(source.contains("NSTextField"));
+        assert!(source.contains("\"Vmux\""));
+        assert!(source.contains("SplashStatus"));
+        assert!(source.contains("update_splash_text"));
     }
 
     #[test]
@@ -273,7 +293,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("\"NSProgressIndicator\""));
         assert!(manifest.contains("\"NSVisualEffectView\""));
-        assert!(manifest.contains("\"NSImageView\""));
-        assert!(manifest.contains("\"NSData\""));
+        assert!(manifest.contains("\"NSTextField\""));
+        assert!(manifest.contains("\"NSFont\""));
     }
 }

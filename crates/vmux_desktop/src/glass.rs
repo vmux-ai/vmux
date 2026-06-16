@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use vmux_core::page::PageReady;
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::scene::InteractionMode;
 
@@ -131,9 +130,9 @@ fn install_window_glass(
 fn reveal_window_after_layout_ready(
     mut state: NonSendMut<GlassState>,
     mut window: Query<(Entity, &mut Window), With<bevy::window::PrimaryWindow>>,
-    layout_ready: Query<(), (With<LayoutCef>, With<PageReady>)>,
+    status: Res<crate::boot_status::SplashStatus>,
 ) {
-    if state.revealed || !state.installed || layout_ready.is_empty() {
+    if state.revealed || !state.installed || !status.reveal_ready {
         return;
     }
     let Ok((entity, mut window)) = window.single_mut() else {
@@ -557,7 +556,7 @@ mod tests {
         assert!(overlay.contains("layer.setBackgroundColor(Some(&clear_color.CGColor()))"));
     }
 
-    fn reveal_test_app(layout_ready: bool) -> App {
+    fn reveal_test_app(reveal_ready: bool) -> App {
         let mut app = App::new();
         app.add_systems(Update, reveal_window_after_layout_ready);
         app.world_mut().insert_non_send(GlassState {
@@ -571,15 +570,15 @@ mod tests {
             },
             bevy::window::PrimaryWindow,
         ));
-        let mut layout = app.world_mut().spawn((LayoutCef,));
-        if layout_ready {
-            layout.insert(PageReady::default());
-        }
+        app.insert_resource(crate::boot_status::SplashStatus {
+            phase: crate::boot_status::BootPhase::Starting,
+            reveal_ready,
+        });
         app
     }
 
     #[test]
-    fn startup_window_stays_hidden_until_layout_ready() {
+    fn startup_window_stays_hidden_until_reveal_ready() {
         let mut app = reveal_test_app(false);
 
         app.update();
@@ -593,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn startup_window_reveals_after_layout_ready() {
+    fn startup_window_reveals_after_reveal_ready() {
         let mut app = reveal_test_app(true);
 
         app.update();
