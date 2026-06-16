@@ -324,6 +324,9 @@ fn create_webview(
                     #[allow(deprecated)]
                     w.raw_window_handle().ok()
                 });
+            if windowed && host_window.is_none() {
+                continue;
+            }
             webview_debug_log(format!(
                 "create_webview entity={entity:?} uri={} size={:?} scale={device_scale_factor} transparent={transparent} host_window={} fps={windowless_frame_rate}",
                 uri.0,
