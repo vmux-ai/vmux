@@ -9523,6 +9523,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "tray-icon",
  "url",
  "uuid",
