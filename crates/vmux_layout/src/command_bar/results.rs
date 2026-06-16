@@ -322,7 +322,15 @@ mod tests {
             shortcut: "super+k".to_string(),
         }];
 
-        let results = filter_results("vmux://spaces/", &[], &commands, &[], &sample_pages(), false, &[]);
+        let results = filter_results(
+            "vmux://spaces/",
+            &[],
+            &commands,
+            &[],
+            &sample_pages(),
+            false,
+            &[],
+        );
 
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
@@ -395,12 +403,20 @@ mod tests {
     #[test]
     fn empty_query_has_no_pages() {
         let results = filter_results("", &[], &[], &[], &sample_pages(), false, &[]);
-        assert!(!results.iter().any(|r| matches!(r, CommandBarResultItem::Page { .. })));
+        assert!(
+            !results
+                .iter()
+                .any(|r| matches!(r, CommandBarResultItem::Page { .. }))
+        );
     }
 
     #[test]
     fn command_prefix_excludes_pages() {
         let results = filter_results("> set", &[], &[], &[], &sample_pages(), false, &[]);
-        assert!(!results.iter().any(|r| matches!(r, CommandBarResultItem::Page { .. })));
+        assert!(
+            !results
+                .iter()
+                .any(|r| matches!(r, CommandBarResultItem::Page { .. }))
+        );
     }
 }
