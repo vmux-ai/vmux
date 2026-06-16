@@ -26,7 +26,7 @@ pub use plugin::runtime::{
     LastSelfWriteHash, SettingsLoadSet, SettingsWriteRequest, ShortcutDef, ShortcutEntry,
     ShortcutSettings, SpaceOverrides, TerminalSettings, TerminalTheme, apply_settings_update,
     load_settings, resolve_startup_dir, resolve_startup_url, serialize_settings_to_json,
-    serialize_settings_to_ron, set_at_path,
+    set_at_path,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::view::Settings;

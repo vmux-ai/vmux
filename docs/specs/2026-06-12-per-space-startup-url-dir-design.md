@@ -25,18 +25,24 @@ via the `update_settings` / `get_settings` MCP tools).
   `startup_dir` (default cwd for new terminals **and** agent sessions).
 - **Out:** per-space anything else; a settings/spaces UI for these fields
   (agent + hand-edit only); making `startup_dir` affect relative `file://`
-  startup_url resolution; pruning override entries when a space is deleted
-  (orphans are left and ignored — safe across re-create).
+  startup_url resolution; auto-seeding/auto-creating per-space entries (the map
+  stays minimal — absent ⇒ global fallback).
 
 ## Decisions (resolved during brainstorming)
 
 1. `startup_dir` governs **terminal + agent cwd**.
 2. Resolution chain is **per-space → global → built-in** for both values.
 3. Per-space overrides live in **`settings.ron`** under a `spaces` map (not in
-   `spaces.ron`/`SpaceRecord`), so the existing agent tools reach them.
-4. Agent can create a new per-space entry because the `spaces` map is **seeded
-   from the registry** — every known space id always has an entry, so
-   `set_at_path` (which rejects unknown paths) needs no change.
+   `spaces.ron`/`SpaceRecord`).
+4. The `spaces` map is **optional and never auto-populated**. A space not listed
+   resolves to the global fallback. Config files stay minimal/hand-curated — no
+   reconcile/seed system writes empty entries. (Reversed an earlier
+   seed-from-registry decision after it polluted `settings.ron` with an empty
+   block per space.)
+5. Global fallbacks: url → `browser.startup_url`, dir → **`terminal.startup_dir`**.
+   The agent edits these globals (and existing/whole `spaces`) via the existing
+   `update_settings` tool; creating a brand-new per-space entry granularly is not
+   supported (humans hand-edit, or the agent replaces the whole `spaces` value).
 
 ## Data model — `AppSettings` (`vmux_setting/src/plugin/runtime.rs`)
 
@@ -56,24 +62,23 @@ pub struct SpaceOverrides {
     pub startup_dir: Option<String>,
 }
 
+// BrowserSettings.startup_url unchanged (existing global).
+// Global startup_dir lives on TerminalSettings (the terminal/agent concern):
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct BrowserSettings {
-    #[serde(default = "default_browser_startup_url")]
-    pub startup_url: String,        // existing global
+pub struct TerminalSettings {
+    // … existing fields …
     #[serde(default)]
     pub startup_dir: Option<String>, // NEW global
 }
+// TerminalSettings gains `impl Default` so tests/agents can build it ergonomically.
 ```
 
-- `BTreeMap` for stable serialization order.
-- `SpaceOverrides` fields **must not** use `skip_serializing_if`: `None` must
-  serialize as `null` so the keys stay present once an entry exists, which is
-  what lets `set_at_path` (`spaces.<id>.startup_url`) target them.
-- Global `startup_dir` lives in `BrowserSettings` to sit beside `startup_url` and
-  because that struct is always present (serde default), keeping the agent path
-  `browser.startup_dir` stable. (Naming caveat: "browser" is a slight misnomer
-  for a terminal dir; accepted to avoid moving the existing `browser.startup_url`
-  and to keep both startup values co-located.)
+- `BTreeMap` for stable serialization order; map is empty by default.
+- `SpaceOverrides` fields use plain `Option` (serialize as `null` when present),
+  but the map is never auto-seeded — an entry exists only if a human/agent wrote it.
+- Global `startup_dir` lives on `TerminalSettings` (not `browser`) since it is a
+  terminal/agent concern. `terminal` is `Some(...)` in the shipped `settings.ron`,
+  so the agent path `terminal.startup_dir` is reachable.
 
 ## Resolution helpers (`vmux_setting/src/plugin/runtime.rs`, pure fns)
 
@@ -94,56 +99,29 @@ pub fn resolve_startup_url(settings: &AppSettings, space_id: &str) -> String {
 }
 
 pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> std::path::PathBuf {
-    let candidate = settings
-        .spaces
-        .get(space_id)
-        .and_then(|o| o.startup_dir.as_deref())
-        .or(settings.browser.startup_dir.as_deref())
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    if let Some(dir) = candidate {
-        let p = std::path::PathBuf::from(dir);
-        if p.is_dir() {
-            return p;
-        }
-    }
-    vmux_core::profile::space_dir(space_id) // built-in, auto-created
+    // `pick` applies trim + non-empty + is_dir at EACH tier, so an invalid
+    // higher tier cascades to a valid lower one.
+    let pick = |opt: Option<&str>| { /* trim, non-empty, PathBuf, is_dir */ };
+    pick(settings.spaces.get(space_id).and_then(|o| o.startup_dir.as_deref()))
+        .or_else(|| pick(settings.terminal.as_ref().and_then(|t| t.startup_dir.as_deref())))
+        .unwrap_or_else(|| vmux_core::profile::space_dir(space_id)) // built-in ~/.vmux/<id>, auto-created
 }
 ```
 
 - `resolve_startup_url` gains a `space_id` param (existing legacy
   `vmux://agent` → google preserved). All call sites pass the active space id.
-- `resolve_startup_dir` falls through tiers on empty/missing/non-dir; startup
-  never errors.
+- `resolve_startup_dir` cascades tiers, validating `is_dir` at each; startup
+  never errors. Built-in tier auto-creates `~/.vmux/<space>/`.
 
-Also add `pub fn serialize_settings_to_ron(&AppSettings) -> Result<String, String>`
-(reusing the same `ron::ser::PrettyConfig` as `apply_settings_update`) for the
-seeder to persist.
+## No seeding
 
-## Seeding (`vmux_space`, owns `ActiveSpace` + registry, depends on `vmux_setting`)
-
-`set_at_path` rejects unknown paths, so `spaces.<id>` must already exist before
-the agent can set `spaces.<id>.startup_url`. A reconcile system guarantees that.
-
-`reconcile_space_overrides` system:
-- Runs at `Startup`, and in `Update` when `AppSettings` **or** `ActiveSpace`
-  changes. The `AppSettings` trigger covers initial load and hand-edit reloads
-  via `reload_settings_on_change` (which replaces the whole resource and would
-  otherwise drop seeded entries); the `ActiveSpace` trigger covers a freshly
-  created space (`on_space_command "new"` switches the active space) without
-  needing the reconcile logic duplicated into the command handler.
-- Reads the registry (`read_space_registry_from(shared_data_dir())`); for each
-  registry space id missing from `settings.spaces`, inserts
-  `SpaceOverrides::default()`.
-- If it added ≥1 entry: `serialize_settings_to_ron` + send
-  `SettingsWriteRequest` so disk mirrors the registry. `persist_settings_to_disk`
-  records `last_hash`, so the resulting file event is suppressed by
-  `reload_settings_on_change` (no reload loop).
-- Delete: orphan entry left in `settings.spaces` (ignored by resolvers).
-
-Registration must order after settings load at `Startup`
-(`reconcile_space_overrides.after(SettingsLoadSet)`), referencing the
-`SettingsLoadSet` re-exported from `vmux_setting`.
+`set_at_path` rejects unknown paths, so the agent cannot create a brand-new
+`spaces.<id>` granularly. We accept that rather than seed: the `spaces` map is
+left empty and resolvers fall back to the global tier when an id is absent. The
+agent can still edit globals (`browser.startup_url`, `terminal.startup_dir`) and
+can replace the whole `spaces` value (the `spaces` key always exists); humans
+hand-edit `settings.ron` to add a per-space override. This keeps config files
+minimal — no empty `{startup_url: None, startup_dir: None}` block per space.
 
 ## URL wiring — move the updater into `vmux_space`
 
@@ -194,43 +172,39 @@ leaving them avoids an unrelated `$HOME → startup_dir` behavior change.
 ## Edge cases
 
 - Empty per-space url/dir string → treated as unset → next tier.
-- Per-space dir set but non-existent / not a dir → falls through to global, then
-  built-in `space_dir(id)`.
-- Hand-edit of `settings.ron` removing `spaces` → reconcile re-seeds in-memory
-  and re-persists.
+- Per-space dir set but non-existent / not a dir → cascades to global
+  (`terminal.startup_dir`), then built-in `~/.vmux/<id>`.
+- A space absent from `spaces` → resolves entirely from the global tier.
 - Agent sets `spaces.<unknown-id>.startup_url` → `set_at_path` returns
-  "unknown setting path" (correct: no such space).
+  "unknown setting path" (no such entry; add it by hand or set the whole map).
 - Active space switches → `EffectiveStartupUrl` recomputes; already-open stacks
   keep their content (only new opens use the new value), matching today.
 
 ## Testing
 
 Resolver (`vmux_setting`):
-- url: per-space wins; falls to global; falls to google; empty per-space →
+- url: per-space wins; falls to global; falls to google; blank per-space →
   global; legacy `vmux://agent` → google.
-- dir: per-space wins; falls to global; falls to `space_dir(id)`; non-dir
-  per-space → fallthrough; empty → fallthrough.
-- `AppSettings` JSON + RON roundtrip with a populated `spaces` map.
-- `serialize_settings_to_ron` reparses.
-
-Seeding (`vmux_space`, Bevy app/messages per AGENTS.md):
-- reconcile seeds an id present in registry but missing from settings.
-- reconcile leaves an existing entry (and its values) untouched.
-- reconcile with nothing missing sends no `SettingsWriteRequest`.
+- dir: per-space wins; cascades to global (`terminal.startup_dir`); falls to
+  `space_dir(id)`; invalid per-space cascades to a valid global; all-invalid →
+  built-in.
+- `AppSettings` RON roundtrip with a populated `spaces` map.
 
 URL updater (`vmux_space`):
 - `EffectiveStartupUrl` reflects the active space's override and flips when
   `ActiveSpace` changes.
 
 Dir wiring (`vmux_terminal`, message+system integration per AGENTS.md):
-- send `LayoutSpawnRequest::Terminal`, run the schedule; with a per-space
-  `startup_dir` configured, the spawned terminal's `TerminalLaunch.cwd` is that
-  dir; with an invalid/unset dir it is `space_dir(id)` (today's value).
+- drive `handle_terminal_page_open` with an explicit `ActiveSpace` (hermetic —
+  do not rely on `ActiveSpace::default()` reading the on-disk registry); with a
+  per-space `startup_dir` configured the spawned terminal's `TerminalLaunch.cwd`
+  is that dir.
 
 ## Out of scope / follow-ups
 
 - Spaces-page or settings-page UI for these fields.
-- Pruning override entries on space delete.
+- Granular agent-create of a new `spaces.<id>` entry (would need `set_at_path`
+  auto-vivification for the `spaces` map only) — deferred to keep config minimal.
 - Per-space overrides for any other setting.
 - Adopting `startup_dir` for the cwd paths that default to `$HOME` today
   (command-bar empty-path terminal via the `respond_terminal_*` responders, and

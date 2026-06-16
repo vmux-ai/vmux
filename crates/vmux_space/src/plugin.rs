@@ -65,12 +65,7 @@ impl Plugin for SpacePlugin {
                 Update,
                 crate::snapshot_updater::update_spaces_snapshot
                     .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
-            )
-            .add_systems(
-                Startup,
-                reconcile_space_overrides.after(vmux_setting::SettingsLoadSet),
-            )
-            .add_systems(Update, reconcile_space_overrides);
+            );
     }
 }
 
@@ -543,48 +538,6 @@ fn respond_spaces_spawn(
     }
 }
 
-pub(crate) fn seed_missing_overrides(
-    spaces: &mut std::collections::BTreeMap<String, vmux_setting::SpaceOverrides>,
-    registry: &SpaceRegistry,
-) -> bool {
-    let mut added = false;
-    for space in &registry.spaces {
-        if !spaces.contains_key(&space.id) {
-            spaces.insert(space.id.clone(), vmux_setting::SpaceOverrides::default());
-            added = true;
-        }
-    }
-    added
-}
-
-fn reconcile_space_overrides(
-    settings: Option<ResMut<vmux_setting::AppSettings>>,
-    active: Option<Res<ActiveSpace>>,
-    mut writes: MessageWriter<vmux_setting::SettingsWriteRequest>,
-) {
-    let (Some(mut settings), Some(active)) = (settings, active) else {
-        return;
-    };
-    if !(settings.is_changed() || active.is_changed()) {
-        return;
-    }
-    let registry = read_space_registry_from(&profile::shared_data_dir());
-    let missing = registry
-        .spaces
-        .iter()
-        .any(|space| !settings.spaces.contains_key(&space.id));
-    if !missing {
-        return;
-    }
-    seed_missing_overrides(&mut settings.spaces, &registry);
-    match vmux_setting::serialize_settings_to_ron(&settings) {
-        Ok(ron_bytes) => {
-            writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
-        }
-        Err(e) => bevy::log::warn!("reconcile_space_overrides: serialize failed: {e}"),
-    }
-}
-
 #[cfg(test)]
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -640,7 +593,6 @@ mod tests {
         AppSettings {
             browser: BrowserSettings {
                 startup_url: "about:blank".to_string(),
-                startup_dir: None,
             },
             layout: LayoutSettings {
                 radius: 0.0,
@@ -1102,92 +1054,5 @@ mod tests {
         assert!(focus.tab.is_some());
         assert!(focus.pane.is_some());
         assert!(focus.stack.is_some());
-    }
-
-    fn mark_active_changed(mut active: ResMut<ActiveSpace>) {
-        active.set_changed();
-    }
-
-    #[test]
-    fn reconcile_does_not_continuously_mark_settings_changed() {
-        let _home = HomeEnvGuard::use_temp_home("reconcile-no-thrash");
-        write_space_registry_to(
-            &profile::shared_data_dir(),
-            &SpaceRegistry {
-                spaces: vec![bootstrap_space_record(), work_space_record()],
-            },
-        );
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<vmux_setting::SettingsWriteRequest>()
-            .insert_resource(test_settings())
-            .insert_resource(ActiveSpace {
-                record: work_space_record(),
-            })
-            .add_systems(
-                Update,
-                (mark_active_changed, reconcile_space_overrides).chain(),
-            );
-
-        app.update();
-        app.update();
-
-        let before = app
-            .world()
-            .resource_ref::<vmux_setting::AppSettings>()
-            .last_changed();
-        app.update();
-        let after = app
-            .world()
-            .resource_ref::<vmux_setting::AppSettings>()
-            .last_changed();
-
-        assert_eq!(
-            before, after,
-            "reconcile must not re-mark AppSettings changed once seeding has settled"
-        );
-    }
-
-    #[test]
-    fn seed_adds_missing_and_reports_change() {
-        let mut spaces = std::collections::BTreeMap::new();
-        let registry = crate::model::SpaceRegistry {
-            spaces: vec![
-                crate::model::SpaceRecord {
-                    id: "a".into(),
-                    name: "A".into(),
-                    profile: "P".into(),
-                },
-                crate::model::SpaceRecord {
-                    id: "b".into(),
-                    name: "B".into(),
-                    profile: "P".into(),
-                },
-            ],
-        };
-        assert!(seed_missing_overrides(&mut spaces, &registry));
-        assert_eq!(spaces.len(), 2);
-        assert!(spaces.contains_key("a") && spaces.contains_key("b"));
-    }
-
-    #[test]
-    fn seed_preserves_existing_and_reports_no_change() {
-        let mut spaces = std::collections::BTreeMap::new();
-        spaces.insert(
-            "a".into(),
-            vmux_setting::SpaceOverrides {
-                startup_url: Some("x".into()),
-                startup_dir: None,
-            },
-        );
-        let registry = crate::model::SpaceRegistry {
-            spaces: vec![crate::model::SpaceRecord {
-                id: "a".into(),
-                name: "A".into(),
-                profile: "P".into(),
-            }],
-        };
-        assert!(!seed_missing_overrides(&mut spaces, &registry));
-        assert_eq!(spaces["a"].startup_url.as_deref(), Some("x"));
     }
 }

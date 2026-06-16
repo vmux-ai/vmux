@@ -101,13 +101,15 @@ pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> std::path:
             .get(space_id)
             .and_then(|o| o.startup_dir.as_deref()),
     )
-    .or_else(|| pick(settings.browser.startup_dir.as_deref()))
+    .or_else(|| {
+        pick(
+            settings
+                .terminal
+                .as_ref()
+                .and_then(|t| t.startup_dir.as_deref()),
+        )
+    })
     .unwrap_or_else(|| vmux_core::profile::space_dir(space_id))
-}
-
-pub fn serialize_settings_to_ron(settings: &AppSettings) -> Result<String, String> {
-    ron::ser::to_string_pretty(settings, ron::ser::PrettyConfig::default())
-        .map_err(|e| format!("RON serialize failed: {e}"))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -227,14 +229,11 @@ impl KeyComboDef {
 pub struct BrowserSettings {
     #[serde(default = "default_browser_startup_url")]
     pub startup_url: String,
-    #[serde(default)]
-    pub startup_dir: Option<String>,
 }
 
 fn default_browser_settings() -> BrowserSettings {
     BrowserSettings {
         startup_url: default_browser_startup_url(),
-        startup_dir: None,
     }
 }
 
@@ -256,6 +255,22 @@ pub struct TerminalSettings {
     pub custom_themes: Vec<crate::themes::TerminalColorScheme>,
     #[serde(default = "default_true")]
     pub confirm_close: bool,
+    #[serde(default)]
+    pub startup_dir: Option<String>,
+}
+
+impl Default for TerminalSettings {
+    fn default() -> Self {
+        Self {
+            shell: None,
+            font_family: None,
+            default_theme: default_theme_name(),
+            themes: Vec::new(),
+            custom_themes: Vec::new(),
+            confirm_close: true,
+            startup_dir: None,
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -694,7 +709,6 @@ mod tests {
         AppSettings {
             browser: BrowserSettings {
                 startup_url: default_browser_startup_url(),
-                startup_dir: None,
             },
             layout: LayoutSettings {
                 radius: 0.0,
@@ -926,7 +940,12 @@ mod tests {
     fn embedded_settings_have_empty_spaces_and_no_global_startup_dir() {
         let s = load_embedded_settings();
         assert!(s.spaces.is_empty());
-        assert!(s.browser.startup_dir.is_none());
+        assert!(
+            s.terminal
+                .as_ref()
+                .and_then(|t| t.startup_dir.as_ref())
+                .is_none()
+        );
     }
 
     #[test]
@@ -934,7 +953,10 @@ mod tests {
         let per = tempfile::tempdir().unwrap();
         let glob = tempfile::tempdir().unwrap();
         let mut s = base_settings();
-        s.browser.startup_dir = Some(glob.path().to_string_lossy().into());
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some(glob.path().to_string_lossy().into()),
+            ..Default::default()
+        });
         s.spaces.insert(
             "work".into(),
             SpaceOverrides {
@@ -944,7 +966,7 @@ mod tests {
         );
         assert_eq!(resolve_startup_dir(&s, "work"), per.path());
         assert_eq!(resolve_startup_dir(&s, "other"), glob.path());
-        s.browser.startup_dir = None;
+        s.terminal = None;
         assert_eq!(
             resolve_startup_dir(&s, "space-1"),
             vmux_core::profile::space_dir("space-1")
@@ -955,7 +977,10 @@ mod tests {
     fn resolve_startup_dir_invalid_per_space_cascades_to_valid_global() {
         let glob = tempfile::tempdir().unwrap();
         let mut s = base_settings();
-        s.browser.startup_dir = Some(glob.path().to_string_lossy().into());
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some(glob.path().to_string_lossy().into()),
+            ..Default::default()
+        });
         s.spaces.insert(
             "work".into(),
             SpaceOverrides {
@@ -969,7 +994,10 @@ mod tests {
     #[test]
     fn resolve_startup_dir_all_invalid_falls_through_to_builtin() {
         let mut s = base_settings();
-        s.browser.startup_dir = Some("/no/such/global/xyz-vmux".into());
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some("/no/such/global/xyz-vmux".into()),
+            ..Default::default()
+        });
         s.spaces.insert(
             "work".into(),
             SpaceOverrides {
@@ -981,12 +1009,5 @@ mod tests {
             resolve_startup_dir(&s, "work"),
             vmux_core::profile::space_dir("work")
         );
-    }
-
-    #[test]
-    fn serialize_settings_to_ron_reparses() {
-        let s = base_settings();
-        let ron = serialize_settings_to_ron(&s).unwrap();
-        let _back: AppSettings = ron::de::from_str(&ron).unwrap();
     }
 }

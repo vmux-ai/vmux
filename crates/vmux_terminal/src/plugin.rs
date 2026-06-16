@@ -3003,7 +3003,6 @@ mod tests {
         AppSettings {
             browser: BrowserSettings {
                 startup_url: "about:blank".to_string(),
-                startup_dir: None,
             },
             layout: LayoutSettings {
                 radius: 0.0,
@@ -3066,9 +3065,10 @@ mod tests {
     #[test]
     fn open_terminal_page_uses_per_space_startup_dir() {
         let dir = tempfile::tempdir().unwrap();
+        let record = vmux_space::model::bootstrap_space_record();
         let mut settings = test_settings();
         settings.spaces.insert(
-            "space-1".into(),
+            record.id.clone(),
             vmux_setting::SpaceOverrides {
                 startup_url: None,
                 startup_dir: Some(dir.path().to_string_lossy().into()),
@@ -3078,7 +3078,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
-            .init_resource::<vmux_space::spaces::ActiveSpace>()
+            .insert_resource(vmux_space::spaces::ActiveSpace { record })
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_terminal_page_open);
