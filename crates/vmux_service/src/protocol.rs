@@ -76,6 +76,11 @@ pub enum AgentCommand {
     OpenInNewStack {
         url: String,
     },
+    SpaceCommand {
+        command: String,
+        space_id: Option<String>,
+        name: Option<String>,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -93,12 +98,14 @@ pub enum AgentCommandResult {
 pub enum AgentQuery {
     ReadLayout,
     GetSettings,
+    ListSpaces,
 }
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentQueryResult {
     Layout(crate::protocol::layout::LayoutSnapshot),
     Settings(String),
+    Spaces(String),
     Error(String),
 }
 
@@ -124,6 +131,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::OpenInNewStack { url, .. } if url.trim().is_empty() => {
             Err("open_in_new_stack.url is empty")
+        }
+        AgentCommand::SpaceCommand { command, .. } if command.trim().is_empty() => {
+            Err("space_command.command is empty")
         }
         _ => Ok(()),
     }

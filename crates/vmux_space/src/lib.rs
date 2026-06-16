@@ -24,6 +24,6 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest =
     vmux_core::page::PageManifest { host: "spaces" };
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use plugin::{SaveSpaceRequest, SpacePlugin};
+pub use plugin::{SaveSpaceRequest, SpaceCommandRequest, SpacePlugin};
 #[cfg(not(target_arch = "wasm32"))]
 pub use spaces::{ActiveSpace, Spaces};
