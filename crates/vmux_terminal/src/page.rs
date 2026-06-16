@@ -120,6 +120,8 @@ pub fn Page() -> Element {
     let cell_dims = use_signal(|| (0.0f64, 0.0f64));
     // Last emitted mouse cell position for move-event throttling.
     let mut last_mouse_cell = use_signal(|| (-1i32, -1i32));
+    // Accumulated wheel delta (pixels) not yet converted into scroll notches.
+    let mut wheel_accum = use_signal(|| 0.0f64);
 
     // Set up character measurement span and ResizeObserver (runs once after mount).
     use_effect(move || {
@@ -213,6 +215,38 @@ pub fn Page() -> Element {
 
             oncontextmenu: move |e: Event<MouseData>| {
                 e.prevent_default();
+            },
+
+            onwheel: move |e: Event<WheelData>| {
+                e.prevent_default();
+                let dims = cell_dims();
+                let (_, ch) = dims;
+                let data = e.data();
+                let Some(raw) = data.downcast::<web_sys::WheelEvent>() else {
+                    return;
+                };
+                let line_px = if ch > 0.0 { ch } else { 16.0 };
+                let px = match raw.delta_mode() {
+                    1 => raw.delta_y() * line_px,
+                    2 => raw.delta_y() * line_px * 3.0,
+                    _ => raw.delta_y(),
+                };
+                let total = wheel_accum() + px;
+                let notches = (total / line_px).trunc();
+                wheel_accum.set(total - notches * line_px);
+                let count = (notches as i32).clamp(-10, 10);
+                if count == 0 {
+                    return;
+                }
+                if let Some((col, row)) =
+                    client_to_cell(raw.client_x() as f64, raw.client_y() as f64, padding, dims)
+                {
+                    let button = if count < 0 { 64 } else { 65 };
+                    let modifiers = wheel_modifier_bits(raw);
+                    for _ in 0..count.unsigned_abs() {
+                        emit_mouse(button, col, row, modifiers, true, false);
+                    }
+                }
             },
 
             if copy_mode() {
@@ -525,7 +559,17 @@ fn parse_px(cs: &web_sys::CssStyleDeclaration, prop: &str) -> f64 {
 // ---------------------------------------------------------------------------
 
 /// Convert mouse client coordinates to terminal grid (col, row).
-fn mouse_to_cell(e: &Event<MouseData>, padding: f64, (cw, ch): (f64, f64)) -> Option<(u16, u16)> {
+fn mouse_to_cell(e: &Event<MouseData>, padding: f64, dims: (f64, f64)) -> Option<(u16, u16)> {
+    let client = e.client_coordinates();
+    client_to_cell(client.x, client.y, padding, dims)
+}
+
+fn client_to_cell(
+    client_x: f64,
+    client_y: f64,
+    padding: f64,
+    (cw, ch): (f64, f64),
+) -> Option<(u16, u16)> {
     if cw <= 0.0 || ch <= 0.0 {
         return None;
     }
@@ -533,9 +577,8 @@ fn mouse_to_cell(e: &Event<MouseData>, padding: f64, (cw, ch): (f64, f64)) -> Op
         .document()?
         .get_element_by_id(CONTAINER_ID)?;
     let rect = container.get_bounding_client_rect();
-    let client = e.client_coordinates();
-    let x = client.x - rect.left() - padding;
-    let y = client.y - rect.top() - padding;
+    let x = client_x - rect.left() - padding;
+    let y = client_y - rect.top() - padding;
     let col = (x / cw).floor().max(0.0) as u16;
     let row = (y / ch).floor().max(0.0) as u16;
     Some((col, row))
@@ -579,6 +622,23 @@ fn modifier_bits(e: &Event<MouseData>) -> u8 {
         m |= MOD_SHIFT;
     }
     if mods.contains(Modifiers::META) {
+        m |= MOD_SUPER;
+    }
+    m
+}
+
+fn wheel_modifier_bits(e: &web_sys::WheelEvent) -> u8 {
+    let mut m = 0u8;
+    if e.ctrl_key() {
+        m |= MOD_CTRL;
+    }
+    if e.alt_key() {
+        m |= MOD_ALT;
+    }
+    if e.shift_key() {
+        m |= MOD_SHIFT;
+    }
+    if e.meta_key() {
         m |= MOD_SUPER;
     }
     m

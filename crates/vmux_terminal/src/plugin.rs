@@ -6,7 +6,6 @@ use bevy::{
     input::{
         ButtonState, InputSystems,
         keyboard::{Key, KeyboardInput},
-        mouse::{MouseScrollUnit, MouseWheel},
     },
     picking::Pickable,
     prelude::*,
@@ -268,10 +267,8 @@ impl Plugin for TerminalPlugin {
             )>::default())
             .add_systems(
                 PreUpdate,
-                (
-                    handle_terminal_keyboard.run_if(on_message::<KeyboardInput>),
-                    handle_terminal_scroll.run_if(on_message::<MouseWheel>),
-                )
+                handle_terminal_keyboard
+                    .run_if(on_message::<KeyboardInput>)
                     .after(InputSystems),
             );
         add_terminal_update_systems(app)
@@ -2083,57 +2080,6 @@ fn key_code_from_web_code(code: &str) -> KeyCode {
     }
 }
 
-/// Handle mouse wheel scrolling — sends scroll input to service.
-fn handle_terminal_scroll(
-    mut er: MessageReader<MouseWheel>,
-    targeted_terminals: Query<&ProcessId, (With<Terminal>, With<CefKeyboardTarget>)>,
-    keyboard_targets: Query<(), With<CefKeyboardTarget>>,
-    terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
-    mode: Res<vmux_layout::scene::InteractionMode>,
-    service: Option<Res<ServiceClient>>,
-) {
-    let target_processes = resolve_terminal_input_targets(
-        targeted_terminals.iter().copied(),
-        !keyboard_targets.is_empty(),
-        focus.stack,
-        terminals
-            .iter()
-            .map(|(pid, child_of)| (child_of.get(), *pid)),
-        *mode,
-    );
-
-    if target_processes.is_empty() {
-        for _ in er.read() {}
-        return;
-    }
-    let Some(service) = service else {
-        for _ in er.read() {}
-        return;
-    };
-    for event in er.read() {
-        let lines = match event.unit {
-            MouseScrollUnit::Line => -event.y as i32,
-            MouseScrollUnit::Pixel => (-event.y / 20.0) as i32,
-        };
-        if lines == 0 {
-            continue;
-        }
-        // Send scroll as mouse button 64/65 SGR sequences
-        let button: u8 = if lines < 0 { 64 } else { 65 };
-        let count = lines.unsigned_abs();
-        let seq = sgr_mouse_sequence(button, 0, 0, 0, true);
-        for process_id in &target_processes {
-            for _ in 0..count {
-                service.0.send(ClientMessage::ProcessInput {
-                    process_id: *process_id,
-                    data: seq.clone(),
-                });
-            }
-        }
-    }
-}
-
 /// Encode a mouse event as an SGR escape sequence.
 fn sgr_mouse_sequence(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool) -> Vec<u8> {
     let mut cb = button as u32;
@@ -2356,6 +2302,17 @@ fn on_term_mouse(
     let Some(service) = service else { return };
     let Ok(pid) = q.get(entity) else { return };
     let process_id = *pid;
+
+    if event.button == 64 || event.button == 65 {
+        service.0.send(ClientMessage::MouseWheel {
+            process_id,
+            up: event.button == 64,
+            col: event.col,
+            row: event.row,
+            modifiers: event.modifiers,
+        });
+        return;
+    }
 
     let mouse_capture = mode_map
         .modes
