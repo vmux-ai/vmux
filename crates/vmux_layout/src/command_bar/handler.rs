@@ -935,6 +935,7 @@ fn command_bar_open_payload(
         spaces,
         tabs,
         commands,
+        pages: Vec::new(),
         target,
     }
 }
