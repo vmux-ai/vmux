@@ -11,7 +11,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     title: "Agent",
     keywords: &["ai", "chat", "assistant"],
     icon: "sparkles",
-    command_bar: true,
+    command_bar: false,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

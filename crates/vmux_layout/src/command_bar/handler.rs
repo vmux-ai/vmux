@@ -23,14 +23,14 @@ use vmux_command::event::{
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    AgentProviderSummary, CommandBarAgentsSnapshot, CommandBarPagesSnapshot,
-    CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
+    CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
+    CommandBarTerminalsSnapshot,
 };
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
-use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnStackRequest};
+use vmux_core::agent::{AgentKind, PageAgentAttachRequest, PageAgentSpawnStackRequest};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
@@ -151,10 +151,7 @@ pub fn parse_app_agent_id(id: &str) -> Option<(String, String)> {
     Some((parts[0].to_string(), parts[1].to_string()))
 }
 
-pub fn command_list(
-    cli_agent_entries: Vec<AgentProviderSummary>,
-    app_agent_entries: Vec<AppAgentEntry>,
-) -> Vec<CommandBarEntry> {
+pub fn command_list(app_agent_entries: Vec<AppAgentEntry>) -> Vec<CommandBarEntry> {
     let mut entries: Vec<CommandBarEntry> = AppCommand::command_bar_entries()
         .into_iter()
         .map(|(id, name, shortcut)| CommandBarEntry {
@@ -163,17 +160,26 @@ pub fn command_list(
             shortcut: shortcut.to_string(),
         })
         .collect();
-    entries.extend(cli_agent_entries.into_iter().map(|entry| CommandBarEntry {
-        id: entry.id,
-        name: entry.name,
-        shortcut: String::new(),
-    }));
     entries.extend(app_agent_entries.into_iter().map(|entry| CommandBarEntry {
         id: entry.id,
         name: entry.name,
         shortcut: String::new(),
     }));
     entries
+}
+
+fn agent_pages() -> Vec<CommandBarPage> {
+    AgentKind::all()
+        .iter()
+        .map(|kind| CommandBarPage {
+            host: "agent".to_string(),
+            url: kind.cli_url_prefix(),
+            title: kind.display_name().to_string(),
+            keywords: vec![kind.as_url_segment().to_string(), "agent".to_string()],
+            icon: String::new(),
+            favicon: true,
+        })
+        .collect()
 }
 
 pub fn match_command(id: &str) -> Option<AppCommand> {
@@ -536,7 +542,6 @@ fn handle_open_command_bar(
     let spaces_snapshot = snapshot_params.p1().clone();
     let space_name = spaces_snapshot.active_space_name.clone();
     let agents_snap = snapshot_params.p0().clone();
-    let agent_entries: Vec<AgentProviderSummary> = agents_snap.providers;
     let app_agent_entries: Vec<AppAgentEntry> = agents_snap
         .strategies
         .iter()
@@ -546,7 +551,8 @@ fn handle_open_command_bar(
         })
         .collect();
     let startup_url = snapshot_params.p3().map(|url| url.0.clone());
-    let pages = snapshot_params.p5().pages.clone();
+    let mut pages = snapshot_params.p5().pages.clone();
+    pages.extend(agent_pages());
 
     let request =
         command_bar_open_request(reader.read().cloned(), &spaces_snapshot.spaces_page_url);
@@ -807,7 +813,7 @@ fn handle_open_command_bar(
     }
 
     // Build command list
-    let bar_commands: Vec<CommandBarCommandEntry> = command_list(agent_entries, app_agent_entries)
+    let bar_commands: Vec<CommandBarCommandEntry> = command_list(app_agent_entries)
         .into_iter()
         .map(|e| CommandBarCommandEntry {
             id: e.id,
@@ -2469,5 +2475,19 @@ mod tests {
     #[test]
     fn normalize_url_preserves_vmux_protocol() {
         assert_eq!(normalize_url("vmux://terminal/123"), "vmux://terminal/123");
+    }
+
+    #[test]
+    fn agent_pages_lists_all_kinds_with_favicon() {
+        let pages = agent_pages();
+        assert_eq!(pages.len(), 3);
+        assert!(pages.iter().all(|p| p.favicon && p.host == "agent"));
+        assert!(
+            pages
+                .iter()
+                .any(|p| p.url == "vmux://agent/vibe/" && p.title == "Vibe")
+        );
+        assert!(pages.iter().any(|p| p.url == "vmux://agent/claude/"));
+        assert!(pages.iter().any(|p| p.url == "vmux://agent/codex/"));
     }
 }
