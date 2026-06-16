@@ -4,9 +4,9 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
 use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_core::agent::{
-    AgentKind, AgentProviderTargetKind, McpServerConfig, PageAgentAttachDefaultRequest,
-    PageAgentAttachRequest, PageAgentSpawnDefaultRequest, PageAgentSpawnStackRequest,
-    RestartAgentPty, SpawnAgentInStackRequest,
+    AgentKind, AgentProviderTargetKind, PageAgentAttachDefaultRequest, PageAgentAttachRequest,
+    PageAgentSpawnDefaultRequest, PageAgentSpawnStackRequest, RestartAgentPty,
+    SpawnAgentInStackRequest,
 };
 use vmux_core::{
     LastActivatedAt, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask, Ready,
@@ -102,6 +102,7 @@ impl Plugin for AgentPlugin {
             .add_message::<TerminalStackSpawnRequest>()
             .add_message::<ProcessStackSpawnRequest>()
             .add_message::<RestartAgentPty>()
+            .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
             .add_systems(Startup, session::start_agent_session_watchers)
             .add_systems(
                 Update,
@@ -139,6 +140,7 @@ impl Plugin for AgentPlugin {
                 (
                     forward_history_open_intent,
                     handle_agent_commands,
+                    handle_agent_self_commands,
                     handle_agent_queries,
                     detect_agent_session_process_exit,
                 )
@@ -338,6 +340,8 @@ fn handle_agent_commands(
                                 pane,
                                 cwd: Some(cwd_path),
                                 pending_input: None,
+                                process_id: None,
+                                activate: true,
                             });
                         } else {
                             process_stack_spawn_writer.write(ProcessStackSpawnRequest {
@@ -439,6 +443,9 @@ fn handle_agent_commands(
                     });
                 AgentCommandResult::Ok
             }
+            ServiceAgentCommand::OpenBeside { .. } | ServiceAgentCommand::Run { .. } => {
+                continue;
+            }
         };
         if let Some(service) = service.as_ref() {
             service.0.send(ClientMessage::AgentCommandResponse {
@@ -446,6 +453,129 @@ fn handle_agent_commands(
                 result,
             });
         }
+    }
+}
+
+fn resolve_self_pane(
+    anchor: ProcessId,
+    agent_terms: &Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
+    child_of_q: &Query<&ChildOf>,
+) -> Option<(Entity, Entity)> {
+    use bevy::ecs::relationship::Relationship;
+    let (term, _, term_co) = agent_terms.iter().find(|(_, pid, _)| **pid == anchor)?;
+    let stack = term_co.get();
+    let pane = child_of_q.get(stack).ok()?.get();
+    Some((term, pane))
+}
+
+fn to_pane_direction(
+    d: &vmux_service::protocol::AgentPaneDirection,
+) -> vmux_command::open::PaneDirection {
+    use vmux_command::open::PaneDirection;
+    use vmux_service::protocol::AgentPaneDirection as D;
+    match d {
+        D::Top => PaneDirection::Top,
+        D::Right => PaneDirection::Right,
+        D::Bottom => PaneDirection::Bottom,
+        D::Left => PaneDirection::Left,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_agent_self_commands(
+    mut reader: MessageReader<AgentCommandRequest>,
+    agent_terms: Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
+    child_of_q: Query<&ChildOf>,
+    pane_children: Query<&Children, With<Pane>>,
+    tab_filter: Query<Entity, With<vmux_layout::stack::Stack>>,
+    mut open_beside_writer: MessageWriter<vmux_layout::OpenBesideRequest>,
+    mut terminal_stack_spawn_writer: MessageWriter<TerminalStackSpawnRequest>,
+    mut commands: Commands,
+    service: Option<Res<ServiceClient>>,
+    active_space: Option<Res<ActiveSpace>>,
+) {
+    use vmux_service::protocol::{AgentCommandResult, ClientMessage};
+    let Some(service) = service else {
+        for _ in reader.read() {}
+        return;
+    };
+    for request in reader.read() {
+        let result = match &request.command {
+            ServiceAgentCommand::OpenBeside {
+                anchor,
+                direction,
+                url,
+                focus,
+            } => match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
+                None => AgentCommandResult::Error("self process not found".to_string()),
+                Some((_, pane)) => {
+                    open_beside_writer.write(vmux_layout::OpenBesideRequest {
+                        pane,
+                        direction: to_pane_direction(direction),
+                        url: url.clone(),
+                        request_id: request.request_id.0,
+                        focus: *focus,
+                    });
+                    AgentCommandResult::Ok
+                }
+            },
+            ServiceAgentCommand::Run {
+                anchor,
+                command,
+                direction,
+                focus,
+                terminal,
+            } => {
+                let mut data = command.clone().into_bytes();
+                data.push(b'\r');
+                match terminal {
+                    Some(pid) => {
+                        service.0.send(ClientMessage::ProcessInput {
+                            process_id: *pid,
+                            data,
+                        });
+                        AgentCommandResult::Text(pid.to_string())
+                    }
+                    None => match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
+                        None => AgentCommandResult::Error("self process not found".to_string()),
+                        Some((_, pane)) => {
+                            let existing_tabs: Vec<Entity> = pane_children
+                                .get(pane)
+                                .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+                                .unwrap_or_default();
+                            let split_dir = vmux_layout::pane::direction_to_split(
+                                &to_pane_direction(direction),
+                            );
+                            let p2 = vmux_layout::pane::split_leaf_into_two(
+                                &mut commands,
+                                pane,
+                                split_dir,
+                                &existing_tabs,
+                                *focus,
+                            );
+                            let new_pid = ProcessId::new();
+                            let cwd = active_space
+                                .as_deref()
+                                .map(|s| space_dir(&s.record.id))
+                                .unwrap_or_else(default_space_dir);
+                            terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
+                                pane: p2,
+                                cwd: Some(cwd),
+                                pending_input: Some(data),
+                                process_id: Some(new_pid),
+                                activate: *focus,
+                            });
+                            AgentCommandResult::Text(new_pid.to_string())
+                        }
+                    },
+                }
+            }
+            _ => continue,
+        };
+        service.0.send(ClientMessage::AgentCommandResponse {
+            request_id: request.request_id,
+            result,
+        });
     }
 }
 
@@ -558,9 +688,10 @@ fn handle_agent_queries(
 
     for request in reader.read() {
         match request.query {
-            AgentQuery::ReadLayout => {
+            AgentQuery::ReadLayout { anchor } => {
                 layout_snapshot_writer.write(vmux_layout::reconcile::LayoutSnapshotRequest {
                     request_id: request.request_id.0,
+                    anchor,
                 });
             }
             AgentQuery::GetSettings => {
@@ -594,6 +725,8 @@ fn handle_agent_queries(
                     result: AgentQueryResult::Spaces(json),
                 });
             }
+            // ReadTerminal is answered by the service directly; it never reaches the GUI.
+            AgentQuery::ReadTerminal { .. } => {}
         }
     }
 }
@@ -912,12 +1045,14 @@ fn handle_spawn_agent_requests(
             );
             continue;
         };
+        let process_id = ProcessId::new();
         match crate::build_agent_launch(
             req.kind,
             &req.cwd,
             req.session_id.as_deref(),
             strategies,
             &exe_path,
+            process_id,
         ) {
             Ok(launch) => {
                 clear_stack_children(req.stack, &children_q, &mut commands);
@@ -932,10 +1067,11 @@ fn handle_spawn_agent_requests(
                         ChildOf(req.stack),
                     ))
                     .id();
-                commands
-                    .entity(terminal)
-                    .insert(CefKeyboardTarget)
-                    .insert((launch, AgentSession { kind: req.kind }));
+                commands.entity(terminal).insert(CefKeyboardTarget).insert((
+                    launch,
+                    AgentSession { kind: req.kind },
+                    process_id,
+                ));
                 if let Some(id) = req.session_id.clone() {
                     commands.entity(terminal).insert(SessionId(id));
                 } else {
@@ -1114,6 +1250,29 @@ fn respond_page_agent_attach_default(
     }
 }
 
+fn rebuilt_args_env_for_restart(
+    launch: &TerminalLaunch,
+    strategy: &dyn crate::client::cli::strategy::CliAgentStrategy,
+    session_id: Option<&str>,
+    new_id: ProcessId,
+) -> (Vec<String>, Vec<(String, String)>) {
+    let Ok(mcp_cfg) = crate::mcp::resolve(std::path::Path::new(&launch.cwd), new_id) else {
+        return (launch.args.clone(), launch.env.clone());
+    };
+    let args = strategy.build_args(&mcp_cfg, session_id);
+    let fresh = strategy.build_env(&mcp_cfg);
+    let fresh_keys: std::collections::HashSet<String> =
+        fresh.iter().map(|(k, _)| k.clone()).collect();
+    let mut env: Vec<(String, String)> = launch
+        .env
+        .iter()
+        .filter(|(k, _)| !fresh_keys.contains(k))
+        .cloned()
+        .collect();
+    env.extend(fresh);
+    (args, env)
+}
+
 fn handle_restart_agent_pty(
     mut reader: MessageReader<RestartAgentPty>,
     mut q: Query<(
@@ -1136,31 +1295,25 @@ fn handle_restart_agent_pty(
         service
             .0
             .send(ClientMessage::KillProcess { process_id: *pid });
+        let new_id = ProcessId::new();
 
         let (command, args, cwd, env) = match launch.as_deref() {
             Some(l) => {
-                let mut updated_args = l.args.clone();
-                if let Some(strats) = strategies.as_deref()
-                    && let Some(strategy) = strats.get_cli(session.kind)
-                {
-                    let mcp = McpServerConfig {
-                        command: l.command.clone(),
-                        args: vec![],
-                        cwd: None,
+                let (rebuilt_args, rebuilt_env) =
+                    match strategies.as_deref().and_then(|s| s.get_cli(session.kind)) {
+                        Some(strategy) => rebuilt_args_env_for_restart(
+                            l,
+                            strategy,
+                            session_id.map(|s| s.0.as_str()),
+                            new_id,
+                        ),
+                        None => (l.args.clone(), l.env.clone()),
                     };
-                    updated_args = strategy.build_args(&mcp, session_id.map(|s| s.0.as_str()));
-                }
-                (
-                    l.command.clone(),
-                    updated_args,
-                    l.cwd.clone(),
-                    l.env.clone(),
-                )
+                (l.command.clone(), rebuilt_args, l.cwd.clone(), rebuilt_env)
             }
             None => (String::new(), vec![], String::new(), Vec::new()),
         };
 
-        let new_id = ProcessId::new();
         service.0.send(ClientMessage::CreateProcess {
             process_id: new_id,
             command: command.clone(),
@@ -1177,6 +1330,7 @@ fn handle_restart_agent_pty(
         *pid = new_id;
         if let Some(l) = launch.as_mut() {
             l.args = args;
+            l.env = env;
         }
     }
 }
@@ -1219,6 +1373,32 @@ mod tests {
     #[test]
     fn blank_cwd_is_accepted() {
         assert_eq!(valid_cwd("").unwrap(), None);
+    }
+
+    #[test]
+    fn restart_rebuilds_args_with_new_anchor() {
+        let temp = std::env::temp_dir().join(format!("vmux-restart-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(temp.join("Cargo.toml"), b"[workspace]\n").unwrap();
+        let launch = TerminalLaunch {
+            command: "/usr/local/bin/claude".into(),
+            args: vec!["--mcp-config".into(), "OLD".into()],
+            cwd: temp.to_string_lossy().to_string(),
+            env: vec![],
+            kind: vmux_core::terminal::TerminalKind::Claude,
+        };
+        let new_id = ProcessId::new();
+        let (args, _env) = rebuilt_args_env_for_restart(
+            &launch,
+            &crate::client::cli::claude::ClaudeStrategy,
+            None,
+            new_id,
+        );
+        let _ = std::fs::remove_dir_all(&temp);
+        let joined = args.join(" ");
+        assert!(joined.contains("--anchor"), "args carry --anchor: {joined}");
+        assert!(joined.contains(&new_id.to_string()), "anchor is the new id");
+        assert!(!joined.contains("OLD"), "old args replaced");
     }
 
     #[test]
@@ -1295,6 +1475,7 @@ mod tests {
             .add_message::<vmux_layout::BrowserGoBackRequest>()
             .add_message::<vmux_layout::BrowserGoForwardRequest>()
             .add_message::<vmux_layout::OpenInNewStackRequest>()
+            .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
             .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
             .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()

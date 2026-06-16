@@ -520,6 +520,41 @@ async fn handle_client(
             }
 
             ClientMessage::AgentQuery { request_id, query } => {
+                // ReadTerminal is answered by the service directly (it owns the
+                // terminal state); other queries relay to the GUI.
+                let query = match query {
+                    crate::protocol::AgentQuery::ReadTerminal { process_id } => {
+                        let result = {
+                            let mgr = manager.lock().await;
+                            match mgr.processes.get(&process_id) {
+                                Some(process) => {
+                                    let text = match process.snapshot() {
+                                        ServiceMessage::Snapshot { lines, .. } => lines
+                                            .iter()
+                                            .map(|line| {
+                                                line.spans
+                                                    .iter()
+                                                    .map(|span| span.text.as_str())
+                                                    .collect::<String>()
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("\n"),
+                                        _ => String::new(),
+                                    };
+                                    crate::protocol::AgentQueryResult::Text(text)
+                                }
+                                None => crate::protocol::AgentQueryResult::Error(format!(
+                                    "process not found: {process_id}"
+                                )),
+                            }
+                        };
+                        let resp = ServiceMessage::AgentQueryResult { request_id, result };
+                        let mut w = writer.lock().await;
+                        write_message!(&mut *w, &resp)?;
+                        continue;
+                    }
+                    other => other,
+                };
                 if agent_tx.receiver_count() == 0 {
                     let resp = ServiceMessage::Error {
                         message: "no desktop subscribed to agent commands".to_string(),
@@ -652,7 +687,7 @@ mod tests {
         let request_id = AgentRequestId::new();
         assert!(pending.lock().await.remove(&request_id).is_none());
 
-        let _ = AgentQuery::ReadLayout;
+        let _ = AgentQuery::ReadLayout { anchor: None };
     }
 
     #[tokio::test]

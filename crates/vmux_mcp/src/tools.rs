@@ -2,7 +2,7 @@ use serde::Serialize;
 use serde_json::Value;
 use vmux_command::command::AppCommand;
 use vmux_macro::McpTool;
-use vmux_service::protocol::{AgentCommand, AgentShellMode};
+use vmux_service::protocol::AgentCommand;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,21 +17,6 @@ pub enum McpParamTool {
     #[mcp(description = "Open the Vmux command bar.")]
     OpenCommandBar {
         #[mcp(enum_values = ["default", "commands", "path"])]
-        mode: Option<String>,
-    },
-    #[mcp(
-        description = "Spawn a process in a new visible Vmux tab. If `command` is omitted, the user's default shell is launched. If `args` is provided as a single string, it is split on whitespace. If `cwd` is omitted, the active space's directory (~/.vmux/<space>) is used. Useful for opening claude/vibe/codex/nvim/etc. directly without going through a shell."
-    )]
-    NewTerminalTab {
-        cwd: Option<String>,
-        command: Option<String>,
-        args: Option<String>,
-    },
-    #[mcp(description = "Run a shell command in a visible Vmux terminal.")]
-    RunShell {
-        command: String,
-        cwd: Option<String>,
-        #[mcp(enum_values = ["new_tab", "active"])]
         mode: Option<String>,
     },
     #[mcp(
@@ -88,34 +73,6 @@ impl McpParamTool {
                 Ok(AgentCommand::AppCommand {
                     id: id.to_string(),
                     args_json: String::new(),
-                })
-            }
-            McpParamTool::NewTerminalTab { cwd, command, args } => {
-                let args_vec = args
-                    .unwrap_or_default()
-                    .split_whitespace()
-                    .map(|s| s.to_string())
-                    .collect();
-                Ok(AgentCommand::NewTerminalTab {
-                    cwd: cwd.unwrap_or_default(),
-                    command: command.unwrap_or_default(),
-                    args: args_vec,
-                    env: vec![],
-                })
-            }
-            McpParamTool::RunShell { command, cwd, mode } => {
-                if command.trim().is_empty() {
-                    return Err("run_shell.command is empty".to_string());
-                }
-                let mode = match mode.as_deref().unwrap_or("new_tab") {
-                    "new_tab" => AgentShellMode::NewTab,
-                    "active" => AgentShellMode::Active,
-                    other => return Err(format!("unknown shell mode: {other}")),
-                };
-                Ok(AgentCommand::RunShell {
-                    command,
-                    cwd: cwd.unwrap_or_default(),
-                    mode,
                 })
             }
             McpParamTool::BrowserNavigate { url, pane } => {
@@ -314,6 +271,72 @@ fn list_spaces_definition() -> ToolDefinition {
     }
 }
 
+fn open_page_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "open_page".into(),
+        description: "Open a page in a new pane directly beside YOUR pane (the agent calling this). \
+direction is one of right|left|top|bottom (default right). url uses the same rules as browser_navigate \
+(vmux://terminal/ opens a terminal; anything else loads as a browser). \
+focus (default true): true moves focus to the new pane (use when the human will interact with it); \
+false keeps focus on your own pane."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["url"],
+            "additionalProperties": false,
+            "properties": {
+                "direction": {"enum": ["right", "left", "top", "bottom"]},
+                "url": {"type": "string"},
+                "focus": {"type": "boolean"}
+            }
+        }),
+    }
+}
+
+fn run_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "run".into(),
+        description:
+            "Run a shell command in a visible terminal the user can watch live and take over. \
+By default opens a new terminal in a pane beside YOUR pane; pass `terminal` (a terminal id from a \
+previous run or from read_layout's process_id) to run in that existing terminal instead. \
+direction|focus apply only when opening a new terminal (direction default right; \
+focus default false = keep focus on your own pane). \
+The command is typed into an interactive shell, so the terminal stays usable afterwards. \
+Returns the terminal's id; pass it to read_terminal to read the output, or to run again."
+                .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["command"],
+            "additionalProperties": false,
+            "properties": {
+                "command": {"type": "string"},
+                "terminal": {"type": "string"},
+                "direction": {"enum": ["right", "left", "top", "bottom"]},
+                "focus": {"type": "boolean"}
+            }
+        }),
+    }
+}
+
+fn read_terminal_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "read_terminal".into(),
+        description:
+            "Return the current visible scrollback text of a terminal (the same text the user sees). \
+Pass `terminal` = a terminal id returned by run, or a terminal stack's process_id from read_layout."
+                .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["terminal"],
+            "additionalProperties": false,
+            "properties": {
+                "terminal": {"type": "string"}
+            }
+        }),
+    }
+}
+
 pub fn tool_definitions() -> Vec<ToolDefinition> {
     let mut defs: Vec<ToolDefinition> = AppCommand::mcp_tool_entries()
         .into_iter()
@@ -328,13 +351,102 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(update_layout_definition());
     defs.push(get_settings_definition());
     defs.push(list_spaces_definition());
+    defs.push(open_page_definition());
+    defs.push(run_definition());
+    defs.push(read_terminal_definition());
     defs
 }
 
 pub fn dispatch_from_tool_call(name: &str, arguments: Value) -> Result<DispatchTarget, String> {
+    dispatch_with_anchor(name, arguments, None)
+}
+
+pub fn dispatch_with_anchor(
+    name: &str,
+    arguments: Value,
+    anchor: Option<vmux_service::protocol::ProcessId>,
+) -> Result<DispatchTarget, String> {
+    use vmux_service::protocol::AgentPaneDirection;
+    fn parse_direction(arguments: &Value) -> Result<AgentPaneDirection, String> {
+        match arguments
+            .get("direction")
+            .and_then(Value::as_str)
+            .unwrap_or("right")
+        {
+            "right" => Ok(AgentPaneDirection::Right),
+            "left" => Ok(AgentPaneDirection::Left),
+            "top" => Ok(AgentPaneDirection::Top),
+            "bottom" => Ok(AgentPaneDirection::Bottom),
+            other => Err(format!("unknown direction: {other}")),
+        }
+    }
+    if name == "open_page" {
+        let anchor =
+            anchor.ok_or("open_page requires an agent anchor (not available to this client)")?;
+        let url = arguments
+            .get("url")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if url.trim().is_empty() {
+            return Err("open_page.url is empty".to_string());
+        }
+        let direction = parse_direction(&arguments)?;
+        let focus = arguments
+            .get("focus")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        return Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
+            anchor,
+            direction,
+            url,
+            focus,
+        }));
+    }
+    if name == "run" {
+        let anchor = anchor.ok_or("run requires an agent anchor (not available to this client)")?;
+        let command = arguments
+            .get("command")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if command.trim().is_empty() {
+            return Err("run.command is empty".to_string());
+        }
+        let direction = parse_direction(&arguments)?;
+        let focus = arguments
+            .get("focus")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let terminal = match arguments.get("terminal").and_then(Value::as_str) {
+            Some(s) if !s.is_empty() => Some(
+                s.parse::<vmux_service::protocol::ProcessId>()
+                    .map_err(|_| format!("run.terminal is not a valid terminal id: {s}"))?,
+            ),
+            _ => None,
+        };
+        return Ok(DispatchTarget::Command(AgentCommand::Run {
+            anchor,
+            command,
+            direction,
+            focus,
+            terminal,
+        }));
+    }
+    if name == "read_terminal" {
+        let process_id = arguments
+            .get("terminal")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .parse::<vmux_service::protocol::ProcessId>()
+            .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string())?;
+        return Ok(DispatchTarget::Query(
+            vmux_service::protocol::AgentQuery::ReadTerminal { process_id },
+        ));
+    }
     if name == "read_layout" {
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::ReadLayout,
+            vmux_service::protocol::AgentQuery::ReadLayout { anchor },
         ));
     }
     if name == "update_layout" {
@@ -399,10 +511,16 @@ mod tests {
     fn list_tools_includes_auto_generated_and_handwritten() {
         let names = tool_names();
 
-        for hand in ["open_command_bar", "new_terminal_tab", "run_shell"] {
+        for hand in ["open_command_bar", "open_page", "run", "read_terminal"] {
             assert!(
                 names.contains(&hand.to_string()),
                 "missing hand-written {hand}"
+            );
+        }
+        for removed_tool in ["new_terminal_tab", "run_shell", "in_pane"] {
+            assert!(
+                !names.contains(&removed_tool.to_string()),
+                "superseded tool {removed_tool} should no longer appear in MCP tools"
             );
         }
         for auto in ["terminal_clear", "browser_reload"] {
@@ -461,11 +579,6 @@ mod tests {
     #[test]
     fn browser_navigate_missing_url_returns_error() {
         assert!(dispatch_from_tool_call("browser_navigate", serde_json::json!({})).is_err());
-    }
-
-    #[test]
-    fn empty_run_shell_command_returns_tool_error() {
-        assert!(dispatch_from_tool_call("run_shell", serde_json::json!({"command": ""})).is_err());
     }
 
     #[test]
@@ -530,8 +643,6 @@ mod tests {
             .collect();
         for expected in [
             "open_command_bar",
-            "new_terminal_tab",
-            "run_shell",
             "browser_navigate",
             "terminal_send",
             "select_tab",
@@ -595,8 +706,102 @@ mod tests {
         let target = dispatch_from_tool_call("read_layout", serde_json::json!({})).unwrap();
         assert!(matches!(
             target,
-            DispatchTarget::Query(AgentQuery::ReadLayout)
+            DispatchTarget::Query(AgentQuery::ReadLayout { .. })
         ));
+    }
+
+    #[test]
+    fn open_page_dispatch_uses_anchor() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_with_anchor(
+            "open_page",
+            serde_json::json!({"direction": "right", "url": "vmux://terminal/"}),
+            Some(anchor),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::OpenBeside { anchor: a, url, .. }) => {
+                assert_eq!(a, anchor);
+                assert_eq!(url, "vmux://terminal/");
+            }
+            other => panic!("expected OpenBeside, got {other:?}"),
+        }
+        assert!(
+            dispatch_with_anchor("open_page", serde_json::json!({"url": ""}), Some(anchor))
+                .is_err()
+        );
+        assert!(dispatch_with_anchor("open_page", serde_json::json!({"url": "x"}), None).is_err());
+        assert!(tool_definitions().iter().any(|d| d.name == "open_page"));
+        assert!(tool_definitions().iter().any(|d| d.name == "run"));
+    }
+
+    #[test]
+    fn run_dispatch_uses_anchor() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_with_anchor(
+            "run",
+            serde_json::json!({"command": "echo hi"}),
+            Some(anchor),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::Run {
+                anchor: a, command, ..
+            }) => {
+                assert_eq!(a, anchor);
+                assert_eq!(command, "echo hi");
+            }
+            other => panic!("expected Run, got {other:?}"),
+        }
+        assert!(
+            dispatch_with_anchor("run", serde_json::json!({"command": " "}), Some(anchor)).is_err()
+        );
+        assert!(dispatch_with_anchor("run", serde_json::json!({"command": "x"}), None).is_err());
+    }
+
+    #[test]
+    fn run_with_terminal_targets_existing() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let term = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_with_anchor(
+            "run",
+            serde_json::json!({"command": "ls", "terminal": term.to_string()}),
+            Some(anchor),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::Run {
+                terminal: Some(t), ..
+            }) => assert_eq!(t, term),
+            other => panic!("expected Run with terminal, got {other:?}"),
+        }
+        assert!(
+            dispatch_with_anchor(
+                "run",
+                serde_json::json!({"command": "ls", "terminal": "nope"}),
+                Some(anchor)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn read_terminal_dispatch_routes_to_query() {
+        let pid = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_from_tool_call(
+            "read_terminal",
+            serde_json::json!({"terminal": pid.to_string()}),
+        )
+        .unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Query(vmux_service::protocol::AgentQuery::ReadTerminal { .. })
+        ));
+        assert!(
+            dispatch_from_tool_call("read_terminal", serde_json::json!({"terminal": "bad"}))
+                .is_err()
+        );
+        assert!(tool_definitions().iter().any(|d| d.name == "read_terminal"));
     }
 
     #[test]
@@ -736,43 +941,14 @@ mod tests {
     #[test]
     fn open_command_tools_are_exposed() {
         let names = tool_names();
-        for expected in [
-            "in_place",
-            "in_new_stack",
-            "in_pane",
-            "in_new_tab",
-            "in_new_space",
-        ] {
+        for expected in ["in_place", "in_new_stack", "in_new_tab", "in_new_space"] {
             assert!(
                 names.contains(&expected.to_string()),
                 "missing OpenCommand tool: {expected}"
             );
         }
-    }
-
-    #[test]
-    fn in_pane_tool_has_direction_enum() {
-        let defs = tool_definitions();
-        let in_pane = defs
-            .iter()
-            .find(|d| d.name == "in_pane")
-            .expect("in_pane tool present");
-        let props = in_pane
-            .input_schema
-            .get("properties")
-            .expect("properties key");
-        let dir = props.get("direction").expect("direction property");
-        let enum_vals = dir.get("enum").expect("direction has enum constraint");
-        assert_eq!(
-            enum_vals,
-            &serde_json::json!(["top", "right", "bottom", "left"])
-        );
-        let required = in_pane.input_schema.get("required").expect("required key");
-        let required_arr = required.as_array().expect("required is array");
-        assert!(
-            required_arr.iter().any(|v| v.as_str() == Some("direction")),
-            "direction must be required"
-        );
+        // in_pane is hidden (superseded by open_page).
+        assert!(!names.contains(&"in_pane".to_string()));
     }
 
     #[test]

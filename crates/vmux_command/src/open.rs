@@ -48,9 +48,10 @@ pub enum OpenCommand {
         chord = "Ctrl+g, \"",
         variant = "InPane { direction: PaneDirection::Bottom, target: PaneTarget::NewSplit, mode: PaneOpenMode::NewStack, url: None }"
     )]
-    #[mcp(
-        description = "Open a page in a sibling pane in the given direction. Set target=NewSplit to split the current pane, target=Existing to reuse an adjacent pane (falls back to NewSplit if none). Set mode=InPlace to navigate the chosen pane's active stack, mode=NewStack to add a stack to it."
-    )]
+    // Hidden from the agent MCP surface: superseded by the self-relative
+    // `open_page` tool (in_pane targets the focused pane, which is unpredictable
+    // for an agent). Still available via the command bar / keyboard.
+    #[mcp(skip)]
     InPane {
         #[mcp(description = "Which side of the current pane to act on.", enum_values = ["top", "right", "bottom", "left"])]
         direction: PaneDirection,

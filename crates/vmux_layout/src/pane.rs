@@ -53,6 +53,8 @@ impl Plugin for PanePlugin {
             .add_systems(Update, on_pane_select.in_set(ReadAppCommands))
             .add_systems(Update, handle_pane_commands.in_set(ReadAppCommands))
             .add_systems(Update, handle_open_in_pane.in_set(ReadAppCommands))
+            .add_message::<OpenBesideRequest>()
+            .add_systems(Update, handle_open_beside_requests)
             .add_systems(
                 Update,
                 handle_zoom_command
@@ -756,10 +758,82 @@ fn handle_pane_commands(
     }
 }
 
-fn direction_to_split(direction: &PaneDirection) -> PaneSplitDirection {
+pub fn direction_to_split(direction: &PaneDirection) -> PaneSplitDirection {
     match direction {
         PaneDirection::Left | PaneDirection::Right => PaneSplitDirection::Row,
         PaneDirection::Top | PaneDirection::Bottom => PaneSplitDirection::Column,
+    }
+}
+
+pub fn split_leaf_into_two(
+    commands: &mut Commands,
+    active: Entity,
+    split_dir: PaneSplitDirection,
+    existing_tabs: &[Entity],
+    activate_new: bool,
+) -> Entity {
+    let new_ts = if activate_new {
+        LastActivatedAt::now()
+    } else {
+        LastActivatedAt(0)
+    };
+    let pane1 = commands
+        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
+        .id();
+    let p2 = commands
+        .spawn((leaf_pane_bundle(), new_ts, ChildOf(active)))
+        .id();
+    for tab in existing_tabs {
+        commands.entity(*tab).insert(ChildOf(pane1));
+    }
+    commands.entity(active).insert(split_root_bundle(split_dir));
+    p2
+}
+
+#[derive(Message, Clone)]
+pub struct OpenBesideRequest {
+    pub pane: Entity,
+    pub direction: PaneDirection,
+    pub url: String,
+    pub request_id: [u8; 16],
+    /// When true, focus moves to the newly opened pane. When false, focus stays
+    /// where it is (the agent keeps focus so it can drive the new pane itself).
+    pub focus: bool,
+}
+
+pub fn handle_open_beside_requests(
+    mut reader: MessageReader<OpenBesideRequest>,
+    pane_children: Query<&Children, With<Pane>>,
+    tab_filter: Query<Entity, With<Stack>>,
+    mut commands: Commands,
+    mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut new_stack_ctx: ResMut<NewStackContext>,
+) {
+    for req in reader.read() {
+        let existing_tabs: Vec<Entity> = pane_children
+            .get(req.pane)
+            .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+            .unwrap_or_default();
+        let split_dir = direction_to_split(&req.direction);
+        let p2 = split_leaf_into_two(
+            &mut commands,
+            req.pane,
+            split_dir,
+            &existing_tabs,
+            req.focus,
+        );
+        let stack_ts = if req.focus {
+            LastActivatedAt::now()
+        } else {
+            LastActivatedAt(0)
+        };
+        let new_stack = commands.spawn((stack_bundle(), stack_ts, ChildOf(p2))).id();
+        open_or_prompt_stack(
+            new_stack,
+            Some(req.url.clone()),
+            &mut new_stack_ctx,
+            &mut page_open_requests,
+        );
     }
 }
 
@@ -872,17 +946,13 @@ fn handle_open_in_pane(
                             .get(active)
                             .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                             .unwrap_or_default();
-                        let pane1 = commands
-                            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
-                            .id();
-                        let p2 = commands
-                            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
-                            .id();
-                        for tab in &existing_tabs {
-                            commands.entity(*tab).insert(ChildOf(pane1));
-                        }
-                        commands.entity(active).insert(split_root_bundle(split_dir));
-                        commands.entity(p2).insert(LastActivatedAt::now());
+                        let p2 = split_leaf_into_two(
+                            &mut commands,
+                            active,
+                            split_dir,
+                            &existing_tabs,
+                            true,
+                        );
                         (p2, true)
                     }
                 }
@@ -892,17 +962,8 @@ fn handle_open_in_pane(
                     .get(active)
                     .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                     .unwrap_or_default();
-                let pane1 = commands
-                    .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
-                    .id();
-                let p2 = commands
-                    .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(active)))
-                    .id();
-                for tab in &existing_tabs {
-                    commands.entity(*tab).insert(ChildOf(pane1));
-                }
-                commands.entity(active).insert(split_root_bundle(split_dir));
-                commands.entity(p2).insert(LastActivatedAt::now());
+                let p2 =
+                    split_leaf_into_two(&mut commands, active, split_dir, &existing_tabs, true);
                 (p2, true)
             }
         };
@@ -2921,6 +2982,123 @@ mod tests {
         );
 
         assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn split_leaf_into_two_reparents_tabs_and_splits() {
+        use bevy_ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let active = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now()))
+            .id();
+        let existing = app
+            .world_mut()
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(active)))
+            .id();
+
+        let p2 = app
+            .world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      children: Query<&Children, With<Pane>>,
+                      tabq: Query<Entity, With<Stack>>| {
+                    let existing_tabs: Vec<Entity> = children
+                        .get(active)
+                        .map(|c| c.iter().filter(|&e| tabq.contains(e)).collect())
+                        .unwrap_or_default();
+                    split_leaf_into_two(
+                        &mut commands,
+                        active,
+                        PaneSplitDirection::Row,
+                        &existing_tabs,
+                        true,
+                    )
+                },
+            )
+            .unwrap();
+
+        let world = app.world_mut();
+        assert!(
+            world.get::<PaneSplit>(active).is_some(),
+            "active became a split root"
+        );
+        assert_ne!(
+            world.entity(existing).get::<ChildOf>().unwrap().get(),
+            active,
+            "stack reparented off active"
+        );
+        assert!(world.get::<PaneSplit>(p2).is_none(), "p2 is a leaf");
+    }
+
+    #[test]
+    fn open_beside_splits_the_given_pane() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OpenBesideRequest>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .add_systems(Update, handle_open_beside_requests);
+        let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
+        let anchor_pane = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        app.world_mut()
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(anchor_pane)));
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: anchor_pane,
+                direction: PaneDirection::Right,
+                url: "vmux://terminal/".into(),
+                request_id: [0u8; 16],
+                focus: true,
+            });
+        app.update();
+
+        let world = app.world_mut();
+        assert!(world.get::<PaneSplit>(anchor_pane).is_some());
+        let kids = world.entity(anchor_pane).get::<Children>().unwrap();
+        assert_eq!(kids.iter().count(), 2);
+    }
+
+    #[test]
+    fn open_beside_with_focus_false_leaves_new_stack_unactivated() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OpenBesideRequest>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .add_systems(Update, handle_open_beside_requests);
+        let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
+        let anchor_pane = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        app.world_mut()
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(anchor_pane)));
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: anchor_pane,
+                direction: PaneDirection::Right,
+                url: "vmux://terminal/".into(),
+                request_id: [0u8; 16],
+                focus: false,
+            });
+        app.update();
+
+        let world = app.world_mut();
+        let mut stacks = world.query_filtered::<&LastActivatedAt, With<Stack>>();
+        let unactivated = stacks.iter(world).filter(|la| la.0 == 0).count();
+        assert_eq!(
+            unactivated, 1,
+            "focus:false leaves exactly the new stack un-activated (ts 0) so focus stays put"
+        );
     }
 
     #[test]

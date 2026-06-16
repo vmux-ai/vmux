@@ -37,6 +37,31 @@ fn mcp_tools_list_includes_layout_tools() {
 }
 
 #[test]
+fn mcp_tools_list_includes_self_anchor_tools() {
+    let stdin = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n";
+    let mut cmd = Command::cargo_bin("vmux").unwrap();
+    cmd.arg("mcp")
+        .write_stdin(stdin)
+        .assert()
+        .success()
+        .stdout(contains("\"open_page\""))
+        .stdout(contains("\"run\""));
+}
+
+#[test]
+fn mcp_accepts_anchor_flag() {
+    let stdin = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\"}}\n";
+    let mut cmd = Command::cargo_bin("vmux").unwrap();
+    cmd.arg("mcp")
+        .arg("--anchor")
+        .arg("00000000-0000-0000-0000-000000000000")
+        .write_stdin(stdin)
+        .assert()
+        .success()
+        .stdout(contains("\"name\":\"vmux\""));
+}
+
+#[test]
 fn mcp_tools_list_excludes_legacy_layout_tools() {
     let stdin = "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\"}\n";
     let mut cmd = Command::cargo_bin("vmux").unwrap();

@@ -202,6 +202,12 @@ pub struct TerminalStackSpawnRequest {
     pub pane: Entity,
     pub cwd: Option<PathBuf>,
     pub pending_input: Option<Vec<u8>>,
+    /// Pin this `ProcessId` on the spawned terminal (so the caller can address
+    /// it later); `None` lets the bundle mint a fresh one.
+    pub process_id: Option<ProcessId>,
+    /// When true, the new stack is activated (focus moves to it). When false,
+    /// focus stays where it is.
+    pub activate: bool,
 }
 
 pub struct TerminalPlugin;
@@ -642,10 +648,15 @@ fn respond_terminal_stack_spawn(
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for request in reader.read() {
+        let stack_ts = if request.activate {
+            LastActivatedAt::now()
+        } else {
+            LastActivatedAt(0)
+        };
         let stack = commands
             .spawn((
                 vmux_layout::stack::stack_bundle(),
-                LastActivatedAt::now(),
+                stack_ts,
                 ChildOf(request.pane),
             ))
             .id();
@@ -672,6 +683,9 @@ fn respond_terminal_stack_spawn(
             ))
             .id();
         commands.entity(terminal).insert(CefKeyboardTarget);
+        if let Some(pid) = request.process_id {
+            commands.entity(terminal).insert(pid);
+        }
         if let Some(data) = request.pending_input.clone() {
             commands
                 .entity(terminal)
@@ -2935,6 +2949,8 @@ pub fn handle_run_shell_requests(
                 pane,
                 cwd: cwd_path,
                 pending_input: Some(input),
+                process_id: None,
+                activate: true,
             });
         }
     }

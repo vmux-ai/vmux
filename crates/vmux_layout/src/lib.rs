@@ -69,6 +69,8 @@ pub use command_bar::handler::PendingCommandBarReveal;
 #[cfg(not(target_arch = "wasm32"))]
 pub use header::Header;
 #[cfg(not(target_arch = "wasm32"))]
+pub use pane::{OpenBesideRequest, handle_open_beside_requests};
+#[cfg(not(target_arch = "wasm32"))]
 pub use plugin::LayoutPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use webview_reveal::PendingWebviewReveal;

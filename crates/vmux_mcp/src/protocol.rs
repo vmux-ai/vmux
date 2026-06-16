@@ -13,14 +13,14 @@ pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
     Ok(Some(value))
 }
 
-pub async fn run_stdio() -> io::Result<()> {
+pub async fn run_stdio(anchor: Option<vmux_service::protocol::ProcessId>) -> io::Result<()> {
     let stdin = io::stdin();
     let mut reader = stdin.lock();
     let stdout = io::stdout();
     let mut writer = stdout.lock();
 
     while let Some(message) = read_json_line(&mut reader)? {
-        if let Some(response) = handle_message(message).await {
+        if let Some(response) = handle_message(message, anchor).await {
             serde_json::to_writer(&mut writer, &response)?;
             writer.write_all(b"\n")?;
             writer.flush()?;
@@ -29,7 +29,10 @@ pub async fn run_stdio() -> io::Result<()> {
     Ok(())
 }
 
-async fn handle_message(message: Value) -> Option<Value> {
+async fn handle_message(
+    message: Value,
+    anchor: Option<vmux_service::protocol::ProcessId>,
+) -> Option<Value> {
     let id = message.get("id").cloned()?;
     let method = message.get("method").and_then(Value::as_str).unwrap_or("");
     let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -37,7 +40,7 @@ async fn handle_message(message: Value) -> Option<Value> {
     let result = match method {
         "initialize" => Ok(initialize_result(&params)),
         "tools/list" => Ok(json!({ "tools": crate::tools::tool_definitions() })),
-        "tools/call" => tool_call_result(&params).await,
+        "tools/call" => tool_call_result(&params, anchor).await,
         _ => {
             return Some(json!({
                 "jsonrpc": "2.0",
@@ -81,7 +84,10 @@ fn initialize_result(params: &Value) -> Value {
     })
 }
 
-async fn tool_call_result(params: &Value) -> Result<Value, String> {
+async fn tool_call_result(
+    params: &Value,
+    anchor: Option<vmux_service::protocol::ProcessId>,
+) -> Result<Value, String> {
     let name = params
         .get("name")
         .and_then(Value::as_str)
@@ -91,7 +97,7 @@ async fn tool_call_result(params: &Value) -> Result<Value, String> {
         .cloned()
         .unwrap_or_else(|| json!({}));
 
-    match crate::tools::dispatch_from_tool_call(name, arguments)? {
+    match crate::tools::dispatch_with_anchor(name, arguments, anchor)? {
         crate::tools::DispatchTarget::Command(command) => run_agent_command(command).await,
         crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
     }
@@ -127,6 +133,9 @@ async fn run_agent_command(command: AgentCommand) -> Result<Value, String> {
                 return match result {
                     AgentCommandResult::Ok => Ok(json!({
                         "content": [{"type": "text", "text": "ok"}]
+                    })),
+                    AgentCommandResult::Text(text) => Ok(json!({
+                        "content": [{"type": "text", "text": text}]
                     })),
                     AgentCommandResult::Layout(snapshot) => {
                         let text = serde_json::to_string(&snapshot).unwrap_or_default();
@@ -179,6 +188,11 @@ fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult
     match result {
         AgentQueryResult::Layout(snapshot) => {
             let text = serde_json::to_string(&snapshot).unwrap_or_default();
+            json!({
+                "content": [{"type": "text", "text": text}]
+            })
+        }
+        AgentQueryResult::Text(text) => {
             json!({
                 "content": [{"type": "text", "text": text}]
             })

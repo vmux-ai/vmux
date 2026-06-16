@@ -120,9 +120,10 @@ fn mcp_tool_entries_has_all_variants() {
     let names: Vec<_> = entries.iter().map(|(name, _, _)| *name).collect();
     assert!(names.contains(&"in_place"));
     assert!(names.contains(&"in_new_stack"));
-    assert!(names.contains(&"in_pane"));
     assert!(names.contains(&"in_new_tab"));
     assert!(names.contains(&"in_new_space"));
+    // in_pane is #[mcp(skip)] (superseded by the self-relative open_page tool).
+    assert!(!names.contains(&"in_pane"));
 }
 
 #[test]
