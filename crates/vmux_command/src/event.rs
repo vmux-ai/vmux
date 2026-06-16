@@ -50,6 +50,7 @@ pub struct CommandBarPage {
     pub title: String,
     pub keywords: Vec<String>,
     pub icon: String,
+    pub favicon: bool,
 }
 
 #[derive(
@@ -478,6 +479,7 @@ mod tests {
                 title: "Settings".to_string(),
                 keywords: vec!["preferences".to_string()],
                 icon: "settings".to_string(),
+                favicon: false,
             }],
             ..Default::default()
         };

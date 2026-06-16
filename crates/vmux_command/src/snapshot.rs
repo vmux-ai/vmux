@@ -69,6 +69,7 @@ pub fn update_pages_snapshot(
             title: manifest.title.to_string(),
             keywords: manifest.keywords.iter().map(|k| k.to_string()).collect(),
             icon: manifest.icon.to_string(),
+            favicon: false,
         })
         .collect();
     pages.sort_by(|a, b| a.title.cmp(&b.title));

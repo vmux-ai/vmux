@@ -552,9 +552,18 @@ pub fn Page() -> Element {
                                         }
                                         span { class: result_trailing_slot_class() }
                                     },
-                                    ResultItem::Page { url, title, icon } => rsx! {
+                                    ResultItem::Page { url, title, icon, favicon } => rsx! {
                                         div { class: result_content_row_class(),
-                                            {page_icon(icon)}
+                                            if *favicon {
+                                                Favicon {
+                                                    favicon_url: String::new(),
+                                                    url: url.clone(),
+                                                    class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                                                    globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                                                }
+                                            } else {
+                                                {page_icon(icon)}
+                                            }
                                             div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                                 span { class: result_primary_text_class(), "{title}" }
                                                 span { class: result_secondary_text_class(), "{url}" }

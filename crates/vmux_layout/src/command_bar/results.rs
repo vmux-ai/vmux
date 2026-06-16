@@ -29,6 +29,7 @@ pub enum CommandBarResultItem {
         url: String,
         title: String,
         icon: String,
+        favicon: bool,
     },
     Navigate {
         url: String,
@@ -85,6 +86,7 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
             url: page.url.clone(),
             title: page.title.clone(),
             icon: page.icon.clone(),
+            favicon: page.favicon,
         })
         .collect()
 }
@@ -266,6 +268,7 @@ mod tests {
                 title: "Settings".into(),
                 keywords: vec!["preferences".into()],
                 icon: "settings".into(),
+                favicon: false,
             },
             CommandBarPage {
                 host: "spaces".into(),
@@ -273,6 +276,7 @@ mod tests {
                 title: "Spaces".into(),
                 keywords: vec!["space".into()],
                 icon: "layers".into(),
+                favicon: false,
             },
             CommandBarPage {
                 host: "history".into(),
@@ -280,6 +284,15 @@ mod tests {
                 title: "History".into(),
                 keywords: vec!["recent".into()],
                 icon: "clock".into(),
+                favicon: false,
+            },
+            CommandBarPage {
+                host: "agent".into(),
+                url: "vmux://agent/vibe/".into(),
+                title: "Vibe".into(),
+                keywords: vec!["vibe".into(), "agent".into()],
+                icon: "".into(),
+                favicon: true,
             },
         ]
     }
@@ -305,6 +318,7 @@ mod tests {
             url: "vmux://spaces/".into(),
             title: "Spaces".into(),
             icon: "layers".into(),
+            favicon: false,
         }));
         assert!(results.iter().any(|r| matches!(
             r, CommandBarResultItem::Space { id, .. } if id == "space-1"
@@ -336,6 +350,7 @@ mod tests {
             url: "vmux://spaces/".into(),
             title: "Spaces".into(),
             icon: "layers".into(),
+            favicon: false,
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
             id: "browser_open_command_bar".to_string(),
@@ -358,6 +373,7 @@ mod tests {
             url: "vmux://spaces/".into(),
             title: "Spaces".into(),
             icon: "layers".into(),
+            favicon: false,
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
             id: "space_open".to_string(),
@@ -388,7 +404,27 @@ mod tests {
             url: "vmux://settings/".into(),
             title: "Settings".into(),
             icon: "settings".into(),
+            favicon: false,
         }));
+    }
+
+    #[test]
+    fn agent_page_matched_by_vmux_prefix_carries_favicon() {
+        let results = filter_results("vmux://", &[], &[], &[], &sample_pages(), false, &[]);
+        assert!(results.iter().any(|r| matches!(
+            r,
+            CommandBarResultItem::Page { url, favicon, .. }
+                if url == "vmux://agent/vibe/" && *favicon
+        )));
+    }
+
+    #[test]
+    fn agent_page_matched_by_name() {
+        let results = filter_results("vibe", &[], &[], &[], &sample_pages(), false, &[]);
+        assert!(results.iter().any(|r| matches!(
+            r,
+            CommandBarResultItem::Page { title, favicon, .. } if title == "Vibe" && *favicon
+        )));
     }
 
     #[test]
