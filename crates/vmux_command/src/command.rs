@@ -312,10 +312,12 @@ pub enum TabCommand {
     #[menu(id = "next_tab", label = "Next Tab", accel = "super+shift+]")]
     #[shortcut(direct = "Super+Shift+L")]
     #[shortcut(direct = "Super+Shift+ArrowRight")]
+    #[shortcut(direct = "Super+Shift+BracketRight")]
     Next,
     #[menu(id = "prev_tab", label = "Previous Tab", accel = "super+shift+[")]
     #[shortcut(direct = "Super+Shift+H")]
     #[shortcut(direct = "Super+Shift+ArrowLeft")]
+    #[shortcut(direct = "Super+Shift+BracketLeft")]
     Previous,
     #[menu(id = "rename_tab", label = "Rename Tab")]
     Rename,
@@ -596,6 +598,40 @@ mod tests {
             shortcuts
                 .iter()
                 .any(|(shortcut, id)| shortcut == &hard_reload && id == "browser_hard_reload")
+        );
+    }
+
+    #[test]
+    fn tab_nav_brackets_are_global_shortcuts() {
+        let next = Shortcut::Direct(KeyCombo {
+            key: KeyCode::BracketRight,
+            modifiers: Modifiers {
+                shift: true,
+                super_key: true,
+                ..Default::default()
+            },
+        });
+        let prev = Shortcut::Direct(KeyCombo {
+            key: KeyCode::BracketLeft,
+            modifiers: Modifiers {
+                shift: true,
+                super_key: true,
+                ..Default::default()
+            },
+        });
+        let shortcuts = AppCommand::default_shortcuts();
+
+        assert!(
+            shortcuts
+                .iter()
+                .any(|(shortcut, id)| shortcut == &next && id == "next_tab"),
+            "cmd+shift+] must be a global shortcut so it fires under terminal/layout focus"
+        );
+        assert!(
+            shortcuts
+                .iter()
+                .any(|(shortcut, id)| shortcut == &prev && id == "prev_tab"),
+            "cmd+shift+[ must be a global shortcut so it fires under terminal/layout focus"
         );
     }
 
