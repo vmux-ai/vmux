@@ -189,6 +189,29 @@ fn copy_mode_scroll_input(
     Some((format!("\x1b[<{button};{x};{y}M").into_bytes(), scroll_rows))
 }
 
+fn sgr_mouse_wheel_bytes(up: bool, col: u16, row: u16, modifiers: u8) -> Vec<u8> {
+    let mut cb: u32 = if up { 64 } else { 65 };
+    if modifiers & MOD_SHIFT != 0 {
+        cb += 4;
+    }
+    if modifiers & MOD_ALT != 0 {
+        cb += 8;
+    }
+    if modifiers & MOD_CTRL != 0 {
+        cb += 16;
+    }
+    format!("\x1b[<{cb};{};{}M", col + 1, row + 1).into_bytes()
+}
+
+fn alternate_scroll_bytes(up: bool, app_cursor: bool) -> &'static [u8] {
+    match (up, app_cursor) {
+        (true, false) => b"\x1b[A",
+        (false, false) => b"\x1b[B",
+        (true, true) => b"\x1bOA",
+        (false, true) => b"\x1bOB",
+    }
+}
+
 impl Process {
     pub fn new(
         id: ProcessId,
@@ -811,6 +834,38 @@ impl Process {
             }
         }
         actual
+    }
+
+    fn scroll_viewport(&mut self, delta: i32) -> i32 {
+        let old_offset = self.term.grid().display_offset() as i32;
+        self.term.scroll_display(Scroll::Delta(delta));
+        let new_offset = self.term.grid().display_offset() as i32;
+        let actual = new_offset - old_offset;
+        if actual != 0 {
+            self.line_hashes.clear();
+        }
+        actual
+    }
+
+    pub fn handle_mouse_wheel(&mut self, up: bool, col: u16, row: u16, modifiers: u8) {
+        use alacritty_terminal::term::TermMode;
+        let delta = if up { 1 } else { -1 };
+        if self.copy_mode.is_some() {
+            if self.scroll_copy_mode_viewport(delta) != 0 {
+                self.sync_viewport();
+            }
+            return;
+        }
+        let mode = self.term.mode();
+        if mode.intersects(TermMode::MOUSE_MODE) {
+            let bytes = sgr_mouse_wheel_bytes(up, col, row, modifiers);
+            Self::write_input_to_writer(&self.pty_writer, &bytes);
+        } else if mode.contains(TermMode::ALT_SCREEN) && mode.contains(TermMode::ALTERNATE_SCROLL) {
+            let bytes = alternate_scroll_bytes(up, mode.contains(TermMode::APP_CURSOR));
+            Self::write_input_to_writer(&self.pty_writer, bytes);
+        } else if self.scroll_viewport(delta) != 0 {
+            self.sync_viewport();
+        }
     }
 
     fn last_non_blank_col(&self, row: u16) -> u16 {
@@ -1695,6 +1750,110 @@ mod tests {
         process.kill();
 
         assert_eq!(*captured.lock().unwrap(), b"\x1b[<64;7;5M".to_vec());
+    }
+
+    fn capturing_process(cols: u16, rows: u16) -> (Process, Arc<Mutex<Vec<u8>>>) {
+        #[derive(Clone)]
+        struct CapturingWriter(Arc<Mutex<Vec<u8>>>);
+
+        impl Write for CapturingWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let (wake_tx, _) = mpsc::unbounded_channel();
+        let mut process = Process::new_with_wake(
+            ProcessId::new(),
+            "/bin/sh".to_string(),
+            vec![],
+            String::new(),
+            Vec::new(),
+            cols,
+            rows,
+            wake_tx,
+        )
+        .expect("process should spawn");
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        process.pty_writer = Arc::new(Mutex::new(Box::new(CapturingWriter(captured.clone()))));
+        (process, captured)
+    }
+
+    #[test]
+    fn mouse_wheel_in_mouse_mode_forwards_sgr() {
+        let (mut process, captured) = capturing_process(12, 8);
+        process.process_output_for_test(b"\x1b[?1000h");
+        process.handle_mouse_wheel(true, 6, 4, 0);
+        process.handle_mouse_wheel(false, 0, 0, 0);
+        process.kill();
+        assert_eq!(
+            *captured.lock().unwrap(),
+            b"\x1b[<64;7;5M\x1b[<65;1;1M".to_vec()
+        );
+    }
+
+    #[test]
+    fn mouse_wheel_in_alt_screen_sends_arrow_keys() {
+        let (mut process, captured) = capturing_process(12, 8);
+        process.process_output_for_test(b"\x1b[?1049h");
+        process.handle_mouse_wheel(true, 0, 0, 0);
+        process.handle_mouse_wheel(false, 0, 0, 0);
+        process.kill();
+        assert_eq!(*captured.lock().unwrap(), b"\x1b[A\x1b[B".to_vec());
+    }
+
+    #[test]
+    fn mouse_wheel_in_alt_screen_app_cursor_sends_ss3_arrows() {
+        let (mut process, captured) = capturing_process(12, 8);
+        process.process_output_for_test(b"\x1b[?1049h\x1b[?1h");
+        process.handle_mouse_wheel(true, 0, 0, 0);
+        process.kill();
+        assert_eq!(*captured.lock().unwrap(), b"\x1bOA".to_vec());
+    }
+
+    #[test]
+    fn mouse_wheel_in_alt_screen_without_alternate_scroll_is_inert() {
+        let (mut process, captured) = capturing_process(12, 8);
+        process.process_output_for_test(b"\x1b[?1049h\x1b[?1007l");
+        process.handle_mouse_wheel(true, 0, 0, 0);
+        process.kill();
+        assert!(captured.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn mouse_wheel_on_normal_screen_scrolls_into_scrollback() {
+        let (mut process, captured) = capturing_process(12, 4);
+        let mut feed = Vec::new();
+        for i in 0..40 {
+            feed.extend_from_slice(format!("line{i}\r\n").as_bytes());
+        }
+        process.process_output_for_test(&feed);
+        assert_eq!(process.term.grid().display_offset(), 0);
+
+        let mut patches = process.subscribe();
+        process.handle_mouse_wheel(true, 0, 0, 0);
+        let offset = process.term.grid().display_offset();
+        process.kill();
+
+        assert!(
+            offset >= 1,
+            "wheel up on a normal screen should scroll into scrollback, got offset {offset}"
+        );
+        assert!(
+            captured.lock().unwrap().is_empty(),
+            "scrollback scroll must not write to the pty"
+        );
+        let broadcast_patch = std::iter::from_fn(|| patches.try_recv().ok())
+            .any(|msg| matches!(msg, ServiceMessage::ViewportPatch { .. }));
+        assert!(
+            broadcast_patch,
+            "scrollback scroll must broadcast a viewport patch so the frontend re-renders"
+        );
     }
 
     #[test]

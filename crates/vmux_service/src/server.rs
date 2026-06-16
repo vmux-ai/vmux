@@ -271,6 +271,19 @@ async fn handle_client(
                 }
             }
 
+            ClientMessage::MouseWheel {
+                process_id,
+                up,
+                col,
+                row,
+                modifiers,
+            } => {
+                with_process_mut(&manager, process_id, |process| {
+                    process.handle_mouse_wheel(up, col, row, modifiers)
+                })
+                .await;
+            }
+
             ClientMessage::ResizeProcess {
                 process_id,
                 cols,

@@ -161,6 +161,13 @@ pub enum ClientMessage {
         process_id: ProcessId,
         data: Vec<u8>,
     },
+    MouseWheel {
+        process_id: ProcessId,
+        up: bool,
+        col: u16,
+        row: u16,
+        modifiers: u8,
+    },
     ResizeProcess {
         process_id: ProcessId,
         cols: u16,
