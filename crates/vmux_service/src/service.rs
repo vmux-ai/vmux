@@ -54,12 +54,14 @@ async fn run_async() {
 }
 
 fn init_tracing() {
+    let dir = crate::log_dir();
+    std::fs::create_dir_all(&dir).expect("failed to create log dir");
     let appender = tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
         .filename_prefix(format!("vmux-{}", crate::current_profile()))
         .filename_suffix("log")
         .max_log_files(7)
-        .build(service_dir())
+        .build(&dir)
         .expect("build rolling log appender");
 
     let (writer, guard) = tracing_appender::non_blocking(appender);

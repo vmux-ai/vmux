@@ -41,159 +41,96 @@ handler; it is currently inert (no `crash_reporter.cfg`).
 
 ## Architecture overview
 
+> **Revision (2026-06-16):** the original IPC-forwarding design (desktop →
+> daemon single writer) proved fragile in this repo's multi-worktree dev setup:
+> all builds/installs share one global per-profile socket
+> (`~/Library/Application Support/Vmux/services/vmux-{profile}.sock`), and
+> forwarded records are only persisted when the socket happens to be owned by a
+> daemon built from a branch that knows `ClientMessage::Log`. When another
+> worktree's daemon (or the release install) owns the socket, the forwarded
+> records fail to deserialize and are silently dropped. The design below uses
+> **direct file writes** instead — no IPC, no daemon dependency, no version
+> skew.
+
 Three components:
 
-- **C1 — Unified application log.** Desktop forwards log records over the
-  existing Unix-domain IPC to the daemon, which is the **single writer** of
-  `vmux-{profile}.log`.
-- **C2 — Panic capture.** Desktop installs a panic hook that writes panics
-  **directly** to a crash file (crash-safe; survives daemon-down) and
-  best-effort forwards them through C1.
+- **C1 — Unified application log.** Both the desktop and the daemon write
+  **directly** to the same daily-rolled file
+  `~/Library/Application Support/Vmux/logs/vmux-{profile}.{date}.log` via their
+  own tracing-appender layers. `Rotation::DAILY` uses date-stamped filenames
+  (not renames), so two processes appending to one file is safe — no rename
+  race, just line-granular interleave.
+- **C2 — Panic capture.** Desktop installs a panic hook that appends the panic
+  (message + location + backtrace) **directly** to the same daily file
+  (crash-safe; independent of the daemon).
 - **C3 — CEF Crashpad.** Ship `crash_reporter.cfg` so CEF's bundled handler
-  writes minidumps for native/Chromium crashes.
+  writes minidumps for native/Chromium crashes (dumps under `root_cache_path`;
+  see C3 below).
 
-All paths live under the existing service dir
-`~/Library/Application Support/Vmux/services/` so report artifacts are
-co-located.
+Application logs live under `~/Library/Application Support/Vmux/logs/`; runtime
+files (socket, pid, identity) stay in `…/Vmux/services/`.
 
 ```
-desktop process                          daemon process (single writer)
-┌───────────────────────────┐           ┌──────────────────────────────┐
-│ tracing                   │           │ server.rs                     │
-│  ├─ default fmt → stdout  │           │  ClientMessage::Log arm       │
-│  └─ IpcLogLayer ──┐       │           │   → re-emit via tracing       │
-│                   ▼       │  IPC      │   → vmux-{profile}.log (roll)  │
-│  vmux-log-forward thread ─┼──────────▶│                               │
-│   (blocking UnixStream,   │  socket   └──────────────────────────────┘
-│    reconnect + ring buf)  │
-│                           │           direct write (crash-safe)
-│ panic hook ───────────────┼──────────▶ vmux-{profile}-crash.log
-│ CEF (Settings.user_data_  │           CEF Crashpad handler
-│  path) ───────────────────┼──────────▶ services/crashpad/ (minidumps)
-└───────────────────────────┘
+desktop process                              daemon process
+┌─────────────────────────────┐             ┌─────────────────────────────┐
+│ tracing                     │             │ tracing                     │
+│  ├─ default fmt → stdout    │             │  └─ rolling DAILY appender  │
+│  └─ file DAILY appender ────┼───┐     ┌───┼──── (vmux_service)          │
+│ panic hook ─ direct append ─┼─┐ │     │   └─────────────────────────────┘
+└─────────────────────────────┘ ▼ ▼     ▼
+        logs/vmux-{profile}.{date}.log   (one file, both append)
 ```
 
 ## C1 — Unified application log
 
-### Protocol (`crates/vmux_service/src/protocol.rs`)
+### Daemon (`crates/vmux_service/src/service.rs`, `paths.rs`)
 
-Add a fire-and-forget variant to `ClientMessage` (already
-`rkyv::{Archive,Serialize,Deserialize}`):
-
-```rust
-Log {
-    ts_ms: u64,      // desktop event time, unix epoch millis
-    level: u8,       // 1=ERROR, 2=WARN, 3=INFO, 4=DEBUG, 5=TRACE
-    target: String,
-    message: String,
-},
-```
-
-Add a pure level-mapping helper (testable, shared):
+`init_tracing` builds a `tracing_appender::rolling` DAILY appender in
+`log_dir()` (`~/Library/Application Support/Vmux/logs/`) with prefix
+`vmux-{profile}`, suffix `log`, `max_log_files(7)` → writes
+`vmux-{profile}.{date}.log`. `paths.rs` adds:
 
 ```rust
-pub fn level_to_u8(level: tracing::Level) -> u8 { /* ERROR=1 .. TRACE=5 */ }
+pub fn log_dir() -> PathBuf;          // …/Vmux/logs
+pub fn current_log_file() -> PathBuf; // log_dir()/vmux-{profile}.{utc-date}.log
 ```
 
-The desktop maps `tracing::Level → u8`; the daemon maps `u8 → const level`
-(see below). No `ServiceMessage` response — the daemon never replies to `Log`.
+`current_log_file()` reproduces the appender's filename (UTC date, via `chrono`)
+so the CLI and the panic hook can target the same file.
 
-### Desktop (`crates/vmux_desktop/src/log_forward.rs`, new)
+### Desktop (`crates/vmux_desktop/src/log_forward.rs`)
 
-Public entry used as `LogPlugin.custom_layer`:
+`file_log_layer(&mut App) -> Option<BoxedLayer>`, used as
+`LogPlugin.custom_layer`, builds its **own** DAILY appender in the same
+`log_dir()` with the same prefix and returns
+`fmt::layer().with_writer(non_blocking).with_ansi(false)`. The `WorkerGuard` is
+leaked to keep the writer alive. Bevy's default stdout layer is kept (additive),
+so `cargo run` terminal output is unchanged.
 
-```rust
-pub fn ipc_log_layer(_app: &mut App) -> Option<BoxedLayer>;
-```
+Because `Rotation::DAILY` writes date-stamped files (it does **not** rename),
+the desktop and daemon appenders both open `vmux-{profile}.{date}.log` in append
+mode; concurrent appends interleave at line granularity (safe). No IPC, no
+daemon dependency, no protocol version skew.
 
-`custom_layer` is a bare `fn(&mut App) -> Option<BoxedLayer>` (cannot capture),
-so the function builds everything internally:
+### CLI (`crates/vmux_service/src/cli.rs`)
 
-1. Read forward threshold from env `VMUX_LOG_FORWARD` (parse as a level),
-   default `INFO`. Records at or above the threshold severity (e.g.
-   `INFO`/`WARN`/`ERROR` for the default) are forwarded; more verbose records
-   (`DEBUG`/`TRACE`) are skipped. Skipped records still reach stdout via Bevy's
-   default layer.
-2. Create a bounded `std::sync::mpsc::sync_channel::<LogRecord>(1024)`.
-3. Spawn the `vmux-log-forward` OS thread (detached) owning the receiver:
-   - Maintain a blocking `std::os::unix::net::UnixStream` to
-     `vmux_service::socket_path()`.
-   - Connect-retry with backoff. While disconnected, accumulate records in a
-     bounded `VecDeque` (cap 1024, **drop-oldest**).
-   - On connect: drain the buffer, then stream each record as
-     `ClientMessage::Log` using `vmux_service::write_message_blocking!`.
-   - On any write/connect error: mark disconnected and retry.
-4. Return a boxed custom `tracing_subscriber::Layer` whose `on_event`:
-   - Filters by level threshold.
-   - Extracts `target()`, captures the event's `message` field (and appends
-     other `key=value` fields) via a small `field::Visit` impl.
-   - Builds `LogRecord { ts_ms, level, target, message }` and `try_send`s it
-     (full channel → drop; counted, not fatal).
-
-Bevy's default fmt layer is **kept** (additive `custom_layer`), so `cargo run`
-terminal output is unchanged and dev workflow is unaffected.
-
-This opens a **second** daemon connection dedicated to logs, independent of the
-Bevy `ServiceHandle` terminal connection. The server already supports multiple
-clients; the `Log` arm touches no process state.
-
-### Daemon (`crates/vmux_service/src/server.rs`)
-
-New arm in `handle_client`:
-
-```rust
-ClientMessage::Log { ts_ms, level, target, message } => {
-    match level {
-        1 => tracing::error!(source = "desktop", ts_ms, target = %target, "{message}"),
-        2 => tracing::warn!( source = "desktop", ts_ms, target = %target, "{message}"),
-        3 => tracing::info!( source = "desktop", ts_ms, target = %target, "{message}"),
-        4 => tracing::debug!(source = "desktop", ts_ms, target = %target, "{message}"),
-        _ => tracing::trace!(source = "desktop", ts_ms, target = %target, "{message}"),
-    }
-}
-```
-
-Re-emitting reuses the daemon's existing fmt subscriber, non-blocking appender,
-daily rotation, and retention. The line carries the daemon's receive timestamp
-in its prefix; the original desktop time is preserved as the `ts_ms` field.
-
-Result: a single `vmux-{profile}.log` interleaving daemon and desktop lines,
-one writer, no rotation race.
+`vmux logs [-f]` tails `current_log_file()` (previously it tailed the empty
+`log_path()` stdout sink, which is why logs appeared "missing").
 
 ## C2 — Panic capture (crash-safe)
 
-### Path helper (`crates/vmux_service/src/paths.rs`)
+`crates/vmux_desktop/src/panic_hook.rs`; `install()` is called as the **first**
+statement of `main()` so the earliest panics are captured:
 
-Add, mirroring `log_path()`:
-
-```rust
-/// Per-profile desktop crash log: vmux-{profile}-crash.log
-pub fn crash_log_path() -> PathBuf { /* service_dir().join("vmux-{profile}-crash.log") */ }
-```
-
-### Hook (`crates/vmux_desktop/src/panic_hook.rs`, new)
-
-```rust
-pub fn install();
-```
-
-- Chain the previous hook: `let prev = std::panic::take_hook();` then
-  `std::panic::set_hook(Box::new(move |info| { write_crash(info); prev(info); }))`
-  so stderr / default abort behavior is preserved.
-- Build a record string from: timestamp, thread name, panic payload
-  (`downcast_ref::<&str>` / `String`), `info.location()`, and
-  `std::backtrace::Backtrace::force_capture()`.
-- **Guaranteed:** append the record to `vmux_service::crash_log_path()` with
-  `OpenOptions::new().create(true).append(true)` and a plain blocking write (the
-  process is still alive inside the hook; no tracing, minimal allocation).
-- **Best-effort:** `tracing::error!(target: "vmux::panic", ...)` so the panic
-  also flows through C1 into the unified file when the daemon is up.
-- Factor the formatting into a pure `format_crash_record(...) -> String` for
-  unit testing.
-
-Call `panic_hook::install()` as the **first** statement in
-`crates/vmux_desktop/src/main.rs::main()` (before the banner `println!`), so the
-earliest panics are captured.
+- Chain the previous hook so stderr/abort behavior is preserved.
+- Build a record from timestamp, thread name, panic payload
+  (`downcast_ref::<&str>`/`String`), `info.location()`, and
+  `Backtrace::force_capture()` — formatting factored into
+  `format_crash_record(...)` for unit testing.
+- Append it **directly** (blocking `OpenOptions::append`) to
+  `vmux_service::current_log_file()` — the same unified file. Reliable
+  regardless of daemon state. No tracing emit in the hook (avoids a duplicate
+  via the file layer and the unreliable non-blocking flush at abort).
 
 ## C3 — CEF Crashpad (native/Chromium crashes)
 
@@ -246,42 +183,37 @@ above): dumps land under the existing `root_cache_path`.
 ## Testing
 
 ### C1
-- `ClientMessage::Log` rkyv round-trip (in `protocol.rs` tests).
-- `level_to_u8` / `u8 → level` mapping is total and round-trips 1..=5.
-- Field visitor extracts the `message` field (+ appends extra fields) — unit
-  test the visitor on a synthetic event record.
-- Bounded-buffer behavior: extract `enqueue_drop_oldest(&mut VecDeque, cap, rec)`
-  and test it drops the oldest at capacity.
+- `current_log_file()` lives in `log_dir()` (`…/logs`), starts with
+  `vmux-{profile}.`, ends `.log` (paths.rs test).
+- `file_log_layer` compiles into `LogPlugin.custom_layer` (desktop builds).
+- Manual: run the app; confirm INFO lines appear in
+  `logs/vmux-{profile}.{date}.log` (the same lines as stdout), alongside daemon
+  lines.
 
 ### C2
 - `format_crash_record(...)` contains the panic message and `file:line`.
-- `crash_log_path()` ends with `vmux-{profile}-crash.log` and shares the service
-  dir (extend the existing `pid_log_identity_paths_share_profile_suffix` style
-  test).
+- Manual: trigger a Rust panic; confirm the record is appended to
+  `logs/vmux-{profile}.{date}.log`.
 
 ### C3
 - `scripts/test-bundle-layout.sh`: assert
   `Contents/Resources/crash_reporter.cfg` exists in the built bundle.
-- Source test in patched `bevy_cef` (like the existing
-  `cef_global_background_is_transparent_for_windowed_glass`): assert
-  `message_loop.rs` sets `user_data_path`.
 - Manual: load `chrome://crash` in a webview; confirm a minidump appears under
-  `services/crashpad/`. Trigger a Rust panic; confirm `vmux-{profile}-crash.log`
-  is written and (daemon up) the panic also appears in `vmux-{profile}.log`.
+  the `root_cache_path` Crashpad dir.
 
 ## Risks / notes
 
-- **Patched CEF crates change** (`bevy_cef`, and the `Settings` site). Per
-  `AGENTS.md`, run the appropriate package checks for the patched crate.
-- **Log volume:** default `INFO` forward threshold bounds IPC traffic;
-  per-frame `DEBUG`/`TRACE` stay local on stdout only.
-- **Daemon-down at crash time:** C1 may miss the last lines, but C2's direct
-  crash file (and C3's minidump) are the guaranteed artifacts — this is the
-  whole point of the Electron-style split.
-- **Ordering/timestamps:** forwarded lines show the daemon's receive time in the
-  fmt prefix; the desktop event time is preserved in the `ts_ms` field.
-- **Second socket connection** from the desktop (logs) is intentional and
-  independent of the Bevy terminal `ServiceHandle`.
+- **Two processes, one file:** desktop and daemon append concurrently to
+  `vmux-{profile}.{date}.log`. `Rotation::DAILY` uses date-stamped names (no
+  rename), so the only effect is occasional line interleave — acceptable.
+- **`current_log_file()` couples to the appender's filename** (`{prefix}.{utc
+  date}.{suffix}`). Both use UTC; a panic exactly at the UTC midnight boundary
+  could land in the previous day's file. Negligible.
+- **Stale files:** older `services/vmux-{profile}.log` (empty stdout sink) and
+  dated files remain from the pre-move layout; they can be deleted.
+- **CEF Crashpad dumps** land under `root_cache_path` (profile dir), not the
+  `logs/` dir — CEF 148 has no setting to relocate them without moving the
+  browser cache.
 
 ## Out of scope
 

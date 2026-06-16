@@ -16,17 +16,6 @@ pub(crate) fn init_started_at() {
     SERVICE_STARTED.get_or_init(Instant::now);
 }
 
-pub(crate) fn emit_desktop_log(ts_ms: u64, level: u8, target: &str, message: &str) {
-    let line = format!("[{target}] {message}");
-    match level {
-        1 => tracing::error!(source = "desktop", ts_ms, "{line}"),
-        2 => tracing::warn!(source = "desktop", ts_ms, "{line}"),
-        3 => tracing::info!(source = "desktop", ts_ms, "{line}"),
-        4 => tracing::debug!(source = "desktop", ts_ms, "{line}"),
-        _ => tracing::trace!(source = "desktop", ts_ms, "{line}"),
-    }
-}
-
 const MAX_WAKE_EVENTS_PER_TICK: usize = 1024;
 type InputWriters = Arc<Mutex<HashMap<ProcessId, PtyInputWriter>>>;
 type PendingQueries = Arc<
@@ -513,15 +502,6 @@ async fn handle_client(
                 break;
             }
 
-            ClientMessage::Log {
-                ts_ms,
-                level,
-                target,
-                message,
-            } => {
-                emit_desktop_log(ts_ms, level, &target, &message);
-            }
-
             ClientMessage::Status => {
                 let uptime_secs = SERVICE_STARTED
                     .get()
@@ -713,51 +693,5 @@ mod tests {
         let res = tokio::time::timeout(std::time::Duration::from_secs(3), server).await;
         assert!(res.is_ok(), "run_server did not exit after Shutdown");
         let _ = std::fs::remove_dir_all(&dir);
-    }
-}
-
-#[cfg(test)]
-mod log_ingest_tests {
-    use super::emit_desktop_log;
-    use std::io::Write;
-    use std::sync::{Arc, Mutex};
-    use tracing_subscriber::fmt::MakeWriter;
-
-    #[derive(Clone)]
-    struct BufWriter(Arc<Mutex<Vec<u8>>>);
-    impl Write for BufWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    impl<'a> MakeWriter<'a> for BufWriter {
-        type Writer = BufWriter;
-        fn make_writer(&'a self) -> Self::Writer {
-            self.clone()
-        }
-    }
-
-    #[test]
-    fn emit_desktop_log_writes_message_level_and_source() {
-        let buf = Arc::new(Mutex::new(Vec::new()));
-        let subscriber = tracing_subscriber::fmt()
-            .with_writer(BufWriter(buf.clone()))
-            .with_max_level(tracing::Level::TRACE)
-            .finish();
-        tracing::subscriber::with_default(subscriber, || {
-            emit_desktop_log(1_700_000_000_123, 3, "vmux_desktop::startup", "hello world");
-        });
-        let out = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
-        assert!(out.contains("hello world"), "missing message: {out}");
-        assert!(out.contains("INFO"), "missing level: {out}");
-        assert!(out.contains("desktop"), "missing source tag: {out}");
-        assert!(
-            out.contains("vmux_desktop::startup"),
-            "missing target: {out}"
-        );
     }
 }

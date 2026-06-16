@@ -230,12 +230,6 @@ pub enum ClientMessage {
         result: AgentCommandResult,
     },
     Status,
-    Log {
-        ts_ms: u64,
-        level: u8,
-        target: String,
-        message: String,
-    },
 }
 
 /// Vim-style visual/copy-mode action sent by the GUI to the service.
@@ -410,54 +404,9 @@ pub struct ProcessInfo {
     pub created_at_secs: u64,
 }
 
-pub fn level_to_u8(level: tracing::Level) -> u8 {
-    match level {
-        tracing::Level::ERROR => 1,
-        tracing::Level::WARN => 2,
-        tracing::Level::INFO => 3,
-        tracing::Level::DEBUG => 4,
-        tracing::Level::TRACE => 5,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn level_to_u8_maps_all_severities() {
-        assert_eq!(level_to_u8(tracing::Level::ERROR), 1);
-        assert_eq!(level_to_u8(tracing::Level::WARN), 2);
-        assert_eq!(level_to_u8(tracing::Level::INFO), 3);
-        assert_eq!(level_to_u8(tracing::Level::DEBUG), 4);
-        assert_eq!(level_to_u8(tracing::Level::TRACE), 5);
-    }
-
-    #[test]
-    fn client_message_log_rkyv_round_trip() {
-        let msg = ClientMessage::Log {
-            ts_ms: 1_700_000_000_123,
-            level: 3,
-            target: "vmux_desktop::startup".to_string(),
-            message: "hello world".to_string(),
-        };
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
-        let decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
-        match decoded {
-            ClientMessage::Log {
-                ts_ms,
-                level,
-                target,
-                message,
-            } => {
-                assert_eq!(ts_ms, 1_700_000_000_123);
-                assert_eq!(level, 3);
-                assert_eq!(target, "vmux_desktop::startup");
-                assert_eq!(message, "hello world");
-            }
-            _ => panic!("wrong variant"),
-        }
-    }
 
     #[test]
     fn agent_request_id_roundtrips() {

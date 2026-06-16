@@ -9,15 +9,6 @@ use tokio::sync::Mutex;
 #[derive(Resource)]
 pub struct ServiceClient(pub ServiceHandle);
 
-/// Send a single `ClientMessage` over a blocking Unix socket. Keeps the rkyv
-/// framing encapsulated in this crate so callers don't need rkyv as a dep.
-pub fn send_message_blocking(
-    stream: &mut std::os::unix::net::UnixStream,
-    msg: &ClientMessage,
-) -> std::io::Result<()> {
-    crate::write_message_blocking!(stream, msg)
-}
-
 const MAX_SERVICE_MESSAGES_PER_DRAIN: usize = 128;
 
 /// Async client connection to the vmux service.

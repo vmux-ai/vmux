@@ -36,9 +36,18 @@ pub fn log_path() -> PathBuf {
     profile_file("log")
 }
 
-/// Path to the per-profile desktop crash log: vmux-{profile}-crash.log
-pub fn crash_log_path() -> PathBuf {
-    service_dir().join(format!("vmux-{}-crash.log", current_profile()))
+/// Directory for application log files (separate from runtime files in `service_dir`).
+pub fn log_dir() -> PathBuf {
+    let home = std::env::var_os("HOME").expect("HOME not set");
+    PathBuf::from(home).join("Library/Application Support/Vmux/logs")
+}
+
+/// Path to today's unified log file. Matches the filename the tracing-appender
+/// DAILY rotation writes (`vmux-{profile}.{YYYY-MM-DD}.log`, UTC date), so the
+/// daemon, the desktop file layer, and the panic hook all target the same file.
+pub fn current_log_file() -> PathBuf {
+    let date = chrono::Utc::now().format("%Y-%m-%d");
+    log_dir().join(format!("vmux-{}.{date}.log", current_profile()))
 }
 
 /// LaunchAgent label for the given profile.
@@ -232,13 +241,16 @@ mod tests {
     }
 
     #[test]
-    fn crash_log_path_shares_profile_suffix() {
-        let p = crash_log_path();
+    fn current_log_file_lives_in_log_dir_with_profile_and_date() {
+        let p = current_log_file();
         let name = p.file_name().unwrap().to_string_lossy().into_owned();
-        assert!(name.starts_with("vmux-"), "got {name}");
-        assert!(name.ends_with("-crash.log"), "got {name}");
-        assert!(name.contains(current_profile()), "got {name}");
-        assert_eq!(p.parent().unwrap(), service_dir());
+        assert!(
+            name.starts_with(&format!("vmux-{}.", current_profile())),
+            "got {name}"
+        );
+        assert!(name.ends_with(".log"), "got {name}");
+        assert_eq!(p.parent().unwrap(), log_dir());
+        assert!(log_dir().ends_with("logs"), "got {}", log_dir().display());
     }
 
     #[test]

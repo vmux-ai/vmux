@@ -7,7 +7,6 @@ pub fn install() {
     std::panic::set_hook(Box::new(move |info| {
         let record = crash_record_from(info);
         write_crash(&record);
-        tracing::error!(target: "vmux::panic", "{record}");
         previous(info);
     }));
 }
@@ -33,10 +32,11 @@ fn crash_record_from(info: &PanicHookInfo<'_>) -> String {
 }
 
 fn write_crash(record: &str) {
+    let _ = std::fs::create_dir_all(vmux_service::log_dir());
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(vmux_service::crash_log_path())
+        .open(vmux_service::current_log_file())
     {
         let _ = file.write_all(record.as_bytes());
     }
