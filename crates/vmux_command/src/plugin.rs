@@ -19,10 +19,7 @@ impl Plugin for CommandPlugin {
                 Update,
                 (WriteAppCommands, WriteCommandBarSnapshots, ReadAppCommands).chain(),
             )
-            .add_systems(
-                Update,
-                update_pages_snapshot.in_set(WriteCommandBarSnapshots),
-            )
+            .add_systems(Startup, update_pages_snapshot)
             .add_systems(
                 Update,
                 log_app_commands
