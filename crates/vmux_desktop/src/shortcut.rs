@@ -318,6 +318,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
+            spaces: Default::default(),
         }
     }
 

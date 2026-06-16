@@ -10,17 +10,6 @@ pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
 };
 
-pub(crate) fn update_effective_startup_url(
-    settings: Option<Res<AppSettings>>,
-    mut effective: ResMut<vmux_layout::settings::EffectiveStartupUrl>,
-) {
-    if let Some(settings) = settings.as_ref()
-        && (settings.is_changed() || effective.0.is_empty())
-    {
-        effective.0 = resolve_startup_url(settings);
-    }
-}
-
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SettingsLoadSet;
 
@@ -38,6 +27,16 @@ pub struct AppSettings {
     pub auto_update: bool,
     #[serde(default = "default_agent_settings")]
     pub agent: AgentSettings,
+    #[serde(default)]
+    pub spaces: std::collections::BTreeMap<String, SpaceOverrides>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct SpaceOverrides {
+    #[serde(default)]
+    pub startup_url: Option<String>,
+    #[serde(default)]
+    pub startup_dir: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -74,13 +73,43 @@ fn default_provider_kind() -> String {
     "vibe".to_string()
 }
 
-pub fn resolve_startup_url(settings: &AppSettings) -> String {
-    let url = settings.browser.startup_url.trim();
-    if url.is_empty() || url == "vmux://agent/" || url == "vmux://agent" {
+pub fn resolve_startup_url(settings: &AppSettings, space_id: &str) -> String {
+    let per_space = settings
+        .spaces
+        .get(space_id)
+        .and_then(|o| o.startup_url.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let chosen = per_space.unwrap_or_else(|| settings.browser.startup_url.trim());
+    if chosen.is_empty() || chosen == "vmux://agent/" || chosen == "vmux://agent" {
         default_browser_startup_url()
     } else {
-        url.to_string()
+        chosen.to_string()
     }
+}
+
+pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> std::path::PathBuf {
+    let pick = |opt: Option<&str>| -> Option<std::path::PathBuf> {
+        opt.map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_dir())
+    };
+    pick(
+        settings
+            .spaces
+            .get(space_id)
+            .and_then(|o| o.startup_dir.as_deref()),
+    )
+    .or_else(|| {
+        pick(
+            settings
+                .terminal
+                .as_ref()
+                .and_then(|t| t.startup_dir.as_deref()),
+        )
+    })
+    .unwrap_or_else(|| vmux_core::profile::space_dir(space_id))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -226,6 +255,22 @@ pub struct TerminalSettings {
     pub custom_themes: Vec<crate::themes::TerminalColorScheme>,
     #[serde(default = "default_true")]
     pub confirm_close: bool,
+    #[serde(default)]
+    pub startup_dir: Option<String>,
+}
+
+impl Default for TerminalSettings {
+    fn default() -> Self {
+        Self {
+            shell: None,
+            font_family: None,
+            default_theme: default_theme_name(),
+            themes: Vec::new(),
+            custom_themes: Vec::new(),
+            confirm_close: true,
+            startup_dir: None,
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -334,6 +379,59 @@ fn data_dir() -> Option<std::path::PathBuf> {
     }
 }
 
+#[derive(Deserialize, Default)]
+struct PartialAppSettings {
+    #[serde(default)]
+    browser: Option<BrowserSettings>,
+    #[serde(default)]
+    layout: Option<LayoutSettings>,
+    #[serde(default)]
+    shortcuts: Option<ShortcutSettings>,
+    #[serde(default)]
+    terminal: Option<TerminalSettings>,
+    #[serde(default)]
+    auto_update: Option<bool>,
+    #[serde(default)]
+    agent: Option<AgentSettings>,
+    #[serde(default)]
+    spaces: Option<std::collections::BTreeMap<String, SpaceOverrides>>,
+}
+
+fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
+    let mut settings = load_embedded_settings();
+    if let Some(browser) = partial.browser {
+        settings.browser = browser;
+    }
+    if let Some(layout) = partial.layout {
+        settings.layout = layout;
+    }
+    if let Some(shortcuts) = partial.shortcuts {
+        settings.shortcuts = shortcuts;
+    }
+    if let Some(terminal) = partial.terminal {
+        settings.terminal = Some(terminal);
+    }
+    if let Some(auto_update) = partial.auto_update {
+        settings.auto_update = auto_update;
+    }
+    if let Some(agent) = partial.agent {
+        settings.agent = agent;
+    }
+    if let Some(spaces) = partial.spaces {
+        settings.spaces = spaces;
+    }
+    settings
+}
+
+fn parse_settings(text: &str) -> Result<AppSettings, ron::error::SpannedError> {
+    // IMPLICIT_SOME lets a sparse file write `browser: (..)` instead of
+    // `browser: Some((..))` for the optional override sections.
+    ron::Options::default()
+        .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+        .from_str::<PartialAppSettings>(text)
+        .map(merge_over_embedded)
+}
+
 pub fn load_settings(mut commands: Commands) {
     let (settings, config_path) = if let Some(dir) = data_dir() {
         if std::fs::create_dir_all(&dir).is_err() {
@@ -341,7 +439,7 @@ pub fn load_settings(mut commands: Commands) {
         } else {
             let path = dir.join("settings.ron");
             let s = match std::fs::read_to_string(&path) {
-                Ok(text) => match ron::de::from_str::<AppSettings>(&text) {
+                Ok(text) => match parse_settings(&text) {
                     Ok(s) => s,
                     Err(e) => {
                         bevy::log::warn!(
@@ -351,10 +449,7 @@ pub fn load_settings(mut commands: Commands) {
                         load_embedded_settings()
                     }
                 },
-                Err(_) => {
-                    let _ = std::fs::write(&path, DEFAULT_SETTINGS);
-                    load_embedded_settings()
-                }
+                Err(_) => load_embedded_settings(),
             };
             (s, Some(path))
         }
@@ -423,7 +518,7 @@ pub(crate) fn reload_settings_on_change(
                 bevy::log::debug!("settings: skipping reload (matches last self-write)");
                 return;
             }
-            match ron::de::from_str::<AppSettings>(&text) {
+            match parse_settings(&text) {
                 Ok(new_settings) => {
                     bevy::log::info!("Settings reloaded from {}", watcher.path.display());
                     *layout_settings = new_settings.layout.clone();
@@ -468,10 +563,61 @@ pub fn apply_settings_update(
     set_at_path(&mut value_json, path, value)?;
     let new_settings: AppSettings = serde_json::from_value(value_json)
         .map_err(|e| format!("invalid value for path '{path}': {e}"))?;
-    let ron_bytes = ron::ser::to_string_pretty(&new_settings, ron::ser::PrettyConfig::default())
-        .map_err(|e| format!("RON serialize failed: {e}"))?;
+    let ron_bytes = sparse_settings_ron(&new_settings)?;
     *settings = new_settings;
     Ok(ron_bytes)
+}
+
+fn section_ron<T: Serialize>(value: &T) -> Result<String, String> {
+    ron::ser::to_string_pretty(value, ron::ser::PrettyConfig::default())
+        .map_err(|e| format!("RON serialize failed: {e}"))
+}
+
+/// Serialize only the top-level sections that differ from the embedded defaults,
+/// so the on-disk `settings.ron` stays minimal (omitted sections fall back to
+/// the embedded defaults on load via `merge_over_embedded`).
+fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
+    let default = load_embedded_settings();
+    let cur =
+        serde_json::to_value(settings).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let def =
+        serde_json::to_value(&default).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let differs = |key: &str| cur.get(key) != def.get(key);
+    let mut parts: Vec<String> = Vec::new();
+    if differs("browser") {
+        parts.push(format!("    browser: {},", section_ron(&settings.browser)?));
+    }
+    if differs("layout") {
+        parts.push(format!("    layout: {},", section_ron(&settings.layout)?));
+    }
+    if differs("shortcuts") {
+        parts.push(format!(
+            "    shortcuts: {},",
+            section_ron(&settings.shortcuts)?
+        ));
+    }
+    if differs("terminal") {
+        parts.push(format!(
+            "    terminal: {},",
+            section_ron(&settings.terminal)?
+        ));
+    }
+    if differs("auto_update") {
+        parts.push(format!(
+            "    auto_update: {},",
+            section_ron(&settings.auto_update)?
+        ));
+    }
+    if differs("agent") {
+        parts.push(format!("    agent: {},", section_ron(&settings.agent)?));
+    }
+    if differs("spaces") {
+        parts.push(format!("    spaces: {},", section_ron(&settings.spaces)?));
+    }
+    if parts.is_empty() {
+        return Ok("()\n".to_string());
+    }
+    Ok(format!("(\n{}\n)\n", parts.join("\n")))
 }
 
 pub fn serialize_settings_to_json(settings: &AppSettings) -> String {
@@ -682,6 +828,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             agent: crate::plugin::runtime::AgentSettings::default(),
+            spaces: Default::default(),
         }
     }
 
@@ -689,33 +836,62 @@ mod tests {
     fn resolve_startup_url_returns_browser_override() {
         let mut s = base_settings();
         s.browser.startup_url = "vmux://services/".into();
-        assert_eq!(resolve_startup_url(&s), "vmux://services/");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "vmux://services/");
     }
 
     #[test]
     fn resolve_startup_url_defaults_to_google() {
         let s = base_settings();
-        assert_eq!(resolve_startup_url(&s), "https://www.google.com");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
     }
 
     #[test]
     fn resolve_startup_url_uses_google_for_empty_browser_url() {
         let mut s = base_settings();
         s.browser.startup_url.clear();
-        assert_eq!(resolve_startup_url(&s), "https://www.google.com");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
     }
 
     #[test]
     fn resolve_startup_url_treats_legacy_agent_default_as_google() {
         let mut s = base_settings();
         s.browser.startup_url = "vmux://agent/".into();
-        assert_eq!(resolve_startup_url(&s), "https://www.google.com");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
     }
 
     #[test]
     fn embedded_settings_default_to_google() {
         let s = load_embedded_settings();
-        assert_eq!(resolve_startup_url(&s), "https://www.google.com");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
+    }
+
+    #[test]
+    fn resolve_startup_url_prefers_per_space_override() {
+        let mut s = base_settings();
+        s.browser.startup_url = "https://global.example".into();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: Some("https://work.example".into()),
+                startup_dir: None,
+            },
+        );
+        assert_eq!(resolve_startup_url(&s, "work"), "https://work.example");
+        assert_eq!(resolve_startup_url(&s, "other"), "https://global.example");
+    }
+
+    #[test]
+    fn resolve_startup_url_blank_per_space_falls_to_global() {
+        let mut s = base_settings();
+        s.browser.startup_url = "https://global.example".into();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: Some("   ".into()),
+                startup_dir: None,
+            },
+        );
+        assert_eq!(resolve_startup_url(&s, "work"), "https://global.example");
     }
 
     #[test]
@@ -837,5 +1013,139 @@ mod tests {
         let h3 = settings_content_hash(b"world");
         assert_eq!(h1, h2);
         assert_ne!(h1, h3);
+    }
+
+    #[test]
+    fn app_settings_spaces_roundtrip_through_ron() {
+        let mut s = base_settings();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: Some("https://work.example".into()),
+                startup_dir: Some("/tmp/work".into()),
+            },
+        );
+        let ron = ron::ser::to_string_pretty(&s, ron::ser::PrettyConfig::default()).unwrap();
+        let back: AppSettings = ron::de::from_str(&ron).unwrap();
+        assert_eq!(
+            back.spaces["work"].startup_url.as_deref(),
+            Some("https://work.example")
+        );
+        assert_eq!(
+            back.spaces["work"].startup_dir.as_deref(),
+            Some("/tmp/work")
+        );
+    }
+
+    #[test]
+    fn embedded_settings_have_empty_spaces_and_no_global_startup_dir() {
+        let s = load_embedded_settings();
+        assert!(s.spaces.is_empty());
+        assert!(
+            s.terminal
+                .as_ref()
+                .and_then(|t| t.startup_dir.as_ref())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn resolve_startup_dir_prefers_per_space_then_global_then_builtin() {
+        let per = tempfile::tempdir().unwrap();
+        let glob = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some(glob.path().to_string_lossy().into()),
+            ..Default::default()
+        });
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(per.path().to_string_lossy().into()),
+            },
+        );
+        assert_eq!(resolve_startup_dir(&s, "work"), per.path());
+        assert_eq!(resolve_startup_dir(&s, "other"), glob.path());
+        s.terminal = None;
+        assert_eq!(
+            resolve_startup_dir(&s, "space-1"),
+            vmux_core::profile::space_dir("space-1")
+        );
+    }
+
+    #[test]
+    fn resolve_startup_dir_invalid_per_space_cascades_to_valid_global() {
+        let glob = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some(glob.path().to_string_lossy().into()),
+            ..Default::default()
+        });
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some("/no/such/dir/xyz-vmux".into()),
+            },
+        );
+        assert_eq!(resolve_startup_dir(&s, "work"), glob.path());
+    }
+
+    #[test]
+    fn resolve_startup_dir_all_invalid_falls_through_to_builtin() {
+        let mut s = base_settings();
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some("/no/such/global/xyz-vmux".into()),
+            ..Default::default()
+        });
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some("/no/such/dir/xyz-vmux".into()),
+            },
+        );
+        assert_eq!(
+            resolve_startup_dir(&s, "work"),
+            vmux_core::profile::space_dir("work")
+        );
+    }
+
+    #[test]
+    fn parse_settings_merges_sparse_over_embedded() {
+        let s = parse_settings(r#"(browser: (startup_url: "https://x.example"))"#).unwrap();
+        assert_eq!(s.browser.startup_url, "https://x.example");
+        // omitted sections come from the embedded defaults, NOT the plainer serde
+        // field defaults (embedded leader is "b"; serde default would be "g").
+        assert_eq!(s.shortcuts.leader.key, "b");
+        assert_eq!(s.layout.radius, 8.0);
+    }
+
+    #[test]
+    fn parse_settings_empty_uses_embedded_defaults() {
+        let s = parse_settings("()").unwrap();
+        assert_eq!(s.shortcuts.leader.key, "b");
+        assert_eq!(s.browser.startup_url, "https://www.google.com");
+    }
+
+    #[test]
+    fn apply_settings_update_writes_only_changed_section() {
+        let mut settings = parse_settings("()").unwrap();
+        let ron = apply_settings_update(
+            &mut settings,
+            "browser.startup_url",
+            serde_json::json!("https://x.example"),
+        )
+        .unwrap();
+        assert!(ron.contains("browser"));
+        assert!(ron.contains("https://x.example"));
+        // untouched heavy sections stay out of the file
+        assert!(!ron.contains("shortcuts"));
+        assert!(!ron.contains("themes"));
+        // and reload merges them back from the embedded defaults
+        let reloaded = parse_settings(&ron).unwrap();
+        assert_eq!(reloaded.browser.startup_url, "https://x.example");
+        assert_eq!(reloaded.shortcuts.leader.key, "b");
     }
 }

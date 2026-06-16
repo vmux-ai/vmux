@@ -26,6 +26,7 @@ ron = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_setting = { path = "../vmux_setting" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
@@ -39,4 +40,3 @@ tempfile = "3"
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 bevy_cef_core = { workspace = true }
 serde_json = { workspace = true }
-vmux_setting = { path = "../vmux_setting" }

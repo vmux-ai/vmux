@@ -8,7 +8,7 @@ use vmux_command::{ReadAppCommands, WriteAppCommands};
 use crate::event::SettingsCommandEvent;
 use runtime::{
     LastSelfWriteHash, SettingsLoadSet, SettingsWriteRequest, load_settings,
-    persist_settings_to_disk, reload_settings_on_change, update_effective_startup_url,
+    persist_settings_to_disk, reload_settings_on_change,
 };
 use view::{
     broadcast_schema_to_views, broadcast_settings_to_views, handle_open_settings_command,
@@ -29,16 +29,9 @@ impl Plugin for SettingsPlugin {
             .init_resource::<vmux_layout::settings::EffectiveStartupUrl>()
             .add_systems(Startup, load_settings.in_set(SettingsLoadSet))
             .add_systems(
-                Startup,
-                update_effective_startup_url
-                    .after(SettingsLoadSet)
-                    .before(vmux_layout::LayoutStartupSet::Post),
-            )
-            .add_systems(
                 Update,
                 (persist_settings_to_disk, reload_settings_on_change).chain(),
             )
-            .add_systems(Update, update_effective_startup_url)
             .add_systems(
                 Update,
                 crate::snapshot_updater::update_settings_snapshot

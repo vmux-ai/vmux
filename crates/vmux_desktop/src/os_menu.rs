@@ -330,6 +330,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             agent: AgentSettings::default(),
+            spaces: Default::default(),
         }
     }
 

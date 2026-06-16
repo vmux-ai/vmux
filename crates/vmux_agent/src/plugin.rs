@@ -322,7 +322,9 @@ fn handle_agent_commands(
                         let cwd_path = cwd_opt.unwrap_or_else(|| {
                             active_space
                                 .as_ref()
-                                .map(|s| space_dir(&s.record.id))
+                                .map(|s| {
+                                    vmux_setting::resolve_startup_dir(&sp.settings, &s.record.id)
+                                })
                                 .unwrap_or_else(default_space_dir)
                         });
                         if command.trim().is_empty() {
@@ -1164,6 +1166,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
+            spaces: Default::default(),
         }
     }
 
@@ -1226,15 +1229,16 @@ mod tests {
     #[test]
     fn update_settings_via_apply_mutates_resource_and_returns_ron() {
         let mut settings = test_settings();
-        assert!(!settings.auto_update);
         let ron_bytes = vmux_setting::apply_settings_update(
             &mut settings,
-            "auto_update",
-            serde_json::json!(true),
+            "browser.startup_url",
+            serde_json::json!("https://example.com/custom"),
         )
         .expect("apply ok");
-        assert!(settings.auto_update);
-        assert!(ron_bytes.contains("auto_update"));
+        assert_eq!(settings.browser.startup_url, "https://example.com/custom");
+        // sparse RON includes only sections that differ from the embedded
+        // defaults; this override differs, so it appears.
+        assert!(ron_bytes.contains("https://example.com/custom"));
     }
 
     #[test]

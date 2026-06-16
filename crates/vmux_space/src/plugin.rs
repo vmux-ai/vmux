@@ -34,6 +34,13 @@ impl Plugin for SpacePlugin {
         app.init_resource::<ActiveSpace>()
             .add_message::<SaveSpaceRequest>()
             .add_systems(Startup, ensure_space_registry)
+            .add_systems(
+                Startup,
+                update_effective_startup_url
+                    .after(vmux_setting::SettingsLoadSet)
+                    .before(vmux_layout::LayoutStartupSet::Post),
+            )
+            .add_systems(Update, update_effective_startup_url)
             .add_message::<vmux_core::page::SpacesPageSpawnRequest>()
             .add_systems(
                 Update,
@@ -59,6 +66,19 @@ impl Plugin for SpacePlugin {
                 crate::snapshot_updater::update_spaces_snapshot
                     .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
             );
+    }
+}
+
+fn update_effective_startup_url(
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    active: Option<Res<ActiveSpace>>,
+    mut effective: ResMut<vmux_layout::settings::EffectiveStartupUrl>,
+) {
+    let (Some(settings), Some(active)) = (settings, active) else {
+        return;
+    };
+    if settings.is_changed() || active.is_changed() || effective.0.is_empty() {
+        effective.0 = vmux_setting::resolve_startup_url(&settings, &active.record.id);
     }
 }
 
@@ -591,6 +611,7 @@ mod tests {
             terminal: None,
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
+            spaces: Default::default(),
         }
     }
 
@@ -925,6 +946,37 @@ mod tests {
         assert!(focus.tab.is_some());
         assert!(focus.pane.is_some());
         assert!(focus.stack.is_some());
+    }
+
+    #[test]
+    fn effective_startup_url_reflects_active_space_override() {
+        let mut settings = test_settings();
+        settings.browser.startup_url = "https://global.example".into();
+        settings.spaces.insert(
+            "work".into(),
+            vmux_setting::SpaceOverrides {
+                startup_url: Some("https://work.example".into()),
+                startup_dir: None,
+            },
+        );
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(settings)
+            .init_resource::<vmux_layout::settings::EffectiveStartupUrl>()
+            .insert_resource(ActiveSpace {
+                record: work_space_record(),
+            })
+            .add_systems(Update, update_effective_startup_url);
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<vmux_layout::settings::EffectiveStartupUrl>()
+                .0,
+            "https://work.example"
+        );
     }
 
     #[test]
