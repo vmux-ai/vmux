@@ -560,7 +560,7 @@ pub fn Page() -> Element {
                                         }
                                         span { class: result_trailing_slot_class() }
                                     },
-                                    ResultItem::Page { url, title, icon, favicon } => rsx! {
+                                    ResultItem::Page { url, title, icon, favicon, shortcut } => rsx! {
                                         div { class: result_content_row_class(),
                                             if *favicon {
                                                 Favicon {
@@ -577,7 +577,13 @@ pub fn Page() -> Element {
                                                 span { class: result_secondary_text_class(), "{url}" }
                                             }
                                         }
-                                        span { class: result_trailing_slot_class(), "New tab" }
+                                        span { class: result_trailing_slot_class(),
+                                            if shortcut.is_empty() {
+                                                "New tab"
+                                            } else {
+                                                span { class: result_shortcut_badge_class(), "{shortcut}" }
+                                            }
+                                        }
                                     },
                                     ResultItem::Navigate { url } => rsx! {
                                         div { class: result_content_row_class(),

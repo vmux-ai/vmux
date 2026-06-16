@@ -30,6 +30,7 @@ pub enum CommandBarResultItem {
         title: String,
         icon: String,
         favicon: bool,
+        shortcut: String,
     },
     Navigate {
         url: String,
@@ -91,6 +92,7 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
             title: page.title.clone(),
             icon: page.icon.clone(),
             favicon: page.favicon,
+            shortcut: page.shortcut.clone(),
         })
         .collect()
 }
@@ -274,6 +276,7 @@ mod tests {
                 keywords: vec!["preferences".into()],
                 icon: "settings".into(),
                 favicon: false,
+                shortcut: String::new(),
             },
             CommandBarPage {
                 host: "spaces".into(),
@@ -282,6 +285,7 @@ mod tests {
                 keywords: vec!["space".into()],
                 icon: "layers".into(),
                 favicon: false,
+                shortcut: String::new(),
             },
             CommandBarPage {
                 host: "history".into(),
@@ -290,6 +294,7 @@ mod tests {
                 keywords: vec!["recent".into()],
                 icon: "clock".into(),
                 favicon: false,
+                shortcut: "\u{2318}Y".into(),
             },
             CommandBarPage {
                 host: "agent".into(),
@@ -298,6 +303,7 @@ mod tests {
                 keywords: vec!["vibe".into(), "agent".into()],
                 icon: "".into(),
                 favicon: true,
+                shortcut: String::new(),
             },
         ]
     }
@@ -324,6 +330,7 @@ mod tests {
             title: "Spaces".into(),
             icon: "layers".into(),
             favicon: false,
+            shortcut: String::new(),
         }));
         assert!(results.iter().any(|r| matches!(
             r, CommandBarResultItem::Space { id, .. } if id == "space-1"
@@ -356,6 +363,7 @@ mod tests {
             title: "Spaces".into(),
             icon: "layers".into(),
             favicon: false,
+            shortcut: String::new(),
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
             id: "browser_open_command_bar".to_string(),
@@ -379,6 +387,7 @@ mod tests {
             title: "Spaces".into(),
             icon: "layers".into(),
             favicon: false,
+            shortcut: String::new(),
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
             id: "space_open".to_string(),
@@ -410,6 +419,7 @@ mod tests {
             title: "Settings".into(),
             icon: "settings".into(),
             favicon: false,
+            shortcut: String::new(),
         }));
     }
 
@@ -487,6 +497,16 @@ mod tests {
                 "vmux://spaces/",
             ]
         );
+    }
+
+    #[test]
+    fn page_carries_shortcut() {
+        let results = filter_results("history", &[], &[], &[], &sample_pages(), false, &[]);
+        assert!(results.iter().any(|r| matches!(
+            r,
+            CommandBarResultItem::Page { title, shortcut, .. }
+                if title == "History" && shortcut == "\u{2318}Y"
+        )));
     }
 
     #[test]

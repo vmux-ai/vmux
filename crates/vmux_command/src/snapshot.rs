@@ -70,6 +70,7 @@ pub fn update_pages_snapshot(
             keywords: manifest.keywords.iter().map(|k| k.to_string()).collect(),
             icon: manifest.icon.to_string(),
             favicon: false,
+            shortcut: String::new(),
         })
         .collect();
     pages.sort_by(|a, b| a.url.cmp(&b.url));
