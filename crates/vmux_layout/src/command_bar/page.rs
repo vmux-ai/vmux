@@ -8,9 +8,9 @@ use crate::command_bar::results::{CommandBarResultItem as ResultItem, filter_res
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
     command_bar_root_class, command_bar_shell_class, result_content_row_class,
-    result_history_url_class, result_item_class, result_list_class, result_primary_text_class,
-    result_secondary_text_class, result_shortcut_badge_class, result_terminal_path_class,
-    result_trailing_slot_class,
+    result_favicon_class, result_history_url_class, result_item_class, result_leading_icon_class,
+    result_list_class, result_primary_text_class, result_secondary_text_class,
+    result_shortcut_badge_class, result_terminal_path_class, result_trailing_slot_class,
 };
 use dioxus::prelude::*;
 use vmux_command::event::{
@@ -497,11 +497,11 @@ pub fn Page() -> Element {
                                 match item {
                                     ResultItem::Terminal { path } => rsx! {
                                         div { class: result_content_row_class(),
-                                            span { class: "shrink-0 text-base text-muted-foreground", ">_" }
+                                            span { class: "shrink-0 text-sm text-muted-foreground", ">_" }
                                             if path.is_empty() {
-                                                span { class: "text-base text-foreground", "Terminal" }
+                                                span { class: "text-sm text-foreground", "Terminal" }
                                             } else {
-                                                span { class: "shrink-0 text-base text-foreground", "Open in Terminal" }
+                                                span { class: "shrink-0 text-sm text-foreground", "Open in Terminal" }
                                                 span { class: result_terminal_path_class(), "{path}" }
                                             }
                                         }
@@ -512,8 +512,8 @@ pub fn Page() -> Element {
                                             Favicon {
                                                 favicon_url: String::new(),
                                                 url: url.clone(),
-                                                class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
-                                                globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                                                class: result_favicon_class().to_string(),
+                                                globe_class: result_leading_icon_class().to_string(),
                                             }
                                             div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                                 span { class: result_primary_text_class(), "{title}" }
@@ -536,7 +536,7 @@ pub fn Page() -> Element {
                                     },
                                     ResultItem::Command { name, shortcut, .. } => rsx! {
                                         div { class: result_content_row_class(),
-                                            span { class: "shrink-0 text-base text-muted-foreground", ">_" }
+                                            span { class: "shrink-0 text-sm text-muted-foreground", ">_" }
                                             span { class: result_primary_text_class(), "{name}" }
                                         }
                                         span { class: result_trailing_slot_class(),
@@ -550,10 +550,10 @@ pub fn Page() -> Element {
                                             Favicon {
                                                 favicon_url: favicon_url.clone(),
                                                 url: url.clone(),
-                                                class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
-                                                globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                                                class: result_favicon_class().to_string(),
+                                                globe_class: result_leading_icon_class().to_string(),
                                             }
-                                            span { class: "min-w-0 flex-1 truncate text-base text-foreground",
+                                            span { class: "min-w-0 flex-1 truncate text-sm text-foreground",
                                                 if title.is_empty() { "{url}" } else { "{title}" }
                                             }
                                             span { class: result_history_url_class(), "{url}" }
@@ -566,8 +566,8 @@ pub fn Page() -> Element {
                                                 Favicon {
                                                     favicon_url: String::new(),
                                                     url: url.clone(),
-                                                    class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
-                                                    globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                                                    class: result_favicon_class().to_string(),
+                                                    globe_class: result_leading_icon_class().to_string(),
                                                 }
                                             } else {
                                                 {page_icon(icon)}
@@ -581,12 +581,12 @@ pub fn Page() -> Element {
                                     },
                                     ResultItem::Navigate { url } => rsx! {
                                         div { class: result_content_row_class(),
-                                            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                                            Icon { class: result_leading_icon_class(),
                                                 circle { cx: "11", cy: "11", r: "8" }
                                                 path { d: "m21 21-4.3-4.3" }
                                             }
                                             if url.is_empty() {
-                                                span { class: "text-base text-foreground", "Search" }
+                                                span { class: "text-sm text-foreground", "Search" }
                                             } else if looks_like_url(url) {
                                                 span { class: result_primary_text_class(), "Open \"{url}\"" }
                                             } else {
@@ -618,7 +618,7 @@ fn looks_like_path(s: &str) -> bool {
 }
 
 fn page_icon(icon: &str) -> Element {
-    let icon_class = "h-4 w-4 shrink-0 text-muted-foreground";
+    let icon_class = result_leading_icon_class();
     match icon {
         "settings" => rsx! { Icon { class: icon_class,
             circle { cx: "12", cy: "12", r: "3" }

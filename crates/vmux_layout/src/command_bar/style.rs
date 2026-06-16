@@ -1,8 +1,8 @@
 pub fn result_item_class(is_selected: bool) -> &'static str {
     if is_selected {
-        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-sidebar-primary px-3 py-2 text-sidebar-primary-foreground"
+        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-sidebar-primary px-3 py-1.5 text-sidebar-primary-foreground"
     } else {
-        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden px-3 py-2 hover:bg-white/5"
+        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden px-3 py-1.5 hover:bg-white/5"
     }
 }
 
@@ -39,31 +39,39 @@ pub fn result_list_class() -> &'static str {
 }
 
 pub fn result_content_row_class() -> &'static str {
-    "flex min-w-0 flex-1 items-center gap-2 overflow-hidden"
+    "flex min-w-0 flex-1 items-start gap-2 overflow-hidden"
+}
+
+pub fn result_favicon_class() -> &'static str {
+    "mt-0.5 h-4 w-4 shrink-0 rounded-sm object-contain"
+}
+
+pub fn result_leading_icon_class() -> &'static str {
+    "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
 }
 
 pub fn result_primary_text_class() -> &'static str {
-    "min-w-0 truncate text-base text-foreground"
+    "min-w-0 truncate text-sm leading-tight text-foreground"
 }
 
 pub fn result_secondary_text_class() -> &'static str {
-    "min-w-0 truncate text-sm text-muted-foreground"
+    "min-w-0 truncate text-xs leading-tight text-muted-foreground"
 }
 
 pub fn result_terminal_path_class() -> &'static str {
-    "ml-1 min-w-0 truncate text-sm text-muted-foreground"
+    "ml-1 min-w-0 truncate text-xs text-muted-foreground"
 }
 
 pub fn result_history_url_class() -> &'static str {
-    "ml-auto min-w-0 max-w-xs truncate text-sm text-muted-foreground"
+    "ml-auto min-w-0 max-w-xs truncate text-xs text-muted-foreground"
 }
 
 pub fn result_trailing_slot_class() -> &'static str {
-    "ml-3 flex h-6 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-sm text-muted-foreground"
+    "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground"
 }
 
 pub fn result_shortcut_badge_class() -> &'static str {
-    "max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-sm text-muted-foreground"
+    "max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
 }
 
 #[cfg(test)]
