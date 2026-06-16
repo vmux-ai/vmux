@@ -53,7 +53,7 @@ fn show_splash(mut state: NonSendMut<SplashState>) {
         NSGlassEffectViewStyle, NSImage, NSImageScaling, NSImageView, NSProgressIndicator,
         NSProgressIndicatorStyle, NSScreen, NSView, NSVisualEffectBlendingMode,
         NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindow,
-        NSWindowStyleMask,
+        NSWindowCollectionBehavior, NSWindowStyleMask,
     };
     use objc2_foundation::{NSData, NSPoint, NSRect, NSSize};
 
@@ -92,6 +92,11 @@ fn show_splash(mut state: NonSendMut<SplashState>) {
     window.setHasShadow(true);
     unsafe { window.setReleasedWhenClosed(false) };
     panel.setBecomesKeyOnlyIfNeeded(true);
+    window.setCollectionBehavior(
+        NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::FullScreenAuxiliary
+            | NSWindowCollectionBehavior::IgnoresCycle,
+    );
 
     let bounds = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(W, H));
     let resize =
@@ -253,6 +258,14 @@ mod tests {
         let source = include_str!("splash.rs");
         assert!(source.contains("include_bytes!"));
         assert!(source.contains("vmux-icon.png"));
+    }
+
+    #[test]
+    fn splash_panel_is_fullscreen_auxiliary() {
+        let source = include_str!("splash.rs");
+        assert!(source.contains("setCollectionBehavior"));
+        assert!(source.contains("FullScreenAuxiliary"));
+        assert!(source.contains("CanJoinAllSpaces"));
     }
 
     #[test]
