@@ -319,7 +319,10 @@ fn open_beside_me_definition() -> ToolDefinition {
         name: "open_beside_me".into(),
         description: "Open a url in a new pane directly beside YOUR pane (the agent calling this). \
 direction is one of right|left|top|bottom (default right). url uses the same rules as browser_navigate \
-(vmux://terminal/ opens a terminal; anything else loads as a browser). Returns ok; call read_layout to learn new ids."
+(vmux://terminal/ opens a terminal; anything else loads as a browser). \
+focus (default true): true moves focus to the new pane (use when the human will interact with it); \
+false keeps focus on your own pane (use when you will drive the new pane yourself, e.g. run a command in it). \
+Returns ok; call read_layout to learn new ids."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -327,7 +330,8 @@ direction is one of right|left|top|bottom (default right). url uses the same rul
             "additionalProperties": false,
             "properties": {
                 "direction": {"enum": ["right", "left", "top", "bottom"]},
-                "url": {"type": "string"}
+                "url": {"type": "string"},
+                "focus": {"type": "boolean"}
             }
         }),
     }
@@ -392,10 +396,15 @@ pub fn dispatch_with_anchor(
             "bottom" => AgentPaneDirection::Bottom,
             other => return Err(format!("unknown direction: {other}")),
         };
+        let focus = arguments
+            .get("focus")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         return Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
             anchor,
             direction,
             url,
+            focus,
         }));
     }
     if name == "focus_self" {

@@ -4387,8 +4387,7 @@ mod tests {
                 .add_systems(
                     Update,
                     (
-                        crate::handle_browser_navigate_requests
-                            .before(PageOpenSet::ResolveTarget),
+                        crate::handle_browser_navigate_requests.before(PageOpenSet::ResolveTarget),
                         crate::handle_page_open_requests.in_set(PageOpenSet::ResolveTarget),
                         handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),
                         crate::attach_cef_page_requests.in_set(PageOpenSet::Fallback),

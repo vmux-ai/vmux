@@ -93,6 +93,7 @@ pub enum AgentCommand {
         anchor: ProcessId,
         direction: AgentPaneDirection,
         url: String,
+        focus: bool,
     },
     FocusSelf {
         anchor: ProcessId,
@@ -485,6 +486,7 @@ mod tests {
             anchor: ProcessId::new(),
             direction: AgentPaneDirection::Right,
             url: "vmux://terminal/".into(),
+            focus: true,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let back: AgentCommand =
@@ -496,6 +498,7 @@ mod tests {
             anchor: ProcessId::new(),
             direction: AgentPaneDirection::Right,
             url: "  ".into(),
+            focus: true,
         };
         assert!(validate_agent_command(&empty).is_err());
     }

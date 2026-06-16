@@ -485,6 +485,7 @@ fn handle_agent_self_commands(
                 anchor,
                 direction,
                 url,
+                focus,
             } => match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
                 None => AgentCommandResult::Error("self process not found".to_string()),
                 Some((_, pane)) => {
@@ -499,6 +500,7 @@ fn handle_agent_self_commands(
                         direction: dir,
                         url: url.clone(),
                         request_id: request.request_id.0,
+                        focus: *focus,
                     });
                     AgentCommandResult::Ok
                 }
