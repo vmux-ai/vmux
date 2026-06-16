@@ -35,6 +35,7 @@ impl Plugin for PersistencePlugin {
             periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
             dirty: false,
         })
+        .init_resource::<crate::boot_status::RestoreComplete>()
         .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
         .add_message::<vmux_space::SaveSpaceRequest>()
         .add_observer(save_on_default_event)
@@ -78,7 +79,11 @@ fn mark_space_views_need_rebuild(_trigger: On<Loaded>, mut commands: Commands) {
     commands.insert_resource(SpaceViewsNeedRebuild);
 }
 
-fn clear_space_views_need_rebuild(mut commands: Commands) {
+fn clear_space_views_need_rebuild(
+    mut restore: ResMut<crate::boot_status::RestoreComplete>,
+    mut commands: Commands,
+) {
+    restore.0 = true;
     commands.remove_resource::<SpaceViewsNeedRebuild>();
 }
 
@@ -175,7 +180,11 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
 }
 
 /// Check if a space file exists and trigger load on startup.
-pub(crate) fn load_space_on_startup(active: Res<ActiveSpace>, mut commands: Commands) {
+pub(crate) fn load_space_on_startup(
+    active: Res<ActiveSpace>,
+    mut restore: ResMut<crate::boot_status::RestoreComplete>,
+    mut commands: Commands,
+) {
     let path = space_path(&active);
     let removed_stale = remove_stale_space_if_needed(&path);
     let exists = path.exists() && !removed_stale;
@@ -184,6 +193,7 @@ pub(crate) fn load_space_on_startup(active: Res<ActiveSpace>, mut commands: Comm
         info!("Loading space from {:?}", path);
         commands.trigger_load(LoadWorld::default_from_file(path));
     } else {
+        restore.0 = true;
         commands.spawn(vmux_space::spaces::space_profile_bundle(&active.record));
     }
 }

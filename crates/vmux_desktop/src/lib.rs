@@ -6,6 +6,7 @@
 )]
 
 mod background_lifecycle;
+mod boot_status;
 #[cfg(target_os = "macos")]
 mod event_tap;
 #[cfg(target_os = "macos")]
@@ -111,6 +112,13 @@ impl Plugin for VmuxPlugin {
                 background_lifecycle::BackgroundLifecyclePlugin,
                 tray::TrayPlugin,
             ));
+
+        app.init_resource::<boot_status::SplashStatus>()
+            .init_resource::<boot_status::RestoreComplete>()
+            .add_systems(
+                Update,
+                boot_status::compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
+            );
 
         #[cfg(target_os = "macos")]
         app.add_plugins((glass::GlassPlugin, splash::SplashPlugin))
