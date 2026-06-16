@@ -17,6 +17,9 @@ mod native_keyboard;
 mod os_menu;
 mod persistence;
 
+#[cfg(target_os = "macos")]
+mod splash;
+
 pub(crate) mod shortcut;
 mod tray;
 pub mod updater;
@@ -107,7 +110,7 @@ impl Plugin for VmuxPlugin {
             ));
 
         #[cfg(target_os = "macos")]
-        app.add_plugins(glass::GlassPlugin)
+        app.add_plugins((glass::GlassPlugin, splash::SplashPlugin))
             .add_systems(Last, focus_native::apply_winit_host_focus);
     }
 }
