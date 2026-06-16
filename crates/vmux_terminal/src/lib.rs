@@ -33,7 +33,13 @@ pub mod target;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest =
-    vmux_core::page::PageManifest { host: "terminal" };
+    vmux_core::page::PageManifest {
+        host: "terminal",
+        title: "Terminal",
+        keywords: &["shell", "console"],
+        icon: "terminal",
+        command_bar: true,
+    };
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::*;
