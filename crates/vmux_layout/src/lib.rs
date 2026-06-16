@@ -93,11 +93,21 @@ pub const COMMAND_BAR_PAGE_MANIFEST: vmux_core::page::PageManifest =
         command_bar: false,
     };
 #[cfg(not(target_arch = "wasm32"))]
-pub const DEBUG_PAGE_MANIFEST: vmux_core::page::PageManifest =
-    vmux_core::page::PageManifest { host: "debug" };
+pub const DEBUG_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "debug",
+    title: "Debug",
+    keywords: &[],
+    icon: "",
+    command_bar: false,
+};
 #[cfg(not(target_arch = "wasm32"))]
-pub const ERROR_PAGE_MANIFEST: vmux_core::page::PageManifest =
-    vmux_core::page::PageManifest { host: "error" };
+pub const ERROR_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "error",
+    title: "Error",
+    keywords: &[],
+    icon: "",
+    command_bar: false,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
