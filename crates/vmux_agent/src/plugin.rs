@@ -340,6 +340,8 @@ fn handle_agent_commands(
                                 pane,
                                 cwd: Some(cwd_path),
                                 pending_input: None,
+                                process_id: None,
+                                activate: true,
                             });
                         } else {
                             process_stack_spawn_writer.write(ProcessStackSpawnRequest {
@@ -521,32 +523,48 @@ fn handle_agent_self_commands(
                 command,
                 direction,
                 focus,
-            } => match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
-                None => AgentCommandResult::Error("self process not found".to_string()),
-                Some((_, pane)) => {
-                    let existing_tabs: Vec<Entity> = pane_children
-                        .get(pane)
-                        .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
-                        .unwrap_or_default();
-                    let split_dir =
-                        vmux_layout::pane::direction_to_split(&to_pane_direction(direction));
-                    let p2 = vmux_layout::pane::split_leaf_into_two(
-                        &mut commands,
-                        pane,
-                        split_dir,
-                        &existing_tabs,
-                        *focus,
-                    );
-                    let mut data = command.clone().into_bytes();
-                    data.push(b'\n');
-                    terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
-                        pane: p2,
-                        cwd: None,
-                        pending_input: Some(data),
-                    });
-                    AgentCommandResult::Ok
+                terminal,
+            } => {
+                let mut data = command.clone().into_bytes();
+                data.push(b'\r');
+                match terminal {
+                    Some(pid) => {
+                        service.0.send(ClientMessage::ProcessInput {
+                            process_id: *pid,
+                            data,
+                        });
+                        AgentCommandResult::Text(pid.to_string())
+                    }
+                    None => match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
+                        None => AgentCommandResult::Error("self process not found".to_string()),
+                        Some((_, pane)) => {
+                            let existing_tabs: Vec<Entity> = pane_children
+                                .get(pane)
+                                .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+                                .unwrap_or_default();
+                            let split_dir = vmux_layout::pane::direction_to_split(
+                                &to_pane_direction(direction),
+                            );
+                            let p2 = vmux_layout::pane::split_leaf_into_two(
+                                &mut commands,
+                                pane,
+                                split_dir,
+                                &existing_tabs,
+                                *focus,
+                            );
+                            let new_pid = ProcessId::new();
+                            terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
+                                pane: p2,
+                                cwd: None,
+                                pending_input: Some(data),
+                                process_id: Some(new_pid),
+                                activate: *focus,
+                            });
+                            AgentCommandResult::Text(new_pid.to_string())
+                        }
+                    },
                 }
-            },
+            }
             _ => continue,
         };
         service.0.send(ClientMessage::AgentCommandResponse {
@@ -702,6 +720,8 @@ fn handle_agent_queries(
                     result: AgentQueryResult::Spaces(json),
                 });
             }
+            // ReadTerminal is answered by the service directly; it never reaches the GUI.
+            AgentQuery::ReadTerminal { .. } => {}
         }
     }
 }

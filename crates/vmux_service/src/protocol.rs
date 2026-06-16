@@ -100,6 +100,9 @@ pub enum AgentCommand {
         command: String,
         direction: AgentPaneDirection,
         focus: bool,
+        /// Run in this existing terminal (its `ProcessId`); `None` opens a new
+        /// terminal beside the agent.
+        terminal: Option<ProcessId>,
     },
 }
 
@@ -110,6 +113,7 @@ pub const AGENT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentCommandResult {
     Ok,
+    Text(String),
     Layout(crate::protocol::layout::LayoutSnapshot),
     Error(String),
 }
@@ -117,6 +121,7 @@ pub enum AgentCommandResult {
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentQuery {
     ReadLayout { anchor: Option<ProcessId> },
+    ReadTerminal { process_id: ProcessId },
     GetSettings,
     ListSpaces,
 }
@@ -124,6 +129,7 @@ pub enum AgentQuery {
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentQueryResult {
     Layout(crate::protocol::layout::LayoutSnapshot),
+    Text(String),
     Settings(String),
     Spaces(String),
     Error(String),
@@ -568,6 +574,7 @@ mod tests {
                         is_loading: false,
                         favicon_url: String::new(),
                         is_self: false,
+                        process_id: None,
                     }],
                 },
             }],

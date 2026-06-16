@@ -134,6 +134,9 @@ async fn run_agent_command(command: AgentCommand) -> Result<Value, String> {
                     AgentCommandResult::Ok => Ok(json!({
                         "content": [{"type": "text", "text": "ok"}]
                     })),
+                    AgentCommandResult::Text(text) => Ok(json!({
+                        "content": [{"type": "text", "text": text}]
+                    })),
                     AgentCommandResult::Layout(snapshot) => {
                         let text = serde_json::to_string(&snapshot).unwrap_or_default();
                         Ok(json!({
@@ -185,6 +188,11 @@ fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult
     match result {
         AgentQueryResult::Layout(snapshot) => {
             let text = serde_json::to_string(&snapshot).unwrap_or_default();
+            json!({
+                "content": [{"type": "text", "text": text}]
+            })
+        }
+        AgentQueryResult::Text(text) => {
             json!({
                 "content": [{"type": "text", "text": text}]
             })

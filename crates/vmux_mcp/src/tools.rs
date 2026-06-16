@@ -340,12 +340,13 @@ fn run_definition() -> ToolDefinition {
     ToolDefinition {
         name: "run".into(),
         description:
-            "Open a terminal in a new pane beside YOUR pane and run a shell command in it, \
-so the user can watch it live and take over the terminal. \
-direction is one of right|left|top|bottom (default right). \
-focus (default false): false keeps focus on your own pane (you are driving the command); \
-true moves focus to the new terminal (use when you want the user to interact with it). \
-The command is typed into an interactive shell, so the terminal stays usable after it finishes."
+            "Run a shell command in a visible terminal the user can watch live and take over. \
+By default opens a new terminal in a pane beside YOUR pane; pass `terminal` (a terminal id from a \
+previous run or from read_layout's process_id) to run in that existing terminal instead. \
+direction|focus apply only when opening a new terminal (direction default right; \
+focus default false = keep focus on your own pane). \
+The command is typed into an interactive shell, so the terminal stays usable afterwards. \
+Returns the terminal's id; pass it to read_terminal to read the output, or to run again."
                 .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -353,8 +354,27 @@ The command is typed into an interactive shell, so the terminal stays usable aft
             "additionalProperties": false,
             "properties": {
                 "command": {"type": "string"},
+                "terminal": {"type": "string"},
                 "direction": {"enum": ["right", "left", "top", "bottom"]},
                 "focus": {"type": "boolean"}
+            }
+        }),
+    }
+}
+
+fn read_terminal_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "read_terminal".into(),
+        description:
+            "Return the current visible scrollback text of a terminal (the same text the user sees). \
+Pass `terminal` = a terminal id returned by run, or a terminal stack's process_id from read_layout."
+                .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["terminal"],
+            "additionalProperties": false,
+            "properties": {
+                "terminal": {"type": "string"}
             }
         }),
     }
@@ -376,6 +396,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(list_spaces_definition());
     defs.push(open_page_definition());
     defs.push(run_definition());
+    defs.push(read_terminal_definition());
     defs
 }
 
@@ -440,12 +461,31 @@ pub fn dispatch_with_anchor(
             .get("focus")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let terminal = match arguments.get("terminal").and_then(Value::as_str) {
+            Some(s) if !s.is_empty() => Some(
+                s.parse::<vmux_service::protocol::ProcessId>()
+                    .map_err(|_| format!("run.terminal is not a valid terminal id: {s}"))?,
+            ),
+            _ => None,
+        };
         return Ok(DispatchTarget::Command(AgentCommand::Run {
             anchor,
             command,
             direction,
             focus,
+            terminal,
         }));
+    }
+    if name == "read_terminal" {
+        let process_id = arguments
+            .get("terminal")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .parse::<vmux_service::protocol::ProcessId>()
+            .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string())?;
+        return Ok(DispatchTarget::Query(
+            vmux_service::protocol::AgentQuery::ReadTerminal { process_id },
+        ));
     }
     if name == "read_layout" {
         return Ok(DispatchTarget::Query(
@@ -761,6 +801,51 @@ mod tests {
             dispatch_with_anchor("run", serde_json::json!({"command": " "}), Some(anchor)).is_err()
         );
         assert!(dispatch_with_anchor("run", serde_json::json!({"command": "x"}), None).is_err());
+    }
+
+    #[test]
+    fn run_with_terminal_targets_existing() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let term = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_with_anchor(
+            "run",
+            serde_json::json!({"command": "ls", "terminal": term.to_string()}),
+            Some(anchor),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::Run {
+                terminal: Some(t), ..
+            }) => assert_eq!(t, term),
+            other => panic!("expected Run with terminal, got {other:?}"),
+        }
+        assert!(
+            dispatch_with_anchor(
+                "run",
+                serde_json::json!({"command": "ls", "terminal": "nope"}),
+                Some(anchor)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn read_terminal_dispatch_routes_to_query() {
+        let pid = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_from_tool_call(
+            "read_terminal",
+            serde_json::json!({"terminal": pid.to_string()}),
+        )
+        .unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Query(vmux_service::protocol::AgentQuery::ReadTerminal { .. })
+        ));
+        assert!(
+            dispatch_from_tool_call("read_terminal", serde_json::json!({"terminal": "bad"}))
+                .is_err()
+        );
+        assert!(tool_definitions().iter().any(|d| d.name == "read_terminal"));
     }
 
     #[test]

@@ -74,6 +74,10 @@ pub struct Stack {
     pub favicon_url: String,
     #[serde(default)]
     pub is_self: bool,
+    /// For terminal stacks: the terminal's `ProcessId` (its handle for `run` /
+    /// `read_terminal`). `None` for browser stacks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<String>,
 }
 
 #[derive(
@@ -276,6 +280,7 @@ mod tests {
                                 is_loading: false,
                                 favicon_url: String::new(),
                                 is_self: false,
+                                process_id: None,
                             }],
                         },
                         LayoutNode::Pane {

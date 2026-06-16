@@ -331,17 +331,21 @@ pub fn serve_snapshot_requests(
     pane_sizes_q: Query<&PaneSize>,
     zoomed_q: Query<&crate::pane::Zoomed>,
     focused: Res<crate::stack::FocusedStack>,
-    agent_terms: Query<(&vmux_core::ProcessId, &ChildOf), With<vmux_core::agent::AgentSession>>,
+    process_ids: Query<(&vmux_core::ProcessId, &ChildOf)>,
     mut writer: MessageWriter<LayoutSnapshotResponse>,
 ) {
+    let pid_by_stack: HashMap<u64, String> = process_ids
+        .iter()
+        .map(|(pid, co)| (co.get().to_bits(), pid.to_string()))
+        .collect();
     for request in reader.read() {
         let self_stack = request.anchor.and_then(|anchor| {
-            agent_terms
+            process_ids
                 .iter()
                 .find(|(pid, _)| **pid == anchor)
                 .map(|(_, co)| co.get())
         });
-        let snapshot = crate::snapshot::build_layout_snapshot(
+        let mut snapshot = crate::snapshot::build_layout_snapshot(
             &tabs_q,
             &splits_q,
             &leaves_q,
@@ -351,10 +355,34 @@ pub fn serve_snapshot_requests(
             &focused,
             self_stack,
         );
+        for tab in &mut snapshot.tabs {
+            fill_process_ids(&mut tab.root, &pid_by_stack);
+        }
         writer.write(LayoutSnapshotResponse {
             request_id: request.request_id,
             snapshot,
         });
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn fill_process_ids(node: &mut LayoutNode, pid_by_stack: &HashMap<u64, String>) {
+    match node {
+        LayoutNode::Split { children, .. } => {
+            for child in children {
+                fill_process_ids(child, pid_by_stack);
+            }
+        }
+        LayoutNode::Pane { stacks, .. } => {
+            for stack in stacks {
+                if let Some(id) = &stack.id
+                    && let Ok((NodeKind::Stack, bits)) = parse_id(id)
+                    && let Some(pid) = pid_by_stack.get(&bits)
+                {
+                    stack.process_id = Some(pid.clone());
+                }
+            }
+        }
     }
 }
 

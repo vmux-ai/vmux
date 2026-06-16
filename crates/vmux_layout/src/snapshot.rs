@@ -150,6 +150,7 @@ fn build_stack(
         is_loading: false,
         favicon_url: page.map(|p| p.favicon_url.clone()).unwrap_or_default(),
         is_self: Some(stack_entity) == self_stack,
+        process_id: None,
     }
 }
 
