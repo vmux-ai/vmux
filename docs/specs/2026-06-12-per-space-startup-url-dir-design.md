@@ -123,6 +123,31 @@ can replace the whole `spaces` value (the `spaces` key always exists); humans
 hand-edit `settings.ron` to add a per-space override. This keeps config files
 minimal — no empty `{startup_url: None, startup_dir: None}` block per space.
 
+## Sparse `settings.ron` (merge over embedded)
+
+The user's `settings.ron` holds **only overrides**; everything else comes from the
+embedded defaults (`include_str!("../settings.ron")`). Implemented section-level
+(top-level keys: `browser`, `layout`, `shortcuts`, `terminal`, `auto_update`,
+`agent`, `spaces`):
+
+- **Read** (`parse_settings`, used by `load_settings` + `reload_settings_on_change`):
+  deserialize the file into a `PartialAppSettings` (every section `Option`, parsed
+  with RON `IMPLICIT_SOME` so `browser: (..)` works without `Some(..)`), then
+  `merge_over_embedded` overlays present sections onto `load_embedded_settings()`.
+  An omitted section therefore resolves to the **embedded** default (e.g. leader
+  `b`, `radius: 8.0`, terminal themes) — not the plainer serde field default.
+- **First run:** no file is written (the old code dumped the full embedded file).
+  Absent file ⇒ all embedded defaults.
+- **Write** (`sparse_settings_ron`, used by `apply_settings_update`): emit only the
+  top-level sections whose `serde_json` value differs from the embedded default,
+  each serialized with the **typed** RON serializer (so enum fields like shortcut
+  bindings stay faithful — `ron` 0.8's generic `Value` does not round-trip them).
+- **Granularity caveat:** section-level. Touching one field in a multi-field
+  section (e.g. `terminal.startup_dir`) writes that whole section. Untouched heavy
+  sections (shortcuts, terminal themes) stay omitted — which is the main goal.
+  Hand-writing a partial multi-field section drops its omitted subfields to serde
+  defaults; agent edits go through the full in-memory struct so they don't.
+
 ## URL wiring — move the updater into `vmux_space`
 
 `EffectiveStartupUrl` (defined in `vmux_layout::settings`) is read by layout

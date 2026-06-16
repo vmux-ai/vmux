@@ -379,6 +379,59 @@ fn data_dir() -> Option<std::path::PathBuf> {
     }
 }
 
+#[derive(Deserialize, Default)]
+struct PartialAppSettings {
+    #[serde(default)]
+    browser: Option<BrowserSettings>,
+    #[serde(default)]
+    layout: Option<LayoutSettings>,
+    #[serde(default)]
+    shortcuts: Option<ShortcutSettings>,
+    #[serde(default)]
+    terminal: Option<TerminalSettings>,
+    #[serde(default)]
+    auto_update: Option<bool>,
+    #[serde(default)]
+    agent: Option<AgentSettings>,
+    #[serde(default)]
+    spaces: Option<std::collections::BTreeMap<String, SpaceOverrides>>,
+}
+
+fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
+    let mut settings = load_embedded_settings();
+    if let Some(browser) = partial.browser {
+        settings.browser = browser;
+    }
+    if let Some(layout) = partial.layout {
+        settings.layout = layout;
+    }
+    if let Some(shortcuts) = partial.shortcuts {
+        settings.shortcuts = shortcuts;
+    }
+    if let Some(terminal) = partial.terminal {
+        settings.terminal = Some(terminal);
+    }
+    if let Some(auto_update) = partial.auto_update {
+        settings.auto_update = auto_update;
+    }
+    if let Some(agent) = partial.agent {
+        settings.agent = agent;
+    }
+    if let Some(spaces) = partial.spaces {
+        settings.spaces = spaces;
+    }
+    settings
+}
+
+fn parse_settings(text: &str) -> Result<AppSettings, ron::error::SpannedError> {
+    // IMPLICIT_SOME lets a sparse file write `browser: (..)` instead of
+    // `browser: Some((..))` for the optional override sections.
+    ron::Options::default()
+        .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+        .from_str::<PartialAppSettings>(text)
+        .map(merge_over_embedded)
+}
+
 pub fn load_settings(mut commands: Commands) {
     let (settings, config_path) = if let Some(dir) = data_dir() {
         if std::fs::create_dir_all(&dir).is_err() {
@@ -386,7 +439,7 @@ pub fn load_settings(mut commands: Commands) {
         } else {
             let path = dir.join("settings.ron");
             let s = match std::fs::read_to_string(&path) {
-                Ok(text) => match ron::de::from_str::<AppSettings>(&text) {
+                Ok(text) => match parse_settings(&text) {
                     Ok(s) => s,
                     Err(e) => {
                         bevy::log::warn!(
@@ -396,10 +449,7 @@ pub fn load_settings(mut commands: Commands) {
                         load_embedded_settings()
                     }
                 },
-                Err(_) => {
-                    let _ = std::fs::write(&path, DEFAULT_SETTINGS);
-                    load_embedded_settings()
-                }
+                Err(_) => load_embedded_settings(),
             };
             (s, Some(path))
         }
@@ -468,7 +518,7 @@ pub(crate) fn reload_settings_on_change(
                 bevy::log::debug!("settings: skipping reload (matches last self-write)");
                 return;
             }
-            match ron::de::from_str::<AppSettings>(&text) {
+            match parse_settings(&text) {
                 Ok(new_settings) => {
                     bevy::log::info!("Settings reloaded from {}", watcher.path.display());
                     *layout_settings = new_settings.layout.clone();
@@ -513,10 +563,61 @@ pub fn apply_settings_update(
     set_at_path(&mut value_json, path, value)?;
     let new_settings: AppSettings = serde_json::from_value(value_json)
         .map_err(|e| format!("invalid value for path '{path}': {e}"))?;
-    let ron_bytes = ron::ser::to_string_pretty(&new_settings, ron::ser::PrettyConfig::default())
-        .map_err(|e| format!("RON serialize failed: {e}"))?;
+    let ron_bytes = sparse_settings_ron(&new_settings)?;
     *settings = new_settings;
     Ok(ron_bytes)
+}
+
+fn section_ron<T: Serialize>(value: &T) -> Result<String, String> {
+    ron::ser::to_string_pretty(value, ron::ser::PrettyConfig::default())
+        .map_err(|e| format!("RON serialize failed: {e}"))
+}
+
+/// Serialize only the top-level sections that differ from the embedded defaults,
+/// so the on-disk `settings.ron` stays minimal (omitted sections fall back to
+/// the embedded defaults on load via `merge_over_embedded`).
+fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
+    let default = load_embedded_settings();
+    let cur =
+        serde_json::to_value(settings).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let def =
+        serde_json::to_value(&default).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let differs = |key: &str| cur.get(key) != def.get(key);
+    let mut parts: Vec<String> = Vec::new();
+    if differs("browser") {
+        parts.push(format!("    browser: {},", section_ron(&settings.browser)?));
+    }
+    if differs("layout") {
+        parts.push(format!("    layout: {},", section_ron(&settings.layout)?));
+    }
+    if differs("shortcuts") {
+        parts.push(format!(
+            "    shortcuts: {},",
+            section_ron(&settings.shortcuts)?
+        ));
+    }
+    if differs("terminal") {
+        parts.push(format!(
+            "    terminal: {},",
+            section_ron(&settings.terminal)?
+        ));
+    }
+    if differs("auto_update") {
+        parts.push(format!(
+            "    auto_update: {},",
+            section_ron(&settings.auto_update)?
+        ));
+    }
+    if differs("agent") {
+        parts.push(format!("    agent: {},", section_ron(&settings.agent)?));
+    }
+    if differs("spaces") {
+        parts.push(format!("    spaces: {},", section_ron(&settings.spaces)?));
+    }
+    if parts.is_empty() {
+        return Ok("()\n".to_string());
+    }
+    Ok(format!("(\n{}\n)\n", parts.join("\n")))
 }
 
 pub fn serialize_settings_to_json(settings: &AppSettings) -> String {
@@ -1009,5 +1110,42 @@ mod tests {
             resolve_startup_dir(&s, "work"),
             vmux_core::profile::space_dir("work")
         );
+    }
+
+    #[test]
+    fn parse_settings_merges_sparse_over_embedded() {
+        let s = parse_settings(r#"(browser: (startup_url: "https://x.example"))"#).unwrap();
+        assert_eq!(s.browser.startup_url, "https://x.example");
+        // omitted sections come from the embedded defaults, NOT the plainer serde
+        // field defaults (embedded leader is "b"; serde default would be "g").
+        assert_eq!(s.shortcuts.leader.key, "b");
+        assert_eq!(s.layout.radius, 8.0);
+    }
+
+    #[test]
+    fn parse_settings_empty_uses_embedded_defaults() {
+        let s = parse_settings("()").unwrap();
+        assert_eq!(s.shortcuts.leader.key, "b");
+        assert_eq!(s.browser.startup_url, "https://www.google.com");
+    }
+
+    #[test]
+    fn apply_settings_update_writes_only_changed_section() {
+        let mut settings = parse_settings("()").unwrap();
+        let ron = apply_settings_update(
+            &mut settings,
+            "browser.startup_url",
+            serde_json::json!("https://x.example"),
+        )
+        .unwrap();
+        assert!(ron.contains("browser"));
+        assert!(ron.contains("https://x.example"));
+        // untouched heavy sections stay out of the file
+        assert!(!ron.contains("shortcuts"));
+        assert!(!ron.contains("themes"));
+        // and reload merges them back from the embedded defaults
+        let reloaded = parse_settings(&ron).unwrap();
+        assert_eq!(reloaded.browser.startup_url, "https://x.example");
+        assert_eq!(reloaded.shortcuts.leader.key, "b");
     }
 }
