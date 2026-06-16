@@ -492,6 +492,7 @@ fn handle_agent_self_commands(
     mut terminal_stack_spawn_writer: MessageWriter<TerminalStackSpawnRequest>,
     mut commands: Commands,
     service: Option<Res<ServiceClient>>,
+    active_space: Option<Res<ActiveSpace>>,
 ) {
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
     let Some(service) = service else {
@@ -553,9 +554,13 @@ fn handle_agent_self_commands(
                                 *focus,
                             );
                             let new_pid = ProcessId::new();
+                            let cwd = active_space
+                                .as_deref()
+                                .map(|s| space_dir(&s.record.id))
+                                .unwrap_or_else(default_space_dir);
                             terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
                                 pane: p2,
-                                cwd: None,
+                                cwd: Some(cwd),
                                 pending_input: Some(data),
                                 process_id: Some(new_pid),
                                 activate: *focus,
