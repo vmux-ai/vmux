@@ -123,7 +123,7 @@ impl Plugin for UpdatePlugin {
     }
 }
 
-fn relaunch_plan(exe: &std::path::Path, pid: u32) -> Vec<String> {
+fn relaunch_plan(exe: &std::path::Path, pid: u32, dyld_library_path: Option<&str>) -> Vec<String> {
     let app_bundle = exe
         .ancestors()
         .nth(3)
@@ -131,7 +131,14 @@ fn relaunch_plan(exe: &std::path::Path, pid: u32) -> Vec<String> {
         .and_then(|p| p.to_str());
     let launch = match app_bundle {
         Some(app) => format!("open \"{app}\""),
-        None => format!("\"{}\"", exe.display()),
+        // A bare dev binary is dynamically linked; /bin/sh strips DYLD_* (SIP),
+        // so re-inject the search path the running process is already using.
+        None => match dyld_library_path {
+            Some(dyld) if !dyld.is_empty() => {
+                format!("DYLD_LIBRARY_PATH=\"{dyld}\" \"{}\"", exe.display())
+            }
+            _ => format!("\"{}\"", exe.display()),
+        },
     };
     vec![
         "-c".to_string(),
@@ -147,7 +154,8 @@ fn on_restart_request(
         bevy::log::error!("restart requested but current_exe() is unavailable");
         return;
     };
-    let args = relaunch_plan(&exe, std::process::id());
+    let dyld = std::env::var("DYLD_LIBRARY_PATH").ok();
+    let args = relaunch_plan(&exe, std::process::id(), dyld.as_deref());
     if let Err(e) = std::process::Command::new("sh").args(&args).spawn() {
         bevy::log::error!("failed to spawn relauncher: {e}");
         return;
@@ -299,18 +307,20 @@ mod tests {
     #[test]
     fn relaunch_plan_opens_app_bundle() {
         let exe = std::path::Path::new("/Applications/Vmux.app/Contents/MacOS/vmux_desktop");
-        let args = relaunch_plan(exe, 4242);
+        let args = relaunch_plan(exe, 4242, None);
         assert_eq!(args[0], "-c");
         assert!(args[1].contains("kill -0 4242"));
         assert!(args[1].contains("open \"/Applications/Vmux.app\""));
     }
 
     #[test]
-    fn relaunch_plan_reexecs_bare_binary_in_dev() {
+    fn relaunch_plan_reexecs_bare_binary_in_dev_with_dyld() {
         let exe = std::path::Path::new("/tmp/target/debug/vmux_desktop");
-        let args = relaunch_plan(exe, 7);
+        let args = relaunch_plan(exe, 7, Some("/rust/lib:/tmp/target/debug/deps"));
         assert!(args[1].contains("kill -0 7"));
-        assert!(args[1].contains("\"/tmp/target/debug/vmux_desktop\""));
+        assert!(
+            args[1].contains("DYLD_LIBRARY_PATH=\"/rust/lib:/tmp/target/debug/deps\" \"/tmp/target/debug/vmux_desktop\"")
+        );
         assert!(!args[1].contains("open \""));
     }
 
