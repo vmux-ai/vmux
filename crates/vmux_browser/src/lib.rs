@@ -33,11 +33,13 @@ use vmux_layout::command_bar::handler::{CommandBarNativeSize, PendingCommandBarR
 use vmux_layout::event::SideSheetCommandEvent;
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
-    Header, LayoutCef, NavigationState, Open, PendingWebviewReveal,
+    Header, LayoutCef, NavigationState, Open, PendingWebviewReveal, StagedUpdate,
     event::{
-        HEADER_HEIGHT_PX, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent,
-        PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT,
-        StackNode, StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsHostEvent,
+        DebugUpdateClear, DebugUpdateReady, HEADER_HEIGHT_PX, HeaderCommandEvent,
+        LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode, PaneTreeEvent,
+        RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent, TABS_EVENT,
+        TabRow, TabsHostEvent, UPDATE_CLEARED_EVENT, UPDATE_READY_EVENT, UpdateClearedEvent,
+        UpdateReadyEvent,
     },
     pane::{Pane, PaneHoverIntent, PaneSplit, first_stack_in_pane},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
@@ -85,12 +87,15 @@ impl Plugin for BrowserPlugin {
                     ..default()
                 },
                 BinEventEmitterPlugin::<(HeaderCommandEvent, SideSheetCommandEvent)>::default(),
+                BinEventEmitterPlugin::<(DebugUpdateReady, DebugUpdateClear)>::default(),
             ))
             .add_observer(on_webview_ready_send_theme)
             .add_observer(on_header_command_emit)
             .add_observer(on_side_sheet_command_emit)
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
+            .add_observer(on_debug_update_ready)
+            .add_observer(on_debug_update_clear)
             .add_systems(
                 Update,
                 sync_cef_backend_for_interaction_mode
@@ -149,6 +154,7 @@ impl Plugin for BrowserPlugin {
                     push_stacks_host_emit,
                     push_pane_tree_emit,
                     push_tabs_host_emit,
+                    push_update_notice_emit,
                 )
                     .after(vmux_layout::apply_cef_state_from_webview)
                     .after(vmux_layout::stack::ComputeFocusSet),
@@ -2458,6 +2464,61 @@ fn handle_browser_commands(
     }
 }
 
+fn should_emit_update_notice(
+    current: &Option<String>,
+    last: &Option<String>,
+    page_ready_changed: bool,
+) -> bool {
+    current != last || (page_ready_changed && current.is_some())
+}
+
+fn push_update_notice_emit(
+    mut commands: Commands,
+    browsers: NonSend<Browsers>,
+    cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
+    staged: Res<StagedUpdate>,
+    mut last: Local<Option<String>>,
+) {
+    let Ok((cef_e, page_ready)) = cef_q.single() else {
+        return;
+    };
+    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
+        return;
+    }
+    if !should_emit_update_notice(&staged.0, &last, page_ready.is_changed()) {
+        return;
+    }
+    match &staged.0 {
+        Some(version) => commands.trigger(BinHostEmitEvent::from_rkyv(
+            cef_e,
+            UPDATE_READY_EVENT,
+            &UpdateReadyEvent {
+                version: version.clone(),
+            },
+        )),
+        None => commands.trigger(BinHostEmitEvent::from_rkyv(
+            cef_e,
+            UPDATE_CLEARED_EVENT,
+            &UpdateClearedEvent,
+        )),
+    }
+    *last = staged.0.clone();
+}
+
+fn on_debug_update_ready(
+    trigger: On<BinReceive<DebugUpdateReady>>,
+    mut staged: ResMut<StagedUpdate>,
+) {
+    staged.0 = Some(trigger.event().payload.version.clone());
+}
+
+fn on_debug_update_clear(
+    _trigger: On<BinReceive<DebugUpdateClear>>,
+    mut staged: ResMut<StagedUpdate>,
+) {
+    staged.0 = None;
+}
+
 fn on_header_command_emit(
     trigger: On<BinReceive<HeaderCommandEvent>>,
     mut messages: ResMut<Messages<AppCommand>>,
@@ -2814,7 +2875,7 @@ fn handle_unclaimed_page_open_tasks(
         if let Some(error) = error {
             attach_error_page_to_stack(
                 task.stack,
-                "vmux://error/page-open/",
+                &task.url,
                 "Page failed to load",
                 &error.message,
                 &children_q,
@@ -2836,12 +2897,11 @@ fn handle_unclaimed_page_open_tasks(
             );
             commands.entity(entity).insert(PageOpenHandled);
         } else if task.url.starts_with("vmux://") {
-            let message = format!("Page not found: {}", task.url);
             attach_error_page_to_stack(
                 task.stack,
-                "vmux://error/not-found/",
+                &task.url,
                 "Page not found",
-                &message,
+                "",
                 &children_q,
                 &mut commands,
                 &mut meshes,
@@ -2931,7 +2991,7 @@ fn attach_cef_page_to_stack(
 
 fn attach_error_page_to_stack(
     stack: Entity,
-    url: &str,
+    display_url: &str,
     title: &str,
     message: &str,
     children_q: &Query<&Children>,
@@ -2939,19 +2999,20 @@ fn attach_error_page_to_stack(
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
-    let html = format!(
-        "<!doctype html><html><head><meta charset='utf-8'><title>{title}</title><style>html,body{{height:100%;margin:0;background:#101114;color:#e8e8ea;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}}main{{height:100%;display:flex;align-items:center;justify-content:center;padding:40px;box-sizing:border-box}}section{{max-width:640px}}h1{{font-size:28px;line-height:1.15;margin:0 0 12px;font-weight:650}}p{{font-size:14px;line-height:1.55;margin:0;color:#a9abb2}}code{{display:block;margin-top:18px;padding:12px;border-radius:6px;background:#1a1c22;color:#d7d8dd;white-space:pre-wrap;word-break:break-word}}</style></head><body><main><section><h1>{title}</h1><p>{message}</p><code>{url}</code></section></main></body></html>"
-    );
-    attach_cef_page_to_stack(
-        stack,
-        &data_url_for_html(&html),
-        title,
-        Some("#101114".to_string()),
-        children_q,
-        commands,
-        meshes,
-        webview_mt,
-    );
+    let source = error_page_source(title, message, display_url);
+    clear_stack_children(stack, children_q, commands);
+    commands.entity(stack).insert(PageMetadata {
+        url: display_url.to_string(),
+        title: title.to_string(),
+        ..default()
+    });
+    let browser = commands
+        .spawn((
+            Browser::new_error(meshes, webview_mt, &source, display_url, title),
+            ChildOf(stack),
+        ))
+        .id();
+    commands.entity(browser).insert(CefKeyboardTarget);
 }
 
 fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
@@ -2962,9 +3023,18 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
     }
 }
 
-fn data_url_for_html(html: &str) -> String {
-    let mut encoded = String::with_capacity(html.len() * 3);
-    for byte in html.as_bytes() {
+fn error_page_source(title: &str, message: &str, url: &str) -> String {
+    format!(
+        "vmux://error/?title={}&message={}&url={}",
+        percent_encode(title),
+        percent_encode(message),
+        percent_encode(url),
+    )
+}
+
+fn percent_encode(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len() * 3);
+    for byte in value.as_bytes() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 encoded.push(*byte as char)
@@ -2972,7 +3042,7 @@ fn data_url_for_html(html: &str) -> String {
             _ => encoded.push_str(&format!("%{byte:02X}")),
         }
     }
-    format!("data:text/html;charset=utf-8,{encoded}")
+    encoded
 }
 
 pub fn handle_open_in_new_stack_requests(
@@ -5005,5 +5075,86 @@ mod tests {
             let page_opens = app.world().resource::<CapturedPageOpenRequests>();
             assert!(page_opens.0.is_empty());
         }
+    }
+}
+
+#[cfg(test)]
+mod update_notice_tests {
+    use super::should_emit_update_notice;
+
+    #[test]
+    fn emits_on_change() {
+        assert!(should_emit_update_notice(&Some("v2".into()), &None, false));
+        assert!(should_emit_update_notice(&None, &Some("v2".into()), false));
+    }
+
+    #[test]
+    fn no_emit_when_unchanged_and_no_page_ready() {
+        assert!(!should_emit_update_notice(&None, &None, false));
+        assert!(!should_emit_update_notice(
+            &Some("v2".into()),
+            &Some("v2".into()),
+            false
+        ));
+    }
+
+    #[test]
+    fn re_emits_staged_on_page_ready_but_not_idle() {
+        assert!(should_emit_update_notice(
+            &Some("v2".into()),
+            &Some("v2".into()),
+            true
+        ));
+        assert!(!should_emit_update_notice(&None, &None, true));
+    }
+}
+
+#[cfg(test)]
+mod debug_update_observer_tests {
+    use super::*;
+    use bevy_cef::prelude::BinReceive;
+
+    #[test]
+    fn debug_ready_sets_staged_then_clear_resets() {
+        let mut app = App::new();
+        app.init_resource::<StagedUpdate>()
+            .add_observer(on_debug_update_ready)
+            .add_observer(on_debug_update_clear);
+
+        app.world_mut().trigger(BinReceive::<DebugUpdateReady> {
+            webview: Entity::PLACEHOLDER,
+            payload: DebugUpdateReady {
+                version: "v9.0.0".into(),
+            },
+        });
+        assert_eq!(
+            app.world().resource::<StagedUpdate>().0.as_deref(),
+            Some("v9.0.0")
+        );
+
+        app.world_mut().trigger(BinReceive::<DebugUpdateClear> {
+            webview: Entity::PLACEHOLDER,
+            payload: DebugUpdateClear,
+        });
+        assert_eq!(app.world().resource::<StagedUpdate>().0, None);
+    }
+}
+
+#[cfg(test)]
+mod error_page_source_tests {
+    use super::{error_page_source, percent_encode};
+
+    #[test]
+    fn percent_encode_escapes_reserved_keeps_unreserved() {
+        assert_eq!(percent_encode("a b/&"), "a%20b%2F%26");
+        assert_eq!(percent_encode("v0.0.1-rc~_"), "v0.0.1-rc~_");
+    }
+
+    #[test]
+    fn error_page_source_builds_query() {
+        assert_eq!(
+            error_page_source("Page not found", "", "vmux://debug/"),
+            "vmux://error/?title=Page%20not%20found&message=&url=vmux%3A%2F%2Fdebug%2F"
+        );
     }
 }

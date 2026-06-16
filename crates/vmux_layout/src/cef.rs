@@ -26,6 +26,8 @@ impl Plugin for LayoutCefPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::LAYOUT_PAGE_MANIFEST);
         app.world_mut().spawn(crate::COMMAND_BAR_PAGE_MANIFEST);
+        app.world_mut().spawn(crate::DEBUG_PAGE_MANIFEST);
+        app.world_mut().spawn(crate::ERROR_PAGE_MANIFEST);
     }
 }
 
@@ -146,6 +148,44 @@ impl Browser {
             },
             WebviewSource::new(url),
             ResolvedWebviewUri(url.to_string()),
+            Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
+            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
+            WebviewSize(Vec2::new(1280.0, 720.0)),
+            Transform::default(),
+            GlobalTransform::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                ..default()
+            },
+            Visibility::Inherited,
+            Pickable::default(),
+        )
+    }
+
+    pub fn new_error(
+        meshes: &mut ResMut<Assets<Mesh>>,
+        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+        source_url: &str,
+        display_url: &str,
+        title: &str,
+    ) -> impl Bundle {
+        (
+            Self,
+            WebviewWindowed,
+            WebviewWindowedNativeFocus,
+            WebviewOpaqueWindowedBackground,
+            vmux_core::PageMetadata {
+                title: title.to_string(),
+                url: display_url.to_string(),
+                favicon_url: String::new(),
+                bg_color: None,
+            },
+            WebviewSource::new(source_url),
+            ResolvedWebviewUri(source_url.to_string()),
             Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
             MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
