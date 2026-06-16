@@ -46,6 +46,10 @@ impl Plugin for BackgroundLifecyclePlugin {
             .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
             .add_systems(Update, keep_awake_while_revealing)
             .add_systems(
+                Update,
+                keep_awake_while_command_bar_opening.after(vmux_command::ReadAppCommands),
+            )
+            .add_systems(
                 Startup,
                 (
                     install_native_mouse_wake_monitor,
@@ -294,6 +298,34 @@ fn keep_awake_while_revealing(
     }
 }
 
+fn command_bar_should_wake(needs_open: bool, has_active_reveal: bool) -> bool {
+    needs_open || has_active_reveal
+}
+
+/// The command bar opens across several reactive frames: the first shortcut may defer
+/// (`NewStackContext::needs_open`) until the CEF webview is ready, then a reveal
+/// (`PendingCommandBarReveal`) waits for the rendered/sized ack. Without an explicit wake the loop
+/// idles after the keystroke and the open stalls until the next input — the user has to press
+/// Cmd+K/Cmd+L twice. Mirror [`keep_awake_while_revealing`] for the modal. Runs after
+/// `ReadAppCommands` so `needs_open` set this frame is observed. Self-terminating: once revealed,
+/// `needs_open` clears and the placeholder reveal is `open_id == 0` (inactive), so we stop waking.
+fn keep_awake_while_command_bar_opening(
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    new_stack_ctx: Option<Res<vmux_layout::NewStackContext>>,
+    pending: Query<&vmux_layout::PendingCommandBarReveal>,
+) {
+    let needs_open = new_stack_ctx.map(|ctx| ctx.needs_open).unwrap_or(false);
+    let has_active_reveal = pending
+        .iter()
+        .any(vmux_layout::PendingCommandBarReveal::is_active);
+    if !command_bar_should_wake(needs_open, has_active_reveal) {
+        return;
+    }
+    if let Some(proxy) = proxy {
+        let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
+    }
+}
+
 fn handle_lifecycle_events(world: &mut World) {
     let drained: Vec<LifecycleEvent> = {
         let mut events = world.resource_mut::<Messages<LifecycleEvent>>();
@@ -340,6 +372,14 @@ fn hide_all_osr_webviews(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_bar_wake_covers_defer_and_active_reveal() {
+        assert!(command_bar_should_wake(true, false));
+        assert!(command_bar_should_wake(false, true));
+        assert!(command_bar_should_wake(true, true));
+        assert!(!command_bar_should_wake(false, false));
+    }
 
     #[test]
     fn handle_lifecycle_events_uses_world_for_confirm_dialog() {
