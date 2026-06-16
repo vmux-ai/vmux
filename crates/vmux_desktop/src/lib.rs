@@ -12,9 +12,11 @@ mod event_tap;
 mod focus_native;
 #[cfg(target_os = "macos")]
 mod glass;
+mod log_forward;
 #[cfg(target_os = "macos")]
 mod native_keyboard;
 mod os_menu;
+pub mod panic_hook;
 mod persistence;
 
 #[cfg(target_os = "macos")]
@@ -84,6 +86,7 @@ impl Plugin for VmuxPlugin {
                     .set(window_plugin)
                     .set(bevy::log::LogPlugin {
                         filter: "bevy_camera_controller=warn".into(),
+                        custom_layer: crate::log_forward::file_log_layer,
                         ..default()
                     }),
                 ServerPlugin,

@@ -98,4 +98,16 @@ if [[ -f "$ICNS_SRC" ]]; then
     done
 fi
 
+# Ship the CEF crash reporter config so Crashpad is enabled. macOS reads it
+# from the top-level app bundle Resources directory.
+CRASH_CFG_SRC="$ROOT/packaging/macos/crash_reporter.cfg"
+if [[ -f "$CRASH_CFG_SRC" ]]; then
+    mkdir -p "$APP_BUNDLE/Contents/Resources"
+    cp -f "$CRASH_CFG_SRC" "$APP_BUNDLE/Contents/Resources/crash_reporter.cfg"
+    echo "==> inject-cef: installed crash_reporter.cfg"
+else
+    echo "inject-cef: ERROR: crash_reporter.cfg missing at $CRASH_CFG_SRC" >&2
+    exit 1
+fi
+
 echo "==> inject-cef: done"

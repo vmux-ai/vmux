@@ -14,6 +14,7 @@ REQUIRED=(
     "Contents/Library/LaunchAgents/ai.vmux.service.plist"
     "Contents/Info.plist"
     "Contents/Resources/Vmux.icns"
+    "Contents/Resources/crash_reporter.cfg"
 )
 
 for path in "${REQUIRED[@]}"; do

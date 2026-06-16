@@ -152,7 +152,7 @@ pub fn cmd_logs(follow: bool) -> std::io::Result<i32> {
     if follow {
         cmd.arg("-f");
     }
-    cmd.arg(crate::log_path());
+    cmd.arg(crate::current_log_file());
     let err = cmd.exec();
     Err(err)
 }
