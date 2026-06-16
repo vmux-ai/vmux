@@ -1229,15 +1229,16 @@ mod tests {
     #[test]
     fn update_settings_via_apply_mutates_resource_and_returns_ron() {
         let mut settings = test_settings();
-        assert!(!settings.auto_update);
         let ron_bytes = vmux_setting::apply_settings_update(
             &mut settings,
-            "auto_update",
-            serde_json::json!(true),
+            "browser.startup_url",
+            serde_json::json!("https://example.com/custom"),
         )
         .expect("apply ok");
-        assert!(settings.auto_update);
-        assert!(ron_bytes.contains("auto_update"));
+        assert_eq!(settings.browser.startup_url, "https://example.com/custom");
+        // sparse RON includes only sections that differ from the embedded
+        // defaults; this override differs, so it appears.
+        assert!(ron_bytes.contains("https://example.com/custom"));
     }
 
     #[test]
