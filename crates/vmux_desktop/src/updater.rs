@@ -123,41 +123,37 @@ impl Plugin for UpdatePlugin {
     }
 }
 
-fn relaunch_plan(exe: &std::path::Path, pid: u32) -> Option<Vec<String>> {
-    let app = exe.ancestors().nth(3)?;
-    if app.extension().and_then(|e| e.to_str()) != Some("app") {
-        return None;
-    }
-    let app = app.to_str()?;
-    Some(vec![
+fn relaunch_plan(exe: &std::path::Path, pid: u32) -> Vec<String> {
+    let app_bundle = exe
+        .ancestors()
+        .nth(3)
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("app"))
+        .and_then(|p| p.to_str());
+    let launch = match app_bundle {
+        Some(app) => format!("open \"{app}\""),
+        None => format!("\"{}\"", exe.display()),
+    };
+    vec![
         "-c".to_string(),
-        format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; open \"{app}\""),
-    ])
+        format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; {launch}"),
+    ]
 }
 
 fn on_restart_request(
     _trigger: On<BinReceive<RestartRequestEvent>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    let pid = std::process::id();
-    match std::env::current_exe()
-        .ok()
-        .and_then(|exe| relaunch_plan(&exe, pid))
-    {
-        Some(args) => {
-            if let Err(e) = std::process::Command::new("sh").args(&args).spawn() {
-                bevy::log::error!("failed to spawn relauncher: {e}");
-                return;
-            }
-            bevy::log::info!("relaunching to apply update");
-            exit.write(AppExit::Success);
-        }
-        None => {
-            bevy::log::info!(
-                "update restart requested but not running from .app; relaunch is a dev no-op"
-            );
-        }
+    let Ok(exe) = std::env::current_exe() else {
+        bevy::log::error!("restart requested but current_exe() is unavailable");
+        return;
+    };
+    let args = relaunch_plan(&exe, std::process::id());
+    if let Err(e) = std::process::Command::new("sh").args(&args).spawn() {
+        bevy::log::error!("failed to spawn relauncher: {e}");
+        return;
     }
+    bevy::log::info!("relaunching to apply update");
+    exit.write(AppExit::Success);
 }
 
 #[derive(Resource)]
@@ -301,18 +297,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn relaunch_plan_targets_app_bundle() {
+    fn relaunch_plan_opens_app_bundle() {
         let exe = std::path::Path::new("/Applications/Vmux.app/Contents/MacOS/vmux_desktop");
-        let args = relaunch_plan(exe, 4242).expect("inside .app");
+        let args = relaunch_plan(exe, 4242);
         assert_eq!(args[0], "-c");
         assert!(args[1].contains("kill -0 4242"));
         assert!(args[1].contains("open \"/Applications/Vmux.app\""));
     }
 
     #[test]
-    fn relaunch_plan_none_outside_app() {
+    fn relaunch_plan_reexecs_bare_binary_in_dev() {
         let exe = std::path::Path::new("/tmp/target/debug/vmux_desktop");
-        assert!(relaunch_plan(exe, 1).is_none());
+        let args = relaunch_plan(exe, 7);
+        assert!(args[1].contains("kill -0 7"));
+        assert!(args[1].contains("\"/tmp/target/debug/vmux_desktop\""));
+        assert!(!args[1].contains("open \""));
     }
 
     #[test]
