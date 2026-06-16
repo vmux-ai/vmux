@@ -10,8 +10,6 @@ pub mod page;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;
 pub mod schema;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod snapshot_updater;
 pub mod themes;
 
 #[cfg(not(target_arch = "wasm32"))]

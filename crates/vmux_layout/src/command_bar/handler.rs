@@ -24,7 +24,7 @@ use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
     AgentProviderSummary, CommandBarAgentsSnapshot, CommandBarPagesSnapshot,
-    CommandBarSettingsSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
+    CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
 };
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
@@ -1009,7 +1009,6 @@ fn on_command_bar_action(
     )>,
     mut resource_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
-        Res<CommandBarSettingsSnapshot>,
         Res<CommandBarTerminalsSnapshot>,
         Res<CommandBarAgentsSnapshot>,
     )>,
@@ -1030,7 +1029,7 @@ fn on_command_bar_action(
 ) {
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let terminals_snapshot = resource_params.p2().clone();
+    let terminals_snapshot = resource_params.p1().clone();
     let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
     let pid_to_entity = terminals_snapshot.pid_to_entity.clone();
     let mut empty_stack = new_stack_ctx.stack;
@@ -1240,7 +1239,7 @@ fn on_command_bar_action(
                     }
                 }
             } else if let Some(url) = resource_params
-                .p3()
+                .p2()
                 .providers
                 .iter()
                 .find(|p| p.id == evt.value)

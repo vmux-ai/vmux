@@ -27,11 +27,6 @@ pub struct AgentStrategySummary {
 }
 
 #[derive(Resource, Default, Clone, Debug)]
-pub struct CommandBarSettingsSnapshot {
-    pub settings_page_url: String,
-}
-
-#[derive(Resource, Default, Clone, Debug)]
 pub struct CommandBarSpacesSnapshot {
     pub spaces: Vec<SpaceSummary>,
     pub active_space_id: String,
