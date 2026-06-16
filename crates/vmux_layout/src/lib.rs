@@ -7,6 +7,8 @@
 pub mod command_bar;
 #[cfg(target_arch = "wasm32")]
 pub mod debug_page;
+#[cfg(target_arch = "wasm32")]
+pub mod error_page;
 pub mod event;
 #[cfg(target_arch = "wasm32")]
 pub mod page;
@@ -93,6 +95,9 @@ pub const COMMAND_BAR_PAGE_MANIFEST: vmux_core::page::PageManifest =
 #[cfg(not(target_arch = "wasm32"))]
 pub const DEBUG_PAGE_MANIFEST: vmux_core::page::PageManifest =
     vmux_core::page::PageManifest { host: "debug" };
+#[cfg(not(target_arch = "wasm32"))]
+pub const ERROR_PAGE_MANIFEST: vmux_core::page::PageManifest =
+    vmux_core::page::PageManifest { host: "error" };
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]

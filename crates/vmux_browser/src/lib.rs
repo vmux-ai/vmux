@@ -2875,7 +2875,7 @@ fn handle_unclaimed_page_open_tasks(
         if let Some(error) = error {
             attach_error_page_to_stack(
                 task.stack,
-                "vmux://error/page-open/",
+                &task.url,
                 "Page failed to load",
                 &error.message,
                 &children_q,
@@ -2897,12 +2897,11 @@ fn handle_unclaimed_page_open_tasks(
             );
             commands.entity(entity).insert(PageOpenHandled);
         } else if task.url.starts_with("vmux://") {
-            let message = format!("Page not found: {}", task.url);
             attach_error_page_to_stack(
                 task.stack,
-                "vmux://error/not-found/",
+                &task.url,
                 "Page not found",
-                &message,
+                "",
                 &children_q,
                 &mut commands,
                 &mut meshes,
@@ -2992,7 +2991,7 @@ fn attach_cef_page_to_stack(
 
 fn attach_error_page_to_stack(
     stack: Entity,
-    url: &str,
+    display_url: &str,
     title: &str,
     message: &str,
     children_q: &Query<&Children>,
@@ -3000,19 +2999,20 @@ fn attach_error_page_to_stack(
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
-    let html = format!(
-        "<!doctype html><html><head><meta charset='utf-8'><title>{title}</title><style>html,body{{height:100%;margin:0;background:#101114;color:#e8e8ea;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}}main{{height:100%;display:flex;align-items:center;justify-content:center;padding:40px;box-sizing:border-box}}section{{max-width:640px}}h1{{font-size:28px;line-height:1.15;margin:0 0 12px;font-weight:650}}p{{font-size:14px;line-height:1.55;margin:0;color:#a9abb2}}code{{display:block;margin-top:18px;padding:12px;border-radius:6px;background:#1a1c22;color:#d7d8dd;white-space:pre-wrap;word-break:break-word}}</style></head><body><main><section><h1>{title}</h1><p>{message}</p><code>{url}</code></section></main></body></html>"
-    );
-    attach_cef_page_to_stack(
-        stack,
-        &data_url_for_html(&html),
-        title,
-        Some("#101114".to_string()),
-        children_q,
-        commands,
-        meshes,
-        webview_mt,
-    );
+    let source = error_page_source(title, message, display_url);
+    clear_stack_children(stack, children_q, commands);
+    commands.entity(stack).insert(PageMetadata {
+        url: display_url.to_string(),
+        title: title.to_string(),
+        ..default()
+    });
+    let browser = commands
+        .spawn((
+            Browser::new_error(meshes, webview_mt, &source, display_url, title),
+            ChildOf(stack),
+        ))
+        .id();
+    commands.entity(browser).insert(CefKeyboardTarget);
 }
 
 fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
@@ -3023,9 +3023,18 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
     }
 }
 
-fn data_url_for_html(html: &str) -> String {
-    let mut encoded = String::with_capacity(html.len() * 3);
-    for byte in html.as_bytes() {
+fn error_page_source(title: &str, message: &str, url: &str) -> String {
+    format!(
+        "vmux://error/?title={}&message={}&url={}",
+        percent_encode(title),
+        percent_encode(message),
+        percent_encode(url),
+    )
+}
+
+fn percent_encode(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len() * 3);
+    for byte in value.as_bytes() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 encoded.push(*byte as char)
@@ -3033,7 +3042,7 @@ fn data_url_for_html(html: &str) -> String {
             _ => encoded.push_str(&format!("%{byte:02X}")),
         }
     }
-    format!("data:text/html;charset=utf-8,{encoded}")
+    encoded
 }
 
 pub fn handle_open_in_new_stack_requests(
@@ -5128,5 +5137,24 @@ mod debug_update_observer_tests {
             payload: DebugUpdateClear,
         });
         assert_eq!(app.world().resource::<StagedUpdate>().0, None);
+    }
+}
+
+#[cfg(test)]
+mod error_page_source_tests {
+    use super::{error_page_source, percent_encode};
+
+    #[test]
+    fn percent_encode_escapes_reserved_keeps_unreserved() {
+        assert_eq!(percent_encode("a b/&"), "a%20b%2F%26");
+        assert_eq!(percent_encode("v0.0.1-rc~_"), "v0.0.1-rc~_");
+    }
+
+    #[test]
+    fn error_page_source_builds_query() {
+        assert_eq!(
+            error_page_source("Page not found", "", "vmux://debug/"),
+            "vmux://error/?title=Page%20not%20found&message=&url=vmux%3A%2F%2Fdebug%2F"
+        );
     }
 }
