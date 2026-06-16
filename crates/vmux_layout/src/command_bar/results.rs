@@ -83,7 +83,7 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
         .iter()
         .filter(|page| page_matches(page, search_lower))
         .collect();
-    matched.sort_by_key(|page| page.title.to_lowercase());
+    matched.sort_by_key(|page| page.url.to_lowercase());
     matched
         .into_iter()
         .map(|page| CommandBarResultItem::Page {
@@ -469,16 +469,24 @@ mod tests {
     }
 
     #[test]
-    fn pages_listed_alphabetically() {
+    fn pages_listed_alphabetically_by_url() {
         let results = filter_results("", &[], &[], &[], &sample_pages(), false, &[]);
-        let titles: Vec<String> = results
+        let urls: Vec<String> = results
             .iter()
             .filter_map(|r| match r {
-                CommandBarResultItem::Page { title, .. } => Some(title.clone()),
+                CommandBarResultItem::Page { url, .. } => Some(url.clone()),
                 _ => None,
             })
             .collect();
-        assert_eq!(titles, vec!["History", "Settings", "Spaces", "Vibe"]);
+        assert_eq!(
+            urls,
+            vec![
+                "vmux://agent/vibe/",
+                "vmux://history/",
+                "vmux://settings/",
+                "vmux://spaces/",
+            ]
+        );
     }
 
     #[test]

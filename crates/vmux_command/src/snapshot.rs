@@ -72,7 +72,7 @@ pub fn update_pages_snapshot(
             favicon: false,
         })
         .collect();
-    pages.sort_by(|a, b| a.title.cmp(&b.title));
+    pages.sort_by(|a, b| a.url.cmp(&b.url));
     snapshot.pages = pages;
 }
 
