@@ -152,6 +152,7 @@ pub fn filter_results(
             pane_id: t.pane_id,
             tab_index: t.tab_index as usize,
         }));
+        items.extend(page_results(pages, ""));
         items.extend(command_results(commands));
         return items;
     }
@@ -437,13 +438,30 @@ mod tests {
     }
 
     #[test]
-    fn empty_query_has_no_pages() {
-        let results = filter_results("", &[], &[], &[], &sample_pages(), false, &[]);
-        assert!(
-            !results
-                .iter()
-                .any(|r| matches!(r, CommandBarResultItem::Page { .. }))
-        );
+    fn empty_query_lists_all_pages_before_commands() {
+        let commands = vec![CommandBarCommandEntry {
+            id: "close".to_string(),
+            name: "Close".to_string(),
+            shortcut: String::new(),
+        }];
+
+        let results = filter_results("", &[], &commands, &[], &sample_pages(), false, &[]);
+
+        let page_count = results
+            .iter()
+            .filter(|r| matches!(r, CommandBarResultItem::Page { .. }))
+            .count();
+        assert_eq!(page_count, sample_pages().len());
+
+        let last_page = results
+            .iter()
+            .rposition(|r| matches!(r, CommandBarResultItem::Page { .. }))
+            .expect("pages present on empty query");
+        let first_command = results
+            .iter()
+            .position(|r| matches!(r, CommandBarResultItem::Command { .. }))
+            .expect("command present");
+        assert!(last_page < first_command, "pages must come before commands");
     }
 
     #[test]
