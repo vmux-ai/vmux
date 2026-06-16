@@ -6,8 +6,13 @@ pub mod page;
 use bevy::prelude::*;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest =
-    vmux_core::page::PageManifest { host: "agent" };
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "agent",
+    title: "Agent",
+    keywords: &["ai", "chat", "assistant"],
+    icon: "sparkles",
+    command_bar: false,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub const VIBE_SETUP_URL: &str = "vmux://agent/vibe/setup";

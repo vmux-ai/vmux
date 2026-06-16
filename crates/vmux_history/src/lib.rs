@@ -16,8 +16,13 @@ pub use vmux_core::{CreatedAt, LastActivatedAt, Visit, now_millis};
 use bevy::prelude::*;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest =
-    vmux_core::page::PageManifest { host: "history" };
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "history",
+    title: "History",
+    keywords: &["recent", "visited"],
+    icon: "clock",
+    command_bar: true,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 include!("plugin.rs");

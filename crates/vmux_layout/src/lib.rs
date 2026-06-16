@@ -68,12 +68,21 @@ pub use webview_reveal::PendingWebviewReveal;
 pub use window::fit_window_to_screen;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest =
-    vmux_core::page::PageManifest { host: "layout" };
+pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "layout",
+    title: "Layout",
+    keywords: &[],
+    icon: "",
+    command_bar: false,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub const COMMAND_BAR_PAGE_MANIFEST: vmux_core::page::PageManifest =
     vmux_core::page::PageManifest {
         host: "command-bar",
+        title: "Command Bar",
+        keywords: &[],
+        icon: "",
+        command_bar: false,
     };
 
 #[cfg(not(target_arch = "wasm32"))]

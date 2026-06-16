@@ -15,6 +15,10 @@ pub const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageManifest {
     pub host: &'static str,
+    pub title: &'static str,
+    pub keywords: &'static [&'static str],
+    pub icon: &'static str,
+    pub command_bar: bool,
 }
 
 impl PageManifest {
@@ -23,6 +27,11 @@ impl PageManifest {
             host: self.host.to_string(),
             default_document: embedded_default_document(self.host, "index.html"),
         }
+    }
+
+    pub fn url(&self) -> String {
+        let host = self.host.trim().trim_matches('/');
+        format!("vmux://{host}/")
     }
 
     fn bundle_root(&self, resources_dir: Option<&Path>) -> PathBuf {
@@ -217,6 +226,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn page_manifest_url_derives_from_host() {
+        let manifest = PageManifest {
+            host: "settings",
+            title: "Settings",
+            keywords: &["preferences"],
+            icon: "settings",
+            command_bar: true,
+        };
+        assert_eq!(manifest.url(), "vmux://settings/");
+    }
+
+    #[test]
     fn packaged_page_root_uses_resources_webview_host_dir() {
         let root =
             std::env::temp_dir().join(format!("vmux-webview-app-test-{}", std::process::id()));
@@ -246,7 +267,13 @@ mod tests {
     #[test]
     fn page_manifest_registers_host() {
         let mut app = App::new();
-        app.world_mut().spawn(PageManifest { host: "history" });
+        app.world_mut().spawn(PageManifest {
+            host: "history",
+            title: "History",
+            keywords: &["recent", "visited"],
+            icon: "clock",
+            command_bar: true,
+        });
         let mut query = app.world_mut().query::<&PageManifest>();
 
         let hosts = bevy_cef_core::prelude::CefEmbeddedHosts(
@@ -261,7 +288,13 @@ mod tests {
 
     #[test]
     fn registered_hosts_use_vmux_server_dist() {
-        let manifest = PageManifest { host: "history" };
+        let manifest = PageManifest {
+            host: "history",
+            title: "History",
+            keywords: &["recent", "visited"],
+            icon: "clock",
+            command_bar: true,
+        };
 
         assert_eq!(
             manifest.bundle_root(None),

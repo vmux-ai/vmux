@@ -549,6 +549,16 @@ mod tests {
     }
 
     #[test]
+    fn command_bar_names_are_hierarchical() {
+        let entries = AppCommand::command_bar_entries();
+        let back = entries
+            .iter()
+            .find(|(id, _, _)| *id == "browser_prev_page")
+            .map(|(_, name, _)| name.as_str());
+        assert_eq!(back, Some("Browser > Navigation > Back"));
+    }
+
+    #[test]
     fn browser_navigation_back_still_resolves() {
         assert!(matches!(
             AppCommand::from_menu_id("browser_prev_page"),

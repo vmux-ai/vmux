@@ -1050,7 +1050,7 @@ fn impl_command_bar_leaf(
                 let label_ref = label_str.as_str();
                 let shortcut_ref = shortcut_display.as_str();
                 entries.push(quote! {
-                    (#id_ref, #label_ref, #shortcut_ref)
+                    (#id_ref, ::std::string::String::from(#label_ref), #shortcut_ref)
                 });
             }
             continue;
@@ -1083,13 +1083,13 @@ fn impl_command_bar_leaf(
         };
 
         entries.push(quote! {
-            (#id_lit, #name, #shortcut)
+            (#id_lit, ::std::string::String::from(#name), #shortcut)
         });
     }
 
     Ok(quote! {
         impl #ident {
-            pub fn command_bar_entries() -> ::std::vec::Vec<(&'static str, &'static str, &'static str)> {
+            pub fn command_bar_entries() -> ::std::vec::Vec<(&'static str, ::std::string::String, &'static str)> {
                 ::std::vec![#(#entries),*]
             }
         }
@@ -1116,14 +1116,28 @@ fn impl_command_bar_root(
             ));
         };
         let inner_ty = &field.ty;
-        extend_calls.push(quote! {
-            entries.extend(<#inner_ty>::command_bar_entries());
-        });
+        let props = MenuProps::from_attrs(&variant.attrs)?;
+        if let Some(label) = props.label {
+            let label_lit = label.as_str();
+            extend_calls.push(quote! {
+                entries.extend(
+                    <#inner_ty>::command_bar_entries()
+                        .into_iter()
+                        .map(|(id, name, shortcut)| {
+                            (id, ::std::format!("{} > {}", #label_lit, name), shortcut)
+                        }),
+                );
+            });
+        } else {
+            extend_calls.push(quote! {
+                entries.extend(<#inner_ty>::command_bar_entries());
+            });
+        }
     }
 
     Ok(quote! {
         impl #ident {
-            pub fn command_bar_entries() -> ::std::vec::Vec<(&'static str, &'static str, &'static str)> {
+            pub fn command_bar_entries() -> ::std::vec::Vec<(&'static str, ::std::string::String, &'static str)> {
                 let mut entries = ::std::vec::Vec::new();
                 #(#extend_calls)*
                 entries

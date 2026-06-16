@@ -32,11 +32,6 @@ impl Plugin for SettingsPlugin {
                 Update,
                 (persist_settings_to_disk, reload_settings_on_change).chain(),
             )
-            .add_systems(
-                Update,
-                crate::snapshot_updater::update_settings_snapshot
-                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
-            )
             .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
             .add_systems(Update, respond_settings_spawn.in_set(ReadAppCommands))
             .add_plugins(BinEventEmitterPlugin::<(SettingsCommandEvent,)>::default())

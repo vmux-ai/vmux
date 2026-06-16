@@ -16,20 +16,21 @@ use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
-    CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent, CommandBarSpace,
-    CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse, PathEntry,
+    CommandBarPage, CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent,
+    CommandBarSpace, CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
+    PathCompleteResponse, PathEntry,
 };
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    AgentProviderSummary, CommandBarAgentsSnapshot, CommandBarSettingsSnapshot,
-    CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
+    CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
+    CommandBarTerminalsSnapshot,
 };
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
-use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnStackRequest};
+use vmux_core::agent::{AgentKind, PageAgentAttachRequest, PageAgentSpawnStackRequest};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
@@ -150,29 +151,53 @@ pub fn parse_app_agent_id(id: &str) -> Option<(String, String)> {
     Some((parts[0].to_string(), parts[1].to_string()))
 }
 
-pub fn command_list(
-    cli_agent_entries: Vec<AgentProviderSummary>,
-    app_agent_entries: Vec<AppAgentEntry>,
-) -> Vec<CommandBarEntry> {
+/// Command ids surfaced through a page entry instead of a command row: the
+/// Services page (vmux://services/) replaces "Open Service Monitor", and the
+/// History page shows the History shortcut. Their menu items + shortcuts stay.
+const COMMAND_BAR_SKIP_IDS: &[&str] = &["service_open", "browser_open_history"];
+
+pub fn command_list(app_agent_entries: Vec<AppAgentEntry>) -> Vec<CommandBarEntry> {
     let mut entries: Vec<CommandBarEntry> = AppCommand::command_bar_entries()
         .into_iter()
+        .filter(|(id, _, _)| !COMMAND_BAR_SKIP_IDS.contains(id))
         .map(|(id, name, shortcut)| CommandBarEntry {
             id: id.to_string(),
-            name: name.to_string(),
+            name,
             shortcut: shortcut.to_string(),
         })
         .collect();
-    entries.extend(cli_agent_entries.into_iter().map(|entry| CommandBarEntry {
-        id: entry.id,
-        name: entry.name,
-        shortcut: String::new(),
-    }));
     entries.extend(app_agent_entries.into_iter().map(|entry| CommandBarEntry {
         id: entry.id,
         name: entry.name,
         shortcut: String::new(),
     }));
     entries
+}
+
+/// Display string for a command's shortcut, looked up by menu id. Used to show
+/// a page's keybinding (e.g. History) on its page entry after the command itself
+/// is hidden from the command list.
+fn command_shortcut(id: &str) -> String {
+    AppCommand::command_bar_entries()
+        .into_iter()
+        .find(|(entry_id, _, _)| *entry_id == id)
+        .map(|(_, _, shortcut)| shortcut.to_string())
+        .unwrap_or_default()
+}
+
+fn agent_pages() -> Vec<CommandBarPage> {
+    AgentKind::all()
+        .iter()
+        .map(|kind| CommandBarPage {
+            host: "agent".to_string(),
+            url: kind.cli_url_prefix(),
+            title: kind.display_name().to_string(),
+            keywords: vec![kind.as_url_segment().to_string(), "agent".to_string()],
+            icon: String::new(),
+            favicon: true,
+            shortcut: String::new(),
+        })
+        .collect()
 }
 
 pub fn match_command(id: &str) -> Option<AppCommand> {
@@ -527,6 +552,7 @@ fn handle_open_command_bar(
         ResMut<NewStackContext>,
         Option<Res<crate::settings::EffectiveStartupUrl>>,
         MessageWriter<PageOpenRequest>,
+        Res<CommandBarPagesSnapshot>,
     )>,
     mut commands: Commands,
 ) {
@@ -534,7 +560,6 @@ fn handle_open_command_bar(
     let spaces_snapshot = snapshot_params.p1().clone();
     let space_name = spaces_snapshot.active_space_name.clone();
     let agents_snap = snapshot_params.p0().clone();
-    let agent_entries: Vec<AgentProviderSummary> = agents_snap.providers;
     let app_agent_entries: Vec<AppAgentEntry> = agents_snap
         .strategies
         .iter()
@@ -544,6 +569,14 @@ fn handle_open_command_bar(
         })
         .collect();
     let startup_url = snapshot_params.p3().map(|url| url.0.clone());
+    let mut pages = snapshot_params.p5().pages.clone();
+    pages.extend(agent_pages());
+    let history_shortcut = command_shortcut("browser_open_history");
+    if !history_shortcut.is_empty()
+        && let Some(page) = pages.iter_mut().find(|page| page.host == "history")
+    {
+        page.shortcut = history_shortcut;
+    }
 
     let request =
         command_bar_open_request(reader.read().cloned(), &spaces_snapshot.spaces_page_url);
@@ -804,7 +837,7 @@ fn handle_open_command_bar(
     }
 
     // Build command list
-    let bar_commands: Vec<CommandBarCommandEntry> = command_list(agent_entries, app_agent_entries)
+    let bar_commands: Vec<CommandBarCommandEntry> = command_list(app_agent_entries)
         .into_iter()
         .map(|e| CommandBarCommandEntry {
             id: e.id,
@@ -874,6 +907,7 @@ fn handle_open_command_bar(
         bar_tabs,
         bar_commands,
         target,
+        pages,
     );
     let event = BinHostEmitEvent::from_rkyv(modal_e, COMMAND_BAR_OPEN_EVENT, &payload);
     let payload_bytes = event.payload.clone();
@@ -926,6 +960,7 @@ fn command_bar_open_payload(
     tabs: Vec<CommandBarTab>,
     commands: Vec<CommandBarCommandEntry>,
     target: Option<vmux_command::open_target::OpenTarget>,
+    pages: Vec<CommandBarPage>,
 ) -> CommandBarOpenEvent {
     CommandBarOpenEvent {
         open_id,
@@ -935,6 +970,7 @@ fn command_bar_open_payload(
         spaces,
         tabs,
         commands,
+        pages,
         target,
     }
 }
@@ -1003,7 +1039,6 @@ fn on_command_bar_action(
     )>,
     mut resource_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
-        Res<CommandBarSettingsSnapshot>,
         Res<CommandBarTerminalsSnapshot>,
         Res<CommandBarAgentsSnapshot>,
     )>,
@@ -1024,7 +1059,7 @@ fn on_command_bar_action(
 ) {
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let terminals_snapshot = resource_params.p2().clone();
+    let terminals_snapshot = resource_params.p1().clone();
     let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
     let pid_to_entity = terminals_snapshot.pid_to_entity.clone();
     let mut empty_stack = new_stack_ctx.stack;
@@ -1234,7 +1269,7 @@ fn on_command_bar_action(
                     }
                 }
             } else if let Some(url) = resource_params
-                .p3()
+                .p2()
                 .providers
                 .iter()
                 .find(|p| p.id == evt.value)
@@ -2015,6 +2050,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             None,
+            Vec::new(),
         );
 
         assert_eq!(payload.space_name, "Work");
@@ -2040,6 +2076,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             None,
+            Vec::new(),
         );
 
         assert_eq!(payload.spaces, spaces);
@@ -2462,5 +2499,19 @@ mod tests {
     #[test]
     fn normalize_url_preserves_vmux_protocol() {
         assert_eq!(normalize_url("vmux://terminal/123"), "vmux://terminal/123");
+    }
+
+    #[test]
+    fn agent_pages_lists_all_kinds_with_favicon() {
+        let pages = agent_pages();
+        assert_eq!(pages.len(), 3);
+        assert!(pages.iter().all(|p| p.favicon && p.host == "agent"));
+        assert!(
+            pages
+                .iter()
+                .any(|p| p.url == "vmux://agent/vibe/" && p.title == "Vibe")
+        );
+        assert!(pages.iter().any(|p| p.url == "vmux://agent/claude/"));
+        assert!(pages.iter().any(|p| p.url == "vmux://agent/codex/"));
     }
 }

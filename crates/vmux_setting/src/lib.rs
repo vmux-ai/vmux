@@ -10,13 +10,16 @@ pub mod page;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;
 pub mod schema;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod snapshot_updater;
 pub mod themes;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest =
-    vmux_core::page::PageManifest { host: "settings" };
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "settings",
+    title: "Settings",
+    keywords: &["preferences", "config"],
+    icon: "settings",
+    command_bar: true,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::SettingsPlugin;

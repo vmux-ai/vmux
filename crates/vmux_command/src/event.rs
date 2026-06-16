@@ -27,7 +27,31 @@ pub struct CommandBarOpenEvent {
     pub spaces: Vec<CommandBarSpace>,
     pub tabs: Vec<CommandBarTab>,
     pub commands: Vec<CommandBarCommandEntry>,
+    #[serde(default)]
+    pub pages: Vec<CommandBarPage>,
     pub target: Option<crate::open_target::OpenTarget>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct CommandBarPage {
+    pub host: String,
+    pub url: String,
+    pub title: String,
+    pub keywords: Vec<String>,
+    pub icon: String,
+    pub favicon: bool,
+    pub shortcut: String,
 }
 
 #[derive(
@@ -445,5 +469,26 @@ mod tests {
 
         assert_eq!(event.spaces[0].id, "work");
         assert!(event.spaces[0].is_active);
+    }
+
+    #[test]
+    fn command_bar_open_event_carries_pages() {
+        let event = CommandBarOpenEvent {
+            pages: vec![CommandBarPage {
+                host: "settings".to_string(),
+                url: "vmux://settings/".to_string(),
+                title: "Settings".to_string(),
+                keywords: vec!["preferences".to_string()],
+                icon: "settings".to_string(),
+                favicon: false,
+                shortcut: String::new(),
+            }],
+            ..Default::default()
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).expect("ser");
+        let recovered =
+            rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(recovered.pages.len(), 1);
+        assert_eq!(recovered.pages[0].title, "Settings");
     }
 }
