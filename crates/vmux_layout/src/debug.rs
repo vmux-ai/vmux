@@ -7,6 +7,10 @@ use crate::cef::Browser;
 
 pub const DEBUG_PAGE_URL: &str = "vmux://debug/";
 
+fn is_debug_url(url: &str) -> bool {
+    url.trim_end_matches('/') == DEBUG_PAGE_URL.trim_end_matches('/')
+}
+
 #[derive(Component)]
 pub struct DebugView;
 
@@ -62,7 +66,7 @@ pub fn handle_debug_page_open(
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for (entity, task) in &tasks {
-        if task.url != DEBUG_PAGE_URL {
+        if !is_debug_url(&task.url) {
             continue;
         }
         if let Ok(children) = children_q.get(task.stack) {
@@ -81,5 +85,23 @@ pub fn handle_debug_page_open(
             ChildOf(task.stack),
         ));
         commands.entity(entity).insert(PageOpenHandled);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_debug_url;
+
+    #[test]
+    fn matches_with_and_without_trailing_slash() {
+        assert!(is_debug_url("vmux://debug/"));
+        assert!(is_debug_url("vmux://debug"));
+    }
+
+    #[test]
+    fn rejects_other_hosts() {
+        assert!(!is_debug_url("vmux://debugger"));
+        assert!(!is_debug_url("vmux://spaces/"));
+        assert!(!is_debug_url("vmux://debug/extra"));
     }
 }
