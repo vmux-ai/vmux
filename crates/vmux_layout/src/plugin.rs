@@ -28,6 +28,7 @@ impl Plugin for LayoutPlugin {
         app.register_type::<Open>()
             .init_resource::<NewStackContext>()
             .init_resource::<settings::ConfirmCloseSettings>()
+            .init_resource::<crate::StagedUpdate>()
             .add_message::<LayoutSpawnRequest>()
             .add_message::<TabLayoutSpawnRequest>()
             .add_message::<vmux_core::PageOpenRequest>()
@@ -57,6 +58,11 @@ impl Plugin for LayoutPlugin {
                     reconcile::apply_layout_requests,
                     reconcile::serve_snapshot_requests,
                 ),
+            )
+            .add_systems(
+                Update,
+                crate::debug::handle_debug_page_open
+                    .in_set(vmux_core::PageOpenSet::HandleKnownPages),
             )
             .add_plugins(BinEventEmitterPlugin::<(PageReady,)>::with_id(
                 PAGE_READY_BIN_EVENT_ID,

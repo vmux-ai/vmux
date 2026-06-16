@@ -1,7 +1,9 @@
 use bevy::prelude::*;
+use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
+use vmux_layout::event::RestartRequestEvent;
 use vmux_setting::AppSettings;
 
 const DEFAULT_ENDPOINT: &str = "https://vmux.ai/updates.json";
@@ -115,7 +117,46 @@ impl Plugin for UpdatePlugin {
             poll_interval: self.updater.poll_interval,
         })
         .add_systems(Startup, init_update_checker)
-        .add_systems(Update, poll_update_result);
+        .add_systems(Update, poll_update_result)
+        .add_plugins(BinEventEmitterPlugin::<(RestartRequestEvent,)>::default())
+        .add_observer(on_restart_request);
+    }
+}
+
+fn relaunch_plan(exe: &std::path::Path, pid: u32) -> Option<Vec<String>> {
+    let app = exe.ancestors().nth(3)?;
+    if app.extension().and_then(|e| e.to_str()) != Some("app") {
+        return None;
+    }
+    let app = app.to_str()?;
+    Some(vec![
+        "-c".to_string(),
+        format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; open \"{app}\""),
+    ])
+}
+
+fn on_restart_request(
+    _trigger: On<BinReceive<RestartRequestEvent>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let pid = std::process::id();
+    match std::env::current_exe()
+        .ok()
+        .and_then(|exe| relaunch_plan(&exe, pid))
+    {
+        Some(args) => {
+            if let Err(e) = std::process::Command::new("sh").args(&args).spawn() {
+                bevy::log::error!("failed to spawn relauncher: {e}");
+                return;
+            }
+            bevy::log::info!("relaunching to apply update");
+            exit.write(AppExit::Success);
+        }
+        None => {
+            bevy::log::info!(
+                "update restart requested but not running from .app; relaunch is a dev no-op"
+            );
+        }
     }
 }
 
@@ -161,6 +202,7 @@ fn poll_update_result(
     config: Res<UpdateConfig>,
     settings: Res<AppSettings>,
     time: Res<Time>,
+    mut staged: ResMut<vmux_layout::StagedUpdate>,
 ) {
     if checker.done {
         return;
@@ -181,6 +223,7 @@ fn poll_update_result(
             }
             UpdateResult::Installed { version } => {
                 bevy::log::info!("update v{version} installed, will take effect on next launch");
+                staged.0 = Some(version.clone());
                 checker.done = true;
                 return;
             }
@@ -256,6 +299,21 @@ fn run_update_check(endpoint: &str, pubkey: &str) -> UpdateResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relaunch_plan_targets_app_bundle() {
+        let exe = std::path::Path::new("/Applications/Vmux.app/Contents/MacOS/vmux_desktop");
+        let args = relaunch_plan(exe, 4242).expect("inside .app");
+        assert_eq!(args[0], "-c");
+        assert!(args[1].contains("kill -0 4242"));
+        assert!(args[1].contains("open \"/Applications/Vmux.app\""));
+    }
+
+    #[test]
+    fn relaunch_plan_none_outside_app() {
+        let exe = std::path::Path::new("/tmp/target/debug/vmux_desktop");
+        assert!(relaunch_plan(exe, 1).is_none());
+    }
 
     #[test]
     fn default_endpoint_is_vmux_ai_updates_json() {

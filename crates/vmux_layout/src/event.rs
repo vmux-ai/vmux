@@ -444,3 +444,100 @@ pub enum LayoutNode {
         stacks: Vec<StackNode>,
     },
 }
+
+pub const UPDATE_READY_EVENT: &str = "update-ready";
+pub const UPDATE_CLEARED_EVENT: &str = "update-cleared";
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct UpdateReadyEvent {
+    pub version: String,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct UpdateClearedEvent;
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct RestartRequestEvent;
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct DebugUpdateReady {
+    pub version: String,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct DebugUpdateClear;
+
+#[cfg(test)]
+mod update_event_tests {
+    use super::*;
+
+    #[test]
+    fn update_ready_event_rkyv_round_trips() {
+        let evt = UpdateReadyEvent {
+            version: "v9.9.9".to_string(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&evt).unwrap();
+        let back = rkyv::from_bytes::<UpdateReadyEvent, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back.version, "v9.9.9");
+    }
+
+    #[test]
+    fn event_ids_are_stable() {
+        assert_eq!(UPDATE_READY_EVENT, "update-ready");
+        assert_eq!(UPDATE_CLEARED_EVENT, "update-cleared");
+    }
+}

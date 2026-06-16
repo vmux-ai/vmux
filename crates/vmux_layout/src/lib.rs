@@ -5,6 +5,8 @@
 )]
 
 pub mod command_bar;
+#[cfg(target_arch = "wasm32")]
+pub mod debug_page;
 pub mod event;
 #[cfg(target_arch = "wasm32")]
 pub mod page;
@@ -15,6 +17,8 @@ pub mod snapshot;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cef;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod debug;
 #[cfg(not(target_arch = "wasm32"))]
 mod focus_ring;
 #[cfg(not(target_arch = "wasm32"))]
@@ -86,6 +90,9 @@ pub const COMMAND_BAR_PAGE_MANIFEST: vmux_core::page::PageManifest =
         icon: "",
         command_bar: false,
     };
+#[cfg(not(target_arch = "wasm32"))]
+pub const DEBUG_PAGE_MANIFEST: vmux_core::page::PageManifest =
+    vmux_core::page::PageManifest { host: "debug" };
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -118,6 +125,10 @@ pub struct CloseRequiresConfirmation;
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Resource, Default)]
 pub struct SpaceFilePresent(pub bool);
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Resource, Default)]
+pub struct StagedUpdate(pub Option<String>);
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Message, Clone, Debug)]
@@ -170,4 +181,11 @@ pub struct OpenInNewStackRequest {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn debug_manifest_and_url_are_consistent() {
+        assert_eq!(super::DEBUG_PAGE_MANIFEST.host, "debug");
+        assert_eq!(crate::debug::DEBUG_PAGE_URL, "vmux://debug/");
+    }
+}

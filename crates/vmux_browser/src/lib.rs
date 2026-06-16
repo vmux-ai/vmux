@@ -33,11 +33,13 @@ use vmux_layout::command_bar::handler::{CommandBarNativeSize, PendingCommandBarR
 use vmux_layout::event::SideSheetCommandEvent;
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
-    Header, LayoutCef, NavigationState, Open, PendingWebviewReveal,
+    Header, LayoutCef, NavigationState, Open, PendingWebviewReveal, StagedUpdate,
     event::{
-        HEADER_HEIGHT_PX, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent,
-        PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT,
-        StackNode, StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsHostEvent,
+        DebugUpdateClear, DebugUpdateReady, HEADER_HEIGHT_PX, HeaderCommandEvent,
+        LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode, PaneTreeEvent,
+        RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent, TABS_EVENT,
+        TabRow, TabsHostEvent, UPDATE_CLEARED_EVENT, UPDATE_READY_EVENT, UpdateClearedEvent,
+        UpdateReadyEvent,
     },
     pane::{Pane, PaneHoverIntent, PaneSplit, first_stack_in_pane},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
@@ -85,12 +87,15 @@ impl Plugin for BrowserPlugin {
                     ..default()
                 },
                 BinEventEmitterPlugin::<(HeaderCommandEvent, SideSheetCommandEvent)>::default(),
+                BinEventEmitterPlugin::<(DebugUpdateReady, DebugUpdateClear)>::default(),
             ))
             .add_observer(on_webview_ready_send_theme)
             .add_observer(on_header_command_emit)
             .add_observer(on_side_sheet_command_emit)
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
+            .add_observer(on_debug_update_ready)
+            .add_observer(on_debug_update_clear)
             .add_systems(
                 Update,
                 sync_cef_backend_for_interaction_mode
@@ -149,6 +154,7 @@ impl Plugin for BrowserPlugin {
                     push_stacks_host_emit,
                     push_pane_tree_emit,
                     push_tabs_host_emit,
+                    push_update_notice_emit,
                 )
                     .after(vmux_layout::apply_cef_state_from_webview)
                     .after(vmux_layout::stack::ComputeFocusSet),
@@ -2456,6 +2462,61 @@ fn handle_browser_commands(
             BrowserCommand::Bar(_) => {}
         }
     }
+}
+
+fn should_emit_update_notice(
+    current: &Option<String>,
+    last: &Option<String>,
+    page_ready_changed: bool,
+) -> bool {
+    current != last || (page_ready_changed && current.is_some())
+}
+
+fn push_update_notice_emit(
+    mut commands: Commands,
+    browsers: NonSend<Browsers>,
+    cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
+    staged: Res<StagedUpdate>,
+    mut last: Local<Option<String>>,
+) {
+    let Ok((cef_e, page_ready)) = cef_q.single() else {
+        return;
+    };
+    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
+        return;
+    }
+    if !should_emit_update_notice(&staged.0, &last, page_ready.is_changed()) {
+        return;
+    }
+    match &staged.0 {
+        Some(version) => commands.trigger(BinHostEmitEvent::from_rkyv(
+            cef_e,
+            UPDATE_READY_EVENT,
+            &UpdateReadyEvent {
+                version: version.clone(),
+            },
+        )),
+        None => commands.trigger(BinHostEmitEvent::from_rkyv(
+            cef_e,
+            UPDATE_CLEARED_EVENT,
+            &UpdateClearedEvent,
+        )),
+    }
+    *last = staged.0.clone();
+}
+
+fn on_debug_update_ready(
+    trigger: On<BinReceive<DebugUpdateReady>>,
+    mut staged: ResMut<StagedUpdate>,
+) {
+    staged.0 = Some(trigger.event().payload.version.clone());
+}
+
+fn on_debug_update_clear(
+    _trigger: On<BinReceive<DebugUpdateClear>>,
+    mut staged: ResMut<StagedUpdate>,
+) {
+    staged.0 = None;
 }
 
 fn on_header_command_emit(
@@ -5005,5 +5066,67 @@ mod tests {
             let page_opens = app.world().resource::<CapturedPageOpenRequests>();
             assert!(page_opens.0.is_empty());
         }
+    }
+}
+
+#[cfg(test)]
+mod update_notice_tests {
+    use super::should_emit_update_notice;
+
+    #[test]
+    fn emits_on_change() {
+        assert!(should_emit_update_notice(&Some("v2".into()), &None, false));
+        assert!(should_emit_update_notice(&None, &Some("v2".into()), false));
+    }
+
+    #[test]
+    fn no_emit_when_unchanged_and_no_page_ready() {
+        assert!(!should_emit_update_notice(&None, &None, false));
+        assert!(!should_emit_update_notice(
+            &Some("v2".into()),
+            &Some("v2".into()),
+            false
+        ));
+    }
+
+    #[test]
+    fn re_emits_staged_on_page_ready_but_not_idle() {
+        assert!(should_emit_update_notice(
+            &Some("v2".into()),
+            &Some("v2".into()),
+            true
+        ));
+        assert!(!should_emit_update_notice(&None, &None, true));
+    }
+}
+
+#[cfg(test)]
+mod debug_update_observer_tests {
+    use super::*;
+    use bevy_cef::prelude::BinReceive;
+
+    #[test]
+    fn debug_ready_sets_staged_then_clear_resets() {
+        let mut app = App::new();
+        app.init_resource::<StagedUpdate>()
+            .add_observer(on_debug_update_ready)
+            .add_observer(on_debug_update_clear);
+
+        app.world_mut().trigger(BinReceive::<DebugUpdateReady> {
+            webview: Entity::PLACEHOLDER,
+            payload: DebugUpdateReady {
+                version: "v9.0.0".into(),
+            },
+        });
+        assert_eq!(
+            app.world().resource::<StagedUpdate>().0.as_deref(),
+            Some("v9.0.0")
+        );
+
+        app.world_mut().trigger(BinReceive::<DebugUpdateClear> {
+            webview: Entity::PLACEHOLDER,
+            payload: DebugUpdateClear,
+        });
+        assert_eq!(app.world().resource::<StagedUpdate>().0, None);
     }
 }
