@@ -183,6 +183,18 @@ pub fn command_bar_open_should_ack(open_id: u64) -> bool {
     open_id != 0
 }
 
+pub fn should_open_typed_query_on_enter(
+    open_target: Option<crate::open_target::OpenTarget>,
+    nav_mode: bool,
+    query: &str,
+) -> bool {
+    matches!(open_target, Some(crate::open_target::OpenTarget::InPlace))
+        && !nav_mode
+        && !query.trim().is_empty()
+        && !query.trim_start().starts_with('>')
+        && looks_like_url(query.trim())
+}
+
 pub const PATH_COMPLETE_REQUEST: &str = "path-complete-request";
 pub const PATH_COMPLETE_RESPONSE: &str = "path-complete-response";
 
@@ -427,6 +439,51 @@ mod tests {
     fn command_bar_retried_open_payload_still_gets_ack() {
         assert!(command_bar_open_should_ack(7));
         assert!(!command_bar_open_should_ack(0));
+    }
+
+    #[test]
+    fn in_place_enter_opens_typed_query_without_nav_selection() {
+        assert!(should_open_typed_query_on_enter(
+            Some(crate::open_target::OpenTarget::InPlace),
+            false,
+            "https://example.com"
+        ));
+    }
+
+    #[test]
+    fn in_place_enter_keeps_explicit_nav_selection() {
+        assert!(!should_open_typed_query_on_enter(
+            Some(crate::open_target::OpenTarget::InPlace),
+            true,
+            "https://example.com"
+        ));
+    }
+
+    #[test]
+    fn command_query_enter_keeps_command_selection() {
+        assert!(!should_open_typed_query_on_enter(
+            Some(crate::open_target::OpenTarget::InPlace),
+            false,
+            "> close"
+        ));
+    }
+
+    #[test]
+    fn in_place_enter_keeps_highlighted_suggestion_for_plain_text_query() {
+        assert!(!should_open_typed_query_on_enter(
+            Some(crate::open_target::OpenTarget::InPlace),
+            false,
+            "terminal"
+        ));
+    }
+
+    #[test]
+    fn in_place_enter_opens_typed_domain_query() {
+        assert!(should_open_typed_query_on_enter(
+            Some(crate::open_target::OpenTarget::InPlace),
+            false,
+            "google.com"
+        ));
     }
 
     #[test]
