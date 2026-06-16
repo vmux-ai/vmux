@@ -2,8 +2,9 @@ use bevy::prelude::*;
 
 use crate::command::{AppCommand, ReadAppCommands, WriteAppCommands};
 use crate::snapshot::{
-    CommandBarAgentsSnapshot, CommandBarSettingsSnapshot, CommandBarSpacesSnapshot,
-    CommandBarTerminalsSnapshot, WriteCommandBarSnapshots,
+    CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSettingsSnapshot,
+    CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot, WriteCommandBarSnapshots,
+    update_pages_snapshot,
 };
 
 pub struct CommandPlugin;
@@ -15,9 +16,14 @@ impl Plugin for CommandPlugin {
             .init_resource::<CommandBarSettingsSnapshot>()
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarTerminalsSnapshot>()
+            .init_resource::<CommandBarPagesSnapshot>()
             .configure_sets(
                 Update,
                 (WriteAppCommands, WriteCommandBarSnapshots, ReadAppCommands).chain(),
+            )
+            .add_systems(
+                Update,
+                update_pages_snapshot.in_set(WriteCommandBarSnapshots),
             )
             .add_systems(
                 Update,
