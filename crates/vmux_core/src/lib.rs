@@ -39,6 +39,7 @@ impl Plugin for CorePlugin {
             .register_type::<LastVisitedAt>()
             .register_type::<VisitedUrl>()
             .register_type::<TransitionType>()
+            .register_type::<Order>()
             .register_type::<Children>()
             .register_type::<ChildOf>();
     }
@@ -142,6 +143,13 @@ pub struct VisitCount(pub u32);
 #[require(Save)]
 #[type_path = "vmux_history"]
 pub struct LastVisitedAt(pub i64);
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_core"]
+pub struct Order(pub u32);
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Clone, Copy, Debug, Reflect)]

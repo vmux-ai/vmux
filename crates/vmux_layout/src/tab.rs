@@ -15,6 +15,7 @@ use moonshine_save::prelude::*;
 use std::time::Instant;
 use vmux_command::open::OpenCommand;
 use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, TabCommand};
+use vmux_core::Order;
 use vmux_history::LastActivatedAt;
 
 pub struct TabPlugin;
@@ -34,7 +35,8 @@ impl Plugin for TabPlugin {
                     .in_set(ReadAppCommands)
                     .in_set(TabCommandSet),
             )
-            .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout));
+            .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout))
+            .add_systems(PostUpdate, sync_tab_order);
     }
 }
 
@@ -274,6 +276,33 @@ fn sync_tab_visibility(
     }
 }
 
+fn sync_tab_order(
+    main_children: Query<&Children, (With<MainNode>, Changed<Children>)>,
+    tab_q: Query<(), With<Tab>>,
+    mut order_q: Query<&mut Order>,
+    mut commands: Commands,
+) {
+    for children in &main_children {
+        let mut idx = 0u32;
+        for child in children.iter() {
+            if !tab_q.contains(child) {
+                continue;
+            }
+            match order_q.get_mut(child) {
+                Ok(mut order) => {
+                    if order.0 != idx {
+                        order.0 = idx;
+                    }
+                }
+                Err(_) => {
+                    commands.entity(child).insert(Order(idx));
+                }
+            }
+            idx += 1;
+        }
+    }
+}
+
 fn on_tabs_command_emit(
     trigger: On<BinReceive<TabsCommandEvent>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
@@ -368,6 +397,70 @@ mod tests {
             .unwrap_or_default();
 
         assert!(plugin.contains("sync_tab_visibility.before(UiSystems::Layout)"));
+    }
+
+    fn order_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, sync_tab_order);
+        app
+    }
+
+    #[test]
+    fn sync_tab_order_stamps_children_index() {
+        let mut app = order_app();
+        let main = app.world_mut().spawn(MainNode).id();
+        let a = app
+            .world_mut()
+            .spawn((Tab { name: "a".into() }, ChildOf(main)))
+            .id();
+        let b = app
+            .world_mut()
+            .spawn((Tab { name: "b".into() }, ChildOf(main)))
+            .id();
+        let c = app
+            .world_mut()
+            .spawn((Tab { name: "c".into() }, ChildOf(main)))
+            .id();
+
+        app.update();
+
+        assert_eq!(app.world().get::<Order>(a), Some(&Order(0)));
+        assert_eq!(app.world().get::<Order>(b), Some(&Order(1)));
+        assert_eq!(app.world().get::<Order>(c), Some(&Order(2)));
+    }
+
+    #[test]
+    fn sync_tab_order_updates_after_reorder() {
+        let mut app = order_app();
+        let main = app.world_mut().spawn(MainNode).id();
+        let a = app
+            .world_mut()
+            .spawn((Tab { name: "a".into() }, ChildOf(main)))
+            .id();
+        let b = app
+            .world_mut()
+            .spawn((Tab { name: "b".into() }, ChildOf(main)))
+            .id();
+        let c = app
+            .world_mut()
+            .spawn((Tab { name: "c".into() }, ChildOf(main)))
+            .id();
+
+        app.update();
+
+        for e in [a, b, c] {
+            app.world_mut().entity_mut(e).remove::<ChildOf>();
+        }
+        for e in [c, a, b] {
+            app.world_mut().entity_mut(e).insert(ChildOf(main));
+        }
+
+        app.update();
+
+        assert_eq!(app.world().get::<Order>(c), Some(&Order(0)));
+        assert_eq!(app.world().get::<Order>(a), Some(&Order(1)));
+        assert_eq!(app.world().get::<Order>(b), Some(&Order(2)));
     }
 
     fn test_settings() -> LayoutSettings {

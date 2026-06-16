@@ -6,7 +6,7 @@ use moonshine_save::prelude::*;
 use std::path::{Path, PathBuf};
 
 use vmux_browser::Browser;
-use vmux_core::PageMetadata;
+use vmux_core::{CreatedAt, Order, PageMetadata};
 use vmux_layout::event::SERVICES_PAGE_URL;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
@@ -169,6 +169,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<vmux_core::LastVisitedAt>()
         .allow::<vmux_core::VisitedUrl>()
         .allow::<vmux_core::TransitionType>()
+        .allow::<vmux_core::Order>()
         .allow::<vmux_terminal::launch::TerminalLaunch>();
     commands.trigger_save(save);
 }
@@ -261,12 +262,17 @@ fn page_metadata_urls(body: &str) -> Vec<&str> {
     urls
 }
 
+fn sort_tabs_by_order(mut tabs: Vec<(Entity, Option<u32>, Option<i64>)>) -> Vec<Entity> {
+    tabs.sort_by_key(|(_, order, created)| (order.unwrap_or(u32::MAX), created.unwrap_or(0)));
+    tabs.into_iter().map(|(entity, _, _)| entity).collect()
+}
+
 /// Rebuild view components (Node, Transform, Browser, etc.) for entities
 /// that were loaded from space.ron. Loaded entities only have model
 /// components; this system adds the visual layer.
 pub(crate) fn rebuild_space_views(
     main_q: Query<Entity, With<Main>>,
-    tabs_need_view: Query<Entity, (With<Tab>, Without<Node>)>,
+    tabs_need_view: Query<(Entity, Option<&Order>, Option<&CreatedAt>), (With<Tab>, Without<Node>)>,
     splits_need_view: Query<(Entity, &PaneSplit), Without<Node>>,
     panes_need_view: Query<Entity, (With<Pane>, Without<PaneSplit>, Without<Node>)>,
     stacks_need_view: Query<
@@ -300,7 +306,11 @@ pub(crate) fn rebuild_space_views(
     let Ok(main) = main_q.single() else { return };
     let pw = *primary_window;
 
-    for tab_e in &tabs_need_view {
+    let saved_tab_order: Vec<(Entity, Option<u32>, Option<i64>)> = tabs_need_view
+        .iter()
+        .map(|(entity, order, created)| (entity, order.map(|o| o.0), created.map(|c| c.0)))
+        .collect();
+    for tab_e in sort_tabs_by_order(saved_tab_order) {
         commands.entity(tab_e).insert((
             Transform::default(),
             GlobalTransform::default(),
@@ -523,6 +533,40 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
+
+    #[test]
+    fn sort_tabs_orders_by_order_field() {
+        let a = Entity::from_bits(10);
+        let b = Entity::from_bits(11);
+        let c = Entity::from_bits(12);
+        let input = vec![
+            (a, Some(2u32), Some(100i64)),
+            (b, Some(0), Some(200)),
+            (c, Some(1), Some(50)),
+        ];
+        assert_eq!(sort_tabs_by_order(input), vec![b, c, a]);
+    }
+
+    #[test]
+    fn sort_tabs_legacy_falls_back_to_created_at() {
+        let a = Entity::from_bits(10);
+        let b = Entity::from_bits(11);
+        let c = Entity::from_bits(12);
+        let input = vec![
+            (a, None, Some(2i64)),
+            (b, None, Some(3)),
+            (c, None, Some(1)),
+        ];
+        assert_eq!(sort_tabs_by_order(input), vec![c, a, b]);
+    }
+
+    #[test]
+    fn sort_tabs_ordered_before_unordered() {
+        let ordered = Entity::from_bits(1);
+        let legacy = Entity::from_bits(2);
+        let input = vec![(legacy, None, Some(0i64)), (ordered, Some(5u32), Some(999))];
+        assert_eq!(sort_tabs_by_order(input), vec![ordered, legacy]);
+    }
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
