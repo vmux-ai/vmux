@@ -18,7 +18,7 @@ use vmux_command::event::{
     CommandBarRenderedEvent, CommandBarSizeEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
     HistorySuggestionsRequest, HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE,
     PathCompleteRequest, PathCompleteResponse, PathEntry, command_bar_open_should_ack,
-    command_bar_open_should_reset_input, looks_like_url,
+    command_bar_open_should_reset_input, looks_like_url, should_open_typed_query_on_enter,
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::Favicon;
@@ -656,19 +656,6 @@ fn page_icon(icon: &str) -> Element {
     }
 }
 
-fn should_open_typed_query_on_enter(
-    open_target: Option<vmux_command::open_target::OpenTarget>,
-    nav_mode: bool,
-    query: &str,
-) -> bool {
-    matches!(
-        open_target,
-        Some(vmux_command::open_target::OpenTarget::InPlace)
-    ) && !nav_mode
-        && !query.trim().is_empty()
-        && !query.trim_start().starts_with('>')
-}
-
 fn emit_action(action: &str, value: &str) {
     emit_action_with_target(action, value, None);
 }
@@ -1032,38 +1019,5 @@ fn dispatch_input_event(el: &web_sys::HtmlInputElement) {
     init.set_bubbles(true);
     if let Ok(evt) = web_sys::Event::new_with_event_init_dict("input", &init) {
         let _ = el.dispatch_event(&evt);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use vmux_command::open_target::OpenTarget;
-
-    #[test]
-    fn in_place_enter_opens_typed_query_without_nav_selection() {
-        assert!(should_open_typed_query_on_enter(
-            Some(OpenTarget::InPlace),
-            false,
-            "https://example.com"
-        ));
-    }
-
-    #[test]
-    fn in_place_enter_keeps_explicit_nav_selection() {
-        assert!(!should_open_typed_query_on_enter(
-            Some(OpenTarget::InPlace),
-            true,
-            "https://example.com"
-        ));
-    }
-
-    #[test]
-    fn command_query_enter_keeps_command_selection() {
-        assert!(!should_open_typed_query_on_enter(
-            Some(OpenTarget::InPlace),
-            false,
-            "> close"
-        ));
     }
 }
