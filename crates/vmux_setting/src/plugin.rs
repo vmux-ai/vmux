@@ -7,8 +7,9 @@ use vmux_command::{ReadAppCommands, WriteAppCommands};
 
 use crate::event::SettingsCommandEvent;
 use runtime::{
-    LastSelfWriteHash, SettingsLoadSet, SettingsWriteRequest, load_settings,
-    persist_settings_to_disk, reload_settings_on_change,
+    LastSelfWriteHash, SettingsLoadSet, SettingsSaveDebounce, SettingsSaveRequest,
+    SettingsWriteRequest, flush_settings_save, load_settings, persist_settings_to_disk,
+    reload_settings_on_change, request_settings_save,
 };
 use view::{
     broadcast_schema_to_views, broadcast_settings_to_views, handle_open_settings_command,
@@ -21,7 +22,9 @@ impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.init_resource::<LastSelfWriteHash>()
+            .init_resource::<SettingsSaveDebounce>()
             .add_message::<SettingsWriteRequest>()
+            .add_message::<SettingsSaveRequest>()
             .configure_sets(
                 Startup,
                 SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
@@ -30,7 +33,13 @@ impl Plugin for SettingsPlugin {
             .add_systems(Startup, load_settings.in_set(SettingsLoadSet))
             .add_systems(
                 Update,
-                (persist_settings_to_disk, reload_settings_on_change).chain(),
+                (
+                    request_settings_save,
+                    flush_settings_save,
+                    persist_settings_to_disk,
+                    reload_settings_on_change,
+                )
+                    .chain(),
             )
             .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
             .add_systems(Update, respond_settings_spawn.in_set(ReadAppCommands))

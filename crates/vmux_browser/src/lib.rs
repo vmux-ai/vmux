@@ -2324,9 +2324,9 @@ fn handle_browser_commands(
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     mut meta_q: Query<&mut PageMetadata, With<Browser>>,
     terminal_q: Query<(), With<Terminal>>,
-    term_scale_q: Query<&vmux_terminal::TerminalFontScale>,
     effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut font_size_writer: MessageWriter<vmux_terminal::TerminalFontSizeCommand>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -2426,29 +2426,21 @@ fn handle_browser_commands(
             BrowserCommand::View(view) => match view {
                 BrowserViewCommand::ZoomIn => {
                     if is_terminal {
-                        let scale = term_scale_q.get(webview).map(|s| s.0).unwrap_or(1.0);
-                        commands
-                            .entity(webview)
-                            .insert(vmux_terminal::TerminalFontScale((scale + 0.1).min(3.0)));
+                        font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Increase);
                     } else if let Ok(mut z) = zoom_q.get_mut(webview) {
                         z.0 += 0.5;
                     }
                 }
                 BrowserViewCommand::ZoomOut => {
                     if is_terminal {
-                        let scale = term_scale_q.get(webview).map(|s| s.0).unwrap_or(1.0);
-                        commands
-                            .entity(webview)
-                            .insert(vmux_terminal::TerminalFontScale((scale - 0.1).max(0.5)));
+                        font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Decrease);
                     } else if let Ok(mut z) = zoom_q.get_mut(webview) {
                         z.0 -= 0.5;
                     }
                 }
                 BrowserViewCommand::ZoomReset => {
                     if is_terminal {
-                        commands
-                            .entity(webview)
-                            .insert(vmux_terminal::TerminalFontScale(1.0));
+                        font_size_writer.write(vmux_terminal::TerminalFontSizeCommand::Reset);
                     } else if let Ok(mut z) = zoom_q.get_mut(webview) {
                         z.0 = 0.0;
                     }
@@ -4841,7 +4833,7 @@ mod tests {
         use bevy::prelude::*;
         use bevy_cef::prelude::{RequestNavigate, WebviewExtendStandardMaterial};
         use vmux_command::open::OpenCommand;
-        use vmux_command::{AppCommand, BrowserCommand};
+        use vmux_command::{AppCommand, BrowserCommand, BrowserViewCommand};
         use vmux_core::{PageOpenRequest, PageOpenTarget};
         use vmux_history::LastActivatedAt;
         use vmux_layout::Browser;
@@ -4860,6 +4852,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin))
                 .add_message::<PageOpenRequest>()
+                .add_message::<vmux_terminal::TerminalFontSizeCommand>()
                 .add_systems(
                     Update,
                     (
@@ -5035,6 +5028,52 @@ mod tests {
             assert_eq!(page_opens.0.len(), 1);
             assert_eq!(page_opens.0[0].url, "https://google.com");
             assert!(matches!(page_opens.0[0].target, PageOpenTarget::Stack(_)));
+        }
+
+        #[test]
+        fn zoom_in_on_terminal_emits_font_size_increase() {
+            use bevy::ecs::message::Messages;
+
+            let mut app = build_app();
+            build_focused_terminal_stack(&mut app);
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::View(
+                    BrowserViewCommand::ZoomIn,
+                )));
+
+            app.update();
+
+            let cmds: Vec<vmux_terminal::TerminalFontSizeCommand> = app
+                .world_mut()
+                .resource_mut::<Messages<vmux_terminal::TerminalFontSizeCommand>>()
+                .drain()
+                .collect();
+            assert_eq!(cmds, vec![vmux_terminal::TerminalFontSizeCommand::Increase]);
+        }
+
+        #[test]
+        fn zoom_reset_on_terminal_emits_font_size_reset() {
+            use bevy::ecs::message::Messages;
+
+            let mut app = build_app();
+            build_focused_terminal_stack(&mut app);
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::View(
+                    BrowserViewCommand::ZoomReset,
+                )));
+
+            app.update();
+
+            let cmds: Vec<vmux_terminal::TerminalFontSizeCommand> = app
+                .world_mut()
+                .resource_mut::<Messages<vmux_terminal::TerminalFontSizeCommand>>()
+                .drain()
+                .collect();
+            assert_eq!(cmds, vec![vmux_terminal::TerminalFontSizeCommand::Reset]);
         }
 
         #[test]
