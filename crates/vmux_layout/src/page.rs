@@ -371,6 +371,14 @@ fn NavButton(
     }
 }
 
+fn dir_truncate_class(title: &str) -> &'static str {
+    if title.starts_with('/') || title.starts_with("~/") {
+        "truncate-start"
+    } else {
+        "truncate"
+    }
+}
+
 #[component]
 fn Tab(tab: TabRow) -> Element {
     let id_switch = tab.id.clone();
@@ -399,11 +407,12 @@ fn Tab(tab: TabRow) -> Element {
         after:[background:radial-gradient(circle_at_top_right,transparent_0,transparent_8px,var(--tab-bg)_8px)]";
     let tab_box_classes = "group flex h-10 w-52 min-w-52 max-w-52 basis-52 shrink-0 grow-0 -mb-[3px] pb-[3px] cursor-pointer items-center gap-2 px-3.5";
 
+    let trunc = dir_truncate_class(&display_title);
     let (tab_style, tab_class, title_class, close_class) = if is_active {
         (
             "--tab-bg:var(--glass);".to_string(),
             format!("{skirt_classes} {tab_box_classes} glass rounded-t-md border-b-0"),
-            "min-w-0 flex-1 truncate text-ui font-medium text-foreground".to_string(),
+            format!("min-w-0 flex-1 {trunc} text-ui font-medium text-foreground"),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
     } else {
@@ -412,7 +421,7 @@ fn Tab(tab: TabRow) -> Element {
             format!(
                 "{tab_box_classes} rounded-md text-muted-foreground hover:bg-glass-hover hover:px-4 hover:text-foreground"
             ),
-            "min-w-0 flex-1 truncate text-ui".to_string(),
+            format!("min-w-0 flex-1 {trunc} text-ui"),
             "flex h-4 w-4 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10".to_string(),
         )
     };
@@ -630,9 +639,9 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
             StackIcon { url: stack.url.clone(), title: stack.title.clone(), favicon_src: icon, favicon_error: icon_error }
             span {
                 class: if is_active {
-                    "min-w-0 flex-1 truncate text-ui font-medium text-foreground"
+                    format!("min-w-0 flex-1 {} text-ui font-medium text-foreground", dir_truncate_class(&stack.title))
                 } else {
-                    "min-w-0 flex-1 truncate text-ui"
+                    format!("min-w-0 flex-1 {} text-ui", dir_truncate_class(&stack.title))
                 },
                 "{stack.title}"
             }

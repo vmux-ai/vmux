@@ -53,7 +53,8 @@ fn header_tabs_use_same_fixed_width_for_active_and_inactive_states() {
     assert!(tab.contains("before:-left-2"));
     assert!(tab.contains("after:-right-2"));
     assert!(tab.contains("class: \"flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden\""));
-    assert!(tab.contains("min-w-0 flex-1 truncate text-ui"));
+    assert!(tab.contains("min-w-0 flex-1 {trunc} text-ui"));
+    assert!(tab.contains("dir_truncate_class(&display_title)"));
 }
 
 #[test]
@@ -149,6 +150,26 @@ fn command_bar_page_installs_document_pointer_dismiss_listener() {
     assert!(source.contains("command-bar-shell"));
     assert!(source.contains("shell.contains"));
     assert!(source.contains("emit_action(\"dismiss\", \"\")"));
+}
+
+#[test]
+fn dir_path_titles_truncate_at_start() {
+    let source = include_str!("../src/page.rs");
+
+    assert!(source.contains("fn dir_truncate_class(title: &str) -> &'static str"));
+    assert!(source.contains("title.starts_with('/') || title.starts_with(\"~/\")"));
+    assert!(source.contains("\"truncate-start\""));
+    assert!(source.contains("dir_truncate_class(&display_title)"));
+    assert!(source.contains("dir_truncate_class(&stack.title)"));
+
+    let theme = include_str!("../../vmux_ui/assets/theme.css");
+    assert!(theme.contains(".truncate-start"));
+    assert!(theme.contains("direction: rtl"));
+    assert!(theme.contains("text-overflow: ellipsis"));
+
+    let server_css = include_str!("../../vmux_server/assets/index.css");
+    assert!(server_css.contains("../../vmux_ui/assets/theme.css"));
+    assert!(server_css.contains("@source \"../../vmux_layout/src\""));
 }
 
 fn tab_component_source() -> &'static str {
