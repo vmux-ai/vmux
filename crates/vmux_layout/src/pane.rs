@@ -390,6 +390,25 @@ pub fn split_root_bundle(direction: PaneSplitDirection) -> impl Bundle {
     )
 }
 
+pub(crate) fn set_pane_split_direction(
+    world: &mut World,
+    entity: Entity,
+    direction: PaneSplitDirection,
+) {
+    if let Some(mut split) = world.get_mut::<PaneSplit>(entity) {
+        split.direction = direction;
+    }
+    if let Some(mut node) = world.get_mut::<Node>(entity) {
+        node.flex_direction = match direction {
+            PaneSplitDirection::Row => FlexDirection::Row,
+            PaneSplitDirection::Column => FlexDirection::Column,
+        };
+        let gaps = pane_split_gaps(direction, crate::event::PANE_GAP_PX);
+        node.column_gap = gaps.column_gap;
+        node.row_gap = gaps.row_gap;
+    }
+}
+
 /// Compute clamped flex_grow values after a resize delta.
 /// Returns (new_pane_grow, new_sibling_grow).
 fn compute_resize(pane_grow: f32, sib_grow: f32, delta: f32, parent_len: f32) -> (f32, f32) {
@@ -567,10 +586,15 @@ fn handle_pane_commands(
 
                 let new_active_pane;
                 if split_dir_q.contains(sibling) {
+                    let sibling_direction = split_dir_q
+                        .get(sibling)
+                        .map(|s| s.direction)
+                        .unwrap_or_default();
                     new_active_pane = first_leaf_descendant(sibling, &pane_children, &leaf_panes);
                     commands.entity(sibling).remove::<ChildOf>();
                     commands.queue(move |world: &mut World| {
                         world.despawn(sibling);
+                        set_pane_split_direction(world, parent, sibling_direction);
                     });
                 } else {
                     new_active_pane = parent;
@@ -2143,6 +2167,107 @@ mod tests {
             1,
             "the fresh pane should contain one stack"
         );
+    }
+
+    #[test]
+    fn closing_pane_preserves_surviving_split_direction() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .init_resource::<PaneHoverIntent>()
+            .init_resource::<PendingCursorWarp>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<ConfirmCloseSettings>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(test_settings())
+            .add_systems(Update, handle_pane_commands.in_set(WriteAppCommands));
+
+        let _window = app.world_mut().spawn(PrimaryWindow).id();
+        let tab_e = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let root = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    ..default()
+                },
+                ChildOf(tab_e),
+            ))
+            .id();
+        let left = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Column,
+                },
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    ..default()
+                },
+                ChildOf(root),
+            ))
+            .id();
+        let left_top = place_pane(
+            &mut app,
+            left,
+            Vec2::new(200.0, 200.0),
+            Vec2::new(400.0, 400.0),
+        );
+        let left_bottom = place_pane(
+            &mut app,
+            left,
+            Vec2::new(200.0, 600.0),
+            Vec2::new(400.0, 400.0),
+        );
+        let right = place_pane(
+            &mut app,
+            root,
+            Vec2::new(600.0, 400.0),
+            Vec2::new(400.0, 800.0),
+        );
+
+        app.world_mut()
+            .entity_mut(right)
+            .insert(LastActivatedAt::now());
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
+        app.update();
+
+        assert!(
+            app.world().get_entity(right).is_err(),
+            "closed pane should be despawned"
+        );
+        let split = app
+            .world()
+            .get::<PaneSplit>(root)
+            .expect("root must remain a split after the right pane closes");
+        assert_eq!(
+            split.direction,
+            PaneSplitDirection::Column,
+            "surviving left split was horizontal (Column); closing right must keep it Column, not flip to Row"
+        );
+        let node = app.world().get::<Node>(root).expect("root has a Node");
+        assert_eq!(
+            node.flex_direction,
+            FlexDirection::Column,
+            "root Node flex_direction must follow the adopted Column split direction"
+        );
+        let children = app
+            .world()
+            .get::<Children>(root)
+            .expect("root has children");
+        let leaves: Vec<Entity> = children.iter().collect();
+        assert_eq!(leaves.len(), 2, "root should hold the two surviving leaves");
+        assert!(leaves.contains(&left_top) && leaves.contains(&left_bottom));
     }
 
     #[test]
