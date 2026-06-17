@@ -290,12 +290,12 @@ impl Plugin for TerminalPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    respond_terminal_spawn,
-                    respond_processes_monitor_spawn,
-                    handle_terminal_font_size,
-                )
+                (respond_terminal_spawn, respond_processes_monitor_spawn)
                     .in_set(vmux_command::ReadAppCommands),
+            )
+            .add_systems(
+                Update,
+                handle_terminal_font_size.after(vmux_command::ReadAppCommands),
             )
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
@@ -358,9 +358,12 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
                     .in_set(ServiceMessageSet),
                 flush_pending_terminal_input,
                 handle_terminal_copy_mode_command.in_set(vmux_command::ReadAppCommands),
-                sync_terminal_theme,
             )
                 .chain(),
+        )
+        .add_systems(
+            Update,
+            sync_terminal_theme.after(handle_terminal_font_size),
         )
 }
 
