@@ -29,7 +29,7 @@ use vmux_service::{
     client::{ServiceHandle, ServiceWake},
     protocol::{ClientMessage, ProcessId, ServiceMessage},
 };
-use vmux_setting::AppSettings;
+use vmux_setting::{AppSettings, SettingsWriteRequest, apply_settings_update};
 
 use crate::event::*;
 use crate::pid::{self, Pid};
@@ -246,6 +246,7 @@ impl Plugin for TerminalPlugin {
             .add_message::<TerminalStackSpawnRequest>()
             .add_message::<TerminalSpawnRequest>()
             .add_message::<ProcessesMonitorSpawnRequest>()
+            .add_message::<TerminalFontSizeCommand>()
             .init_resource::<pid::PidToEntity>()
             .add_systems(
                 Update,
@@ -289,7 +290,11 @@ impl Plugin for TerminalPlugin {
             )
             .add_systems(
                 Update,
-                (respond_terminal_spawn, respond_processes_monitor_spawn)
+                (
+                    respond_terminal_spawn,
+                    respond_processes_monitor_spawn,
+                    handle_terminal_font_size,
+                )
                     .in_set(vmux_command::ReadAppCommands),
             )
             .add_observer(on_term_ready)
@@ -2564,6 +2569,45 @@ impl Default for TerminalFontScale {
     }
 }
 
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminalFontSizeCommand {
+    Increase,
+    Decrease,
+    Reset,
+}
+
+pub fn handle_terminal_font_size(
+    mut reader: MessageReader<TerminalFontSizeCommand>,
+    mut settings: ResMut<AppSettings>,
+    mut writes: MessageWriter<SettingsWriteRequest>,
+) {
+    for cmd in reader.read() {
+        let Some(terminal) = settings.terminal.as_ref() else {
+            continue;
+        };
+        let name = terminal.default_theme.clone();
+        let Some(idx) = terminal.themes.iter().position(|t| t.name == name) else {
+            tracing::warn!(
+                "terminal font size: default theme '{name}' not in themes; cannot persist"
+            );
+            continue;
+        };
+        let cur = terminal.themes[idx].font_size;
+        let new = match cmd {
+            TerminalFontSizeCommand::Increase => (cur + 1.0).min(40.0),
+            TerminalFontSizeCommand::Decrease => (cur - 1.0).max(6.0),
+            TerminalFontSizeCommand::Reset => 14.0,
+        };
+        let path = format!("terminal.themes[{idx}].font_size");
+        match apply_settings_update(settings.as_mut(), &path, serde_json::json!(new)) {
+            Ok(ron_bytes) => {
+                writes.write(SettingsWriteRequest { ron_bytes });
+            }
+            Err(e) => tracing::warn!("terminal font size update rejected: {e}"),
+        }
+    }
+}
+
 fn sync_terminal_theme(
     q: Query<Entity, With<Terminal>>,
     new_terminals: Query<Entity, Added<Terminal>>,
@@ -3934,5 +3978,90 @@ mod tests {
             .write(ProcessExitedEvent { process_id: pid });
         app.update();
         assert!(app.world().get::<vmux_core::OscTitle>(e).is_none());
+    }
+
+    fn term_theme(font_size: f32) -> vmux_setting::TerminalTheme {
+        vmux_setting::TerminalTheme {
+            name: "default".to_string(),
+            color_scheme: "catppuccin-mocha".to_string(),
+            font_family: "JetBrainsMono Nerd Font".to_string(),
+            font_size,
+            line_height: 1.2,
+            padding: 4.0,
+            cursor_style: "block".to_string(),
+            cursor_blink: true,
+            shell: "/bin/sh".to_string(),
+        }
+    }
+
+    fn settings_with_font(font_size: f32) -> AppSettings {
+        let mut s = test_settings();
+        s.terminal = Some(vmux_setting::TerminalSettings {
+            default_theme: "default".to_string(),
+            themes: vec![term_theme(font_size)],
+            ..Default::default()
+        });
+        s
+    }
+
+    fn run_font_size_command(start: f32, cmd: TerminalFontSizeCommand) -> (f32, usize) {
+        use bevy::ecs::message::Messages;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(settings_with_font(start))
+            .add_message::<TerminalFontSizeCommand>()
+            .add_message::<SettingsWriteRequest>()
+            .add_systems(Update, handle_terminal_font_size);
+        app.world_mut()
+            .resource_mut::<Messages<TerminalFontSizeCommand>>()
+            .write(cmd);
+        app.update();
+        let size = app
+            .world()
+            .resource::<AppSettings>()
+            .terminal
+            .as_ref()
+            .unwrap()
+            .themes[0]
+            .font_size;
+        let writes = app
+            .world_mut()
+            .resource_mut::<Messages<SettingsWriteRequest>>()
+            .drain()
+            .count();
+        (size, writes)
+    }
+
+    #[test]
+    fn font_size_increase_steps_up_and_persists() {
+        let (size, writes) = run_font_size_command(14.0, TerminalFontSizeCommand::Increase);
+        assert_eq!(size, 15.0);
+        assert_eq!(writes, 1);
+    }
+
+    #[test]
+    fn font_size_decrease_steps_down_and_persists() {
+        let (size, writes) = run_font_size_command(14.0, TerminalFontSizeCommand::Decrease);
+        assert_eq!(size, 13.0);
+        assert_eq!(writes, 1);
+    }
+
+    #[test]
+    fn font_size_increase_clamps_at_40() {
+        let (size, _) = run_font_size_command(40.0, TerminalFontSizeCommand::Increase);
+        assert_eq!(size, 40.0);
+    }
+
+    #[test]
+    fn font_size_decrease_clamps_at_6() {
+        let (size, _) = run_font_size_command(6.0, TerminalFontSizeCommand::Decrease);
+        assert_eq!(size, 6.0);
+    }
+
+    #[test]
+    fn font_size_reset_returns_to_14() {
+        let (size, writes) = run_font_size_command(20.0, TerminalFontSizeCommand::Reset);
+        assert_eq!(size, 14.0);
+        assert_eq!(writes, 1);
     }
 }

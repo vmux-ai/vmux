@@ -23,6 +23,7 @@ bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 rfd = { workspace = true }
+serde_json = { workspace = true }
 tracing = "0.1"
 url = { workspace = true }
 vmux_command = { path = "../vmux_command" }
