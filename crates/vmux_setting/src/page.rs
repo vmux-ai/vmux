@@ -71,7 +71,7 @@ pub fn Page() -> Element {
                     div { class: "mb-8 lg:hidden",
                         h1 { class: "text-xl font-semibold tracking-tight", "Settings" }
                         p { class: "mt-1 text-sm text-muted-foreground",
-                            "Stored in ~/Library/Application Support/Vmux/settings.ron"
+                            "Stored in ~/.vmux/settings.ron"
                         }
                     }
                     div { class: "flex flex-col gap-8",
