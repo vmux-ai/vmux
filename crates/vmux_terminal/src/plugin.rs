@@ -361,10 +361,7 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
             )
                 .chain(),
         )
-        .add_systems(
-            Update,
-            sync_terminal_theme.after(handle_terminal_font_size),
-        )
+        .add_systems(Update, sync_terminal_theme.after(handle_terminal_font_size))
 }
 
 fn spawn_layout_requested_content(
