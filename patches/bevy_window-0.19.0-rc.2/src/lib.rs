@@ -4,6 +4,7 @@
     html_favicon_url = "https://bevy.org/assets/icon.png"
 )]
 #![no_std]
+#![allow(clippy::all)]
 
 //! `bevy_window` provides a platform-agnostic interface for windowing in Bevy.
 //!
