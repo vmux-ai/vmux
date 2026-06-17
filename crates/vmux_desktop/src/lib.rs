@@ -112,6 +112,7 @@ impl Plugin for VmuxPlugin {
                 updater::VmuxUpdater::builder().build().plugin(),
                 background_lifecycle::BackgroundLifecyclePlugin,
                 tray::TrayPlugin,
+                display::DisplayPlugin,
             ));
 
         app.init_resource::<boot_status::SplashStatus>()
