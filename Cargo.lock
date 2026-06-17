@@ -9732,7 +9732,6 @@ dependencies = [
  "rfd",
  "rkyv",
  "serde",
- "serde_json",
  "tempfile",
  "tracing",
  "unicode-width",

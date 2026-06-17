@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, mpsc};
+use std::time::{Duration, Instant};
 use vmux_layout::settings::ConfirmCloseSettings;
 pub use vmux_layout::settings::LayoutSettings;
 #[cfg(test)]
@@ -763,6 +764,48 @@ fn settings_content_hash(bytes: &[u8]) -> u64 {
     hasher.finish()
 }
 
+const SETTINGS_SAVE_DEBOUNCE: Duration = Duration::from_millis(400);
+
+/// Request that the current in-memory settings be persisted to disk after a short
+/// quiet period. Coalesces bursts of rapid edits (e.g. holding `cmd+`) into a single
+/// write, keeping the main loop free of synchronous disk I/O per keystroke.
+#[derive(Message, Debug, Clone)]
+pub struct SettingsSaveRequest;
+
+#[derive(Resource, Default)]
+pub(crate) struct SettingsSaveDebounce {
+    pub due: Option<Instant>,
+}
+
+pub(crate) fn request_settings_save(
+    mut reader: MessageReader<SettingsSaveRequest>,
+    mut debounce: ResMut<SettingsSaveDebounce>,
+) {
+    if reader.read().count() > 0 {
+        debounce.due = Some(Instant::now() + SETTINGS_SAVE_DEBOUNCE);
+    }
+}
+
+pub(crate) fn flush_settings_save(
+    mut debounce: ResMut<SettingsSaveDebounce>,
+    settings: Res<AppSettings>,
+    mut writes: MessageWriter<SettingsWriteRequest>,
+) {
+    let Some(due) = debounce.due else {
+        return;
+    };
+    if Instant::now() < due {
+        return;
+    }
+    debounce.due = None;
+    match sparse_settings_ron(&settings) {
+        Ok(ron_bytes) => {
+            writes.write(SettingsWriteRequest { ron_bytes });
+        }
+        Err(e) => bevy::log::warn!("settings: debounced save serialize failed: {e}"),
+    }
+}
+
 pub(crate) fn persist_settings_to_disk(
     mut reader: MessageReader<SettingsWriteRequest>,
     watcher: Option<Res<SettingsWatcher>>,
@@ -1146,5 +1189,62 @@ mod tests {
         let reloaded = parse_settings(&ron).unwrap();
         assert_eq!(reloaded.browser.startup_url, "https://x.example");
         assert_eq!(reloaded.shortcuts.leader.key, "b");
+    }
+
+    #[test]
+    fn request_settings_save_sets_due() {
+        use bevy::ecs::message::Messages;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SettingsSaveDebounce>()
+            .add_message::<SettingsSaveRequest>()
+            .add_systems(Update, request_settings_save);
+        app.world_mut()
+            .resource_mut::<Messages<SettingsSaveRequest>>()
+            .write(SettingsSaveRequest);
+        app.update();
+        assert!(app.world().resource::<SettingsSaveDebounce>().due.is_some());
+    }
+
+    #[test]
+    fn flush_writes_after_due_elapses() {
+        use bevy::ecs::message::Messages;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(base_settings())
+            .insert_resource(SettingsSaveDebounce {
+                due: Some(Instant::now() - Duration::from_secs(1)),
+            })
+            .add_message::<SettingsWriteRequest>()
+            .add_systems(Update, flush_settings_save);
+        app.update();
+        let writes = app
+            .world_mut()
+            .resource_mut::<Messages<SettingsWriteRequest>>()
+            .drain()
+            .count();
+        assert_eq!(writes, 1);
+        assert!(app.world().resource::<SettingsSaveDebounce>().due.is_none());
+    }
+
+    #[test]
+    fn flush_skips_before_due() {
+        use bevy::ecs::message::Messages;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(base_settings())
+            .insert_resource(SettingsSaveDebounce {
+                due: Some(Instant::now() + Duration::from_secs(60)),
+            })
+            .add_message::<SettingsWriteRequest>()
+            .add_systems(Update, flush_settings_save);
+        app.update();
+        let writes = app
+            .world_mut()
+            .resource_mut::<Messages<SettingsWriteRequest>>()
+            .drain()
+            .count();
+        assert_eq!(writes, 0);
+        assert!(app.world().resource::<SettingsSaveDebounce>().due.is_some());
     }
 }

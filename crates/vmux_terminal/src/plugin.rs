@@ -29,7 +29,7 @@ use vmux_service::{
     client::{ServiceHandle, ServiceWake},
     protocol::{ClientMessage, ProcessId, ServiceMessage},
 };
-use vmux_setting::{AppSettings, SettingsWriteRequest, apply_settings_update};
+use vmux_setting::{AppSettings, SettingsSaveRequest};
 
 use crate::event::*;
 use crate::pid::{self, Pid};
@@ -2570,7 +2570,7 @@ pub enum TerminalFontSizeCommand {
 pub fn handle_terminal_font_size(
     mut reader: MessageReader<TerminalFontSizeCommand>,
     mut settings: ResMut<AppSettings>,
-    mut writes: MessageWriter<SettingsWriteRequest>,
+    mut saves: MessageWriter<SettingsSaveRequest>,
 ) {
     for cmd in reader.read() {
         let Some(terminal) = settings.terminal.as_ref() else {
@@ -2589,13 +2589,11 @@ pub fn handle_terminal_font_size(
             TerminalFontSizeCommand::Decrease => (cur - 1.0).max(6.0),
             TerminalFontSizeCommand::Reset => 14.0,
         };
-        let path = format!("terminal.themes[{idx}].font_size");
-        match apply_settings_update(settings.as_mut(), &path, serde_json::json!(new)) {
-            Ok(ron_bytes) => {
-                writes.write(SettingsWriteRequest { ron_bytes });
-            }
-            Err(e) => tracing::warn!("terminal font size update rejected: {e}"),
+        if new == cur {
+            continue;
         }
+        settings.terminal.as_mut().unwrap().themes[idx].font_size = new;
+        saves.write(SettingsSaveRequest);
     }
 }
 
@@ -3993,7 +3991,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings_with_font(start))
             .add_message::<TerminalFontSizeCommand>()
-            .add_message::<SettingsWriteRequest>()
+            .add_message::<SettingsSaveRequest>()
             .add_systems(Update, handle_terminal_font_size);
         app.world_mut()
             .resource_mut::<Messages<TerminalFontSizeCommand>>()
@@ -4007,12 +4005,12 @@ mod tests {
             .unwrap()
             .themes[0]
             .font_size;
-        let writes = app
+        let saves = app
             .world_mut()
-            .resource_mut::<Messages<SettingsWriteRequest>>()
+            .resource_mut::<Messages<SettingsSaveRequest>>()
             .drain()
             .count();
-        (size, writes)
+        (size, saves)
     }
 
     #[test]
