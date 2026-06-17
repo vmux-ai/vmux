@@ -31,6 +31,12 @@ use vmux_history::LastActivatedAt;
 #[derive(Component)]
 pub struct PendingPaneClose;
 
+/// Marker: close this pane immediately, without a confirmation dialog. Used when
+/// the pane's process has already exited (e.g. an agent CLI quit), so there is
+/// nothing to confirm and the pane should be removed + the split collapsed.
+#[derive(Component)]
+pub struct ForcePaneClose;
+
 pub struct PanePlugin;
 
 #[cfg_attr(target_os = "macos", allow(dead_code))]
@@ -67,6 +73,7 @@ impl Plugin for PanePlugin {
                     click_pane_in_player_mode,
                     pane_gap_drag_resize,
                     process_pending_pane_closes,
+                    process_force_pane_closes,
                     process_pending_stack_closes,
                 ),
             )
@@ -1754,6 +1761,48 @@ fn process_pending_pane_closes(world: &mut World) {
     }
 }
 
+/// Exclusive system: force-close panes marked [`ForcePaneClose`] with no
+/// confirmation dialog. Mirrors [`process_pending_pane_closes`] (activate the
+/// pane + its tab, mark `CloseConfirmed`, dispatch `PaneCommand::Close`) but
+/// skips the prompt, since the process has already exited. Being exclusive, the
+/// activation lands before the dispatched command is read.
+fn process_force_pane_closes(world: &mut World) {
+    let pending: Vec<Entity> = world
+        .query_filtered::<Entity, (With<ForcePaneClose>, With<Pane>)>()
+        .iter(world)
+        .collect();
+
+    if pending.is_empty() {
+        return;
+    }
+
+    for pane in pending {
+        let Ok(mut entity_mut) = world.get_entity_mut(pane) else {
+            continue;
+        };
+        entity_mut.remove::<ForcePaneClose>();
+        entity_mut.insert((CloseConfirmed, LastActivatedAt::now()));
+
+        let mut current = pane;
+        for _ in 0..10 {
+            if world.get_entity(current).is_ok_and(|e| e.contains::<Tab>()) {
+                if let Ok(mut entity_mut) = world.get_entity_mut(current) {
+                    entity_mut.insert(LastActivatedAt::now());
+                }
+                break;
+            }
+            if let Some(co) = world.get::<ChildOf>(current) {
+                current = co.get();
+            } else {
+                break;
+            }
+        }
+        world
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
+    }
+}
+
 fn process_pending_stack_closes(world: &mut World) {
     let pending: Vec<Entity> = world
         .query_filtered::<Entity, (With<PendingStackClose>, With<Stack>)>()
@@ -1865,6 +1914,44 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(id)));
         id
+    }
+
+    #[test]
+    fn force_pane_close_dispatches_pane_close_without_dialog() {
+        use vmux_command::CommandPlugin;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin));
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab), ForcePaneClose))
+            .id();
+
+        process_force_pane_closes(app.world_mut());
+
+        assert!(
+            app.world().get::<ForcePaneClose>(pane).is_none(),
+            "ForcePaneClose marker should be consumed"
+        );
+        assert!(
+            app.world().get::<CloseConfirmed>(pane).is_some(),
+            "pane should be marked CloseConfirmed so the close skips the dialog"
+        );
+        let closes: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .filter(|c| {
+                matches!(
+                    c,
+                    AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close))
+                )
+            })
+            .collect();
+        assert_eq!(closes.len(), 1, "exactly one PaneCommand::Close dispatched");
     }
 
     #[test]

@@ -450,6 +450,14 @@ mod tests {
             marker_code("__VMUX_DONE_tok_($env.LAST_EXIT_CODE)__", "tok"),
             None
         );
+        // nushell catch-branch echo (interpolated expr, not digits) must not match.
+        assert_eq!(
+            marker_code(
+                "print $\"__VMUX_DONE_tok_($e.exit_code? | default 1)__\"",
+                "tok"
+            ),
+            None
+        );
         // Wrong token never matches.
         assert_eq!(marker_code("__VMUX_DONE_other_0__", "tok"), None);
     }

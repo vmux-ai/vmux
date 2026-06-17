@@ -334,7 +334,6 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
         .add_message::<OscTitleChanged>()
         .add_systems(Update, apply_osc_title.after(poll_service_messages))
         .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
-        .add_systems(Update, respawn_shell_on_vibe_exit)
         .add_systems(
             Update,
             handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
@@ -2844,48 +2843,6 @@ pub fn clear_osc_title_on_exit(
     }
 }
 
-fn respawn_shell_on_agent_exit_for_entity(
-    commands: &mut Commands,
-    entity: Entity,
-    shell: &str,
-    cwd: String,
-) {
-    let new_id = ProcessId::new();
-    let mut ec = commands.entity(entity);
-    ec.remove::<vmux_core::agent::AgentSession>();
-    ec.remove::<vmux_core::agent::SessionId>();
-    ec.remove::<vmux_core::agent::PendingAgentSession>();
-    ec.insert(new_id);
-    ec.insert(PendingServiceCreate);
-    ec.insert(crate::launch::TerminalLaunch {
-        command: shell.to_string(),
-        args: vec![],
-        cwd,
-        env: vec![],
-        kind: crate::launch::TerminalKind::Plain,
-    });
-}
-
-pub fn respawn_shell_on_vibe_exit(
-    mut commands: Commands,
-    mut exited: MessageReader<ProcessExitedEvent>,
-    q: Query<
-        (Entity, &ProcessId, &crate::launch::TerminalLaunch),
-        With<vmux_core::agent::AgentSession>,
-    >,
-    settings: Res<AppSettings>,
-) {
-    for ev in exited.read() {
-        let Some((entity, _pid, launch)) = q.iter().find(|(_, pid, _)| **pid == ev.process_id)
-        else {
-            continue;
-        };
-        let shell = terminal_shell(&settings);
-        let cwd = launch.cwd.clone();
-        respawn_shell_on_agent_exit_for_entity(&mut commands, entity, &shell, cwd);
-    }
-}
-
 fn update_local_copy_mode_for_mouse_action(
     local_copy_mode: &mut LocalCopyModeState,
     process_id: ProcessId,
@@ -3706,57 +3663,6 @@ mod tests {
         assert!(app.world().get::<AwaitingProcessCreated>(entity).is_none());
         let stored_process_id = app.world().get::<ProcessId>(entity).unwrap();
         assert_eq!(*stored_process_id, id);
-    }
-
-    #[test]
-    fn respawn_shell_on_agent_exit_swaps_kind_and_drops_agent() {
-        use crate::launch::{TerminalKind, TerminalLaunch};
-
-        let mut app = bevy::prelude::App::new();
-        let original_id = ProcessId::new();
-        let entity = app
-            .world_mut()
-            .spawn((
-                Terminal,
-                original_id,
-                vmux_core::agent::AgentSession {
-                    kind: vmux_core::agent::AgentKind::Vibe,
-                },
-                vmux_core::agent::SessionId("abc-123".into()),
-                TerminalLaunch {
-                    command: "/usr/local/bin/vibe".into(),
-                    args: vec!["--trust".into()],
-                    cwd: "/work".into(),
-                    env: vec![("VIBE_MCP_SERVERS".into(), "[]".into())],
-                    kind: TerminalKind::Vibe,
-                },
-            ))
-            .id();
-
-        app.world_mut()
-            .run_system_cached_with(
-                |In((entity, shell, cwd)): In<(Entity, String, String)>, mut commands: Commands| {
-                    respawn_shell_on_agent_exit_for_entity(&mut commands, entity, &shell, cwd);
-                },
-                (entity, "/bin/zsh".to_string(), "/work".to_string()),
-            )
-            .unwrap();
-
-        let world = app.world();
-        assert!(
-            world
-                .get::<vmux_core::agent::AgentSession>(entity)
-                .is_none()
-        );
-        assert!(world.get::<vmux_core::agent::SessionId>(entity).is_none());
-        let launch = world.get::<TerminalLaunch>(entity).unwrap();
-        assert_eq!(launch.kind, TerminalKind::Plain);
-        assert_eq!(launch.command, "/bin/zsh");
-        assert_eq!(launch.cwd, "/work");
-        assert!(launch.args.is_empty());
-        let new_id = world.get::<ProcessId>(entity).copied().unwrap();
-        assert_ne!(new_id, original_id);
-        assert!(world.get::<PendingServiceCreate>(entity).is_some());
     }
 
     #[test]
