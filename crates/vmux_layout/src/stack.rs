@@ -327,11 +327,20 @@ fn handle_stack_commands(
 
                         let new_active_pane;
                         if split_dir_q.contains(sibling) {
+                            let sibling_direction = split_dir_q
+                                .get(sibling)
+                                .map(|s| s.direction)
+                                .unwrap_or_default();
                             new_active_pane =
                                 first_leaf_descendant(sibling, &pane_children, &leaf_panes);
                             commands.entity(sibling).remove::<ChildOf>();
                             commands.queue(move |world: &mut World| {
                                 world.despawn(sibling);
+                                crate::pane::set_pane_split_direction(
+                                    world,
+                                    parent,
+                                    sibling_direction,
+                                );
                             });
                         } else {
                             new_active_pane = parent;
