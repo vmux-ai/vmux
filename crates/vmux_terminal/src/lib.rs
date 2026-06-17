@@ -25,6 +25,8 @@ pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod processes_monitor;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod shell_env;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod shell_input;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod snapshot_updater;

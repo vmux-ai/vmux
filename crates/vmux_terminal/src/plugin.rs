@@ -748,6 +748,13 @@ pub struct PendingTerminalInput {
     pub data: Vec<u8>,
 }
 
+/// Marker: the terminal's process has produced output at least once (i.e. the
+/// shell has drawn its prompt). Used to defer flushing [`PendingTerminalInput`]
+/// until the shell is reading input, so a `run` command isn't raw-echoed above
+/// the prompt before the shell renders it.
+#[derive(Component)]
+struct ShellOutputSeen;
+
 /// Marker: CreateProcess was sent, waiting for ProcessCreated response.
 #[derive(Component)]
 struct AwaitingProcessCreated;
@@ -1008,18 +1015,27 @@ fn poll_service_messages(
     settings: Res<AppSettings>,
     launches: Query<&crate::launch::TerminalLaunch>,
     agent_sessions: Query<&vmux_core::agent::AgentSession>,
+    output_seen: Query<(), With<ShellOutputSeen>>,
 ) {
     let Some(service) = service else { return };
 
     // Handle pending creates — send CreateProcess, wait for ProcessCreated
     // response which will carry the real process ID.
     for (entity, process_id, launch) in &pending_create {
+        // Agents run as bare executables and don't load the user's shell config
+        // the way a terminal does, so merge in the login-shell env (API keys
+        // etc.). Done here (at spawn) rather than at launch-build time so it
+        // also covers agents restored from a persisted space or restarted.
+        let mut env = launch.env.clone();
+        if agent_sessions.contains(entity) {
+            crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
+        }
         service.0.send(ClientMessage::CreateProcess {
             process_id: *process_id,
             command: launch.command.clone(),
             args: launch.args.clone(),
             cwd: launch.cwd.clone(),
-            env: launch.env.clone(),
+            env,
             cols: 80,
             rows: 24,
         });
@@ -1073,6 +1089,9 @@ fn poll_service_messages(
             } => {
                 for (entity, pid, _) in &terminals {
                     if *pid == process_id {
+                        if !output_seen.contains(entity) {
+                            commands.entity(entity).insert(ShellOutputSeen);
+                        }
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
                         }
@@ -1123,6 +1142,9 @@ fn poll_service_messages(
             } => {
                 for (entity, pid, _) in &terminals {
                     if *pid == process_id {
+                        if !output_seen.contains(entity) {
+                            commands.entity(entity).insert(ShellOutputSeen);
+                        }
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
                         }
@@ -1162,7 +1184,7 @@ fn poll_service_messages(
                             .insert(ProcessExited)
                             .remove::<CloseRequiresConfirmation>()
                             .remove::<AgentLoading>();
-                        if let Ok(session) = agent_sessions.get(entity) {
+                        let is_agent = if let Ok(session) = agent_sessions.get(entity) {
                             commands.trigger(BinHostEmitEvent::from_rkyv(
                                 entity,
                                 TERM_LOADING_EVENT,
@@ -1171,14 +1193,23 @@ fn poll_service_messages(
                                     label: session.kind.display_name().to_string(),
                                 },
                             ));
+                            true
+                        } else {
+                            false
+                        };
+                        // Plain terminals close their stack on exit. Agent
+                        // terminals are closed by the agent crate (it
+                        // force-closes the whole pane), so skip the stack close
+                        // here to avoid a double close collapsing the wrong pane.
+                        if !is_agent {
+                            let tab = child_of.get();
+                            commands.entity(tab).insert(LastActivatedAt::now());
+                            writers
+                                .app_commands
+                                .write(AppCommand::Layout(LayoutCommand::Stack(
+                                    StackCommand::Close,
+                                )));
                         }
-                        let tab = child_of.get();
-                        commands.entity(tab).insert(LastActivatedAt::now());
-                        writers
-                            .app_commands
-                            .write(AppCommand::Layout(LayoutCommand::Stack(
-                                StackCommand::Close,
-                            )));
                         break;
                     }
                 }
@@ -1273,6 +1304,7 @@ fn flush_pending_terminal_input(
         (Entity, &ProcessId, &PendingTerminalInput),
         (
             With<Terminal>,
+            With<ShellOutputSeen>,
             Without<PendingServiceCreate>,
             Without<AwaitingProcessCreated>,
             Without<ProcessExited>,

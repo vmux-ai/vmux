@@ -33,7 +33,11 @@ impl CliAgentStrategy for VibeStrategy {
     }
 
     fn build_args(&self, _mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
-        let mut args = Vec::new();
+        // vmux launches vibe non-interactively, so the folder-trust prompt can't
+        // be answered. Without trust, vibe runs restricted and ignores the user
+        // config (falling back to default models). `--trust` trusts the working
+        // directory for this invocation (vibe's documented automation flag).
+        let mut args = vec!["--trust".to_string()];
         if let Some(sid) = session_id {
             args.push("--resume".to_string());
             args.push(sid.to_string());
@@ -178,6 +182,22 @@ pub(crate) fn discover_vibe_session_id(
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn build_args_trusts_workdir_and_resumes_when_given() {
+        let mcp = McpServerConfig {
+            command: "vmux".to_string(),
+            args: vec![],
+            cwd: None,
+        };
+        // Non-interactive launches must pass --trust so vibe loads the user
+        // config instead of falling back to default models.
+        assert_eq!(VibeStrategy.build_args(&mcp, None), vec!["--trust"]);
+        assert_eq!(
+            VibeStrategy.build_args(&mcp, Some("sid-1")),
+            vec!["--trust", "--resume", "sid-1"]
+        );
+    }
 
     fn write_meta(
         dir: &Path,
