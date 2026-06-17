@@ -772,7 +772,13 @@ fn handle_agent_page_open(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: Res<AppSettings>,
+    active_space: Option<Res<ActiveSpace>>,
 ) {
+    let default_cwd = active_space
+        .as_deref()
+        .map(|s| vmux_setting::resolve_startup_dir(&settings, &s.record.id))
+        .unwrap_or_else(default_space_dir);
     for (entity, task) in &tasks {
         if !task.url.starts_with("vmux://agent/") {
             continue;
@@ -788,6 +794,7 @@ fn handle_agent_page_open(
             &mut commands,
             &mut meshes,
             &mut webview_mt,
+            &default_cwd,
         ) {
             Ok(()) => {
                 commands.entity(entity).insert(PageOpenHandled);
@@ -810,6 +817,7 @@ fn handle_agent_page_open_task(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    default_cwd: &std::path::Path,
 ) -> Result<(), String> {
     // The Vibe-CLI setup page lives in the agent namespace but is a *served* page, not an agent
     // session — attach it directly rather than mis-parsing "vibe/setup" as a Page-agent provider/model.
@@ -869,10 +877,9 @@ fn handle_agent_page_open_task(
                 vmux_terminal::pid::focus_pane_entity(entity, commands, child_of_q);
                 return Ok(());
             }
-            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
             spawn_agent.write(SpawnAgentInStackRequest {
                 kind,
-                cwd,
+                cwd: default_cwd.to_path_buf(),
                 session_id: Some(sid),
                 stack: task.stack,
             });
@@ -882,10 +889,9 @@ fn handle_agent_page_open_task(
             if segs.len() == 1
                 && let Some(kind) = AgentKind::from_url_segment(segs[0])
             {
-                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
                 spawn_agent.write(SpawnAgentInStackRequest {
                     kind,
-                    cwd,
+                    cwd: default_cwd.to_path_buf(),
                     session_id: None,
                     stack: task.stack,
                 });
@@ -1571,5 +1577,61 @@ mod tests {
         assert_eq!(metas.len(), 1);
         assert_eq!(metas[0].title, "Set up Vibe CLI");
         assert_eq!(metas[0].url, "vmux://agent/vibe/setup");
+    }
+
+    #[test]
+    fn fresh_claude_page_uses_space_startup_dir() {
+        let dir = std::env::temp_dir().join(format!("vmux-startup-dir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut settings = test_settings();
+        settings.spaces.insert(
+            "space-1".into(),
+            vmux_setting::SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(dir.to_string_lossy().into()),
+            },
+        );
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(settings)
+            .insert_resource(vmux_space::spaces::ActiveSpace {
+                record: vmux_space::model::SpaceRecord {
+                    id: "space-1".into(),
+                    name: "Space 1".into(),
+                    profile: "Personal".into(),
+                },
+            })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_agent_page_open);
+
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://agent/claude/".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        let spawns: Vec<SpawnAgentInStackRequest> = app
+            .world_mut()
+            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
+            .drain()
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(spawns.len(), 1, "one agent spawn emitted");
+        assert_eq!(spawns[0].kind, AgentKind::Claude);
+        assert_eq!(
+            spawns[0].cwd, dir,
+            "claude page cwd resolves to space startup_dir"
+        );
     }
 }
