@@ -7,6 +7,7 @@
 
 mod background_lifecycle;
 mod boot_status;
+mod display;
 #[cfg(target_os = "macos")]
 mod event_tap;
 #[cfg(target_os = "macos")]
