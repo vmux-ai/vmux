@@ -44,6 +44,7 @@ impl Plugin for SpacePlugin {
             .add_message::<SaveSpaceRequest>()
             .add_message::<SpaceCommandRequest>()
             .add_systems(Update, relay_space_command_requests)
+            .add_systems(Update, persist_active_space)
             .add_systems(Startup, ensure_space_registry)
             .add_systems(
                 Startup,
@@ -162,6 +163,19 @@ fn ensure_space_registry() {
         return;
     }
     write_space_registry_to(&root, &read_space_registry_from(&root));
+}
+
+fn persist_active_space(active: Res<ActiveSpace>) {
+    if !active.is_changed() {
+        return;
+    }
+    let root = profile::shared_data_dir();
+    let mut registry = read_space_registry_from(&root);
+    if registry.active.as_deref() == Some(active.record.id.as_str()) {
+        return;
+    }
+    registry.active = Some(active.record.id.clone());
+    write_space_registry_to(&root, &registry);
 }
 
 fn rename_space_record(registry: &mut SpaceRegistry, id: &str, name: &str) -> bool {
@@ -702,6 +716,7 @@ mod tests {
         };
         let registry = SpaceRegistry {
             spaces: vec![bootstrap_space_record(), active.record.clone()],
+            active: None,
         };
         let rows = space_rows(&active, &registry, 4);
         assert!(!rows[0].is_active);
@@ -737,6 +752,7 @@ mod tests {
                     profile: BOOTSTRAP_PROFILE_NAME.to_string(),
                 },
             ],
+            active: None,
         };
 
         let deleted = delete_space_record(&mut registry, "work").unwrap();
@@ -756,6 +772,7 @@ mod tests {
                     profile: BOOTSTRAP_PROFILE_NAME.to_string(),
                 },
             ],
+            active: None,
         };
 
         assert!(rename_space_record(&mut registry, "work", "Client A"));
@@ -769,6 +786,7 @@ mod tests {
     fn rename_space_record_unknown_id_is_noop() {
         let mut registry = SpaceRegistry {
             spaces: vec![bootstrap_space_record()],
+            active: None,
         };
         assert!(!rename_space_record(&mut registry, "nope", "X"));
     }
@@ -777,12 +795,37 @@ mod tests {
     fn delete_space_keeps_last_space() {
         let mut registry = SpaceRegistry {
             spaces: vec![bootstrap_space_record()],
+            active: None,
         };
 
         let deleted = delete_space_record(&mut registry, "space-1");
 
         assert!(deleted.is_none());
         assert_eq!(registry.spaces, vec![bootstrap_space_record()]);
+    }
+
+    #[test]
+    fn active_space_change_persists_active_id_to_registry() {
+        let _home = HomeEnvGuard::use_temp_home("persist-active-id");
+        write_space_registry_to(
+            &profile::shared_data_dir(),
+            &SpaceRegistry {
+                spaces: vec![bootstrap_space_record(), work_space_record()],
+                active: None,
+            },
+        );
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ActiveSpace {
+                record: work_space_record(),
+            })
+            .add_systems(Update, persist_active_space);
+        app.update();
+
+        let registry = read_space_registry_from(&profile::shared_data_dir());
+        assert_eq!(registry.active.as_deref(), Some("work"));
+        assert_eq!(registry.spaces.len(), 2);
     }
 
     #[test]
@@ -793,6 +836,7 @@ mod tests {
             &profile::shared_data_dir(),
             &SpaceRegistry {
                 spaces: vec![bootstrap_space_record(), active_record.clone()],
+                active: None,
             },
         );
         let mut app = App::new();
@@ -852,6 +896,7 @@ mod tests {
             &profile::shared_data_dir(),
             &SpaceRegistry {
                 spaces: vec![bootstrap_space_record(), active_record.clone()],
+                active: None,
             },
         );
         let mut app = App::new();
@@ -931,6 +976,7 @@ mod tests {
             &profile::shared_data_dir(),
             &SpaceRegistry {
                 spaces: vec![bootstrap_space_record()],
+                active: None,
             },
         );
         let mut app = App::new();
@@ -1066,6 +1112,7 @@ mod tests {
             &profile::shared_data_dir(),
             &SpaceRegistry {
                 spaces: vec![bootstrap_space_record()],
+                active: None,
             },
         );
         let mut app = App::new();

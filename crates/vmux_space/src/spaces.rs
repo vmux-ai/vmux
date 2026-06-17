@@ -8,7 +8,8 @@ use vmux_layout::cef::Browser;
 
 use crate::event::{SPACES_PAGE_URL, SpaceRow};
 use crate::model::{
-    SpaceRecord, SpaceRegistry, bootstrap_space_record, registry_path, space_layout_path_for,
+    SpaceRecord, SpaceRegistry, bootstrap_space_record, registry_path, select_active_record,
+    space_layout_path_for,
 };
 
 #[derive(Resource, Clone, Debug)]
@@ -19,12 +20,9 @@ pub struct ActiveSpace {
 impl Default for ActiveSpace {
     fn default() -> Self {
         let registry = read_space_registry_from(&profile::shared_data_dir());
-        let record = registry
-            .spaces
-            .first()
-            .cloned()
-            .unwrap_or_else(bootstrap_space_record);
-        Self { record }
+        Self {
+            record: select_active_record(&registry),
+        }
     }
 }
 

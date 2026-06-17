@@ -20,6 +20,8 @@ impl Default for SpaceRecord {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SpaceRegistry {
     pub spaces: Vec<SpaceRecord>,
+    #[serde(default)]
+    pub active: Option<String>,
 }
 
 pub fn bootstrap_space_record() -> SpaceRecord {
@@ -28,6 +30,16 @@ pub fn bootstrap_space_record() -> SpaceRecord {
         name: BOOTSTRAP_SPACE_NAME.to_string(),
         profile: BOOTSTRAP_PROFILE_NAME.to_string(),
     }
+}
+
+pub fn select_active_record(registry: &SpaceRegistry) -> SpaceRecord {
+    registry
+        .active
+        .as_deref()
+        .and_then(|id| registry.spaces.iter().find(|space| space.id == id))
+        .or_else(|| registry.spaces.first())
+        .cloned()
+        .unwrap_or_else(bootstrap_space_record)
 }
 
 pub fn registry_path(root: &Path) -> PathBuf {
@@ -135,5 +147,57 @@ mod tests {
             },
         ];
         assert_eq!(unique_space_id(&records, "Work"), "work-3");
+    }
+
+    fn record(id: &str) -> SpaceRecord {
+        SpaceRecord {
+            id: id.to_string(),
+            name: id.to_uppercase(),
+            profile: BOOTSTRAP_PROFILE_NAME.to_string(),
+        }
+    }
+
+    #[test]
+    fn select_active_uses_active_id_when_present() {
+        let registry = SpaceRegistry {
+            spaces: vec![record("a"), record("b")],
+            active: Some("b".to_string()),
+        };
+        assert_eq!(select_active_record(&registry).id, "b");
+    }
+
+    #[test]
+    fn select_active_falls_back_to_first_when_active_none() {
+        let registry = SpaceRegistry {
+            spaces: vec![record("a"), record("b")],
+            active: None,
+        };
+        assert_eq!(select_active_record(&registry).id, "a");
+    }
+
+    #[test]
+    fn select_active_falls_back_to_first_when_active_id_unknown() {
+        let registry = SpaceRegistry {
+            spaces: vec![record("a")],
+            active: Some("missing".to_string()),
+        };
+        assert_eq!(select_active_record(&registry).id, "a");
+    }
+
+    #[test]
+    fn select_active_uses_bootstrap_when_empty() {
+        let registry = SpaceRegistry {
+            spaces: vec![],
+            active: Some("anything".to_string()),
+        };
+        assert_eq!(select_active_record(&registry), bootstrap_space_record());
+    }
+
+    #[test]
+    fn registry_without_active_field_parses() {
+        let body = r#"(spaces: [(id: "a", name: "A", profile: "Personal")])"#;
+        let registry: SpaceRegistry = ron::de::from_str(body).expect("parse legacy registry");
+        assert_eq!(registry.active, None);
+        assert_eq!(registry.spaces.len(), 1);
     }
 }
