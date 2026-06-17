@@ -7,6 +7,7 @@
 
 mod background_lifecycle;
 mod boot_status;
+mod display;
 #[cfg(target_os = "macos")]
 mod event_tap;
 #[cfg(target_os = "macos")]
@@ -111,6 +112,7 @@ impl Plugin for VmuxPlugin {
                 updater::VmuxUpdater::builder().build().plugin(),
                 background_lifecycle::BackgroundLifecyclePlugin,
                 tray::TrayPlugin,
+                display::DisplayPlugin,
             ));
 
         app.init_resource::<boot_status::SplashStatus>()
