@@ -256,13 +256,25 @@ fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
 }
 
 fn sync_tab_visibility(
-    mut tabs: Query<(Entity, &LastActivatedAt, &mut Node, &mut Visibility), With<Tab>>,
+    active_id: Option<Res<crate::space::ActiveSpaceId>>,
+    mut tabs: Query<
+        (
+            Entity,
+            &LastActivatedAt,
+            Option<&crate::space::SpaceId>,
+            &mut Node,
+            &mut Visibility,
+        ),
+        With<Tab>,
+    >,
 ) {
+    let active_space = active_id.as_deref().and_then(|id| id.0.as_deref());
     let active = tabs
         .iter()
-        .max_by_key(|(_, ts, _, _)| ts.0)
-        .map(|(e, _, _, _)| e);
-    for (entity, _, mut node, mut vis) in &mut tabs {
+        .filter(|(_, _, sid, _, _)| crate::space::in_active_space(*sid, active_space))
+        .max_by_key(|(_, ts, _, _, _)| ts.0)
+        .map(|(e, _, _, _, _)| e);
+    for (entity, _, _, mut node, mut vis) in &mut tabs {
         let is_active = Some(entity) == active;
         let target_display = if is_active {
             Display::Flex

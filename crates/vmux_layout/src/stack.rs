@@ -139,6 +139,8 @@ pub fn focused_stack(
 
 fn compute_focused_stack(
     mut cached: ResMut<FocusedStack>,
+    active_id: Option<Res<crate::space::ActiveSpaceId>>,
+    tab_space: Query<&crate::space::SpaceId>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -146,14 +148,12 @@ fn compute_focused_stack(
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
 ) {
-    let (tab, pane, stack) = focused_stack(
-        &tabs,
-        &all_children,
-        &leaf_panes,
-        &pane_ts,
-        &pane_children,
-        &stack_ts,
-    );
+    let active_space = active_id.as_deref().and_then(|id| id.0.as_deref());
+    let tab = active_among(tabs.iter().filter(|(entity, _)| {
+        crate::space::in_active_space(tab_space.get(*entity).ok(), active_space)
+    }));
+    let pane = tab.and_then(|t| active_pane_in_tab(t, &all_children, &leaf_panes, &pane_ts));
+    let stack = pane.and_then(|p| active_stack_in_pane(p, &pane_children, &stack_ts));
     cached.tab = tab;
     cached.pane = pane;
     cached.stack = stack;

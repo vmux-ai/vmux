@@ -104,6 +104,16 @@ pub fn same_space(candidate: Option<&SpaceId>, active: Option<&SpaceId>) -> bool
     }
 }
 
+/// Whether a tab/entity carrying `candidate` belongs to the active space id.
+/// Unknown ids (no `SpaceId`, or no active space) are treated as in-scope so
+/// callers degrade to global behavior instead of hiding everything.
+pub fn in_active_space(candidate: Option<&SpaceId>, active: Option<&str>) -> bool {
+    match (candidate, active) {
+        (Some(candidate), Some(active)) => candidate.0 == active,
+        _ => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
