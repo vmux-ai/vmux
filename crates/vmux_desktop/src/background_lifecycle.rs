@@ -293,16 +293,12 @@ fn event_location_in_window_physical_px(event: &objc2_app_kit::NSEvent) -> Optio
     }
 }
 
-/// In browse (User) mode the focused-window update mode is fully native-wake-driven: winit's content
-/// view is first responder and emits `CursorMoved` on every move (CEF keeps `acceptsMouseMovedEvents`
-/// on for in-page hover), so leaving `react_to_window_events` on would tick Bevy ~display-refresh
-/// times per second while the mouse moves. Instead both `react_to_device_events` and
-/// `react_to_window_events` are off in User mode, and the native NSEvent monitors
-/// ([`install_native_mouse_wake_monitor`], native keyboard) wake the loop for the input that matters
-/// (clicks, keys, and pane-crossing hover). Player mode keeps both on for the free camera.
-/// every raw HID report. In browse (User) mode native CEF views own scroll/input, so Bevy must NOT
-/// wake on those — only Player mode's free camera consumes `AccumulatedMouseMotion`. Window events
-/// (resize/focus, OSR layout hover) and user events (CEF texture wake) stay on in both modes.
+/// `react_to_device_events` is off in browse (User) mode: native CEF views own scroll/input, so only
+/// Player mode's free camera consumes `AccumulatedMouseMotion`. `react_to_window_events` is on in
+/// both modes so the layout chrome mesh + camera track a live window resize (`Resized` fires during
+/// the macOS resize loop; the native mouse monitor never sees edge-drag events). The cost is that
+/// `CursorMoved` also wakes Bevy while the mouse moves — to be gated to live-resize only as a
+/// follow-up. The native NSEvent monitors still wake the loop for clicks/keys/pane-crossing hover.
 pub(crate) fn foreground_winit_settings(player: bool) -> WinitSettings {
     WinitSettings {
         focused_mode: UpdateMode::Reactive {
@@ -565,11 +561,11 @@ mod tests {
             settings.unfocused_mode,
             UpdateMode::reactive_low_power(Duration::from_secs(1))
         );
-        // Browse mode is fully native-wake-driven: both raw device-event and window-event wakes are
-        // off so the mouse moving (winit `CursorMoved`) does not tick Bevy. Player mode keeps both on
-        // for the free camera.
+        // Window-event wakes are on so the layout chrome mesh + camera track a live window resize
+        // (`Resized` fires during the macOS resize loop; the native mouse monitor never sees
+        // edge-drag events). Device-event wakes stay off in browse mode.
         assert!(!react_to_device_events);
-        assert!(!react_to_window_events);
+        assert!(react_to_window_events);
         let player = foreground_winit_settings(true);
         let UpdateMode::Reactive {
             react_to_device_events: player_device,

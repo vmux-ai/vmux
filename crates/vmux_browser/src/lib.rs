@@ -834,15 +834,14 @@ fn sync_windowed_content_mesh_materials(
     }
 }
 
-/// In User mode the layout chrome is presented by the native overlay (accelerated, with glass), but
-/// the OSR mesh still holds the last Player-mode (cpu-painted) frame and would draw it on top of the
-/// page views — the duplicate. Make the mesh render invisible in User; in Player the overlay is
-/// hidden and the mesh presents the (transparent) 3D layout, so render it.
+/// The layout chrome renders on the OSR mesh in both modes: a wgpu quad that resizes with the Bevy
+/// frame, so it tracks a live window resize (a native overlay cannot — its frame only updates from a
+/// Bevy schedule the macOS resize loop starves). Keep the material visible.
 ///
-/// This toggles the material's alpha rather than `Visibility`: the OSR focus pipeline treats a
-/// `Visibility::Hidden` webview as hidden and tells CEF to stop rendering it, which would starve the
-/// overlay. Keeping the entity visible (only the material transparent) leaves OSR running. Alpha
-/// mode stays `Blend` so Player keeps its transparency (pages show through the layout).
+/// This drives the material's alpha rather than `Visibility`: the OSR focus pipeline treats a
+/// `Visibility::Hidden` webview as hidden and tells CEF to stop rendering it. Keeping the entity
+/// visible leaves OSR running. Alpha mode stays `Blend` so pages show through the layout's
+/// transparent areas.
 fn sync_layout_mesh_visibility(
     layout_q: Query<&MeshMaterial3d<WebviewExtendStandardMaterial>, With<LayoutCef>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -3192,12 +3191,12 @@ mod tests {
     }
 
     #[test]
-    fn user_mode_makes_layout_mesh_invisible() {
-        let mat = layout_material_after_mode(vmux_layout::scene::InteractionMode::User, 1.0);
+    fn user_mode_makes_layout_mesh_visible() {
+        let mat = layout_material_after_mode(vmux_layout::scene::InteractionMode::User, 0.0);
         assert_eq!(
             mat.base.base_color.alpha(),
-            0.0,
-            "User mode hides the layout OSR mesh (the overlay presents the chrome) so it does not duplicate"
+            1.0,
+            "User mode renders the layout chrome via the mesh (CPU OSR) so it tracks live resize"
         );
         assert_eq!(mat.base.alpha_mode, AlphaMode::Blend);
     }
@@ -3855,10 +3854,7 @@ mod tests {
         sync_cef_backend_for_interaction_mode(app.world_mut());
 
         assert!(app.world().get::<WebviewWindowed>(layout).is_none());
-        assert_eq!(
-            app.world().get::<WebviewNativeOverlay>(layout).is_some(),
-            cfg!(target_os = "macos")
-        );
+        assert!(app.world().get::<WebviewNativeOverlay>(layout).is_none());
         assert_eq!(
             app.world().get::<WebviewWindowed>(terminal).is_some(),
             cfg!(target_os = "macos")
