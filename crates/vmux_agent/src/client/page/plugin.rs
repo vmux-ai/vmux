@@ -1,12 +1,14 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::BinEventEmitterPlugin;
 
-use crate::components::{AgentApprovalPolicy, AgentSession};
+use crate::AgentVariant;
+use crate::components::{AgentApprovalPolicy, AgentSession, PendingUserInput};
 use crate::run_state_kind::LastRunStateKind;
-use crate::systems::{
-    approval, continue_after_tool, dispatch_tool, drain_stream, process_input, surface_errors,
-};
+use crate::systems::{approval, surface_errors};
 use crate::toast::AgentToast;
+use crate::tools::mcp_tool_defs;
+use vmux_service::client::ServiceClient;
+use vmux_service::protocol::ClientMessage;
 
 pub struct PageAgentPlugin;
 
@@ -22,10 +24,8 @@ impl Plugin for PageAgentPlugin {
             .add_systems(
                 Update,
                 (
-                    process_input::process_user_input,
-                    drain_stream::drain_stream,
-                    dispatch_tool::dispatch_tool,
-                    continue_after_tool::continue_after_tool,
+                    spawn_page_session_on_add,
+                    send_page_agent_input,
                     surface_errors::surface_errors,
                     attach_last_run_state_kind,
                 ),
@@ -53,6 +53,56 @@ fn attach_last_run_state_kind(
 ) {
     for entity in &q {
         commands.entity(entity).insert(LastRunStateKind::default());
+    }
+}
+
+fn spawn_page_session_on_add(
+    q: Query<(&AgentSession, Option<&AgentApprovalPolicy>), Added<AgentSession>>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else {
+        return;
+    };
+    for (session, policy) in &q {
+        if session.variant != AgentVariant::Page {
+            continue;
+        }
+        let auto_tools: Vec<String> = policy
+            .map(|p| p.auto.iter().cloned().collect())
+            .unwrap_or_default();
+        let tools_json =
+            serde_json::to_string(&mcp_tool_defs()).unwrap_or_else(|_| "[]".to_string());
+        service.0.send(ClientMessage::SpawnPageAgent {
+            sid: session.sid.clone(),
+            provider: session.provider.clone(),
+            model: session.model.clone(),
+            cwd: String::new(),
+            auto_tools,
+            tools_json,
+        });
+        service.0.send(ClientMessage::AttachPageAgent {
+            sid: session.sid.clone(),
+        });
+    }
+}
+
+fn send_page_agent_input(
+    mut commands: Commands,
+    q: Query<(Entity, &AgentSession, &PendingUserInput)>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else {
+        return;
+    };
+    for (entity, session, pending) in &q {
+        if session.variant != AgentVariant::Page {
+            continue;
+        }
+        service.0.send(ClientMessage::AgentInput {
+            sid: session.sid.clone(),
+            text: pending.0.clone(),
+        });
+        commands.entity(entity).remove::<PendingUserInput>();
     }
 }
 
