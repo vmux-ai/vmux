@@ -40,6 +40,7 @@ impl Plugin for SpacePlugin {
             .add_message::<SpaceCommandRequest>()
             .add_systems(Update, relay_space_command_requests)
             .add_systems(Update, sync_active_space_record)
+            .add_systems(Update, sync_space_name_to_id)
             .add_systems(
                 Startup,
                 update_effective_startup_url
@@ -307,6 +308,22 @@ fn deactivate_all_spaces(spaces: &SpaceQuery, commands: &mut Commands) {
     }
 }
 
+fn sync_space_name_to_id(
+    mut spaces: Query<
+        (&vmux_layout::space::SpaceId, &mut Name),
+        (
+            With<vmux_layout::space::Space>,
+            Changed<vmux_layout::space::SpaceId>,
+        ),
+    >,
+) {
+    for (id, mut name) in &mut spaces {
+        if name.as_str() != id.0 {
+            *name = Name::new(id.0.clone());
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn on_space_command(
     trigger: On<BinReceive<SpaceCommandEvent>>,
@@ -364,13 +381,13 @@ fn on_space_command(
         else {
             return;
         };
-        commands.entity(entity).insert(Name::new(name.to_string()));
         let existing: std::collections::HashSet<String> = spaces
             .iter()
             .filter(|(_, sid, _, _)| sid.0 != id)
             .map(|(_, sid, _, _)| sid.0.clone())
             .collect();
         let new_id = crate::model::unique_space_id_among(&existing, name);
+        commands.entity(entity).insert(Name::new(new_id.clone()));
         if new_id != id {
             commands
                 .entity(entity)
@@ -462,7 +479,7 @@ fn on_space_command(
             commands.spawn((
                 vmux_layout::space::Space,
                 vmux_layout::space::SpaceId(id.clone()),
-                Name::new(name),
+                Name::new(id.clone()),
                 vmux_core::Order(order),
                 vmux_layout::space::ActiveSpaceTag,
             ));
@@ -516,7 +533,7 @@ fn handle_open_in_new_space(
         commands.spawn((
             vmux_layout::space::Space,
             vmux_layout::space::SpaceId(id.clone()),
-            Name::new(name),
+            Name::new(id.clone()),
             vmux_core::Order(order),
             vmux_layout::space::ActiveSpaceTag,
         ));
@@ -694,7 +711,7 @@ mod tests {
         );
         assert_eq!(
             app.world().get::<Name>(space).map(|n| n.to_string()),
-            Some("Rename Dst Test".to_string())
+            Some("rename-dst-test".to_string())
         );
         assert_eq!(
             app.world()

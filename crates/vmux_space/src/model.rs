@@ -1,6 +1,6 @@
 pub const BOOTSTRAP_PROFILE_NAME: &str = "Personal";
 pub const BOOTSTRAP_SPACE_ID: &str = "space-1";
-pub const BOOTSTRAP_SPACE_NAME: &str = "Space 1";
+pub const BOOTSTRAP_SPACE_NAME: &str = "space-1";
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SpaceRecord {
