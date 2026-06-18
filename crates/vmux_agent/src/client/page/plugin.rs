@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::BinEventEmitterPlugin;
 
-use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession};
+use crate::components::{AgentApprovalPolicy, AgentSession};
 use crate::run_state_kind::LastRunStateKind;
 use crate::systems::{
     approval, continue_after_tool, dispatch_tool, drain_stream, process_input, surface_errors,
@@ -13,7 +13,6 @@ pub struct PageAgentPlugin;
 impl Plugin for PageAgentPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<AgentSession>()
-            .register_type::<AgentMessages>()
             .register_type::<AgentApprovalPolicy>()
             .add_message::<AgentToast>()
             .add_plugins(BinEventEmitterPlugin::<(AgentToast,)>::with_id(

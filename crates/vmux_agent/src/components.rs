@@ -16,8 +16,7 @@ pub struct AgentSession {
     pub model: String,
 }
 
-#[derive(Component, Clone, Debug, Default, Serialize, Deserialize, Reflect)]
-#[reflect(Component)]
+#[derive(Component, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AgentMessages(pub Vec<Message>);
 
 #[derive(Component, Clone, Debug, Default, Serialize, Deserialize, Reflect)]

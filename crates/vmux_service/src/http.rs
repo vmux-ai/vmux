@@ -1,8 +1,7 @@
 use crossbeam_channel::Sender;
 use futures_util::StreamExt;
 
-use crate::client::page::strategy_components::ParseSse;
-use crate::stream::StreamEvent;
+use crate::stream::{ParseSse, StreamEvent};
 
 pub async fn drive_sse(request: reqwest::Request, parse_sse: ParseSse, tx: Sender<StreamEvent>) {
     let client = reqwest::Client::new();
