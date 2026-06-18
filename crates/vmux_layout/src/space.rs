@@ -16,6 +16,7 @@ impl Plugin for SpacePlugin {
                     ensure_active_space_tagged,
                     sync_active_space_entity,
                     sync_active_space_id,
+                    assign_orphan_tabs_to_active_space,
                 )
                     .chain(),
             );
@@ -28,7 +29,7 @@ impl Plugin for SpacePlugin {
 #[require(Save)]
 pub struct Space;
 
-#[derive(Component, Reflect, Default, Clone, PartialEq, Eq)]
+#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::space"]
 #[require(Save)]
@@ -80,6 +81,19 @@ pub fn sync_active_space_id(
         .map(|id| id.0.clone());
     if active_id.0 != current {
         active_id.0 = current;
+    }
+}
+
+pub fn assign_orphan_tabs_to_active_space(
+    active_id: Res<ActiveSpaceId>,
+    orphans: Query<Entity, (With<crate::tab::Tab>, Without<SpaceId>)>,
+    mut commands: Commands,
+) {
+    let Some(id) = active_id.0.as_deref() else {
+        return;
+    };
+    for tab in &orphans {
+        commands.entity(tab).insert(SpaceId(id.to_string()));
     }
 }
 
@@ -141,6 +155,19 @@ mod tests {
         assert_eq!(
             app.world().resource::<ActiveSpaceId>().0.as_deref(),
             Some("work")
+        );
+    }
+
+    #[test]
+    fn orphan_tabs_get_active_space_id() {
+        let mut app = App::new();
+        app.insert_resource(ActiveSpaceId(Some("work".to_string())))
+            .add_systems(Update, assign_orphan_tabs_to_active_space);
+        let tab = app.world_mut().spawn(crate::tab::Tab::default()).id();
+        app.update();
+        assert_eq!(
+            app.world().entity(tab).get::<SpaceId>(),
+            Some(&SpaceId("work".to_string()))
         );
     }
 
