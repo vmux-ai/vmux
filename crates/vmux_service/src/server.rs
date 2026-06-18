@@ -164,10 +164,11 @@ async fn handle_client(
     let attached: Arc<tokio::sync::Mutex<HashMap<ProcessId, tokio::task::JoinHandle<()>>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let mut agent_subscription: Option<tokio::task::JoinHandle<()>> = None;
-    let mut in_flight_query_ids: std::collections::HashSet<crate::protocol::AgentRequestId> =
-        std::collections::HashSet::new();
-    let mut in_flight_command_ids: std::collections::HashSet<crate::protocol::AgentRequestId> =
-        std::collections::HashSet::new();
+    let broker = crate::agent_broker::AgentBroker::new(
+        agent_tx.clone(),
+        Arc::clone(&pending_commands),
+        Arc::clone(&pending_queries),
+    );
 
     loop {
         let msg: Option<ClientMessage> = read_message!(&mut reader, ClientMessage)?;
@@ -429,53 +430,13 @@ async fn handle_client(
                     write_message!(&mut *w, &resp)?;
                     continue;
                 }
-                if agent_tx.receiver_count() == 0 {
-                    let resp = ServiceMessage::Error {
-                        message: "no desktop subscribed to agent commands".to_string(),
-                    };
-                    let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
-                    continue;
-                }
 
-                let (tx, rx) =
-                    tokio::sync::oneshot::channel::<crate::protocol::AgentCommandResult>();
-                pending_commands.lock().await.insert(request_id, tx);
-                in_flight_command_ids.insert(request_id);
-
-                if agent_tx
-                    .send(ServiceMessage::AgentCommand {
-                        request_id,
-                        command,
-                    })
-                    .is_err()
-                {
-                    pending_commands.lock().await.remove(&request_id);
-                    in_flight_command_ids.remove(&request_id);
-                    let resp = ServiceMessage::Error {
-                        message: "no desktop subscribed to agent commands".to_string(),
-                    };
-                    let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
-                    continue;
-                }
-
+                let broker = broker.clone();
                 let writer = writer.clone();
-                let pending_commands = Arc::clone(&pending_commands);
                 tokio::spawn(async move {
-                    let resp = match tokio::time::timeout(
-                        crate::protocol::AGENT_COMMAND_TIMEOUT,
-                        rx,
-                    )
-                    .await
-                    {
-                        Ok(Ok(result)) => ServiceMessage::AgentCommandResult { request_id, result },
-                        _ => {
-                            pending_commands.lock().await.remove(&request_id);
-                            ServiceMessage::Error {
-                                message: "agent command timed out".to_string(),
-                            }
-                        }
+                    let resp = match broker.command(request_id, command).await {
+                        Ok(result) => ServiceMessage::AgentCommandResult { request_id, result },
+                        Err(message) => ServiceMessage::Error { message },
                     };
                     let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&resp) {
                         Ok(b) => b,
@@ -555,46 +516,13 @@ async fn handle_client(
                     }
                     other => other,
                 };
-                if agent_tx.receiver_count() == 0 {
-                    let resp = ServiceMessage::Error {
-                        message: "no desktop subscribed to agent commands".to_string(),
-                    };
-                    let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
-                    continue;
-                }
 
-                let (tx, rx) = tokio::sync::oneshot::channel::<crate::protocol::AgentQueryResult>();
-                pending_queries.lock().await.insert(request_id, tx);
-                in_flight_query_ids.insert(request_id);
-
-                if agent_tx
-                    .send(ServiceMessage::AgentQuery { request_id, query })
-                    .is_err()
-                {
-                    pending_queries.lock().await.remove(&request_id);
-                    in_flight_query_ids.remove(&request_id);
-                    let resp = ServiceMessage::Error {
-                        message: "no desktop subscribed to agent commands".to_string(),
-                    };
-                    let mut w = writer.lock().await;
-                    write_message!(&mut *w, &resp)?;
-                    continue;
-                }
-
+                let broker = broker.clone();
                 let writer = writer.clone();
-                let pending_queries = Arc::clone(&pending_queries);
                 tokio::spawn(async move {
-                    let resp = match tokio::time::timeout(crate::protocol::AGENT_QUERY_TIMEOUT, rx)
-                        .await
-                    {
-                        Ok(Ok(result)) => ServiceMessage::AgentQueryResult { request_id, result },
-                        _ => {
-                            pending_queries.lock().await.remove(&request_id);
-                            ServiceMessage::Error {
-                                message: "agent query timed out".to_string(),
-                            }
-                        }
+                    let resp = match broker.query(request_id, query).await {
+                        Ok(result) => ServiceMessage::AgentQueryResult { request_id, result },
+                        Err(message) => ServiceMessage::Error { message },
                     };
                     let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&resp) {
                         Ok(b) => b,
@@ -609,14 +537,12 @@ async fn handle_client(
                 if let Some(tx) = pending_queries.lock().await.remove(&request_id) {
                     let _ = tx.send(result);
                 }
-                in_flight_query_ids.remove(&request_id);
             }
 
             ClientMessage::AgentCommandResponse { request_id, result } => {
                 if let Some(tx) = pending_commands.lock().await.remove(&request_id) {
                     let _ = tx.send(result);
                 }
-                in_flight_command_ids.remove(&request_id);
             }
         }
     }
@@ -627,20 +553,6 @@ async fn handle_client(
     }
     if let Some(handle) = agent_subscription.take() {
         handle.abort();
-    }
-
-    {
-        let mut pending = pending_queries.lock().await;
-        for id in &in_flight_query_ids {
-            pending.remove(id);
-        }
-    }
-
-    {
-        let mut pending = pending_commands.lock().await;
-        for id in &in_flight_command_ids {
-            pending.remove(id);
-        }
     }
 
     Ok(())
