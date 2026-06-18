@@ -47,11 +47,15 @@ pub fn default_space_dir() -> PathBuf {
     space_dir("space-1")
 }
 
+fn space_dir_path(home: &std::path::Path, space_id: &str) -> PathBuf {
+    home.join(".vmux").join("spaces").join(space_id)
+}
+
 pub fn space_dir(space_id: &str) -> PathBuf {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"));
-    let dir = home.join(".vmux").join(space_id);
+    let dir = space_dir_path(&home, space_id);
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
@@ -91,5 +95,13 @@ mod tests {
     #[test]
     fn shared_data_dir_ends_with_profile_suffix() {
         assert!(shared_data_dir().ends_with(data_dir_suffix()));
+    }
+
+    #[test]
+    fn space_dir_is_under_vmux_spaces() {
+        assert_eq!(
+            space_dir_path(std::path::Path::new("/home/u"), "work"),
+            PathBuf::from("/home/u/.vmux/spaces/work")
+        );
     }
 }
