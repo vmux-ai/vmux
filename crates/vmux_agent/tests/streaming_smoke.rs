@@ -34,7 +34,7 @@ fn single_text_turn_streams_into_assistant_message() {
     let _guard = rt.enter();
 
     let mut server = mockito::Server::new();
-    let body = include_str!("fixtures/mistral/text.sse");
+    let body = include_str!("../../vmux_service/tests/fixtures/mistral/text.sse");
     let _m = server
         .mock("POST", "/chat")
         .with_status(200)

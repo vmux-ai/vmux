@@ -30,6 +30,8 @@ pub mod process;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod protocol;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod providers;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod registry;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;

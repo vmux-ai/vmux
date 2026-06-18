@@ -57,3 +57,4 @@ serde_json = { workspace = true }
 tempfile = "3.27.0"
 tokio = { workspace = true, features = ["test-util", "macros", "rt"] }
 mockito = "1"
+serial_test = "3"

@@ -1,4 +1,4 @@
-use crate::AgentKind;
+use vmux_core::agent::AgentKind;
 
 #[derive(Copy, Clone, Debug)]
 pub struct BuiltinProvider {
