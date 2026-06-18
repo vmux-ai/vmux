@@ -16,7 +16,13 @@ impl Plugin for GlassPlugin {
             .init_non_send::<LayoutOverlay>()
             .init_non_send::<CommandBarOverlay>()
             .add_systems(PreUpdate, install_window_glass)
-            .add_systems(Update, sync_window_glass_visibility)
+            .add_systems(
+                Update,
+                (
+                    sync_window_glass_visibility,
+                    keep_window_surface_layer_transparent,
+                ),
+            )
             .add_systems(
                 Update,
                 handle_toggle_fullscreen_command.in_set(vmux_command::ReadAppCommands),
@@ -318,6 +324,29 @@ fn primary_content_view_ptr(entity: Entity) -> Option<*mut core::ffi::c_void> {
             _ => None,
         }
     })
+}
+
+fn keep_window_surface_layer_transparent(window: Query<Entity, With<bevy::window::PrimaryWindow>>) {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSColor, NSView};
+
+    if MainThreadMarker::new().is_none() {
+        return;
+    }
+    let Ok(entity) = window.single() else {
+        return;
+    };
+    let Some(ns_view) = primary_content_view_ptr(entity) else {
+        return;
+    };
+    let content: &NSView = unsafe { &*ns_view.cast::<NSView>() };
+    content.setWantsLayer(true);
+    let Some(layer) = content.layer() else {
+        return;
+    };
+    let clear_color = NSColor::clearColor();
+    layer.setOpaque(false);
+    layer.setBackgroundColor(Some(&clear_color.CGColor()));
 }
 
 fn sync_layout_overlay(
@@ -707,5 +736,30 @@ mod tests {
             .unwrap_or_default();
 
         assert!(build.contains("ensure_window_active_after_reveal"));
+    }
+
+    #[test]
+    fn surface_transparency_system_is_registered() {
+        let source = include_str!("glass.rs");
+        let build = source
+            .split("fn build(&self, app: &mut App)")
+            .nth(1)
+            .and_then(|tail| tail.split("#[derive(Default)]").next())
+            .unwrap_or_default();
+
+        assert!(build.contains("keep_window_surface_layer_transparent"));
+    }
+
+    #[test]
+    fn surface_layer_kept_non_opaque_and_clear() {
+        let source = include_str!("glass.rs");
+        let func = source
+            .split("fn keep_window_surface_layer_transparent")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_layout_overlay").next())
+            .unwrap_or_default();
+
+        assert!(func.contains("layer.setOpaque(false)"));
+        assert!(func.contains("layer.setBackgroundColor(Some(&clear_color.CGColor()))"));
     }
 }
