@@ -51,27 +51,36 @@ fn space_dir_path(home: &std::path::Path, space_id: &str) -> PathBuf {
     home.join(".vmux").join("spaces").join(space_id)
 }
 
-pub fn space_dir(space_id: &str) -> PathBuf {
-    let home = std::env::var_os("HOME")
+fn home_dir() -> PathBuf {
+    std::env::var_os("HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"));
-    let dir = space_dir_path(&home, space_id);
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+pub fn space_dir(space_id: &str) -> PathBuf {
+    let dir = space_dir_path(&home_dir(), space_id);
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
 
-pub fn rename_space_dir(old_id: &str, new_id: &str) {
+fn rename_space_dir_in(home: &std::path::Path, old_id: &str, new_id: &str) {
     if old_id == new_id {
         return;
     }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"));
-    let old = space_dir_path(&home, old_id);
-    let new = space_dir_path(&home, new_id);
-    if old.exists() && !new.exists() {
-        let _ = std::fs::rename(&old, &new);
+    let old = space_dir_path(home, old_id);
+    let new = space_dir_path(home, new_id);
+    if new.exists() {
+        return;
     }
+    if old.exists() {
+        let _ = std::fs::rename(&old, &new);
+    } else {
+        let _ = std::fs::create_dir_all(&new);
+    }
+}
+
+pub fn rename_space_dir(old_id: &str, new_id: &str) {
+    rename_space_dir_in(&home_dir(), old_id, new_id);
 }
 
 #[cfg(test)]
@@ -117,5 +126,25 @@ mod tests {
             space_dir_path(std::path::Path::new("/home/u"), "work"),
             PathBuf::from("/home/u/.vmux/spaces/work")
         );
+    }
+
+    #[test]
+    fn rename_space_dir_moves_existing_folder() {
+        let home = std::env::temp_dir().join(format!("vmux-rndir-mv-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(space_dir_path(&home, "old")).unwrap();
+        rename_space_dir_in(&home, "old", "new");
+        assert!(!space_dir_path(&home, "old").exists());
+        assert!(space_dir_path(&home, "new").exists());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn rename_space_dir_creates_folder_when_absent() {
+        let home = std::env::temp_dir().join(format!("vmux-rndir-new-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        rename_space_dir_in(&home, "old", "new");
+        assert!(space_dir_path(&home, "new").exists());
+        let _ = std::fs::remove_dir_all(&home);
     }
 }
