@@ -203,3 +203,36 @@ old switch blocks. Verify hidden live CEF respects the wake/idle-CPU rule.
   and active; reload re-parents Space→Main.
 - Lifecycle: switching does **not** despawn an inactive space's terminal entity
   (process stays alive).
+
+## As-built deviations
+
+The shipped implementation differs from the design above in a few deliberate ways:
+
+- **No `Main → Space → Tab` re-parent.** Tabs stay `ChildOf(Main)` and carry a
+  `SpaceId(String)` tag (the active space id; spawned-tagged + backfilled). `Space`
+  entities remain standalone markers holding `SpaceId` + `Name` + `Order` +
+  `ActiveSpaceTag`. This avoids a large, fragile cross-crate re-parent and lets the
+  scoping land incrementally. Scoping is done by filtering on `SpaceId == ActiveSpaceId`
+  rather than relying on a Bevy `Visibility` cascade from a Space node.
+- **`ActiveSpaceId` resource** (string) mirrors the `ActiveSpaceTag`ged space and is the
+  single value the scoping systems compare against; `ActiveSpace` (vmux_space) is a
+  derived id/name cache synced from the tagged entity.
+- **name === folder.** A space's name *is* its slug id; `Name` is kept equal to
+  `SpaceId` by a sync system. `/` is preserved as a **nested folder separator** so
+  `org/repo` → `~/.vmux/spaces/org/repo` (each segment slugged). The folder path mirrors
+  the name exactly.
+- **Self-cleaning folders.** Rename moves the folder (creating nested parents, removing
+  an empty target first) and prunes empty old parents; a reconcile system removes
+  empty, unreferenced dirs under `~/.vmux/spaces/` (never folders containing files).
+- **Focus scoping is at the source.** `compute_focused_stack` (the `FocusedStack`
+  resource) and `sync_tab_visibility` filter to the active space; the on-demand
+  `focused_stack()` helper used by some command handlers stays global (acceptable —
+  the resource + visibility drive all rendering; command targeting rides on
+  `LastActivatedAt` + the switch bump).
+- **#4 (hidden CEF throttle) needed no new code.** Because inactive-space tabs are now
+  `Display::None`/`Visibility::Hidden`, the pre-existing windowed/OSR hide systems
+  (`set_windowed_hidden` / `set_osr_hidden`, keyed off mesh scale / node size /
+  active-stack) already stop their paint while the page stays alive.
+- **MCP scoping.** `read_layout` filters its tab list to the active space, and
+  `update_layout`'s `collect_existing_ids` is scoped to the active space's tab subtrees
+  so a reconcile can never despawn another space's content.
