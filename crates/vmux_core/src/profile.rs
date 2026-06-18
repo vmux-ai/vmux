@@ -72,6 +72,9 @@ fn rename_space_dir_in(home: &std::path::Path, old_id: &str, new_id: &str) {
     if new.exists() {
         return;
     }
+    if let Some(parent) = new.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     if old.exists() {
         let _ = std::fs::rename(&old, &new);
     } else {
@@ -145,6 +148,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
         rename_space_dir_in(&home, "old", "new");
         assert!(space_dir_path(&home, "new").exists());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn rename_space_dir_creates_nested_path() {
+        let home = std::env::temp_dir().join(format!("vmux-rndir-nest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(space_dir_path(&home, "old")).unwrap();
+        rename_space_dir_in(&home, "old", "org/new");
+        assert!(!space_dir_path(&home, "old").exists());
+        assert!(space_dir_path(&home, "org/new").exists());
         let _ = std::fs::remove_dir_all(&home);
     }
 }

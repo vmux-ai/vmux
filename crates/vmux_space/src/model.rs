@@ -23,7 +23,7 @@ pub fn bootstrap_space_record() -> SpaceRecord {
     }
 }
 
-pub fn normalize_space_id(input: &str) -> String {
+fn slug_segment(input: &str) -> String {
     let mut out = String::new();
     let mut pending_dash = false;
     for ch in input.chars().flat_map(char::to_lowercase) {
@@ -37,10 +37,21 @@ pub fn normalize_space_id(input: &str) -> String {
             pending_dash = true;
         }
     }
-    if out.is_empty() {
+    out
+}
+
+/// Slugs a space name into a filesystem-relative id, preserving `/` as a
+/// nested-directory separator (each segment is slugged independently).
+pub fn normalize_space_id(input: &str) -> String {
+    let segments: Vec<String> = input
+        .split('/')
+        .map(slug_segment)
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    if segments.is_empty() {
         "space".to_string()
     } else {
-        out
+        segments.join("/")
     }
 }
 
@@ -66,6 +77,13 @@ mod tests {
     fn space_ids_are_slugged() {
         assert_eq!(normalize_space_id("Client A!"), "client-a");
         assert_eq!(normalize_space_id("  "), "space");
+    }
+
+    #[test]
+    fn normalize_keeps_slash_as_nested_separator() {
+        assert_eq!(normalize_space_id("vmux-ai/vmux"), "vmux-ai/vmux");
+        assert_eq!(normalize_space_id("Org Name/Repo!"), "org-name/repo");
+        assert_eq!(normalize_space_id("a//b/"), "a/b");
     }
 
     #[test]
