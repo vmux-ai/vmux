@@ -360,8 +360,32 @@ fn on_space_command(
         let Some(name) = evt.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) else {
             return;
         };
-        if let Some((entity, _, _, _)) = spaces.iter().find(|(_, sid, _, _)| sid.0 == id) {
-            commands.entity(entity).insert(Name::new(name.to_string()));
+        let Some((entity, _, is_active, _)) = spaces.iter().find(|(_, sid, _, _)| sid.0 == id)
+        else {
+            return;
+        };
+        commands.entity(entity).insert(Name::new(name.to_string()));
+        let existing: std::collections::HashSet<String> = spaces
+            .iter()
+            .filter(|(_, sid, _, _)| sid.0 != id)
+            .map(|(_, sid, _, _)| sid.0.clone())
+            .collect();
+        let new_id = crate::model::unique_space_id_among(&existing, name);
+        if new_id != id {
+            commands
+                .entity(entity)
+                .insert(vmux_layout::space::SpaceId(new_id.clone()));
+            for (tab, sid, _) in tabs.iter() {
+                if sid.0 == id {
+                    commands
+                        .entity(tab)
+                        .insert(vmux_layout::space::SpaceId(new_id.clone()));
+                }
+            }
+            profile::rename_space_dir(id, &new_id);
+            if is_active {
+                active_id.0 = Some(new_id.clone());
+            }
         }
         return;
     }
@@ -623,6 +647,67 @@ mod tests {
                 .resource::<vmux_layout::settings::EffectiveStartupUrl>()
                 .0,
             "https://work.example"
+        );
+    }
+
+    #[test]
+    fn rename_reslugs_space_id_and_retags_tabs() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<TabLayoutSpawnRequest>()
+            .init_resource::<vmux_layout::space::ActiveSpaceId>()
+            .add_observer(on_space_command);
+        app.world_mut().spawn(bevy::window::PrimaryWindow);
+        let space = app
+            .world_mut()
+            .spawn((
+                vmux_layout::space::Space,
+                vmux_layout::space::SpaceId("rename-src-test".to_string()),
+                Name::new("rename-src-test"),
+                vmux_layout::space::ActiveSpaceTag,
+            ))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                vmux_layout::tab::Tab::default(),
+                vmux_layout::space::SpaceId("rename-src-test".to_string()),
+                vmux_history::LastActivatedAt::now(),
+            ))
+            .id();
+
+        app.world_mut().trigger(BinReceive {
+            webview: Entity::PLACEHOLDER,
+            payload: SpaceCommandEvent {
+                command: "rename".to_string(),
+                space_id: Some("rename-src-test".to_string()),
+                name: Some("Rename Dst Test".to_string()),
+            },
+        });
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::space::SpaceId>(space)
+                .map(|s| s.0.clone()),
+            Some("rename-dst-test".to_string())
+        );
+        assert_eq!(
+            app.world().get::<Name>(space).map(|n| n.to_string()),
+            Some("Rename Dst Test".to_string())
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::space::SpaceId>(tab)
+                .map(|s| s.0.clone()),
+            Some("rename-dst-test".to_string())
+        );
+        assert_eq!(
+            app.world()
+                .resource::<vmux_layout::space::ActiveSpaceId>()
+                .0
+                .as_deref(),
+            Some("rename-dst-test")
         );
     }
 }

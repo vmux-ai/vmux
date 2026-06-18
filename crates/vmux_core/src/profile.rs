@@ -60,6 +60,20 @@ pub fn space_dir(space_id: &str) -> PathBuf {
     dir
 }
 
+pub fn rename_space_dir(old_id: &str, new_id: &str) {
+    if old_id == new_id {
+        return;
+    }
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"));
+    let old = space_dir_path(&home, old_id);
+    let new = space_dir_path(&home, new_id);
+    if old.exists() && !new.exists() {
+        let _ = std::fs::rename(&old, &new);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
