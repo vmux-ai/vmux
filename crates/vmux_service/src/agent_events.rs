@@ -13,3 +13,10 @@ pub struct AgentQueryRequest {
     pub request_id: AgentRequestId,
     pub query: AgentQuery,
 }
+
+#[derive(Message)]
+pub struct AgentToolCallRequest {
+    pub request_id: AgentRequestId,
+    pub name: String,
+    pub args_json: String,
+}

@@ -31,7 +31,7 @@ use crate::AgentVariant;
 use crate::client::cli::claude::ClaudeStrategy;
 use crate::client::cli::codex::CodexStrategy;
 use crate::client::cli::vibe::VibeStrategy;
-use crate::events::{AgentCommandRequest, AgentQueryRequest};
+use crate::events::{AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest};
 use crate::session::{
     self, AgentSession, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
     PendingAgentSession, SessionId, agent_session_dirty_run_condition,
@@ -93,6 +93,7 @@ impl Plugin for AgentPlugin {
             .init_resource::<AgentSessionDirty>()
             .add_message::<AgentCommandRequest>()
             .add_message::<AgentQueryRequest>()
+            .add_message::<AgentToolCallRequest>()
             .add_message::<AgentSessionExited>()
             .add_message::<SpawnAgentInStackRequest>()
             .add_message::<PageAgentAttachRequest>()
@@ -139,6 +140,7 @@ impl Plugin for AgentPlugin {
                 Update,
                 (
                     forward_history_open_intent,
+                    handle_agent_tool_calls,
                     handle_agent_commands,
                     handle_agent_self_commands,
                     handle_agent_queries,
@@ -271,6 +273,41 @@ pub struct AgentLookups<'w> {
 struct AgentSpaceWriters<'w> {
     layout_apply: MessageWriter<'w, vmux_layout::reconcile::LayoutApplyRequest>,
     space_command: MessageWriter<'w, vmux_space::SpaceCommandRequest>,
+}
+
+fn handle_agent_tool_calls(
+    mut reader: MessageReader<AgentToolCallRequest>,
+    mut command_writer: MessageWriter<AgentCommandRequest>,
+    mut query_writer: MessageWriter<AgentQueryRequest>,
+    service: Option<Res<ServiceClient>>,
+) {
+    for req in reader.read() {
+        let args: serde_json::Value =
+            serde_json::from_str(&req.args_json).unwrap_or_else(|_| serde_json::json!({}));
+        match vmux_mcp::tools::dispatch_from_tool_call(&req.name, args) {
+            Ok(vmux_mcp::tools::DispatchTarget::Command(command)) => {
+                command_writer.write(AgentCommandRequest {
+                    request_id: req.request_id,
+                    command,
+                });
+            }
+            Ok(vmux_mcp::tools::DispatchTarget::Query(query)) => {
+                query_writer.write(AgentQueryRequest {
+                    request_id: req.request_id,
+                    query,
+                });
+            }
+            Err(message) => {
+                if let Some(service) = service.as_ref() {
+                    service.0.send(ClientMessage::AgentToolResult {
+                        request_id: req.request_id,
+                        content: message,
+                        is_error: true,
+                    });
+                }
+            }
+        }
+    }
 }
 
 fn handle_agent_commands(

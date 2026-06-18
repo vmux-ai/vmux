@@ -154,6 +154,31 @@ fn drain_pending_wakes(wake_rx: &mut mpsc::UnboundedReceiver<ProcessId>) {
     }
 }
 
+fn command_result_to_content(result: crate::protocol::AgentCommandResult) -> (String, bool) {
+    use crate::protocol::AgentCommandResult;
+    match result {
+        AgentCommandResult::Ok => ("ok".to_string(), false),
+        AgentCommandResult::Text(text) => (text, false),
+        AgentCommandResult::Layout(snapshot) => {
+            (serde_json::to_string(&snapshot).unwrap_or_default(), false)
+        }
+        AgentCommandResult::Error(message) => (message, true),
+    }
+}
+
+fn query_result_to_content(result: crate::protocol::AgentQueryResult) -> (String, bool) {
+    use crate::protocol::AgentQueryResult;
+    match result {
+        AgentQueryResult::Layout(snapshot) => {
+            (serde_json::to_string(&snapshot).unwrap_or_default(), false)
+        }
+        AgentQueryResult::Text(text) => (text, false),
+        AgentQueryResult::Settings(json) => (json, false),
+        AgentQueryResult::Spaces(json) => (json, false),
+        AgentQueryResult::Error(message) => (message, true),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn handle_client(
     stream: tokio::net::UnixStream,
@@ -546,14 +571,22 @@ async fn handle_client(
             }
 
             ClientMessage::AgentQueryResponse { request_id, result } => {
-                if let Some(tx) = pending_queries.lock().await.remove(&request_id) {
+                let pending = pending_queries.lock().await.remove(&request_id);
+                if let Some(tx) = pending {
                     let _ = tx.send(result);
+                } else {
+                    let (content, is_error) = query_result_to_content(result);
+                    broker.resolve_tool(request_id, content, is_error).await;
                 }
             }
 
             ClientMessage::AgentCommandResponse { request_id, result } => {
-                if let Some(tx) = pending_commands.lock().await.remove(&request_id) {
+                let pending = pending_commands.lock().await.remove(&request_id);
+                if let Some(tx) = pending {
                     let _ = tx.send(result);
+                } else {
+                    let (content, is_error) = command_result_to_content(result);
+                    broker.resolve_tool(request_id, content, is_error).await;
                 }
             }
 
