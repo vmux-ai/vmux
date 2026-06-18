@@ -44,6 +44,7 @@ impl Plugin for BackgroundLifecyclePlugin {
         app.add_message::<LifecycleEvent>()
             .add_systems(Update, handle_lifecycle_events)
             .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
+            .add_systems(Update, activate_app_during_boot)
             .add_systems(Update, keep_awake_while_revealing)
             .add_systems(
                 Update,
@@ -110,6 +111,92 @@ pub(crate) fn activate_native_window(window_entity: Entity) {
         window.makeKeyAndOrderFront(None);
     });
 }
+
+/// Re-assert app activation + window key status, returning `true` once it has taken effect.
+///
+/// `activateIgnoringOtherApps` is asynchronous: the app does not report active until a later
+/// runloop tick, so a single one-shot at reveal does not stick — the window shows but the app
+/// stays in the background, and keystrokes (including menu key-equivalents) go nowhere until a
+/// click activates the app. Callers retry this each frame until it returns `true`.
+#[cfg(target_os = "macos")]
+pub(crate) fn ensure_native_window_active(window_entity: Entity) -> bool {
+    use bevy::winit::WINIT_WINDOWS;
+    use objc2_app_kit::{NSApp, NSView};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return false;
+    };
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
+        let Some(winit_window) = winit_windows.get_window(window_entity) else {
+            return false;
+        };
+        let Ok(handle) = winit_window.window_handle() else {
+            return false;
+        };
+        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+            return false;
+        };
+        let view: &NSView = unsafe { &*appkit.ns_view.as_ptr().cast::<NSView>() };
+        let Some(window) = view.window() else {
+            return false;
+        };
+        let app = NSApp(mtm);
+        if app.isActive() && window.isKeyWindow() {
+            return true;
+        }
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(true);
+        window.makeKeyAndOrderFront(None);
+        false
+    })
+}
+
+/// Stop re-asserting boot activation after this long, so a degenerate case cannot wake the loop
+/// forever.
+#[cfg(target_os = "macos")]
+const APP_ACTIVATION_BUDGET: Duration = Duration::from_secs(10);
+
+/// Bring the app to the foreground (app level only — no window). Returns `true` once active.
+#[cfg(target_os = "macos")]
+fn activate_app() -> bool {
+    use objc2_app_kit::NSApp;
+
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return false;
+    };
+    let app = NSApp(mtm);
+    if app.isActive() {
+        return true;
+    }
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+    false
+}
+
+/// When launched from a terminal, the launching app stays frontmost and macOS takes ~1-2s to honor
+/// our activation request. Start asking the moment boot begins so that latency overlaps the splash
+/// wait — by the time the window reveals the app is already active and becoming key is instant,
+/// instead of the user watching the UI for a second before keys register.
+#[cfg(target_os = "macos")]
+fn activate_app_during_boot(
+    mut confirmed: Local<bool>,
+    mut started_at: Local<Option<Instant>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+) {
+    if *confirmed {
+        return;
+    }
+    let started = *started_at.get_or_insert_with(Instant::now);
+    if activate_app() || started.elapsed() >= APP_ACTIVATION_BUDGET {
+        *confirmed = true;
+    } else if let Some(proxy) = proxy {
+        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn activate_app_during_boot() {}
 
 #[cfg(target_os = "macos")]
 fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
@@ -562,6 +649,25 @@ mod tests {
             .unwrap_or_default();
 
         assert!(source.contains("if !window.visible"));
+    }
+
+    #[test]
+    fn app_activation_starts_during_boot() {
+        let source = include_str!("background_lifecycle.rs");
+        let plugin_build = source
+            .split("impl Plugin for BackgroundLifecyclePlugin")
+            .nth(1)
+            .and_then(|tail| tail.split("#[cfg(target_os = \"macos\")]").next())
+            .unwrap_or_default();
+        assert!(plugin_build.contains("activate_app_during_boot"));
+
+        let boot = source
+            .split("fn activate_app_during_boot")
+            .nth(1)
+            .and_then(|tail| tail.split("#[cfg(not(target_os = \"macos\"))]").next())
+            .unwrap_or_default();
+        assert!(boot.contains("APP_ACTIVATION_BUDGET"));
+        assert!(boot.contains("WinitUserEvent::WakeUp"));
     }
 
     #[test]

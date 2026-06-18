@@ -1,6 +1,12 @@
+use std::time::{Duration, Instant};
+
 use bevy::prelude::*;
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::scene::InteractionMode;
+
+/// How long to keep re-asserting activation after reveal before giving up, so a degenerate case
+/// (activation never confirms) cannot wake the loop forever.
+const ACTIVATION_RETRY_BUDGET: Duration = Duration::from_secs(3);
 
 pub(crate) struct GlassPlugin;
 
@@ -19,6 +25,7 @@ impl Plugin for GlassPlugin {
                 Last,
                 (
                     reveal_window_after_layout_ready,
+                    ensure_window_active_after_reveal,
                     sync_layout_overlay,
                     sync_command_bar_overlay,
                 )
@@ -32,6 +39,8 @@ struct GlassState {
     installed: bool,
     visible: bool,
     revealed: bool,
+    revealed_at: Option<Instant>,
+    active_confirmed: bool,
     _glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
     _backdrop_window: Option<objc2::rc::Retained<objc2_app_kit::NSPanel>>,
     _parent_window: Option<objc2::rc::Retained<objc2_app_kit::NSWindow>>,
@@ -135,12 +144,48 @@ fn reveal_window_after_layout_ready(
     if state.revealed || !state.installed || !status.reveal_ready {
         return;
     }
-    let Ok((entity, mut window)) = window.single_mut() else {
+    let Ok((_, mut window)) = window.single_mut() else {
         return;
     };
     window.visible = true;
     state.revealed = true;
-    crate::background_lifecycle::activate_native_window(entity);
+    state.revealed_at = Some(Instant::now());
+}
+
+fn should_attempt_activation(
+    revealed: bool,
+    active_confirmed: bool,
+    elapsed_since_reveal: Option<Duration>,
+) -> bool {
+    if !revealed || active_confirmed {
+        return false;
+    }
+    match elapsed_since_reveal {
+        Some(elapsed) => elapsed < ACTIVATION_RETRY_BUDGET,
+        None => true,
+    }
+}
+
+/// The reveal frame shows the window, but the app is still in the background (the splash is a
+/// nonactivating panel). Activation is async, so retry it each frame until the app is active and
+/// the window is key, waking the loop in between so the retry actually runs.
+fn ensure_window_active_after_reveal(
+    mut state: NonSendMut<GlassState>,
+    window: Query<Entity, With<bevy::window::PrimaryWindow>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+) {
+    let elapsed = state.revealed_at.map(|at| at.elapsed());
+    if !should_attempt_activation(state.revealed, state.active_confirmed, elapsed) {
+        return;
+    }
+    let Ok(entity) = window.single() else {
+        return;
+    };
+    if crate::background_lifecycle::ensure_native_window_active(entity) {
+        state.active_confirmed = true;
+    } else if let Some(proxy) = proxy {
+        let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
+    }
 }
 
 fn glass_backdrop_visible(mode: InteractionMode) -> bool {
@@ -603,5 +648,64 @@ mod tests {
             .single(app.world())
             .expect("primary window");
         assert!(window.visible);
+    }
+
+    #[test]
+    fn no_activation_before_reveal() {
+        assert!(!should_attempt_activation(false, false, None));
+    }
+
+    #[test]
+    fn activates_immediately_after_reveal() {
+        assert!(should_attempt_activation(true, false, None));
+        assert!(should_attempt_activation(true, false, Some(Duration::ZERO)));
+    }
+
+    #[test]
+    fn stops_once_confirmed() {
+        assert!(!should_attempt_activation(
+            true,
+            true,
+            Some(Duration::from_millis(10))
+        ));
+    }
+
+    #[test]
+    fn retries_within_budget_then_gives_up() {
+        assert!(should_attempt_activation(
+            true,
+            false,
+            Some(ACTIVATION_RETRY_BUDGET - Duration::from_millis(1))
+        ));
+        assert!(!should_attempt_activation(
+            true,
+            false,
+            Some(ACTIVATION_RETRY_BUDGET)
+        ));
+    }
+
+    #[test]
+    fn reveal_does_not_activate_inline() {
+        let source = include_str!("glass.rs");
+        let reveal = source
+            .split("fn reveal_window_after_layout_ready")
+            .nth(1)
+            .and_then(|tail| tail.split("fn should_attempt_activation").next())
+            .unwrap_or_default();
+
+        assert!(!reveal.contains("activate_native_window"));
+        assert!(reveal.contains("state.revealed_at = Some(Instant::now())"));
+    }
+
+    #[test]
+    fn activation_retry_system_is_registered() {
+        let source = include_str!("glass.rs");
+        let build = source
+            .split("fn build(&self, app: &mut App)")
+            .nth(1)
+            .and_then(|tail| tail.split("#[derive(Default)]").next())
+            .unwrap_or_default();
+
+        assert!(build.contains("ensure_window_active_after_reveal"));
     }
 }
