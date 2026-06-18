@@ -9,9 +9,15 @@ impl Plugin for SpacePlugin {
             .register_type::<SpaceId>()
             .register_type::<ActiveSpaceTag>()
             .init_resource::<ActiveSpaceEntity>()
+            .init_resource::<ActiveSpaceId>()
             .add_systems(
                 Update,
-                (ensure_active_space_tagged, sync_active_space_entity).chain(),
+                (
+                    ensure_active_space_tagged,
+                    sync_active_space_entity,
+                    sync_active_space_id,
+                )
+                    .chain(),
             );
     }
 }
@@ -37,6 +43,9 @@ pub struct ActiveSpaceTag;
 #[derive(Resource, Default, Debug, PartialEq, Eq)]
 pub struct ActiveSpaceEntity(pub Option<Entity>);
 
+#[derive(Resource, Default, Debug, PartialEq, Eq)]
+pub struct ActiveSpaceId(pub Option<String>);
+
 pub fn sync_active_space_entity(
     tagged: Query<Entity, With<ActiveSpaceTag>>,
     mut active: ResMut<ActiveSpaceEntity>,
@@ -57,6 +66,20 @@ pub fn ensure_active_space_tagged(
     }
     if let Some(entity) = spaces.iter().next() {
         commands.entity(entity).insert(ActiveSpaceTag);
+    }
+}
+
+pub fn sync_active_space_id(
+    active: Res<ActiveSpaceEntity>,
+    ids: Query<&SpaceId>,
+    mut active_id: ResMut<ActiveSpaceId>,
+) {
+    let current = active
+        .0
+        .and_then(|entity| ids.get(entity).ok())
+        .map(|id| id.0.clone());
+    if active_id.0 != current {
+        active_id.0 = current;
     }
 }
 
@@ -101,6 +124,24 @@ mod tests {
         app.update();
         assert!(app.world().entity(space).contains::<ActiveSpaceTag>());
         assert_eq!(app.world().resource::<ActiveSpaceEntity>().0, Some(space));
+    }
+
+    #[test]
+    fn active_space_id_tracks_active_entity() {
+        let mut app = App::new();
+        app.init_resource::<ActiveSpaceEntity>()
+            .init_resource::<ActiveSpaceId>()
+            .add_systems(
+                Update,
+                (sync_active_space_entity, sync_active_space_id).chain(),
+            );
+        app.world_mut()
+            .spawn((Space, SpaceId("work".to_string()), ActiveSpaceTag));
+        app.update();
+        assert_eq!(
+            app.world().resource::<ActiveSpaceId>().0.as_deref(),
+            Some("work")
+        );
     }
 
     #[test]
