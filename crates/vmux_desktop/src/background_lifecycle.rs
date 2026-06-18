@@ -54,6 +54,7 @@ impl Plugin for BackgroundLifecyclePlugin {
                 Startup,
                 (
                     install_native_mouse_wake_monitor,
+                    install_live_resize_monitor,
                     activate_primary_window_on_startup,
                 ),
             );
@@ -65,6 +66,10 @@ static NATIVE_MOUSE_WAKE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static LAST_NATIVE_MOUSE_WAKE: LazyLock<Mutex<Option<Instant>>> =
     LazyLock::new(|| Mutex::new(None));
+#[cfg(target_os = "macos")]
+static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "macos")]
 fn activate_primary_window_on_startup(
@@ -277,6 +282,58 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
 #[cfg(not(target_os = "macos"))]
 fn install_native_mouse_wake_monitor() {}
 
+/// Track macOS live-resize so [`foreground_winit_settings`] can pace the loop at ~60Hz during the
+/// drag. `NSWindow` posts these notifications once per drag; the blocks set [`IN_LIVE_RESIZE`] and
+/// wake the loop so the reactive mode switches immediately.
+#[cfg(target_os = "macos")]
+fn install_live_resize_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
+    use objc2_app_kit::{
+        NSWindowDidEndLiveResizeNotification, NSWindowWillStartLiveResizeNotification,
+    };
+    use objc2_foundation::{NSNotification, NSNotificationCenter};
+
+    if LIVE_RESIZE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
+        return;
+    }
+    let Some(proxy) = proxy else {
+        return;
+    };
+    let (start_name, end_name) = unsafe {
+        (
+            NSWindowWillStartLiveResizeNotification,
+            NSWindowDidEndLiveResizeNotification,
+        )
+    };
+    let center = NSNotificationCenter::defaultCenter();
+    let start_proxy = (**proxy).clone();
+    let start_block = block2::RcBlock::new(move |_n: NonNull<NSNotification>| {
+        IN_LIVE_RESIZE.store(true, Ordering::Relaxed);
+        let _ = start_proxy.send_event(WinitUserEvent::WakeUp);
+    });
+    let end_proxy = (**proxy).clone();
+    let end_block = block2::RcBlock::new(move |_n: NonNull<NSNotification>| {
+        IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
+        let _ = end_proxy.send_event(WinitUserEvent::WakeUp);
+    });
+    let start_token = unsafe {
+        center.addObserverForName_object_queue_usingBlock(
+            Some(start_name),
+            None,
+            None,
+            &start_block,
+        )
+    };
+    let end_token = unsafe {
+        center.addObserverForName_object_queue_usingBlock(Some(end_name), None, None, &end_block)
+    };
+    std::mem::forget(start_token);
+    std::mem::forget(end_token);
+    LIVE_RESIZE_MONITOR_INSTALLED.store(true, Ordering::Relaxed);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_live_resize_monitor() {}
+
 #[cfg(target_os = "macos")]
 fn event_location_in_window_physical_px(event: &objc2_app_kit::NSEvent) -> Option<(f32, f32)> {
     let mtm = objc2::MainThreadMarker::new()?;
@@ -294,19 +351,31 @@ fn event_location_in_window_physical_px(event: &objc2_app_kit::NSEvent) -> Optio
 }
 
 /// `react_to_device_events` is off in browse (User) mode: native CEF views own scroll/input, so only
-/// Player mode's free camera consumes `AccumulatedMouseMotion`. `react_to_window_events` is on in
-/// both modes so the layout chrome mesh + camera track a live window resize (`Resized` fires during
-/// the macOS resize loop; the native mouse monitor never sees edge-drag events). The cost is that
-/// `CursorMoved` also wakes Bevy while the mouse moves — to be gated to live-resize only as a
-/// follow-up. The native NSEvent monitors still wake the loop for clicks/keys/pane-crossing hover.
-pub(crate) fn foreground_winit_settings(player: bool) -> WinitSettings {
-    WinitSettings {
-        focused_mode: UpdateMode::Reactive {
+/// Player mode's free camera consumes `AccumulatedMouseMotion`.
+///
+/// At rest `react_to_window_events` is on so the layout chrome mesh + camera respond to window events
+/// (sizing, focus). During a live resize it flips off and `wait` drops to ~16ms: the loop is paced by
+/// the timer at ~60Hz instead of rendering on every 120Hz `Resized`, capping the resize CPU spike.
+/// `Resized` still updates the `Window` on delivery, so the timer reads the latest size each tick and
+/// the chrome tracks the drag. `live_resize` is driven by [`install_live_resize_monitor`].
+pub(crate) fn foreground_winit_settings(player: bool, live_resize: bool) -> WinitSettings {
+    let focused_mode = if live_resize {
+        UpdateMode::Reactive {
+            wait: Duration::from_millis(16),
+            react_to_device_events: player,
+            react_to_user_events: true,
+            react_to_window_events: false,
+        }
+    } else {
+        UpdateMode::Reactive {
             wait: FOCUSED_FRAME_INTERVAL,
             react_to_device_events: player,
             react_to_user_events: true,
             react_to_window_events: true,
-        },
+        }
+    };
+    WinitSettings {
+        focused_mode,
         unfocused_mode: UpdateMode::reactive_low_power(UNFOCUSED_FRAME_INTERVAL),
     }
 }
@@ -328,10 +397,14 @@ fn sync_winit_power_mode(
     let all_hidden = windows.iter().all(|w| !w.visible);
     let any_visible = windows.iter().any(|w| w.visible);
     let any_focused = windows.iter().any(|w| w.visible && w.focused);
+    #[cfg(target_os = "macos")]
+    let live_resize = IN_LIVE_RESIZE.load(Ordering::Relaxed);
+    #[cfg(not(target_os = "macos"))]
+    let live_resize = false;
     let next = if all_hidden {
         hidden_winit_settings()
     } else {
-        foreground_winit_settings(*mode == InteractionMode::Player)
+        foreground_winit_settings(*mode == InteractionMode::Player, live_resize)
     };
     if settings.focused_mode != next.focused_mode || settings.unfocused_mode != next.unfocused_mode
     {
@@ -541,7 +614,7 @@ mod tests {
 
     #[test]
     fn foreground_power_mode_is_reactive_when_focused() {
-        let settings = foreground_winit_settings(false);
+        let settings = foreground_winit_settings(false, false);
 
         let UpdateMode::Reactive {
             wait,
@@ -561,12 +634,25 @@ mod tests {
             settings.unfocused_mode,
             UpdateMode::reactive_low_power(Duration::from_secs(1))
         );
-        // Window-event wakes are on so the layout chrome mesh + camera track a live window resize
-        // (`Resized` fires during the macOS resize loop; the native mouse monitor never sees
-        // edge-drag events). Device-event wakes stay off in browse mode.
+        // At rest, window-event wakes are on so the chrome mesh + camera respond to window events;
+        // device-event wakes stay off in browse mode.
         assert!(!react_to_device_events);
         assert!(react_to_window_events);
-        let player = foreground_winit_settings(true);
+
+        // During a live resize, the loop is paced by a ~16ms timer (window-event reaction off) to cap
+        // the render rate to ~60Hz instead of the 120Hz display refresh.
+        let UpdateMode::Reactive {
+            wait: resize_wait,
+            react_to_window_events: resize_window,
+            ..
+        } = foreground_winit_settings(false, true).focused_mode
+        else {
+            panic!("focused mode must be Reactive");
+        };
+        assert_eq!(resize_wait, Duration::from_millis(16));
+        assert!(!resize_window);
+
+        let player = foreground_winit_settings(true, false);
         let UpdateMode::Reactive {
             react_to_device_events: player_device,
             react_to_window_events: player_window,
