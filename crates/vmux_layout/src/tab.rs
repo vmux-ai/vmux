@@ -75,6 +75,7 @@ fn handle_tab_commands(
     mut reader: MessageReader<AppCommand>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     tab_q: Query<Entity, With<Tab>>,
+    tab_space: Query<&crate::space::SpaceId>,
     main_q: Query<Entity, With<MainNode>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
@@ -115,7 +116,8 @@ fn handle_tab_commands(
             AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) => match tab_cmd {
                 TabCommand::Close => {
                     let Some(active) = active_tab else { continue };
-                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
+                    let siblings =
+                        active_tab_siblings(active, &child_of_q, &all_children, &tab_q, &tab_space);
                     if siblings.len() <= 1 {
                         let Ok(main) = main_q.single() else { continue };
                         layout_requests.write(TabLayoutSpawnRequest {
@@ -133,7 +135,8 @@ fn handle_tab_commands(
                 }
                 TabCommand::Next | TabCommand::Previous => {
                     let Some(active) = active_tab else { continue };
-                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
+                    let siblings =
+                        active_tab_siblings(active, &child_of_q, &all_children, &tab_q, &tab_space);
                     if siblings.len() <= 1 {
                         continue;
                     }
@@ -161,7 +164,8 @@ fn handle_tab_commands(
                 | TabCommand::SelectIndex8
                 | TabCommand::SelectLast => {
                     let Some(active) = active_tab else { continue };
-                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
+                    let siblings =
+                        active_tab_siblings(active, &child_of_q, &all_children, &tab_q, &tab_space);
                     if siblings.is_empty() {
                         continue;
                     }
@@ -224,6 +228,7 @@ pub fn active_tab_siblings(
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
     tab_q: &Query<Entity, With<Tab>>,
+    tab_space: &Query<&crate::space::SpaceId>,
 ) -> Vec<Entity> {
     let Ok(co) = child_of_q.get(active) else {
         return vec![active];
@@ -232,9 +237,11 @@ pub fn active_tab_siblings(
     let Ok(children) = all_children.get(parent) else {
         return vec![active];
     };
+    let active_space = tab_space.get(active).ok();
     children
         .iter()
         .filter(|e| tab_q.contains(*e))
+        .filter(|e| crate::space::same_space(tab_space.get(*e).ok(), active_space))
         .collect::<Vec<_>>()
 }
 
@@ -279,15 +286,21 @@ fn sync_tab_visibility(
 fn sync_tab_order(
     main_children: Query<&Children, (With<MainNode>, Changed<Children>)>,
     tab_q: Query<(), With<Tab>>,
+    tab_space: Query<&crate::space::SpaceId>,
     mut order_q: Query<&mut Order>,
     mut commands: Commands,
 ) {
     for children in &main_children {
-        let mut idx = 0u32;
+        let mut counters: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         for child in children.iter() {
             if !tab_q.contains(child) {
                 continue;
             }
+            let key = tab_space
+                .get(child)
+                .map(|space| space.0.clone())
+                .unwrap_or_default();
+            let idx = *counters.get(&key).unwrap_or(&0);
             match order_q.get_mut(child) {
                 Ok(mut order) => {
                     if order.0 != idx {
@@ -298,7 +311,7 @@ fn sync_tab_order(
                     commands.entity(child).insert(Order(idx));
                 }
             }
-            idx += 1;
+            counters.insert(key, idx + 1);
         }
     }
 }
@@ -307,6 +320,7 @@ fn on_tabs_command_emit(
     trigger: On<BinReceive<TabsCommandEvent>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     tab_q: Query<Entity, With<Tab>>,
+    tab_space: Query<&crate::space::SpaceId>,
     main_q: Query<Entity, With<MainNode>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
@@ -329,7 +343,8 @@ fn on_tabs_command_emit(
             let target = tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
                 .or(active_tab);
             let Some(target) = target else { return };
-            let siblings = active_tab_siblings(target, &child_of_q, &all_children, &tab_q);
+            let siblings =
+                active_tab_siblings(target, &child_of_q, &all_children, &tab_q, &tab_space);
             if siblings.len() <= 1 {
                 let Ok(main) = main_q.single() else { return };
                 layout_requests.write(TabLayoutSpawnRequest {
@@ -385,6 +400,53 @@ mod tests {
         let id = target.to_bits().to_string();
 
         assert_eq!(tab_target(Some(&id), [other, target]), Some(target));
+    }
+
+    #[test]
+    fn active_tab_siblings_scopes_to_space() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let main = app.world_mut().spawn(MainNode).id();
+        let a1 = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                crate::space::SpaceId("a".into()),
+                ChildOf(main),
+            ))
+            .id();
+        let a2 = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                crate::space::SpaceId("a".into()),
+                ChildOf(main),
+            ))
+            .id();
+        let b1 = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                crate::space::SpaceId("b".into()),
+                ChildOf(main),
+            ))
+            .id();
+        let siblings = app
+            .world_mut()
+            .run_system_once(
+                move |child_of_q: Query<&ChildOf>,
+                      all_children: Query<&Children>,
+                      tab_q: Query<Entity, With<Tab>>,
+                      tab_space: Query<&crate::space::SpaceId>| {
+                    active_tab_siblings(a1, &child_of_q, &all_children, &tab_q, &tab_space)
+                },
+            )
+            .unwrap();
+        assert_eq!(siblings.len(), 2);
+        assert!(siblings.contains(&a1));
+        assert!(siblings.contains(&a2));
+        assert!(!siblings.contains(&b1));
     }
 
     #[test]

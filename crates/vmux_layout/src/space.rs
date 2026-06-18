@@ -97,6 +97,13 @@ pub fn assign_orphan_tabs_to_active_space(
     }
 }
 
+pub fn same_space(candidate: Option<&SpaceId>, active: Option<&SpaceId>) -> bool {
+    match (candidate, active) {
+        (Some(candidate), Some(active)) => candidate == active,
+        _ => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
