@@ -332,12 +332,15 @@ pub fn serve_snapshot_requests(
     zoomed_q: Query<&crate::pane::Zoomed>,
     focused: Res<crate::stack::FocusedStack>,
     process_ids: Query<(&vmux_core::ProcessId, &ChildOf)>,
+    tab_space_q: Query<&crate::space::SpaceId>,
+    active_id: Option<Res<crate::space::ActiveSpaceId>>,
     mut writer: MessageWriter<LayoutSnapshotResponse>,
 ) {
     let pid_by_stack: HashMap<u64, String> = process_ids
         .iter()
         .map(|(pid, co)| (co.get().to_bits(), pid.to_string()))
         .collect();
+    let active_space = active_id.as_deref().and_then(|id| id.0.clone());
     for request in reader.read() {
         let self_stack = request.anchor.and_then(|anchor| {
             process_ids
@@ -355,6 +358,20 @@ pub fn serve_snapshot_requests(
             &focused,
             self_stack,
         );
+        if let Some(active) = active_space.as_deref() {
+            snapshot.tabs.retain(|tab| {
+                tab.id
+                    .as_deref()
+                    .and_then(|id| crate::protocol::parse_id(id).ok())
+                    .map(|(_, bits)| {
+                        tab_space_q
+                            .get(Entity::from_bits(bits))
+                            .map(|sid| sid.0 == active)
+                            .unwrap_or(true)
+                    })
+                    .unwrap_or(true)
+            });
+        }
         for tab in &mut snapshot.tabs {
             fill_process_ids(&mut tab.root, &pid_by_stack);
         }
@@ -630,23 +647,50 @@ fn apply_close(world: &mut World, id: &str) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn active_space_id(world: &World) -> Option<String> {
+    world
+        .get_resource::<crate::space::ActiveSpaceId>()
+        .and_then(|active| active.0.clone())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn collect_ids_recursive(world: &World, entity: Entity, out: &mut ApplyHashSet<String>) {
+    let Ok(entity_ref) = world.get_entity(entity) else {
+        return;
+    };
+    if entity_ref.contains::<LayoutTab>() {
+        out.insert(format_id(NodeKind::Tab, entity.to_bits()));
+    } else if entity_ref.contains::<PaneSplit>() {
+        out.insert(format_id(NodeKind::Split, entity.to_bits()));
+    } else if entity_ref.contains::<Pane>() {
+        out.insert(format_id(NodeKind::Pane, entity.to_bits()));
+    } else if entity_ref.contains::<Stack>() {
+        out.insert(format_id(NodeKind::Stack, entity.to_bits()));
+    }
+    if let Some(children) = entity_ref.get::<Children>() {
+        let kids: Vec<Entity> = children.iter().collect();
+        for child in kids {
+            collect_ids_recursive(world, child, out);
+        }
+    }
+}
+
+/// Existing ids the reconcile diff may add/remove. Scoped to the active space's
+/// tab subtrees so `update_layout` can never despawn another space's content.
+/// When there is no active space, all tabs are included (global behavior).
+#[cfg(not(target_arch = "wasm32"))]
 fn collect_existing_ids(world: &mut World) -> ApplyHashSet<String> {
+    let active = active_space_id(world);
+    let mut tab_q =
+        world.query_filtered::<(Entity, Option<&crate::space::SpaceId>), With<LayoutTab>>();
+    let tabs: Vec<Entity> = tab_q
+        .iter(world)
+        .filter(|(_, sid)| crate::space::in_active_space(*sid, active.as_deref()))
+        .map(|(entity, _)| entity)
+        .collect();
     let mut out = ApplyHashSet::new();
-    let mut q_tab = world.query_filtered::<Entity, With<LayoutTab>>();
-    for e in q_tab.iter(world) {
-        out.insert(format_id(NodeKind::Tab, e.to_bits()));
-    }
-    let mut q_split = world.query_filtered::<Entity, (With<Pane>, With<PaneSplit>)>();
-    for e in q_split.iter(world) {
-        out.insert(format_id(NodeKind::Split, e.to_bits()));
-    }
-    let mut q_pane = world.query_filtered::<Entity, (With<Pane>, Without<PaneSplit>)>();
-    for e in q_pane.iter(world) {
-        out.insert(format_id(NodeKind::Pane, e.to_bits()));
-    }
-    let mut q_tab = world.query_filtered::<Entity, With<Stack>>();
-    for e in q_tab.iter(world) {
-        out.insert(format_id(NodeKind::Stack, e.to_bits()));
+    for tab in tabs {
+        collect_ids_recursive(world, tab, &mut out);
     }
     out
 }
@@ -812,6 +856,27 @@ fn node_entity(node: &proto::LayoutNode) -> Option<Entity> {
 mod tests {
     use super::*;
     use crate::protocol::{SplitDirection, Tab as TabDto};
+
+    #[test]
+    fn collect_existing_ids_scoped_to_active_space() {
+        let mut world = World::new();
+        world.insert_resource(crate::space::ActiveSpaceId(Some("a".to_string())));
+        let tab_a = world
+            .spawn((
+                crate::tab::Tab::default(),
+                crate::space::SpaceId("a".to_string()),
+            ))
+            .id();
+        let tab_b = world
+            .spawn((
+                crate::tab::Tab::default(),
+                crate::space::SpaceId("b".to_string()),
+            ))
+            .id();
+        let ids = collect_existing_ids(&mut world);
+        assert!(ids.contains(&format_id(NodeKind::Tab, tab_a.to_bits())));
+        assert!(!ids.contains(&format_id(NodeKind::Tab, tab_b.to_bits())));
+    }
 
     fn pane(id: Option<&str>, stacks: Vec<StackDto>) -> LayoutNode {
         LayoutNode::Pane {

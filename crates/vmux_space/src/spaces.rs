@@ -1,93 +1,25 @@
-use std::path::{Path, PathBuf};
-
 use bevy::{picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
-use vmux_core::profile;
 use vmux_layout::cef::Browser;
 
-use crate::event::{SPACES_PAGE_URL, SpaceRow};
-use crate::model::{
-    SpaceRecord, SpaceRegistry, bootstrap_space_record, registry_path, space_layout_path_for,
-};
+use crate::event::SPACES_PAGE_URL;
+use crate::model::SpaceRecord;
 
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, Default)]
 pub struct ActiveSpace {
     pub record: SpaceRecord,
-}
-
-impl Default for ActiveSpace {
-    fn default() -> Self {
-        let registry = read_space_registry_from(&profile::shared_data_dir());
-        let record = registry
-            .spaces
-            .first()
-            .cloned()
-            .unwrap_or_else(bootstrap_space_record);
-        Self { record }
-    }
-}
-
-impl ActiveSpace {
-    pub fn layout_path(&self) -> PathBuf {
-        space_layout_path_for(
-            &profile::shared_data_dir(),
-            &self.record.id,
-            &self.record.profile,
-        )
-    }
-}
-
-pub fn read_space_registry_from(root: &Path) -> SpaceRegistry {
-    let mut registry = std::fs::read_to_string(registry_path(root))
-        .ok()
-        .and_then(|body| ron::de::from_str::<SpaceRegistry>(&body).ok())
-        .unwrap_or_default();
-    if registry.spaces.is_empty() {
-        registry.spaces.push(bootstrap_space_record());
-    }
-    registry
 }
 
 pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
     (
         vmux_layout::space::Space,
+        vmux_layout::space::SpaceId(record.id.clone()),
         vmux_layout::profile::Profile {
             name: record.profile.clone(),
         },
         Name::new(record.name.clone()),
     )
-}
-
-pub fn registry_space_summaries() -> Vec<(String, String, String)> {
-    let registry = read_space_registry_from(&profile::shared_data_dir());
-    registry
-        .spaces
-        .into_iter()
-        .map(|space| (space.id, space.name, space.profile))
-        .collect()
-}
-
-pub fn active_space_rows(active: &ActiveSpace, active_stack_count: usize) -> Vec<SpaceRow> {
-    let registry = read_space_registry_from(&profile::shared_data_dir());
-    registry
-        .spaces
-        .into_iter()
-        .map(|space| {
-            let is_active = space.id == active.record.id;
-            SpaceRow {
-                id: space.id.clone(),
-                name: space.name.clone(),
-                profile: space.profile.clone(),
-                is_active,
-                tab_count: if is_active {
-                    active_stack_count as u32
-                } else {
-                    0
-                },
-            }
-        })
-        .collect()
 }
 
 #[derive(Component)]
@@ -138,20 +70,25 @@ impl Spaces {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{BOOTSTRAP_PROFILE_NAME, BOOTSTRAP_SPACE_NAME, bootstrap_space_record};
+    use crate::model::{
+        BOOTSTRAP_PROFILE_NAME, BOOTSTRAP_SPACE_ID, BOOTSTRAP_SPACE_NAME, bootstrap_space_record,
+    };
 
     #[test]
-    fn space_profile_bundle_spawns_space_name_and_profile_name() {
+    fn space_profile_bundle_spawns_space_name_profile_and_id() {
         let mut app = App::new();
         app.world_mut()
             .spawn(space_profile_bundle(&bootstrap_space_record()));
 
-        let mut query = app
-            .world_mut()
-            .query_filtered::<(&Name, &vmux_layout::profile::Profile), With<vmux_layout::space::Space>>();
-        let (name, profile) = query.single(app.world()).unwrap();
+        let mut query = app.world_mut().query_filtered::<(
+            &Name,
+            &vmux_layout::profile::Profile,
+            &vmux_layout::space::SpaceId,
+        ), With<vmux_layout::space::Space>>();
+        let (name, profile, space_id) = query.single(app.world()).unwrap();
 
         assert_eq!(name.as_str(), BOOTSTRAP_SPACE_NAME);
         assert_eq!(profile.name, BOOTSTRAP_PROFILE_NAME);
+        assert_eq!(space_id.0, BOOTSTRAP_SPACE_ID);
     }
 }

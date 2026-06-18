@@ -681,7 +681,15 @@ fn handle_agent_queries(
     mut reader: MessageReader<AgentQueryRequest>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
-    active_space: Option<Res<ActiveSpace>>,
+    spaces: Query<
+        (
+            &vmux_layout::space::SpaceId,
+            &Name,
+            Has<vmux_layout::space::ActiveSpaceTag>,
+            Option<&vmux_core::Order>,
+        ),
+        With<vmux_layout::space::Space>,
+    >,
     mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
 ) {
     let Some(service) = service else { return };
@@ -703,22 +711,22 @@ fn handle_agent_queries(
                 });
             }
             AgentQuery::ListSpaces => {
-                let registry = vmux_space::spaces::read_space_registry_from(
-                    &vmux_core::profile::shared_data_dir(),
-                );
-                let active_id = active_space.as_ref().map(|a| a.record.id.clone());
-                let rows: Vec<serde_json::Value> = registry
-                    .spaces
+                let mut rows: Vec<(u32, serde_json::Value)> = spaces
                     .iter()
-                    .map(|space| {
-                        serde_json::json!({
-                            "id": space.id,
-                            "name": space.name,
-                            "profile": space.profile,
-                            "is_active": active_id.as_deref() == Some(space.id.as_str()),
-                        })
+                    .map(|(id, name, is_active, order)| {
+                        (
+                            order.map(|o| o.0).unwrap_or(u32::MAX),
+                            serde_json::json!({
+                                "id": id.0,
+                                "name": name.to_string(),
+                                "profile": vmux_space::model::BOOTSTRAP_PROFILE_NAME,
+                                "is_active": is_active,
+                            }),
+                        )
                     })
                     .collect();
+                rows.sort_by_key(|(order, _)| *order);
+                let rows: Vec<serde_json::Value> = rows.into_iter().map(|(_, row)| row).collect();
                 let json = serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string());
                 service.0.send(ClientMessage::AgentQueryResponse {
                     request_id: request.request_id,

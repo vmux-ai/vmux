@@ -2204,6 +2204,7 @@ fn push_tabs_host_emit(
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     tabs: Query<(Entity, &Tab, &LastActivatedAt)>,
     tab_q: Query<Entity, With<Tab>>,
+    tab_space: Query<&vmux_layout::space::SpaceId>,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -2222,8 +2223,14 @@ fn push_tabs_host_emit(
 
     let active_tab = tabs.iter().max_by_key(|(_, _, ts)| ts.0).map(|t| t.0);
 
-    let ordered = if let Some(any) = tabs.iter().next() {
-        vmux_layout::tab::active_tab_siblings(any.0, &child_of_q, &all_children, &tab_q)
+    let ordered = if let Some(anchor) = active_tab {
+        vmux_layout::tab::active_tab_siblings(
+            anchor,
+            &child_of_q,
+            &all_children,
+            &tab_q,
+            &tab_space,
+        )
     } else {
         Vec::new()
     };
