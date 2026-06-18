@@ -10,7 +10,7 @@ use vmux_core::{CreatedAt, Order, PageMetadata};
 use vmux_layout::event::SERVICES_PAGE_URL;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
-use vmux_layout::space::Space;
+use vmux_layout::space::{ActiveSpaceTag, Space, SpaceId};
 use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
@@ -94,8 +94,8 @@ struct AutoSave {
     dirty: bool,
 }
 
-pub(crate) fn space_path(active: &ActiveSpace) -> PathBuf {
-    active.layout_path()
+pub(crate) fn store_path() -> PathBuf {
+    vmux_core::profile::shared_data_dir().join("store.ron")
 }
 
 fn mark_dirty_on_change(
@@ -123,24 +123,19 @@ fn mark_dirty_on_change(
     }
 }
 
-fn auto_save_system(
-    time: Res<Time>,
-    mut auto_save: ResMut<AutoSave>,
-    active: Res<ActiveSpace>,
-    mut commands: Commands,
-) {
+fn auto_save_system(time: Res<Time>, mut auto_save: ResMut<AutoSave>, mut commands: Commands) {
     auto_save.periodic.tick(time.delta());
 
     if auto_save.dirty {
         auto_save.debounce.tick(time.delta());
         if auto_save.debounce.is_finished() {
-            save_space_to_path(&mut commands, space_path(&active));
+            save_space_to_path(&mut commands, store_path());
             auto_save.dirty = false;
         }
     }
 
     if auto_save.periodic.just_finished() {
-        save_space_to_path(&mut commands, space_path(&active));
+        save_space_to_path(&mut commands, store_path());
     }
 }
 
@@ -163,6 +158,8 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<PaneSplit>()
         .allow::<PaneSize>()
         .allow::<Space>()
+        .allow::<SpaceId>()
+        .allow::<ActiveSpaceTag>()
         .allow::<Profile>()
         .allow::<Open>()
         .allow::<PageMetadata>()
@@ -185,7 +182,7 @@ pub(crate) fn load_space_on_startup(
     mut restore: ResMut<crate::boot_status::RestoreComplete>,
     mut commands: Commands,
 ) {
-    let path = space_path(&active);
+    let path = store_path();
     let removed_stale = remove_stale_space_if_needed(&path);
     let exists = path.exists() && !removed_stale;
     commands.insert_resource(SpaceFilePresent(exists));
@@ -205,12 +202,8 @@ fn remove_stale_space_if_needed(path: &Path) -> bool {
     if !space_is_stale(&body) {
         return false;
     }
-    warn!("Removing stale space from {:?}", path);
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::remove_dir_all(dir);
-    } else {
-        let _ = std::fs::remove_file(path);
-    }
+    warn!("Removing stale store from {:?}", path);
+    let _ = std::fs::remove_file(path);
     true
 }
 
@@ -906,6 +899,6 @@ mod tests {
 
         assert!(remove_stale_space_if_needed(&path));
         assert!(!path.exists());
-        assert!(!space_dir.exists());
+        assert!(space_dir.exists());
     }
 }
