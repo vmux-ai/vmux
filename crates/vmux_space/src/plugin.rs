@@ -41,6 +41,7 @@ impl Plugin for SpacePlugin {
             .add_systems(Update, relay_space_command_requests)
             .add_systems(Update, sync_active_space_record)
             .add_systems(Update, sync_space_name_to_id)
+            .add_systems(Update, prune_orphan_space_dirs)
             .add_systems(
                 Startup,
                 update_effective_startup_url
@@ -322,6 +323,25 @@ fn sync_space_name_to_id(
             *name = Name::new(id.0.clone());
         }
     }
+}
+
+fn prune_orphan_space_dirs(
+    spaces: Query<&vmux_layout::space::SpaceId, With<vmux_layout::space::Space>>,
+    changed: Query<
+        (),
+        (
+            With<vmux_layout::space::Space>,
+            Changed<vmux_layout::space::SpaceId>,
+        ),
+    >,
+    mut removed: RemovedComponents<vmux_layout::space::Space>,
+) {
+    let any_removed = removed.read().count() > 0;
+    if changed.is_empty() && !any_removed {
+        return;
+    }
+    let live: std::collections::HashSet<String> = spaces.iter().map(|id| id.0.clone()).collect();
+    profile::prune_orphan_space_dirs(&live);
 }
 
 #[allow(clippy::too_many_arguments)]
