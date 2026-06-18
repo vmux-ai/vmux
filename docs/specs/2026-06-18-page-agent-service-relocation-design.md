@@ -114,11 +114,15 @@ Bevy-free — see §"Current architecture"): `message`, `stream`, `http`,
 (`mcp_tool_defs`). `vmux_service` gains their deps (`reqwest`, `crossbeam-channel`,
 `futures-util`); these are already `vmux_agent` deps.
 
-Move tool *resolution* (`DispatchTarget` + `dispatch_from_tool_call`) from
-`vmux_mcp` into `vmux_service`: it only wraps `vmux_service::protocol`
-(`AgentCommand`/`AgentQuery`), so it belongs at the protocol layer. `vmux_mcp`
-re-exports both so its sidecar path (`run_agent_command`/`run_agent_query`) is
-unchanged.
+Tool *resolution* (`DispatchTarget` + `dispatch_from_tool_call`) **stays in
+`vmux_mcp`** — it is entangled with the MCP tool registry (`McpParamTool`,
+`vmux_macro`, `vmux_command`) and moving it would drag that subtree into the
+daemon. Instead the service treats a tool call as opaque: `run_session` forwards
+the raw `{ name, args_json }` to the desktop over a round-trip; the desktop (which
+has `vmux_mcp` + the ECS) resolves via `dispatch_from_tool_call` and applies it,
+returning the result. This reuses the existing desktop apply path. The tool
+*schema* the model sees (`mcp_tool_defs` — self-contained static data) moves down
+with the provider modules so the relocated `build_request` can include it.
 
 `vmux_agent` stays a desktop/Bevy crate (no feature-gating). In Phase B it repoints
 its imports to the new `vmux_service` locations and keeps running its ECS loop;
@@ -173,11 +177,8 @@ run_session(sid, session, mut input_rx, broker, stream_tx, registry):
           emit AwaitingApproval(sid, tool); 
           match input_rx.recv().await { Approve(deny) => push ToolResult(denied); continue
                                         Approve(allow) => {} ; Close => return }
-        let target = dispatch_from_tool_call(tool.name, tool.args)?
-        let result = match target {                     # AgentCommand/Query round-trip
-          Command(c) => broker.command(new_id(), c).await,
-          Query(q)   => broker.query(new_id(), q).await,
-        }
+        # forward the raw tool call to the desktop, which resolves + applies it
+        let result = broker.tool_call(new_id(), tool.name, tool.args_json).await
         messages.push(ToolResult(result)); 
         emit MessagesSnapshot(sid); continue            # loop back to provider
       else:
@@ -217,16 +218,18 @@ impl AgentBroker {
     // Err(message) -> ServiceMessage::Error; Ok(result) -> the success result.
     async fn command(&self, id: AgentRequestId, c: AgentCommand) -> Result<AgentCommandResult, String>;
     async fn query(&self, id: AgentRequestId, q: AgentQuery) -> Result<AgentQueryResult, String>;
+    // Phase B3: forward an opaque tool call; desktop resolves (vmux_mcp) + applies.
+    async fn tool_call(&self, id: AgentRequestId, name: String, args_json: String) -> Result<ToolResult, String>;
 }
 ```
 
-Both the external-MCP-client handler and the internal `run_session` loop call the
-same broker; the internal loop maps a `DispatchTarget` to `command`/`query`.
-`ReadTerminal` is **not** in the broker — it stays answered locally in `server.rs`
-(it needs the `ProcessManager`). No new desktop-side application path: the desktop
-keeps applying `AgentCommand`s exactly as today. The broker uses the singleton
-`agent_tx` control broadcast; this is unrelated to the per-session *stream*
-forwarders in §5.
+`command`/`query` exist today (Phase A). `tool_call` is added in B3 with its own
+`pending_tool_calls` map + `ServiceMessage::AgentToolCall` / `ClientMessage::
+AgentToolResult` round-trip, mirroring `command`. The external-MCP handler still
+uses `command`/`query`; the internal `run_session` uses `tool_call` (it has no
+`vmux_mcp`, so it cannot resolve locally). `ReadTerminal` stays answered locally in
+`server.rs`. The broker uses the singleton `agent_tx` control broadcast; this is
+unrelated to the per-session *stream* forwarders in §5.
 
 ### 5. Protocol additions (`vmux_service::protocol`)
 
@@ -238,6 +241,8 @@ forwarders in §5.
 - `ClosePageAgent { sid }`
 - `AttachPageAgent { sid }` / `DetachPageAgent { sid }`  (mirror `AttachProcess` /
   `DetachProcess`: attach starts a per-session forwarder, detach stops it)
+- `AgentToolResult { request_id, content, is_error }`  (desktop's resolved +
+  applied tool result, returned to the session loop via the broker)
 
 `ServiceMessage` (service -> desktop):
 
@@ -247,6 +252,9 @@ forwarders in §5.
 - `AgentAwaitingApproval { sid, call_id, name, args_json }`
 - `AgentMessagesSnapshot { sid, messages }`
 - `AgentToast { sid, ... }`
+- `AgentToolCall { request_id, name, args_json }`  (raw tool call to the desktop to
+  resolve via `vmux_mcp` + apply; rides the singleton `agent_tx` control broadcast,
+  not the per-session stream)
 
 All new types derive the existing rkyv + serde framing used by the protocol.
 Message/AssistantBlock cross the boundary by serializing the pure
@@ -292,21 +300,23 @@ suite green; clippy + fmt clean.
 
 **Phase B — relocate compute into the service + add the session runtime.** Three
 sub-PRs:
-- **B1:** move `DispatchTarget` + `dispatch_from_tool_call` from `vmux_mcp` into
-  `vmux_service`; `vmux_mcp` re-exports them. Verify: `vmux_mcp`, `vmux_agent`,
-  `vmux_service` build + test green.
-- **B2:** move `message`/`stream`/`http`/`providers`/`tools` from `vmux_agent` into
-  `vmux_service` (gaining `reqwest`/`crossbeam`/`futures-util` deps); repoint
-  `vmux_agent` imports to the new locations — its ECS loop still runs. Verify: all
-  three crates build + test green.
-- **B3:** add the new `ClientMessage`/`ServiceMessage` variants (§5, rkyv/serde
-  roundtrip tests); add `vmux_service::agent` with `run_session`, the provider
-  registry, and the `AgentSessionManager` (per-session broadcast + forwarder,
-  mirroring `AttachProcess`); wire `SpawnPageAgent` / `AttachPageAgent` /
-  `AgentInput` / `AgentApprove` / `ClosePageAgent`. Not yet consumed by desktop.
-  Verify: `run_session` unit tests with a mock provider (canned SSE fixture) and a
-  mock broker covering the full loop (delta -> tool -> result -> continue -> idle),
-  approval allow/deny, missing-API-key, provider error.
+- **B1:** move the self-contained provider modules — `message`, `stream`, `http`
+  (relocating the `ParseSse` fn-pointer alias out of ECS `strategy_components` into
+  `stream`), `providers/*`, and `tools` (`mcp_tool_defs`) — from `vmux_agent` into
+  `vmux_service` (which gains `reqwest`/`crossbeam-channel`/`futures-util`). Repoint
+  `vmux_agent` imports to the new `vmux_service` paths; its ECS loop still runs.
+  Tool *resolution* stays in `vmux_mcp` (untouched). Verify: `vmux_agent`,
+  `vmux_service`, `vmux_mcp` build + test green; no new dependency cycle.
+- **B2:** add the new `ClientMessage`/`ServiceMessage` variants (§5, rkyv/serde
+  roundtrip tests), including the `AgentToolCall`/`AgentToolResult` round-trip and
+  `AgentBroker::tool_call`; add `vmux_service::agent` with `run_session`, the
+  provider registry, and the `AgentSessionManager` (per-session broadcast +
+  forwarder, mirroring `AttachProcess`); wire `SpawnPageAgent` / `AttachPageAgent` /
+  `AgentInput` / `AgentApprove` / `ClosePageAgent`; add the desktop handler that
+  resolves + applies an `AgentToolCall` via `vmux_mcp`. Not yet consumed by the
+  desktop chat UI. Verify: `run_session` unit tests with a mock provider (canned SSE
+  fixture) + mock broker covering the full loop (delta -> tool -> result -> continue
+  -> idle), approval allow/deny, missing-API-key, provider error.
 
 **Phase C — Desktop cutover.**
 Switch the desktop to send-down + stream-consume + webview re-emit; delete the
@@ -326,8 +336,8 @@ Monitor that turn CPU lands on `vmux_service`, not `vmux`.
   plain text turn, single tool turn, multi-tool agentic loop, approval-deny,
   missing-API-key error, provider error.
 - **Layering:** after the moves, `vmux_service` still has no dependency on
-  `vmux_mcp`/`vmux_agent` (no cycle); `vmux_mcp`'s re-exports keep its callers
-  compiling unchanged.
+  `vmux_mcp`/`vmux_agent` (no cycle); `vmux_mcp` is untouched (tool resolution stays
+  there); `vmux_agent` compiles against the relocated `vmux_service` modules.
 - **End to end (manual, Phase C):** real provider turn with a tool call; Activity
   Monitor attribution check.
 
