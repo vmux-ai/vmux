@@ -844,15 +844,10 @@ fn sync_windowed_content_mesh_materials(
 /// overlay. Keeping the entity visible (only the material transparent) leaves OSR running. Alpha
 /// mode stays `Blend` so Player keeps its transparency (pages show through the layout).
 fn sync_layout_mesh_visibility(
-    mode: Res<vmux_layout::scene::InteractionMode>,
     layout_q: Query<&MeshMaterial3d<WebviewExtendStandardMaterial>, With<LayoutCef>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
-    let want_alpha = if *mode == vmux_layout::scene::InteractionMode::User {
-        0.0
-    } else {
-        1.0
-    };
+    let want_alpha = 1.0;
     for mat_handle in &layout_q {
         let Some(mut material) = materials.get_mut(mat_handle.id()) else {
             continue;
@@ -878,9 +873,7 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
     )>();
     let entities: Vec<(Entity, bool, bool)> = query.iter(world).collect();
     let target_windowed = |_entity: Entity, is_layout: bool| base_windowed && !is_layout;
-    let target_native_overlay = |is_layout: bool| {
-        cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User && is_layout
-    };
+    let target_native_overlay = |_is_layout: bool| false;
     let mut recreate = Vec::new();
     {
         let browsers = world.non_send::<Browsers>();

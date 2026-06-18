@@ -309,7 +309,7 @@ pub(crate) fn foreground_winit_settings(player: bool) -> WinitSettings {
             wait: FOCUSED_FRAME_INTERVAL,
             react_to_device_events: player,
             react_to_user_events: true,
-            react_to_window_events: player,
+            react_to_window_events: true,
         },
         unfocused_mode: UpdateMode::reactive_low_power(UNFOCUSED_FRAME_INTERVAL),
     }
