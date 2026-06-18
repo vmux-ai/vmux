@@ -544,6 +544,14 @@ async fn handle_client(
                     let _ = tx.send(result);
                 }
             }
+
+            ClientMessage::SpawnPageAgent { .. }
+            | ClientMessage::AttachPageAgent { .. }
+            | ClientMessage::DetachPageAgent { .. }
+            | ClientMessage::AgentInput { .. }
+            | ClientMessage::AgentApprove { .. }
+            | ClientMessage::ClosePageAgent { .. }
+            | ClientMessage::AgentToolResult { .. } => {}
         }
     }
 

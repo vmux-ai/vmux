@@ -4,8 +4,8 @@ pub fn mcp_tool_defs() -> Vec<ToolDef> {
     vmux_mcp::tools::tool_definitions()
         .into_iter()
         .map(|d| ToolDef {
-            name: Box::leak(d.name.into_boxed_str()),
-            description: Box::leak(d.description.into_boxed_str()),
+            name: d.name,
+            description: d.description,
             input_schema: d.input_schema,
             read_only: false,
         })

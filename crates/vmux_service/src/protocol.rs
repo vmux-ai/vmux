@@ -135,6 +135,19 @@ pub enum AgentQueryResult {
     Error(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum ApprovalDecision {
+    Allow,
+    Deny,
+}
+
+#[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AgentRunStatus {
+    Streaming,
+    Idle,
+    Errored(String),
+}
+
 pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str> {
     match command {
         AgentCommand::AppCommand { id, .. } if id.trim().is_empty() => {
@@ -260,6 +273,37 @@ pub enum ClientMessage {
     AgentCommandResponse {
         request_id: AgentRequestId,
         result: AgentCommandResult,
+    },
+    SpawnPageAgent {
+        sid: String,
+        provider: String,
+        model: String,
+        cwd: String,
+        auto_tools: Vec<String>,
+        tools_json: String,
+    },
+    AttachPageAgent {
+        sid: String,
+    },
+    DetachPageAgent {
+        sid: String,
+    },
+    AgentInput {
+        sid: String,
+        text: String,
+    },
+    AgentApprove {
+        sid: String,
+        call_id: String,
+        decision: ApprovalDecision,
+    },
+    ClosePageAgent {
+        sid: String,
+    },
+    AgentToolResult {
+        request_id: AgentRequestId,
+        content: String,
+        is_error: bool,
     },
     Status,
 }
@@ -417,6 +461,30 @@ pub enum ServiceMessage {
     AgentCommandResult {
         request_id: AgentRequestId,
         result: AgentCommandResult,
+    },
+    AgentDelta {
+        sid: String,
+        text: String,
+    },
+    AgentRunStatusChanged {
+        sid: String,
+        status: AgentRunStatus,
+    },
+    AgentAwaitingApproval {
+        sid: String,
+        call_id: String,
+        name: String,
+        args_json: String,
+    },
+    AgentToolCall {
+        request_id: AgentRequestId,
+        sid: String,
+        name: String,
+        args_json: String,
+    },
+    AgentMessagesSnapshot {
+        sid: String,
+        messages_json: String,
     },
     StatusResponse {
         uptime_secs: u64,
@@ -725,5 +793,78 @@ mod tests {
             value_json: "1".to_string(),
         };
         assert!(validate_agent_command(&cmd).is_err());
+    }
+
+    #[test]
+    fn page_agent_client_messages_roundtrip() {
+        let messages = [
+            ClientMessage::SpawnPageAgent {
+                sid: "s".into(),
+                provider: "anthropic".into(),
+                model: "m".into(),
+                cwd: "/tmp".into(),
+                auto_tools: vec!["list_spaces".into()],
+                tools_json: "[]".into(),
+            },
+            ClientMessage::AttachPageAgent { sid: "s".into() },
+            ClientMessage::DetachPageAgent { sid: "s".into() },
+            ClientMessage::AgentInput {
+                sid: "s".into(),
+                text: "hi".into(),
+            },
+            ClientMessage::AgentApprove {
+                sid: "s".into(),
+                call_id: "c".into(),
+                decision: ApprovalDecision::Allow,
+            },
+            ClientMessage::ClosePageAgent { sid: "s".into() },
+            ClientMessage::AgentToolResult {
+                request_id: AgentRequestId::new(),
+                content: "ok".into(),
+                is_error: false,
+            },
+        ];
+        for msg in messages {
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
+            rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        }
+    }
+
+    #[test]
+    fn page_agent_service_messages_roundtrip() {
+        let messages = [
+            ServiceMessage::AgentDelta {
+                sid: "s".into(),
+                text: "hello".into(),
+            },
+            ServiceMessage::AgentRunStatusChanged {
+                sid: "s".into(),
+                status: AgentRunStatus::Streaming,
+            },
+            ServiceMessage::AgentRunStatusChanged {
+                sid: "s".into(),
+                status: AgentRunStatus::Errored("boom".into()),
+            },
+            ServiceMessage::AgentAwaitingApproval {
+                sid: "s".into(),
+                call_id: "c".into(),
+                name: "n".into(),
+                args_json: "{}".into(),
+            },
+            ServiceMessage::AgentToolCall {
+                request_id: AgentRequestId::new(),
+                sid: "s".into(),
+                name: "n".into(),
+                args_json: "{}".into(),
+            },
+            ServiceMessage::AgentMessagesSnapshot {
+                sid: "s".into(),
+                messages_json: "[]".into(),
+            },
+        ];
+        for msg in messages {
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
+            rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        }
     }
 }
