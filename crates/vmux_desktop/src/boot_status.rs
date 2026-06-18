@@ -1,8 +1,33 @@
+use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_core::page::PageReady;
 use vmux_layout::SpaceFilePresent;
 use vmux_layout::cef::LayoutCef;
+use vmux_layout::space::{ActiveSpaceId, SpaceId};
 use vmux_layout::stack::Stack;
+
+/// Walk up from a stack to its owning tab's `SpaceId`; `true` if it belongs to
+/// the active space (or there is no active space / no space ancestor).
+fn stack_in_active_space(
+    stack: Entity,
+    child_of_q: &Query<&ChildOf>,
+    tab_space_q: &Query<&SpaceId>,
+    active: Option<&str>,
+) -> bool {
+    let Some(active) = active else {
+        return true;
+    };
+    let mut entity = stack;
+    loop {
+        if let Ok(sid) = tab_space_q.get(entity) {
+            return sid.0 == active;
+        }
+        match child_of_q.get(entity) {
+            Ok(child_of) => entity = child_of.get(),
+            Err(_) => return true,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootPhase {
@@ -77,14 +102,21 @@ pub fn compute_boot_status(
     space_present: Res<SpaceFilePresent>,
     restore: Res<RestoreComplete>,
     layout_q: Query<(), (With<LayoutCef>, With<PageReady>)>,
-    stacks_q: Query<Option<&Children>, With<Stack>>,
+    stacks_q: Query<(Entity, Option<&Children>), With<Stack>>,
     ready_q: Query<(), With<PageReady>>,
+    child_of_q: Query<&ChildOf>,
+    tab_space_q: Query<&SpaceId>,
+    active_id: Option<Res<ActiveSpaceId>>,
 ) {
+    let active_space = active_id.as_deref().and_then(|id| id.0.as_deref());
     let layout_ready = !layout_q.is_empty();
 
     let mut total_pages = 0usize;
     let mut ready_pages = 0usize;
-    for children in &stacks_q {
+    for (stack, children) in &stacks_q {
+        if !stack_in_active_space(stack, &child_of_q, &tab_space_q, active_space) {
+            continue;
+        }
         if let Some(c) = children.filter(|c| !c.is_empty()) {
             total_pages += 1;
             if c.iter().any(|e| ready_q.contains(e)) {
