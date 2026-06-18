@@ -1,14 +1,8 @@
-use std::time::{Duration, Instant};
-
 use bevy::prelude::*;
 use vmux_core::page::PageReady;
 use vmux_layout::SpaceFilePresent;
 use vmux_layout::cef::LayoutCef;
-use vmux_layout::stack::{FocusedStack, Stack};
-
-/// How long to wait for the active page after the layout page is ready before
-/// revealing the window anyway, so a slow/hanging page cannot stall startup.
-pub const ACTIVE_PAGE_BUDGET: Duration = Duration::from_secs(8);
+use vmux_layout::stack::Stack;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootPhase {
@@ -57,17 +51,10 @@ pub struct BootInputs {
     pub layout_ready: bool,
     pub total_pages: usize,
     pub ready_pages: usize,
-    pub active_page_ready: bool,
-    pub has_active_page: bool,
-    pub elapsed_since_layout: Option<Duration>,
 }
 
 pub fn compute(i: BootInputs) -> (BootPhase, bool) {
-    let budget_expired = i
-        .elapsed_since_layout
-        .is_some_and(|e| e >= ACTIVE_PAGE_BUDGET);
-    let reveal_ready =
-        i.layout_ready && (i.active_page_ready || !i.has_active_page || budget_expired);
+    let reveal_ready = i.layout_ready;
 
     let phase = if i.layout_ready && i.total_pages > 0 {
         BootPhase::LoadingPages {
@@ -92,42 +79,19 @@ pub fn compute_boot_status(
     layout_q: Query<(), (With<LayoutCef>, With<PageReady>)>,
     stacks_q: Query<Option<&Children>, With<Stack>>,
     ready_q: Query<(), With<PageReady>>,
-    focused: Res<FocusedStack>,
-    mut layout_ready_at: Local<Option<Instant>>,
 ) {
     let layout_ready = !layout_q.is_empty();
-    if layout_ready && layout_ready_at.is_none() {
-        *layout_ready_at = Some(Instant::now());
-    }
-    let elapsed_since_layout = layout_ready_at.map(|t| t.elapsed());
-
-    // (is_content_stack, has_a_ready_page)
-    let inspect = |children: Option<&Children>| -> (bool, bool) {
-        match children {
-            Some(c) if !c.is_empty() => (true, c.iter().any(|e| ready_q.contains(e))),
-            _ => (false, false),
-        }
-    };
 
     let mut total_pages = 0usize;
     let mut ready_pages = 0usize;
     for children in &stacks_q {
-        let (is_content, ready) = inspect(children);
-        if is_content {
+        if let Some(c) = children.filter(|c| !c.is_empty()) {
             total_pages += 1;
-            if ready {
+            if c.iter().any(|e| ready_q.contains(e)) {
                 ready_pages += 1;
             }
         }
     }
-
-    let (has_active_page, active_page_ready) = match focused.stack {
-        Some(stack) => match stacks_q.get(stack) {
-            Ok(children) => inspect(children),
-            Err(_) => (false, false),
-        },
-        None => (false, false),
-    };
 
     let (phase, reveal_ready) = compute(BootInputs {
         space_present: space_present.0,
@@ -135,9 +99,6 @@ pub fn compute_boot_status(
         layout_ready,
         total_pages,
         ready_pages,
-        active_page_ready,
-        has_active_page,
-        elapsed_since_layout,
     });
 
     if status.phase != phase {
@@ -158,9 +119,6 @@ mod tests {
             layout_ready: false,
             total_pages: 0,
             ready_pages: 0,
-            active_page_ready: false,
-            has_active_page: false,
-            elapsed_since_layout: None,
         }
     }
 
@@ -214,52 +172,26 @@ mod tests {
     fn not_revealed_until_layout_ready() {
         let (_, reveal) = compute(BootInputs {
             layout_ready: false,
-            has_active_page: true,
-            active_page_ready: true,
             ..inputs()
         });
         assert!(!reveal);
     }
 
     #[test]
-    fn revealed_when_layout_and_active_page_ready() {
+    fn revealed_when_layout_ready() {
         let (_, reveal) = compute(BootInputs {
             layout_ready: true,
-            has_active_page: true,
-            active_page_ready: true,
             ..inputs()
         });
         assert!(reveal);
     }
 
     #[test]
-    fn not_revealed_while_active_page_pending() {
+    fn revealed_when_layout_ready_even_while_pages_pending() {
         let (_, reveal) = compute(BootInputs {
             layout_ready: true,
-            has_active_page: true,
-            active_page_ready: false,
-            ..inputs()
-        });
-        assert!(!reveal);
-    }
-
-    #[test]
-    fn revealed_via_budget_when_active_page_hangs() {
-        let (_, reveal) = compute(BootInputs {
-            layout_ready: true,
-            has_active_page: true,
-            active_page_ready: false,
-            elapsed_since_layout: Some(Duration::from_secs(8)),
-            ..inputs()
-        });
-        assert!(reveal);
-    }
-
-    #[test]
-    fn revealed_when_no_content_pages() {
-        let (_, reveal) = compute(BootInputs {
-            layout_ready: true,
-            has_active_page: false,
+            total_pages: 3,
+            ready_pages: 0,
             ..inputs()
         });
         assert!(reveal);
@@ -280,19 +212,17 @@ mod tests {
     }
 
     #[test]
-    fn system_reports_loading_pages_and_reveals_on_active_ready() {
+    fn system_reports_loading_pages_and_reveals_on_layout_ready() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<SplashStatus>()
             .init_resource::<RestoreComplete>()
-            .init_resource::<FocusedStack>()
             .insert_resource(SpaceFilePresent(true))
             .add_systems(Update, compute_boot_status);
 
         app.world_mut().spawn((LayoutCef, PageReady {}));
         let stack = app.world_mut().spawn(Stack::default()).id();
         app.world_mut().spawn((PageReady {}, ChildOf(stack)));
-        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
 
         app.update();
 
@@ -307,7 +237,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<SplashStatus>()
             .init_resource::<RestoreComplete>()
-            .init_resource::<FocusedStack>()
             .insert_resource(SpaceFilePresent(true))
             .add_systems(Update, compute_boot_status);
 

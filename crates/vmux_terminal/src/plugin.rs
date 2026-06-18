@@ -253,14 +253,8 @@ impl Plugin for TerminalPlugin {
                 (pid::track_pid_inserts, pid::track_pid_removals).chain(),
             );
         let service_wake = service_wake_callback(app);
-        if let Some(handle) = ServiceHandle::connect_with_wake(service_wake.clone()) {
-            tracing::info!("connected to existing service");
-            handle.send(ClientMessage::SubscribeAgentCommands);
-            app.insert_resource(ServiceClient(handle));
-        } else {
-            ensure_service_started();
-            app.insert_resource(ServiceConnectRetry::new());
-        }
+        ensure_service_started();
+        app.insert_resource(ServiceConnectRetry::new());
         app.insert_resource(ServiceWakeCallback(service_wake))
             .init_resource::<MouseSelectionState>()
             .init_resource::<TerminalModeMap>()
