@@ -653,6 +653,7 @@ fn active_space_id(world: &World) -> Option<String> {
         .and_then(|active| active.0.clone())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn collect_ids_recursive(world: &World, entity: Entity, out: &mut ApplyHashSet<String>) {
     let Ok(entity_ref) = world.get_entity(entity) else {
         return;
@@ -677,6 +678,7 @@ fn collect_ids_recursive(world: &World, entity: Entity, out: &mut ApplyHashSet<S
 /// Existing ids the reconcile diff may add/remove. Scoped to the active space's
 /// tab subtrees so `update_layout` can never despawn another space's content.
 /// When there is no active space, all tabs are included (global behavior).
+#[cfg(not(target_arch = "wasm32"))]
 fn collect_existing_ids(world: &mut World) -> ApplyHashSet<String> {
     let active = active_space_id(world);
     let mut tab_q =
