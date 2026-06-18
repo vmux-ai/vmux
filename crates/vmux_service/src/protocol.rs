@@ -110,6 +110,8 @@ pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 
 pub const AGENT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+pub const AGENT_TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentCommandResult {
     Ok,

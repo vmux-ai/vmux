@@ -60,6 +60,9 @@ pub async fn run_server(listener: UnixListener) {
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
     let pending_queries: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
     let pending_commands: PendingCommands = Arc::new(Mutex::new(HashMap::new()));
+    let pending_tool_calls: crate::agent_broker::PendingToolCalls =
+        Arc::new(Mutex::new(HashMap::new()));
+    let agent_manager = Arc::new(Mutex::new(crate::agent::AgentSessionManager::default()));
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
     init_started_at();
@@ -110,6 +113,8 @@ pub async fn run_server(listener: UnixListener) {
                 let agent_tx = agent_tx.clone();
                 let pending_queries = Arc::clone(&pending_queries);
                 let pending_commands = Arc::clone(&pending_commands);
+                let pending_tool_calls = Arc::clone(&pending_tool_calls);
+                let agent_manager = Arc::clone(&agent_manager);
                 let shutdown_tx = shutdown_tx.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_client(
@@ -119,6 +124,8 @@ pub async fn run_server(listener: UnixListener) {
                         agent_tx,
                         pending_queries,
                         pending_commands,
+                        pending_tool_calls,
+                        agent_manager,
                         shutdown_tx,
                     )
                     .await
@@ -147,6 +154,7 @@ fn drain_pending_wakes(wake_rx: &mut mpsc::UnboundedReceiver<ProcessId>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_client(
     stream: tokio::net::UnixStream,
     manager: Arc<Mutex<ProcessManager>>,
@@ -154,6 +162,8 @@ async fn handle_client(
     agent_tx: broadcast::Sender<ServiceMessage>,
     pending_queries: PendingQueries,
     pending_commands: PendingCommands,
+    pending_tool_calls: crate::agent_broker::PendingToolCalls,
+    agent_manager: Arc<Mutex<crate::agent::AgentSessionManager>>,
     shutdown_tx: mpsc::Sender<()>,
 ) -> std::io::Result<()> {
     let (reader, writer) = stream.into_split();
@@ -164,10 +174,12 @@ async fn handle_client(
     let attached: Arc<tokio::sync::Mutex<HashMap<ProcessId, tokio::task::JoinHandle<()>>>> =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let mut agent_subscription: Option<tokio::task::JoinHandle<()>> = None;
+    let mut page_agent_forwarders: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
     let broker = crate::agent_broker::AgentBroker::new(
         agent_tx.clone(),
         Arc::clone(&pending_commands),
         Arc::clone(&pending_queries),
+        Arc::clone(&pending_tool_calls),
     );
 
     loop {
@@ -545,13 +557,106 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::SpawnPageAgent { .. }
-            | ClientMessage::AttachPageAgent { .. }
-            | ClientMessage::DetachPageAgent { .. }
-            | ClientMessage::AgentInput { .. }
-            | ClientMessage::AgentApprove { .. }
-            | ClientMessage::ClosePageAgent { .. }
-            | ClientMessage::AgentToolResult { .. } => {}
+            ClientMessage::SpawnPageAgent {
+                sid,
+                provider,
+                model,
+                cwd: _,
+                auto_tools,
+                tools_json,
+            } => {
+                let tools: Vec<crate::stream::ToolDef> =
+                    serde_json::from_str(&tools_json).unwrap_or_default();
+                let auto: std::collections::HashSet<String> = auto_tools.into_iter().collect();
+                let result = agent_manager.lock().await.spawn(
+                    sid,
+                    &provider,
+                    model,
+                    tools,
+                    auto,
+                    broker.clone(),
+                );
+                if let Err(message) = result {
+                    let resp = ServiceMessage::Error { message };
+                    let mut w = writer.lock().await;
+                    write_message!(&mut *w, &resp)?;
+                }
+            }
+
+            ClientMessage::AttachPageAgent { sid } => {
+                let rx = agent_manager.lock().await.subscribe(&sid);
+                if let Some(mut rx) = rx {
+                    if let Some(snapshot) = agent_manager.lock().await.snapshot(&sid).await {
+                        let mut w = writer.lock().await;
+                        write_message!(&mut *w, &snapshot)?;
+                    }
+                    if let Some(old) = page_agent_forwarders.remove(&sid) {
+                        old.abort();
+                    }
+                    let w = writer.clone();
+                    let handle = tokio::spawn(async move {
+                        loop {
+                            match rx.recv().await {
+                                Ok(msg) => {
+                                    let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&msg) {
+                                        Ok(b) => b,
+                                        Err(_) => break,
+                                    };
+                                    let mut w = w.lock().await;
+                                    if crate::framing::write_raw_frame(&mut *w, &bytes)
+                                        .await
+                                        .is_err()
+                                    {
+                                        break;
+                                    }
+                                }
+                                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                                Err(broadcast::error::RecvError::Closed) => break,
+                            }
+                        }
+                    });
+                    page_agent_forwarders.insert(sid, handle);
+                }
+            }
+
+            ClientMessage::DetachPageAgent { sid } => {
+                if let Some(handle) = page_agent_forwarders.remove(&sid) {
+                    handle.abort();
+                }
+            }
+
+            ClientMessage::AgentInput { sid, text } => {
+                agent_manager
+                    .lock()
+                    .await
+                    .input(&sid, crate::agent::SessionInput::User(text));
+            }
+
+            ClientMessage::AgentApprove {
+                sid,
+                call_id,
+                decision,
+            } => {
+                agent_manager.lock().await.input(
+                    &sid,
+                    crate::agent::SessionInput::Approve { call_id, decision },
+                );
+            }
+
+            ClientMessage::ClosePageAgent { sid } => {
+                agent_manager.lock().await.close(&sid);
+                if let Some(handle) = page_agent_forwarders.remove(&sid) {
+                    handle.abort();
+                }
+            }
+
+            ClientMessage::AgentToolResult {
+                request_id,
+                content,
+                is_error,
+            } => {
+                broker.resolve_tool(request_id, content, is_error).await;
+            }
         }
     }
 
@@ -560,6 +665,9 @@ async fn handle_client(
         handle.abort();
     }
     if let Some(handle) = agent_subscription.take() {
+        handle.abort();
+    }
+    for (_, handle) in page_agent_forwarders.drain() {
         handle.abort();
     }
 

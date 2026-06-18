@@ -4,6 +4,8 @@ pub mod event;
 pub mod page;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod agent;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod agent_broker;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod agent_events;
