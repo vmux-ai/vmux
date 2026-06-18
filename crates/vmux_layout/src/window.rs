@@ -492,7 +492,10 @@ pub fn spawn_requested_tab_layouts(
         if let Some(name) = request.name.clone() {
             commands.entity(tab_e).insert(Tab { name });
         }
-        if let Some(space_id) = active_space_id.as_deref().and_then(|active| active.0.clone()) {
+        if let Some(space_id) = active_space_id
+            .as_deref()
+            .and_then(|active| active.0.clone())
+        {
             commands
                 .entity(tab_e)
                 .insert(crate::space::SpaceId(space_id));
