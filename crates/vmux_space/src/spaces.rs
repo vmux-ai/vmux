@@ -1,15 +1,10 @@
-use std::path::{Path, PathBuf};
-
 use bevy::{picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
-use vmux_core::profile;
 use vmux_layout::cef::Browser;
 
-use crate::event::{SPACES_PAGE_URL, SpaceRow};
-use crate::model::{
-    SpaceRecord, SpaceRegistry, bootstrap_space_record, registry_path, space_layout_path_for,
-};
+use crate::event::SPACES_PAGE_URL;
+use crate::model::{SpaceRecord, bootstrap_space_record};
 
 #[derive(Resource, Clone, Debug)]
 pub struct ActiveSpace {
@@ -18,35 +13,10 @@ pub struct ActiveSpace {
 
 impl Default for ActiveSpace {
     fn default() -> Self {
-        let registry = read_space_registry_from(&profile::shared_data_dir());
-        let record = registry
-            .spaces
-            .first()
-            .cloned()
-            .unwrap_or_else(bootstrap_space_record);
-        Self { record }
+        Self {
+            record: bootstrap_space_record(),
+        }
     }
-}
-
-impl ActiveSpace {
-    pub fn layout_path(&self) -> PathBuf {
-        space_layout_path_for(
-            &profile::shared_data_dir(),
-            &self.record.id,
-            &self.record.profile,
-        )
-    }
-}
-
-pub fn read_space_registry_from(root: &Path) -> SpaceRegistry {
-    let mut registry = std::fs::read_to_string(registry_path(root))
-        .ok()
-        .and_then(|body| ron::de::from_str::<SpaceRegistry>(&body).ok())
-        .unwrap_or_default();
-    if registry.spaces.is_empty() {
-        registry.spaces.push(bootstrap_space_record());
-    }
-    registry
 }
 
 pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
@@ -58,37 +28,6 @@ pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
         },
         Name::new(record.name.clone()),
     )
-}
-
-pub fn registry_space_summaries() -> Vec<(String, String, String)> {
-    let registry = read_space_registry_from(&profile::shared_data_dir());
-    registry
-        .spaces
-        .into_iter()
-        .map(|space| (space.id, space.name, space.profile))
-        .collect()
-}
-
-pub fn active_space_rows(active: &ActiveSpace, active_stack_count: usize) -> Vec<SpaceRow> {
-    let registry = read_space_registry_from(&profile::shared_data_dir());
-    registry
-        .spaces
-        .into_iter()
-        .map(|space| {
-            let is_active = space.id == active.record.id;
-            SpaceRow {
-                id: space.id.clone(),
-                name: space.name.clone(),
-                profile: space.profile.clone(),
-                is_active,
-                tab_count: if is_active {
-                    active_stack_count as u32
-                } else {
-                    0
-                },
-            }
-        })
-        .collect()
 }
 
 #[derive(Component)]

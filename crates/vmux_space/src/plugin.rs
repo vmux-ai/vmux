@@ -1,8 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use bevy::{ecs::message::MessageReader, prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
-use moonshine_save::prelude::TriggerLoad;
 use vmux_core::page::PageReady;
 use vmux_core::profile;
 use vmux_core::{
@@ -15,11 +14,7 @@ use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 use crate::event::{
     SPACES_LIST_EVENT, SPACES_PAGE_URL, SpaceCommandEvent, SpaceRow, SpacesListEvent,
 };
-use crate::model::{
-    SpaceRecord, SpaceRegistry, bootstrap_space_record, registry_path, space_layout_path_for,
-    unique_space_id,
-};
-use crate::spaces::{ActiveSpace, Spaces, read_space_registry_from, space_profile_bundle};
+use crate::spaces::{ActiveSpace, Spaces};
 
 #[derive(Message, Clone)]
 pub struct SaveSpaceRequest {
@@ -44,7 +39,7 @@ impl Plugin for SpacePlugin {
             .add_message::<SaveSpaceRequest>()
             .add_message::<SpaceCommandRequest>()
             .add_systems(Update, relay_space_command_requests)
-            .add_systems(Startup, ensure_space_registry)
+            .add_systems(Update, sync_active_space_record)
             .add_systems(
                 Startup,
                 update_effective_startup_url
@@ -68,10 +63,7 @@ impl Plugin for SpacePlugin {
                 Update,
                 handle_open_in_new_space.in_set(vmux_command::ReadAppCommands),
             )
-            .add_systems(
-                Update,
-                (apply_pending_space_switch, broadcast_spaces_to_views).chain(),
-            )
+            .add_systems(Update, broadcast_spaces_to_views)
             .add_systems(
                 Update,
                 crate::snapshot_updater::update_spaces_snapshot
@@ -145,83 +137,57 @@ fn reset_spaces_sent_marker_on_page_ready(
     commands.entity(entity).remove::<SpacesListSent>();
 }
 
-fn write_space_registry_to(root: &Path, registry: &SpaceRegistry) {
-    let path = registry_path(root);
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Ok(body) = ron::ser::to_string_pretty(registry, ron::ser::PrettyConfig::default()) {
-        let _ = std::fs::write(path, body);
-    }
-}
-
-fn ensure_space_registry() {
-    let root = profile::shared_data_dir();
-    let path = registry_path(&root);
-    if path.exists() {
-        return;
-    }
-    write_space_registry_to(&root, &read_space_registry_from(&root));
-}
-
-fn rename_space_record(registry: &mut SpaceRegistry, id: &str, name: &str) -> bool {
-    if let Some(space) = registry.spaces.iter_mut().find(|space| space.id == id) {
-        space.name = name.to_string();
-        true
-    } else {
-        false
+fn sync_active_space_record(
+    tagged: Query<(&vmux_layout::space::SpaceId, &Name), With<vmux_layout::space::ActiveSpaceTag>>,
+    mut active: ResMut<ActiveSpace>,
+) {
+    if let Some((id, name)) = tagged.iter().next()
+        && (active.record.id != id.0 || active.record.name != name.as_str())
+    {
+        active.record.id = id.0.clone();
+        active.record.name = name.to_string();
     }
 }
 
-fn delete_space_record(registry: &mut SpaceRegistry, id: &str) -> Option<SpaceRecord> {
-    if registry.spaces.len() <= 1 {
-        return None;
-    }
-    let idx = registry.spaces.iter().position(|space| space.id == id)?;
-    Some(registry.spaces.remove(idx))
-}
+type SpaceListQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static vmux_layout::space::SpaceId,
+        &'static Name,
+        Has<vmux_layout::space::ActiveSpaceTag>,
+        Option<&'static vmux_core::Order>,
+    ),
+    With<vmux_layout::space::Space>,
+>;
 
-fn delete_space_layout(root: &Path, record: &SpaceRecord) {
-    let path = space_layout_path_for(root, &record.id, &record.profile);
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::remove_dir_all(dir);
-    }
-}
-
-fn space_rows(
-    active: &ActiveSpace,
-    registry: &SpaceRegistry,
-    active_stack_count: usize,
+fn space_rows_from_world(
+    spaces: &SpaceListQuery,
+    tab_spaces: &Query<&vmux_layout::space::SpaceId, With<vmux_layout::tab::Tab>>,
 ) -> Vec<SpaceRow> {
-    registry
-        .spaces
+    let mut rows: Vec<(u32, SpaceRow)> = spaces
         .iter()
-        .map(|space| {
-            let is_active = space.id == active.record.id;
-            SpaceRow {
-                id: space.id.clone(),
-                name: space.name.clone(),
-                profile: space.profile.clone(),
-                is_active,
-                tab_count: if is_active {
-                    active_stack_count as u32
-                } else {
-                    0
+        .map(|(sid, name, is_active, order)| {
+            let tab_count = tab_spaces.iter().filter(|s| s.0 == sid.0).count() as u32;
+            (
+                order.map(|o| o.0).unwrap_or(u32::MAX),
+                SpaceRow {
+                    id: sid.0.clone(),
+                    name: name.to_string(),
+                    profile: crate::model::BOOTSTRAP_PROFILE_NAME.to_string(),
+                    is_active,
+                    tab_count,
                 },
-            }
+            )
         })
-        .collect()
-}
-
-#[derive(Resource)]
-struct PendingSpaceSwitch {
-    from_id: String,
-    record: SpaceRecord,
-    delay_frames: u8,
+        .collect();
+    rows.sort_by_key(|(order, _)| *order);
+    rows.into_iter().map(|(_, row)| row).collect()
 }
 
 fn broadcast_spaces_to_views(
-    active: Res<ActiveSpace>,
+    spaces: SpaceListQuery,
+    tab_spaces: Query<&vmux_layout::space::SpaceId, With<vmux_layout::tab::Tab>>,
     pending_spaces: Query<Entity, (With<Spaces>, With<PageReady>, Without<SpacesListSent>)>,
     sent_spaces: Query<Entity, (With<Spaces>, With<PageReady>, With<SpacesListSent>)>,
     pending_cef: Query<
@@ -241,7 +207,6 @@ fn broadcast_spaces_to_views(
         ),
     >,
     browsers: NonSend<Browsers>,
-    tabs: Query<(), With<Stack>>,
     mut last_body: Local<String>,
     mut commands: Commands,
 ) {
@@ -250,9 +215,8 @@ fn broadcast_spaces_to_views(
     if pending_total == 0 && sent_total == 0 {
         return;
     }
-    let registry = read_space_registry_from(&profile::shared_data_dir());
     let payload = SpacesListEvent {
-        spaces: space_rows(&active, &registry, tabs.iter().count()),
+        spaces: space_rows_from_world(&spaces, &tab_spaces),
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     let body_changed = body != *last_body;
@@ -282,59 +246,6 @@ fn broadcast_spaces_to_views(
     }
 }
 
-fn apply_pending_space_switch(
-    pending: Option<ResMut<PendingSpaceSwitch>>,
-    mut active: ResMut<ActiveSpace>,
-    space_entities: Query<
-        Entity,
-        Or<(
-            With<vmux_layout::space::Space>,
-            With<vmux_layout::tab::Tab>,
-            With<vmux_history::Visit>,
-        )>,
-    >,
-    main_q: Query<Entity, With<vmux_layout::window::Main>>,
-    primary_window: Single<Entity, With<PrimaryWindow>>,
-    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
-    mut commands: Commands,
-) {
-    let Some(mut pending) = pending else {
-        return;
-    };
-    if pending.delay_frames > 0 {
-        pending.delay_frames -= 1;
-        return;
-    }
-    let record = pending.record.clone();
-    let from_id = pending.from_id.clone();
-    commands.remove_resource::<PendingSpaceSwitch>();
-    if from_id != active.record.id {
-        return;
-    }
-    active.record = record.clone();
-    let target_path =
-        space_layout_path_for(&profile::shared_data_dir(), &record.id, &record.profile);
-    if target_path.exists() {
-        commands.trigger_load(moonshine_save::prelude::LoadWorld::default_from_file(
-            target_path,
-        ));
-    } else {
-        for entity in &space_entities {
-            commands.entity(entity).try_despawn();
-        }
-        commands.spawn(space_profile_bundle(&record));
-        let Ok(main) = main_q.single() else { return };
-        layout_requests.write(TabLayoutSpawnRequest {
-            main,
-            primary_window: *primary_window,
-            name: None,
-            content: TabLayoutSpawnContent::StartupUrlOrPrompt,
-            clear_pending_stack: false,
-            focus: true,
-        });
-    }
-}
-
 fn relay_space_command_requests(
     mut reader: MessageReader<SpaceCommandRequest>,
     mut commands: Commands,
@@ -351,30 +262,68 @@ fn relay_space_command_requests(
     }
 }
 
+type SpaceQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static vmux_layout::space::SpaceId,
+        Has<vmux_layout::space::ActiveSpaceTag>,
+        Option<&'static vmux_core::Order>,
+    ),
+    With<vmux_layout::space::Space>,
+>;
+
+type SpaceTabQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static vmux_layout::space::SpaceId,
+        &'static vmux_history::LastActivatedAt,
+    ),
+    With<vmux_layout::tab::Tab>,
+>;
+
+fn bump_space_tab(tabs: &SpaceTabQuery, space_id: &str, commands: &mut Commands) {
+    if let Some((tab, _, _)) = tabs
+        .iter()
+        .filter(|(_, sid, _)| sid.0 == space_id)
+        .max_by_key(|(_, _, ts)| ts.0)
+    {
+        commands
+            .entity(tab)
+            .insert(vmux_history::LastActivatedAt::now());
+    }
+}
+
+fn deactivate_all_spaces(spaces: &SpaceQuery, commands: &mut Commands) {
+    for (entity, _, is_active, _) in spaces.iter() {
+        if is_active {
+            commands
+                .entity(entity)
+                .remove::<vmux_layout::space::ActiveSpaceTag>();
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn on_space_command(
     trigger: On<BinReceive<SpaceCommandEvent>>,
-    mut active: ResMut<ActiveSpace>,
-    space_entities: Query<
-        Entity,
-        Or<(
-            With<vmux_layout::space::Space>,
-            With<vmux_layout::tab::Tab>,
-            With<vmux_history::Visit>,
-        )>,
-    >,
+    spaces: SpaceQuery,
+    tabs: SpaceTabQuery,
     main_q: Query<Entity, With<vmux_layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    focus: Option<ResMut<vmux_layout::stack::FocusedStack>>,
+    focus: Option<Res<vmux_layout::stack::FocusedStack>>,
     mut spawn_requests: Option<MessageWriter<PageOpenRequest>>,
-    mut save_requests: MessageWriter<SaveSpaceRequest>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
+    mut active_id: ResMut<vmux_layout::space::ActiveSpaceId>,
     stack_q: Query<(Entity, &PageMetadata), With<Stack>>,
     child_of_q: Query<&ChildOf>,
     mut commands: Commands,
 ) {
-    let root = profile::shared_data_dir();
-    let mut registry = read_space_registry_from(&root);
     let evt = &trigger.event().payload;
+
     if evt.command == "open_page" {
         if let Some((existing, _)) = stack_q.iter().find(|(_, meta)| meta.url == SPACES_PAGE_URL) {
             vmux_core::focus_pane_entity(existing, &mut commands, &child_of_q);
@@ -403,32 +352,6 @@ fn on_space_command(
         });
         return;
     }
-    if evt.command == "delete" {
-        let Some(id) = evt.space_id.as_deref() else {
-            return;
-        };
-        let Some(deleted) = delete_space_record(&mut registry, id) else {
-            return;
-        };
-        let deleted_active = deleted.id == active.record.id;
-        let target = registry
-            .spaces
-            .first()
-            .cloned()
-            .unwrap_or_else(bootstrap_space_record);
-        write_space_registry_to(&root, &registry);
-        delete_space_layout(&root, &deleted);
-        if !deleted_active {
-            return;
-        }
-        let from_id = active.record.id.clone();
-        commands.insert_resource(PendingSpaceSwitch {
-            from_id,
-            record: target,
-            delay_frames: 1,
-        });
-        return;
-    }
 
     if evt.command == "rename" {
         let Some(id) = evt.space_id.as_deref() else {
@@ -437,92 +360,112 @@ fn on_space_command(
         let Some(name) = evt.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) else {
             return;
         };
-        if rename_space_record(&mut registry, id, name) {
-            write_space_registry_to(&root, &registry);
-            if active.record.id == id {
-                active.record.name = name.to_string();
-            }
+        if let Some((entity, _, _, _)) = spaces.iter().find(|(_, sid, _, _)| sid.0 == id) {
+            commands.entity(entity).insert(Name::new(name.to_string()));
         }
         return;
     }
 
-    let (target, open_spaces_page) = match evt.command.as_str() {
+    if evt.command == "delete" {
+        let Some(id) = evt.space_id.as_deref() else {
+            return;
+        };
+        if spaces.iter().count() <= 1 {
+            return;
+        }
+        let Some((entity, _, was_active, _)) = spaces.iter().find(|(_, sid, _, _)| sid.0 == id)
+        else {
+            return;
+        };
+        commands.entity(entity).despawn();
+        for (tab, sid, _) in tabs.iter() {
+            if sid.0 == id {
+                commands.entity(tab).despawn();
+            }
+        }
+        if was_active
+            && let Some((target_entity, target_id)) = spaces
+                .iter()
+                .filter(|(_, sid, _, _)| sid.0 != id)
+                .min_by_key(|(_, _, _, order)| order.map(|o| o.0).unwrap_or(u32::MAX))
+                .map(|(entity, sid, _, _)| (entity, sid.0.clone()))
+        {
+            commands
+                .entity(target_entity)
+                .insert(vmux_layout::space::ActiveSpaceTag);
+            active_id.0 = Some(target_id.clone());
+            bump_space_tab(&tabs, &target_id, &mut commands);
+        }
+        return;
+    }
+
+    match evt.command.as_str() {
         "attach" => {
             let Some(id) = evt.space_id.as_deref() else {
                 return;
             };
-            let Some(record) = registry.spaces.iter().find(|space| space.id == id) else {
+            let Some((entity, _, is_active, _)) = spaces.iter().find(|(_, sid, _, _)| sid.0 == id)
+            else {
                 return;
             };
-            (record.clone(), false)
+            if is_active {
+                return;
+            }
+            deactivate_all_spaces(&spaces, &mut commands);
+            commands
+                .entity(entity)
+                .insert(vmux_layout::space::ActiveSpaceTag);
+            active_id.0 = Some(id.to_string());
+            bump_space_tab(&tabs, id, &mut commands);
         }
         "new" => {
+            let count = spaces.iter().count();
             let name = evt
                 .name
                 .clone()
-                .unwrap_or_else(|| format!("Space {}", registry.spaces.len() + 1));
-            let id = unique_space_id(&registry.spaces, &name);
-            let record = SpaceRecord {
-                id,
-                name,
-                profile: active.record.profile.clone(),
-            };
-            registry.spaces.push(record.clone());
-            write_space_registry_to(&root, &registry);
-            (record, true)
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| format!("Space {}", count + 1));
+            let existing: std::collections::HashSet<String> =
+                spaces.iter().map(|(_, sid, _, _)| sid.0.clone()).collect();
+            let id = crate::model::unique_space_id_among(&existing, &name);
+            let order = spaces
+                .iter()
+                .filter_map(|(_, _, _, order)| order.map(|o| o.0))
+                .max()
+                .map(|max| max + 1)
+                .unwrap_or(0);
+            deactivate_all_spaces(&spaces, &mut commands);
+            commands.spawn((
+                vmux_layout::space::Space,
+                vmux_layout::space::SpaceId(id.clone()),
+                Name::new(name),
+                vmux_core::Order(order),
+                vmux_layout::space::ActiveSpaceTag,
+            ));
+            active_id.0 = Some(id.clone());
+            let _ = profile::space_dir(&id);
+            let Ok(main) = main_q.single() else { return };
+            layout_requests.write(TabLayoutSpawnRequest {
+                main,
+                primary_window: *primary_window,
+                name: None,
+                content: TabLayoutSpawnContent::Url(SPACES_PAGE_URL.to_string()),
+                clear_pending_stack: true,
+                focus: true,
+            });
         }
-        _ => return,
-    };
-
-    if target.id == active.record.id {
-        return;
-    }
-
-    let current_path = active.layout_path();
-    save_requests.write(SaveSpaceRequest { path: current_path });
-    active.record = target;
-    let target_path = active.layout_path();
-    if target_path.exists() {
-        commands.trigger_load(moonshine_save::prelude::LoadWorld::default_from_file(
-            target_path,
-        ));
-    } else {
-        for entity in &space_entities {
-            commands.entity(entity).try_despawn();
-        }
-        commands.spawn(space_profile_bundle(&active.record));
-        let Ok(main) = main_q.single() else { return };
-        layout_requests.write(TabLayoutSpawnRequest {
-            main,
-            primary_window: *primary_window,
-            name: None,
-            content: if open_spaces_page {
-                TabLayoutSpawnContent::Url(SPACES_PAGE_URL.to_string())
-            } else {
-                TabLayoutSpawnContent::StartupUrlOrPrompt
-            },
-            clear_pending_stack: true,
-            focus: true,
-        });
+        _ => {}
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn handle_open_in_new_space(
     mut reader: MessageReader<vmux_command::AppCommand>,
-    mut active: ResMut<ActiveSpace>,
-    space_entities: Query<
-        Entity,
-        Or<(
-            With<vmux_layout::space::Space>,
-            With<vmux_layout::tab::Tab>,
-            With<vmux_history::Visit>,
-        )>,
-    >,
+    spaces: SpaceQuery,
     main_q: Query<Entity, With<vmux_layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
-    mut save_requests: MessageWriter<SaveSpaceRequest>,
+    mut active_id: ResMut<vmux_layout::space::ActiveSpaceId>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
@@ -534,25 +477,28 @@ fn handle_open_in_new_space(
             continue;
         };
 
-        let root = profile::shared_data_dir();
-        let mut registry = read_space_registry_from(&root);
-        let name = format!("Space {}", registry.spaces.len() + 1);
-        let record = SpaceRecord {
-            id: unique_space_id(&registry.spaces, &name),
-            name,
-            profile: active.record.profile.clone(),
-        };
-        registry.spaces.push(record.clone());
-        write_space_registry_to(&root, &registry);
-        save_requests.write(SaveSpaceRequest {
-            path: active.layout_path(),
-        });
-        active.record = record;
-        for entity in &space_entities {
-            commands.entity(entity).try_despawn();
-        }
+        let count = spaces.iter().count();
+        let name = format!("Space {}", count + 1);
+        let existing: std::collections::HashSet<String> =
+            spaces.iter().map(|(_, sid, _, _)| sid.0.clone()).collect();
+        let id = crate::model::unique_space_id_among(&existing, &name);
+        let order = spaces
+            .iter()
+            .filter_map(|(_, _, _, order)| order.map(|o| o.0))
+            .max()
+            .map(|max| max + 1)
+            .unwrap_or(0);
+        deactivate_all_spaces(&spaces, &mut commands);
+        commands.spawn((
+            vmux_layout::space::Space,
+            vmux_layout::space::SpaceId(id.clone()),
+            Name::new(name),
+            vmux_core::Order(order),
+            vmux_layout::space::ActiveSpaceTag,
+        ));
+        active_id.0 = Some(id.clone());
+        let _ = profile::space_dir(&id);
         let Ok(main) = main_q.single() else { continue };
-        commands.spawn(space_profile_bundle(&active.record));
         let content = url
             .as_deref()
             .filter(|url| !url.is_empty())
@@ -591,55 +537,13 @@ fn respond_spaces_spawn(
 }
 
 #[cfg(test)]
-static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::BOOTSTRAP_PROFILE_NAME;
-    use vmux_history::LastActivatedAt;
+    use crate::model::{BOOTSTRAP_PROFILE_NAME, SpaceRecord};
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
-    use vmux_layout::{NewStackContext, pane::Pane, stack::Stack, tab::Tab, window::Main};
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
-
-    struct HomeEnvGuard {
-        _guard: std::sync::MutexGuard<'static, ()>,
-        old_home: Option<std::ffi::OsString>,
-    }
-
-    impl HomeEnvGuard {
-        fn use_temp_home(name: &str) -> Self {
-            let guard = super::ENV_LOCK
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            let old_home = std::env::var_os("HOME");
-            let home =
-                std::env::temp_dir().join(format!("vmux-test-{name}-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&home);
-            std::fs::create_dir_all(&home).expect("create temp home");
-            unsafe {
-                std::env::set_var("HOME", &home);
-            }
-            Self {
-                _guard: guard,
-                old_home,
-            }
-        }
-    }
-
-    impl Drop for HomeEnvGuard {
-        fn drop(&mut self) {
-            unsafe {
-                if let Some(home) = &self.old_home {
-                    std::env::set_var("HOME", home);
-                } else {
-                    std::env::remove_var("HOME");
-                }
-            }
-        }
-    }
 
     fn test_settings() -> AppSettings {
         AppSettings {
@@ -675,41 +579,6 @@ mod tests {
         }
     }
 
-    fn resolve_stack_page_open_requests(
-        mut reader: MessageReader<PageOpenRequest>,
-        mut commands: Commands,
-    ) {
-        for request in reader.read() {
-            if let PageOpenTarget::Stack(stack) = request.target {
-                commands.spawn(PageOpenTask {
-                    id: vmux_core::PageOpenId::new(),
-                    stack,
-                    url: request.url.clone(),
-                    request_id: request.request_id,
-                });
-            }
-        }
-    }
-
-    #[test]
-    fn rows_mark_active_space_and_profile() {
-        let active = ActiveSpace {
-            record: SpaceRecord {
-                id: "work".to_string(),
-                name: "Work".to_string(),
-                profile: BOOTSTRAP_PROFILE_NAME.to_string(),
-            },
-        };
-        let registry = SpaceRegistry {
-            spaces: vec![bootstrap_space_record(), active.record.clone()],
-        };
-        let rows = space_rows(&active, &registry, 4);
-        assert!(!rows[0].is_active);
-        assert!(rows[1].is_active);
-        assert_eq!(rows[1].profile, BOOTSTRAP_PROFILE_NAME);
-        assert_eq!(rows[1].tab_count, 4);
-    }
-
     #[test]
     fn registers_spaces_host_before_cef_embedded_hosts_are_read() {
         let mut app = App::new();
@@ -724,308 +593,6 @@ mod tests {
 
         let entry = hosts.entry_for_host("spaces").unwrap();
         assert_eq!(entry.default_document, "spaces/index.html");
-    }
-
-    #[test]
-    fn delete_space_removes_named_space_from_registry() {
-        let mut registry = SpaceRegistry {
-            spaces: vec![
-                bootstrap_space_record(),
-                SpaceRecord {
-                    id: "work".to_string(),
-                    name: "Work".to_string(),
-                    profile: BOOTSTRAP_PROFILE_NAME.to_string(),
-                },
-            ],
-        };
-
-        let deleted = delete_space_record(&mut registry, "work").unwrap();
-
-        assert_eq!(deleted.id, "work");
-        assert_eq!(registry.spaces, vec![bootstrap_space_record()]);
-    }
-
-    #[test]
-    fn rename_space_record_changes_name_keeps_id() {
-        let mut registry = SpaceRegistry {
-            spaces: vec![
-                bootstrap_space_record(),
-                SpaceRecord {
-                    id: "work".to_string(),
-                    name: "Work".to_string(),
-                    profile: BOOTSTRAP_PROFILE_NAME.to_string(),
-                },
-            ],
-        };
-
-        assert!(rename_space_record(&mut registry, "work", "Client A"));
-
-        let renamed = registry.spaces.iter().find(|s| s.id == "work").unwrap();
-        assert_eq!(renamed.name, "Client A");
-        assert_eq!(renamed.id, "work");
-    }
-
-    #[test]
-    fn rename_space_record_unknown_id_is_noop() {
-        let mut registry = SpaceRegistry {
-            spaces: vec![bootstrap_space_record()],
-        };
-        assert!(!rename_space_record(&mut registry, "nope", "X"));
-    }
-
-    #[test]
-    fn delete_space_keeps_last_space() {
-        let mut registry = SpaceRegistry {
-            spaces: vec![bootstrap_space_record()],
-        };
-
-        let deleted = delete_space_record(&mut registry, "space-1");
-
-        assert!(deleted.is_none());
-        assert_eq!(registry.spaces, vec![bootstrap_space_record()]);
-    }
-
-    #[test]
-    fn delete_active_space_defers_current_layout_teardown() {
-        let _home = HomeEnvGuard::use_temp_home("delete-active-space-defers-layout");
-        let active_record = work_space_record();
-        write_space_registry_to(
-            &profile::shared_data_dir(),
-            &SpaceRegistry {
-                spaces: vec![bootstrap_space_record(), active_record.clone()],
-            },
-        );
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<SaveSpaceRequest>()
-            .add_message::<vmux_layout::TabLayoutSpawnRequest>()
-            .add_observer(on_space_command)
-            .insert_resource(ActiveSpace {
-                record: active_record,
-            })
-            .insert_resource(test_settings())
-            .insert_resource(test_settings().layout)
-            .init_resource::<NewStackContext>()
-            .init_resource::<Assets<Mesh>>()
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        app.world_mut().spawn(PrimaryWindow);
-        let main = app.world_mut().spawn(Main).id();
-        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
-        let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
-        let tab = app
-            .world_mut()
-            .spawn((
-                Stack::default(),
-                PageMetadata {
-                    title: "Spaces".to_string(),
-                    url: SPACES_PAGE_URL.to_string(),
-                    favicon_url: String::new(),
-                    bg_color: None,
-                },
-                ChildOf(pane),
-            ))
-            .id();
-        let webview = app.world_mut().spawn((Spaces, ChildOf(tab))).id();
-
-        app.world_mut()
-            .entity_mut(webview)
-            .trigger(|webview| BinReceive {
-                webview,
-                payload: SpaceCommandEvent {
-                    command: "delete".to_string(),
-                    space_id: Some("work".to_string()),
-                    name: None,
-                },
-            });
-        app.update();
-
-        assert!(app.world().get_entity(space).is_ok());
-        assert_eq!(app.world().resource::<ActiveSpace>().record.id, "work");
-    }
-
-    #[test]
-    fn deferred_active_space_delete_spawns_target_layout() {
-        let _home = HomeEnvGuard::use_temp_home("deferred-active-space-delete-switches");
-        let active_record = work_space_record();
-        write_space_registry_to(
-            &profile::shared_data_dir(),
-            &SpaceRegistry {
-                spaces: vec![bootstrap_space_record(), active_record.clone()],
-            },
-        );
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<SaveSpaceRequest>()
-            .add_message::<vmux_layout::TabLayoutSpawnRequest>()
-            .add_message::<PageOpenRequest>()
-            .add_observer(on_space_command)
-            .add_systems(
-                Update,
-                (
-                    apply_pending_space_switch,
-                    vmux_layout::window::spawn_requested_tab_layouts,
-                )
-                    .chain(),
-            )
-            .insert_resource(ActiveSpace {
-                record: active_record,
-            })
-            .insert_resource(test_settings())
-            .insert_resource(test_settings().layout)
-            .init_resource::<NewStackContext>()
-            .init_resource::<Assets<Mesh>>()
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        app.world_mut().spawn(PrimaryWindow);
-        let main = app.world_mut().spawn(Main).id();
-        let space = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
-        let pane = app.world_mut().spawn((Pane, ChildOf(space))).id();
-        let tab = app
-            .world_mut()
-            .spawn((
-                Stack::default(),
-                PageMetadata {
-                    title: "Spaces".to_string(),
-                    url: SPACES_PAGE_URL.to_string(),
-                    favicon_url: String::new(),
-                    bg_color: None,
-                },
-                ChildOf(pane),
-            ))
-            .id();
-        let webview = app.world_mut().spawn((Spaces, ChildOf(tab))).id();
-
-        app.world_mut()
-            .entity_mut(webview)
-            .trigger(|webview| BinReceive {
-                webview,
-                payload: SpaceCommandEvent {
-                    command: "delete".to_string(),
-                    space_id: Some("work".to_string()),
-                    name: None,
-                },
-            });
-        app.update();
-        assert!(app.world().get_entity(space).is_ok());
-
-        for _ in 0..3 {
-            app.update();
-            if app.world().get_entity(space).is_err() {
-                break;
-            }
-        }
-        assert!(app.world().get_entity(space).is_err());
-        assert_eq!(
-            app.world().resource::<ActiveSpace>().record,
-            bootstrap_space_record()
-        );
-        let mut tab_query = app.world_mut().query::<&Tab>();
-        assert_eq!(tab_query.iter(app.world()).count(), 1);
-    }
-
-    #[test]
-    fn new_space_spawns_spaces_page_layout() {
-        let _home = HomeEnvGuard::use_temp_home("new-space-spawns-spaces-page");
-        write_space_registry_to(
-            &profile::shared_data_dir(),
-            &SpaceRegistry {
-                spaces: vec![bootstrap_space_record()],
-            },
-        );
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<SaveSpaceRequest>()
-            .add_message::<vmux_layout::TabLayoutSpawnRequest>()
-            .add_message::<PageOpenRequest>()
-            .add_observer(on_space_command)
-            .add_systems(
-                Update,
-                (
-                    vmux_layout::window::spawn_requested_tab_layouts,
-                    resolve_stack_page_open_requests,
-                    handle_spaces_page_open,
-                )
-                    .chain(),
-            )
-            .insert_resource(vmux_layout::stack::FocusedStack::default())
-            .insert_resource(ActiveSpace {
-                record: bootstrap_space_record(),
-            })
-            .insert_resource(test_settings())
-            .insert_resource(test_settings().layout)
-            .init_resource::<NewStackContext>()
-            .init_resource::<Assets<Mesh>>()
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        app.world_mut().spawn(PrimaryWindow);
-        let main = app.world_mut().spawn(Main).id();
-        let old_tab = app.world_mut().spawn((Tab::default(), ChildOf(main))).id();
-        let pane = app.world_mut().spawn((Pane, ChildOf(old_tab))).id();
-        let tab = app
-            .world_mut()
-            .spawn((
-                Stack::default(),
-                PageMetadata {
-                    title: "Spaces".to_string(),
-                    url: SPACES_PAGE_URL.to_string(),
-                    favicon_url: String::new(),
-                    bg_color: None,
-                },
-                ChildOf(pane),
-            ))
-            .id();
-        let webview = app.world_mut().spawn((Spaces, ChildOf(tab))).id();
-        *app.world_mut()
-            .resource_mut::<vmux_layout::stack::FocusedStack>() =
-            vmux_layout::stack::FocusedStack {
-                tab: Some(old_tab),
-                pane: Some(pane),
-                stack: Some(tab),
-            };
-
-        app.world_mut()
-            .entity_mut(webview)
-            .trigger(|webview| BinReceive {
-                webview,
-                payload: SpaceCommandEvent {
-                    command: "new".to_string(),
-                    space_id: None,
-                    name: Some("Client A".to_string()),
-                },
-            });
-        app.update();
-
-        assert!(app.world().get_entity(old_tab).is_err());
-        assert_eq!(app.world().resource::<ActiveSpace>().record.id, "client-a");
-        assert!(!app.world().resource::<NewStackContext>().needs_open);
-        assert!(app.world().resource::<NewStackContext>().stack.is_none());
-
-        let mut tab_query = app.world_mut().query::<&Tab>();
-        assert_eq!(tab_query.iter(app.world()).count(), 1);
-
-        let tabs = {
-            let mut tab_q = app
-                .world_mut()
-                .query_filtered::<(Entity, &PageMetadata, &Children), With<Stack>>();
-            tab_q
-                .iter(app.world())
-                .map(|(entity, meta, children)| {
-                    let has_spaces_view = children
-                        .iter()
-                        .any(|child| app.world().get::<Spaces>(child).is_some());
-                    (entity, meta.url.clone(), has_spaces_view)
-                })
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(tabs.len(), 1);
-        assert_eq!(tabs[0].1, SPACES_PAGE_URL);
-        assert!(tabs[0].2);
-        let focus = app.world().resource::<vmux_layout::stack::FocusedStack>();
-        assert_ne!(focus.tab, Some(old_tab));
-        assert!(focus.tab.is_some());
-        assert!(focus.pane.is_some());
-        assert!(focus.stack.is_some());
     }
 
     #[test]
@@ -1057,82 +624,5 @@ mod tests {
                 .0,
             "https://work.example"
         );
-    }
-
-    #[test]
-    fn ipc_new_space_focuses_spaces_page_layout_in_same_update() {
-        let _home = HomeEnvGuard::use_temp_home("ipc-new-space-focuses-layout");
-        write_space_registry_to(
-            &profile::shared_data_dir(),
-            &SpaceRegistry {
-                spaces: vec![bootstrap_space_record()],
-            },
-        );
-        let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_command::CommandPlugin,
-            bevy_cef::prelude::JsEmitEventPlugin::<SpaceCommandEvent>::default(),
-            vmux_layout::stack::StackPlugin,
-        ))
-        .add_message::<vmux_layout::LayoutSpawnRequest>()
-        .add_message::<vmux_layout::TabLayoutSpawnRequest>()
-        .add_message::<PageOpenRequest>()
-        .add_message::<SaveSpaceRequest>()
-        .add_observer(on_space_command)
-        .add_systems(Update, vmux_layout::window::spawn_requested_tab_layouts)
-        .init_resource::<vmux_layout::pane::PendingCursorWarp>()
-        .init_resource::<bevy_cef::prelude::IpcEventRawBuffer>()
-        .insert_resource(ActiveSpace {
-            record: bootstrap_space_record(),
-        })
-        .insert_resource(test_settings())
-        .insert_resource(test_settings().layout)
-        .init_resource::<NewStackContext>()
-        .init_resource::<Assets<Mesh>>()
-        .init_resource::<Assets<WebviewExtendStandardMaterial>>();
-
-        app.world_mut().spawn(PrimaryWindow);
-        let main = app.world_mut().spawn(Main).id();
-        let old_tab = app
-            .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now(), ChildOf(main)))
-            .id();
-        let pane = app
-            .world_mut()
-            .spawn((Pane, LastActivatedAt::now(), ChildOf(old_tab)))
-            .id();
-        let tab = app
-            .world_mut()
-            .spawn((
-                Stack::default(),
-                LastActivatedAt::now(),
-                PageMetadata {
-                    title: "Spaces".to_string(),
-                    url: SPACES_PAGE_URL.to_string(),
-                    favicon_url: String::new(),
-                    bg_color: None,
-                },
-                ChildOf(pane),
-            ))
-            .id();
-        let webview = app.world_mut().spawn((Spaces, ChildOf(tab))).id();
-        let payload = serde_json::to_string(&SpaceCommandEvent {
-            command: "new".to_string(),
-            space_id: None,
-            name: Some("Client A".to_string()),
-        })
-        .unwrap();
-        app.world_mut()
-            .resource_mut::<bevy_cef::prelude::IpcEventRawBuffer>()
-            .0
-            .push(bevy_cef_core::prelude::IpcEventRaw { webview, payload });
-
-        app.update();
-
-        let focus = app.world().resource::<vmux_layout::stack::FocusedStack>();
-        assert!(focus.tab.is_some());
-        assert!(focus.pane.is_some());
-        assert!(focus.stack.is_some());
     }
 }

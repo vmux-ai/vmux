@@ -1,24 +1,38 @@
 use bevy::prelude::*;
 use vmux_command::snapshot::{CommandBarSpacesSnapshot, SpaceSummary};
+use vmux_core::Order;
+use vmux_layout::space::{ActiveSpaceId, ActiveSpaceTag, Space, SpaceId};
 
 use crate::event::SPACES_PAGE_URL;
-use crate::spaces::{ActiveSpace, registry_space_summaries};
 
 pub fn update_spaces_snapshot(
-    active: Res<ActiveSpace>,
+    spaces: Query<(&SpaceId, &Name, Option<&Order>), With<Space>>,
+    active_id: Res<ActiveSpaceId>,
+    active_name: Query<&Name, With<ActiveSpaceTag>>,
     mut snapshot: ResMut<CommandBarSpacesSnapshot>,
 ) {
-    let active_changed = active.is_changed() || active.is_added();
-    if !active_changed && !snapshot.spaces_page_url.is_empty() {
-        return;
-    }
-
-    snapshot.spaces = registry_space_summaries()
-        .into_iter()
-        .map(|(id, name, profile)| SpaceSummary { id, name, profile })
+    let mut rows: Vec<(u32, SpaceSummary)> = spaces
+        .iter()
+        .map(|(id, name, order)| {
+            (
+                order.map(|o| o.0).unwrap_or(u32::MAX),
+                SpaceSummary {
+                    id: id.0.clone(),
+                    name: name.to_string(),
+                    profile: crate::model::BOOTSTRAP_PROFILE_NAME.to_string(),
+                },
+            )
+        })
         .collect();
-    snapshot.active_space_id = active.record.id.clone();
-    snapshot.active_space_name = active.record.name.clone();
+    rows.sort_by_key(|(order, _)| *order);
+
+    snapshot.spaces = rows.into_iter().map(|(_, summary)| summary).collect();
+    snapshot.active_space_id = active_id.0.clone().unwrap_or_default();
+    snapshot.active_space_name = active_name
+        .iter()
+        .next()
+        .map(|name| name.to_string())
+        .unwrap_or_default();
     snapshot.spaces_page_url = SPACES_PAGE_URL.to_string();
 }
 
@@ -30,11 +44,19 @@ mod tests {
     fn writes_active_name_and_url() {
         let mut app = App::new();
         app.init_resource::<CommandBarSpacesSnapshot>()
-            .init_resource::<ActiveSpace>()
+            .insert_resource(ActiveSpaceId(Some("space-1".to_string())))
             .add_systems(Update, update_spaces_snapshot);
+        app.world_mut().spawn((
+            Space,
+            SpaceId("space-1".to_string()),
+            Name::new("Space 1"),
+            ActiveSpaceTag,
+        ));
         app.update();
         let snap = app.world().resource::<CommandBarSpacesSnapshot>();
         assert_eq!(snap.spaces_page_url, SPACES_PAGE_URL);
-        assert!(!snap.active_space_id.is_empty());
+        assert_eq!(snap.active_space_id, "space-1");
+        assert_eq!(snap.active_space_name, "Space 1");
+        assert_eq!(snap.spaces.len(), 1);
     }
 }
