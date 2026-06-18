@@ -477,6 +477,7 @@ pub fn spawn_requested_tab_layouts(
     mut new_stack_ctx: ResMut<crate::NewStackContext>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut focus: Option<ResMut<crate::stack::FocusedStack>>,
+    active_space_id: Option<Res<crate::space::ActiveSpaceId>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -490,6 +491,11 @@ pub fn spawn_requested_tab_layouts(
             .id();
         if let Some(name) = request.name.clone() {
             commands.entity(tab_e).insert(Tab { name });
+        }
+        if let Some(space_id) = active_space_id.as_deref().and_then(|active| active.0.clone()) {
+            commands
+                .entity(tab_e)
+                .insert(crate::space::SpaceId(space_id));
         }
 
         let gap = pane_split_gaps(PaneSplitDirection::Row, settings.pane.gap);
