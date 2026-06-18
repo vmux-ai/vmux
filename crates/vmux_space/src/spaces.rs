@@ -4,19 +4,11 @@ use vmux_core::PageMetadata;
 use vmux_layout::cef::Browser;
 
 use crate::event::SPACES_PAGE_URL;
-use crate::model::{SpaceRecord, bootstrap_space_record};
+use crate::model::SpaceRecord;
 
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, Default)]
 pub struct ActiveSpace {
     pub record: SpaceRecord,
-}
-
-impl Default for ActiveSpace {
-    fn default() -> Self {
-        Self {
-            record: bootstrap_space_record(),
-        }
-    }
 }
 
 pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
