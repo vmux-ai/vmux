@@ -99,34 +99,33 @@ Ownership:
 
 ## Design details
 
-### 1. `vmux_agent` feature-gating (no new crate)
+### 1. Relocate agent compute DOWN into `vmux_service` (no new crate)
 
-Per the decision to keep one crate: feature-gate `vmux_agent` so its pure modules
-compile without Bevy, and the daemon depends on it with `default-features = false`.
+`vmux_agent` already depends on `vmux_service` (`ServiceClient` + `protocol`), and
+so does `vmux_mcp`. `vmux_service` is the low crate. So the daemon **cannot** depend
+on `vmux_agent` — that is a `vmux_agent ⇄ vmux_service` package cycle, which Cargo
+rejects, and feature-gating does not change the package edge. To run page-agent
+compute in the daemon, the pure code must live at `vmux_service`'s layer, so we
+**move it down** rather than depend upward.
 
-- `vmux_agent/Cargo.toml`:
-  - `[features] default = ["desktop"]`
-  - `desktop` enables `bevy`, `bevy_cef`, and the ECS/UI modules.
-  - Bevy and `bevy_cef` deps become `optional = true`, pulled in by `desktop`.
-- `vmux_agent/src/lib.rs`: gate ECS modules behind `#[cfg(feature = "desktop")]`
-  (`plugin`, `client/page`, `systems`, `components`, `run_state`, `session`,
-  `snapshot_updater`, `toast`, `echo_plugin`, provider `*_plugin` modules). Leave
-  pure modules ungated: `message`, `stream`, `http`, `providers` (the non-plugin
-  builders/parsers), `tools`, `variant`, `url`, `exec`, `mcp`.
-- Replace the two `Reflect` derives with
-  `#[cfg_attr(feature = "desktop", derive(bevy::prelude::Reflect))]` and gate the
-  corresponding `use` (`message.rs`, `variant.rs`).
-- `vmux_desktop` keeps `vmux_agent = { path = ... }` (default features on) — no
-  change.
-- `vmux_service` adds `vmux_agent = { path = "../vmux_agent", default-features = false }`.
+Relocate from `vmux_agent` into `vmux_service` (these modules are already
+Bevy-free — see §"Current architecture"): `message`, `stream`, `http`,
+`providers/{anthropic,openai,mistral,openai_shared,builtin}`, and `tools`
+(`mcp_tool_defs`). `vmux_service` gains their deps (`reqwest`, `crossbeam-channel`,
+`futures-util`); these are already `vmux_agent` deps.
 
-Verification: `cargo build -p vmux_agent --no-default-features` succeeds and the
-dependency tree contains no `bevy`/`bevy_cef`.
+Move tool *resolution* (`DispatchTarget` + `dispatch_from_tool_call`) from
+`vmux_mcp` into `vmux_service`: it only wraps `vmux_service::protocol`
+(`AgentCommand`/`AgentQuery`), so it belongs at the protocol layer. `vmux_mcp`
+re-exports both so its sidecar path (`run_agent_command`/`run_agent_query`) is
+unchanged.
 
-`drive_sse` currently takes a `crossbeam_channel::Sender<StreamEvent>`. Keep that
-signature; the service loop bridges it to its async output (a small task draining
-the crossbeam receiver into the per-session stream), or `drive_sse` gains an
-async-sink variant. Either is acceptable; the bridge keeps `drive_sse` untouched.
+`vmux_agent` stays a desktop/Bevy crate (no feature-gating). In Phase B it repoints
+its imports to the new `vmux_service` locations and keeps running its ECS loop;
+Phase C deletes that loop and turns `vmux_agent` into the thin client.
+
+`drive_sse` keeps its `crossbeam_channel::Sender<StreamEvent>` signature; the
+service loop bridges the crossbeam receiver into each session's async stream.
 
 ### 2. Provider registry in the service
 
@@ -142,10 +141,10 @@ struct PageProvider {
 // HashMap<(provider, model), PageProvider>
 ```
 
-Provide a bevy-free constructor in `vmux_agent::providers` (e.g.
-`builtin::page_provider_registry()`) returning the anthropic/openai/mistral
-entries from the existing pure builders. Desktop's ECS strategy registration is
-rebuilt on top of the same data so there is a single source of truth.
+Provide the registry constructor in the relocated `vmux_service::providers` (e.g.
+`builtin::page_provider_registry()`) returning the anthropic/openai/mistral entries
+from the moved pure builders. Desktop's ECS strategy registration is rebuilt on top
+of the same data so there is a single source of truth.
 
 ### 3. Service-side session runtime (`run_session`)
 
@@ -272,7 +271,9 @@ proven lag/backpressure handling (`broadcast::error::RecvError::Lagged`).
   - approval UI -> `ClientMessage::AgentApprove`.
 - `SpawnAgentInStackRequest` for a Page provider sends `SpawnPageAgent` instead of
   constructing a local session.
-- Delete the now-dead desktop loop modules under the `desktop` feature.
+- Delete the now-dead desktop loop modules (`process_input`, `drain_stream`,
+  `dispatch_tool`, `continue_after_tool`, `tool_dispatch`); `vmux_agent` keeps only
+  thin-client systems + the chat view.
 - The CEF/terminal/CLI agent paths are untouched in SP1.
 
 ## Phased delivery
@@ -289,17 +290,23 @@ Phase B, where they are constructed — adding them here would be dead code.
 Verify: broker unit tests (no-subscriber / resolve / timeout); full `vmux_service`
 suite green; clippy + fmt clean.
 
-**Phase B — `vmux_agent` feature-gating + service runtime.**
-Feature-gate `vmux_agent` (`default = ["desktop"]`); confirm
-`--no-default-features` is bevy-free. Add the new `ClientMessage`/`ServiceMessage`
-variants (§5) with rkyv/serde roundtrip tests. Add `vmux_service::agent` with
-`run_session`, the provider registry, and the `AgentSessionManager` (per-session
-broadcast + forwarder, mirroring `AttachProcess`); wire `SpawnPageAgent` /
-`AttachPageAgent` / `AgentInput` / `AgentApprove` / `ClosePageAgent`; emit stream
-messages on each session's broadcast. Not yet consumed by desktop.
-Verify: `run_session` unit tests with a mock provider (local SSE fixture) and a
-mock broker asserting the full loop (delta -> tool -> result -> continue ->
-idle), including approval allow/deny.
+**Phase B — relocate compute into the service + add the session runtime.** Three
+sub-PRs:
+- **B1:** move `DispatchTarget` + `dispatch_from_tool_call` from `vmux_mcp` into
+  `vmux_service`; `vmux_mcp` re-exports them. Verify: `vmux_mcp`, `vmux_agent`,
+  `vmux_service` build + test green.
+- **B2:** move `message`/`stream`/`http`/`providers`/`tools` from `vmux_agent` into
+  `vmux_service` (gaining `reqwest`/`crossbeam`/`futures-util` deps); repoint
+  `vmux_agent` imports to the new locations — its ECS loop still runs. Verify: all
+  three crates build + test green.
+- **B3:** add the new `ClientMessage`/`ServiceMessage` variants (§5, rkyv/serde
+  roundtrip tests); add `vmux_service::agent` with `run_session`, the provider
+  registry, and the `AgentSessionManager` (per-session broadcast + forwarder,
+  mirroring `AttachProcess`); wire `SpawnPageAgent` / `AttachPageAgent` /
+  `AgentInput` / `AgentApprove` / `ClosePageAgent`. Not yet consumed by desktop.
+  Verify: `run_session` unit tests with a mock provider (canned SSE fixture) and a
+  mock broker covering the full loop (delta -> tool -> result -> continue -> idle),
+  approval allow/deny, missing-API-key, provider error.
 
 **Phase C — Desktop cutover.**
 Switch the desktop to send-down + stream-consume + webview re-emit; delete the
@@ -318,8 +325,9 @@ Monitor that turn CPU lands on `vmux_service`, not `vmux`.
   stream and a mock broker; assert emitted stream messages and final state for:
   plain text turn, single tool turn, multi-tool agentic loop, approval-deny,
   missing-API-key error, provider error.
-- **Feature-gate:** CI builds `vmux_agent --no-default-features`; assert no
-  bevy in the resolved tree for that build.
+- **Layering:** after the moves, `vmux_service` still has no dependency on
+  `vmux_mcp`/`vmux_agent` (no cycle); `vmux_mcp`'s re-exports keep its callers
+  compiling unchanged.
 - **End to end (manual, Phase C):** real provider turn with a tool call; Activity
   Monitor attribution check.
 
@@ -328,8 +336,11 @@ Monitor that turn CPU lands on `vmux_service`, not `vmux`.
 - **Daemon idle CPU.** `run_session` must be fully await-driven (no busy polling);
   tasks park on `input_rx.recv()` / SSE I/O. No second Bevy loop is introduced, so
   the project's no-`Continuous` rule is unaffected.
-- **Provider extraction churn.** Mitigated by feature-gating instead of moving
-  files: the pure modules stay in place; only Bevy derives/imports get cfg-gated.
+- **Relocation churn / cycle.** `vmux_service` cannot depend on `vmux_agent`
+  (existing `vmux_agent → vmux_service` edge), so the pure modules move *down* into
+  `vmux_service` and `vmux_agent` repoints imports. Mitigated by `git mv` + import
+  fixes per crate, landed as small B1/B2 PRs that each keep all three crates green
+  before any new runtime code (B3) is added.
 - **Stream/UI protocol rework later.** The chat UI is greenfield, so it is built
   against the service stream from the start — no desktop-first throwaway.
 - **CEF build fragility / large rebuilds.** Implement directly in a warm target
