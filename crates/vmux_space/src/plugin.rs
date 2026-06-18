@@ -586,6 +586,46 @@ mod tests {
     };
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct HomeEnvGuard {
+        _guard: std::sync::MutexGuard<'static, ()>,
+        old_home: Option<std::ffi::OsString>,
+        home: std::path::PathBuf,
+    }
+
+    impl HomeEnvGuard {
+        fn use_temp_home(name: &str) -> Self {
+            let guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+            let old_home = std::env::var_os("HOME");
+            let home =
+                std::env::temp_dir().join(format!("vmux-test-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&home);
+            std::fs::create_dir_all(&home).expect("create temp home");
+            unsafe {
+                std::env::set_var("HOME", &home);
+            }
+            Self {
+                _guard: guard,
+                old_home,
+                home,
+            }
+        }
+    }
+
+    impl Drop for HomeEnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(home) = &self.old_home {
+                    std::env::set_var("HOME", home);
+                } else {
+                    std::env::remove_var("HOME");
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.home);
+        }
+    }
+
     fn test_settings() -> AppSettings {
         AppSettings {
             browser: BrowserSettings {
@@ -668,7 +708,8 @@ mod tests {
     }
 
     #[test]
-    fn rename_reslugs_space_id_and_retags_tabs() {
+    fn rename_reslugs_space_id_retags_tabs_and_nests_folder() {
+        let home = HomeEnvGuard::use_temp_home("rename-slash");
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<TabLayoutSpawnRequest>()
@@ -698,7 +739,7 @@ mod tests {
             payload: SpaceCommandEvent {
                 command: "rename".to_string(),
                 space_id: Some("rename-src-test".to_string()),
-                name: Some("Rename Dst Test".to_string()),
+                name: Some("Vmux Ai/Vmux".to_string()),
             },
         });
         app.update();
@@ -707,24 +748,25 @@ mod tests {
             app.world()
                 .get::<vmux_layout::space::SpaceId>(space)
                 .map(|s| s.0.clone()),
-            Some("rename-dst-test".to_string())
+            Some("vmux-ai/vmux".to_string())
         );
         assert_eq!(
             app.world().get::<Name>(space).map(|n| n.to_string()),
-            Some("rename-dst-test".to_string())
+            Some("vmux-ai/vmux".to_string())
         );
         assert_eq!(
             app.world()
                 .get::<vmux_layout::space::SpaceId>(tab)
                 .map(|s| s.0.clone()),
-            Some("rename-dst-test".to_string())
+            Some("vmux-ai/vmux".to_string())
         );
         assert_eq!(
             app.world()
                 .resource::<vmux_layout::space::ActiveSpaceId>()
                 .0
                 .as_deref(),
-            Some("rename-dst-test")
+            Some("vmux-ai/vmux")
         );
+        assert!(home.home.join(".vmux/spaces/vmux-ai/vmux").is_dir());
     }
 }
