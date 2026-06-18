@@ -78,7 +78,8 @@ impl Plugin for VmuxPlugin {
             ..default()
         };
 
-        app.insert_resource(background_lifecycle::foreground_winit_settings(false))
+        let winit_settings = background_lifecycle::foreground_winit_settings(false, false);
+        app.insert_resource(winit_settings)
             .add_plugins((
                 vmux_core::CorePlugin,
                 DefaultPlugins
