@@ -225,8 +225,8 @@ mod tests {
     #[test]
     fn tools_to_function_specs_shape() {
         let tools = vec![ToolDef {
-            name: "list_spaces",
-            description: "desc",
+            name: "list_spaces".into(),
+            description: "desc".into(),
             input_schema: json!({"type":"object"}),
             read_only: true,
         }];

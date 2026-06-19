@@ -100,6 +100,12 @@ opt-level = 3
 [profile.dev.package.bevy_cef_core]
 opt-level = 3
 
+# Single codegen unit so rkyv's derive-generated internal symbols aren't dropped
+# across CGUs at link time (undefined `_anon.*.llvm.*` under --gc-sections /
+# -dead_strip — surfaces in Linux test-binary links and the dev dynamic-linking build).
+[profile.dev.package.vmux_service]
+codegen-units = 1
+
 [profile.release]
 strip = true
 lto = "thin"

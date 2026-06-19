@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+use crate::message::Message;
+
+pub type BuildRequest =
+    fn(model: &str, messages: &[Message], tools: &[ToolDef], api_key: &str) -> reqwest::Request;
+
+pub type ParseSse = fn(payload: &str) -> Option<StreamEvent>;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum StreamEvent {
     TextDelta(String),
@@ -18,10 +25,10 @@ pub enum StopReason {
     Other,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolDef {
-    pub name: &'static str,
-    pub description: &'static str,
+    pub name: String,
+    pub description: String,
     pub input_schema: serde_json::Value,
     pub read_only: bool,
 }

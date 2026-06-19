@@ -1,35 +1,16 @@
 use bevy::prelude::*;
-use bevy::tasks::Task;
-use crossbeam_channel::Receiver;
-
-use crate::stream::{PartialToolUse, StreamEvent};
 
 #[derive(Component, Default)]
 pub enum AgentRunState {
     #[default]
     Idle,
-    Streaming {
-        rx: Receiver<StreamEvent>,
-        _task: Task<()>,
-        partial: Option<PartialToolUse>,
-    },
-    RunningTool {
-        call_id: String,
-        task: Task<ToolDispatchOutput>,
-    },
+    Streaming,
     AwaitingApproval {
         call_id: String,
         name: String,
         args: serde_json::Value,
     },
     Errored(String),
-}
-
-#[derive(Clone, Debug)]
-pub struct ToolDispatchOutput {
-    pub call_id: String,
-    pub content: String,
-    pub is_error: bool,
 }
 
 #[cfg(test)]

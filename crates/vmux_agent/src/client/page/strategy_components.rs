@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
-use crate::message::Message;
-use crate::stream::{StreamEvent, ToolDef};
 use crate::{AgentKind, AgentVariant};
+
+pub use crate::stream::{BuildRequest, ParseSse};
 
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
 pub struct Strategy;
@@ -24,11 +24,6 @@ pub struct StrategyKind(pub AgentKind);
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct StrategyVariant(pub AgentVariant);
-
-pub type BuildRequest =
-    fn(model: &str, messages: &[Message], tools: &[ToolDef], api_key: &str) -> reqwest::Request;
-
-pub type ParseSse = fn(payload: &str) -> Option<StreamEvent>;
 
 #[derive(Component, Clone, Copy)]
 pub struct BuildRequestFn(pub BuildRequest);

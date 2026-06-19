@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use serde_json::Value;
 
-pub use vmux_service::agent_events::{AgentCommandRequest, AgentQueryRequest};
+pub use vmux_service::agent_events::{
+    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest,
+};
 
 #[derive(Event, Clone, Debug)]
 pub struct AgentInput {

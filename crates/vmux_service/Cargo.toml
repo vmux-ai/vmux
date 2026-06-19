@@ -34,6 +34,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 chrono = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+crossbeam-channel = "0.5"
+futures-util = "0.3"
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
 
@@ -51,3 +55,6 @@ objc2-service-management = "0.3"
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = "3.27.0"
+tokio = { workspace = true, features = ["test-util", "macros", "rt"] }
+mockito = "1"
+serial_test = "3"

@@ -977,6 +977,11 @@ struct PollServiceWriters<'w> {
     app_commands: MessageWriter<'w, AppCommand>,
     agent_commands: MessageWriter<'w, vmux_service::agent_events::AgentCommandRequest>,
     agent_queries: MessageWriter<'w, vmux_service::agent_events::AgentQueryRequest>,
+    agent_tool_calls: MessageWriter<'w, vmux_service::agent_events::AgentToolCallRequest>,
+    page_agent_delta: MessageWriter<'w, vmux_service::agent_events::PageAgentDelta>,
+    page_agent_run_status: MessageWriter<'w, vmux_service::agent_events::PageAgentRunStatus>,
+    page_agent_awaiting: MessageWriter<'w, vmux_service::agent_events::PageAgentAwaitingApproval>,
+    page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
     osc_title: MessageWriter<'w, OscTitleChanged>,
 }
@@ -1263,6 +1268,50 @@ fn poll_service_messages(
                 writers
                     .agent_queries
                     .write(vmux_service::agent_events::AgentQueryRequest { request_id, query });
+            }
+            ServiceMessage::AgentToolCall {
+                request_id,
+                name,
+                args_json,
+                ..
+            } => {
+                writers
+                    .agent_tool_calls
+                    .write(vmux_service::agent_events::AgentToolCallRequest {
+                        request_id,
+                        name,
+                        args_json,
+                    });
+            }
+            ServiceMessage::AgentDelta { sid, text } => {
+                writers
+                    .page_agent_delta
+                    .write(vmux_service::agent_events::PageAgentDelta { sid, text });
+            }
+            ServiceMessage::AgentRunStatusChanged { sid, status } => {
+                writers
+                    .page_agent_run_status
+                    .write(vmux_service::agent_events::PageAgentRunStatus { sid, status });
+            }
+            ServiceMessage::AgentAwaitingApproval {
+                sid,
+                call_id,
+                name,
+                args_json,
+            } => {
+                writers.page_agent_awaiting.write(
+                    vmux_service::agent_events::PageAgentAwaitingApproval {
+                        sid,
+                        call_id,
+                        name,
+                        args_json,
+                    },
+                );
+            }
+            ServiceMessage::AgentMessagesSnapshot { sid, messages_json } => {
+                writers
+                    .page_agent_snapshot
+                    .write(vmux_service::agent_events::PageAgentSnapshot { sid, messages_json });
             }
             _ => {}
         }
