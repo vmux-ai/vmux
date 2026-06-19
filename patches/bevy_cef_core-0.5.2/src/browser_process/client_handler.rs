@@ -8,8 +8,9 @@ use crate::prelude::IntoString;
 use cef::rc::{Rc, RcImpl};
 use cef::{
     Browser, Client, ContextMenuHandler, DisplayHandler, FocusHandler, FocusSource, Frame,
-    ImplClient, ImplFocusHandler, ImplProcessMessage, LifeSpanHandler, ListValue, LoadHandler,
-    ProcessId, ProcessMessage, RenderHandler, RequestHandler, WrapClient, WrapFocusHandler, sys,
+    ImplClient, ImplFocusHandler, ImplFrame, ImplProcessMessage, LifeSpanHandler, ListValue,
+    LoadHandler, ProcessId, ProcessMessage, RenderHandler, RequestHandler, WrapClient,
+    WrapFocusHandler, sys,
 };
 use std::os::raw::c_int;
 
@@ -224,19 +225,26 @@ impl ImplClient for ClientHandlerBuilder {
         if let Some(message) = message
             && let Some(browser) = browser
             && let Some(frame) = frame
-            && let Some(name) = Some(message.name().into_string())
-            && let Some(handler) = self
+        {
+            let name = message.name().into_string();
+            let url = frame.url().into_string();
+            if !crate::util::is_trusted_embedded_page(&url) {
+                crate::util::webview_debug_log(format!(
+                    "ipc: dropped inbound '{name}' from untrusted url={url}"
+                ));
+                return 1;
+            }
+            if let Some(handler) = self
                 .message_handlers
                 .iter()
                 .find(|h| h.process_name() == name.as_str())
-        {
             {
                 let args = message.argument_list();
                 handler.handle_message(browser, frame, args);
-            }
-            // Wake Bevy so it drains the IPC channel this frame instead of on the next idle tick.
-            if let Some(wake) = &self.wake {
-                wake();
+                // Wake Bevy so it drains the IPC channel this frame instead of on the next idle tick.
+                if let Some(wake) = &self.wake {
+                    wake();
+                }
             }
         };
         1
