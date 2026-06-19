@@ -10,7 +10,7 @@ use vmux_core::{CreatedAt, Order, PageMetadata};
 use vmux_layout::event::SERVICES_PAGE_URL;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
-use vmux_layout::space::{ActiveSpaceTag, Space, SpaceId};
+use vmux_layout::space::{Space, SpaceId};
 use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
@@ -161,7 +161,6 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<PaneSize>()
         .allow::<Space>()
         .allow::<SpaceId>()
-        .allow::<ActiveSpaceTag>()
         .allow::<WindowGeometry>()
         .allow::<Profile>()
         .allow::<Open>()

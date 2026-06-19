@@ -1,14 +1,14 @@
 use bevy::prelude::*;
 use vmux_command::snapshot::{CommandBarSpacesSnapshot, SpaceSummary};
 use vmux_core::Order;
-use vmux_layout::space::{ActiveSpaceId, ActiveSpaceTag, Space, SpaceId};
+use vmux_layout::space::{ActiveSpaceId, Space, SpaceId};
 
 use crate::event::SPACES_PAGE_URL;
 
 pub fn update_spaces_snapshot(
     spaces: Query<(&SpaceId, &Name, Option<&Order>), With<Space>>,
     active_id: Res<ActiveSpaceId>,
-    active_name: Query<&Name, With<ActiveSpaceTag>>,
+    active_name: Query<&Name, (With<Space>, With<vmux_core::Active>)>,
     mut snapshot: ResMut<CommandBarSpacesSnapshot>,
 ) {
     let mut rows: Vec<(u32, SpaceSummary)> = spaces
@@ -50,7 +50,7 @@ mod tests {
             Space,
             SpaceId("space-1".to_string()),
             Name::new("Space 1"),
-            ActiveSpaceTag,
+            vmux_core::Active,
         ));
         app.update();
         let snap = app.world().resource::<CommandBarSpacesSnapshot>();

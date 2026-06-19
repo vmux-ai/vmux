@@ -7,16 +7,14 @@ impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Space>()
             .register_type::<SpaceId>()
-            .register_type::<ActiveSpaceTag>()
             .init_resource::<ActiveSpaceEntity>()
             .init_resource::<ActiveSpaceId>()
             .add_systems(
                 Update,
                 (
-                    ensure_active_space_tagged,
+                    crate::active::ensure_active_space,
                     sync_active_space_entity,
                     sync_active_space_id,
-                    assign_orphan_tabs_to_active_space,
                 )
                     .chain(),
             )
@@ -43,12 +41,6 @@ pub struct Space;
 #[require(Save)]
 pub struct SpaceId(pub String);
 
-#[derive(Component, Reflect, Default)]
-#[reflect(Component)]
-#[type_path = "vmux_desktop::space"]
-#[require(Save)]
-pub struct ActiveSpaceTag;
-
 #[derive(Resource, Default, Debug, PartialEq, Eq)]
 pub struct ActiveSpaceEntity(pub Option<Entity>);
 
@@ -56,25 +48,12 @@ pub struct ActiveSpaceEntity(pub Option<Entity>);
 pub struct ActiveSpaceId(pub Option<String>);
 
 pub fn sync_active_space_entity(
-    tagged: Query<Entity, With<ActiveSpaceTag>>,
+    tagged: Query<Entity, (With<Space>, With<vmux_core::Active>)>,
     mut active: ResMut<ActiveSpaceEntity>,
 ) {
     let current = tagged.iter().next();
     if active.0 != current {
         active.0 = current;
-    }
-}
-
-pub fn ensure_active_space_tagged(
-    tagged: Query<(), With<ActiveSpaceTag>>,
-    spaces: Query<Entity, With<Space>>,
-    mut commands: Commands,
-) {
-    if !tagged.is_empty() {
-        return;
-    }
-    if let Some(entity) = spaces.iter().next() {
-        commands.entity(entity).insert(ActiveSpaceTag);
     }
 }
 
@@ -172,7 +151,7 @@ mod tests {
             .add_systems(Update, sync_active_space_entity);
         let space = app
             .world_mut()
-            .spawn((Space, SpaceId("default".to_string()), ActiveSpaceTag))
+            .spawn((Space, SpaceId("default".to_string()), vmux_core::Active))
             .id();
         app.update();
         assert_eq!(app.world().resource::<ActiveSpaceEntity>().0, Some(space));
@@ -189,22 +168,6 @@ mod tests {
     }
 
     #[test]
-    fn ensure_active_space_tagged_tags_sole_untagged_space() {
-        let mut app = App::new();
-        app.init_resource::<ActiveSpaceEntity>().add_systems(
-            Update,
-            (ensure_active_space_tagged, sync_active_space_entity).chain(),
-        );
-        let space = app
-            .world_mut()
-            .spawn((Space, SpaceId("default".to_string())))
-            .id();
-        app.update();
-        assert!(app.world().entity(space).contains::<ActiveSpaceTag>());
-        assert_eq!(app.world().resource::<ActiveSpaceEntity>().0, Some(space));
-    }
-
-    #[test]
     fn active_space_id_tracks_active_entity() {
         let mut app = App::new();
         app.init_resource::<ActiveSpaceEntity>()
@@ -214,7 +177,7 @@ mod tests {
                 (sync_active_space_entity, sync_active_space_id).chain(),
             );
         app.world_mut()
-            .spawn((Space, SpaceId("work".to_string()), ActiveSpaceTag));
+            .spawn((Space, SpaceId("work".to_string()), vmux_core::Active));
         app.update();
         assert_eq!(
             app.world().resource::<ActiveSpaceId>().0.as_deref(),
@@ -233,23 +196,6 @@ mod tests {
             app.world().entity(tab).get::<SpaceId>(),
             Some(&SpaceId("work".to_string()))
         );
-    }
-
-    #[test]
-    fn ensure_active_space_tagged_is_noop_when_already_tagged() {
-        let mut app = App::new();
-        app.add_systems(Update, ensure_active_space_tagged);
-        let a = app
-            .world_mut()
-            .spawn((Space, SpaceId("a".to_string()), ActiveSpaceTag))
-            .id();
-        let b = app
-            .world_mut()
-            .spawn((Space, SpaceId("b".to_string())))
-            .id();
-        app.update();
-        assert!(app.world().entity(a).contains::<ActiveSpaceTag>());
-        assert!(!app.world().entity(b).contains::<ActiveSpaceTag>());
     }
 
     #[test]

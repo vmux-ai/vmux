@@ -894,7 +894,7 @@ fn handle_agent_queries(
         (
             &vmux_layout::space::SpaceId,
             &Name,
-            Has<vmux_layout::space::ActiveSpaceTag>,
+            Has<vmux_core::Active>,
             Option<&vmux_core::Order>,
         ),
         With<vmux_layout::space::Space>,

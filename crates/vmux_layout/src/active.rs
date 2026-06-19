@@ -83,6 +83,24 @@ pub fn ensure_active_branch(
     }
 }
 
+pub fn ensure_active_space(
+    spaces: Query<(Entity, Option<&LastActivatedAt>, Has<Active>), With<Space>>,
+    mut commands: Commands,
+) {
+    let mut candidates = Vec::new();
+    let mut has_active = false;
+    for (entity, ts, active) in &spaces {
+        candidates.push((entity, ts.map(|t| t.0).unwrap_or(0)));
+        has_active |= active;
+    }
+    if has_active || candidates.is_empty() {
+        return;
+    }
+    if let Some(target) = pick_active(candidates) {
+        commands.entity(target).insert(Active);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,5 +151,16 @@ mod tests {
             .iter(app.world())
             .count();
         assert_eq!(active_count, 1);
+    }
+
+    #[test]
+    fn ensure_active_space_marks_max_last_activated_space() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, ensure_active_space);
+        let _a = app.world_mut().spawn((Space, LastActivatedAt(1))).id();
+        let b = app.world_mut().spawn((Space, LastActivatedAt(9))).id();
+        app.update();
+        assert!(app.world().entity(b).contains::<Active>());
     }
 }

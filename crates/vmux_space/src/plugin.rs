@@ -142,7 +142,10 @@ fn reset_spaces_sent_marker_on_page_ready(
 }
 
 fn sync_active_space_record(
-    tagged: Query<(&vmux_layout::space::SpaceId, &Name), With<vmux_layout::space::ActiveSpaceTag>>,
+    tagged: Query<
+        (&vmux_layout::space::SpaceId, &Name),
+        (With<vmux_layout::space::Space>, With<vmux_core::Active>),
+    >,
     mut active: ResMut<ActiveSpace>,
 ) {
     if let Some((id, name)) = tagged.iter().next()
@@ -159,7 +162,7 @@ type SpaceListQuery<'w, 's> = Query<
     (
         &'static vmux_layout::space::SpaceId,
         &'static Name,
-        Has<vmux_layout::space::ActiveSpaceTag>,
+        Has<vmux_core::Active>,
         Option<&'static vmux_core::Order>,
     ),
     With<vmux_layout::space::Space>,
@@ -272,7 +275,7 @@ type SpaceQuery<'w, 's> = Query<
     (
         Entity,
         &'static vmux_layout::space::SpaceId,
-        Has<vmux_layout::space::ActiveSpaceTag>,
+        Has<vmux_core::Active>,
         Option<&'static vmux_core::Order>,
     ),
     With<vmux_layout::space::Space>,
@@ -306,7 +309,7 @@ fn deactivate_all_spaces(spaces: &SpaceQuery, commands: &mut Commands) {
         if is_active {
             commands
                 .entity(entity)
-                .remove::<vmux_layout::space::ActiveSpaceTag>();
+                .remove::<vmux_core::Active>();
         }
     }
 }
@@ -455,7 +458,7 @@ fn on_space_command(
         {
             commands
                 .entity(target_entity)
-                .insert(vmux_layout::space::ActiveSpaceTag);
+                .insert((vmux_core::Active, vmux_history::LastActivatedAt::now()));
             active_id.0 = Some(target_id.clone());
             bump_space_tab(&tabs, &target_id, &mut commands);
         }
@@ -477,7 +480,7 @@ fn on_space_command(
             deactivate_all_spaces(&spaces, &mut commands);
             commands
                 .entity(entity)
-                .insert(vmux_layout::space::ActiveSpaceTag);
+                .insert((vmux_core::Active, vmux_history::LastActivatedAt::now()));
             active_id.0 = Some(id.to_string());
             bump_space_tab(&tabs, id, &mut commands);
         }
@@ -503,7 +506,8 @@ fn on_space_command(
                 vmux_layout::space::SpaceId(id.clone()),
                 Name::new(id.clone()),
                 vmux_core::Order(order),
-                vmux_layout::space::ActiveSpaceTag,
+                vmux_core::Active,
+                vmux_history::LastActivatedAt::now(),
             ));
             active_id.0 = Some(id.clone());
             let _ = profile::space_dir(&id);
@@ -557,7 +561,8 @@ fn handle_open_in_new_space(
             vmux_layout::space::SpaceId(id.clone()),
             Name::new(id.clone()),
             vmux_core::Order(order),
-            vmux_layout::space::ActiveSpaceTag,
+            vmux_core::Active,
+            vmux_history::LastActivatedAt::now(),
         ));
         active_id.0 = Some(id.clone());
         let _ = profile::space_dir(&id);
@@ -744,7 +749,7 @@ mod tests {
                 vmux_layout::space::Space,
                 vmux_layout::space::SpaceId("rename-src-test".to_string()),
                 Name::new("rename-src-test"),
-                vmux_layout::space::ActiveSpaceTag,
+                vmux_core::Active,
             ))
             .id();
         let tab = app
