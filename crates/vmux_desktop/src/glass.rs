@@ -31,6 +31,7 @@ impl Plugin for GlassPlugin {
                 Last,
                 (
                     reveal_window_after_layout_ready,
+                    restore_fullscreen_after_reveal,
                     ensure_window_active_after_reveal,
                     sync_layout_overlay,
                     sync_command_bar_overlay,
@@ -158,6 +159,34 @@ fn reveal_window_after_layout_ready(
     state.revealed_at = Some(Instant::now());
 }
 
+/// After reveal, apply the persisted fullscreen intent once: enter native
+/// fullscreen if it was saved, then mark restore complete so geometry capture
+/// can begin. Consumes [`crate::window_state::PendingFullscreenRestore`].
+fn restore_fullscreen_after_reveal(
+    state: NonSend<GlassState>,
+    pending: Option<Res<crate::window_state::PendingFullscreenRestore>>,
+    mut commands: Commands,
+) {
+    use objc2_app_kit::NSWindowStyleMask;
+
+    let Some(pending) = pending else {
+        return;
+    };
+    if !state.revealed {
+        return;
+    }
+    if pending.0
+        && let Some(parent_window) = &state._parent_window
+        && !parent_window
+            .styleMask()
+            .contains(NSWindowStyleMask::FullScreen)
+    {
+        parent_window.toggleFullScreen(None);
+    }
+    commands.remove_resource::<crate::window_state::PendingFullscreenRestore>();
+    commands.insert_resource(crate::window_state::WindowRestoreComplete);
+}
+
 fn should_attempt_activation(
     revealed: bool,
     active_confirmed: bool,
@@ -233,6 +262,7 @@ fn sync_window_glass_visibility(
         (&Node, Has<bevy_cef::prelude::CefKeyboardTarget>),
         With<vmux_layout::window::Modal>,
     >,
+    mut window_fullscreen: ResMut<crate::window_state::WindowFullscreen>,
 ) {
     use objc2::ClassType;
     use objc2_app_kit::NSWindowStyleMask;
@@ -252,6 +282,10 @@ fn sync_window_glass_visibility(
         .as_ref()
         .is_some_and(|w| w.styleMask().contains(NSWindowStyleMask::FullScreen));
     let fullscreen = bevy_fullscreen || native_fullscreen;
+
+    if window_fullscreen.0 != fullscreen {
+        window_fullscreen.0 = fullscreen;
+    }
 
     let [r, g, b] = vmux_layout::window::WINDOW_BACKGROUND_SRGB;
     let want_clear = if fullscreen {

@@ -23,6 +23,7 @@ use bevy::{
     winit::WINIT_WINDOWS,
 };
 use bevy_cef::prelude::*;
+use moonshine_save::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
 use vmux_core::page::ServerEmbedSet;
 use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
@@ -125,6 +126,9 @@ impl Plugin for WindowPlugin {
         load_internal_asset!(app, WINDOW_SHADER_HANDLE, "window.wgsl", Shader::from_wgsl);
 
         app.add_plugins(MaterialPlugin::<WindowMaterial>::default())
+            .register_type::<WindowGeometry>()
+            .register_type::<Option<IVec2>>()
+            .register_type::<Option<Vec2>>()
             .add_systems(
                 Startup,
                 setup
@@ -161,7 +165,6 @@ impl Plugin for WindowPlugin {
             .add_systems(
                 Update,
                 (
-                    maximize_window_to_screen.run_if(not(resource_exists::<ScreenMaximized>)),
                     crate::stack::open_startup_url_if_no_stacks.before(PageOpenSet::ResolveTarget),
                     spawn_requested_tab_layouts
                         .after(ReadAppCommands)
@@ -189,10 +192,6 @@ fn handle_window_commands(
     }
 }
 
-/// One-shot resource: window has been sized to fill the screen.
-#[derive(Resource)]
-pub(crate) struct ScreenMaximized;
-
 pub(crate) fn window_uses_full_padding(window: &Window, monitors: &Query<&Monitor>) -> bool {
     matches!(
         &window.mode,
@@ -206,30 +205,6 @@ fn window_fills_monitor(window: &Window, monitors: &Query<&Monitor>) -> bool {
         let monitor_size = monitor.physical_size();
         size.x >= monitor_size.x.saturating_sub(2) && size.y >= monitor_size.y.saturating_sub(2)
     })
-}
-
-/// Size the window to fill the current monitor (runs once at startup).
-fn maximize_window_to_screen(
-    mut window_q: Query<(Entity, &mut Window), With<PrimaryWindow>>,
-    mut commands: Commands,
-) {
-    let Ok((entity, mut window)) = window_q.single_mut() else {
-        return;
-    };
-    WINIT_WINDOWS.with_borrow(|winit_windows| {
-        let Some(winit_win) = winit_windows.get_window(entity) else {
-            return;
-        };
-        let Some(monitor) = winit_win.current_monitor() else {
-            return;
-        };
-        let size = monitor.size();
-        let scale = monitor.scale_factor() as f32;
-        let logical_w = size.width as f32 / scale;
-        let logical_h = size.height as f32 / scale;
-        window.resolution.set(logical_w, logical_h);
-        commands.insert_resource(ScreenMaximized);
-    });
 }
 
 #[derive(Bundle)]
@@ -260,6 +235,19 @@ pub struct Modal;
 
 #[derive(Component)]
 pub struct WindowSurface;
+
+/// Persisted primary-window geometry, saved as a singleton entity in `store.ron`.
+/// `position`/`size` always describe the windowed frame, even while `fullscreen`,
+/// so exiting fullscreen lands on a sane frame.
+#[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::window"]
+#[require(Save)]
+pub struct WindowGeometry {
+    pub fullscreen: bool,
+    pub position: Option<IVec2>,
+    pub size: Option<Vec2>,
+}
 
 fn setup(
     window: Single<&Window, With<PrimaryWindow>>,
@@ -653,7 +641,6 @@ fn apply_webview_material_defaults(
 fn sync_window_layout_to_settings(
     settings: Res<LayoutSettings>,
     hidden: Option<Res<crate::toggle::LayoutHidden>>,
-    screen_maximized: Option<Res<ScreenMaximized>>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
     monitors: Query<&Monitor>,
     mut window_q: Query<&mut Node, (With<VmuxWindow>, Without<SideSheet>, Without<MainColumn>)>,
@@ -678,7 +665,6 @@ fn sync_window_layout_to_settings(
     let gap = crate::event::PANE_GAP_PX;
     let cfg_width = crate::event::SIDE_SHEET_WIDTH_PX;
     let full_padding = hidden.as_deref().is_some_and(|hidden| hidden.0)
-        || screen_maximized.is_some()
         || primary_window
             .single()
             .ok()
@@ -1177,11 +1163,10 @@ mod tests {
     }
 
     #[test]
-    fn screen_maximized_window_sync_applies_all_window_padding_edges() {
+    fn fills_monitor_window_sync_applies_all_window_padding_edges() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(crate::toggle::LayoutHidden(false))
-            .insert_resource(ScreenMaximized)
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings {
@@ -1204,6 +1189,15 @@ mod tests {
             },
             PrimaryWindow,
         ));
+        app.world_mut().spawn(Monitor {
+            name: None,
+            physical_width: 1200,
+            physical_height: 800,
+            physical_position: IVec2::ZERO,
+            refresh_rate_millihertz: None,
+            scale_factor: 1.0,
+            video_modes: Vec::new(),
+        });
         let root = app.world_mut().spawn((VmuxWindow, Node::default())).id();
 
         app.update();
@@ -1213,5 +1207,26 @@ mod tests {
         assert_eq!(node.padding.left, Val::Px(16.0));
         assert_eq!(node.padding.right, Val::Px(16.0));
         assert_eq!(node.padding.bottom, Val::Px(16.0));
+    }
+
+    #[test]
+    fn window_geometry_round_trips_position_size_fullscreen() {
+        let g = WindowGeometry {
+            fullscreen: true,
+            position: Some(IVec2::new(100, 200)),
+            size: Some(Vec2::new(1280.0, 800.0)),
+        };
+        assert_eq!(g, g);
+        assert_eq!(g.position, Some(IVec2::new(100, 200)));
+        assert_eq!(g.size, Some(Vec2::new(1280.0, 800.0)));
+        assert!(g.fullscreen);
+        assert_eq!(
+            WindowGeometry::default(),
+            WindowGeometry {
+                fullscreen: false,
+                position: None,
+                size: None,
+            }
+        );
     }
 }

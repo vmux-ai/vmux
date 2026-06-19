@@ -2,7 +2,7 @@ use crate::Open;
 use crate::header::Header;
 use crate::settings::LayoutSettings;
 use crate::side_sheet::SideSheet;
-use crate::window::{ScreenMaximized, VmuxWindow, window_uses_full_padding};
+use crate::window::{VmuxWindow, window_uses_full_padding};
 use bevy::prelude::*;
 use bevy::window::{Monitor, PrimaryWindow};
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, ToggleLayoutCommand};
@@ -31,16 +31,14 @@ impl Plugin for TogglePlugin {
 fn sync_window_padding_to_layout_hidden(
     hidden: Res<LayoutHidden>,
     settings: Res<LayoutSettings>,
-    screen_maximized: Option<Res<ScreenMaximized>>,
     primary_window: Query<&Window, With<PrimaryWindow>>,
     monitors: Query<&Monitor>,
     mut window_q: Query<&mut Node, With<VmuxWindow>>,
 ) {
-    let fullscreen = screen_maximized.is_some()
-        || primary_window
-            .single()
-            .ok()
-            .is_some_and(|window| window_uses_full_padding(window, &monitors));
+    let fullscreen = primary_window
+        .single()
+        .ok()
+        .is_some_and(|window| window_uses_full_padding(window, &monitors));
     let (top, left) = if hidden.0 || fullscreen {
         (settings.window.pad_top(), settings.window.pad_left())
     } else {
@@ -202,17 +200,5 @@ mod tests {
         let node = app.world().get::<Node>(root).expect("window node");
         assert_eq!(node.padding.top, Val::Px(16.0));
         assert_eq!(node.padding.left, Val::Px(16.0));
-    }
-
-    #[test]
-    fn startup_maximized_window_padding_does_not_depend_on_monitor_query() {
-        let source = include_str!("toggle.rs");
-        let sync_fn = source
-            .split("fn sync_window_padding_to_layout_hidden")
-            .nth(1)
-            .and_then(|tail| tail.split("fn handle_toggle").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("ScreenMaximized"));
     }
 }

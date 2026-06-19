@@ -27,9 +27,13 @@ mod splash;
 pub(crate) mod shortcut;
 mod tray;
 pub mod updater;
+mod window_state;
 use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
-use bevy::window::{CompositeAlphaMode, ExitCondition, Window as NativeWindow, WindowPlugin};
+use bevy::window::{
+    CompositeAlphaMode, ExitCondition, MonitorSelection, Window as NativeWindow, WindowPlugin,
+    WindowPosition, WindowResolution,
+};
 
 use {
     os_menu::OsMenuPlugin, persistence::PersistencePlugin, shortcut::ShortcutPlugin,
@@ -42,6 +46,11 @@ use {
 use vmux_agent::AgentPlugin;
 
 pub struct VmuxPlugin;
+
+/// First-launch window size (logical px) when no geometry is persisted in
+/// `store.ron`. Restored geometry overrides this after load.
+const DEFAULT_WINDOW_WIDTH: u32 = 1280;
+const DEFAULT_WINDOW_HEIGHT: u32 = 800;
 
 fn primary_window_config(title: String) -> NativeWindow {
     NativeWindow {
@@ -57,6 +66,8 @@ fn primary_window_config(title: String) -> NativeWindow {
         fullsize_content_view: true,
         ime_enabled: true,
         visible: !cfg!(target_os = "macos"),
+        position: WindowPosition::Centered(MonitorSelection::Primary),
+        resolution: WindowResolution::new(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT),
         ..default()
     }
 }
@@ -114,6 +125,7 @@ impl Plugin for VmuxPlugin {
                 background_lifecycle::BackgroundLifecyclePlugin,
                 tray::TrayPlugin,
                 display::DisplayPlugin,
+                window_state::WindowStatePlugin,
             ));
 
         app.init_resource::<boot_status::SplashStatus>()
@@ -145,6 +157,18 @@ mod tests {
         let window = primary_window_config("Vmux".to_string());
 
         assert_eq!(window.visible, !cfg!(target_os = "macos"));
+    }
+
+    #[test]
+    fn primary_window_defaults_to_centered_default_size() {
+        let window = primary_window_config("Vmux".to_string());
+
+        assert!(matches!(
+            window.position,
+            WindowPosition::Centered(MonitorSelection::Primary)
+        ));
+        assert_eq!(window.resolution.physical_width(), DEFAULT_WINDOW_WIDTH);
+        assert_eq!(window.resolution.physical_height(), DEFAULT_WINDOW_HEIGHT);
     }
 
     #[test]
