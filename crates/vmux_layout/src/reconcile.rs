@@ -499,6 +499,21 @@ pub fn apply_with_existing(
     for tab in &snapshot.tabs {
         apply_tab(world, tab);
     }
+    // Honor the snapshot's active tab: make it the most-recently-activated tab so
+    // the timestamp-based active-tab selection (windowed-browser visibility, focus
+    // ring) follows `is_active` instead of defaulting to whichever tab was just
+    // spawned — otherwise a newly created tab steals "active" and its windowed
+    // browser covers the layout.
+    if let Some((_, active_entity)) = materialized.iter().find(|(t, _)| t.is_active) {
+        let newest = materialized
+            .iter()
+            .filter_map(|(_, e)| world.get::<LastActivatedAt>(*e).map(|l| l.0))
+            .max()
+            .unwrap_or(0);
+        if let Ok(mut e) = world.get_entity_mut(*active_entity) {
+            e.insert(LastActivatedAt(newest + 1));
+        }
+    }
     let rescued: ApplyHashSet<String> = new_entities
         .iter()
         .filter_map(|(ptr, &entity)| {
@@ -1371,6 +1386,79 @@ mod tests {
         assert!(
             s_grandparent.is_some() && s_grandparent != Some(tab),
             "moved stack's pane should live under the new tab, not the original"
+        );
+    }
+
+    #[test]
+    fn snapshot_active_tab_becomes_most_recently_activated() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
+        let active_tab = app
+            .world_mut()
+            .spawn((LayoutTab { name: "A".into() }, LastActivatedAt(1)))
+            .id();
+        let active_pane = app.world_mut().spawn((Pane, ChildOf(active_tab))).id();
+
+        // Keep the existing tab (is_active) and add a NEW tab that must NOT steal active.
+        let snap = LayoutSnapshot {
+            tabs: vec![
+                proto::Tab {
+                    id: Some(format_id(NodeKind::Tab, active_tab.to_bits())),
+                    name: "A".into(),
+                    is_active: true,
+                    root: proto::LayoutNode::Pane {
+                        id: Some(format_id(NodeKind::Pane, active_pane.to_bits())),
+                        is_zoomed: false,
+                        stacks: vec![],
+                    },
+                },
+                proto::Tab {
+                    id: None,
+                    name: "New".into(),
+                    is_active: false,
+                    root: proto::LayoutNode::Pane {
+                        id: None,
+                        is_zoomed: false,
+                        stacks: vec![proto::Stack {
+                            id: None,
+                            url: "https://example.com".into(),
+                            kind: "browser".into(),
+                            ..Default::default()
+                        }],
+                    },
+                },
+            ],
+            focused: proto::Focus::default(),
+        };
+        let existing: std::collections::HashSet<String> = [
+            format_id(NodeKind::Tab, active_tab.to_bits()),
+            format_id(NodeKind::Pane, active_pane.to_bits()),
+        ]
+        .into_iter()
+        .collect();
+
+        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(Entity, &LastActivatedAt), With<LayoutTab>>();
+        let ts: Vec<(Entity, i64)> = q.iter(app.world()).map(|(e, l)| (e, l.0)).collect();
+        let active_ts = ts
+            .iter()
+            .find(|(e, _)| *e == active_tab)
+            .map(|(_, t)| *t)
+            .expect("active tab has a timestamp");
+        let max_other = ts
+            .iter()
+            .filter(|(e, _)| *e != active_tab)
+            .map(|(_, t)| *t)
+            .max()
+            .expect("a new tab exists");
+        assert!(
+            active_ts > max_other,
+            "is_active tab ({active_ts}) must out-rank other tabs ({max_other})"
         );
     }
 
