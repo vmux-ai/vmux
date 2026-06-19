@@ -2,7 +2,7 @@ use crate::{
     CloseRequiresConfirmation, NewStackContext,
     settings::{ConfirmCloseSettings, LayoutSettings},
     stack::{
-        CloseConfirmed, PendingStackClose, Stack, active_among, active_pane_in_tab,
+        ActiveTabParam, CloseConfirmed, PendingStackClose, Stack, active_among, active_pane_in_tab,
         active_stack_in_pane, focused_stack, stack_bundle,
     },
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
@@ -197,6 +197,7 @@ fn collect_siblings_to_hide(
 fn handle_zoom_command(
     mut reader: MessageReader<AppCommand>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -220,7 +221,7 @@ fn handle_zoom_command(
             _ => continue,
         };
         let (_, active_pane_opt, _) = focused_stack(
-            &tabs,
+            active_tab_param.get(),
             &all_children,
             &leaf_panes,
             &pane_ts,
@@ -484,7 +485,7 @@ impl PaneStartupContext<'_> {
 
 fn handle_pane_commands(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -511,7 +512,7 @@ fn handle_pane_commands(
             continue;
         };
         let (_, active_pane_opt, _active_stack_opt) = focused_stack(
-            &tabs,
+            active_tab_param.get(),
             &all_children,
             &leaf_panes,
             &pane_ts,
@@ -975,7 +976,7 @@ fn find_sibling_pane(
 
 fn handle_open_in_pane(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -1002,7 +1003,7 @@ fn handle_open_in_pane(
         };
 
         let (_, active_pane_opt, _) = focused_stack(
-            &tabs,
+            active_tab_param.get(),
             &all_children,
             &leaf_panes,
             &pane_ts,
@@ -1124,7 +1125,7 @@ fn open_or_prompt_stack(
 
 fn on_pane_select(
     mut reader: MessageReader<AppCommand>,
-    tab_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -1152,7 +1153,7 @@ fn on_pane_select(
             new_stack_ctx.previous_stack = None;
         }
 
-        let active_tab = active_among(tab_q.iter());
+        let active_tab = active_tab_param.get();
         let Some(tab_e) = active_tab else {
             continue;
         };

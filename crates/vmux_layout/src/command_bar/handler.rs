@@ -4,7 +4,7 @@ use crate::{
     Header,
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
-    stack::{Stack, active_among, collect_leaf_panes, focused_stack},
+    stack::{ActiveTabParam, Stack, collect_leaf_panes, focused_stack},
     tab::Tab,
     window::{Main, Modal},
 };
@@ -536,7 +536,7 @@ fn handle_open_command_bar(
     >,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
     browsers: NonSend<Browsers>,
-    tab_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -645,7 +645,7 @@ fn handle_open_command_bar(
                 }
             } else {
                 let (_, _, active_stack) = focused_stack(
-                    &tab_q,
+                    active_tab_param.get(),
                     &all_children,
                     &leaf_panes,
                     &pane_ts,
@@ -781,7 +781,7 @@ fn handle_open_command_bar(
     } else {
         let active_stack = active_stack_override.or_else(|| {
             let (_, _, active_stack) = focused_stack(
-                &tab_q,
+                active_tab_param.get(),
                 &all_children,
                 &leaf_panes,
                 &pane_ts,
@@ -802,11 +802,11 @@ fn handle_open_command_bar(
     };
 
     // Gather all tabs
-    let active_tab = active_among(tab_q.iter());
+    let active_tab = active_tab_param.get();
     let mut bar_tabs = Vec::new();
     if let Some(active_tab_e) = active_tab {
         let (_, _, active_stack) = focused_stack(
-            &tab_q,
+            active_tab_param.get(),
             &all_children,
             &leaf_panes,
             &pane_ts,
@@ -986,6 +986,7 @@ fn command_bar_open_payload(
 #[derive(SystemParam)]
 struct CommandBarActionQueries<'w, 's> {
     tab_q: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
+    active_tab_param: ActiveTabParam<'w, 's>,
     all_children: Query<'w, 's, &'static Children>,
     leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
@@ -1125,7 +1126,7 @@ fn on_command_bar_action(
                         custom_keyboard_restore = true;
                     } else {
                         let (_, active_pane_opt, _) = focused_stack(
-                            &queries.tab_q,
+                            queries.active_tab_param.get(),
                             &queries.all_children,
                             &queries.leaf_panes,
                             &queries.pane_ts,
@@ -1200,7 +1201,7 @@ fn on_command_bar_action(
                     custom_keyboard_restore = true;
                 } else {
                     let (_, active_pane_opt, _) = focused_stack(
-                        &queries.tab_q,
+                        queries.active_tab_param.get(),
                         &queries.all_children,
                         &queries.leaf_panes,
                         &queries.pane_ts,
@@ -1257,7 +1258,7 @@ fn on_command_bar_action(
                     custom_keyboard_restore = true;
                 } else {
                     let (_, active_pane_opt, _) = focused_stack(
-                        &queries.tab_q,
+                        queries.active_tab_param.get(),
                         &queries.all_children,
                         &queries.leaf_panes,
                         &queries.pane_ts,
@@ -1402,7 +1403,7 @@ fn on_command_bar_action(
     }
     if !custom_keyboard_restore {
         let (_, _, active_stack) = focused_stack(
-            &queries.tab_q,
+            queries.active_tab_param.get(),
             &queries.all_children,
             &queries.leaf_panes,
             &queries.pane_ts,

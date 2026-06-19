@@ -76,6 +76,7 @@ pub fn tab_bundle() -> impl Bundle {
 fn handle_tab_commands(
     mut reader: MessageReader<AppCommand>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: crate::stack::ActiveTabParam,
     tab_q: Query<Entity, With<Tab>>,
     tab_space: Query<&crate::space::SpaceId>,
     main_q: Query<Entity, With<MainNode>>,
@@ -87,7 +88,7 @@ fn handle_tab_commands(
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let active_tab = tabs.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
+        let active_tab = active_tab_param.get();
 
         match cmd {
             AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewTab { url })) => {
@@ -316,6 +317,7 @@ fn sync_tab_order(
 fn on_tabs_command_emit(
     trigger: On<BinReceive<TabsCommandEvent>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: crate::stack::ActiveTabParam,
     tab_q: Query<Entity, With<Tab>>,
     tab_space: Query<&crate::space::SpaceId>,
     main_q: Query<Entity, With<MainNode>>,
@@ -328,7 +330,7 @@ fn on_tabs_command_emit(
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
-    let active_tab = tabs.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
+    let active_tab = active_tab_param.get();
     match evt.command.as_str() {
         "new" => {
             messages.write(AppCommand::Browser(BrowserCommand::Open(

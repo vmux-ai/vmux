@@ -43,7 +43,10 @@ use vmux_layout::{
     },
     pane::{Pane, PaneHoverIntent, PaneSplit, first_stack_in_pane},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
-    stack::{Stack, active_stack_in_pane, collect_leaf_panes, focused_stack, stack_bundle},
+    stack::{
+        ActiveTabParam, Stack, active_stack_in_pane, collect_leaf_panes, focused_stack,
+        stack_bundle,
+    },
     tab::Tab,
     window::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
@@ -2317,7 +2320,7 @@ fn first_browser_meta<'a>(
 
 fn handle_browser_commands(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -2337,7 +2340,7 @@ fn handle_browser_commands(
             continue;
         };
         let (_, _, active_stack_opt) = focused_stack(
-            &tabs,
+            active_tab_param.get(),
             &all_children,
             &leaf_panes,
             &pane_ts,
