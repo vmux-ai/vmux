@@ -74,10 +74,27 @@ fn default_provider_kind() -> String {
     "vibe".to_string()
 }
 
-pub fn resolve_startup_url(settings: &AppSettings, space_id: &str) -> String {
-    let per_space = settings
+fn normalize_space_key(key: &str) -> String {
+    key.chars()
+        .map(|c| if c == '/' { '-' } else { c })
+        .collect::<String>()
+        .to_lowercase()
+}
+
+fn space_override<'a>(settings: &'a AppSettings, space_id: &str) -> Option<&'a SpaceOverrides> {
+    if let Some(overrides) = settings.spaces.get(space_id) {
+        return Some(overrides);
+    }
+    let target = normalize_space_key(space_id);
+    settings
         .spaces
-        .get(space_id)
+        .iter()
+        .find(|(key, _)| normalize_space_key(key) == target)
+        .map(|(_, value)| value)
+}
+
+pub fn resolve_startup_url(settings: &AppSettings, space_id: &str) -> String {
+    let per_space = space_override(settings, space_id)
         .and_then(|o| o.startup_url.as_deref())
         .map(str::trim)
         .filter(|s| !s.is_empty());
@@ -96,12 +113,7 @@ pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> std::path:
             .map(std::path::PathBuf::from)
             .filter(|p| p.is_dir())
     };
-    pick(
-        settings
-            .spaces
-            .get(space_id)
-            .and_then(|o| o.startup_dir.as_deref()),
-    )
+    pick(space_override(settings, space_id).and_then(|o| o.startup_dir.as_deref()))
     .or_else(|| {
         pick(
             settings
@@ -889,6 +901,20 @@ mod tests {
         let mut s = base_settings();
         s.browser.startup_url = "vmux://agent/".into();
         assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
+    }
+
+    #[test]
+    fn resolve_startup_dir_matches_slug_variant_key() {
+        let dir = std::env::temp_dir();
+        let mut s = base_settings();
+        s.spaces.insert(
+            "mistralai-dashboard".to_string(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(dir.to_string_lossy().to_string()),
+            },
+        );
+        assert_eq!(resolve_startup_dir(&s, "mistralai/dashboard"), dir);
     }
 
     #[test]
