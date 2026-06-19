@@ -258,27 +258,10 @@ fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
 }
 
 fn sync_tab_visibility(
-    active_id: Option<Res<crate::space::ActiveSpaceId>>,
-    mut tabs: Query<
-        (
-            Entity,
-            &LastActivatedAt,
-            Option<&crate::space::SpaceId>,
-            &mut Node,
-            &mut Visibility,
-        ),
-        With<Tab>,
-    >,
+    mut tabs: Query<(&mut Node, &mut Visibility, Has<vmux_core::Active>), With<Tab>>,
 ) {
-    let active_space = active_id.as_deref().and_then(|id| id.0.as_deref());
-    let active = tabs
-        .iter()
-        .filter(|(_, _, sid, _, _)| crate::space::in_active_space(*sid, active_space))
-        .max_by_key(|(_, ts, _, _, _)| ts.0)
-        .map(|(e, _, _, _, _)| e);
-    for (entity, _, _, mut node, mut vis) in &mut tabs {
-        let is_active = Some(entity) == active;
-        let target_display = if is_active {
+    for (mut node, mut vis, active) in &mut tabs {
+        let target_display = if active {
             Display::Flex
         } else {
             Display::None
@@ -286,7 +269,7 @@ fn sync_tab_visibility(
         if node.display != target_display {
             node.display = target_display;
         }
-        let target_vis = if is_active {
+        let target_vis = if active {
             Visibility::Inherited
         } else {
             Visibility::Hidden

@@ -25,6 +25,10 @@ impl Plugin for SpacePlugin {
                     crate::active::ensure_active_stack,
                     crate::active::ensure_active_branch,
                 ),
+            )
+            .add_systems(
+                PostUpdate,
+                sync_space_container_visibility.before(bevy::ui::UiSystems::Layout),
             );
     }
 }
@@ -140,6 +144,29 @@ pub fn space_view_bundle() -> impl Bundle {
     )
 }
 
+pub fn sync_space_container_visibility(
+    mut spaces: Query<(&mut Node, &mut Visibility, Has<vmux_core::Active>), With<Space>>,
+) {
+    for (mut node, mut vis, active) in &mut spaces {
+        let target_display = if active {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != target_display {
+            node.display = target_display;
+        }
+        let target_vis = if active {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != target_vis {
+            *vis = target_vis;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,5 +252,24 @@ mod tests {
     #[test]
     fn space_container_bundle_is_absolute_fill_node() {
         assert_eq!(space_container_node().position_type, PositionType::Absolute);
+    }
+
+    #[test]
+    fn inactive_space_container_is_hidden_but_alive() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, sync_space_container_visibility);
+        let active = app
+            .world_mut()
+            .spawn((Space, vmux_core::Active, space_container_node(), Visibility::default()))
+            .id();
+        let bg = app
+            .world_mut()
+            .spawn((Space, space_container_node(), Visibility::default()))
+            .id();
+        app.update();
+        assert_eq!(app.world().get::<Node>(active).unwrap().display, Display::Flex);
+        assert_eq!(app.world().get::<Node>(bg).unwrap().display, Display::None);
+        assert!(app.world().get_entity(bg).is_ok());
     }
 }
