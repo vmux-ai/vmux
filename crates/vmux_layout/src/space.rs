@@ -114,6 +114,45 @@ pub fn in_active_space(candidate: Option<&SpaceId>, active: Option<&str>) -> boo
     }
 }
 
+pub fn space_of(
+    entity: Entity,
+    child_of: &Query<&ChildOf>,
+    spaces: &Query<(), With<Space>>,
+) -> Option<Entity> {
+    let mut current = entity;
+    loop {
+        if spaces.get(current).is_ok() {
+            return Some(current);
+        }
+        match child_of.get(current) {
+            Ok(parent) => current = parent.parent(),
+            Err(_) => return None,
+        }
+    }
+}
+
+pub fn space_container_node() -> Node {
+    Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(0.0),
+        right: Val::Px(0.0),
+        top: Val::Px(0.0),
+        bottom: Val::Px(0.0),
+        width: Val::Percent(100.0),
+        height: Val::Percent(100.0),
+        ..default()
+    }
+}
+
+pub fn space_view_bundle() -> impl Bundle {
+    (
+        space_container_node(),
+        Transform::default(),
+        GlobalTransform::default(),
+        Visibility::default(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,5 +242,34 @@ mod tests {
         app.update();
         assert!(app.world().entity(a).contains::<ActiveSpaceTag>());
         assert!(!app.world().entity(b).contains::<ActiveSpaceTag>());
+    }
+
+    #[test]
+    fn space_of_walks_up_to_nearest_space() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s".to_string())))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((crate::tab::Tab::default(), ChildOf(space)))
+            .id();
+        let stack = app.world_mut().spawn(ChildOf(tab)).id();
+        let found = app
+            .world_mut()
+            .run_system_once(
+                move |child_of: Query<&ChildOf>, spaces: Query<(), With<Space>>| {
+                    space_of(stack, &child_of, &spaces)
+                },
+            )
+            .unwrap();
+        assert_eq!(found, Some(space));
+    }
+
+    #[test]
+    fn space_container_bundle_is_absolute_fill_node() {
+        assert_eq!(space_container_node().position_type, PositionType::Absolute);
     }
 }
