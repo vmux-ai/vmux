@@ -51,12 +51,12 @@ const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
 #[derive(Resource, Clone, Default)]
 pub struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool>);
 
-/// Tracks the terminal a `run` opened for each agent (anchor → run-terminal
-/// `ProcessId`), so a later `run` without an explicit `terminal` reuses it
-/// instead of opening a new split. Stale entries self-heal: if the tracked
-/// terminal is gone, `run` opens a new one and overwrites the entry.
+/// The terminal "region" pane each agent's `run` terminals live in (anchor →
+/// pane). A bare `run` stacks new terminals into this pane instead of splitting
+/// the agent's own pane again; the first `run` creates it. Self-healing: a stale
+/// pane (closed) is replaced by a fresh split.
 #[derive(Resource, Default)]
-pub struct AgentRunTerminals(pub std::collections::HashMap<ProcessId, ProcessId>);
+pub struct AgentTerminalRegions(pub std::collections::HashMap<ProcessId, Entity>);
 
 fn resolve_agent_executable(
     kind: AgentKind,
@@ -99,7 +99,7 @@ impl Plugin for AgentPlugin {
 
         app.insert_resource(strategies)
             .init_resource::<AgentSessionToEntity>()
-            .init_resource::<AgentRunTerminals>()
+            .init_resource::<AgentTerminalRegions>()
             .init_resource::<AgentSessionDirty>()
             .add_message::<AgentCommandRequest>()
             .add_message::<AgentQueryRequest>()
@@ -478,6 +478,49 @@ fn resolve_self_pane(
     Some((term, pane))
 }
 
+/// The pane containing the terminal whose `ProcessId` is `pid` (its stack's
+/// parent pane). Used to anchor a `run` next to an existing terminal page.
+fn resolve_pane_for_pid(
+    pid: ProcessId,
+    term_pids: &Query<(Entity, &ProcessId), With<Terminal>>,
+    child_of_q: &Query<&ChildOf>,
+) -> Option<Entity> {
+    use bevy::ecs::relationship::Relationship;
+    let (term, _) = term_pids.iter().find(|(_, p)| **p == pid)?;
+    let stack = child_of_q.get(term).ok()?.get();
+    let pane = child_of_q.get(stack).ok()?.get();
+    Some(pane)
+}
+
+/// Split `pane` and return the new leaf pane. Batches several splits of the same
+/// pane in one tick (extend an existing split instead of re-splitting the leaf).
+#[allow(clippy::too_many_arguments)]
+fn split_pane_off(
+    commands: &mut Commands,
+    pane: Entity,
+    direction: &vmux_service::protocol::AgentPaneDirection,
+    focus: bool,
+    pane_children: &Query<&Children, With<Pane>>,
+    tab_filter: &Query<Entity, With<vmux_layout::stack::Stack>>,
+    split_dir_q: &Query<&PaneSplit>,
+    split_this_batch: &mut std::collections::HashSet<Entity>,
+) -> Entity {
+    let existing_tabs: Vec<Entity> = pane_children
+        .get(pane)
+        .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+        .unwrap_or_default();
+    let split_dir = vmux_layout::pane::direction_to_split(&to_pane_direction(direction));
+    let already_split = !split_this_batch.insert(pane) || split_dir_q.contains(pane);
+    vmux_layout::pane::split_or_extend(
+        commands,
+        pane,
+        split_dir,
+        &existing_tabs,
+        focus,
+        already_split,
+    )
+}
+
 fn to_pane_direction(
     d: &vmux_service::protocol::AgentPaneDirection,
 ) -> vmux_command::open::PaneDirection {
@@ -541,9 +584,12 @@ fn run_terminal_cwd(agent_launch_cwd: Option<&str>, active_space: Option<&Active
 fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     agent_terms: Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
+    term_pids: Query<(Entity, &ProcessId), With<Terminal>>,
     child_of_q: Query<&ChildOf>,
     launch_q: Query<&TerminalLaunch>,
     pane_children: Query<&Children, With<Pane>>,
+    panes: Query<Entity, With<Pane>>,
+    split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<vmux_layout::stack::Stack>>,
     mut open_beside_writer: MessageWriter<vmux_layout::OpenBesideRequest>,
     mut terminal_stack_spawn_writer: MessageWriter<TerminalStackSpawnRequest>,
@@ -551,14 +597,17 @@ fn handle_agent_self_commands(
     service: Option<Res<ServiceClient>>,
     active_space: Option<Res<ActiveSpace>>,
     settings: Res<AppSettings>,
-    live_terms: Query<&ProcessId, (With<Terminal>, Without<ProcessExited>)>,
-    mut run_terminals: ResMut<AgentRunTerminals>,
+    mut regions: ResMut<AgentTerminalRegions>,
 ) {
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
     let Some(service) = service else {
         for _ in reader.read() {}
         return;
     };
+    // Anchors split during this batch. Several `run`s dispatched in one tick all
+    // resolve to the same agent pane; the first splits it, the rest must extend
+    // that split rather than re-split the leaf (which would orphan empty panes).
+    let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     for request in reader.read() {
         let result = match &request.command {
             ServiceAgentCommand::OpenBeside {
@@ -584,6 +633,8 @@ fn handle_agent_self_commands(
                 command,
                 direction,
                 focus,
+                beside,
+                mode,
                 terminal,
                 done_marker,
             } => {
@@ -598,61 +649,77 @@ fn handle_agent_self_commands(
                         });
                         AgentCommandResult::Text(pid.to_string())
                     }
-                    None => {
-                        // Reuse this agent's existing run-terminal if it's still
-                        // alive; otherwise open a new one and remember it.
-                        let reuse = run_terminals
-                            .0
-                            .get(anchor)
-                            .copied()
-                            .filter(|pid| live_terms.iter().any(|p| p == pid));
-                        match reuse {
+                    None => 'spawn: {
+                        let Some((agent_term, self_pane)) =
+                            resolve_self_pane(*anchor, &agent_terms, &child_of_q)
+                        else {
+                            break 'spawn AgentCommandResult::Error(
+                                "self process not found".to_string(),
+                            );
+                        };
+                        // Resolve an explicit `beside` anchor up front (errors if stale).
+                        let beside_pane = match beside {
                             Some(pid) => {
-                                service.0.send(ClientMessage::ProcessInput {
-                                    process_id: pid,
-                                    data,
-                                });
-                                AgentCommandResult::Text(pid.to_string())
+                                match resolve_pane_for_pid(*pid, &term_pids, &child_of_q) {
+                                    Some(pane) => Some(pane),
+                                    None => {
+                                        break 'spawn AgentCommandResult::Error(format!(
+                                            "run.beside page not found: {pid}"
+                                        ));
+                                    }
+                                }
                             }
-                            None => match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
-                                None => {
-                                    AgentCommandResult::Error("self process not found".to_string())
-                                }
-                                Some((term, pane)) => {
-                                    let existing_tabs: Vec<Entity> = pane_children
-                                        .get(pane)
-                                        .map(|c| {
-                                            c.iter().filter(|&e| tab_filter.contains(e)).collect()
-                                        })
-                                        .unwrap_or_default();
-                                    let split_dir = vmux_layout::pane::direction_to_split(
-                                        &to_pane_direction(direction),
-                                    );
-                                    let p2 = vmux_layout::pane::split_leaf_into_two(
+                            None => None,
+                        };
+                        use vmux_service::protocol::PlacementMode;
+                        let target_pane = match (beside_pane, *mode) {
+                            // Explicit split: a new pane off the given page's pane (or self).
+                            (anchor, PlacementMode::Split) => split_pane_off(
+                                &mut commands,
+                                anchor.unwrap_or(self_pane),
+                                direction,
+                                *focus,
+                                &pane_children,
+                                &tab_filter,
+                                &split_dir_q,
+                                &mut split_this_batch,
+                            ),
+                            // Stack into the given page's pane.
+                            (Some(pane), _) => pane,
+                            // No anchor: reuse the agent's terminal region, else split one
+                            // off the agent the first time (don't spawn a pane unless needed).
+                            (None, _) => {
+                                let region = regions
+                                    .0
+                                    .get(anchor)
+                                    .copied()
+                                    .filter(|p| panes.contains(*p));
+                                region.unwrap_or_else(|| {
+                                    split_pane_off(
                                         &mut commands,
-                                        pane,
-                                        split_dir,
-                                        &existing_tabs,
+                                        self_pane,
+                                        direction,
                                         *focus,
-                                    );
-                                    let new_pid = ProcessId::new();
-                                    let agent_cwd = launch_q.get(term).ok().map(|l| l.cwd.clone());
-                                    let cwd = run_terminal_cwd(
-                                        agent_cwd.as_deref(),
-                                        active_space.as_deref(),
-                                    );
-                                    terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
-                                        pane: p2,
-                                        cwd: Some(cwd),
-                                        pending_input: Some(data),
-                                        process_id: Some(new_pid),
-                                        activate: *focus,
-                                    });
-                                    run_terminals.0.insert(*anchor, new_pid);
-                                    AgentCommandResult::Text(new_pid.to_string())
-                                }
-                            },
-                        }
+                                        &pane_children,
+                                        &tab_filter,
+                                        &split_dir_q,
+                                        &mut split_this_batch,
+                                    )
+                                })
+                            }
+                        };
+                        regions.0.insert(*anchor, target_pane);
+                        let new_pid = ProcessId::new();
+                        let agent_cwd = launch_q.get(agent_term).ok().map(|l| l.cwd.clone());
+                        let cwd = run_terminal_cwd(agent_cwd.as_deref(), active_space.as_deref());
+                        terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
+                            pane: target_pane,
+                            cwd: Some(cwd),
+                            pending_input: Some(data),
+                            process_id: Some(new_pid),
+                            activate: *focus,
+                        });
+                        AgentCommandResult::Text(new_pid.to_string())
                     }
                 }
             }

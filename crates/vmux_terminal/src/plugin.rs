@@ -987,6 +987,13 @@ struct PollServiceWriters<'w> {
     osc_title: MessageWriter<'w, OscTitleChanged>,
 }
 
+/// True when a rendered line carries any non-whitespace text. Used to decide
+/// when a shell has actually drawn its prompt (vs. a blank pre-prompt frame), so
+/// pending `run` input is flushed only once the line editor is ready.
+fn line_has_content(line: &vmux_core::event::TermLine) -> bool {
+    line.spans.iter().any(|s| !s.text.trim().is_empty())
+}
+
 fn poll_service_messages(
     pending_create: Query<
         (Entity, &ProcessId, &crate::launch::TerminalLaunch),
@@ -1089,7 +1096,9 @@ fn poll_service_messages(
             } => {
                 for (entity, pid, _) in &terminals {
                     if *pid == process_id {
-                        if !output_seen.contains(entity) {
+                        if !output_seen.contains(entity)
+                            && changed_lines.iter().any(|(_, l)| line_has_content(l))
+                        {
                             commands.entity(entity).insert(ShellOutputSeen);
                         }
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
@@ -1142,7 +1151,7 @@ fn poll_service_messages(
             } => {
                 for (entity, pid, _) in &terminals {
                     if *pid == process_id {
-                        if !output_seen.contains(entity) {
+                        if !output_seen.contains(entity) && lines.iter().any(line_has_content) {
                             commands.entity(entity).insert(ShellOutputSeen);
                         }
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {

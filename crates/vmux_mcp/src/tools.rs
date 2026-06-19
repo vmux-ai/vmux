@@ -183,6 +183,7 @@ Recipes: \
 - Close a pane/stack: omit it from the submitted tree. \
 - Resize a split: change flex_weights on the parent split. \
 - Equalize a split: set all flex_weights to the same value. \
+- Group an agent's parallel terminals (keep the agent's own pane readable): make the tab root a row split with two children - the agent's own pane on one side, and on the other either a split holding the terminal panes (when there are a few, so all are visible) or a single pane whose stacks are all the terminals (tabs, when there are many). Move existing terminal stacks by id into the grouped pane(s) rather than recreating them, and set flex_weights so the agent keeps a fair share (e.g. [1, 1] or [2, 3]). \
 - Change focus: set the top-level focused triple. \
 - Toggle zoom: flip the pane's is_zoomed flag. \
 \
@@ -297,16 +298,26 @@ fn run_definition() -> ToolDefinition {
     ToolDefinition {
         name: "run".into(),
         description:
-            "Run a shell command in a visible terminal the user can watch live and take over. \
+            "Run a shell command in a visible terminal pane the user can watch live and take over. \
 Blocks until the command finishes and returns its full output plus the exit code \
 (`terminal: <id>`, `exit: <code>`, `output: ...`). If it has not finished within ~50s, returns the \
 output so far with a note to call read_terminal for the rest. \
-By default opens a new terminal in a pane beside YOUR pane; pass `terminal` (a terminal id from a \
-previous run or from read_layout's process_id) to run in that existing terminal instead — reuse the \
-id instead of opening a new terminal for every command. \
-direction|focus apply only when opening a new terminal (direction default right; \
-focus default false = keep focus on your own pane). \
-The command is typed into an interactive shell, so the terminal stays usable afterwards."
+\
+PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses your one terminal region \
+(new terminals stack into a single pane beside you), so your own pane never keeps shrinking and the \
+layout stays tidy. The first `run` opens that region; later ones stack into it. Rule of thumb: don't \
+open a new pane unless you actually need one. \
+Override only when you mean to: \
+- `mode`: `auto` (default, reuse your region) | `split` (force a NEW pane) | `stack` (force a stacked \
+tab into the anchor's pane). \
+- `beside`: anchor to a specific page — a terminal id a previous run returned, or \"self\" for your own \
+pane. With `beside` set, `stack` tabs into that page's pane and `split` splits off it. \
+- `direction`: which side for `split` (right|left|top|bottom, default right). \
+- `terminal: <id>`: instead of opening anything, run IN that existing terminal (best for dependent / \
+sequential steps that share one shell, in order). \
+\
+`focus` (default false = keep focus on your own pane) applies when opening a new terminal. The command \
+is typed into an interactive shell, so the terminal stays usable afterwards."
                 .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -315,6 +326,8 @@ The command is typed into an interactive shell, so the terminal stays usable aft
             "properties": {
                 "command": {"type": "string"},
                 "terminal": {"type": "string"},
+                "beside": {"type": "string"},
+                "mode": {"enum": ["auto", "split", "stack"]},
                 "direction": {"enum": ["right", "left", "top", "bottom"]},
                 "focus": {"type": "boolean"}
             }
@@ -428,11 +441,30 @@ pub fn dispatch_with_anchor(
             ),
             _ => None,
         };
+        let beside = match arguments.get("beside").and_then(Value::as_str) {
+            Some(s) if !s.is_empty() && s != "self" => Some(
+                s.parse::<vmux_service::protocol::ProcessId>()
+                    .map_err(|_| format!("run.beside is not a valid page id: {s}"))?,
+            ),
+            _ => None,
+        };
+        let mode = match arguments
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("auto")
+        {
+            "auto" => vmux_service::protocol::PlacementMode::Auto,
+            "split" => vmux_service::protocol::PlacementMode::Split,
+            "stack" => vmux_service::protocol::PlacementMode::Stack,
+            other => return Err(format!("unknown mode: {other}")),
+        };
         return Ok(DispatchTarget::Command(AgentCommand::Run {
             anchor,
             command,
             direction,
             focus,
+            beside,
+            mode,
             terminal,
             done_marker: None,
         }));
@@ -784,6 +816,70 @@ mod tests {
                 "run",
                 serde_json::json!({"command": "ls", "terminal": "nope"}),
                 Some(anchor)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn run_beside_and_mode_dispatch() {
+        use vmux_service::protocol::PlacementMode;
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let beside = vmux_service::protocol::ProcessId::new();
+
+        // beside=<id> + mode=stack carries through.
+        let target = dispatch_with_anchor(
+            "run",
+            serde_json::json!({"command": "ls", "beside": beside.to_string(), "mode": "stack"}),
+            Some(anchor),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::Run {
+                beside: Some(b),
+                mode,
+                ..
+            }) => {
+                assert_eq!(b, beside);
+                assert_eq!(mode, PlacementMode::Stack);
+            }
+            other => panic!("expected Run with beside+stack, got {other:?}"),
+        }
+
+        // beside="self" => None; mode defaults to Auto (reuse the region).
+        let target = dispatch_with_anchor(
+            "run",
+            serde_json::json!({"command": "ls", "beside": "self"}),
+            Some(anchor),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::Run {
+                beside: None, mode, ..
+            }) => assert_eq!(mode, PlacementMode::Auto),
+            other => panic!("expected Run with self+auto, got {other:?}"),
+        }
+
+        // explicit mode=split is honored.
+        let target = dispatch_with_anchor(
+            "run",
+            serde_json::json!({"command": "ls", "mode": "split"}),
+            Some(anchor),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::Run { mode, .. }) => {
+                assert_eq!(mode, PlacementMode::Split)
+            }
+            other => panic!("expected Run with split, got {other:?}"),
+        }
+
+        // unknown mode errors.
+        assert!(
+            dispatch_with_anchor(
+                "run",
+                serde_json::json!({"command": "ls", "mode": "nope"}),
+                Some(anchor),
             )
             .is_err()
         );

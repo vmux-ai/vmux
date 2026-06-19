@@ -467,6 +467,10 @@ pub fn apply_with_existing(
 
     let mut new_entities: std::collections::HashMap<*const proto::LayoutNode, Entity> =
         std::collections::HashMap::new();
+    // Resolve (or create) each tab's entity once and keep the pairing, so the
+    // structure pass reparents existing nodes into NEW tabs too (e.g. moving a
+    // stack to a brand-new tab) — not only into tabs that already have an id.
+    let mut materialized: Vec<(&proto::Tab, Entity)> = Vec::with_capacity(snapshot.tabs.len());
     for tab in &snapshot.tabs {
         let tab_entity = match &tab.id {
             Some(id) => match parse_id(id) {
@@ -486,15 +490,11 @@ pub fn apply_with_existing(
             }
         };
         materialize_descendants(world, tab_entity, &tab.root, &mut new_entities);
+        materialized.push((tab, tab_entity));
     }
 
-    for tab in &snapshot.tabs {
-        if let Some(id) = &tab.id
-            && let Ok((_, value)) = parse_id(id)
-        {
-            let tab_entity = Entity::from_bits(value);
-            apply_structure(world, Some(tab_entity), &tab.root, &new_entities);
-        }
+    for (tab, tab_entity) in &materialized {
+        apply_structure(world, Some(*tab_entity), &tab.root, &new_entities);
     }
     for tab in &snapshot.tabs {
         apply_tab(world, tab);
@@ -1307,6 +1307,71 @@ mod tests {
         apply(app.world_mut(), &snap).unwrap();
         let parent = app.world().get::<ChildOf>(moved).map(|p| p.parent());
         assert_eq!(parent, Some(split_b));
+    }
+
+    #[test]
+    fn moves_stack_to_new_tab_reparents_it() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>();
+        let tab = app.world_mut().spawn(LayoutTab { name: "S".into() }).id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+        let stack = app.world_mut().spawn(ChildOf(pane)).id();
+
+        // Move the existing stack out of its pane into a brand-new tab (id: None).
+        let snap = LayoutSnapshot {
+            tabs: vec![
+                proto::Tab {
+                    id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                    name: "S".into(),
+                    is_active: false,
+                    root: proto::LayoutNode::Pane {
+                        id: Some(format_id(NodeKind::Pane, pane.to_bits())),
+                        is_zoomed: false,
+                        stacks: vec![],
+                    },
+                },
+                proto::Tab {
+                    id: None,
+                    name: "YouTube".into(),
+                    is_active: true,
+                    root: proto::LayoutNode::Pane {
+                        id: None,
+                        is_zoomed: false,
+                        stacks: vec![proto::Stack {
+                            id: Some(format_id(NodeKind::Stack, stack.to_bits())),
+                            ..Default::default()
+                        }],
+                    },
+                },
+            ],
+            focused: proto::Focus::default(),
+        };
+        let existing: std::collections::HashSet<String> = [
+            format_id(NodeKind::Tab, tab.to_bits()),
+            format_id(NodeKind::Pane, pane.to_bits()),
+            format_id(NodeKind::Stack, stack.to_bits()),
+        ]
+        .into_iter()
+        .collect();
+
+        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+
+        let s_parent = app
+            .world()
+            .get::<ChildOf>(stack)
+            .map(|p| p.parent())
+            .expect("moved stack still has a parent");
+        assert_ne!(
+            s_parent, pane,
+            "stack should be reparented out of the original pane"
+        );
+        let s_grandparent = app.world().get::<ChildOf>(s_parent).map(|p| p.parent());
+        assert!(
+            s_grandparent.is_some() && s_grandparent != Some(tab),
+            "moved stack's pane should live under the new tab, not the original"
+        );
     }
 
     #[test]

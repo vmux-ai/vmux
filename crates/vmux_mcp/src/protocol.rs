@@ -115,6 +115,8 @@ async fn tool_call_result(
             command,
             direction,
             focus,
+            beside,
+            mode,
             terminal,
             ..
         }) => {
@@ -124,6 +126,8 @@ async fn tool_call_result(
                 command,
                 direction,
                 focus,
+                beside,
+                mode,
                 terminal,
                 done_marker: Some(token.clone()),
             };
