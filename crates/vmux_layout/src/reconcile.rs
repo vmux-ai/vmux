@@ -332,15 +332,15 @@ pub fn serve_snapshot_requests(
     zoomed_q: Query<&crate::pane::Zoomed>,
     focused: Res<crate::stack::FocusedStack>,
     process_ids: Query<(&vmux_core::ProcessId, &ChildOf)>,
-    tab_space_q: Query<&crate::space::SpaceId>,
-    active_id: Option<Res<crate::space::ActiveSpaceId>>,
+    child_of_q: Query<&ChildOf>,
+    space_q: Query<(), With<crate::space::Space>>,
+    active_space_q: Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
     mut writer: MessageWriter<LayoutSnapshotResponse>,
 ) {
     let pid_by_stack: HashMap<u64, String> = process_ids
         .iter()
         .map(|(pid, co)| (co.get().to_bits(), pid.to_string()))
         .collect();
-    let active_space = active_id.as_deref().and_then(|id| id.0.clone());
     for request in reader.read() {
         let self_stack = request.anchor.and_then(|anchor| {
             process_ids
@@ -348,6 +348,9 @@ pub fn serve_snapshot_requests(
                 .find(|(pid, _)| **pid == anchor)
                 .map(|(_, co)| co.get())
         });
+        let target_space = self_stack
+            .and_then(|stack| crate::space::space_of(stack, &child_of_q, &space_q))
+            .or_else(|| active_space_q.iter().next());
         let mut snapshot = crate::snapshot::build_layout_snapshot(
             &tabs_q,
             &splits_q,
@@ -358,16 +361,14 @@ pub fn serve_snapshot_requests(
             &focused,
             self_stack,
         );
-        if let Some(active) = active_space.as_deref() {
+        if let Some(target) = target_space {
             snapshot.tabs.retain(|tab| {
                 tab.id
                     .as_deref()
                     .and_then(|id| crate::protocol::parse_id(id).ok())
                     .map(|(_, bits)| {
-                        tab_space_q
-                            .get(Entity::from_bits(bits))
-                            .map(|sid| sid.0 == active)
-                            .unwrap_or(true)
+                        crate::space::space_of(Entity::from_bits(bits), &child_of_q, &space_q)
+                            == Some(target)
                     })
                     .unwrap_or(true)
             });
@@ -720,12 +721,15 @@ fn collect_ids_recursive(world: &World, entity: Entity, out: &mut ApplyHashSet<S
 /// When there is no active space, all tabs are included (global behavior).
 #[cfg(not(target_arch = "wasm32"))]
 fn collect_existing_ids(world: &mut World) -> ApplyHashSet<String> {
-    let active = active_space_id(world);
-    let mut tab_q =
-        world.query_filtered::<(Entity, Option<&crate::space::SpaceId>), With<LayoutTab>>();
+    let mut active_space_q =
+        world.query_filtered::<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>();
+    let active_space = active_space_q.iter(world).next();
+    let mut tab_q = world.query_filtered::<(Entity, Option<&ChildOf>), With<LayoutTab>>();
     let tabs: Vec<Entity> = tab_q
         .iter(world)
-        .filter(|(_, sid)| crate::space::in_active_space(*sid, active.as_deref()))
+        .filter(|(_, child_of)| {
+            active_space.is_none() || child_of.map(|c| c.parent()) == active_space
+        })
         .map(|(entity, _)| entity)
         .collect();
     let mut out = ApplyHashSet::new();
@@ -900,18 +904,13 @@ mod tests {
     #[test]
     fn collect_existing_ids_scoped_to_active_space() {
         let mut world = World::new();
-        world.insert_resource(crate::space::ActiveSpaceId(Some("a".to_string())));
+        let space_a = world.spawn((crate::space::Space, vmux_core::Active)).id();
+        let space_b = world.spawn(crate::space::Space).id();
         let tab_a = world
-            .spawn((
-                crate::tab::Tab::default(),
-                crate::space::SpaceId("a".to_string()),
-            ))
+            .spawn((crate::tab::Tab::default(), ChildOf(space_a)))
             .id();
         let tab_b = world
-            .spawn((
-                crate::tab::Tab::default(),
-                crate::space::SpaceId("b".to_string()),
-            ))
+            .spawn((crate::tab::Tab::default(), ChildOf(space_b)))
             .id();
         let ids = collect_existing_ids(&mut world);
         assert!(ids.contains(&format_id(NodeKind::Tab, tab_a.to_bits())));
