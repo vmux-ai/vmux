@@ -16,7 +16,7 @@ use vmux_layout::{
     pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
     stack::Stack,
     tab::Tab,
-    window::Main,
+    window::{Main, WindowGeometry},
 };
 use vmux_setting::AppSettings;
 use vmux_setting::Settings;
@@ -108,6 +108,7 @@ fn mark_dirty_on_change(
     changed_meta: Query<(), (Changed<PageMetadata>, With<Stack>)>,
     changed_size: Query<(), Changed<PaneSize>>,
     changed_children: Query<(), Changed<Children>>,
+    changed_geometry: Query<(), Changed<WindowGeometry>>,
 ) {
     if !added_stacks.is_empty()
         || !added_panes.is_empty()
@@ -117,6 +118,7 @@ fn mark_dirty_on_change(
         || !changed_meta.is_empty()
         || !changed_size.is_empty()
         || !changed_children.is_empty()
+        || !changed_geometry.is_empty()
     {
         auto_save.dirty = true;
         auto_save.debounce.reset();
@@ -160,6 +162,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<Space>()
         .allow::<SpaceId>()
         .allow::<ActiveSpaceTag>()
+        .allow::<WindowGeometry>()
         .allow::<Profile>()
         .allow::<Open>()
         .allow::<PageMetadata>()
@@ -767,6 +770,57 @@ mod tests {
             .next()
             .expect("TransitionType not round-tripped");
         assert_eq!(*tt, vmux_core::TransitionType::Typed);
+    }
+
+    #[test]
+    fn window_geometry_round_trips_through_store() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("store.ron");
+
+        let mut app_save = App::new();
+        app_save.add_plugins(MinimalPlugins);
+        app_save.add_plugins(vmux_core::CorePlugin);
+        app_save
+            .register_type::<WindowGeometry>()
+            .register_type::<Option<IVec2>>()
+            .register_type::<Option<Vec2>>();
+        app_save.add_observer(save_on_default_event);
+        app_save.world_mut().spawn((
+            Save,
+            WindowGeometry {
+                fullscreen: true,
+                position: Some(IVec2::new(11, 22)),
+                size: Some(Vec2::new(640.0, 480.0)),
+            },
+        ));
+
+        save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
+        app_save.update();
+        assert!(path.exists(), "store file should exist");
+
+        let mut app_load = App::new();
+        app_load.add_plugins(MinimalPlugins);
+        app_load.add_plugins(vmux_core::CorePlugin);
+        app_load
+            .register_type::<WindowGeometry>()
+            .register_type::<Option<IVec2>>()
+            .register_type::<Option<Vec2>>();
+        app_load.add_observer(load_on_default_event);
+        app_load.update();
+        app_load
+            .world_mut()
+            .commands()
+            .trigger_load(LoadWorld::default_from_file(path));
+        app_load.update();
+
+        let geom = app_load
+            .world_mut()
+            .query::<&WindowGeometry>()
+            .single(app_load.world())
+            .expect("WindowGeometry not round-tripped");
+        assert!(geom.fullscreen);
+        assert_eq!(geom.position, Some(IVec2::new(11, 22)));
+        assert_eq!(geom.size, Some(Vec2::new(640.0, 480.0)));
     }
 
     #[test]
