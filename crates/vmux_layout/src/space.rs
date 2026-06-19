@@ -19,6 +19,14 @@ impl Plugin for SpacePlugin {
                     assign_orphan_tabs_to_active_space,
                 )
                     .chain(),
+            )
+            .add_systems(
+                Update,
+                (
+                    crate::active::ensure_active_tab,
+                    crate::active::ensure_active_stack,
+                    crate::active::ensure_active_branch,
+                ),
             );
     }
 }

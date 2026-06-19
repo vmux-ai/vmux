@@ -47,6 +47,8 @@ pub mod side_sheet;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod space;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod active;
+#[cfg(not(target_arch = "wasm32"))]
 mod swap;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tab;
