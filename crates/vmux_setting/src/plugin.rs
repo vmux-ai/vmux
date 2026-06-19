@@ -43,7 +43,9 @@ impl Plugin for SettingsPlugin {
             )
             .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
             .add_systems(Update, respond_settings_spawn.in_set(ReadAppCommands))
-            .add_plugins(BinEventEmitterPlugin::<(SettingsCommandEvent,)>::default())
+            .add_plugins(BinEventEmitterPlugin::<(SettingsCommandEvent,)>::for_hosts(
+                &["settings"],
+            ))
             .add_observer(on_settings_command)
             .add_observer(reset_sent_markers_on_page_ready)
             .add_systems(

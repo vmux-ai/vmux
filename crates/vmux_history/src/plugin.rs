@@ -30,16 +30,16 @@ impl Plugin for HistoryPlugin {
                 prune_history.run_if(on_timer(Duration::from_secs(3600))),
             )
             .add_systems(Startup, prune_history)
-            .add_plugins(
+            .add_plugins((
                 BinEventEmitterPlugin::<(
                     HistoryQueryRequest,
                     HistoryDeleteRequest,
                     HistoryClearAllRequest,
                     HistoryOpenRequest,
-                    HistorySuggestionsRequest,
                     HistoryChangedEvent,
-                )>::default(),
-            )
+                )>::for_hosts(&["history"]),
+                BinEventEmitterPlugin::<(HistorySuggestionsRequest,)>::for_hosts(&["command-bar"]),
+            ))
             .add_observer(on_history_query_request)
             .add_observer(on_history_delete_request)
             .add_observer(on_history_clear_all_request)

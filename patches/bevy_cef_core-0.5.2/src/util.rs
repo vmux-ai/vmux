@@ -122,6 +122,47 @@ pub fn resolved_cef_embedded_page_config() -> Arc<CefEmbeddedPageConfig> {
         .unwrap_or_else(|| Arc::new(CefEmbeddedPageConfig::default()))
 }
 
+pub fn url_has_embedded_scheme(url: &str, scheme_prefix: &str) -> bool {
+    !scheme_prefix.is_empty() && url.starts_with(scheme_prefix)
+}
+
+pub fn embedded_page_host(url: &str, scheme_prefix: &str) -> Option<String> {
+    if scheme_prefix.is_empty() {
+        return None;
+    }
+    let rest = url.strip_prefix(scheme_prefix)?;
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+pub fn url_is_trusted_embedded_page(
+    url: &str,
+    scheme_prefix: &str,
+    hosts: &CefEmbeddedHosts,
+) -> bool {
+    match embedded_page_host(url, scheme_prefix) {
+        Some(host) => hosts.entry_for_host(&host).is_some(),
+        None => false,
+    }
+}
+
+pub fn has_embedded_scheme(url: &str) -> bool {
+    url_has_embedded_scheme(url, resolved_cef_embedded_page_config().scheme_prefix())
+}
+
+pub fn is_trusted_embedded_page(url: &str) -> bool {
+    let config = resolved_cef_embedded_page_config();
+    url_is_trusted_embedded_page(url, config.scheme_prefix(), &config.hosts)
+}
+
+pub fn embedded_page_host_of(url: &str) -> Option<String> {
+    embedded_page_host(url, resolved_cef_embedded_page_config().scheme_prefix())
+}
+
 pub fn webview_debug_log_enabled() -> bool {
     std::env::var_os("VMUX_WEBVIEW_DEBUG").is_some()
 }
@@ -303,6 +344,107 @@ mod tests {
             webview_debug_log_path(),
             PathBuf::from("/tmp/vmux_webview_debug.log")
         );
+    }
+
+    fn allowlisted_hosts() -> CefEmbeddedHosts {
+        CefEmbeddedHosts(vec![
+            CefEmbeddedHost {
+                host: "history".to_string(),
+                default_document: "index.html".to_string(),
+            },
+            CefEmbeddedHost {
+                host: "terminal".to_string(),
+                default_document: "index.html".to_string(),
+            },
+        ])
+    }
+
+    #[test]
+    fn embedded_scheme_matches_only_exact_scheme_prefix() {
+        assert!(url_has_embedded_scheme("vmux://history/", "vmux://"));
+        assert!(url_has_embedded_scheme("vmux://anything/at/all", "vmux://"));
+        assert!(!url_has_embedded_scheme("https://evil.com/", "vmux://"));
+        assert!(!url_has_embedded_scheme("about:blank", "vmux://"));
+        assert!(!url_has_embedded_scheme("vmux:evil", "vmux://"));
+        assert!(!url_has_embedded_scheme("", "vmux://"));
+    }
+
+    #[test]
+    fn embedded_scheme_rejects_empty_prefix() {
+        assert!(!url_has_embedded_scheme("vmux://history/", ""));
+        assert!(!url_has_embedded_scheme("anything", ""));
+    }
+
+    #[test]
+    fn trusted_page_requires_scheme_and_allowlisted_host() {
+        let hosts = allowlisted_hosts();
+        assert!(url_is_trusted_embedded_page(
+            "vmux://history/",
+            "vmux://",
+            &hosts
+        ));
+        assert!(url_is_trusted_embedded_page(
+            "vmux://history/sub/path?x=1",
+            "vmux://",
+            &hosts
+        ));
+        assert!(url_is_trusted_embedded_page(
+            "vmux://history?x=1",
+            "vmux://",
+            &hosts
+        ));
+        assert!(url_is_trusted_embedded_page(
+            "vmux://terminal/",
+            "vmux://",
+            &hosts
+        ));
+    }
+
+    #[test]
+    fn trusted_page_rejects_unknown_host_and_untrusted_origins() {
+        let hosts = allowlisted_hosts();
+        assert!(!url_is_trusted_embedded_page(
+            "vmux://unknown/",
+            "vmux://",
+            &hosts
+        ));
+        assert!(!url_is_trusted_embedded_page("vmux://", "vmux://", &hosts));
+        assert!(!url_is_trusted_embedded_page(
+            "vmux:evil",
+            "vmux://",
+            &hosts
+        ));
+        assert!(!url_is_trusted_embedded_page(
+            "https://evil.com/",
+            "vmux://",
+            &hosts
+        ));
+        assert!(!url_is_trusted_embedded_page(
+            "about:blank",
+            "vmux://",
+            &hosts
+        ));
+        assert!(!url_is_trusted_embedded_page("", "vmux://", &hosts));
+        assert!(!url_is_trusted_embedded_page("vmux://history/", "", &hosts));
+    }
+
+    #[test]
+    fn embedded_page_host_parses_host_segment() {
+        assert_eq!(
+            embedded_page_host("vmux://history/", "vmux://").as_deref(),
+            Some("history")
+        );
+        assert_eq!(
+            embedded_page_host("vmux://agent/vibe/setup", "vmux://").as_deref(),
+            Some("agent")
+        );
+        assert_eq!(
+            embedded_page_host("vmux://command-bar?x=1", "vmux://").as_deref(),
+            Some("command-bar")
+        );
+        assert_eq!(embedded_page_host("vmux://", "vmux://"), None);
+        assert_eq!(embedded_page_host("https://evil.com/", "vmux://"), None);
+        assert_eq!(embedded_page_host("vmux://history/", ""), None);
     }
 }
 

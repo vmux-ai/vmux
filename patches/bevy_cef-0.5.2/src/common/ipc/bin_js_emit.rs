@@ -46,11 +46,16 @@ where
 }
 
 pub trait BinEventList {
-    fn register_events(app: &mut App, id_override: Option<&'static str>);
+    fn register_events(
+        app: &mut App,
+        id_override: Option<&'static str>,
+        owner_hosts: Option<&'static [&'static str]>,
+    );
 }
 
 pub struct BinEventEmitterPlugin<T> {
     id: Option<&'static str>,
+    owner_hosts: Option<&'static [&'static str]>,
     marker: PhantomData<T>,
 }
 
@@ -58,6 +63,17 @@ impl<E> BinEventEmitterPlugin<(E,)> {
     pub const fn with_id(id: &'static str) -> Self {
         Self {
             id: Some(id),
+            owner_hosts: None,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<T> BinEventEmitterPlugin<T> {
+    pub const fn for_hosts(owner_hosts: &'static [&'static str]) -> Self {
+        Self {
+            id: None,
+            owner_hosts: Some(owner_hosts),
             marker: PhantomData,
         }
     }
@@ -67,6 +83,7 @@ impl<T> Default for BinEventEmitterPlugin<T> {
     fn default() -> Self {
         Self {
             id: None,
+            owner_hosts: None,
             marker: PhantomData,
         }
     }
@@ -77,11 +94,18 @@ where
     T: BinEventList + Send + Sync + 'static,
 {
     fn build(&self, app: &mut App) {
-        T::register_events(app, self.id);
+        T::register_events(app, self.id, self.owner_hosts);
     }
 }
 
-fn register_event<E>(app: &mut App, id: &'static str)
+fn host_allowed(owner_hosts: Option<&[&str]>, host: &str) -> bool {
+    match owner_hosts {
+        None => true,
+        Some(list) => list.contains(&host),
+    }
+}
+
+fn register_event<E>(app: &mut App, id: &'static str, owner_hosts: Option<&'static [&'static str]>)
 where
     E: rkyv::Archive + Send + Sync + 'static,
     E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
@@ -90,7 +114,7 @@ where
     app.add_systems(
         Update,
         (move |commands: Commands, buffer: Res<BinIpcEventRawBuffer>| {
-            receive_bin_events::<E>(commands, buffer, id);
+            receive_bin_events::<E>(commands, buffer, id, owner_hosts);
         })
         .after(drain_bin_ipc_events),
     );
@@ -109,11 +133,15 @@ macro_rules! impl_bin_event_list {
                     + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
             )*
         {
-            fn register_events(app: &mut App, id_override: Option<&'static str>) {
+            fn register_events(
+                app: &mut App,
+                id_override: Option<&'static str>,
+                owner_hosts: Option<&'static [&'static str]>,
+            ) {
                 let head_id = id_override.unwrap_or_else(bin_ipc_event_id::<$head>);
-                register_event::<$head>(app, head_id);
+                register_event::<$head>(app, head_id, owner_hosts);
                 $(
-                    register_event::<$tail>(app, bin_ipc_event_id::<$tail>());
+                    register_event::<$tail>(app, bin_ipc_event_id::<$tail>(), owner_hosts);
                 )*
             }
         }
@@ -149,14 +177,25 @@ where
     rkyv::from_bytes::<E, rkyv::rancor::Error>(&event.payload).ok()
 }
 
-fn receive_bin_events<E>(mut commands: Commands, buffer: Res<BinIpcEventRawBuffer>, id: &str)
-where
+fn receive_bin_events<E>(
+    mut commands: Commands,
+    buffer: Res<BinIpcEventRawBuffer>,
+    id: &str,
+    owner_hosts: Option<&'static [&'static str]>,
+) where
     E: rkyv::Archive + Send + Sync + 'static,
     E::Archived: rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
     for event in &buffer.0 {
         if let Some(payload) = decode_bin_event::<E>(event, id) {
+            if !host_allowed(owner_hosts, &event.host) {
+                webview_debug_log(format!(
+                    "ipc: dropped '{}' from host '{}' (owner {:?})",
+                    id, event.host, owner_hosts
+                ));
+                continue;
+            }
             commands.trigger(BinReceive {
                 webview: event.webview,
                 payload,
@@ -205,6 +244,7 @@ mod tests {
             .into_vec();
         let raw = BinIpcEventRaw {
             webview: Entity::PLACEHOLDER,
+            host: String::new(),
             id: bin_ipc_event_id::<BetaEvent>().to_string(),
             payload: bytes,
         };
@@ -220,6 +260,7 @@ mod tests {
             .into_vec();
         let raw = BinIpcEventRaw {
             webview: Entity::PLACEHOLDER,
+            host: String::new(),
             id: bin_ipc_event_id::<AlphaEvent>().to_string(),
             payload: bytes,
         };
@@ -228,5 +269,21 @@ mod tests {
             decode_bin_event::<AlphaEvent>(&raw, bin_ipc_event_id::<AlphaEvent>()).unwrap();
 
         assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn host_allowed_without_owner_accepts_any_host() {
+        assert!(host_allowed(None, "history"));
+        assert!(host_allowed(None, ""));
+    }
+
+    #[test]
+    fn host_allowed_restricts_to_owner_hosts() {
+        assert!(host_allowed(Some(&["history"]), "history"));
+        assert!(!host_allowed(Some(&["history"]), "command-bar"));
+        assert!(host_allowed(Some(&["debug", "layout"]), "layout"));
+        assert!(host_allowed(Some(&["debug", "layout"]), "debug"));
+        assert!(!host_allowed(Some(&["debug", "layout"]), "terminal"));
+        assert!(!host_allowed(Some(&[]), "history"));
     }
 }

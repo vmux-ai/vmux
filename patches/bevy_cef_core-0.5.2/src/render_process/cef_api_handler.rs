@@ -99,6 +99,9 @@ impl CefApiHandler {
         let Some(frame) = context.frame() else {
             return 0;
         };
+        if !crate::util::has_embedded_scheme(&frame.url().into_string()) {
+            return 1;
+        }
 
         if let Some(mut process) = process_message_create(Some(&PROCESS_MESSAGE_BRP.into()))
             && let Some(promise) = v8_value_create_promise()
@@ -136,6 +139,9 @@ impl CefApiHandler {
         let Some(frame) = context.frame() else {
             return 0;
         };
+        if !crate::util::has_embedded_scheme(&frame.url().into_string()) {
+            return 1;
+        }
 
         if let Some(mut process) = process_message_create(Some(&PROCESS_MESSAGE_JS_EMIT.into()))
             && let Some(arguments_list) = process.argument_list()
@@ -161,6 +167,9 @@ impl CefApiHandler {
         let Some(frame) = context.frame() else {
             return 0;
         };
+        if !crate::util::has_embedded_scheme(&frame.url().into_string()) {
+            return 1;
+        }
 
         if let Some(mut process) = process_message_create(Some(&PROCESS_MESSAGE_BIN_JS_EMIT.into()))
             && let Some(arguments_list) = process.argument_list()
@@ -218,6 +227,15 @@ impl CefApiHandler {
     }
 
     fn execute_listen(&self, arguments: Option<&[Option<V8Value>]>) -> c_int {
+        let Some(context) = v8_context_get_current_context() else {
+            return 1;
+        };
+        let Some(frame) = context.frame() else {
+            return 1;
+        };
+        if !crate::util::has_embedded_scheme(&frame.url().into_string()) {
+            return 1;
+        }
         if let Some(arguments) = arguments
             && let Some(Some(id)) = arguments.first()
             && id.is_string().is_positive()
