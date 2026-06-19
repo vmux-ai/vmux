@@ -31,6 +31,7 @@ impl Plugin for PageAgentPlugin {
                 "vmux-agent-toast",
             ))
             .add_observer(approval::handle_approval_reply)
+            .add_observer(close_page_session_on_remove)
             .add_systems(
                 Update,
                 (
@@ -115,6 +116,28 @@ fn send_page_agent_input(
         });
         commands.entity(entity).remove::<PendingUserInput>();
     }
+}
+
+fn close_page_session_on_remove(
+    trigger: On<Remove, AgentSession>,
+    sessions: Query<&AgentSession>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else {
+        return;
+    };
+    let Ok(session) = sessions.get(trigger.event_target()) else {
+        return;
+    };
+    if session.variant != AgentVariant::Page {
+        return;
+    }
+    service.0.send(ClientMessage::DetachPageAgent {
+        sid: session.sid.clone(),
+    });
+    service.0.send(ClientMessage::ClosePageAgent {
+        sid: session.sid.clone(),
+    });
 }
 
 #[allow(clippy::type_complexity)]
