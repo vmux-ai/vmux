@@ -667,6 +667,39 @@ mod tests {
     }
 
     #[test]
+    fn new_tab_parents_under_active_space_container() {
+        let mut app = build_app();
+        let window = app.world_mut().spawn(PrimaryWindow).id();
+        let main = app.world_mut().spawn(MainNode).id();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::TabLayoutSpawnRequest>>()
+            .write(crate::TabLayoutSpawnRequest {
+                main,
+                primary_window: window,
+                name: None,
+                content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
+                clear_pending_stack: false,
+                focus: true,
+            });
+
+        app.update();
+
+        let tab = app
+            .world_mut()
+            .query_filtered::<Entity, With<Tab>>()
+            .iter(app.world())
+            .next()
+            .expect("tab spawned");
+        assert_eq!(app.world().get::<ChildOf>(tab).map(|c| c.parent()), Some(space));
+        assert!(app.world().get::<crate::space::SpaceId>(tab).is_none());
+    }
+
+    #[test]
     fn tabs_close_event_records_recent_tab_close() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, TabPlugin))

@@ -501,6 +501,7 @@ fn on_space_command(
                 .map(|max| max + 1)
                 .unwrap_or(0);
             deactivate_all_spaces(&spaces, &mut commands);
+            let Ok(main) = main_q.single() else { return };
             commands.spawn((
                 vmux_layout::space::Space,
                 vmux_layout::space::SpaceId(id.clone()),
@@ -508,10 +509,11 @@ fn on_space_command(
                 vmux_core::Order(order),
                 vmux_core::Active,
                 vmux_history::LastActivatedAt::now(),
+                vmux_layout::space::space_view_bundle(),
+                ChildOf(main),
             ));
             active_id.0 = Some(id.clone());
             let _ = profile::space_dir(&id);
-            let Ok(main) = main_q.single() else { return };
             layout_requests.write(TabLayoutSpawnRequest {
                 main,
                 primary_window: *primary_window,
@@ -556,6 +558,7 @@ fn handle_open_in_new_space(
             .map(|max| max + 1)
             .unwrap_or(0);
         deactivate_all_spaces(&spaces, &mut commands);
+        let Ok(main) = main_q.single() else { continue };
         commands.spawn((
             vmux_layout::space::Space,
             vmux_layout::space::SpaceId(id.clone()),
@@ -563,10 +566,11 @@ fn handle_open_in_new_space(
             vmux_core::Order(order),
             vmux_core::Active,
             vmux_history::LastActivatedAt::now(),
+            vmux_layout::space::space_view_bundle(),
+            ChildOf(main),
         ));
         active_id.0 = Some(id.clone());
         let _ = profile::space_dir(&id);
-        let Ok(main) = main_q.single() else { continue };
         let content = url
             .as_deref()
             .filter(|url| !url.is_empty())

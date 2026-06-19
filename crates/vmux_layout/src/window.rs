@@ -473,28 +473,21 @@ pub fn spawn_requested_tab_layouts(
     mut new_stack_ctx: ResMut<crate::NewStackContext>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut focus: Option<ResMut<crate::stack::FocusedStack>>,
-    active_space_id: Option<Res<crate::space::ActiveSpaceId>>,
+    active_space: Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
+        let parent = active_space.iter().next().unwrap_or(request.main);
         let tab_e = commands
             .spawn((
                 tab_bundle(),
                 LastActivatedAt::now(),
                 CreatedAt::now(),
-                ChildOf(request.main),
+                ChildOf(parent),
             ))
             .id();
         if let Some(name) = request.name.clone() {
             commands.entity(tab_e).insert(Tab { name });
-        }
-        if let Some(space_id) = active_space_id
-            .as_deref()
-            .and_then(|active| active.0.clone())
-        {
-            commands
-                .entity(tab_e)
-                .insert(crate::space::SpaceId(space_id));
         }
 
         let gap = pane_split_gaps(PaneSplitDirection::Row, settings.pane.gap);
