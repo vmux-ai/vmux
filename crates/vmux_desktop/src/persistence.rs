@@ -94,8 +94,26 @@ struct AutoSave {
     dirty: bool,
 }
 
+const STORE_SCHEMA_VERSION: u32 = 2;
+
 pub(crate) fn store_path() -> PathBuf {
     vmux_core::profile::shared_data_dir().join("store.ron")
+}
+
+fn store_version_path() -> PathBuf {
+    vmux_core::profile::shared_data_dir().join("store.version")
+}
+
+fn store_schema_is_current() -> bool {
+    std::fs::read_to_string(store_version_path())
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .map(|v| v >= STORE_SCHEMA_VERSION)
+        .unwrap_or(false)
+}
+
+fn write_store_schema_version() {
+    let _ = std::fs::write(store_version_path(), STORE_SCHEMA_VERSION.to_string());
 }
 
 fn mark_dirty_on_change(
@@ -145,6 +163,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    write_store_schema_version();
     // Use an allowlist to only save our model components.
     // ChildOf is the source of truth for hierarchy; Children is derived
     // automatically by Bevy's relationship system on load.
@@ -186,6 +205,11 @@ pub(crate) fn load_space_on_startup(
 ) {
     let path = store_path();
     let removed_stale = remove_stale_space_if_needed(&path);
+    if path.exists() && !store_schema_is_current() {
+        warn!("Store schema outdated; resetting {:?}", path);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(store_version_path());
+    }
     let exists = path.exists() && !removed_stale;
     commands.insert_resource(SpaceFilePresent(exists));
     if exists {
@@ -278,6 +302,7 @@ fn sort_tabs_by_order(mut tabs: Vec<(Entity, Option<u32>, Option<i64>)>) -> Vec<
 pub(crate) fn rebuild_space_views(
     main_q: Query<Entity, With<Main>>,
     tabs_need_view: Query<(Entity, Option<&Order>, Option<&CreatedAt>), (With<Tab>, Without<Node>)>,
+    spaces_need_view: Query<Entity, (With<Space>, Without<Node>)>,
     splits_need_view: Query<(Entity, &PaneSplit), Without<Node>>,
     panes_need_view: Query<Entity, (With<Pane>, Without<PaneSplit>, Without<Node>)>,
     stacks_need_view: Query<
@@ -291,7 +316,6 @@ pub(crate) fn rebuild_space_views(
     pane_sizes: Query<&PaneSize>,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
-    tab_children_q: Query<&Children, With<Stack>>,
     browser_q: Query<(), With<Browser>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     settings: Res<AppSettings>,
@@ -301,6 +325,7 @@ pub(crate) fn rebuild_space_views(
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     if tabs_need_view.is_empty()
+        && spaces_need_view.is_empty()
         && splits_need_view.is_empty()
         && panes_need_view.is_empty()
         && stacks_need_view.is_empty()
@@ -310,6 +335,12 @@ pub(crate) fn rebuild_space_views(
 
     let Ok(main) = main_q.single() else { return };
     let pw = *primary_window;
+
+    for space in &spaces_need_view {
+        commands
+            .entity(space)
+            .insert((vmux_layout::space::space_view_bundle(), ChildOf(main)));
+    }
 
     let saved_tab_order: Vec<(Entity, Option<u32>, Option<i64>)> = tabs_need_view
         .iter()
@@ -329,8 +360,10 @@ pub(crate) fn rebuild_space_views(
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            ChildOf(main),
         ));
+        if let Ok(co) = child_of_q.get(tab_e) {
+            commands.entity(tab_e).insert(ChildOf(co.get()));
+        }
     }
 
     // -- PaneSplit: add flex container with gap + direction --
@@ -397,7 +430,7 @@ pub(crate) fn rebuild_space_views(
             ZIndex(0),
         ));
 
-        let has_browser = tab_children_q
+        let has_browser = all_children
             .get(entity)
             .map(|ch| ch.iter().any(|e| browser_q.contains(e)))
             .unwrap_or(false);
