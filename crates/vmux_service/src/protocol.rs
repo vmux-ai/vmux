@@ -38,6 +38,19 @@ pub enum AgentPaneDirection {
     Left,
 }
 
+/// How a spawned page is placed relative to its anchor pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum PlacementMode {
+    /// Default: don't spawn a new pane unless necessary. Reuse the agent's
+    /// existing terminal region (stack the new terminal into it); split one pane
+    /// off the agent only when no region exists yet.
+    Auto,
+    /// New pane split off the anchor pane (X/Y), in the given direction.
+    Split,
+    /// New stack added to the anchor pane itself (Z); the pane keeps its size.
+    Stack,
+}
+
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentCommand {
     AppCommand {
@@ -100,9 +113,21 @@ pub enum AgentCommand {
         command: String,
         direction: AgentPaneDirection,
         focus: bool,
+        /// Anchor a newly opened terminal next to this page (a terminal's
+        /// `ProcessId`); `None` anchors to the agent's own page. Ignored when
+        /// `terminal` is set (reuse).
+        beside: Option<ProcessId>,
+        /// How a newly opened terminal is placed relative to its anchor pane
+        /// (split into a new pane, or stacked into the anchor pane). Ignored when
+        /// `terminal` is set.
+        mode: PlacementMode,
         /// Run in this existing terminal (its `ProcessId`); `None` opens a new
         /// terminal beside the agent.
         terminal: Option<ProcessId>,
+        /// When set, the GUI appends a shell-aware completion print using this
+        /// token so the caller can detect command completion + exit code in the
+        /// terminal output. `None` keeps the legacy fire-and-forget behavior.
+        done_marker: Option<String>,
     },
 }
 
@@ -122,8 +147,18 @@ pub enum AgentCommandResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentQuery {
-    ReadLayout { anchor: Option<ProcessId> },
-    ReadTerminal { process_id: ProcessId },
+    ReadLayout {
+        anchor: Option<ProcessId>,
+    },
+    ReadTerminal {
+        process_id: ProcessId,
+    },
+    /// Like `ReadTerminal` but returns the full scrollback history plus the
+    /// visible screen as plain text (used to capture a command's complete
+    /// output, not just the current viewport).
+    ReadTerminalFull {
+        process_id: ProcessId,
+    },
     GetSettings,
     ListSpaces,
 }

@@ -138,7 +138,11 @@ impl Plugin for WindowPlugin {
             )
             .add_systems(
                 Startup,
-                (request_default_layout, spawn_requested_tab_layouts)
+                (
+                    request_default_layout,
+                    spawn_requested_tab_layouts,
+                    discard_startup_tab_layout_requests,
+                )
                     .chain()
                     .in_set(LayoutStartupSet::DefaultTab),
             )
@@ -456,6 +460,10 @@ fn request_default_layout(
         clear_pending_stack: false,
         focus: true,
     });
+}
+
+fn discard_startup_tab_layout_requests(mut requests: ResMut<Messages<TabLayoutSpawnRequest>>) {
+    requests.clear();
 }
 
 pub fn spawn_requested_tab_layouts(
@@ -1145,6 +1153,54 @@ mod tests {
         let ctx = app.world().resource::<crate::NewStackContext>();
         assert!(ctx.stack.is_some());
         assert!(ctx.needs_open);
+    }
+
+    #[test]
+    fn cold_start_seeds_exactly_one_default_tab() {
+        let _home = HomeEnvGuard::use_temp_home("cold-start-one-tab");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::NewStackContext>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(LayoutSettings {
+                radius: 0.0,
+                window: crate::settings::WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: crate::settings::PaneSettings { gap: 0.0 },
+                side_sheet: crate::settings::SideSheetSettings::default(),
+                focus_ring: crate::settings::FocusRingSettings::default(),
+            })
+            .insert_resource(crate::settings::EffectiveStartupUrl(
+                "vmux://agent/vibe/".to_string(),
+            ))
+            .add_systems(
+                Startup,
+                (
+                    request_default_layout,
+                    spawn_requested_tab_layouts,
+                    discard_startup_tab_layout_requests,
+                )
+                    .chain(),
+            )
+            .add_systems(Update, spawn_requested_tab_layouts);
+
+        app.world_mut().spawn(PrimaryWindow);
+        app.world_mut().spawn(Main);
+
+        app.update();
+
+        let mut tabs = app.world_mut().query_filtered::<Entity, With<Tab>>();
+        assert_eq!(
+            tabs.iter(app.world()).count(),
+            1,
+            "cold start must seed exactly one default tab; the Startup-written request must not be re-read by the Update consumer"
+        );
     }
 
     #[test]

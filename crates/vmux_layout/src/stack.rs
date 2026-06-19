@@ -310,10 +310,39 @@ fn handle_stack_commands(
                         let Ok(siblings) = pane_children.get(parent) else {
                             continue;
                         };
-                        let sibling = siblings.iter().find(|&e| {
-                            e != pane && (leaf_panes.contains(e) || split_dir_q.contains(e))
-                        });
-                        let Some(sibling) = sibling else {
+                        let pane_siblings: Vec<Entity> = siblings
+                            .iter()
+                            .filter(|&e| {
+                                e != pane && (leaf_panes.contains(e) || split_dir_q.contains(e))
+                            })
+                            .collect();
+
+                        if pane_siblings.len() >= 2 {
+                            commands.entity(pane).despawn();
+                            let new_active_pane = pane_siblings
+                                .iter()
+                                .copied()
+                                .max_by_key(|&e| pane_ts.get(e).map(|(_, t)| t.0).unwrap_or(0))
+                                .unwrap_or(pane_siblings[0]);
+                            let focus_leaf =
+                                first_leaf_descendant(new_active_pane, &pane_children, &leaf_panes);
+                            commands.entity(focus_leaf).insert(LastActivatedAt::now());
+                            if let Some(t) =
+                                active_stack_in_pane(focus_leaf, &pane_children, &stack_ts).or_else(
+                                    || first_stack_in_pane(focus_leaf, &pane_children, &stack_q),
+                                )
+                            {
+                                commands.entity(t).insert(LastActivatedAt::now());
+                            }
+                            if new_stack_ctx.stack == Some(active) {
+                                new_stack_ctx.stack = None;
+                            }
+                            new_stack_ctx.previous_stack = None;
+                            new_stack_ctx.needs_open = false;
+                            continue;
+                        }
+
+                        let Some(sibling) = pane_siblings.into_iter().next() else {
                             continue;
                         };
                         let sibling_children: Vec<Entity> = pane_children
@@ -837,6 +866,101 @@ mod tests {
         assert!(!app.world().entity(split).contains::<PaneSplit>());
         assert_eq!(app.world().resource::<NewStackContext>().stack, None);
         assert!(!app.world().resource::<NewStackContext>().needs_open);
+    }
+
+    #[test]
+    fn closing_stack_in_three_way_split_keeps_split_and_does_not_respawn_startup() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<PendingCursorWarp>()
+            .insert_resource(test_settings())
+            .insert_resource(crate::settings::EffectiveStartupUrl(
+                "vmux://agent/vibe/".to_string(),
+            ))
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let split = app
+            .world_mut()
+            .spawn((
+                crate::pane::split_root_bundle(crate::pane::PaneSplitDirection::Row),
+                ChildOf(tab),
+            ))
+            .id();
+        let active_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(3), ChildOf(split)))
+            .id();
+        let p2 = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(2), ChildOf(split)))
+            .id();
+        let p3 = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt(1), ChildOf(split)))
+            .id();
+        let active_stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(3), ChildOf(active_pane)))
+            .id();
+        let s2 = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(p2)))
+            .id();
+        let s3 = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(p3)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
+        app.update();
+
+        assert!(
+            app.world().get_entity(active_pane).is_err(),
+            "closed terminal pane is despawned"
+        );
+        assert!(
+            app.world().get_entity(active_stack).is_err(),
+            "closed terminal stack is despawned"
+        );
+        assert!(
+            app.world().entity(split).contains::<PaneSplit>(),
+            "a 3-way split must stay a split after one terminal closes (tree not corrupted)"
+        );
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(split)
+            .expect("split has children")
+            .iter()
+            .collect();
+        assert_eq!(children, vec![p2, p3], "exactly the two survivors remain");
+        assert!(app.world().get_entity(s2).is_ok() && app.world().get_entity(s3).is_ok());
+        let mut stacks = app.world_mut().query_filtered::<Entity, With<Stack>>();
+        assert_eq!(
+            stacks.iter(app.world()).count(),
+            2,
+            "no replacement startup (Vibe) stack spawned"
+        );
+        let reqs: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect();
+        assert!(
+            reqs.is_empty(),
+            "closing a terminal in an N-ary split must not open the startup URL"
+        );
     }
 
     #[test]

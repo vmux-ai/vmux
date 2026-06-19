@@ -29,6 +29,54 @@ pub fn shared_data_dir() -> PathBuf {
     }
 }
 
+/// User config directory: `~/.vmux`. Holds `settings.ron` (and per-build
+/// overrides), separate from the profile-isolated [`shared_data_dir`].
+pub fn config_dir() -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"));
+    home.join(".vmux")
+}
+
+/// Per-build config subdir, or `None` for the shared (release) settings.
+fn config_suffix() -> Option<&'static str> {
+    match env!("VMUX_BUILD_PROFILE") {
+        "release" | "local" => None,
+        other => Some(other),
+    }
+}
+
+fn settings_candidates_in(base: &std::path::Path, suffix: Option<&str>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(suffix) = suffix {
+        candidates.push(base.join(suffix).join("settings.ron"));
+    }
+    candidates.push(base.join("settings.ron"));
+    candidates
+}
+
+/// Settings files in priority order: the per-build override first (e.g.
+/// `~/.vmux/dev/settings.ron`), then the shared `~/.vmux/settings.ron`.
+pub fn settings_path_candidates() -> Vec<PathBuf> {
+    settings_candidates_in(&config_dir(), config_suffix())
+}
+
+/// The settings file to read/write: the first candidate that exists, falling
+/// back to the shared `~/.vmux/settings.ron` when none exist yet.
+pub fn settings_path() -> PathBuf {
+    let candidates = settings_path_candidates();
+    candidates
+        .iter()
+        .find(|path| path.exists())
+        .cloned()
+        .unwrap_or_else(|| {
+            candidates
+                .last()
+                .cloned()
+                .expect("settings candidates always include the shared path")
+        })
+}
+
 pub fn profile_dir() -> PathBuf {
     shared_data_dir()
         .join("profiles")
@@ -264,5 +312,31 @@ mod tests {
         assert!(!space_dir_path(&home, "solo").exists());
         assert!(space_dir_path(&home, "keep").is_dir());
         let _ = std::fs::remove_dir_all(&home);
+    }
+    #[test]
+    fn settings_live_in_dot_vmux_not_data_dir() {
+        // Settings live under ~/.vmux, separate from the profile-isolated data dir.
+        for candidate in settings_path_candidates() {
+            assert!(candidate.starts_with(config_dir()));
+            assert!(!candidate.starts_with(shared_data_dir()));
+        }
+    }
+
+    #[test]
+    fn settings_candidates_prefer_per_build_override_then_shared() {
+        let base = PathBuf::from("/base");
+        // Release/local: shared file only.
+        assert_eq!(
+            settings_candidates_in(&base, None),
+            vec![base.join("settings.ron")]
+        );
+        // Dev: per-build override first, then the shared file.
+        assert_eq!(
+            settings_candidates_in(&base, Some("dev")),
+            vec![
+                base.join("dev").join("settings.ron"),
+                base.join("settings.ron"),
+            ]
+        );
     }
 }

@@ -368,17 +368,6 @@ pub(crate) struct SettingsWatcher {
     _watcher: RecommendedWatcher,
 }
 
-fn data_dir() -> Option<std::path::PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        std::env::var_os("HOME").map(|_| vmux_core::profile::shared_data_dir())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Some(vmux_core::profile::shared_data_dir())
-    }
-}
-
 #[derive(Deserialize, Default)]
 struct PartialAppSettings {
     #[serde(default)]
@@ -433,26 +422,27 @@ fn parse_settings(text: &str) -> Result<AppSettings, ron::error::SpannedError> {
 }
 
 pub fn load_settings(mut commands: Commands) {
-    let (settings, config_path) = if let Some(dir) = data_dir() {
-        if std::fs::create_dir_all(&dir).is_err() {
-            (load_embedded_settings(), None)
-        } else {
-            let path = dir.join("settings.ron");
-            let s = match std::fs::read_to_string(&path) {
-                Ok(text) => match parse_settings(&text) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        bevy::log::warn!(
-                            "Ignoring invalid config {}: {e}; using embedded defaults",
-                            path.display()
-                        );
-                        load_embedded_settings()
-                    }
-                },
-                Err(_) => load_embedded_settings(),
-            };
-            (s, Some(path))
-        }
+    // Resolve the active settings file: per-build override (~/.vmux/<profile>/
+    // settings.ron) if present, else the shared ~/.vmux/settings.ron.
+    let path = vmux_core::profile::settings_path();
+    let parent_ready = path
+        .parent()
+        .is_some_and(|parent| std::fs::create_dir_all(parent).is_ok());
+    let (settings, config_path) = if parent_ready {
+        let s = match std::fs::read_to_string(&path) {
+            Ok(text) => match parse_settings(&text) {
+                Ok(s) => s,
+                Err(e) => {
+                    bevy::log::warn!(
+                        "Ignoring invalid config {}: {e}; using embedded defaults",
+                        path.display()
+                    );
+                    load_embedded_settings()
+                }
+            },
+            Err(_) => load_embedded_settings(),
+        };
+        (s, Some(path))
     } else {
         (load_embedded_settings(), None)
     };

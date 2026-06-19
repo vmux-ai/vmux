@@ -342,7 +342,7 @@ fn load_world<E: LoadEvent>(mut event: E, world: &mut World) -> LoadResult {
             let mut deserializer = ron::Deserializer::from_bytes(&bytes)?;
             let type_registry = &world.resource::<AppTypeRegistry>().read();
             let scene_deserializer = SceneDeserializer { type_registry };
-            scene_deserializer.deserialize(&mut deserializer).unwrap()
+            scene_deserializer.deserialize(&mut deserializer)?
         }
         LoadInput::Stream(mut stream) => {
             let mut bytes = Vec::new();

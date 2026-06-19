@@ -551,6 +551,23 @@ async fn handle_client(
                         write_message!(&mut *w, &resp)?;
                         continue;
                     }
+                    crate::protocol::AgentQuery::ReadTerminalFull { process_id } => {
+                        let result = {
+                            let mgr = manager.lock().await;
+                            match mgr.processes.get(&process_id) {
+                                Some(process) => {
+                                    crate::protocol::AgentQueryResult::Text(process.full_text())
+                                }
+                                None => crate::protocol::AgentQueryResult::Error(format!(
+                                    "process not found: {process_id}"
+                                )),
+                            }
+                        };
+                        let resp = ServiceMessage::AgentQueryResult { request_id, result };
+                        let mut w = writer.lock().await;
+                        write_message!(&mut *w, &resp)?;
+                        continue;
+                    }
                     other => other,
                 };
 

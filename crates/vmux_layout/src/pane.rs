@@ -31,6 +31,12 @@ use vmux_history::LastActivatedAt;
 #[derive(Component)]
 pub struct PendingPaneClose;
 
+/// Marker: close this pane immediately, without a confirmation dialog. Used when
+/// the pane's process has already exited (e.g. an agent CLI quit), so there is
+/// nothing to confirm and the pane should be removed + the split collapsed.
+#[derive(Component)]
+pub struct ForcePaneClose;
+
 pub struct PanePlugin;
 
 #[cfg_attr(target_os = "macos", allow(dead_code))]
@@ -67,6 +73,7 @@ impl Plugin for PanePlugin {
                     click_pane_in_player_mode,
                     pane_gap_drag_resize,
                     process_pending_pane_closes,
+                    process_force_pane_closes,
                     process_pending_stack_closes,
                 ),
             )
@@ -568,10 +575,30 @@ fn handle_pane_commands(
                 let Ok(siblings) = pane_children.get(parent) else {
                     continue;
                 };
-                let sibling = siblings
+                let pane_siblings: Vec<Entity> = siblings
                     .iter()
-                    .find(|&e| e != active && (leaf_panes.contains(e) || split_dir_q.contains(e)));
-                let Some(sibling) = sibling else {
+                    .filter(|&e| e != active && (leaf_panes.contains(e) || split_dir_q.contains(e)))
+                    .collect();
+
+                if pane_siblings.len() >= 2 {
+                    commands.entity(active).despawn();
+                    let new_active_pane = pane_siblings
+                        .iter()
+                        .copied()
+                        .max_by_key(|&e| pane_ts.get(e).map(|(_, t)| t.0).unwrap_or(0))
+                        .unwrap_or(pane_siblings[0]);
+                    let focus_leaf =
+                        first_leaf_descendant(new_active_pane, &pane_children, &leaf_panes);
+                    commands.entity(focus_leaf).insert(LastActivatedAt::now());
+                    if let Some(stack) = active_stack_in_pane(focus_leaf, &pane_children, &stack_ts)
+                        .or_else(|| first_stack_in_pane(focus_leaf, &pane_children, &tab_filter))
+                    {
+                        commands.entity(stack).insert(LastActivatedAt::now());
+                    }
+                    continue;
+                }
+
+                let Some(sibling) = pane_siblings.into_iter().next() else {
                     continue;
                 };
 
@@ -814,6 +841,39 @@ pub fn split_leaf_into_two(
     p2
 }
 
+/// Return a fresh empty leaf pane beside `anchor`, to host an agent-spawned
+/// terminal. When `anchor` is still a leaf (`already_split == false`), it is
+/// split in two via [`split_leaf_into_two`] (its stacks move into the first
+/// child, the returned pane is the second). When `anchor` is already a split —
+/// either from a previous frame, or from an earlier call in the *same* command
+/// buffer — the new leaf is appended as another child of that split.
+///
+/// Calling [`split_leaf_into_two`] repeatedly on the same leaf within one
+/// command buffer (e.g. several agent `run`s dispatched in one tick) would wrap
+/// it again on each call and orphan an empty `pane1` every time; routing the
+/// 2nd+ split through here keeps the result a clean N-ary split with no empties.
+pub fn split_or_extend(
+    commands: &mut Commands,
+    anchor: Entity,
+    split_dir: PaneSplitDirection,
+    existing_tabs: &[Entity],
+    activate_new: bool,
+    already_split: bool,
+) -> Entity {
+    if already_split {
+        let ts = if activate_new {
+            LastActivatedAt::now()
+        } else {
+            LastActivatedAt(0)
+        };
+        commands
+            .spawn((leaf_pane_bundle(), ts, ChildOf(anchor)))
+            .id()
+    } else {
+        split_leaf_into_two(commands, anchor, split_dir, existing_tabs, activate_new)
+    }
+}
+
 #[derive(Message, Clone)]
 pub struct OpenBesideRequest {
     pub pane: Entity,
@@ -828,23 +888,30 @@ pub struct OpenBesideRequest {
 pub fn handle_open_beside_requests(
     mut reader: MessageReader<OpenBesideRequest>,
     pane_children: Query<&Children, With<Pane>>,
+    split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<Stack>>,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut new_stack_ctx: ResMut<NewStackContext>,
 ) {
+    // Anchors split during this batch: several `open_page`s dispatched in one
+    // tick all resolve to the same agent pane; the first splits it, the rest must
+    // extend that split rather than re-split the leaf (which orphans empties).
+    let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     for req in reader.read() {
         let existing_tabs: Vec<Entity> = pane_children
             .get(req.pane)
             .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
             .unwrap_or_default();
         let split_dir = direction_to_split(&req.direction);
-        let p2 = split_leaf_into_two(
+        let already_split = !split_this_batch.insert(req.pane) || split_dir_q.contains(req.pane);
+        let p2 = split_or_extend(
             &mut commands,
             req.pane,
             split_dir,
             &existing_tabs,
             req.focus,
+            already_split,
         );
         let stack_ts = if req.focus {
             LastActivatedAt::now()
@@ -1754,6 +1821,48 @@ fn process_pending_pane_closes(world: &mut World) {
     }
 }
 
+/// Exclusive system: force-close panes marked [`ForcePaneClose`] with no
+/// confirmation dialog. Mirrors [`process_pending_pane_closes`] (activate the
+/// pane + its tab, mark `CloseConfirmed`, dispatch `PaneCommand::Close`) but
+/// skips the prompt, since the process has already exited. Being exclusive, the
+/// activation lands before the dispatched command is read.
+fn process_force_pane_closes(world: &mut World) {
+    let pending: Vec<Entity> = world
+        .query_filtered::<Entity, (With<ForcePaneClose>, With<Pane>)>()
+        .iter(world)
+        .collect();
+
+    if pending.is_empty() {
+        return;
+    }
+
+    for pane in pending {
+        let Ok(mut entity_mut) = world.get_entity_mut(pane) else {
+            continue;
+        };
+        entity_mut.remove::<ForcePaneClose>();
+        entity_mut.insert((CloseConfirmed, LastActivatedAt::now()));
+
+        let mut current = pane;
+        for _ in 0..10 {
+            if world.get_entity(current).is_ok_and(|e| e.contains::<Tab>()) {
+                if let Ok(mut entity_mut) = world.get_entity_mut(current) {
+                    entity_mut.insert(LastActivatedAt::now());
+                }
+                break;
+            }
+            if let Some(co) = world.get::<ChildOf>(current) {
+                current = co.get();
+            } else {
+                break;
+            }
+        }
+        world
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
+    }
+}
+
 fn process_pending_stack_closes(world: &mut World) {
     let pending: Vec<Entity> = world
         .query_filtered::<Entity, (With<PendingStackClose>, With<Stack>)>()
@@ -1865,6 +1974,44 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(id)));
         id
+    }
+
+    #[test]
+    fn force_pane_close_dispatches_pane_close_without_dialog() {
+        use vmux_command::CommandPlugin;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin));
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab), ForcePaneClose))
+            .id();
+
+        process_force_pane_closes(app.world_mut());
+
+        assert!(
+            app.world().get::<ForcePaneClose>(pane).is_none(),
+            "ForcePaneClose marker should be consumed"
+        );
+        assert!(
+            app.world().get::<CloseConfirmed>(pane).is_some(),
+            "pane should be marked CloseConfirmed so the close skips the dialog"
+        );
+        let closes: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .filter(|c| {
+                matches!(
+                    c,
+                    AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close))
+                )
+            })
+            .collect();
+        assert_eq!(closes.len(), 1, "exactly one PaneCommand::Close dispatched");
     }
 
     #[test]
@@ -2268,6 +2415,105 @@ mod tests {
         let leaves: Vec<Entity> = children.iter().collect();
         assert_eq!(leaves.len(), 2, "root should hold the two surviving leaves");
         assert!(leaves.contains(&left_top) && leaves.contains(&left_bottom));
+    }
+
+    #[test]
+    fn closing_one_of_three_siblings_keeps_split_intact() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .init_resource::<PaneHoverIntent>()
+            .init_resource::<PendingCursorWarp>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<ConfirmCloseSettings>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(test_settings())
+            .add_systems(Update, handle_pane_commands.in_set(WriteAppCommands));
+
+        let _window = app.world_mut().spawn(PrimaryWindow).id();
+        let tab_e = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let root = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    ..default()
+                },
+                ChildOf(tab_e),
+            ))
+            .id();
+        let a = place_pane(
+            &mut app,
+            root,
+            Vec2::new(200.0, 400.0),
+            Vec2::new(400.0, 800.0),
+        );
+        let b = place_pane(
+            &mut app,
+            root,
+            Vec2::new(600.0, 400.0),
+            Vec2::new(400.0, 800.0),
+        );
+        let c = place_pane(
+            &mut app,
+            root,
+            Vec2::new(1000.0, 400.0),
+            Vec2::new(400.0, 800.0),
+        );
+
+        app.world_mut().entity_mut(a).insert(LastActivatedAt(10));
+        app.world_mut().entity_mut(c).insert(LastActivatedAt(20));
+        app.world_mut().entity_mut(b).insert(LastActivatedAt(30));
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close)));
+        app.update();
+
+        assert!(
+            app.world().get_entity(b).is_err(),
+            "the closed middle pane must be despawned"
+        );
+        let split = app
+            .world()
+            .get::<PaneSplit>(root)
+            .expect("a 3-way split must stay a split after one pane closes");
+        assert_eq!(
+            split.direction,
+            PaneSplitDirection::Row,
+            "surviving split keeps its direction"
+        );
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(root)
+            .expect("root has children")
+            .iter()
+            .collect();
+        assert_eq!(
+            children.len(),
+            2,
+            "root keeps exactly the two surviving leaves directly under it"
+        );
+        assert!(
+            children.contains(&a) && children.contains(&c),
+            "both survivors remain direct children of the split"
+        );
+        assert!(
+            app.world().get_entity(a).is_ok() && app.world().get_entity(c).is_ok(),
+            "survivors are not despawned"
+        );
+        for survivor in [a, c] {
+            let has_stack = app
+                .world()
+                .get::<Children>(survivor)
+                .is_some_and(|ch| ch.iter().any(|e| app.world().get::<Stack>(e).is_some()));
+            assert!(has_stack, "survivor keeps its own stack");
+        }
     }
 
     #[test]
@@ -3158,6 +3404,93 @@ mod tests {
     }
 
     #[test]
+    fn split_or_extend_batched_runs_make_no_empty_panes() {
+        use bevy_ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let anchor = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let agent_stack = app
+            .world_mut()
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(anchor)))
+            .id();
+
+        // Two agent runs splitting the same anchor in ONE command buffer: the
+        // first really splits, the second extends the now-split anchor.
+        let (p2a, p2b) = app
+            .world_mut()
+            .run_system_once(move |mut commands: Commands| {
+                let existing = [agent_stack];
+                let p2a = split_or_extend(
+                    &mut commands,
+                    anchor,
+                    PaneSplitDirection::Row,
+                    &existing,
+                    false,
+                    false,
+                );
+                let p2b = split_or_extend(
+                    &mut commands,
+                    anchor,
+                    PaneSplitDirection::Row,
+                    &existing,
+                    false,
+                    true,
+                );
+                (p2a, p2b)
+            })
+            .unwrap();
+
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(anchor)
+            .expect("anchor has children")
+            .iter()
+            .collect();
+        assert_eq!(
+            children.len(),
+            3,
+            "anchor holds exactly the stack-holder + two terminal leaves (no orphaned empty pane)"
+        );
+        assert!(
+            children.contains(&p2a) && children.contains(&p2b),
+            "both new terminal leaves are direct children of the split"
+        );
+        let stack_holders = children
+            .iter()
+            .filter(|&&c| {
+                app.world()
+                    .get::<Children>(c)
+                    .is_some_and(|cc| cc.iter().any(|e| app.world().get::<Stack>(e).is_some()))
+            })
+            .count();
+        assert_eq!(
+            stack_holders, 1,
+            "the agent stack lives in exactly one child"
+        );
+        let empty_leaves = children
+            .iter()
+            .filter(|&&c| {
+                app.world()
+                    .get::<Children>(c)
+                    .map(|cc| cc.iter().count())
+                    .unwrap_or(0)
+                    == 0
+            })
+            .count();
+        assert_eq!(
+            empty_leaves, 2,
+            "exactly the two terminal-host leaves are empty; no orphan leftover"
+        );
+    }
+
+    #[test]
     fn open_beside_splits_the_given_pane() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -3224,6 +3557,68 @@ mod tests {
             unactivated, 1,
             "focus:false leaves exactly the new stack un-activated (ts 0) so focus stays put"
         );
+    }
+
+    #[test]
+    fn batched_open_beside_makes_no_empty_panes() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OpenBesideRequest>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .add_systems(Update, handle_open_beside_requests);
+        let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
+        let anchor_pane = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        app.world_mut()
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(anchor_pane)));
+
+        // Three open_page calls in one tick, all anchored to the same pane (as
+        // the agent does for "open a few terminals beside me").
+        for direction in [
+            PaneDirection::Right,
+            PaneDirection::Bottom,
+            PaneDirection::Left,
+        ] {
+            app.world_mut()
+                .resource_mut::<Messages<OpenBesideRequest>>()
+                .write(OpenBesideRequest {
+                    pane: anchor_pane,
+                    direction,
+                    url: "vmux://terminal/".into(),
+                    request_id: [0u8; 16],
+                    focus: false,
+                });
+        }
+        app.update();
+
+        assert!(
+            app.world().get::<PaneSplit>(anchor_pane).is_some(),
+            "anchor becomes a split"
+        );
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(anchor_pane)
+            .expect("anchor has children")
+            .iter()
+            .collect();
+        assert_eq!(
+            children.len(),
+            4,
+            "anchor holds the stack-holder + three terminal leaves, with no orphaned empty panes"
+        );
+        for child in children {
+            let has_stack = app
+                .world()
+                .get::<Children>(child)
+                .is_some_and(|cc| cc.iter().any(|e| app.world().get::<Stack>(e).is_some()));
+            assert!(
+                has_stack,
+                "every child pane has a stack; none is an empty orphan"
+            );
+        }
     }
 
     #[test]

@@ -13,7 +13,7 @@ use vmux_core::{
 };
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::{
-    pane::{Pane, PaneSplit},
+    pane::{ForcePaneClose, Pane, PaneSplit},
     stack::FocusedStack,
 };
 use vmux_service::client::ServiceClient;
@@ -23,9 +23,11 @@ use vmux_service::protocol::{
 };
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
-use vmux_terminal::ProcessExited;
 use vmux_terminal::launch::TerminalLaunch;
-use vmux_terminal::{ServiceMessageSet, TerminalStackSpawnRequest, new_terminal_bundle_with_cwd};
+use vmux_terminal::{
+    ProcessExited, ServiceMessageSet, Terminal, TerminalStackSpawnRequest,
+    new_terminal_bundle_with_cwd,
+};
 
 use crate::AgentVariant;
 use crate::client::cli::claude::ClaudeStrategy;
@@ -48,6 +50,13 @@ const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
 /// without depending on which CLIs are installed on the host.
 #[derive(Resource, Clone, Default)]
 pub struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool>);
+
+/// The terminal "region" pane each agent's `run` terminals live in (anchor →
+/// pane). A bare `run` stacks new terminals into this pane instead of splitting
+/// the agent's own pane again; the first `run` creates it. Self-healing: a stale
+/// pane (closed) is replaced by a fresh split.
+#[derive(Resource, Default)]
+pub struct AgentTerminalRegions(pub std::collections::HashMap<ProcessId, Entity>);
 
 fn resolve_agent_executable(
     kind: AgentKind,
@@ -90,6 +99,7 @@ impl Plugin for AgentPlugin {
 
         app.insert_resource(strategies)
             .init_resource::<AgentSessionToEntity>()
+            .init_resource::<AgentTerminalRegions>()
             .init_resource::<AgentSessionDirty>()
             .add_message::<AgentCommandRequest>()
             .add_message::<AgentQueryRequest>()
@@ -505,6 +515,49 @@ fn resolve_self_pane(
     Some((term, pane))
 }
 
+/// The pane containing the terminal whose `ProcessId` is `pid` (its stack's
+/// parent pane). Used to anchor a `run` next to an existing terminal page.
+fn resolve_pane_for_pid(
+    pid: ProcessId,
+    term_pids: &Query<(Entity, &ProcessId), With<Terminal>>,
+    child_of_q: &Query<&ChildOf>,
+) -> Option<Entity> {
+    use bevy::ecs::relationship::Relationship;
+    let (term, _) = term_pids.iter().find(|(_, p)| **p == pid)?;
+    let stack = child_of_q.get(term).ok()?.get();
+    let pane = child_of_q.get(stack).ok()?.get();
+    Some(pane)
+}
+
+/// Split `pane` and return the new leaf pane. Batches several splits of the same
+/// pane in one tick (extend an existing split instead of re-splitting the leaf).
+#[allow(clippy::too_many_arguments)]
+fn split_pane_off(
+    commands: &mut Commands,
+    pane: Entity,
+    direction: &vmux_service::protocol::AgentPaneDirection,
+    focus: bool,
+    pane_children: &Query<&Children, With<Pane>>,
+    tab_filter: &Query<Entity, With<vmux_layout::stack::Stack>>,
+    split_dir_q: &Query<&PaneSplit>,
+    split_this_batch: &mut std::collections::HashSet<Entity>,
+) -> Entity {
+    let existing_tabs: Vec<Entity> = pane_children
+        .get(pane)
+        .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+        .unwrap_or_default();
+    let split_dir = vmux_layout::pane::direction_to_split(&to_pane_direction(direction));
+    let already_split = !split_this_batch.insert(pane) || split_dir_q.contains(pane);
+    vmux_layout::pane::split_or_extend(
+        commands,
+        pane,
+        split_dir,
+        &existing_tabs,
+        focus,
+        already_split,
+    )
+}
+
 fn to_pane_direction(
     d: &vmux_service::protocol::AgentPaneDirection,
 ) -> vmux_command::open::PaneDirection {
@@ -518,24 +571,80 @@ fn to_pane_direction(
     }
 }
 
+fn agent_terminal_shell(settings: &AppSettings) -> String {
+    settings
+        .terminal
+        .as_ref()
+        .map(|t| t.resolve_theme(&t.default_theme).shell)
+        .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()))
+}
+
+/// Wrap a `run` command so the shell prints a completion marker carrying the
+/// exit code once the command finishes (success OR failure). `token` is a unique
+/// per-run id; the printed marker is `__VMUX_DONE_<token>_<exit_code>__`.
+///
+/// posix/fish chain with `;` (which continues after a non-zero command). nushell
+/// aborts the rest of a `;` line when an external command fails, so it needs a
+/// `try`/`catch` wrapper to always print the marker and recover the exit code
+/// from the caught error.
+fn command_with_marker(shell: &str, command: &str, token: &str) -> String {
+    let base = std::path::Path::new(shell)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(shell);
+    match base {
+        "nu" | "nushell" => format!(
+            "try {{ {command}; print $\"\\n__VMUX_DONE_{token}_($env.LAST_EXIT_CODE)__\" }} catch {{ |e| print $\"\\n__VMUX_DONE_{token}_($e.exit_code? | default 1)__\" }}"
+        ),
+        "fish" => format!("{command}; printf '\\n__VMUX_DONE_{token}_%s__\\n' $status"),
+        _ => format!("{command}; printf '\\n__VMUX_DONE_{token}_%s__\\n' \"$?\""),
+    }
+}
+
+fn run_command_line(command: &str, token: Option<&str>, settings: &AppSettings) -> String {
+    match token {
+        Some(token) => command_with_marker(&agent_terminal_shell(settings), command, token),
+        None => command.to_string(),
+    }
+}
+
+fn run_terminal_cwd(agent_launch_cwd: Option<&str>, active_space: Option<&ActiveSpace>) -> PathBuf {
+    if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
+        return path;
+    }
+    active_space
+        .map(|s| space_dir(&s.record.id))
+        .unwrap_or_else(default_space_dir)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     agent_terms: Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
+    term_pids: Query<(Entity, &ProcessId), With<Terminal>>,
     child_of_q: Query<&ChildOf>,
+    launch_q: Query<&TerminalLaunch>,
     pane_children: Query<&Children, With<Pane>>,
+    panes: Query<Entity, With<Pane>>,
+    split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<vmux_layout::stack::Stack>>,
     mut open_beside_writer: MessageWriter<vmux_layout::OpenBesideRequest>,
     mut terminal_stack_spawn_writer: MessageWriter<TerminalStackSpawnRequest>,
     mut commands: Commands,
     service: Option<Res<ServiceClient>>,
     active_space: Option<Res<ActiveSpace>>,
+    settings: Res<AppSettings>,
+    mut regions: ResMut<AgentTerminalRegions>,
 ) {
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
     let Some(service) = service else {
         for _ in reader.read() {}
         return;
     };
+    // Anchors split during this batch. Several `run`s dispatched in one tick all
+    // resolve to the same agent pane; the first splits it, the rest must extend
+    // that split rather than re-split the leaf (which would orphan empty panes).
+    let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     for request in reader.read() {
         let result = match &request.command {
             ServiceAgentCommand::OpenBeside {
@@ -561,9 +670,13 @@ fn handle_agent_self_commands(
                 command,
                 direction,
                 focus,
+                beside,
+                mode,
                 terminal,
+                done_marker,
             } => {
-                let mut data = command.clone().into_bytes();
+                let mut data =
+                    run_command_line(command, done_marker.as_deref(), &settings).into_bytes();
                 data.push(b'\r');
                 match terminal {
                     Some(pid) => {
@@ -573,38 +686,78 @@ fn handle_agent_self_commands(
                         });
                         AgentCommandResult::Text(pid.to_string())
                     }
-                    None => match resolve_self_pane(*anchor, &agent_terms, &child_of_q) {
-                        None => AgentCommandResult::Error("self process not found".to_string()),
-                        Some((_, pane)) => {
-                            let existing_tabs: Vec<Entity> = pane_children
-                                .get(pane)
-                                .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
-                                .unwrap_or_default();
-                            let split_dir = vmux_layout::pane::direction_to_split(
-                                &to_pane_direction(direction),
+                    None => 'spawn: {
+                        let Some((agent_term, self_pane)) =
+                            resolve_self_pane(*anchor, &agent_terms, &child_of_q)
+                        else {
+                            break 'spawn AgentCommandResult::Error(
+                                "self process not found".to_string(),
                             );
-                            let p2 = vmux_layout::pane::split_leaf_into_two(
+                        };
+                        // Resolve an explicit `beside` anchor up front (errors if stale).
+                        let beside_pane = match beside {
+                            Some(pid) => {
+                                match resolve_pane_for_pid(*pid, &term_pids, &child_of_q) {
+                                    Some(pane) => Some(pane),
+                                    None => {
+                                        break 'spawn AgentCommandResult::Error(format!(
+                                            "run.beside page not found: {pid}"
+                                        ));
+                                    }
+                                }
+                            }
+                            None => None,
+                        };
+                        use vmux_service::protocol::PlacementMode;
+                        let target_pane = match (beside_pane, *mode) {
+                            // Explicit split: a new pane off the given page's pane (or self).
+                            (anchor, PlacementMode::Split) => split_pane_off(
                                 &mut commands,
-                                pane,
-                                split_dir,
-                                &existing_tabs,
+                                anchor.unwrap_or(self_pane),
+                                direction,
                                 *focus,
-                            );
-                            let new_pid = ProcessId::new();
-                            let cwd = active_space
-                                .as_deref()
-                                .map(|s| space_dir(&s.record.id))
-                                .unwrap_or_else(default_space_dir);
-                            terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
-                                pane: p2,
-                                cwd: Some(cwd),
-                                pending_input: Some(data),
-                                process_id: Some(new_pid),
-                                activate: *focus,
-                            });
-                            AgentCommandResult::Text(new_pid.to_string())
-                        }
-                    },
+                                &pane_children,
+                                &tab_filter,
+                                &split_dir_q,
+                                &mut split_this_batch,
+                            ),
+                            // Stack into the given page's pane.
+                            (Some(pane), _) => pane,
+                            // No anchor: reuse the agent's terminal region, else split one
+                            // off the agent the first time (don't spawn a pane unless needed).
+                            (None, _) => {
+                                let region = regions
+                                    .0
+                                    .get(anchor)
+                                    .copied()
+                                    .filter(|p| panes.contains(*p));
+                                region.unwrap_or_else(|| {
+                                    split_pane_off(
+                                        &mut commands,
+                                        self_pane,
+                                        direction,
+                                        *focus,
+                                        &pane_children,
+                                        &tab_filter,
+                                        &split_dir_q,
+                                        &mut split_this_batch,
+                                    )
+                                })
+                            }
+                        };
+                        regions.0.insert(*anchor, target_pane);
+                        let new_pid = ProcessId::new();
+                        let agent_cwd = launch_q.get(agent_term).ok().map(|l| l.cwd.clone());
+                        let cwd = run_terminal_cwd(agent_cwd.as_deref(), active_space.as_deref());
+                        terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
+                            pane: target_pane,
+                            cwd: Some(cwd),
+                            pending_input: Some(data),
+                            process_id: Some(new_pid),
+                            activate: *focus,
+                        });
+                        AgentCommandResult::Text(new_pid.to_string())
+                    }
                 }
             }
             _ => continue,
@@ -672,21 +825,40 @@ pub fn detect_agent_session_process_exit(
         (Entity, Option<&vmux_terminal::pid::Pid>, &mut PageMetadata),
         (With<AgentSession>, With<ProcessExited>),
     >,
+    child_of: Query<&ChildOf>,
 ) {
+    use bevy::ecs::relationship::Relationship;
     for (entity, pid, mut meta) in &mut q {
         commands
             .entity(entity)
             .remove::<AgentSession>()
             .remove::<SessionId>()
             .remove::<PendingAgentSession>();
-        let next = match pid {
-            Some(vmux_terminal::pid::Pid(p)) => {
-                format!("{}{p}", vmux_terminal::event::TERMINAL_PAGE_URL)
+        // A vibe agent terminal that exits should close its pane entirely, not
+        // linger as a shell/terminal. The terminal is a child of a stack, which
+        // is a child of a pane; mark that pane for a no-dialog force close. If
+        // the pane can't be resolved, fall back to converting to a terminal.
+        let pane = child_of
+            .get(entity)
+            .ok()
+            .map(Relationship::get)
+            .and_then(|stack| child_of.get(stack).ok())
+            .map(Relationship::get);
+        match pane {
+            Some(pane) => {
+                commands.entity(pane).insert(ForcePaneClose);
             }
-            None => vmux_terminal::event::TERMINAL_PAGE_URL.to_string(),
-        };
-        if meta.url != next {
-            meta.url = next;
+            None => {
+                let next = match pid {
+                    Some(vmux_terminal::pid::Pid(p)) => {
+                        format!("{}{p}", vmux_terminal::event::TERMINAL_PAGE_URL)
+                    }
+                    None => vmux_terminal::event::TERMINAL_PAGE_URL.to_string(),
+                };
+                if meta.url != next {
+                    meta.url = next;
+                }
+            }
         }
         writer.write(AgentSessionExited { entity });
     }
@@ -770,8 +942,9 @@ fn handle_agent_queries(
                     result: AgentQueryResult::Spaces(json),
                 });
             }
-            // ReadTerminal is answered by the service directly; it never reaches the GUI.
-            AgentQuery::ReadTerminal { .. } => {}
+            // ReadTerminal/ReadTerminalFull are answered by the service directly;
+            // they never reach the GUI.
+            AgentQuery::ReadTerminal { .. } | AgentQuery::ReadTerminalFull { .. } => {}
         }
     }
 }
@@ -1678,5 +1851,59 @@ mod tests {
             spawns[0].cwd, dir,
             "claude page cwd resolves to space startup_dir"
         );
+    }
+
+    #[test]
+    fn run_terminal_cwd_inherits_agent_launch_dir() {
+        let dir = std::env::temp_dir().join(format!("vmux-run-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let got = run_terminal_cwd(Some(&dir.to_string_lossy()), None);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(got, dir);
+    }
+
+    #[test]
+    fn run_terminal_cwd_falls_back_when_agent_cwd_missing() {
+        assert_eq!(run_terminal_cwd(Some(""), None), default_space_dir());
+        assert_eq!(run_terminal_cwd(None, None), default_space_dir());
+    }
+
+    #[test]
+    fn command_with_marker_is_shell_aware() {
+        // nushell aborts `;` on failure, so it wraps in try/catch and reads the
+        // exit code from the caught error. Success uses `($env.LAST_EXIT_CODE)`
+        // (not a literal digit) so the echoed command line can't be matched as a
+        // completion marker.
+        assert_eq!(
+            command_with_marker("/opt/homebrew/bin/nu", "ls", "abc"),
+            "try { ls; print $\"\\n__VMUX_DONE_abc_($env.LAST_EXIT_CODE)__\" } catch { |e| print $\"\\n__VMUX_DONE_abc_($e.exit_code? | default 1)__\" }"
+        );
+        assert_eq!(
+            command_with_marker("/usr/local/bin/fish", "ls", "abc"),
+            "ls; printf '\\n__VMUX_DONE_abc_%s__\\n' $status"
+        );
+        assert_eq!(
+            command_with_marker("/bin/zsh", "ls", "abc"),
+            "ls; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$?\""
+        );
+        // Unknown shells fall back to posix syntax.
+        assert_eq!(
+            command_with_marker("/bin/bash", "ls", "abc"),
+            "ls; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$?\""
+        );
+    }
+
+    #[test]
+    fn run_command_line_noop_when_token_absent() {
+        let settings = test_settings();
+        assert_eq!(run_command_line("ls -la", None, &settings), "ls -la");
+    }
+
+    #[test]
+    fn run_command_line_embeds_marker_when_token_present() {
+        let settings = test_settings();
+        let out = run_command_line("ls -la", Some("tok9"), &settings);
+        assert!(out.contains("ls -la"), "got: {out}");
+        assert!(out.contains("__VMUX_DONE_tok9_"), "got: {out}");
     }
 }
