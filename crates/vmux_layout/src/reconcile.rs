@@ -291,7 +291,7 @@ use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 #[cfg(not(target_arch = "wasm32"))]
-use vmux_history::LastActivatedAt;
+use vmux_history::{CreatedAt, LastActivatedAt};
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Message, Clone)]
@@ -471,6 +471,15 @@ pub fn apply_with_existing(
     // structure pass reparents existing nodes into NEW tabs too (e.g. moving a
     // stack to a brand-new tab) — not only into tabs that already have an id.
     let mut materialized: Vec<(&proto::Tab, Entity)> = Vec::with_capacity(snapshot.tabs.len());
+    // The container existing tabs hang off, so new tabs can be spawned as their
+    // siblings (the tab strip only shows same-parent, same-space siblings).
+    let tab_parent: Option<Entity> = snapshot
+        .tabs
+        .iter()
+        .filter_map(|t| t.id.as_deref())
+        .filter_map(|id| parse_id(id).ok())
+        .map(|(_, v)| Entity::from_bits(v))
+        .find_map(|e| world.get::<ChildOf>(e).map(|c| c.parent()));
     for tab in &snapshot.tabs {
         let tab_entity = match &tab.id {
             Some(id) => match parse_id(id) {
@@ -479,8 +488,24 @@ pub fn apply_with_existing(
             },
             None => {
                 let entity = world
-                    .spawn((crate::tab::tab_bundle(), LastActivatedAt::now()))
+                    .spawn((
+                        crate::tab::tab_bundle(),
+                        LastActivatedAt::now(),
+                        CreatedAt::now(),
+                    ))
                     .id();
+                // Match canonical tab creation: parent the new tab to the same
+                // container as existing tabs and tag it with the active space.
+                // Otherwise the sibling-grouped, space-scoped tab strip filters it
+                // out and it never shows, even though it exists in the tree.
+                if let Some(parent) = tab_parent {
+                    world.entity_mut(entity).insert(ChildOf(parent));
+                }
+                if let Some(space) = active_space_id(world) {
+                    world
+                        .entity_mut(entity)
+                        .insert(crate::space::SpaceId(space));
+                }
                 if !tab.name.is_empty()
                     && let Some(mut layout_tab) = world.get_mut::<LayoutTab>(entity)
                 {
@@ -1459,6 +1484,88 @@ mod tests {
         assert!(
             active_ts > max_other,
             "is_active tab ({active_ts}) must out-rank other tabs ({max_other})"
+        );
+    }
+
+    #[test]
+    fn new_tab_inherits_active_space_and_parent() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(crate::space::ActiveSpaceId(Some("space-1".to_string())));
+        let main = app.world_mut().spawn_empty().id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                LayoutTab { name: "A".into() },
+                crate::space::SpaceId("space-1".to_string()),
+                ChildOf(main),
+            ))
+            .id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+
+        let snap = LayoutSnapshot {
+            tabs: vec![
+                proto::Tab {
+                    id: Some(format_id(NodeKind::Tab, tab.to_bits())),
+                    name: "A".into(),
+                    is_active: true,
+                    root: proto::LayoutNode::Pane {
+                        id: Some(format_id(NodeKind::Pane, pane.to_bits())),
+                        is_zoomed: false,
+                        stacks: vec![],
+                    },
+                },
+                proto::Tab {
+                    id: None,
+                    name: "New".into(),
+                    is_active: false,
+                    root: proto::LayoutNode::Pane {
+                        id: None,
+                        is_zoomed: false,
+                        stacks: vec![proto::Stack {
+                            id: None,
+                            url: "https://example.com".into(),
+                            kind: "browser".into(),
+                            ..Default::default()
+                        }],
+                    },
+                },
+            ],
+            focused: proto::Focus::default(),
+        };
+        let existing: std::collections::HashSet<String> = [
+            format_id(NodeKind::Tab, tab.to_bits()),
+            format_id(NodeKind::Pane, pane.to_bits()),
+        ]
+        .into_iter()
+        .collect();
+
+        apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
+
+        let mut q = app.world_mut().query_filtered::<(
+            Entity,
+            Option<&crate::space::SpaceId>,
+            Option<&ChildOf>,
+        ), With<LayoutTab>>();
+        let rows: Vec<(Entity, Option<String>, Option<Entity>)> = q
+            .iter(app.world())
+            .map(|(e, s, c)| (e, s.map(|s| s.0.clone()), c.map(|c| c.parent())))
+            .collect();
+        let (_, space, parent) = rows
+            .iter()
+            .find(|(e, _, _)| *e != tab)
+            .expect("new tab exists");
+        assert_eq!(
+            space.as_deref(),
+            Some("space-1"),
+            "new tab should inherit the active space id"
+        );
+        assert_eq!(
+            *parent,
+            Some(main),
+            "new tab should be a sibling of the existing tab (same parent)"
         );
     }
 
