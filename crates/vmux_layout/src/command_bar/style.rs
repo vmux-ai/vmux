@@ -1,8 +1,8 @@
 pub fn result_item_class(is_selected: bool) -> &'static str {
     if is_selected {
-        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-sidebar-primary px-3 py-1.5 text-sidebar-primary-foreground"
+        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-sidebar-primary px-3.5 py-2.5 text-sidebar-primary-foreground"
     } else {
-        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden px-3 py-1.5 hover:bg-white/5"
+        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden px-3.5 py-2.5 hover:bg-white/5"
     }
 }
 
@@ -51,19 +51,19 @@ pub fn result_leading_icon_class() -> &'static str {
 }
 
 pub fn result_primary_text_class() -> &'static str {
-    "min-w-0 truncate text-sm leading-tight text-foreground"
+    "min-w-0 truncate text-base leading-snug text-foreground"
 }
 
 pub fn result_secondary_text_class() -> &'static str {
-    "min-w-0 truncate text-xs leading-tight text-muted-foreground"
+    "min-w-0 truncate text-sm leading-snug text-muted-foreground"
 }
 
 pub fn result_terminal_path_class() -> &'static str {
-    "ml-1 min-w-0 truncate text-xs text-muted-foreground"
+    "ml-1 min-w-0 truncate text-sm text-muted-foreground"
 }
 
 pub fn result_history_url_class() -> &'static str {
-    "ml-auto min-w-0 max-w-xs truncate text-xs text-muted-foreground"
+    "ml-auto min-w-0 max-w-xs truncate text-sm text-muted-foreground"
 }
 
 pub fn result_trailing_slot_class() -> &'static str {
