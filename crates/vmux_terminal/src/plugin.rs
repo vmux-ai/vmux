@@ -853,7 +853,7 @@ fn ensure_service_started() {
 #[cfg(unix)]
 fn spawn_detached_service(binary: &std::path::Path) {
     use std::os::unix::process::CommandExt;
-    let log_dir = vmux_service::service_dir();
+    let log_dir = vmux_service::log_dir();
     let _ = std::fs::create_dir_all(&log_dir);
     let stderr_cfg = match std::fs::File::create(vmux_service::log_path()) {
         Ok(f) => std::process::Stdio::from(f),

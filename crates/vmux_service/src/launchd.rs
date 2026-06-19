@@ -51,6 +51,7 @@ pub fn generate_plist(profile: &str, binary_path: &Path, log_path: &Path) -> Str
 pub fn install(profile: &str, binary_path: &Path) -> std::io::Result<PathBuf> {
     let plist = crate::plist_path(profile);
     std::fs::create_dir_all(crate::service_dir())?;
+    std::fs::create_dir_all(crate::log_dir())?;
     let log = crate::log_path();
     reconcile_plist_at(&plist, profile, binary_path, &log)?;
     bootstrap(&plist)?;
@@ -135,6 +136,7 @@ pub fn kickstart(label: &str) -> std::io::Result<()> {
 /// `binary_path` is the daemon executable (resolved by the caller).
 pub fn ensure_running(profile: &str, binary_path: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(crate::service_dir())?;
+    std::fs::create_dir_all(crate::log_dir())?;
     let plist = crate::plist_path(profile);
     let log = crate::log_path();
     let rewrote = reconcile_plist_at(&plist, profile, binary_path, &log)?;
