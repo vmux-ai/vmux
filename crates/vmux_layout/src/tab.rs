@@ -27,7 +27,9 @@ impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
             .init_resource::<LastTabCloseAt>()
-            .add_plugins(BinEventEmitterPlugin::<(TabsCommandEvent,)>::default())
+            .add_plugins(BinEventEmitterPlugin::<(TabsCommandEvent,)>::for_hosts(&[
+                "layout",
+            ]))
             .add_observer(on_tabs_command_emit)
             .add_systems(
                 Update,

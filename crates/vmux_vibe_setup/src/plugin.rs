@@ -7,8 +7,10 @@ pub struct VibeSetupPlugin;
 impl Plugin for VibeSetupPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
-        app.add_plugins(BinEventEmitterPlugin::<(VibeInstallRunRequest,)>::default())
-            .add_observer(on_vibe_install_run);
+        app.add_plugins(BinEventEmitterPlugin::<(VibeInstallRunRequest,)>::for_hosts(
+            &["agent"],
+        ))
+        .add_observer(on_vibe_install_run);
     }
 }
 

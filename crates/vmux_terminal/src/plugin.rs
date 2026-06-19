@@ -265,7 +265,7 @@ impl Plugin for TerminalPlugin {
                 TermResizeEvent,
                 TermMouseEvent,
                 TermKeyEvent,
-            )>::default())
+            )>::for_hosts(&["terminal"]))
             .add_systems(
                 PreUpdate,
                 handle_terminal_keyboard

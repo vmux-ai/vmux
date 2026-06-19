@@ -58,7 +58,9 @@ impl Plugin for SpacePlugin {
                 Update,
                 handle_spaces_page_open.in_set(PageOpenSet::HandleKnownPages),
             )
-            .add_plugins(BinEventEmitterPlugin::<(SpaceCommandEvent,)>::default())
+            .add_plugins(BinEventEmitterPlugin::<(SpaceCommandEvent,)>::for_hosts(&[
+                "spaces", "layout",
+            ]))
             .add_observer(on_space_command)
             .add_observer(reset_spaces_sent_marker_on_page_ready)
             .add_systems(

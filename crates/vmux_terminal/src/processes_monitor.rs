@@ -82,7 +82,7 @@ impl Plugin for ProcessesMonitorPlugin {
                 ProcessNavigateEvent,
                 ProcessKillEvent,
                 ProcessKillAllEvent,
-            )>::default())
+            )>::for_hosts(&["services"]))
             .add_systems(
                 Update,
                 (request_process_list, broadcast_to_monitors).chain(),

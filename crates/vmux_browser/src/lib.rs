@@ -86,8 +86,12 @@ impl Plugin for BrowserPlugin {
                     embedded_hosts,
                     ..default()
                 },
-                BinEventEmitterPlugin::<(HeaderCommandEvent, SideSheetCommandEvent)>::default(),
-                BinEventEmitterPlugin::<(DebugUpdateReady, DebugUpdateClear)>::default(),
+                BinEventEmitterPlugin::<(HeaderCommandEvent, SideSheetCommandEvent)>::for_hosts(&[
+                    "layout",
+                ]),
+                BinEventEmitterPlugin::<(DebugUpdateReady, DebugUpdateClear)>::for_hosts(&[
+                    "debug",
+                ]),
             ))
             .add_observer(on_webview_ready_send_theme)
             .add_observer(on_header_command_emit)

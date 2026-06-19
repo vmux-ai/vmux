@@ -126,19 +126,28 @@ pub fn url_has_embedded_scheme(url: &str, scheme_prefix: &str) -> bool {
     !scheme_prefix.is_empty() && url.starts_with(scheme_prefix)
 }
 
+pub fn embedded_page_host(url: &str, scheme_prefix: &str) -> Option<String> {
+    if scheme_prefix.is_empty() {
+        return None;
+    }
+    let rest = url.strip_prefix(scheme_prefix)?;
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
 pub fn url_is_trusted_embedded_page(
     url: &str,
     scheme_prefix: &str,
     hosts: &CefEmbeddedHosts,
 ) -> bool {
-    if scheme_prefix.is_empty() {
-        return false;
+    match embedded_page_host(url, scheme_prefix) {
+        Some(host) => hosts.entry_for_host(&host).is_some(),
+        None => false,
     }
-    let Some(rest) = url.strip_prefix(scheme_prefix) else {
-        return false;
-    };
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    !host.is_empty() && hosts.entry_for_host(host).is_some()
 }
 
 pub fn has_embedded_scheme(url: &str) -> bool {
@@ -148,6 +157,10 @@ pub fn has_embedded_scheme(url: &str) -> bool {
 pub fn is_trusted_embedded_page(url: &str) -> bool {
     let config = resolved_cef_embedded_page_config();
     url_is_trusted_embedded_page(url, config.scheme_prefix(), &config.hosts)
+}
+
+pub fn embedded_page_host_of(url: &str) -> Option<String> {
+    embedded_page_host(url, resolved_cef_embedded_page_config().scheme_prefix())
 }
 
 pub fn webview_debug_log_enabled() -> bool {
@@ -413,6 +426,25 @@ mod tests {
         ));
         assert!(!url_is_trusted_embedded_page("", "vmux://", &hosts));
         assert!(!url_is_trusted_embedded_page("vmux://history/", "", &hosts));
+    }
+
+    #[test]
+    fn embedded_page_host_parses_host_segment() {
+        assert_eq!(
+            embedded_page_host("vmux://history/", "vmux://").as_deref(),
+            Some("history")
+        );
+        assert_eq!(
+            embedded_page_host("vmux://agent/vibe/setup", "vmux://").as_deref(),
+            Some("agent")
+        );
+        assert_eq!(
+            embedded_page_host("vmux://command-bar?x=1", "vmux://").as_deref(),
+            Some("command-bar")
+        );
+        assert_eq!(embedded_page_host("vmux://", "vmux://"), None);
+        assert_eq!(embedded_page_host("https://evil.com/", "vmux://"), None);
+        assert_eq!(embedded_page_host("vmux://history/", ""), None);
     }
 }
 

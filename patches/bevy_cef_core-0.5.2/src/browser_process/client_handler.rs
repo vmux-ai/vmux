@@ -234,6 +234,14 @@ impl ImplClient for ClientHandlerBuilder {
                 ));
                 return 1;
             }
+            if name == crate::prelude::PROCESS_MESSAGE_BRP
+                && crate::util::embedded_page_host_of(&url).as_deref() != Some("debug")
+            {
+                crate::util::webview_debug_log(format!(
+                    "ipc: dropped BRP from non-debug url={url}"
+                ));
+                return 1;
+            }
             if let Some(handler) = self
                 .message_handlers
                 .iter()

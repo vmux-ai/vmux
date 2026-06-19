@@ -78,6 +78,42 @@ process, and the browser side enforces hosts authoritatively.
 BRP is fully covered inbound at A1 (no accepted request ⇒ no response). Outbound is already
 entity-targeted; A2/B2 are defense in depth against future mis-targeting.
 
+## Per-page message ownership (least privilege)
+
+The scheme/host gate above lets *any* trusted `vmux://` page emit *any* registered message
+type. A second layer binds each message type to the page(s) that legitimately emit it, so a
+compromised vmux page cannot pivot to another page's handlers (e.g. a history page triggering
+`RestartRequestEvent`).
+
+Mechanism:
+- `BinIpcEventRaw` carries the source `host` (stamped in `bin_emit_event_handler` from
+  `frame.url()`).
+- `BinEventEmitterPlugin::for_hosts(&["..."])` declares owner host(s); `receive_bin_events`
+  drops a decoded event whose `host` is not in the owner set. No owner set (`default()` /
+  `with_id`) = unrestricted (shared types like `PageReady`).
+
+Owner is the *emitting* page, derived from the `try_cef_bin_emit_rkyv` call sites:
+
+| Owner host(s) | Types |
+|---|---|
+| settings | `SettingsCommandEvent` |
+| agent | `VibeInstallRunRequest` |
+| spaces, layout | `SpaceCommandEvent` |
+| terminal | `TermResizeEvent`, `TermMouseEvent`, `TermKeyEvent` |
+| services | `ProcessNavigateEvent`, `ProcessKillEvent`, `ProcessKillAllEvent` |
+| debug, layout | `RestartRequestEvent` |
+| layout | `HeaderCommandEvent`, `SideSheetCommandEvent`, `TabsCommandEvent` |
+| debug | `DebugUpdateReady`, `DebugUpdateClear` |
+| command-bar | `CommandBarActionEvent`, `PathCompleteRequest`, `CommandBarReadyEvent`, `CommandBarRenderedEvent`, `CommandBarSizeEvent`, `HistorySuggestionsRequest` |
+| history | `HistoryQueryRequest`, `HistoryDeleteRequest`, `HistoryClearAllRequest`, `HistoryOpenRequest`, `HistoryChangedEvent` |
+| (unrestricted) | `PageReady`, `AgentToast` |
+
+`HistorySuggestionsRequest` is emitted by the command-bar page, so it is split out of the
+history registration into its own command-bar-owned registration.
+
+BRP lockdown: A1 additionally drops `PROCESS_MESSAGE_BRP` from any host other than `debug`
+(no production page uses `window.cef.brp`).
+
 ## Non-goals
 - No change to per-entity routing of legitimate messages.
 - No change to outbound targeting logic (Bevy still chooses target entities).

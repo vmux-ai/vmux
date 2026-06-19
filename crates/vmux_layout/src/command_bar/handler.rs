@@ -98,7 +98,7 @@ impl Plugin for CommandBarInputPlugin {
                 CommandBarReadyEvent,
                 CommandBarRenderedEvent,
                 CommandBarSizeEvent,
-            )>::default())
+            )>::for_hosts(&["command-bar"]))
             .add_observer(on_command_bar_action)
             .add_observer(on_path_complete_request)
             .add_observer(on_command_bar_ready)

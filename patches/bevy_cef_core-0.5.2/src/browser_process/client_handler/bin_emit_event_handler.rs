@@ -3,11 +3,12 @@ use crate::prelude::PROCESS_MESSAGE_BIN_JS_EMIT;
 use crate::util::IntoString;
 use async_channel::Sender;
 use bevy::prelude::Entity;
-use cef::{Browser, Frame, ImplBinaryValue, ImplListValue, ListValue};
+use cef::{Browser, Frame, ImplBinaryValue, ImplFrame, ImplListValue, ListValue};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BinIpcEventRaw {
     pub webview: Entity,
+    pub host: String,
     pub id: String,
     pub payload: Vec<u8>,
 }
@@ -76,10 +77,12 @@ impl ProcessMessageHandler for BinEmitEventHandler {
         PROCESS_MESSAGE_BIN_JS_EMIT
     }
 
-    fn handle_message(&self, _browser: &mut Browser, _frame: &mut Frame, args: Option<ListValue>) {
+    fn handle_message(&self, _browser: &mut Browser, frame: &mut Frame, args: Option<ListValue>) {
         let Some(args) = args else {
             return;
         };
+        let host =
+            crate::util::embedded_page_host_of(&frame.url().into_string()).unwrap_or_default();
         let id = args.string(0).into_string();
         let payload_index = if id.is_empty() { 0 } else { 1 };
         let payload = match args.binary(payload_index) {
@@ -104,6 +107,7 @@ impl ProcessMessageHandler for BinEmitEventHandler {
         ));
         let _ = self.sender.send_blocking(BinIpcEventRaw {
             webview: self.webview,
+            host,
             id,
             payload,
         });
@@ -121,10 +125,12 @@ mod tests {
         let payload = vec![1, 2, 3, 4];
         let raw = BinIpcEventRaw {
             webview,
+            host: "history".to_string(),
             id: "test-id".to_string(),
             payload: payload.clone(),
         };
         assert_eq!(raw.webview, webview);
+        assert_eq!(raw.host, "history");
         assert_eq!(raw.id, "test-id");
         assert_eq!(raw.payload, payload);
     }
