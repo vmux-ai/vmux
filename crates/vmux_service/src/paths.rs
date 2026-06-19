@@ -1,15 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
+use vmux_core::profile::shared_data_dir;
 
 /// Profile this build was compiled for ("release", "local", or "dev").
 pub fn current_profile() -> &'static str {
     env!("VMUX_BUILD_PROFILE")
 }
 
-/// Directory for service runtime files (socket, pid, log).
+/// Directory for service runtime files (socket, pid, identity). Nested under the
+/// profile-specific data dir so `dev` builds stay isolated under `Vmux/dev`.
 pub fn service_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").expect("HOME not set");
-    PathBuf::from(home).join("Library/Application Support/Vmux/services")
+    shared_data_dir().join("services")
 }
 
 fn profile_file(ext: &str) -> PathBuf {
@@ -31,15 +32,17 @@ pub fn identity_path() -> PathBuf {
     profile_file("identity")
 }
 
-/// Path to the per-profile service log file.
+/// Path to the per-profile service stdout/stderr capture log. Lives alongside
+/// the rotated application logs in `log_dir`, not in `service_dir`.
 pub fn log_path() -> PathBuf {
-    profile_file("log")
+    log_dir().join(format!("vmux-{}.log", current_profile()))
 }
 
-/// Directory for application log files (separate from runtime files in `service_dir`).
+/// Directory for application log files (separate from runtime files in
+/// `service_dir`). Nested under the profile-specific data dir so `dev` builds
+/// stay isolated under `Vmux/dev`.
 pub fn log_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").expect("HOME not set");
-    PathBuf::from(home).join("Library/Application Support/Vmux/logs")
+    shared_data_dir().join("logs")
 }
 
 /// Path to today's unified log file. Matches the filename the tracing-appender
@@ -238,6 +241,24 @@ mod tests {
                 "expected {name} to start with {suffix}"
             );
         }
+    }
+
+    #[test]
+    fn service_and_log_dirs_nest_under_profile_data_dir() {
+        let base = vmux_core::profile::shared_data_dir();
+        assert_eq!(service_dir(), base.join("services"));
+        assert_eq!(log_dir(), base.join("logs"));
+    }
+
+    #[test]
+    fn log_path_lives_in_log_dir_not_service_dir() {
+        let p = log_path();
+        assert_eq!(p.parent().unwrap(), log_dir());
+        assert_ne!(p.parent().unwrap(), service_dir());
+        assert_eq!(
+            p.file_name().unwrap().to_string_lossy(),
+            format!("vmux-{}.log", current_profile())
+        );
     }
 
     #[test]
