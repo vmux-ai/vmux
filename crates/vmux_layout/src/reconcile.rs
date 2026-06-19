@@ -502,11 +502,6 @@ pub fn apply_with_existing(
                 if let Some(parent) = tab_parent {
                     world.entity_mut(entity).insert(ChildOf(parent));
                 }
-                if let Some(space) = active_space_id(world) {
-                    world
-                        .entity_mut(entity)
-                        .insert(crate::space::SpaceId(space));
-                }
                 if !tab.name.is_empty()
                     && let Some(mut layout_tab) = world.get_mut::<LayoutTab>(entity)
                 {
@@ -685,13 +680,6 @@ fn apply_close(world: &mut World, id: &str) {
     if let Ok(entity_ref) = world.get_entity_mut(entity) {
         entity_ref.despawn();
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn active_space_id(world: &World) -> Option<String> {
-    world
-        .get_resource::<crate::space::ActiveSpaceId>()
-        .and_then(|active| active.0.clone())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1487,20 +1475,15 @@ mod tests {
     }
 
     #[test]
-    fn new_tab_inherits_active_space_and_parent() {
+    fn new_tab_parented_as_sibling_of_existing() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<crate::LayoutSpawnRequest>()
-            .add_message::<PageOpenRequest>()
-            .insert_resource(crate::space::ActiveSpaceId(Some("space-1".to_string())));
+            .add_message::<PageOpenRequest>();
         let main = app.world_mut().spawn_empty().id();
         let tab = app
             .world_mut()
-            .spawn((
-                LayoutTab { name: "A".into() },
-                crate::space::SpaceId("space-1".to_string()),
-                ChildOf(main),
-            ))
+            .spawn((LayoutTab { name: "A".into() }, ChildOf(main)))
             .id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
 
@@ -1543,27 +1526,16 @@ mod tests {
 
         apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
 
-        let mut q = app.world_mut().query_filtered::<(
-            Entity,
-            Option<&crate::space::SpaceId>,
-            Option<&ChildOf>,
-        ), With<LayoutTab>>();
-        let rows: Vec<(Entity, Option<String>, Option<Entity>)> = q
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(Entity, Option<&ChildOf>), With<LayoutTab>>();
+        let parent = q
             .iter(app.world())
-            .map(|(e, s, c)| (e, s.map(|s| s.0.clone()), c.map(|c| c.parent())))
-            .collect();
-        let (_, space, parent) = rows
-            .iter()
-            .find(|(e, _, _)| *e != tab)
-            .expect("new tab exists");
+            .find(|(e, _)| *e != tab)
+            .and_then(|(_, c)| c.map(|c| c.parent()))
+            .expect("new tab exists with a parent");
         assert_eq!(
-            space.as_deref(),
-            Some("space-1"),
-            "new tab should inherit the active space id"
-        );
-        assert_eq!(
-            *parent,
-            Some(main),
+            parent, main,
             "new tab should be a sibling of the existing tab (same parent)"
         );
     }

@@ -75,36 +75,6 @@ pub fn sync_active_space_id(
     }
 }
 
-pub fn assign_orphan_tabs_to_active_space(
-    active_id: Res<ActiveSpaceId>,
-    orphans: Query<Entity, (With<crate::tab::Tab>, Without<SpaceId>)>,
-    mut commands: Commands,
-) {
-    let Some(id) = active_id.0.as_deref() else {
-        return;
-    };
-    for tab in &orphans {
-        commands.entity(tab).insert(SpaceId(id.to_string()));
-    }
-}
-
-pub fn same_space(candidate: Option<&SpaceId>, active: Option<&SpaceId>) -> bool {
-    match (candidate, active) {
-        (Some(candidate), Some(active)) => candidate == active,
-        _ => true,
-    }
-}
-
-/// Whether a tab/entity carrying `candidate` belongs to the active space id.
-/// Unknown ids (no `SpaceId`, or no active space) are treated as in-scope so
-/// callers degrade to global behavior instead of hiding everything.
-pub fn in_active_space(candidate: Option<&SpaceId>, active: Option<&str>) -> bool {
-    match (candidate, active) {
-        (Some(candidate), Some(active)) => candidate.0 == active,
-        _ => true,
-    }
-}
-
 pub fn space_of(
     entity: Entity,
     child_of: &Query<&ChildOf>,
@@ -209,19 +179,6 @@ mod tests {
         assert_eq!(
             app.world().resource::<ActiveSpaceId>().0.as_deref(),
             Some("work")
-        );
-    }
-
-    #[test]
-    fn orphan_tabs_get_active_space_id() {
-        let mut app = App::new();
-        app.insert_resource(ActiveSpaceId(Some("work".to_string())))
-            .add_systems(Update, assign_orphan_tabs_to_active_space);
-        let tab = app.world_mut().spawn(crate::tab::Tab::default()).id();
-        app.update();
-        assert_eq!(
-            app.world().entity(tab).get::<SpaceId>(),
-            Some(&SpaceId("work".to_string()))
         );
     }
 

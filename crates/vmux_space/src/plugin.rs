@@ -164,18 +164,21 @@ type SpaceListQuery<'w, 's> = Query<
         &'static Name,
         Has<vmux_core::Active>,
         Option<&'static vmux_core::Order>,
+        Option<&'static Children>,
     ),
     With<vmux_layout::space::Space>,
 >;
 
 fn space_rows_from_world(
     spaces: &SpaceListQuery,
-    tab_spaces: &Query<&vmux_layout::space::SpaceId, With<vmux_layout::tab::Tab>>,
+    tab_q: &Query<(), With<vmux_layout::tab::Tab>>,
 ) -> Vec<SpaceRow> {
     let mut rows: Vec<(u32, SpaceRow)> = spaces
         .iter()
-        .map(|(sid, name, is_active, order)| {
-            let tab_count = tab_spaces.iter().filter(|s| s.0 == sid.0).count() as u32;
+        .map(|(sid, name, is_active, order, children)| {
+            let tab_count = children
+                .map(|c| c.iter().filter(|e| tab_q.contains(*e)).count())
+                .unwrap_or(0) as u32;
             (
                 order.map(|o| o.0).unwrap_or(u32::MAX),
                 SpaceRow {
@@ -194,7 +197,7 @@ fn space_rows_from_world(
 
 fn broadcast_spaces_to_views(
     spaces: SpaceListQuery,
-    tab_spaces: Query<&vmux_layout::space::SpaceId, With<vmux_layout::tab::Tab>>,
+    tab_q: Query<(), With<vmux_layout::tab::Tab>>,
     pending_spaces: Query<Entity, (With<Spaces>, With<PageReady>, Without<SpacesListSent>)>,
     sent_spaces: Query<Entity, (With<Spaces>, With<PageReady>, With<SpacesListSent>)>,
     pending_cef: Query<
@@ -223,7 +226,7 @@ fn broadcast_spaces_to_views(
         return;
     }
     let payload = SpacesListEvent {
-        spaces: space_rows_from_world(&spaces, &tab_spaces),
+        spaces: space_rows_from_world(&spaces, &tab_q),
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     let body_changed = body != *last_body;
