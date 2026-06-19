@@ -118,11 +118,7 @@ pub fn sync_space_container_visibility(
     mut spaces: Query<(&mut Node, &mut Visibility, Has<vmux_core::Active>), With<Space>>,
 ) {
     for (mut node, mut vis, active) in &mut spaces {
-        let target_display = if active {
-            Display::Flex
-        } else {
-            Display::None
-        };
+        let target_display = if active { Display::Flex } else { Display::None };
         if node.display != target_display {
             node.display = target_display;
         }
@@ -218,14 +214,22 @@ mod tests {
             .add_systems(Update, sync_space_container_visibility);
         let active = app
             .world_mut()
-            .spawn((Space, vmux_core::Active, space_container_node(), Visibility::default()))
+            .spawn((
+                Space,
+                vmux_core::Active,
+                space_container_node(),
+                Visibility::default(),
+            ))
             .id();
         let bg = app
             .world_mut()
             .spawn((Space, space_container_node(), Visibility::default()))
             .id();
         app.update();
-        assert_eq!(app.world().get::<Node>(active).unwrap().display, Display::Flex);
+        assert_eq!(
+            app.world().get::<Node>(active).unwrap().display,
+            Display::Flex
+        );
         assert_eq!(app.world().get::<Node>(bg).unwrap().display, Display::None);
         assert!(app.world().get_entity(bg).is_ok());
     }

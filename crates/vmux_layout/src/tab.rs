@@ -118,8 +118,7 @@ fn handle_tab_commands(
             AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) => match tab_cmd {
                 TabCommand::Close => {
                     let Some(active) = active_tab else { continue };
-                    let siblings =
-                        active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
+                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
                     if siblings.len() <= 1 {
                         let Ok(main) = main_q.single() else { continue };
                         layout_requests.write(TabLayoutSpawnRequest {
@@ -137,8 +136,7 @@ fn handle_tab_commands(
                 }
                 TabCommand::Next | TabCommand::Previous => {
                     let Some(active) = active_tab else { continue };
-                    let siblings =
-                        active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
+                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
                     if siblings.len() <= 1 {
                         continue;
                     }
@@ -166,8 +164,7 @@ fn handle_tab_commands(
                 | TabCommand::SelectIndex8
                 | TabCommand::SelectLast => {
                     let Some(active) = active_tab else { continue };
-                    let siblings =
-                        active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
+                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
                     if siblings.is_empty() {
                         continue;
                     }
@@ -258,11 +255,7 @@ fn sync_tab_visibility(
     mut tabs: Query<(&mut Node, &mut Visibility, Has<vmux_core::Active>), With<Tab>>,
 ) {
     for (mut node, mut vis, active) in &mut tabs {
-        let target_display = if active {
-            Display::Flex
-        } else {
-            Display::None
-        };
+        let target_display = if active { Display::Flex } else { Display::None };
         if node.display != target_display {
             node.display = target_display;
         }
@@ -331,8 +324,7 @@ fn on_tabs_command_emit(
             let target = tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
                 .or(active_tab);
             let Some(target) = target else { return };
-            let siblings =
-                active_tab_siblings(target, &child_of_q, &all_children, &tab_q);
+            let siblings = active_tab_siblings(target, &child_of_q, &all_children, &tab_q);
             if siblings.len() <= 1 {
                 let Ok(main) = main_q.single() else { return };
                 layout_requests.write(TabLayoutSpawnRequest {
@@ -657,7 +649,10 @@ mod tests {
             .iter(app.world())
             .next()
             .expect("tab spawned");
-        assert_eq!(app.world().get::<ChildOf>(tab).map(|c| c.parent()), Some(space));
+        assert_eq!(
+            app.world().get::<ChildOf>(tab).map(|c| c.parent()),
+            Some(space)
+        );
         assert!(app.world().get::<crate::space::SpaceId>(tab).is_none());
     }
 

@@ -114,15 +114,15 @@ pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> std::path:
             .filter(|p| p.is_dir())
     };
     pick(space_override(settings, space_id).and_then(|o| o.startup_dir.as_deref()))
-    .or_else(|| {
-        pick(
-            settings
-                .terminal
-                .as_ref()
-                .and_then(|t| t.startup_dir.as_deref()),
-        )
-    })
-    .unwrap_or_else(|| vmux_core::profile::space_dir(space_id))
+        .or_else(|| {
+            pick(
+                settings
+                    .terminal
+                    .as_ref()
+                    .and_then(|t| t.startup_dir.as_deref()),
+            )
+        })
+        .unwrap_or_else(|| vmux_core::profile::space_dir(space_id))
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

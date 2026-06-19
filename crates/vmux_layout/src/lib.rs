@@ -41,13 +41,13 @@ pub mod unit;
 mod webview_reveal;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod active;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod pane;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod side_sheet;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod space;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod active;
 #[cfg(not(target_arch = "wasm32"))]
 mod swap;
 #[cfg(not(target_arch = "wasm32"))]

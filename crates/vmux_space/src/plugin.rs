@@ -310,9 +310,7 @@ fn bump_space_tab(tabs: &SpaceTabQuery, space_id: &str, commands: &mut Commands)
 fn deactivate_all_spaces(spaces: &SpaceQuery, commands: &mut Commands) {
     for (entity, _, is_active, _) in spaces.iter() {
         if is_active {
-            commands
-                .entity(entity)
-                .remove::<vmux_core::Active>();
+            commands.entity(entity).remove::<vmux_core::Active>();
         }
     }
 }
