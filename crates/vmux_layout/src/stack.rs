@@ -143,10 +143,12 @@ impl ActiveTabParam<'_, '_> {
         if scoped.is_some() {
             return scoped;
         }
-        if self.active_spaces.is_empty() {
-            return active_among(self.tabs.iter());
-        }
-        None
+        // No active tab is scoped to an active space — e.g. on a fresh start
+        // before the default tab is adopted into / marked active within its
+        // space. Fall back to the global most-recently-active tab so callers
+        // (notably `open_startup_url_if_no_stacks`) don't treat the layout as
+        // empty and respawn startup content every frame.
+        active_among(self.tabs.iter())
     }
 }
 
@@ -1289,5 +1291,32 @@ mod tests {
             .unwrap();
 
         assert_eq!(got, Some(tab_b));
+    }
+
+    #[test]
+    fn active_tab_param_falls_back_to_global_when_no_scoped_active_tab() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        let main = app.world_mut().spawn(crate::window::Main).id();
+        // An active space exists, but the only tab isn't scoped to it — the
+        // fresh-start state where the default tab is parented under Main before
+        // it is adopted into / marked active within its space.
+        app.world_mut()
+            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)));
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(5), ChildOf(main)))
+            .id();
+
+        let got = app
+            .world_mut()
+            .run_system_once(|param: ActiveTabParam| param.get())
+            .unwrap();
+
+        assert_eq!(
+            got,
+            Some(tab),
+            "must fall back to the global tab so the layout isn't treated as empty (else startup respawns forever)"
+        );
     }
 }
