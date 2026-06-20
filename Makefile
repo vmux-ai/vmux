@@ -1,4 +1,4 @@
-.PHONY: dev local release build-local build-release build setup-cef install-debug-render-process doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks
+.PHONY: dev local release build-local build-release build setup-cef install-debug-render-process doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup
 
 .DEFAULT_GOAL := dev
 
@@ -87,6 +87,22 @@ lint-fix:
 
 test:
 	env -u CEF_PATH "$(CARGO_BIN)" test --workspace --exclude bevy_cef_core
+
+# Reset vmux *dev* storage for a clean test. Removes the layout store, per-space
+# layout snapshots, session, logs and stale dev service sockets. KEEPS ~/.vmux
+# (settings + space working dirs) and the dev browser profile (logins/cache).
+cleanup:
+	@pkill -f "target/debug/vmux_desktop" 2>/dev/null || true
+	@pkill -f "target/debug/vmux_service" 2>/dev/null || true
+	@pkill -f "bevy_cef_debug_render_process" 2>/dev/null || true
+	@base="$$HOME/Library/Application Support/Vmux"; dev="$$base/dev"; \
+	rm -f "$$dev/store.ron" "$$dev/store.version"; \
+	rm -f "$$dev"/store.ron.*.bak "$$dev"/store.version.bak-*; \
+	rm -f "$$dev/profiles/"*/session.ron; \
+	rm -rf "$$dev/profiles/"*/spaces; \
+	rm -rf "$$dev/logs"; \
+	rm -f "$$base/services/"vmux-dev.*; \
+	echo "cleanup: reset vmux dev storage (kept ~/.vmux settings + dev browser profile)"
 
 # Website
 build-website-css:
