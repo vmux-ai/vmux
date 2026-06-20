@@ -982,6 +982,7 @@ fn forward_layout_snapshot_responses(
 fn handle_agent_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children_q: Query<&Children>,
+    agents: Query<&vmux_core::agent::AgentSession>,
     child_of_q: Query<&ChildOf>,
     agent_to_entity: Option<Res<AgentSessionToEntity>>,
     idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
@@ -1004,6 +1005,7 @@ fn handle_agent_page_open(
         match handle_agent_page_open_task(
             task,
             &children_q,
+            &agents,
             &child_of_q,
             agent_to_entity.as_deref(),
             idx.as_deref(),
@@ -1027,6 +1029,7 @@ fn handle_agent_page_open(
 fn handle_agent_page_open_task(
     task: &PageOpenTask,
     children_q: &Query<&Children>,
+    agents: &Query<&vmux_core::agent::AgentSession>,
     child_of_q: &Query<&ChildOf>,
     agent_to_entity: Option<&AgentSessionToEntity>,
     idx: Option<&crate::client::page::strategy_index::PageStrategyIndex>,
@@ -1107,12 +1110,18 @@ fn handle_agent_page_open_task(
             if segs.len() == 1
                 && let Some(kind) = AgentKind::from_url_segment(segs[0])
             {
-                spawn_agent.write(SpawnAgentInStackRequest {
-                    kind,
-                    cwd: default_cwd.to_path_buf(),
-                    session_id: None,
-                    stack: task.stack,
-                });
+                // Bare agent URLs carry no session id, so they never hit the
+                // agent_to_entity dedup. Guard here: if the stack already hosts
+                // this agent kind, a repeat open is a no-op instead of spawning
+                // (and abandoning) another agent process.
+                if !stack_has_agent_of_kind(task.stack, kind, children_q, agents) {
+                    spawn_agent.write(SpawnAgentInStackRequest {
+                        kind,
+                        cwd: default_cwd.to_path_buf(),
+                        session_id: None,
+                        stack: task.stack,
+                    });
+                }
                 return Ok(());
             }
             if segs.len() == 2 {
@@ -1132,6 +1141,22 @@ fn handle_agent_page_open_task(
             Err(format!("malformed agent URL '{}'", task.url))
         }
     }
+}
+
+fn stack_has_agent_of_kind(
+    stack: Entity,
+    kind: AgentKind,
+    children_q: &Query<&Children>,
+    agents: &Query<&vmux_core::agent::AgentSession>,
+) -> bool {
+    children_q
+        .get(stack)
+        .map(|children| {
+            children
+                .iter()
+                .any(|child| agents.get(child).is_ok_and(|session| session.kind == kind))
+        })
+        .unwrap_or(false)
 }
 
 fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
@@ -1850,6 +1875,48 @@ mod tests {
         assert_eq!(
             spawns[0].cwd, dir,
             "claude page cwd resolves to space startup_dir"
+        );
+    }
+
+    #[test]
+    fn bare_agent_open_skips_when_stack_already_has_same_agent() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_agent_page_open);
+
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
+        // Stack already hosts a live vibe agent.
+        app.world_mut().spawn((
+            ChildOf(stack),
+            vmux_core::agent::AgentSession {
+                kind: AgentKind::Vibe,
+            },
+        ));
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://agent/vibe/".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        let spawns: Vec<SpawnAgentInStackRequest> = app
+            .world_mut()
+            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(
+            spawns.len(),
+            0,
+            "bare agent open must not spawn a second agent when the stack already has one"
         );
     }
 
