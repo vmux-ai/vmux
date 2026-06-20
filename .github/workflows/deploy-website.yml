@@ -75,9 +75,17 @@ jobs:
         working-directory: website
         run: tailwindcss -i tailwind.input.css -o public/style.css --minify
 
-      - name: Build website
+      - name: Build website (SSG)
         working-directory: website
-        run: dx build --platform web --release
+        run: |
+          rm -rf target/dx
+          dx build --platform web --ssg --release
+
+      - name: Promote SSG home to root
+        working-directory: website
+        run: |
+          cp target/dx/vmux_website/release/web/public/_home/index.html target/dx/vmux_website/release/web/public/index.html
+          rm -rf target/dx/vmux_website/release/web/public/_home
 
       - name: Copy CNAME to dist
         run: cp website/CNAME website/target/dx/vmux_website/release/web/public/CNAME
