@@ -41,10 +41,11 @@ jobs:
           echo "Resolved CEF version: $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-  lint:
-    name: Lint
+  lint-rust:
+    name: Lint (rust)
     runs-on: ubuntu-latest
-    needs: cef-version
+    needs: [cef-version, changes]
+    if: needs.changes.outputs.code == 'true'
     env:
       CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
@@ -141,10 +142,11 @@ jobs:
       - name: Clippy
         run: env -u CEF_PATH cargo clippy ${{ steps.pkgs.outputs.args }} --all-targets -- -D warnings
 
-  test:
-    name: Test
+  test-rust:
+    name: Test (rust)
     runs-on: ubuntu-latest
-    needs: cef-version
+    needs: [cef-version, changes]
+    if: needs.changes.outputs.code == 'true'
     env:
       CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
@@ -235,12 +237,21 @@ jobs:
     outputs:
       website: ${{ steps.filter.outputs.website }}
       packaging: ${{ steps.filter.outputs.packaging }}
+      code: ${{ steps.filter.outputs.code }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
+            code:
+              - 'crates/**'
+              - 'patches/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'scripts/**'
+              - '.github/workflows/ci.yml'
             website:
               - 'website/**'
             packaging:
@@ -252,6 +263,50 @@ jobs:
               - 'Cargo.lock'
               - '.github/workflows/release.yml'
               - '.github/workflows/ci.yml'
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: [changes, lint-rust]
+    if: always()
+    steps:
+      - name: Gate
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          RESULT: ${{ needs.lint-rust.result }}
+        run: |
+          if [ "$CHANGES" != "success" ]; then
+            echo "::error::Detect Changes did not succeed ($CHANGES)"
+            exit 1
+          fi
+          if [ "$CODE" = "true" ] && [ "$RESULT" != "success" ]; then
+            echo "::error::Lint (rust) result: $RESULT"
+            exit 1
+          fi
+          echo "Lint gate ok (code=$CODE rust=$RESULT)"
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: [changes, test-rust]
+    if: always()
+    steps:
+      - name: Gate
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          RESULT: ${{ needs.test-rust.result }}
+        run: |
+          if [ "$CHANGES" != "success" ]; then
+            echo "::error::Detect Changes did not succeed ($CHANGES)"
+            exit 1
+          fi
+          if [ "$CODE" = "true" ] && [ "$RESULT" != "success" ]; then
+            echo "::error::Test (rust) result: $RESULT"
+            exit 1
+          fi
+          echo "Test gate ok (code=$CODE rust=$RESULT)"
 
   website:
     name: Website Build
