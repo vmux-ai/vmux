@@ -11,21 +11,33 @@ name = "vmux_website"
 path = "src/main.rs"
 
 [dependencies]
-dioxus = { version = "=0.7.4", features = ["web"] }
-dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = true, features = [
+dioxus = { version = "=0.7.4", features = ["fullstack", "router"] }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = true }
+pulldown-cmark = { version = "0.13", default-features = false }
+serde = { version = "1", features = ["derive"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", features = [
     "web",
 ] }
 gloo-net = { version = "0.6", default-features = false, features = ["http", "json"] }
-serde = { version = "1", features = ["derive"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
     "Clipboard",
     "Document",
+    "DomRect",
     "Element",
+    "EventTarget",
     "HtmlAnchorElement",
     "HtmlElement",
     "Navigator",
     "Node",
+    "NodeList",
     "Window",
 ] }
+
+[features]
+default = ["web"]
+web = ["dioxus/web"]
+server = ["dioxus/server"]

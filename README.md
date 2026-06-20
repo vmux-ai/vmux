@@ -1,5 +1,5 @@
 <h1 align="center">Vmux</h1>
-<p align="center">Vibe Multiplexer — AI-native workspace combining browser and terminal panes.</p>
+<p align="center">Vibe Multiplexer — an agent-first workspace with a browser and IDE built in. Co-work with agents in one shared space.</p>
 
 <p align="center">
   <img src="icon.png" alt="Vmux icon" width="256" />
@@ -7,10 +7,10 @@
 
 ## Features
 
-- **Vibe Driven Development** — Talk to your workspace. browse, run commands, edit files in in one place.
-- **Tmux-like tiling window manager** — Split, arrange, and manage browser and terminal panes in a single window. tmux, but with a built-in Chromium browser.
-- **Built-in Chromium browser** — Browse the web, read docs, and use web apps right next to your terminal. No more switching between windows.
-- **3D workspace** — Powered by Bevy, a game engine with an ECS architecture. Your workspace lives in a GPU-rendered 3D scene.
+- **Co-work with agents** — People and agents build side by side in one shared space — from hands-on pairing to full autonomy, you set the balance.
+- **Browser simplicity, tmux power** — Looks like the browser you already know; split, stack, and tile panes like tmux underneath.
+- **IDE power underneath** — Keyboard-driven workflows and deep environment control — and agents drive the whole workspace over MCP.
+- **3D workspace** — Powered by Bevy. Flip your panes into a live, GPU-rendered 3D scene — same workspace, still interactive.
 
 ## Install
 

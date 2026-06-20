@@ -101,7 +101,9 @@ website: build-website-css
 	}
 
 build-website-release: build-website-css
-	cd website && "$(DX_BIN)" build --platform web --release
+	cd website && rm -rf target/dx && "$(DX_BIN)" build --platform web --ssg --release
+	cp website/target/dx/vmux_website/release/web/public/_home/index.html website/target/dx/vmux_website/release/web/public/index.html
+	rm -rf website/target/dx/vmux_website/release/web/public/_home
 
 # Friendly prerequisite report (colors / emoji when terminal); README: make doctor
 doctor:
