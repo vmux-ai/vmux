@@ -436,6 +436,7 @@ pub enum ServiceMessage {
         pid: u32,
     },
     ProcessCreateFailed {
+        process_id: ProcessId,
         reason: String,
     },
     ProcessOutput {
@@ -783,13 +784,16 @@ mod tests {
 
     #[test]
     fn process_create_failed_round_trips_reason() {
+        let id = ProcessId::new();
         let msg = ServiceMessage::ProcessCreateFailed {
+            process_id: id,
             reason: "missing PID after spawn".into(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
         let decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
         match decoded {
-            ServiceMessage::ProcessCreateFailed { reason } => {
+            ServiceMessage::ProcessCreateFailed { process_id, reason } => {
+                assert_eq!(process_id, id);
                 assert_eq!(reason, "missing PID after spawn");
             }
             _ => panic!("wrong variant"),
