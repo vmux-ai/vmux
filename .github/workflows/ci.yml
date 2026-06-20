@@ -272,9 +272,14 @@ jobs:
     steps:
       - name: Gate
         env:
+          CHANGES: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
           RESULT: ${{ needs.lint-rust.result }}
         run: |
+          if [ "$CHANGES" != "success" ]; then
+            echo "::error::Detect Changes did not succeed ($CHANGES)"
+            exit 1
+          fi
           if [ "$CODE" = "true" ] && [ "$RESULT" != "success" ]; then
             echo "::error::Lint (rust) result: $RESULT"
             exit 1
@@ -289,9 +294,14 @@ jobs:
     steps:
       - name: Gate
         env:
+          CHANGES: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
           RESULT: ${{ needs.test-rust.result }}
         run: |
+          if [ "$CHANGES" != "success" ]; then
+            echo "::error::Detect Changes did not succeed ($CHANGES)"
+            exit 1
+          fi
           if [ "$CODE" = "true" ] && [ "$RESULT" != "success" ]; then
             echo "::error::Test (rust) result: $RESULT"
             exit 1
