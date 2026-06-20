@@ -772,6 +772,16 @@ pub fn apply_process_created(
         .remove::<AwaitingProcessCreated>();
 }
 
+/// A `CreateProcess` failed (e.g. the system PTY pool is exhausted). Clear the
+/// in-flight markers so the entity stops counting against the create budget and
+/// is not left hung awaiting a `ProcessCreated` that will never arrive.
+fn apply_process_create_failed(commands: &mut Commands, entity: Entity) {
+    commands
+        .entity(entity)
+        .remove::<AwaitingProcessCreated>()
+        .remove::<PendingServiceCreate>();
+}
+
 fn default_shell() -> String {
     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
 }
@@ -790,6 +800,19 @@ fn terminal_shell(settings: &AppSettings) -> String {
         .as_ref()
         .map(|t| t.resolve_theme(&t.default_theme).shell)
         .unwrap_or_else(default_shell)
+}
+
+/// Max `CreateProcess` requests outstanding (awaiting `ProcessCreated`) at once.
+/// Restoring a large saved space would otherwise open hundreds of PTYs in one
+/// tick and exhaust the system PTY pool (macOS `kern.tty.ptmx_max` ≈ 511),
+/// which crashes startup. Bounding concurrency spreads restore across ticks;
+/// each `ProcessCreated` response frees budget and wakes the loop for the next.
+const MAX_CONCURRENT_PROCESS_CREATES: usize = 8;
+
+/// How many new `CreateProcess` requests may be dispatched this tick, given how
+/// many are already awaiting a `ProcessCreated` response.
+fn process_create_budget(in_flight: usize, max_concurrent: usize) -> usize {
+    max_concurrent.saturating_sub(in_flight)
 }
 
 fn missing_terminal_restart(
@@ -1032,8 +1055,13 @@ fn poll_service_messages(
     let Some(service) = service else { return };
 
     // Handle pending creates — send CreateProcess, wait for ProcessCreated
-    // response which will carry the real process ID.
-    for (entity, process_id, launch) in &pending_create {
+    // response which will carry the real process ID. Throttle by in-flight count
+    // so restoring a large saved space can't open hundreds of PTYs in one tick.
+    let create_budget = process_create_budget(
+        awaiting_create.iter().count(),
+        MAX_CONCURRENT_PROCESS_CREATES,
+    );
+    for (entity, process_id, launch) in pending_create.iter().take(create_budget) {
         // Agents run as bare executables and don't load the user's shell config
         // the way a terminal does, so merge in the login-shell env (API keys
         // etc.). Done here (at spawn) rather than at launch-build time so it
@@ -1086,8 +1114,15 @@ fn poll_service_messages(
                     );
                 }
             }
-            ServiceMessage::ProcessCreateFailed { reason } => {
+            ServiceMessage::ProcessCreateFailed { process_id, reason } => {
                 bevy::log::warn!("service failed to create process: {reason}");
+                if let Some(entity) = (&awaiting_create)
+                    .into_iter()
+                    .find(|(_, pid_c, _)| **pid_c == process_id)
+                    .map(|(e, _, _)| e)
+                {
+                    apply_process_create_failed(&mut commands, entity);
+                }
             }
             ServiceMessage::ViewportPatch {
                 process_id,
@@ -3179,6 +3214,22 @@ mod tests {
     }
 
     #[test]
+    fn process_create_budget_bounds_in_flight() {
+        assert_eq!(
+            process_create_budget(0, 8),
+            8,
+            "full budget when nothing in flight"
+        );
+        assert_eq!(process_create_budget(3, 8), 5);
+        assert_eq!(process_create_budget(8, 8), 0, "no budget at the cap");
+        assert_eq!(
+            process_create_budget(99, 8),
+            0,
+            "never negative when over the cap"
+        );
+    }
+
+    #[test]
     fn process_not_found_message_parses_process_id() {
         let missing = process_id(9);
 
@@ -3753,6 +3804,28 @@ mod tests {
         assert!(app.world().get::<AwaitingProcessCreated>(entity).is_none());
         let stored_process_id = app.world().get::<ProcessId>(entity).unwrap();
         assert_eq!(*stored_process_id, id);
+    }
+
+    #[test]
+    fn apply_process_create_failed_clears_awaiting() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let entity = app
+            .world_mut()
+            .spawn((Terminal, AwaitingProcessCreated))
+            .id();
+        app.world_mut()
+            .run_system_cached_with(
+                |In(entity): In<Entity>, mut commands: Commands| {
+                    apply_process_create_failed(&mut commands, entity);
+                },
+                entity,
+            )
+            .unwrap();
+        assert!(
+            app.world().get::<AwaitingProcessCreated>(entity).is_none(),
+            "failed create must clear AwaitingProcessCreated so it frees create budget"
+        );
     }
 
     #[test]
