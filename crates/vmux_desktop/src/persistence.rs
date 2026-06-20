@@ -205,12 +205,17 @@ pub(crate) fn load_space_on_startup(
 ) {
     let path = store_path();
     let removed_stale = remove_stale_space_if_needed(&path);
-    if path.exists() && !store_schema_is_current() {
+    let schema_outdated = path.exists() && !store_schema_is_current();
+    if schema_outdated {
         warn!("Store schema outdated; resetting {:?}", path);
-        let _ = std::fs::remove_file(&path);
+        if let Err(e) = std::fs::remove_file(&path) {
+            warn!("Failed to remove outdated store {:?}: {e}", path);
+        }
         let _ = std::fs::remove_file(store_version_path());
     }
-    let exists = path.exists() && !removed_stale;
+    // Never load a schema-incompatible store, even if deletion failed above —
+    // loading it would hit deserialization errors / unknown component types.
+    let exists = path.exists() && !removed_stale && !schema_outdated;
     commands.insert_resource(SpaceFilePresent(exists));
     if exists {
         info!("Loading space from {:?}", path);

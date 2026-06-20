@@ -73,7 +73,7 @@ non-active spaces. Observed on Vmux.app v0.0.16 (release == current HEAD; compon
 
 ### Ownership tree
 
-```
+```text
 Main  (render root, ChildOf window root)
 ├─ Space "vmux-ai/vmux"  [Active]            Node Display=Flex
 │   ├─ Tab  [Active]

@@ -501,8 +501,8 @@ fn on_space_command(
                 .max()
                 .map(|max| max + 1)
                 .unwrap_or(0);
-            deactivate_all_spaces(&spaces, &mut commands);
             let Ok(main) = main_q.single() else { return };
+            deactivate_all_spaces(&spaces, &mut commands);
             commands.spawn((
                 vmux_layout::space::Space,
                 vmux_layout::space::SpaceId(id.clone()),
@@ -558,8 +558,8 @@ fn handle_open_in_new_space(
             .max()
             .map(|max| max + 1)
             .unwrap_or(0);
-        deactivate_all_spaces(&spaces, &mut commands);
         let Ok(main) = main_q.single() else { continue };
+        deactivate_all_spaces(&spaces, &mut commands);
         commands.spawn((
             vmux_layout::space::Space,
             vmux_layout::space::SpaceId(id.clone()),
