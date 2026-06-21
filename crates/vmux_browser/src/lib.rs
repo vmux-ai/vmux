@@ -2513,6 +2513,8 @@ fn on_debug_update_clear(
 fn on_header_command_emit(
     trigger: On<BinReceive<HeaderCommandEvent>>,
     mut messages: ResMut<Messages<AppCommand>>,
+    mut issued: MessageWriter<vmux_command::CommandIssued>,
+    user_q: Query<Entity, With<vmux_core::team::User>>,
 ) {
     let cmd = match trigger.event().payload.header_command.as_str() {
         "prev_page" => BrowserCommand::Navigation(BrowserNavigationCommand::PrevPage),
@@ -2521,7 +2523,13 @@ fn on_header_command_emit(
         "focus_address_bar" => BrowserCommand::Bar(BrowserBarCommand::OpenPageInCommandBar),
         _ => return,
     };
-    messages.write(AppCommand::Browser(cmd));
+    let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
+    let cmd = AppCommand::Browser(cmd);
+    issued.write(vmux_command::CommandIssued {
+        caller,
+        command: cmd.clone(),
+    });
+    messages.write(cmd);
 }
 
 fn on_reload_notify_header(
@@ -2565,9 +2573,12 @@ fn on_side_sheet_command_emit(
     stack_q: Query<Entity, With<Stack>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     mut messages: ResMut<Messages<AppCommand>>,
+    mut issued: MessageWriter<vmux_command::CommandIssued>,
+    user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
+    let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
     let Ok(pane_id) = evt.pane_id.parse::<u64>() else {
         return;
     };
@@ -2596,17 +2607,24 @@ fn on_side_sheet_command_emit(
             };
             commands.entity(target_pane).insert(LastActivatedAt::now());
             commands.entity(target_stack).insert(LastActivatedAt::now());
-            messages.write(AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close,
-            )));
+            let cmd = AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close));
+            issued.write(vmux_command::CommandIssued {
+                caller,
+                command: cmd.clone(),
+            });
+            messages.write(cmd);
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
         }
         "new_stack" => {
             commands.entity(target_pane).insert(LastActivatedAt::now());
-            messages.write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewStack { url: None },
-            )));
+            let cmd =
+                AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack { url: None }));
+            issued.write(vmux_command::CommandIssued {
+                caller,
+                command: cmd.clone(),
+            });
+            messages.write(cmd);
         }
         _ => {}
     }

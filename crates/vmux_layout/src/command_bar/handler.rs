@@ -1064,10 +1064,13 @@ fn on_command_bar_action(
     )>,
     mut page_default_spawn_writer: MessageWriter<vmux_core::agent::PageAgentSpawnDefaultRequest>,
     mut page_default_attach_writer: MessageWriter<vmux_core::agent::PageAgentAttachDefaultRequest>,
+    mut issued: MessageWriter<vmux_command::CommandIssued>,
+    user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let evt = &trigger.event().payload;
+    let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
     let terminals_snapshot = resource_params.p1().clone();
     let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
     let pid_to_entity = terminals_snapshot.pid_to_entity.clone();
@@ -1295,14 +1298,20 @@ fn on_command_bar_action(
                     empty_stack = None;
                 } else {
                     let target = evt.target;
-                    writer_params
-                        .p0()
-                        .write(AppCommand::Browser(BrowserCommand::Open(
-                            build_open_command(target, url),
-                        )));
+                    let cmd =
+                        AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
+                    issued.write(vmux_command::CommandIssued {
+                        caller,
+                        command: cmd.clone(),
+                    });
+                    writer_params.p0().write(cmd);
                 }
                 custom_keyboard_restore = true;
             } else if let Some(cmd) = match_command(&evt.value) {
+                issued.write(vmux_command::CommandIssued {
+                    caller,
+                    command: cmd.clone(),
+                });
                 writer_params.p0().write(cmd);
             }
             // If in new-tab mode and a command was executed, clean up the empty tab
