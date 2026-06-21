@@ -429,6 +429,12 @@ pub enum CopyModeKey {
 }
 
 /// Messages sent from the service to the GUI client.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum CommandLifecycleKind {
+    Started,
+    Ended { exit_code: Option<i32> },
+}
+
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ServiceMessage {
     ProcessCreated {
@@ -460,6 +466,10 @@ pub enum ServiceMessage {
     ProcessTitle {
         process_id: ProcessId,
         title: String,
+    },
+    CommandLifecycle {
+        process_id: ProcessId,
+        kind: CommandLifecycleKind,
     },
     ProcessList {
         processes: Vec<ProcessInfo>,
