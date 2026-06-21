@@ -3,7 +3,9 @@ use bevy_cef::prelude::*;
 
 use vmux_agent::AgentRunState;
 use vmux_command::{AppCommand, BrowserCommand, OpenCommand};
-use vmux_core::event::team::{TEAM_EVENT, TEAM_PAGE_URL, TeamCommandEvent, TeamEvent, TeamMemberRow};
+use vmux_core::event::team::{
+    TEAM_EVENT, TEAM_PAGE_URL, TeamCommandEvent, TeamEvent, TeamMemberRow,
+};
 use vmux_core::page::PageReady;
 use vmux_core::team::{Agent, Profile, User};
 use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
@@ -39,9 +41,9 @@ impl Plugin for TeamPlugin {
                 Update,
                 handle_team_page_open.in_set(PageOpenSet::HandleKnownPages),
             )
-            .add_plugins(BinEventEmitterPlugin::<(TeamCommandEvent,)>::for_hosts(
-                &["layout"],
-            ))
+            .add_plugins(BinEventEmitterPlugin::<(TeamCommandEvent,)>::for_hosts(&[
+                "layout",
+            ]))
             .add_observer(on_team_command)
             .add_observer(reset_team_sent_on_page_ready);
     }
@@ -143,7 +145,13 @@ fn build_team_members(
 
     let mut members = Vec::new();
     if let Ok((entity, profile)) = user_q.single() {
-        members.push(team_member_row(entity, profile, true, active_profile, false));
+        members.push(team_member_row(
+            entity,
+            profile,
+            true,
+            active_profile,
+            false,
+        ));
     }
     if let Some(active) = active {
         for (entity, profile, _agent, run) in agent_q {

@@ -373,9 +373,7 @@ fn handle_agent_commands(
                 .iter()
                 .find(|(_, _, p)| p.is_some_and(|p| p == pid))
                 .map(|(e, _, _)| e),
-            CommandOrigin::Agent {
-                sid: Some(sid), ..
-            } if !sid.is_empty() => writers
+            CommandOrigin::Agent { sid: Some(sid), .. } if !sid.is_empty() => writers
                 .agents
                 .iter()
                 .find(|(_, a, _)| &a.sid == sid)

@@ -132,9 +132,7 @@ async fn tool_call_result(
             };
             run_blocking(run).await
         }
-        crate::tools::DispatchTarget::Command(command) => {
-            run_agent_command(command, anchor).await
-        }
+        crate::tools::DispatchTarget::Command(command) => run_agent_command(command, anchor).await,
         crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
     }
 }

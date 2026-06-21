@@ -39,9 +39,7 @@ fn log_app_commands(
     for ev in reader.read() {
         let who = profiles
             .get(ev.caller)
-            .map(|(p, is_user)| {
-                format!("{} ({})", p.name, if is_user { "user" } else { "agent" })
-            })
+            .map(|(p, is_user)| format!("{} ({})", p.name, if is_user { "user" } else { "agent" }))
             .unwrap_or_else(|_| "unknown".to_string());
         info!(target: "vmux_command::app_command", caller = %who, cmd = ?ev.command, "AppCommand");
     }

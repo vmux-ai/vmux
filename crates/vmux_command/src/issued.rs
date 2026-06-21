@@ -39,9 +39,7 @@ mod tests {
         let caller = app.world_mut().spawn_empty().id();
         let mut state = SystemState::<CommandIssuer>::new(app.world_mut());
         {
-            let mut issuer = state
-                .get_mut(app.world_mut())
-                .expect("system params valid");
+            let mut issuer = state.get_mut(app.world_mut()).expect("system params valid");
             issuer.issue(caller, AppCommand::Terminal(TerminalCommand::Clear));
         }
         state.apply(app.world_mut());
