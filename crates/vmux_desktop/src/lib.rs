@@ -38,7 +38,7 @@ use bevy::window::{
 use {
     os_menu::OsMenuPlugin, persistence::PersistencePlugin, shortcut::ShortcutPlugin,
     vmux_browser::BrowserPlugin, vmux_command::CommandPlugin, vmux_core::page::ServerPlugin,
-    vmux_layout::LayoutPlugin, vmux_layout::cef::LayoutCefPlugin,
+    vmux_editor::EditorPlugin, vmux_layout::LayoutPlugin, vmux_layout::cef::LayoutCefPlugin,
     vmux_service::plugin::ServicePlugin, vmux_setting::SettingsPlugin, vmux_space::SpacePlugin,
     vmux_terminal::TerminalPlugin,
 };
@@ -109,6 +109,7 @@ impl Plugin for VmuxPlugin {
                 ShortcutPlugin,
                 OsMenuPlugin,
                 TerminalPlugin,
+                EditorPlugin,
                 ServicePlugin,
                 SpacePlugin,
                 vmux_team::TeamPlugin,

@@ -9592,6 +9592,7 @@ dependencies = [
  "vmux_browser",
  "vmux_command",
  "vmux_core",
+ "vmux_editor",
  "vmux_history",
  "vmux_layout",
  "vmux_macro",
