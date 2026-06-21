@@ -823,21 +823,49 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    fn process_alive(pid: u32) -> bool {
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+    fn process_alive(pid: u32, identity: &Option<String>) -> bool {
         if unsafe { libc::kill(pid as i32, 0) } != 0 {
             return false;
         }
         #[cfg(target_os = "linux")]
-        if linux_proc_state(pid) == Some('Z') {
-            return false;
+        {
+            if linux_proc_state(pid) == Some('Z') {
+                return false;
+            }
+            if linux_proc_starttime(pid) != *identity {
+                return false;
+            }
         }
         true
+    }
+
+    fn proc_identity(pid: u32) -> Option<String> {
+        #[cfg(target_os = "linux")]
+        {
+            linux_proc_starttime(pid)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = pid;
+            None
+        }
     }
 
     #[cfg(target_os = "linux")]
     fn linux_proc_state(pid: u32) -> Option<char> {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
         stat.rsplit_once(')')?.1.trim_start().chars().next()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_proc_starttime(pid: u32) -> Option<String> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        stat.rsplit_once(')')?
+            .1
+            .split_whitespace()
+            .nth(19)
+            .map(str::to_string)
     }
 
     fn proc_state_label(pid: u32) -> String {
@@ -904,8 +932,9 @@ mod tests {
         let pid = await_child_pid(&pidfile)
             .await
             .expect("child process should report its pid");
+        let identity = proc_identity(pid);
         assert!(
-            process_alive(pid),
+            process_alive(pid, &identity),
             "child should be alive after CreateProcess"
         );
 
@@ -914,7 +943,7 @@ mod tests {
         drop(r);
 
         let reaped = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while process_alive(pid) {
+            while process_alive(pid, &identity) {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
         })
