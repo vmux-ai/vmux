@@ -3,6 +3,7 @@ use bevy_cef::prelude::*;
 
 use vmux_agent::AgentRunState;
 use vmux_command::{AppCommand, BrowserCommand, OpenCommand};
+use vmux_core::agent::SessionId;
 use vmux_core::event::team::{
     TEAM_EVENT, TEAM_PAGE_URL, TeamCommandEvent, TeamEvent, TeamMemberRow,
 };
@@ -112,10 +113,13 @@ fn revert_active_profile_on_agent_exit(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn team_member_row(
     entity: Entity,
     profile: &Profile,
     icon: String,
+    title: String,
+    sid: String,
     is_user: bool,
     active: Option<Entity>,
     is_running: bool,
@@ -126,39 +130,64 @@ fn team_member_row(
         initials: profile.avatar.initials.clone(),
         color: profile.avatar.color.clone(),
         icon,
+        title,
+        sid,
         is_user,
         is_active: active == Some(entity),
         is_running,
     }
 }
 
-/// An agent's favicon, if its page (or owning stack) has one. Page agents carry
-/// `PageMetadata` directly; CLI agents are terminals whose stack holds it.
-fn agent_favicon(
+/// An agent's live favicon + page title. The favicon/title are written to the
+/// *webview* entity, which is the agent entity itself (CLI terminal), a child of
+/// it, or a child of its owning stack (page agent). Probe all three.
+fn agent_page(
     entity: Entity,
     meta_q: &Query<&PageMetadata>,
+    children_q: &Query<&Children>,
     child_of: &Query<&ChildOf>,
-) -> String {
-    let from = |e| {
-        meta_q
-            .get(e)
-            .ok()
-            .map(|m| m.favicon_url.clone())
-            .filter(|s| !s.is_empty())
-    };
-    from(entity)
-        .or_else(|| child_of.get(entity).ok().and_then(|c| from(c.parent())))
-        .unwrap_or_default()
+) -> (String, String) {
+    let mut candidates = vec![entity];
+    if let Ok(children) = children_q.get(entity) {
+        candidates.extend(children.iter());
+    }
+    if let Ok(parent) = child_of.get(entity) {
+        let stack = parent.parent();
+        candidates.push(stack);
+        if let Ok(children) = children_q.get(stack) {
+            candidates.extend(children.iter());
+        }
+    }
+    let mut favicon = String::new();
+    let mut title = String::new();
+    for candidate in candidates {
+        if let Ok(meta) = meta_q.get(candidate) {
+            if favicon.is_empty() && !meta.favicon_url.is_empty() {
+                favicon = meta.favicon_url.clone();
+            }
+            if title.is_empty() && !meta.title.is_empty() {
+                title = meta.title.clone();
+            }
+        }
+    }
+    (favicon, title)
 }
 
 fn build_team_members(
     active_space: &ActiveSpaceEntity,
     space_profiles: &Query<&ActiveProfile, With<Space>>,
     user_q: &Query<(Entity, &Profile), With<User>>,
-    agent_q: &Query<(Entity, &Profile, &Agent, Option<&AgentRunState>)>,
+    agent_q: &Query<(
+        Entity,
+        &Profile,
+        &Agent,
+        Option<&AgentRunState>,
+        Option<&SessionId>,
+    )>,
     child_of: &Query<&ChildOf>,
     space_marker: &Query<(), With<Space>>,
     meta_q: &Query<&PageMetadata>,
+    children_q: &Query<&Children>,
 ) -> Vec<TeamMemberRow> {
     let active = active_space.0;
     let active_profile = active
@@ -171,20 +200,28 @@ fn build_team_members(
             entity,
             profile,
             String::new(),
+            String::new(),
+            String::new(),
             true,
             active_profile,
             false,
         ));
     }
     if let Some(active) = active {
-        for (entity, profile, _agent, run) in agent_q {
+        for (entity, profile, agent, run, session) in agent_q {
             if space_of(entity, child_of, space_marker) == Some(active) {
                 let is_running = matches!(run, Some(AgentRunState::Streaming));
-                let icon = agent_favicon(entity, meta_q, child_of);
+                let (icon, title) = agent_page(entity, meta_q, children_q, child_of);
+                let sid = session
+                    .map(|s| s.0.clone())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| agent.sid.clone());
                 members.push(team_member_row(
                     entity,
                     profile,
                     icon,
+                    title,
+                    sid,
                     false,
                     active_profile,
                     is_running,
@@ -204,10 +241,17 @@ fn emit_team(
     active_space: Res<ActiveSpaceEntity>,
     space_profiles: Query<&ActiveProfile, With<Space>>,
     user_q: Query<(Entity, &Profile), With<User>>,
-    agent_q: Query<(Entity, &Profile, &Agent, Option<&AgentRunState>)>,
+    agent_q: Query<(
+        Entity,
+        &Profile,
+        &Agent,
+        Option<&AgentRunState>,
+        Option<&SessionId>,
+    )>,
     child_of: Query<&ChildOf>,
     space_marker: Query<(), With<Space>>,
     meta_q: Query<&PageMetadata>,
+    children_q: Query<&Children>,
     mut last: Local<String>,
     mut commands: Commands,
 ) {
@@ -226,6 +270,7 @@ fn emit_team(
             &child_of,
             &space_marker,
             &meta_q,
+            &children_q,
         ),
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();

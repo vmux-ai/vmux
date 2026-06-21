@@ -36,6 +36,10 @@ pub struct TeamMemberRow {
     pub color: String,
     #[serde(default)]
     pub icon: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub sid: String,
     pub is_user: bool,
     pub is_active: bool,
     pub is_running: bool,
@@ -71,6 +75,8 @@ mod tests {
             initials: "CL".to_string(),
             color: "#d97757".to_string(),
             icon: String::new(),
+            title: String::new(),
+            sid: String::new(),
             is_user: false,
             is_active: true,
             is_running: true,
@@ -87,6 +93,8 @@ mod tests {
                 initials: "You".to_string(),
                 color: "#3b82f6".to_string(),
                 icon: String::new(),
+                title: String::new(),
+                sid: String::new(),
                 is_user: true,
                 is_active: true,
                 is_running: false,

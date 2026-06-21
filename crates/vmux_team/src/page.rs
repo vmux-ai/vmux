@@ -113,14 +113,20 @@ fn TeamRow(member: TeamMemberRow, selected: bool) -> Element {
     } else {
         "group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors hover:border-border hover:bg-muted/50"
     };
-    let role = if member.is_user { "You" } else { "Agent" };
+    let secondary = if member.is_user {
+        "You".to_string()
+    } else if !member.title.is_empty() {
+        member.title.clone()
+    } else {
+        "Agent".to_string()
+    };
 
     rsx! {
         div {
             class: "{row_class}",
             onclick: move |_| activate(&id),
             TeamAvatar { member: member.clone(), size: 40, ring_active: member.is_active }
-            div { class: "flex min-w-0 flex-1 flex-col",
+            div { class: "flex min-w-0 flex-1 flex-col gap-0.5",
                 div { class: "flex min-w-0 items-center gap-2",
                     span { class: "truncate text-sm font-semibold text-foreground", "{member.name}" }
                     if member.is_active {
@@ -129,7 +135,10 @@ fn TeamRow(member: TeamMemberRow, selected: bool) -> Element {
                         }
                     }
                 }
-                span { class: "truncate text-xs text-muted-foreground", "{role}" }
+                span { class: "truncate text-xs text-muted-foreground", "{secondary}" }
+                if !member.sid.is_empty() {
+                    span { class: "truncate font-mono text-[11px] text-muted-foreground/60", "{member.sid}" }
+                }
             }
             if member.is_running {
                 span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400",
