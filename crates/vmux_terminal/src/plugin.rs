@@ -772,14 +772,12 @@ pub fn apply_process_created(
         .remove::<AwaitingProcessCreated>();
 }
 
-/// A `CreateProcess` failed (e.g. the system PTY pool is exhausted). Clear the
-/// in-flight markers so the entity stops counting against the create budget and
-/// is not left hung awaiting a `ProcessCreated` that will never arrive.
+/// A `CreateProcess` failed (e.g. the system PTY pool is exhausted). Despawn the
+/// terminal entity: with no `ProcessId` and its in-flight markers gone, no system
+/// would ever drive or reap it, so leaving it behind orphans a dead pane. Despawn
+/// also frees the create budget (the entity drops out of the awaiting query).
 fn apply_process_create_failed(commands: &mut Commands, entity: Entity) {
-    commands
-        .entity(entity)
-        .remove::<AwaitingProcessCreated>()
-        .remove::<PendingServiceCreate>();
+    commands.entity(entity).despawn();
 }
 
 fn default_shell() -> String {
@@ -3807,7 +3805,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_process_create_failed_clears_awaiting() {
+    fn apply_process_create_failed_despawns_terminal() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         let entity = app
@@ -3823,8 +3821,8 @@ mod tests {
             )
             .unwrap();
         assert!(
-            app.world().get::<AwaitingProcessCreated>(entity).is_none(),
-            "failed create must clear AwaitingProcessCreated so it frees create budget"
+            !app.world().entities().contains(entity),
+            "failed create must despawn the orphaned terminal so no system is left to drive or reap it"
         );
     }
 
