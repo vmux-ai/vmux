@@ -942,9 +942,11 @@ fn handle_agent_queries(
                     result: AgentQueryResult::Spaces(json),
                 });
             }
-            // ReadTerminal/ReadTerminalFull are answered by the service directly;
-            // they never reach the GUI.
-            AgentQuery::ReadTerminal { .. } | AgentQuery::ReadTerminalFull { .. } => {}
+            // ReadTerminal/ReadTerminalFull/CommandExit are answered by the
+            // service directly; they never reach the GUI.
+            AgentQuery::ReadTerminal { .. }
+            | AgentQuery::ReadTerminalFull { .. }
+            | AgentQuery::CommandExit { .. } => {}
         }
     }
 }

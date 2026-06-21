@@ -77,6 +77,8 @@ pub struct Process {
     term: Term<ServiceEventProxy>,
     processor: Processor,
     osc133: crate::osc133::Osc133Scanner,
+    command_ended_seq: u64,
+    last_command_exit: Option<i32>,
     pty_writer: PtyInputWriter,
     master: Box<dyn portable_pty::MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -328,6 +330,8 @@ impl Process {
             term,
             processor: Processor::new(),
             osc133: crate::osc133::Osc133Scanner::new(),
+            command_ended_seq: 0,
+            last_command_exit: None,
             pty_writer: writer,
             master: pair.master,
             child,
@@ -345,6 +349,13 @@ impl Process {
 
     pub fn subscribe(&self) -> broadcast::Receiver<ServiceMessage> {
         self.patch_tx.subscribe()
+    }
+
+    /// Monotonic count of completed commands (OSC 133;D seen) and the most
+    /// recent command's exit code. A `run` captures the count as a baseline,
+    /// then waits for it to advance to learn its command finished.
+    pub fn command_status(&self) -> (u64, Option<i32>) {
+        (self.command_ended_seq, self.last_command_exit)
     }
 
     pub fn write_input(&self, data: &[u8]) {
@@ -1191,6 +1202,8 @@ impl Process {
                         crate::protocol::CommandLifecycleKind::Started
                     }
                     crate::osc133::Osc133Event::CommandEnd(exit_code) => {
+                        self.command_ended_seq = self.command_ended_seq.wrapping_add(1);
+                        self.last_command_exit = exit_code;
                         crate::protocol::CommandLifecycleKind::Ended { exit_code }
                     }
                 };
@@ -1776,6 +1789,11 @@ mod tests {
         assert!(
             saw_end,
             "expected a CommandLifecycle Ended broadcast from OSC 133;D;0"
+        );
+        assert_eq!(
+            process.command_status(),
+            (1, Some(0)),
+            "command_status must record one completed command with its exit code"
         );
     }
 
