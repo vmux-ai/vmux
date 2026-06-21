@@ -24,9 +24,10 @@ pub fn Coworking() -> Element {
                         span { "Hands-on pairing" }
                         span { "Full autonomy" }
                     }
-                    div { class: "relative h-2 rounded-full bg-border overflow-hidden",
-                        div { class: "absolute inset-y-0 left-0 w-1/2 rounded-full bg-gradient-to-r from-accent to-aurora-violet" }
-                        div { class: "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-5 w-5 rounded-full bg-accent shadow-lg shadow-accent/40 animate-float motion-reduce:animate-none" }
+                    div { class: "relative h-2 rounded-full bg-border",
+                        div { class: "absolute inset-y-0 left-0 w-1/2 rounded-full bg-gradient-to-r from-accent to-aurora-violet animate-slide motion-reduce:animate-none",
+                            div { class: "absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 h-5 w-5 rounded-full bg-accent shadow-lg shadow-accent/40" }
+                        }
                     }
                     p { class: "mt-4 text-sm text-text-muted",
                         "Watch a run and grab the keyboard to steer, or turn agents loose in their own space."

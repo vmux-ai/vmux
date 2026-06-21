@@ -17,10 +17,21 @@
     --font-mono: "SF Mono", "Fira Code", "Cascadia Code", monospace;
 
     --animate-float: float 14s ease-in-out infinite;
+    --animate-slide: slide 4.5s ease-in-out infinite;
+    --animate-cue: cue 3s ease-in-out infinite;
 
     @keyframes float {
         0%, 100% { transform: translate3d(0, 0, 0); }
         50% { transform: translate3d(0, -24px, 0); }
+    }
+    @keyframes slide {
+        0%, 100% { width: 24%; }
+        50% { width: 82%; }
+    }
+    @keyframes cue {
+        0%, 100% { opacity: 0.12; }
+        15% { opacity: 1; }
+        45% { opacity: 0.12; }
     }
 }
 
