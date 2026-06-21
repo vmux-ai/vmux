@@ -111,6 +111,7 @@ impl Plugin for VmuxPlugin {
                 TerminalPlugin,
                 ServicePlugin,
                 SpacePlugin,
+                vmux_team::TeamPlugin,
                 vmux_history::HistoryPlugin,
                 vmux_vibe_setup::VibeSetupPlugin,
                 LayoutCefPlugin,

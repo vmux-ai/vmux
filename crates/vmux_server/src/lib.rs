@@ -47,6 +47,7 @@ web_pages! {
     render_services: "services" => vmux_service::page::Page,
     render_history: "history" => vmux_history::page::Page,
     render_spaces: "spaces" => vmux_space::page::Page,
+    render_team: "team" => vmux_team::page::Page,
     render_settings: "settings" => vmux_setting::page::Page,
     render_agent: "agent" => vmux_vibe_setup::page::Page,
 }

@@ -41,6 +41,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt"] }
 tracing-appender = "0.2"
 vmux_service = { path = "../vmux_service" }
 vmux_space = { path = "../vmux_space" }
+vmux_team = { path = "../vmux_team" }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_server = { path = "../vmux_server" }

@@ -3,19 +3,27 @@ use bevy_cef::prelude::*;
 
 use vmux_agent::AgentRunState;
 use vmux_command::{AppCommand, BrowserCommand, OpenCommand};
-use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
+use vmux_core::event::team::{TEAM_EVENT, TEAM_PAGE_URL, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::page::PageReady;
 use vmux_core::team::{Agent, Profile, User};
+use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::space::{ActiveSpaceEntity, Space, space_of};
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct ActiveProfile(pub Entity);
 
+#[derive(Component)]
+struct Team;
+
+#[derive(Component)]
+struct TeamListSent;
+
 pub struct TeamPlugin;
 
 impl Plugin for TeamPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_systems(Startup, spawn_user_profile)
             .add_systems(
                 Update,
@@ -26,11 +34,16 @@ impl Plugin for TeamPlugin {
                 )
                     .chain(),
             )
-            .add_systems(Update, push_team_emit)
+            .add_systems(Update, emit_team)
+            .add_systems(
+                Update,
+                handle_team_page_open.in_set(PageOpenSet::HandleKnownPages),
+            )
             .add_plugins(BinEventEmitterPlugin::<(TeamCommandEvent,)>::for_hosts(
                 &["layout"],
             ))
-            .add_observer(on_team_command);
+            .add_observer(on_team_command)
+            .add_observer(reset_team_sent_on_page_ready);
     }
 }
 
@@ -115,25 +128,14 @@ fn team_member_row(
     }
 }
 
-fn push_team_emit(
-    mut commands: Commands,
-    browsers: NonSend<Browsers>,
-    cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    active_space: Res<ActiveSpaceEntity>,
-    space_profiles: Query<&ActiveProfile, With<Space>>,
-    user_q: Query<(Entity, &Profile), With<User>>,
-    agent_q: Query<(Entity, &Profile, &Agent, Option<&AgentRunState>)>,
-    child_of: Query<&ChildOf>,
-    space_marker: Query<(), With<Space>>,
-    mut last: Local<String>,
-) {
-    let Ok((cef_e, page_ready)) = cef_q.single() else {
-        return;
-    };
-    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
-        return;
-    }
-
+fn build_team_members(
+    active_space: &ActiveSpaceEntity,
+    space_profiles: &Query<&ActiveProfile, With<Space>>,
+    user_q: &Query<(Entity, &Profile), With<User>>,
+    agent_q: &Query<(Entity, &Profile, &Agent, Option<&AgentRunState>)>,
+    child_of: &Query<&ChildOf>,
+    space_marker: &Query<(), With<Space>>,
+) -> Vec<TeamMemberRow> {
     let active = active_space.0;
     let active_profile = active
         .and_then(|space| space_profiles.get(space).ok())
@@ -144,8 +146,8 @@ fn push_team_emit(
         members.push(team_member_row(entity, profile, true, active_profile, false));
     }
     if let Some(active) = active {
-        for (entity, profile, _agent, run) in &agent_q {
-            if space_of(entity, &child_of, &space_marker) == Some(active) {
+        for (entity, profile, _agent, run) in agent_q {
+            if space_of(entity, child_of, space_marker) == Some(active) {
                 let is_running = matches!(run, Some(AgentRunState::Streaming));
                 members.push(team_member_row(
                     entity,
@@ -157,23 +159,129 @@ fn push_team_emit(
             }
         }
     }
+    members
+}
 
-    let payload = TeamEvent { members };
-    let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
-    if ron_body == *last && !page_ready.is_changed() {
+fn emit_team(
+    browsers: NonSend<Browsers>,
+    pending_layout: Query<Entity, (With<LayoutCef>, With<PageReady>, Without<TeamListSent>)>,
+    sent_layout: Query<Entity, (With<LayoutCef>, With<PageReady>, With<TeamListSent>)>,
+    pending_team: Query<Entity, (With<Team>, With<PageReady>, Without<TeamListSent>)>,
+    sent_team: Query<Entity, (With<Team>, With<PageReady>, With<TeamListSent>)>,
+    active_space: Res<ActiveSpaceEntity>,
+    space_profiles: Query<&ActiveProfile, With<Space>>,
+    user_q: Query<(Entity, &Profile), With<User>>,
+    agent_q: Query<(Entity, &Profile, &Agent, Option<&AgentRunState>)>,
+    child_of: Query<&ChildOf>,
+    space_marker: Query<(), With<Space>>,
+    mut last: Local<String>,
+    mut commands: Commands,
+) {
+    let pending_total = pending_layout.iter().count() + pending_team.iter().count();
+    let sent_total = sent_layout.iter().count() + sent_team.iter().count();
+    if pending_total == 0 && sent_total == 0 {
         return;
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(cef_e, TEAM_EVENT, &payload));
-    *last = ron_body;
+
+    let payload = TeamEvent {
+        members: build_team_members(
+            &active_space,
+            &space_profiles,
+            &user_q,
+            &agent_q,
+            &child_of,
+            &space_marker,
+        ),
+    };
+    let body = ron::ser::to_string(&payload).unwrap_or_default();
+    let body_changed = body != *last;
+
+    for entity in pending_layout.iter().chain(pending_team.iter()) {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(entity, TEAM_EVENT, &payload));
+        commands.entity(entity).insert(TeamListSent);
+    }
+    if body_changed {
+        for entity in sent_layout.iter().chain(sent_team.iter()) {
+            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                continue;
+            }
+            commands.trigger(BinHostEmitEvent::from_rkyv(entity, TEAM_EVENT, &payload));
+        }
+        *last = body;
+    }
+}
+
+fn handle_team_page_open(
+    tasks: Query<(Entity, &PageOpenTask), (Without<PageOpenHandled>, Without<PageOpenError>)>,
+    children_q: Query<&Children>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for (entity, task) in &tasks {
+        if task.url != TEAM_PAGE_URL {
+            continue;
+        }
+        if let Ok(children) = children_q.get(task.stack) {
+            for child in children.iter() {
+                commands.entity(child).try_despawn();
+            }
+        }
+        commands.entity(task.stack).insert(PageMetadata {
+            title: "Team".to_string(),
+            url: TEAM_PAGE_URL.to_string(),
+            bg_color: None,
+            ..default()
+        });
+        commands.spawn((
+            vmux_layout::Browser::new(&mut meshes, &mut webview_mt, TEAM_PAGE_URL),
+            Team,
+            ChildOf(task.stack),
+        ));
+        commands.entity(entity).insert(PageOpenHandled);
+    }
+}
+
+fn reset_team_sent_on_page_ready(
+    trigger: On<BinReceive<PageReady>>,
+    team_views: Query<(), With<Team>>,
+    layout_views: Query<(), With<LayoutCef>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    if team_views.get(entity).is_err() && layout_views.get(entity).is_err() {
+        return;
+    }
+    commands.entity(entity).remove::<TeamListSent>();
 }
 
 fn on_team_command(
-    _trigger: On<BinReceive<TeamCommandEvent>>,
+    trigger: On<BinReceive<TeamCommandEvent>>,
     mut messages: ResMut<bevy::ecs::message::Messages<AppCommand>>,
+    active_space: Res<ActiveSpaceEntity>,
+    mut spaces: Query<&mut ActiveProfile, With<Space>>,
 ) {
-    messages.write(AppCommand::Browser(BrowserCommand::Open(
-        OpenCommand::InNewStack {
-            url: Some(vmux_core::event::team::TEAM_PAGE_URL.to_string()),
-        },
-    )));
+    let event = &trigger.event().payload;
+    match event.command.as_str() {
+        "activate" => {
+            if let Some(id) = event.member_id.as_ref()
+                && let Ok(bits) = id.parse::<u64>()
+                && let Some(member) = Entity::try_from_bits(bits)
+                && let Some(space) = active_space.0
+                && let Ok(mut active) = spaces.get_mut(space)
+            {
+                active.0 = member;
+            }
+        }
+        _ => {
+            messages.write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewStack {
+                    url: Some(TEAM_PAGE_URL.to_string()),
+                },
+            )));
+        }
+    }
 }
