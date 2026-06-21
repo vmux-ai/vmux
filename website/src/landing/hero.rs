@@ -56,6 +56,7 @@ pub fn Hero() -> Element {
                         class: "inline-flex items-center px-6 py-3 rounded-lg text-base font-semibold no-underline border border-border bg-transparent text-text transition-colors hover:border-accent hover:text-accent",
                         href: GITHUB_URL,
                         target: "_blank",
+                        rel: "noopener noreferrer",
                         "GitHub"
                     }
                 }

@@ -37,6 +37,7 @@ fn Banner() -> Element {
                         class: "no-underline text-text-muted hover:text-text px-2 py-1",
                         href: GITHUB_URL,
                         target: "_blank",
+                        rel: "noopener noreferrer",
                         "GitHub"
                     }
                     Link {
@@ -86,6 +87,7 @@ fn Footer() -> Element {
                     class: "text-text-muted no-underline hover:text-text",
                     href: GITHUB_URL,
                     target: "_blank",
+                    rel: "noopener noreferrer",
                     "GitHub"
                 }
                 " · "
@@ -93,6 +95,7 @@ fn Footer() -> Element {
                     class: "text-text-muted no-underline hover:text-text",
                     href: "https://github.com/vmux-ai/vmux/blob/main/LICENSE",
                     target: "_blank",
+                    rel: "noopener noreferrer",
                     "MIT License"
                 }
             }
