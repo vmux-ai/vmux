@@ -2,11 +2,11 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
+use vmux_core::PageMetadata;
 use vmux_core::event::*;
 use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
-use vmux_core::PageMetadata;
-use vmux_layout::event::TERMINAL_CEF_BG_COLOR;
 use vmux_layout::Browser;
+use vmux_layout::event::TERMINAL_CEF_BG_COLOR;
 
 use crate::highlight::Highlighter;
 use crate::viewport::{clamp_top_line, rows_from_viewport, visible_slice};

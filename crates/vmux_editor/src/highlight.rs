@@ -64,8 +64,8 @@ impl Highlighter {
     /// Boundary: read a real file from disk, with guards, then highlight it.
     /// Returns a user-facing error string on failure.
     pub fn load_file(&self, path: &Path) -> Result<HighlightedFile, String> {
-        let meta = std::fs::metadata(path)
-            .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+        let meta =
+            std::fs::metadata(path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
         if !meta.is_file() {
             return Err(format!("not a file: {}", path.display()));
         }
@@ -108,7 +108,10 @@ mod tests {
         assert_eq!(joined.trim_end(), "fn main() {}");
         let distinct: std::collections::HashSet<_> =
             out.lines[0].spans.iter().map(|s| s.fg).collect();
-        assert!(distinct.len() > 1, "expected multiple colors, got {distinct:?}");
+        assert!(
+            distinct.len() > 1,
+            "expected multiple colors, got {distinct:?}"
+        );
     }
 
     #[test]

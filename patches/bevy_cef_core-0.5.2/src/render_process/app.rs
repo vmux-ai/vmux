@@ -43,8 +43,10 @@ impl ImplApp for RenderProcessAppBuilder {
             registrar.add_custom_scheme(Some(&SCHEME_CEF.into()), cef_scheme_flags() as _);
             let emb = compile_time_cef_embedded_scheme();
             registrar.add_custom_scheme(Some(&emb.into()), cef_scheme_flags() as _);
-            registrar
-                .add_custom_scheme(Some(&crate::util::FILES_SCHEME.into()), cef_scheme_flags() as _);
+            registrar.add_custom_scheme(
+                Some(&crate::util::FILES_SCHEME.into()),
+                cef_scheme_flags() as _,
+            );
         }
     }
 

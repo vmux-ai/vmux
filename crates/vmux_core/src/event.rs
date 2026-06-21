@@ -21,8 +21,14 @@ pub const FILE_PAGE_SCHEME: &str = "files";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
 #[derive(
-    Debug, Clone, PartialEq, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 pub struct StyledSpan {
     pub text: String,
@@ -32,8 +38,14 @@ pub struct StyledSpan {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 pub struct FileLine {
     pub line_no: u32,
@@ -41,8 +53,14 @@ pub struct FileLine {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 pub struct FileMetaEvent {
     pub path: String,
@@ -51,8 +69,14 @@ pub struct FileMetaEvent {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 pub struct FileViewportPatch {
     pub first_line: u32,
@@ -61,16 +85,29 @@ pub struct FileViewportPatch {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 pub struct FileErrorEvent {
     pub message: String,
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Default, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 pub struct FileResizeEvent {
     pub char_height: f32,
@@ -78,8 +115,16 @@ pub struct FileResizeEvent {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 pub struct FileScrollEvent {
     pub top_line: u32,
