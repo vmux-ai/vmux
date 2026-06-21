@@ -14,7 +14,7 @@ pub fn Cta() -> Element {
     rsx! {
         section {
             id: "install",
-            class: "relative overflow-hidden scroll-mt-20 px-6 py-28 sm:py-36 text-center",
+            class: "relative overflow-hidden scroll-mt-20 px-6 py-28 sm:py-36 text-center reveal",
             div { class: "pointer-events-none absolute inset-0 -z-10",
                 div { class: "absolute left-1/2 top-1/2 h-[26rem] w-[26rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/25 blur-[120px]" }
             }

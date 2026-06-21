@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 #[component]
 pub fn Platform() -> Element {
     rsx! {
-        section { class: "relative overflow-hidden max-w-5xl mx-auto px-6 py-24 sm:py-32 text-center",
+        section { class: "relative overflow-hidden max-w-5xl mx-auto px-6 py-24 sm:py-32 text-center reveal",
             div { class: "pointer-events-none absolute inset-0 -z-10",
                 div { class: "absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full bg-aurora-violet/15 blur-[120px]" }
             }

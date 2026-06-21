@@ -4,6 +4,8 @@ mod hero;
 mod pillars;
 mod platform;
 mod scenes;
+#[cfg(target_arch = "wasm32")]
+mod scroll;
 
 use coworking::Coworking;
 use cta::Cta;
@@ -53,6 +55,10 @@ fn Banner() -> Element {
 
 #[component]
 pub fn Landing() -> Element {
+    use_effect(move || {
+        #[cfg(target_arch = "wasm32")]
+        scroll::init();
+    });
     rsx! {
         div { id: "top",
             Banner {}
