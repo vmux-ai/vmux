@@ -824,7 +824,34 @@ mod tests {
     }
 
     fn process_alive(pid: u32) -> bool {
-        unsafe { libc::kill(pid as i32, 0) == 0 }
+        if unsafe { libc::kill(pid as i32, 0) } != 0 {
+            return false;
+        }
+        #[cfg(target_os = "linux")]
+        if linux_proc_state(pid) == Some('Z') {
+            return false;
+        }
+        true
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_proc_state(pid: u32) -> Option<char> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        stat.rsplit_once(')')?.1.trim_start().chars().next()
+    }
+
+    fn proc_state_label(pid: u32) -> String {
+        #[cfg(target_os = "linux")]
+        {
+            linux_proc_state(pid)
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "gone".to_string())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = pid;
+            "n/a".to_string()
+        }
     }
 
     async fn await_child_pid(pidfile: &std::path::Path) -> Option<u32> {
@@ -902,7 +929,8 @@ mod tests {
 
         assert!(
             reaped.is_ok(),
-            "child pid {pid} still alive after client disconnect — service did not reap it"
+            "child pid {pid} still alive after client disconnect — service did not reap it (state: {})",
+            proc_state_label(pid)
         );
     }
 }
