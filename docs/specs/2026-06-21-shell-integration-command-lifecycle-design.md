@@ -98,20 +98,24 @@ user's own config still loads — vmux only appends hooks.
 
 ### Parsing in vmux_service
 
-`Process` feeds PTY bytes to `alacritty_terminal`'s vte (`process.rs:359` / `:1179`).
-alacritty ignores OSC 133 (no grid output), and its `EventListener` does not surface it
-(only `TermEvent::Title` etc. today).
+`Process` feeds PTY bytes to `alacritty_terminal`'s ansi processor
+(`process.rs:359` / `:1179`). alacritty's high-level `Handler` does **not** expose OSC 133
+(its "semantic" API is word-selection chars, unrelated), and its `EventListener` only
+surfaces `TermEvent::Title` etc. — OSC 133 falls through as an unhandled OSC: ignored, no
+grid output.
 
-Add an **OSC 133 scanner** over the raw `data` in the drain loop, alongside
-`processor.advance`:
+Rather than hand-roll a byte scanner, ride alacritty's own parser library: run a second,
+tiny **`vte::Parser`** in the drain loop, fed the same `data`, with a custom `Perform` that
+implements only `osc_dispatch`. vte's state machine handles ESC/OSC framing, `ST` vs `BEL`
+terminators, and sequences split across `read()` chunks — correct reassembly for free.
 
-- Scan for `ESC ] 133 ; … (ST | BEL)`; keep a small bounded carry-over buffer so a sequence
-  split across `read()` chunks is reassembled.
-- On `C`: emit "command started". On `D;<exit>`: emit "command ended, exit = <n>".
+- In `osc_dispatch`, match `params[0] == b"133"`; on `C` emit "command started", on
+  `D;<exit>` parse `params[2]` and emit "command ended, exit = <n>". Ignore all other OSC.
 - Broadcast a new `ServiceMessage` (e.g. `CommandLifecycle { process_id, kind, exit_code }`)
   on the existing `patch_tx` channel, next to `ViewportPatch` / `ProcessTitle`.
 
 alacritty keeps rendering the stream unchanged; OSC 133 never appears in the viewport.
+(`vte` is already a transitive dep via `alacritty_terminal`; add it as a direct dep.)
 
 ### Consumption
 
@@ -137,8 +141,9 @@ commands there.
 - Per-shell snippet emits the expected OSC 133 bytes: spawn each shell with injection, run a
   command, assert `C` and `D;<code>` (including non-zero exit) appear in the raw PTY stream
   and are absent from the rendered grid.
-- OSC 133 scanner: unit tests for whole + chunk-split sequences, `BEL` vs `ST` terminators,
-  interleaving with normal output, and ignoring non-133 OSC.
+- OSC 133 `Perform`: feed a persistent `vte::Parser` whole + chunk-split sequences, `BEL` vs
+  `ST` terminators, interleaving with normal output, and non-133 OSC; assert the right
+  lifecycle events fire and nothing else does.
 - `run` correlation: a clean command returns correct output + exit via lifecycle events;
   a concurrent typed command does not confuse the wait.
 - Injection layers user config (the user's rc still runs) and makes no dotfile edits.
@@ -148,8 +153,9 @@ commands there.
 
 - **nu** is the highest-risk target (config layering + hook semantics). Validate first; if
   non-viable, nu temporarily uses the fallback.
-- **Split OSC sequences** across read chunks — the scanner must buffer; bound it so a
-  malformed stream cannot grow it without limit.
+- **Parser state across chunks** — handled by vte's state machine (the `Perform` runs in a
+  persistent `Parser` per process); no hand-rolled buffering. The second parser only inspects
+  OSC, so per-byte cost is negligible.
 - **Snippet drift** vs upstream shells — vendor + version the snippets; cover with the
   emission tests.
 - **History / rc interactions** — `--rcfile` / `ZDOTDIR` must source the user's config or the
