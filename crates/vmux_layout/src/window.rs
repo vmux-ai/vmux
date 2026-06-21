@@ -473,28 +473,30 @@ pub fn spawn_requested_tab_layouts(
     mut new_stack_ctx: ResMut<crate::NewStackContext>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut focus: Option<ResMut<crate::stack::FocusedStack>>,
-    active_space_id: Option<Res<crate::space::ActiveSpaceId>>,
+    active_space: Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
+    any_space: Query<Entity, With<crate::space::Space>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
+        // Parent the tab under the active space; on a fresh start no space is
+        // marked active yet (ensure_active runs later), so fall back to any
+        // existing space so the tab is adopted into a space container (becomes
+        // active + visible) instead of being orphaned under Main.
+        let parent = active_space
+            .iter()
+            .next()
+            .or_else(|| any_space.iter().next())
+            .unwrap_or(request.main);
         let tab_e = commands
             .spawn((
                 tab_bundle(),
                 LastActivatedAt::now(),
                 CreatedAt::now(),
-                ChildOf(request.main),
+                ChildOf(parent),
             ))
             .id();
         if let Some(name) = request.name.clone() {
             commands.entity(tab_e).insert(Tab { name });
-        }
-        if let Some(space_id) = active_space_id
-            .as_deref()
-            .and_then(|active| active.0.clone())
-        {
-            commands
-                .entity(tab_e)
-                .insert(crate::space::SpaceId(space_id));
         }
 
         let gap = pane_split_gaps(PaneSplitDirection::Row, settings.pane.gap);
@@ -1200,6 +1202,57 @@ mod tests {
             tabs.iter(app.world()).count(),
             1,
             "cold start must seed exactly one default tab; the Startup-written request must not be re-read by the Update consumer"
+        );
+    }
+
+    #[test]
+    fn default_tab_adopts_existing_space_when_none_active() {
+        use bevy::ecs::relationship::Relationship;
+        let _home = HomeEnvGuard::use_temp_home("default-tab-adopts-space");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::NewStackContext>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(LayoutSettings {
+                radius: 0.0,
+                window: crate::settings::WindowSettings {
+                    padding: 0.0,
+                    padding_top: None,
+                    padding_right: None,
+                    padding_bottom: None,
+                    padding_left: None,
+                },
+                pane: crate::settings::PaneSettings { gap: 0.0 },
+                side_sheet: crate::settings::SideSheetSettings::default(),
+                focus_ring: crate::settings::FocusRingSettings::default(),
+            })
+            .insert_resource(crate::settings::EffectiveStartupUrl(
+                "vmux://agent/vibe/".to_string(),
+            ))
+            .add_systems(
+                Startup,
+                (request_default_layout, spawn_requested_tab_layouts).chain(),
+            );
+
+        app.world_mut().spawn(Main);
+        app.world_mut().spawn(PrimaryWindow);
+        // Fresh start: a space exists but isn't Active yet (ensure_active runs in
+        // Update, after this Startup). The default tab must still be adopted into
+        // the space so it becomes active + visible — not orphaned under Main.
+        let space = app.world_mut().spawn(crate::space::Space).id();
+
+        app.update();
+
+        let mut tabs = app.world_mut().query_filtered::<&ChildOf, With<Tab>>();
+        let child_of = tabs
+            .iter(app.world())
+            .next()
+            .expect("a default tab should be spawned");
+        assert_eq!(
+            child_of.get(),
+            space,
+            "default tab must be parented under the existing space, not Main"
         );
     }
 

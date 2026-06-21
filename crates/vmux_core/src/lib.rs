@@ -40,6 +40,7 @@ impl Plugin for CorePlugin {
             .register_type::<VisitedUrl>()
             .register_type::<TransitionType>()
             .register_type::<Order>()
+            .register_type::<Active>()
             .register_type::<Children>()
             .register_type::<ChildOf>();
     }
@@ -152,6 +153,12 @@ pub struct LastVisitedAt(pub i64);
 pub struct Order(pub u32);
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_core"]
+pub struct Active;
+
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]
 #[require(Save)]
@@ -203,5 +210,14 @@ mod tests {
                 .get(std::any::TypeId::of::<TransitionType>())
                 .is_some()
         );
+    }
+
+    #[test]
+    fn active_marker_is_registered_and_reflectable() {
+        let mut app = App::new();
+        app.add_plugins(CorePlugin);
+
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        assert!(registry.get(std::any::TypeId::of::<Active>()).is_some());
     }
 }

@@ -43,7 +43,10 @@ use vmux_layout::{
     },
     pane::{Pane, PaneHoverIntent, PaneSplit, first_stack_in_pane},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
-    stack::{Stack, active_stack_in_pane, collect_leaf_panes, focused_stack, stack_bundle},
+    stack::{
+        ActiveTabParam, Stack, active_stack_in_pane, collect_leaf_panes, focused_stack,
+        stack_bundle,
+    },
     tab::Tab,
     window::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
@@ -589,14 +592,13 @@ fn sync_children_to_ui(
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     tabs_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_q: Query<(), (With<Tab>, With<vmux_core::Active>)>,
     new_stack_ctx: Res<vmux_layout::NewStackContext>,
     glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<VmuxWindow>>,
 ) {
     let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
     let pad = glass_node.padding;
     let glass_size_px = glass_node.size + pad.min_inset + pad.max_inset;
-
-    let active_tab = tabs_q.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
 
     for (
         mut tf,
@@ -659,7 +661,7 @@ fn sync_children_to_ui(
         let is_inactive_tab = parent != glass_entity
             && !is_cef_ui
             && match tab_ancestor(parent, &child_of_q, &tabs_q) {
-                Some(tab) => Some(tab) != active_tab,
+                Some(tab) => !active_tab_q.contains(tab),
                 None => false,
             };
 
@@ -2200,7 +2202,7 @@ fn push_tabs_host_emit(
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     tabs: Query<(Entity, &Tab, &LastActivatedAt)>,
     tab_q: Query<Entity, With<Tab>>,
-    tab_space: Query<&vmux_layout::space::SpaceId>,
+    active_tab_param: vmux_layout::stack::ActiveTabParam,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -2217,16 +2219,10 @@ fn push_tabs_host_emit(
         return;
     }
 
-    let active_tab = tabs.iter().max_by_key(|(_, _, ts)| ts.0).map(|t| t.0);
+    let active_tab = active_tab_param.get();
 
     let ordered = if let Some(anchor) = active_tab {
-        vmux_layout::tab::active_tab_siblings(
-            anchor,
-            &child_of_q,
-            &all_children,
-            &tab_q,
-            &tab_space,
-        )
+        vmux_layout::tab::active_tab_siblings(anchor, &child_of_q, &all_children, &tab_q)
     } else {
         Vec::new()
     };
@@ -2317,7 +2313,7 @@ fn first_browser_meta<'a>(
 
 fn handle_browser_commands(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -2337,7 +2333,7 @@ fn handle_browser_commands(
             continue;
         };
         let (_, _, active_stack_opt) = focused_stack(
-            &tabs,
+            active_tab_param.get(),
             &all_children,
             &leaf_panes,
             &pane_ts,
@@ -2859,14 +2855,30 @@ fn attach_cef_page_requests(
     }
 }
 
+/// Marks a `PageOpenTask` the fallback has seen pending once. A `vmux://` scheme
+/// owned by a `HandleKnownPages` handler can, under a rare command-visibility gap,
+/// reach this fallback still pending in its first frame; this grace marker defers
+/// the "unknown URL" verdict one run so the owning handler's mark becomes visible
+/// before we error-claim (and permanently win the race for) an owned task.
+#[derive(Component, Clone, Debug)]
+struct PageOpenFallbackDeferred;
+
 fn handle_unclaimed_page_open_tasks(
-    mut tasks: Query<(Entity, &PageOpenTask, Option<&PageOpenError>), Without<PageOpenHandled>>,
+    mut tasks: Query<
+        (
+            Entity,
+            &PageOpenTask,
+            Option<&PageOpenError>,
+            Option<&PageOpenFallbackDeferred>,
+        ),
+        Without<PageOpenHandled>,
+    >,
     children_q: Query<&Children>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
-    for (entity, task, error) in &mut tasks {
+    for (entity, task, error, deferred_once) in &mut tasks {
         if let Some(error) = error {
             attach_error_page_to_stack(
                 task.stack,
@@ -2892,6 +2904,10 @@ fn handle_unclaimed_page_open_tasks(
             );
             commands.entity(entity).insert(PageOpenHandled);
         } else if task.url.starts_with("vmux://") {
+            if deferred_once.is_none() {
+                commands.entity(entity).insert(PageOpenFallbackDeferred);
+                continue;
+            }
             attach_error_page_to_stack(
                 task.stack,
                 &task.url,
@@ -3514,6 +3530,19 @@ mod tests {
 
         assert!(sync_fn.contains("browsers.raise_windowed_to_front(&entity)"));
         assert!(sync_fn.contains("windowed_pages_to_hide("));
+    }
+
+    #[test]
+    fn webview_tab_visibility_uses_active_marker_not_global_recency() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_children_to_ui")
+            .nth(1)
+            .and_then(|tail| tail.split("fn webview_should_use_windowed").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("active_tab_q.contains(tab)"));
+        assert!(!sync_fn.contains("max_by_key"));
     }
 
     #[test]
@@ -4670,6 +4699,9 @@ mod tests {
                     },
                 });
 
+            // One extra update vs. the other navigate tests: the fallback now grants
+            // unknown `vmux://` URLs a one-frame grace before rendering the error page.
+            app.update();
             app.update();
             app.update();
 

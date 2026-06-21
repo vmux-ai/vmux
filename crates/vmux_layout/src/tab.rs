@@ -76,8 +76,8 @@ pub fn tab_bundle() -> impl Bundle {
 fn handle_tab_commands(
     mut reader: MessageReader<AppCommand>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: crate::stack::ActiveTabParam,
     tab_q: Query<Entity, With<Tab>>,
-    tab_space: Query<&crate::space::SpaceId>,
     main_q: Query<Entity, With<MainNode>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
@@ -87,7 +87,7 @@ fn handle_tab_commands(
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
-        let active_tab = tabs.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
+        let active_tab = active_tab_param.get();
 
         match cmd {
             AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewTab { url })) => {
@@ -118,8 +118,7 @@ fn handle_tab_commands(
             AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) => match tab_cmd {
                 TabCommand::Close => {
                     let Some(active) = active_tab else { continue };
-                    let siblings =
-                        active_tab_siblings(active, &child_of_q, &all_children, &tab_q, &tab_space);
+                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
                     if siblings.len() <= 1 {
                         let Ok(main) = main_q.single() else { continue };
                         layout_requests.write(TabLayoutSpawnRequest {
@@ -137,8 +136,7 @@ fn handle_tab_commands(
                 }
                 TabCommand::Next | TabCommand::Previous => {
                     let Some(active) = active_tab else { continue };
-                    let siblings =
-                        active_tab_siblings(active, &child_of_q, &all_children, &tab_q, &tab_space);
+                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
                     if siblings.len() <= 1 {
                         continue;
                     }
@@ -166,8 +164,7 @@ fn handle_tab_commands(
                 | TabCommand::SelectIndex8
                 | TabCommand::SelectLast => {
                     let Some(active) = active_tab else { continue };
-                    let siblings =
-                        active_tab_siblings(active, &child_of_q, &all_children, &tab_q, &tab_space);
+                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
                     if siblings.is_empty() {
                         continue;
                     }
@@ -230,7 +227,6 @@ pub fn active_tab_siblings(
     child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
     tab_q: &Query<Entity, With<Tab>>,
-    tab_space: &Query<&crate::space::SpaceId>,
 ) -> Vec<Entity> {
     let Ok(co) = child_of_q.get(active) else {
         return vec![active];
@@ -239,11 +235,9 @@ pub fn active_tab_siblings(
     let Ok(children) = all_children.get(parent) else {
         return vec![active];
     };
-    let active_space = tab_space.get(active).ok();
     children
         .iter()
         .filter(|e| tab_q.contains(*e))
-        .filter(|e| crate::space::same_space(tab_space.get(*e).ok(), active_space))
         .collect::<Vec<_>>()
 }
 
@@ -258,35 +252,14 @@ fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
 }
 
 fn sync_tab_visibility(
-    active_id: Option<Res<crate::space::ActiveSpaceId>>,
-    mut tabs: Query<
-        (
-            Entity,
-            &LastActivatedAt,
-            Option<&crate::space::SpaceId>,
-            &mut Node,
-            &mut Visibility,
-        ),
-        With<Tab>,
-    >,
+    mut tabs: Query<(&mut Node, &mut Visibility, Has<vmux_core::Active>), With<Tab>>,
 ) {
-    let active_space = active_id.as_deref().and_then(|id| id.0.as_deref());
-    let active = tabs
-        .iter()
-        .filter(|(_, _, sid, _, _)| crate::space::in_active_space(*sid, active_space))
-        .max_by_key(|(_, ts, _, _, _)| ts.0)
-        .map(|(e, _, _, _, _)| e);
-    for (entity, _, _, mut node, mut vis) in &mut tabs {
-        let is_active = Some(entity) == active;
-        let target_display = if is_active {
-            Display::Flex
-        } else {
-            Display::None
-        };
+    for (mut node, mut vis, active) in &mut tabs {
+        let target_display = if active { Display::Flex } else { Display::None };
         if node.display != target_display {
             node.display = target_display;
         }
-        let target_vis = if is_active {
+        let target_vis = if active {
             Visibility::Inherited
         } else {
             Visibility::Hidden
@@ -298,23 +271,17 @@ fn sync_tab_visibility(
 }
 
 fn sync_tab_order(
-    main_children: Query<&Children, (With<MainNode>, Changed<Children>)>,
+    spaces: Query<&Children, (With<crate::space::Space>, Changed<Children>)>,
     tab_q: Query<(), With<Tab>>,
-    tab_space: Query<&crate::space::SpaceId>,
     mut order_q: Query<&mut Order>,
     mut commands: Commands,
 ) {
-    for children in &main_children {
-        let mut counters: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    for children in &spaces {
+        let mut idx = 0u32;
         for child in children.iter() {
             if !tab_q.contains(child) {
                 continue;
             }
-            let key = tab_space
-                .get(child)
-                .map(|space| space.0.clone())
-                .unwrap_or_default();
-            let idx = *counters.get(&key).unwrap_or(&0);
             match order_q.get_mut(child) {
                 Ok(mut order) => {
                     if order.0 != idx {
@@ -325,7 +292,7 @@ fn sync_tab_order(
                     commands.entity(child).insert(Order(idx));
                 }
             }
-            counters.insert(key, idx + 1);
+            idx += 1;
         }
     }
 }
@@ -333,8 +300,8 @@ fn sync_tab_order(
 fn on_tabs_command_emit(
     trigger: On<BinReceive<TabsCommandEvent>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: crate::stack::ActiveTabParam,
     tab_q: Query<Entity, With<Tab>>,
-    tab_space: Query<&crate::space::SpaceId>,
     main_q: Query<Entity, With<MainNode>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
@@ -345,7 +312,7 @@ fn on_tabs_command_emit(
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
-    let active_tab = tabs.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
+    let active_tab = active_tab_param.get();
     match evt.command.as_str() {
         "new" => {
             messages.write(AppCommand::Browser(BrowserCommand::Open(
@@ -357,8 +324,7 @@ fn on_tabs_command_emit(
             let target = tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
                 .or(active_tab);
             let Some(target) = target else { return };
-            let siblings =
-                active_tab_siblings(target, &child_of_q, &all_children, &tab_q, &tab_space);
+            let siblings = active_tab_siblings(target, &child_of_q, &all_children, &tab_q);
             if siblings.len() <= 1 {
                 let Ok(main) = main_q.single() else { return };
                 layout_requests.write(TabLayoutSpawnRequest {
@@ -417,43 +383,31 @@ mod tests {
     }
 
     #[test]
-    fn active_tab_siblings_scopes_to_space() {
+    fn active_tab_siblings_are_parent_space_tabs() {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        let main = app.world_mut().spawn(MainNode).id();
+        let space_a = app.world_mut().spawn(crate::space::Space).id();
+        let space_b = app.world_mut().spawn(crate::space::Space).id();
         let a1 = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                crate::space::SpaceId("a".into()),
-                ChildOf(main),
-            ))
+            .spawn((Tab::default(), ChildOf(space_a)))
             .id();
         let a2 = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                crate::space::SpaceId("a".into()),
-                ChildOf(main),
-            ))
+            .spawn((Tab::default(), ChildOf(space_a)))
             .id();
         let b1 = app
             .world_mut()
-            .spawn((
-                Tab::default(),
-                crate::space::SpaceId("b".into()),
-                ChildOf(main),
-            ))
+            .spawn((Tab::default(), ChildOf(space_b)))
             .id();
         let siblings = app
             .world_mut()
             .run_system_once(
                 move |child_of_q: Query<&ChildOf>,
                       all_children: Query<&Children>,
-                      tab_q: Query<Entity, With<Tab>>,
-                      tab_space: Query<&crate::space::SpaceId>| {
-                    active_tab_siblings(a1, &child_of_q, &all_children, &tab_q, &tab_space)
+                      tab_q: Query<Entity, With<Tab>>| {
+                    active_tab_siblings(a1, &child_of_q, &all_children, &tab_q)
                 },
             )
             .unwrap();
@@ -485,7 +439,7 @@ mod tests {
     #[test]
     fn sync_tab_order_stamps_children_index() {
         let mut app = order_app();
-        let main = app.world_mut().spawn(MainNode).id();
+        let main = app.world_mut().spawn(crate::space::Space).id();
         let a = app
             .world_mut()
             .spawn((Tab { name: "a".into() }, ChildOf(main)))
@@ -509,7 +463,7 @@ mod tests {
     #[test]
     fn sync_tab_order_updates_after_reorder() {
         let mut app = order_app();
-        let main = app.world_mut().spawn(MainNode).id();
+        let main = app.world_mut().spawn(crate::space::Space).id();
         let a = app
             .world_mut()
             .spawn((Tab { name: "a".into() }, ChildOf(main)))
@@ -664,6 +618,42 @@ mod tests {
         let ctx = app.world().resource::<NewStackContext>();
         assert!(ctx.stack.is_some());
         assert!(ctx.needs_open);
+    }
+
+    #[test]
+    fn new_tab_parents_under_active_space_container() {
+        let mut app = build_app();
+        let window = app.world_mut().spawn(PrimaryWindow).id();
+        let main = app.world_mut().spawn(MainNode).id();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::TabLayoutSpawnRequest>>()
+            .write(crate::TabLayoutSpawnRequest {
+                main,
+                primary_window: window,
+                name: None,
+                content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
+                clear_pending_stack: false,
+                focus: true,
+            });
+
+        app.update();
+
+        let tab = app
+            .world_mut()
+            .query_filtered::<Entity, With<Tab>>()
+            .iter(app.world())
+            .next()
+            .expect("tab spawned");
+        assert_eq!(
+            app.world().get::<ChildOf>(tab).map(|c| c.parent()),
+            Some(space)
+        );
+        assert!(app.world().get::<crate::space::SpaceId>(tab).is_none());
     }
 
     #[test]

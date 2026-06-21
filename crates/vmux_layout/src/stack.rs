@@ -6,7 +6,7 @@ use crate::{
     tab::Tab,
 };
 use bevy::{
-    ecs::relationship::Relationship,
+    ecs::{relationship::Relationship, system::SystemParam},
     prelude::*,
     window::{ClosingWindow, PrimaryWindow},
 };
@@ -123,35 +123,58 @@ pub fn active_stack_in_pane(
         .and_then(|children| active_among(children.iter().filter_map(|e| tab_ts.get(e).ok())))
 }
 
+#[derive(SystemParam)]
+pub struct ActiveTabParam<'w, 's> {
+    tabs: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
+    active_tabs: Query<'w, 's, Entity, (With<Tab>, With<vmux_core::Active>)>,
+    active_spaces: Query<'w, 's, (), (With<crate::space::Space>, With<vmux_core::Active>)>,
+    child_of: Query<'w, 's, &'static ChildOf>,
+}
+
+impl ActiveTabParam<'_, '_> {
+    pub fn get(&self) -> Option<Entity> {
+        let scoped = self.active_tabs.iter().find(|&tab| {
+            self.child_of
+                .get(tab)
+                .ok()
+                .map(|co| self.active_spaces.get(co.parent()).is_ok())
+                .unwrap_or(false)
+        });
+        if scoped.is_some() {
+            return scoped;
+        }
+        // No active tab is scoped to an active space — e.g. on a fresh start
+        // before the default tab is adopted into / marked active within its
+        // space. Fall back to the global most-recently-active tab so callers
+        // (notably `open_startup_url_if_no_stacks`) don't treat the layout as
+        // empty and respawn startup content every frame.
+        active_among(self.tabs.iter())
+    }
+}
+
 pub fn focused_stack(
-    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab: Option<Entity>,
     all_children: &Query<&Children>,
     leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: &Query<&Children, With<Pane>>,
     stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
 ) -> (Option<Entity>, Option<Entity>, Option<Entity>) {
-    let tab = active_among(tabs.iter());
-    let pane = tab.and_then(|t| active_pane_in_tab(t, all_children, leaf_panes, pane_ts));
+    let pane = active_tab.and_then(|t| active_pane_in_tab(t, all_children, leaf_panes, pane_ts));
     let stack = pane.and_then(|p| active_stack_in_pane(p, pane_children, stack_ts));
-    (tab, pane, stack)
+    (active_tab, pane, stack)
 }
 
 fn compute_focused_stack(
     mut cached: ResMut<FocusedStack>,
-    active_id: Option<Res<crate::space::ActiveSpaceId>>,
-    tab_space: Query<&crate::space::SpaceId>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
 ) {
-    let active_space = active_id.as_deref().and_then(|id| id.0.as_deref());
-    let tab = active_among(tabs.iter().filter(|(entity, _)| {
-        crate::space::in_active_space(tab_space.get(*entity).ok(), active_space)
-    }));
+    let tab = active_tab_param.get();
     let pane = tab.and_then(|t| active_pane_in_tab(t, &all_children, &leaf_panes, &pane_ts));
     let stack = pane.and_then(|p| active_stack_in_pane(p, &pane_children, &stack_ts));
     cached.tab = tab;
@@ -180,6 +203,7 @@ pub fn stack_bundle() -> impl Bundle {
 fn handle_stack_commands(
     mut reader: MessageReader<AppCommand>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -212,7 +236,7 @@ fn handle_stack_commands(
         };
 
         let (active_tab, active_pane, active_stack) = focused_stack(
-            &tabs,
+            active_tab_param.get(),
             &all_children,
             &leaf_panes,
             &pane_ts,
@@ -450,7 +474,7 @@ fn handle_stack_commands(
                     commands.entity(e).despawn();
                 }
 
-                let Some(active_tab_e) = active_among(tabs.iter()) else {
+                let Some(active_tab_e) = active_tab else {
                     continue;
                 };
                 let mut tab_panes = Vec::new();
@@ -606,7 +630,7 @@ fn sync_stack_picking(
 }
 
 pub fn open_startup_url_if_no_stacks(
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -623,7 +647,7 @@ pub fn open_startup_url_if_no_stacks(
         return;
     }
     let (active_tab, active_pane, _) = focused_stack(
-        &tabs,
+        active_tab_param.get(),
         &all_children,
         &leaf_panes,
         &pane_ts,
@@ -1227,5 +1251,72 @@ mod tests {
         let collected = app.world().resource::<CollectedSpawns>();
         assert_eq!(collected.0.len(), 1);
         assert_eq!(collected.0[0].url, "https://startup.test");
+    }
+
+    #[test]
+    fn active_tab_param_picks_active_space_tab_not_global_max() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        let main = app.world_mut().spawn(crate::window::Main).id();
+        let space_a = app
+            .world_mut()
+            .spawn((crate::space::Space, ChildOf(main)))
+            .id();
+        let _tab_a = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt(100),
+                ChildOf(space_a),
+            ))
+            .id();
+        let space_b = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .id();
+        let tab_b = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt(1),
+                ChildOf(space_b),
+            ))
+            .id();
+
+        let got = app
+            .world_mut()
+            .run_system_once(|param: ActiveTabParam| param.get())
+            .unwrap();
+
+        assert_eq!(got, Some(tab_b));
+    }
+
+    #[test]
+    fn active_tab_param_falls_back_to_global_when_no_scoped_active_tab() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        let main = app.world_mut().spawn(crate::window::Main).id();
+        // An active space exists, but the only tab isn't scoped to it — the
+        // fresh-start state where the default tab is parented under Main before
+        // it is adopted into / marked active within its space.
+        app.world_mut()
+            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)));
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt(5), ChildOf(main)))
+            .id();
+
+        let got = app
+            .world_mut()
+            .run_system_once(|param: ActiveTabParam| param.get())
+            .unwrap();
+
+        assert_eq!(
+            got,
+            Some(tab),
+            "must fall back to the global tab so the layout isn't treated as empty (else startup respawns forever)"
+        );
     }
 }

@@ -1,5 +1,21 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+/// True for I/O errors that mean the peer is gone, so the stream has no more
+/// frames. A clean shutdown yields `UnexpectedEof`; a crashed peer that closes
+/// its socket with unread data resets the connection, so the next read fails
+/// with `ConnectionReset` (Linux) instead of EOF (macOS delivers a clean EOF).
+/// Callers must treat both as a normal end-of-stream — in the service, a read
+/// error that escaped here would skip client cleanup and orphan PTY children.
+fn is_peer_gone(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::UnexpectedEof
+            | std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::BrokenPipe
+    )
+}
+
 /// Write a length-prefixed frame to an async writer.
 pub async fn write_raw_frame<W>(writer: &mut W, data: &[u8]) -> std::io::Result<()>
 where
@@ -21,7 +37,7 @@ where
     let mut len_buf = [0u8; 4];
     match reader.read_exact(&mut len_buf).await {
         Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) if is_peer_gone(&e) => return Ok(None),
         Err(e) => return Err(e),
     }
     let len = u32::from_le_bytes(len_buf) as usize;
@@ -29,7 +45,11 @@ where
         return Err(std::io::Error::other("frame too large"));
     }
     let mut buf = vec![0u8; len];
-    reader.read_exact(&mut buf).await?;
+    match reader.read_exact(&mut buf).await {
+        Ok(_) => {}
+        Err(e) if is_peer_gone(&e) => return Ok(None),
+        Err(e) => return Err(e),
+    }
     Ok(Some(buf))
 }
 
@@ -53,7 +73,7 @@ pub fn read_raw_frame_blocking<R: std::io::Read>(
     let mut len_buf = [0u8; 4];
     match reader.read_exact(&mut len_buf) {
         Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) if is_peer_gone(&e) => return Ok(None),
         Err(e) => return Err(e),
     }
     let len = u32::from_le_bytes(len_buf) as usize;
@@ -61,7 +81,11 @@ pub fn read_raw_frame_blocking<R: std::io::Read>(
         return Err(std::io::Error::other("frame too large"));
     }
     let mut buf = vec![0u8; len];
-    reader.read_exact(&mut buf)?;
+    match reader.read_exact(&mut buf) {
+        Ok(_) => {}
+        Err(e) if is_peer_gone(&e) => return Ok(None),
+        Err(e) => return Err(e),
+    }
     Ok(Some(buf))
 }
 
@@ -116,4 +140,64 @@ macro_rules! read_message_blocking {
             None => Ok(None),
         }
     }};
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::ErrorKind;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tokio::io::{AsyncRead, ReadBuf};
+
+    struct AsyncErrReader(Option<ErrorKind>);
+
+    impl AsyncRead for AsyncErrReader {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            _buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            let kind = self.0.take().expect("reader polled again after error");
+            Poll::Ready(Err(std::io::Error::from(kind)))
+        }
+    }
+
+    struct BlockingErrReader(Option<ErrorKind>);
+
+    impl std::io::Read for BlockingErrReader {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            let kind = self.0.take().expect("reader read again after error");
+            Err(std::io::Error::from(kind))
+        }
+    }
+
+    #[tokio::test]
+    async fn read_raw_frame_maps_connection_reset_to_clean_eof() {
+        let mut reader = AsyncErrReader(Some(ErrorKind::ConnectionReset));
+        let got = read_raw_frame(&mut reader)
+            .await
+            .expect("a reset peer must not surface as an error");
+        assert!(
+            got.is_none(),
+            "a reset connection must read as end-of-stream, like a clean EOF"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_raw_frame_propagates_non_disconnect_errors() {
+        let mut reader = AsyncErrReader(Some(ErrorKind::InvalidData));
+        let err = read_raw_frame(&mut reader)
+            .await
+            .expect_err("genuine I/O errors must still surface");
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn read_raw_frame_blocking_maps_connection_reset_to_clean_eof() {
+        let mut reader = BlockingErrReader(Some(ErrorKind::ConnectionReset));
+        let got = read_raw_frame_blocking(&mut reader)
+            .expect("a reset peer must not surface as an error");
+        assert!(got.is_none());
+    }
 }

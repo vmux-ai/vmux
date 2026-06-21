@@ -207,6 +207,11 @@ async fn handle_client(
         Arc::clone(&pending_tool_calls),
     );
 
+    // Processes created by this client. The desktop is the sole owner of its
+    // terminals, so when it disconnects (including via a crash) these are reaped
+    // below — otherwise PTY children outlive the GUI and leak PTYs across runs.
+    let mut created_processes: Vec<ProcessId> = Vec::new();
+
     loop {
         let msg: Option<ClientMessage> = read_message!(&mut reader, ClientMessage)?;
         let Some(msg) = msg else {
@@ -230,6 +235,7 @@ async fn handle_client(
                 };
                 match created {
                     Ok((id, pid, input_writer)) => {
+                        created_processes.push(id);
                         if let Some(input_writer) = input_writer {
                             input_writers.lock().await.insert(id, input_writer);
                         }
@@ -242,7 +248,7 @@ async fn handle_client(
                         write_message!(&mut *w, &resp)?;
                     }
                     Err(reason) => {
-                        let resp = ServiceMessage::ProcessCreateFailed { reason };
+                        let resp = ServiceMessage::ProcessCreateFailed { process_id, reason };
                         let w = writer.clone();
                         let mut w = w.lock().await;
                         write_message!(&mut *w, &resp)?;
@@ -721,6 +727,15 @@ async fn handle_client(
         handle.abort();
     }
 
+    // Reap the processes this client created so a disconnected/crashed desktop
+    // never orphans PTY children (which would exhaust the system PTY pool).
+    if !created_processes.is_empty() {
+        let mut mgr = manager.lock().await;
+        for id in &created_processes {
+            mgr.remove_process(id);
+        }
+    }
+
     Ok(())
 }
 
@@ -806,5 +821,145 @@ mod tests {
         let res = tokio::time::timeout(std::time::Duration::from_secs(3), server).await;
         assert!(res.is_ok(), "run_server did not exit after Shutdown");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+    fn process_alive(pid: u32, identity: &Option<String>) -> bool {
+        if unsafe { libc::kill(pid as i32, 0) } != 0 {
+            return false;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            if linux_proc_state(pid) == Some('Z') {
+                return false;
+            }
+            if linux_proc_starttime(pid) != *identity {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn proc_identity(pid: u32) -> Option<String> {
+        #[cfg(target_os = "linux")]
+        {
+            linux_proc_starttime(pid)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = pid;
+            None
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_proc_state(pid: u32) -> Option<char> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        stat.rsplit_once(')')?.1.trim_start().chars().next()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_proc_starttime(pid: u32) -> Option<String> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        stat.rsplit_once(')')?
+            .1
+            .split_whitespace()
+            .nth(19)
+            .map(str::to_string)
+    }
+
+    fn proc_state_label(pid: u32) -> String {
+        #[cfg(target_os = "linux")]
+        {
+            linux_proc_state(pid)
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "gone".to_string())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = pid;
+            "n/a".to_string()
+        }
+    }
+
+    async fn await_child_pid(pidfile: &std::path::Path) -> Option<u32> {
+        for _ in 0..200 {
+            if let Ok(s) = std::fs::read_to_string(pidfile)
+                && let Ok(pid) = s.trim().parse::<u32>()
+                && pid > 0
+            {
+                return Some(pid);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        None
+    }
+
+    #[tokio::test]
+    async fn client_disconnect_reaps_created_processes() {
+        use crate::protocol::ClientMessage;
+
+        let dir = std::env::temp_dir().join(format!("vmux-reap-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("reap.sock");
+        let pidfile = dir.join("child.pid");
+        let _ = std::fs::remove_file(&sock);
+        let _ = std::fs::remove_file(&pidfile);
+        let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+
+        let server = tokio::spawn(super::run_server(listener));
+
+        let stream = tokio::net::UnixStream::connect(&sock).await.unwrap();
+        let (r, mut w) = stream.into_split();
+
+        let create = ClientMessage::CreateProcess {
+            process_id: ProcessId::new(),
+            command: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                format!("echo $$ > {}; exec sleep 30", pidfile.display()),
+            ],
+            cwd: dir.display().to_string(),
+            env: vec![],
+            cols: 80,
+            rows: 24,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&create).expect("serialize");
+        crate::framing::write_raw_frame(&mut w, &bytes)
+            .await
+            .expect("write create");
+
+        let pid = await_child_pid(&pidfile)
+            .await
+            .expect("child process should report its pid");
+        let identity = proc_identity(pid);
+        assert!(
+            process_alive(pid, &identity),
+            "child should be alive after CreateProcess"
+        );
+
+        // Simulate a desktop crash: drop the client connection without Shutdown.
+        drop(w);
+        drop(r);
+
+        let reaped = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while process_alive(pid, &identity) {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await;
+
+        // Hygiene: ensure no leaked child regardless of outcome.
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
+        server.abort();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(
+            reaped.is_ok(),
+            "child pid {pid} still alive after client disconnect — service did not reap it (state: {})",
+            proc_state_label(pid)
+        );
     }
 }

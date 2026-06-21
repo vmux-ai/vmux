@@ -332,15 +332,15 @@ pub fn serve_snapshot_requests(
     zoomed_q: Query<&crate::pane::Zoomed>,
     focused: Res<crate::stack::FocusedStack>,
     process_ids: Query<(&vmux_core::ProcessId, &ChildOf)>,
-    tab_space_q: Query<&crate::space::SpaceId>,
-    active_id: Option<Res<crate::space::ActiveSpaceId>>,
+    child_of_q: Query<&ChildOf>,
+    space_q: Query<(), With<crate::space::Space>>,
+    active_space_q: Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
     mut writer: MessageWriter<LayoutSnapshotResponse>,
 ) {
     let pid_by_stack: HashMap<u64, String> = process_ids
         .iter()
         .map(|(pid, co)| (co.get().to_bits(), pid.to_string()))
         .collect();
-    let active_space = active_id.as_deref().and_then(|id| id.0.clone());
     for request in reader.read() {
         let self_stack = request.anchor.and_then(|anchor| {
             process_ids
@@ -348,6 +348,9 @@ pub fn serve_snapshot_requests(
                 .find(|(pid, _)| **pid == anchor)
                 .map(|(_, co)| co.get())
         });
+        let target_space = self_stack
+            .and_then(|stack| crate::space::space_of(stack, &child_of_q, &space_q))
+            .or_else(|| active_space_q.iter().next());
         let mut snapshot = crate::snapshot::build_layout_snapshot(
             &tabs_q,
             &splits_q,
@@ -358,16 +361,14 @@ pub fn serve_snapshot_requests(
             &focused,
             self_stack,
         );
-        if let Some(active) = active_space.as_deref() {
+        if let Some(target) = target_space {
             snapshot.tabs.retain(|tab| {
                 tab.id
                     .as_deref()
                     .and_then(|id| crate::protocol::parse_id(id).ok())
                     .map(|(_, bits)| {
-                        tab_space_q
-                            .get(Entity::from_bits(bits))
-                            .map(|sid| sid.0 == active)
-                            .unwrap_or(true)
+                        crate::space::space_of(Entity::from_bits(bits), &child_of_q, &space_q)
+                            == Some(target)
                     })
                     .unwrap_or(true)
             });
@@ -500,11 +501,6 @@ pub fn apply_with_existing(
                 // out and it never shows, even though it exists in the tree.
                 if let Some(parent) = tab_parent {
                     world.entity_mut(entity).insert(ChildOf(parent));
-                }
-                if let Some(space) = active_space_id(world) {
-                    world
-                        .entity_mut(entity)
-                        .insert(crate::space::SpaceId(space));
                 }
                 if !tab.name.is_empty()
                     && let Some(mut layout_tab) = world.get_mut::<LayoutTab>(entity)
@@ -687,13 +683,6 @@ fn apply_close(world: &mut World, id: &str) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn active_space_id(world: &World) -> Option<String> {
-    world
-        .get_resource::<crate::space::ActiveSpaceId>()
-        .and_then(|active| active.0.clone())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 fn collect_ids_recursive(world: &World, entity: Entity, out: &mut ApplyHashSet<String>) {
     let Ok(entity_ref) = world.get_entity(entity) else {
         return;
@@ -720,12 +709,15 @@ fn collect_ids_recursive(world: &World, entity: Entity, out: &mut ApplyHashSet<S
 /// When there is no active space, all tabs are included (global behavior).
 #[cfg(not(target_arch = "wasm32"))]
 fn collect_existing_ids(world: &mut World) -> ApplyHashSet<String> {
-    let active = active_space_id(world);
-    let mut tab_q =
-        world.query_filtered::<(Entity, Option<&crate::space::SpaceId>), With<LayoutTab>>();
+    let mut active_space_q =
+        world.query_filtered::<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>();
+    let active_space = active_space_q.iter(world).next();
+    let mut tab_q = world.query_filtered::<(Entity, Option<&ChildOf>), With<LayoutTab>>();
     let tabs: Vec<Entity> = tab_q
         .iter(world)
-        .filter(|(_, sid)| crate::space::in_active_space(*sid, active.as_deref()))
+        .filter(|(_, child_of)| {
+            active_space.is_none() || child_of.map(|c| c.parent()) == active_space
+        })
         .map(|(entity, _)| entity)
         .collect();
     let mut out = ApplyHashSet::new();
@@ -900,18 +892,13 @@ mod tests {
     #[test]
     fn collect_existing_ids_scoped_to_active_space() {
         let mut world = World::new();
-        world.insert_resource(crate::space::ActiveSpaceId(Some("a".to_string())));
+        let space_a = world.spawn((crate::space::Space, vmux_core::Active)).id();
+        let space_b = world.spawn(crate::space::Space).id();
         let tab_a = world
-            .spawn((
-                crate::tab::Tab::default(),
-                crate::space::SpaceId("a".to_string()),
-            ))
+            .spawn((crate::tab::Tab::default(), ChildOf(space_a)))
             .id();
         let tab_b = world
-            .spawn((
-                crate::tab::Tab::default(),
-                crate::space::SpaceId("b".to_string()),
-            ))
+            .spawn((crate::tab::Tab::default(), ChildOf(space_b)))
             .id();
         let ids = collect_existing_ids(&mut world);
         assert!(ids.contains(&format_id(NodeKind::Tab, tab_a.to_bits())));
@@ -1488,20 +1475,15 @@ mod tests {
     }
 
     #[test]
-    fn new_tab_inherits_active_space_and_parent() {
+    fn new_tab_parented_as_sibling_of_existing() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<crate::LayoutSpawnRequest>()
-            .add_message::<PageOpenRequest>()
-            .insert_resource(crate::space::ActiveSpaceId(Some("space-1".to_string())));
+            .add_message::<PageOpenRequest>();
         let main = app.world_mut().spawn_empty().id();
         let tab = app
             .world_mut()
-            .spawn((
-                LayoutTab { name: "A".into() },
-                crate::space::SpaceId("space-1".to_string()),
-                ChildOf(main),
-            ))
+            .spawn((LayoutTab { name: "A".into() }, ChildOf(main)))
             .id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
 
@@ -1544,27 +1526,16 @@ mod tests {
 
         apply_with_existing(app.world_mut(), &snap, &existing).unwrap();
 
-        let mut q = app.world_mut().query_filtered::<(
-            Entity,
-            Option<&crate::space::SpaceId>,
-            Option<&ChildOf>,
-        ), With<LayoutTab>>();
-        let rows: Vec<(Entity, Option<String>, Option<Entity>)> = q
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(Entity, Option<&ChildOf>), With<LayoutTab>>();
+        let parent = q
             .iter(app.world())
-            .map(|(e, s, c)| (e, s.map(|s| s.0.clone()), c.map(|c| c.parent())))
-            .collect();
-        let (_, space, parent) = rows
-            .iter()
-            .find(|(e, _, _)| *e != tab)
-            .expect("new tab exists");
+            .find(|(e, _)| *e != tab)
+            .and_then(|(_, c)| c.map(|c| c.parent()))
+            .expect("new tab exists with a parent");
         assert_eq!(
-            space.as_deref(),
-            Some("space-1"),
-            "new tab should inherit the active space id"
-        );
-        assert_eq!(
-            *parent,
-            Some(main),
+            parent, main,
             "new tab should be a sibling of the existing tab (same parent)"
         );
     }

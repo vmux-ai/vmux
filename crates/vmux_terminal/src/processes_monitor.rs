@@ -12,8 +12,7 @@ use vmux_layout::{
     cef::Browser,
     event::SERVICES_PAGE_URL,
     pane::{Pane, PaneSplit},
-    stack::{Stack, focused_stack, stack_bundle},
-    tab::Tab,
+    stack::{ActiveTabParam, Stack, focused_stack, stack_bundle},
 };
 
 #[derive(Component)]
@@ -167,7 +166,7 @@ fn on_process_navigate(
     trigger: On<BinReceive<ProcessNavigateEvent>>,
     terminals: Query<(Entity, &ProcessId, &ChildOf), With<Terminal>>,
     tab_parent: Query<&ChildOf, With<Stack>>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
@@ -199,7 +198,7 @@ fn on_process_navigate(
         return;
     };
     let (_, active_pane, _) = focused_stack(
-        &tabs,
+        active_tab_param.get(),
         &all_children,
         &leaf_panes,
         &pane_ts,
