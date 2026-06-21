@@ -45,6 +45,12 @@ pub fn log_dir() -> PathBuf {
     shared_data_dir().join("logs")
 }
 
+/// Directory holding the generated per-shell OSC 133 integration snippets that
+/// spawned shells source at startup.
+pub fn shell_integration_dir() -> PathBuf {
+    shared_data_dir().join("shell-integration")
+}
+
 /// Path to today's unified log file. Matches the filename the tracing-appender
 /// DAILY rotation writes (`vmux-{profile}.{YYYY-MM-DD}.log`, UTC date), so the
 /// daemon, the desktop file layer, and the panic hook all target the same file.

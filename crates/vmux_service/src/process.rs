@@ -231,13 +231,19 @@ impl Process {
     pub fn new_with_wake(
         id: ProcessId,
         command: String,
-        args: Vec<String>,
+        mut args: Vec<String>,
         cwd: String,
-        env: Vec<(String, String)>,
+        mut env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
         wake_tx: mpsc::UnboundedSender<ProcessId>,
     ) -> Result<Self, String> {
+        crate::shell_integration::inject(
+            &command,
+            &mut args,
+            &mut env,
+            &crate::paths::shell_integration_dir(),
+        );
         let pty_system = NativePtySystem::default();
         let pair = pty_system
             .openpty(PtySize {
