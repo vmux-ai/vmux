@@ -467,6 +467,7 @@ async fn handle_client(
 
             ClientMessage::AgentCommand {
                 request_id,
+                anchor,
                 command,
             } => {
                 if let Err(message) = validate_agent_command(&command) {
@@ -481,7 +482,7 @@ async fn handle_client(
                 let broker = broker.clone();
                 let writer = writer.clone();
                 tokio::spawn(async move {
-                    let resp = match broker.command(request_id, command).await {
+                    let resp = match broker.command(request_id, anchor, command).await {
                         Ok(result) => ServiceMessage::AgentCommandResult { request_id, result },
                         Err(message) => ServiceMessage::Error { message },
                     };

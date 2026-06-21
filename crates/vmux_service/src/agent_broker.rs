@@ -5,7 +5,7 @@ use tokio::sync::{Mutex, broadcast, oneshot};
 
 use crate::protocol::{
     AGENT_COMMAND_TIMEOUT, AGENT_QUERY_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentCommand,
-    AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, ServiceMessage,
+    AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, ProcessId, ServiceMessage,
 };
 
 pub type PendingCommands = Arc<Mutex<HashMap<AgentRequestId, oneshot::Sender<AgentCommandResult>>>>;
@@ -40,6 +40,7 @@ impl AgentBroker {
     pub async fn command(
         &self,
         request_id: AgentRequestId,
+        anchor: Option<ProcessId>,
         command: AgentCommand,
     ) -> Result<AgentCommandResult, String> {
         if self.agent_tx.receiver_count() == 0 {
@@ -52,6 +53,7 @@ impl AgentBroker {
             .agent_tx
             .send(ServiceMessage::AgentCommand {
                 request_id,
+                anchor,
                 command,
             })
             .is_err()
@@ -165,6 +167,7 @@ mod tests {
         let err = b
             .command(
                 AgentRequestId::new(),
+                None,
                 AgentCommand::OpenInNewStack {
                     url: "https://x".into(),
                 },
@@ -191,6 +194,7 @@ mod tests {
         let result = b
             .command(
                 AgentRequestId::new(),
+                None,
                 AgentCommand::OpenInNewStack {
                     url: "https://x".into(),
                 },
@@ -208,6 +212,7 @@ mod tests {
         let err = b
             .command(
                 AgentRequestId::new(),
+                None,
                 AgentCommand::OpenInNewStack {
                     url: "https://x".into(),
                 },

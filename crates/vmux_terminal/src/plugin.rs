@@ -1327,12 +1327,17 @@ fn poll_service_messages(
             }
             ServiceMessage::AgentCommand {
                 request_id,
+                anchor,
                 command,
             } => {
                 writers
                     .agent_commands
                     .write(vmux_service::agent_events::AgentCommandRequest {
                         request_id,
+                        origin: vmux_service::agent_events::CommandOrigin::Agent {
+                            sid: None,
+                            anchor,
+                        },
                         command,
                     });
             }
@@ -1343,14 +1348,15 @@ fn poll_service_messages(
             }
             ServiceMessage::AgentToolCall {
                 request_id,
+                sid,
                 name,
                 args_json,
-                ..
             } => {
                 writers
                     .agent_tool_calls
                     .write(vmux_service::agent_events::AgentToolCallRequest {
                         request_id,
+                        sid,
                         name,
                         args_json,
                     });
