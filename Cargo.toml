@@ -95,8 +95,12 @@ opt-level = 3
 
 # Hot CEF render/compositing path: optimize even in dev so the texture pipeline
 # isn't bottlenecked by an unoptimized build during development.
+# codegen-units=1 keeps bevy_cef's reflect/rkyv generic instantiations in one CGU so
+# their internal `_anon.*.llvm.*` symbols aren't dropped across CGUs at -dead_strip link
+# time (otherwise binaries linking bevy_cef fail with undefined bevy_reflect symbols).
 [profile.dev.package.bevy_cef]
 opt-level = 3
+codegen-units = 1
 
 [profile.dev.package.bevy_cef_core]
 opt-level = 3
