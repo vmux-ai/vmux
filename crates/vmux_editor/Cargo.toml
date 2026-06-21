@@ -24,6 +24,7 @@ bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 tracing = "0.1"
 url = { workspace = true }
+percent-encoding = "2"
 syntect = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_layout = { path = "../vmux_layout" }

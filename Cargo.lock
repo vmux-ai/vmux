@@ -9615,6 +9615,7 @@ dependencies = [
  "bevy_reflect",
  "dioxus",
  "js-sys",
+ "percent-encoding",
  "rkyv",
  "serde",
  "syntect",
