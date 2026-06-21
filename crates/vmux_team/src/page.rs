@@ -57,12 +57,16 @@ fn TeamRow(member: TeamMemberRow) -> Element {
             },
             div {
                 class: if member.is_running {
-                    "inline-flex size-9 items-center justify-center rounded-full text-sm font-semibold text-white animate-pulse"
+                    "inline-flex size-9 items-center justify-center overflow-hidden rounded-full text-sm font-semibold text-white animate-pulse"
                 } else {
-                    "inline-flex size-9 items-center justify-center rounded-full text-sm font-semibold text-white"
+                    "inline-flex size-9 items-center justify-center overflow-hidden rounded-full text-sm font-semibold text-white"
                 },
-                style: "background:{member.color}",
-                "{member.initials}"
+                style: if member.icon.is_empty() { format!("background:{}", member.color) } else { String::new() },
+                if member.icon.is_empty() {
+                    "{member.initials}"
+                } else {
+                    img { class: "size-full object-cover", src: "{member.icon}" }
+                }
             }
             div { class: "flex flex-col",
                 span { class: "text-ui font-medium", "{member.name}" }

@@ -115,6 +115,7 @@ fn revert_active_profile_on_agent_exit(
 fn team_member_row(
     entity: Entity,
     profile: &Profile,
+    icon: String,
     is_user: bool,
     active: Option<Entity>,
     is_running: bool,
@@ -124,10 +125,30 @@ fn team_member_row(
         name: profile.name.clone(),
         initials: profile.avatar.initials.clone(),
         color: profile.avatar.color.clone(),
+        icon,
         is_user,
         is_active: active == Some(entity),
         is_running,
     }
+}
+
+/// An agent's favicon, if its page (or owning stack) has one. Page agents carry
+/// `PageMetadata` directly; CLI agents are terminals whose stack holds it.
+fn agent_favicon(
+    entity: Entity,
+    meta_q: &Query<&PageMetadata>,
+    child_of: &Query<&ChildOf>,
+) -> String {
+    let from = |e| {
+        meta_q
+            .get(e)
+            .ok()
+            .map(|m| m.favicon_url.clone())
+            .filter(|s| !s.is_empty())
+    };
+    from(entity)
+        .or_else(|| child_of.get(entity).ok().and_then(|c| from(c.parent())))
+        .unwrap_or_default()
 }
 
 fn build_team_members(
@@ -137,6 +158,7 @@ fn build_team_members(
     agent_q: &Query<(Entity, &Profile, &Agent, Option<&AgentRunState>)>,
     child_of: &Query<&ChildOf>,
     space_marker: &Query<(), With<Space>>,
+    meta_q: &Query<&PageMetadata>,
 ) -> Vec<TeamMemberRow> {
     let active = active_space.0;
     let active_profile = active
@@ -148,6 +170,7 @@ fn build_team_members(
         members.push(team_member_row(
             entity,
             profile,
+            String::new(),
             true,
             active_profile,
             false,
@@ -157,9 +180,11 @@ fn build_team_members(
         for (entity, profile, _agent, run) in agent_q {
             if space_of(entity, child_of, space_marker) == Some(active) {
                 let is_running = matches!(run, Some(AgentRunState::Streaming));
+                let icon = agent_favicon(entity, meta_q, child_of);
                 members.push(team_member_row(
                     entity,
                     profile,
+                    icon,
                     false,
                     active_profile,
                     is_running,
@@ -182,6 +207,7 @@ fn emit_team(
     agent_q: Query<(Entity, &Profile, &Agent, Option<&AgentRunState>)>,
     child_of: Query<&ChildOf>,
     space_marker: Query<(), With<Space>>,
+    meta_q: Query<&PageMetadata>,
     mut last: Local<String>,
     mut commands: Commands,
 ) {
@@ -199,6 +225,7 @@ fn emit_team(
             &agent_q,
             &child_of,
             &space_marker,
+            &meta_q,
         ),
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();

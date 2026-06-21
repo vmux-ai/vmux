@@ -513,7 +513,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
     let overflow = members.len().saturating_sub(max);
     rsx! {
         div {
-            class: "flex shrink-0 items-center -space-x-2 pl-2 cursor-pointer",
+            class: "flex shrink-0 items-center -space-x-2 pl-3 pr-2 cursor-pointer",
             title: "Team",
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
@@ -525,13 +525,19 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                 {
                     let ring = if m.is_active { "ring-primary" } else { "ring-background" };
                     let pulse = if m.is_running { "animate-pulse" } else { "" };
+                    let has_icon = !m.icon.is_empty();
+                    let bg = if has_icon { String::new() } else { format!("background:{}", m.color) };
                     rsx! {
                         div {
                             key: "{m.id}",
                             title: "{m.name}",
-                            class: "relative inline-flex size-7 items-center justify-center rounded-full ring-2 {ring} {pulse} text-[11px] font-semibold text-white",
-                            style: "background:{m.color}",
-                            "{m.initials}"
+                            class: "relative inline-flex size-7 items-center justify-center overflow-hidden rounded-full ring-2 {ring} {pulse} text-[11px] font-semibold text-white",
+                            style: "{bg}",
+                            if has_icon {
+                                img { class: "size-full object-cover", src: "{m.icon}" }
+                            } else {
+                                "{m.initials}"
+                            }
                         }
                     }
                 }
