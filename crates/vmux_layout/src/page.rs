@@ -6,6 +6,7 @@ use crate::event::{
     TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
 use dioxus::prelude::*;
+use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{GlobeIcon, favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
@@ -59,6 +60,11 @@ pub fn Page() -> Element {
             spaces_state.set(data);
         },
     );
+
+    let mut team_state = use_signal(TeamEvent::default);
+    let _team_listener = use_bin_event_listener::<TeamEvent, _>(TEAM_EVENT, move |data| {
+        team_state.set(data);
+    });
 
     let mut update_version = use_signal(|| None::<String>);
     let _update_ready_listener = use_bin_event_listener::<crate::event::UpdateReadyEvent, _>(
@@ -141,6 +147,7 @@ pub fn Page() -> Element {
                     HeaderView {
                         stacks_state: stacks,
                         tabs_state: tabs,
+                        team: team_state().members,
                         reload_key: reload_key(),
                         stacks_error: stacks_error.clone(),
                         tabs_error: tabs_error.clone(),
@@ -194,6 +201,7 @@ fn format_address(stack: &StackRow) -> String {
 fn HeaderView(
     stacks_state: StacksHostEvent,
     tabs_state: TabsHostEvent,
+    team: Vec<TeamMemberRow>,
     reload_key: u32,
     stacks_error: Option<String>,
     tabs_error: Option<String>,
@@ -230,6 +238,7 @@ fn HeaderView(
                         NewTabButton {}
                     }
                 }
+                TeamFacepile { members: team }
             }
             div {
                 class: "{url_row_class}",
@@ -490,6 +499,48 @@ fn NewTabButton() -> Element {
             Icon { class: "h-3.5 w-3.5",
                 path { d: "M12 5v14" }
                 path { d: "M5 12h14" }
+            }
+        }
+    }
+}
+
+#[component]
+fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
+    if members.is_empty() {
+        return rsx! {};
+    }
+    let max = 5usize;
+    let overflow = members.len().saturating_sub(max);
+    rsx! {
+        div {
+            class: "flex shrink-0 items-center -space-x-2 pl-2 cursor-pointer",
+            title: "Team",
+            onclick: move |_| {
+                let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
+                    command: "open".to_string(),
+                    member_id: None,
+                });
+            },
+            for m in members.iter().take(max) {
+                {
+                    let ring = if m.is_active { "ring-primary" } else { "ring-background" };
+                    let pulse = if m.is_running { "animate-pulse" } else { "" };
+                    rsx! {
+                        div {
+                            key: "{m.id}",
+                            title: "{m.name}",
+                            class: "relative inline-flex size-7 items-center justify-center rounded-full ring-2 {ring} {pulse} text-[11px] font-semibold text-white",
+                            style: "background:{m.color}",
+                            "{m.initials}"
+                        }
+                    }
+                }
+            }
+            if overflow > 0 {
+                div {
+                    class: "relative inline-flex size-7 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[11px] font-medium text-muted-foreground",
+                    "+{overflow}"
+                }
             }
         }
     }

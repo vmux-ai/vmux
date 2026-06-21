@@ -901,7 +901,9 @@ pub fn detect_agent_session_process_exit(
             .entity(entity)
             .remove::<AgentSession>()
             .remove::<SessionId>()
-            .remove::<PendingAgentSession>();
+            .remove::<PendingAgentSession>()
+            .remove::<vmux_core::team::Agent>()
+            .remove::<vmux_core::team::Profile>();
         // A vibe agent terminal that exits should close its pane entirely, not
         // linger as a shell/terminal. The terminal is a child of a stack, which
         // is a child of a pane; mark that pane for a no-dialog force close. If
