@@ -26,6 +26,8 @@ pub mod launchd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod message;
 #[cfg(not(target_arch = "wasm32"))]
+mod osc133;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod process;
