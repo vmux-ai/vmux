@@ -1,0 +1,226 @@
+#![allow(non_snake_case)]
+
+use crate::page_model::{gutter_width, span_style};
+use dioxus::prelude::*;
+use vmux_core::event::*;
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
+
+const CONTAINER_ID: &str = "file-container";
+const MEASURE_ID: &str = "file-measure";
+
+#[component]
+pub fn Page() -> Element {
+    use_theme();
+    let mut path = use_signal(String::new);
+    let mut language = use_signal(String::new);
+    let mut total_lines = use_signal(|| 0u32);
+    let mut first_line = use_signal(|| 0u32);
+    let mut lines = use_signal(Vec::<FileLine>::new);
+    let mut error = use_signal(String::new);
+    let cell_dims = use_signal(|| (0.0f64, 0.0f64));
+
+    let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            let name = m.path.rsplit('/').next().unwrap_or(&m.path).to_string();
+            doc.set_title(&name);
+        }
+        path.set(m.path);
+        language.set(m.language);
+        total_lines.set(m.total_lines);
+    });
+
+    let _vp = use_bin_event_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
+        first_line.set(p.first_line);
+        total_lines.set(p.total_lines);
+        lines.set(p.lines);
+    });
+
+    let _err = use_bin_event_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
+        error.set(e.message);
+    });
+
+    use_effect(move || setup_measurement(cell_dims));
+
+    let gw = gutter_width(total_lines());
+
+    rsx! {
+        div {
+            id: CONTAINER_ID,
+            tabindex: "0",
+            class: "relative flex h-full w-full flex-col overflow-hidden bg-term-bg text-term-fg font-mono text-sm leading-tight select-none",
+            style: "outline:none;",
+
+            onmousedown: move |_| focus_container(),
+
+            onwheel: move |e: Event<WheelData>| {
+                e.prevent_default();
+                let (_, ch) = cell_dims();
+                let line_px = if ch > 0.0 { ch } else { 16.0 };
+                let data = e.data();
+                let Some(raw) = data.downcast::<web_sys::WheelEvent>() else {
+                    return;
+                };
+                let notches = (raw.delta_y() / line_px).round() as i64;
+                if notches == 0 {
+                    return;
+                }
+                let next = (first_line() as i64 + notches).max(0) as u32;
+                let _ = try_cef_bin_emit_rkyv(&FileScrollEvent { top_line: next });
+            },
+
+            onkeydown: move |e: Event<KeyboardData>| {
+                let data = e.data();
+                let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
+                    return;
+                };
+                let cur = first_line() as i64;
+                let next = match raw.key().as_str() {
+                    "ArrowDown" => cur + 1,
+                    "ArrowUp" => cur - 1,
+                    "PageDown" => cur + 20,
+                    "PageUp" => cur - 20,
+                    "Home" => 0,
+                    _ => return,
+                };
+                e.prevent_default();
+                let _ = try_cef_bin_emit_rkyv(&FileScrollEvent {
+                    top_line: next.max(0) as u32,
+                });
+            },
+
+            div {
+                class: "flex h-7 shrink-0 items-center gap-2 border-b border-white/10 px-3 text-xs text-muted-foreground",
+                span { class: "truncate", "{path}" }
+                if !language().is_empty() {
+                    span { class: "ml-auto shrink-0 opacity-60", "{language}" }
+                }
+            }
+
+            {
+                let msg = error.read().clone();
+                (!msg.is_empty()).then(|| rsx! {
+                    div {
+                        class: "absolute inset-0 z-50 flex items-center justify-center",
+                        style: "background:rgba(0,0,0,0.6);",
+                        div {
+                            class: "rounded-md border border-ansi-1 bg-term-bg px-4 py-2 text-sm text-ansi-1",
+                            "{msg}"
+                        }
+                    }
+                })
+            }
+
+            div { class: "min-h-0 flex-1 overflow-hidden p-1",
+                for line in lines().iter() {
+                    div { key: "{line.line_no}", class: "flex whitespace-pre",
+                        span {
+                            class: "shrink-0 select-none pr-3 text-right opacity-40",
+                            style: "width:calc(var(--cw, 1ch) * {gw});",
+                            "{line.line_no + 1}"
+                        }
+                        span {
+                            for (i, s) in line.spans.iter().enumerate() {
+                                span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn focus_container() {
+    if let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(CONTAINER_ID))
+        && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
+    {
+        let _ = html.focus();
+    }
+}
+
+fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+    let Some(container) = document.get_element_by_id(CONTAINER_ID) else {
+        return;
+    };
+
+    let measure: web_sys::Element = document.create_element("span").unwrap();
+    measure
+        .set_attribute(
+            "style",
+            "position:absolute;visibility:hidden;white-space:pre;font:inherit",
+        )
+        .unwrap();
+    measure.set_attribute("id", MEASURE_ID).unwrap();
+    let measure_node: &web_sys::Node = measure.as_ref();
+    measure_node.set_text_content(Some(&"X".repeat(80)));
+    container.append_child(&measure).unwrap();
+
+    do_measure(cell_dims);
+
+    let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
+        do_measure(cell_dims);
+    }) as Box<dyn FnMut(JsValue)>);
+
+    if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
+        observer.observe(&container);
+        observer.observe(&measure);
+        std::mem::forget(observer);
+    }
+    callback.forget();
+}
+
+fn do_measure(mut cell_dims: Signal<(f64, f64)>) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+    let Some(container) = document.get_element_by_id(CONTAINER_ID) else {
+        return;
+    };
+    let Some(measure) = document.get_element_by_id(MEASURE_ID) else {
+        return;
+    };
+
+    let rect = measure.get_bounding_client_rect();
+    let cw = rect.width() / 80.0;
+
+    let ch = window
+        .get_computed_style(&container)
+        .ok()
+        .flatten()
+        .and_then(|cs| {
+            cs.get_property_value("line-height")
+                .ok()
+                .and_then(|s| s.trim_end_matches("px").parse::<f64>().ok())
+        })
+        .unwrap_or(rect.height());
+
+    if cw <= 0.0 || ch <= 0.0 {
+        return;
+    }
+
+    cell_dims.set((cw, ch));
+
+    let html: &web_sys::HtmlElement = container.unchecked_ref();
+    let _ = html.style().set_property("--cw", &format!("{cw}px"));
+    let _ = html.style().set_property("--ch", &format!("{ch}px"));
+
+    let vh = container.client_height() as f64;
+
+    let _ = try_cef_bin_emit_rkyv(&FileResizeEvent {
+        char_height: ch as f32,
+        viewport_height: vh as f32,
+    });
+}

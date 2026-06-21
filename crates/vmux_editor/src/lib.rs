@@ -10,3 +10,6 @@ pub use plugin::{EditorPlugin, FileView};
 
 #[cfg(any(target_arch = "wasm32", test))]
 pub mod page_model;
+
+#[cfg(all(target_arch = "wasm32", feature = "web"))]
+pub mod page;
