@@ -524,16 +524,16 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
             for m in members.iter().take(max) {
                 {
                     let ring = if m.is_active { "ring-primary" } else { "ring-background" };
-                    let has_icon = !m.icon.is_empty();
-                    let bg = if has_icon { String::new() } else { format!("background:{}", m.color) };
+                    let src = favicon_src_for_url(&m.icon, &m.url);
+                    let bg = if src.is_some() { String::new() } else { format!("background:{}", m.color) };
                     rsx! {
                         div {
                             key: "{m.id}",
                             title: "{m.name}",
                             class: "relative inline-flex size-6 items-center justify-center overflow-hidden rounded-full ring-2 {ring} text-[10px] font-semibold text-white",
                             style: "{bg}",
-                            if has_icon {
-                                img { class: "size-full object-cover", src: "{m.icon}" }
+                            if let Some(src) = src.as_ref() {
+                                img { class: "size-full object-cover", src: "{src}" }
                             } else {
                                 "{m.initials}"
                             }

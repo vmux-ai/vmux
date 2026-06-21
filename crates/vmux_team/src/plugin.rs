@@ -118,6 +118,7 @@ fn team_member_row(
     entity: Entity,
     profile: &Profile,
     icon: String,
+    url: String,
     title: String,
     sid: String,
     is_user: bool,
@@ -130,6 +131,7 @@ fn team_member_row(
         initials: profile.avatar.initials.clone(),
         color: profile.avatar.color.clone(),
         icon,
+        url,
         title,
         sid,
         is_user,
@@ -138,9 +140,11 @@ fn team_member_row(
     }
 }
 
-/// An agent's live favicon + page title. The favicon/title are written to the
-/// *webview* entity, which is the agent entity itself (CLI terminal), a child of
-/// it, or a child of its owning stack (page agent). Probe all three.
+/// An agent's live favicon URL, page url, and title. These live on the *webview*
+/// entity, which is the agent entity itself (CLI terminal), a child of it, or a
+/// child of its owning stack (page agent). Probe all three. The page renders the
+/// favicon via `favicon_src_for_url(favicon, url)` so URL-mapped agent icons
+/// (e.g. Vibe's Mistral logo) match the tab strip.
 fn agent_page(
     entity: Entity,
     meta_q: &Query<&PageMetadata>,
@@ -202,6 +206,7 @@ fn build_team_members(
             String::new(),
             String::new(),
             String::new(),
+            String::new(),
             true,
             active_profile,
             false,
@@ -212,6 +217,7 @@ fn build_team_members(
             if space_of(entity, child_of, space_marker) == Some(active) {
                 let is_running = matches!(run, Some(AgentRunState::Streaming));
                 let (icon, title) = agent_page(entity, meta_q, children_q, child_of);
+                let url = agent.kind.cli_url_prefix();
                 let sid = session
                     .map(|s| s.0.clone())
                     .filter(|s| !s.is_empty())
@@ -220,6 +226,7 @@ fn build_team_members(
                     entity,
                     profile,
                     icon,
+                    url,
                     title,
                     sid,
                     false,

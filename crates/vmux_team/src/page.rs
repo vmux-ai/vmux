@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
+use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 
@@ -152,13 +153,13 @@ fn TeamRow(member: TeamMemberRow, selected: bool) -> Element {
 
 #[component]
 fn TeamAvatar(member: TeamMemberRow, size: u32, ring_active: bool) -> Element {
-    let has_icon = !member.icon.is_empty();
+    let src = favicon_src_for_url(&member.icon, &member.url);
     let ring = if ring_active {
         "ring-2 ring-primary ring-offset-2 ring-offset-background"
     } else {
         ""
     };
-    let bg = if has_icon {
+    let bg = if src.is_some() {
         String::new()
     } else {
         format!("background:{}", member.color)
@@ -170,8 +171,8 @@ fn TeamAvatar(member: TeamMemberRow, size: u32, ring_active: bool) -> Element {
             div {
                 class: "inline-flex items-center justify-center overflow-hidden rounded-full text-sm font-semibold text-white {ring}",
                 style: "{dim}",
-                if has_icon {
-                    img { class: "size-full object-cover", src: "{member.icon}" }
+                if let Some(src) = src.as_ref() {
+                    img { class: "size-full object-cover", src: "{src}" }
                 } else {
                     "{member.initials}"
                 }

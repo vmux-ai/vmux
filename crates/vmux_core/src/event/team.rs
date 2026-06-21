@@ -37,6 +37,8 @@ pub struct TeamMemberRow {
     #[serde(default)]
     pub icon: String,
     #[serde(default)]
+    pub url: String,
+    #[serde(default)]
     pub title: String,
     #[serde(default)]
     pub sid: String,
@@ -75,6 +77,7 @@ mod tests {
             initials: "CL".to_string(),
             color: "#d97757".to_string(),
             icon: String::new(),
+            url: String::new(),
             title: String::new(),
             sid: String::new(),
             is_user: false,
@@ -93,6 +96,7 @@ mod tests {
                 initials: "You".to_string(),
                 color: "#3b82f6".to_string(),
                 icon: String::new(),
+                url: String::new(),
                 title: String::new(),
                 sid: String::new(),
                 is_user: true,
