@@ -8,7 +8,7 @@ Modern tools have split into two camps: chat-first productivity hubs on one side
 developer IDEs (like Cursor) on the other. **Vmux bridges the divide by blending both
 worlds.**
 
-- **Co-working** — an agent-first workspace, natively collaborative with humans. People
+- **Co-working** — an agent co-working space, natively collaborative with humans. People
   and agents work, build, and orchestrate tasks alongside each other, in real time, in one
   shared space — from hands-on pairing to full autonomy. Watch a run and grab the keyboard
   to steer, or turn agents loose in their own space: find your own balance, and let it shift

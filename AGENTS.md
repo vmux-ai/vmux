@@ -51,7 +51,7 @@ Worktree directory: `.worktrees/` (already in `.gitignore`).
 
 Before merging any PR:
 
-1. **Check review comments.** Read all review feedback — CodeRabbit and human reviewers — and address or explicitly triage every item. A green status check is not enough; unresolved review comments must be handled first.
+1. **Check review comments.** Read all review feedback — CodeRabbit and human reviewers — and address or explicitly triage every item. A green status check is not enough; unresolved review comments must be handled first. **Reply to every CodeRabbit thread** — either reflect the fix in code (cite the commit) or comment a triage reason — so no thread is left dangling, then resolve them (e.g. `@coderabbitai resolve`).
 2. **Check CI.** Confirm all required checks are green on the PR's head commit.
 
 After merging, clean up: remove the worktree (`git worktree remove .worktrees/<name>`) and delete the branch (`gh pr merge --delete-branch` for the remote; delete the local branch too if it lingers).
