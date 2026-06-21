@@ -60,7 +60,10 @@ mod tests {
     #[test]
     fn detects_command_start() {
         let mut s = Osc133Scanner::new();
-        assert_eq!(s.feed(&esc("\\e]133;C\\a")), vec![Osc133Event::CommandStart]);
+        assert_eq!(
+            s.feed(&esc("\\e]133;C\\a")),
+            vec![Osc133Event::CommandStart]
+        );
     }
 
     #[test]
@@ -98,7 +101,10 @@ mod tests {
     fn reassembles_sequence_split_across_feeds() {
         let mut s = Osc133Scanner::new();
         assert_eq!(s.feed(&esc("\\e]133;D")), vec![]);
-        assert_eq!(s.feed(&esc(";0\\a")), vec![Osc133Event::CommandEnd(Some(0))]);
+        assert_eq!(
+            s.feed(&esc(";0\\a")),
+            vec![Osc133Event::CommandEnd(Some(0))]
+        );
     }
 
     #[test]
