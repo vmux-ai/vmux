@@ -1,7 +1,24 @@
 use dioxus::prelude::*;
 
+fn fade(c: f64) -> String {
+    let hw = 0.22_f64;
+    let a = c - hw;
+    let b = c + hw;
+    let fade_in = if a >= 0.0 {
+        format!("clamp(0, calc((var(--p,0) - {a:.4}) / {hw:.4}), 1)")
+    } else {
+        format!("clamp(0, calc((var(--p,0) + {:.4}) / {hw:.4}), 1)", -a)
+    };
+    let fade_out = format!("clamp(0, calc(({b:.4} - var(--p,0)) / {hw:.4}), 1)");
+    format!("min({fade_in}, {fade_out})")
+}
+
 #[component]
 pub fn LayoutScene() -> Element {
+    let f0 = fade(0.0);
+    let f1 = fade(0.34);
+    let f2 = fade(0.66);
+    let f3 = fade(1.0);
     rsx! {
         section { class: "relative min-h-[280vh]", "data-scene": "1",
             div { class: "sticky top-0 h-screen flex flex-col items-center justify-center px-6 overflow-hidden",
@@ -22,14 +39,32 @@ pub fn LayoutScene() -> Element {
                         span { class: "h-2.5 w-2.5 rounded-full bg-border" }
                         span { class: "h-2.5 w-2.5 rounded-full bg-border" }
                     }
-                    div { class: "flex h-[calc(100%-2rem)] gap-1 p-1",
-                        div { class: "flex-1 rounded-md bg-aurora-cyan/10 border border-aurora-cyan/20" }
-                        div { class: "flex flex-col gap-1 overflow-hidden basis-1/2",
+                    div { class: "relative h-[calc(100%-2rem)]",
+                        div { class: "absolute inset-0 p-1", style: "opacity: {f0}",
+                            div { class: "h-full w-full rounded-md bg-aurora-cyan/10 border border-aurora-cyan/20" }
+                        }
+                        div { class: "absolute inset-0 p-1 flex gap-1", style: "opacity: {f1}",
+                            div { class: "flex-1 rounded-md bg-aurora-cyan/10 border border-aurora-cyan/20" }
                             div { class: "flex-1 rounded-md bg-accent/10 border border-accent/20" }
-                            div {
-                                class: "flex-1 rounded-md bg-aurora-violet/10 border border-aurora-violet/20 font-mono text-[10px] text-text-muted p-2",
-                                style: "opacity: var(--p, 1); transform: translateY(calc((1 - var(--p, 1)) * 16px))",
-                                "$ vmux split"
+                        }
+                        div { class: "absolute inset-0 p-1 flex gap-1", style: "opacity: {f2}",
+                            div { class: "flex-1 rounded-md bg-aurora-cyan/10 border border-aurora-cyan/20" }
+                            div { class: "flex-1 flex flex-col gap-1",
+                                div { class: "flex-1 rounded-md bg-accent/10 border border-accent/20" }
+                                div { class: "flex-1 rounded-md bg-aurora-violet/10 border border-aurora-violet/20 font-mono text-[10px] text-text-muted p-2",
+                                    "$ vmux split"
+                                }
+                            }
+                        }
+                        div {
+                            class: "absolute inset-0 p-1 flex gap-1",
+                            style: "opacity: {f3}; transform: perspective(900px) rotateY(-16deg) rotateX(7deg) scale(0.92)",
+                            div { class: "flex-1 rounded-md bg-aurora-cyan/15 border border-aurora-cyan/30" }
+                            div { class: "flex-1 flex flex-col gap-1",
+                                div { class: "flex-1 rounded-md bg-accent/15 border border-accent/30" }
+                                div { class: "flex-1 rounded-md bg-aurora-violet/15 border border-aurora-violet/30 font-mono text-[10px] text-text-muted p-2",
+                                    "$ vmux split"
+                                }
                             }
                         }
                     }

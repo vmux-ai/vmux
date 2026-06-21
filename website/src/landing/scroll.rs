@@ -18,7 +18,7 @@ pub fn init() {
     if reduce {
         reveal_all(&doc);
         for_each(&doc, "[data-scene]", |el| {
-            let _ = el.set_attribute("style", "--p:1");
+            let _ = el.set_attribute("style", "--p:0.66");
         });
         return;
     }
