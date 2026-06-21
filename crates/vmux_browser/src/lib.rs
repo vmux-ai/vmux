@@ -592,14 +592,13 @@ fn sync_children_to_ui(
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     tabs_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
+    active_tab_q: Query<(), (With<Tab>, With<vmux_core::Active>)>,
     new_stack_ctx: Res<vmux_layout::NewStackContext>,
     glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<VmuxWindow>>,
 ) {
     let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
     let pad = glass_node.padding;
     let glass_size_px = glass_node.size + pad.min_inset + pad.max_inset;
-
-    let active_tab = tabs_q.iter().max_by_key(|(_, ts)| ts.0).map(|(e, _)| e);
 
     for (
         mut tf,
@@ -662,7 +661,7 @@ fn sync_children_to_ui(
         let is_inactive_tab = parent != glass_entity
             && !is_cef_ui
             && match tab_ancestor(parent, &child_of_q, &tabs_q) {
-                Some(tab) => Some(tab) != active_tab,
+                Some(tab) => !active_tab_q.contains(tab),
                 None => false,
             };
 
@@ -3511,6 +3510,19 @@ mod tests {
 
         assert!(sync_fn.contains("browsers.raise_windowed_to_front(&entity)"));
         assert!(sync_fn.contains("windowed_pages_to_hide("));
+    }
+
+    #[test]
+    fn webview_tab_visibility_uses_active_marker_not_global_recency() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_children_to_ui")
+            .nth(1)
+            .and_then(|tail| tail.split("fn webview_should_use_windowed").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("active_tab_q.contains(tab)"));
+        assert!(!sync_fn.contains("max_by_key"));
     }
 
     #[test]
