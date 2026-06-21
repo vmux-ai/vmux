@@ -2855,14 +2855,30 @@ fn attach_cef_page_requests(
     }
 }
 
+/// Marks a `PageOpenTask` the fallback has seen pending once. A `vmux://` scheme
+/// owned by a `HandleKnownPages` handler can, under a rare command-visibility gap,
+/// reach this fallback still pending in its first frame; this grace marker defers
+/// the "unknown URL" verdict one run so the owning handler's mark becomes visible
+/// before we error-claim (and permanently win the race for) an owned task.
+#[derive(Component, Clone, Debug)]
+struct PageOpenFallbackDeferred;
+
 fn handle_unclaimed_page_open_tasks(
-    mut tasks: Query<(Entity, &PageOpenTask, Option<&PageOpenError>), Without<PageOpenHandled>>,
+    mut tasks: Query<
+        (
+            Entity,
+            &PageOpenTask,
+            Option<&PageOpenError>,
+            Option<&PageOpenFallbackDeferred>,
+        ),
+        Without<PageOpenHandled>,
+    >,
     children_q: Query<&Children>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
-    for (entity, task, error) in &mut tasks {
+    for (entity, task, error, deferred_once) in &mut tasks {
         if let Some(error) = error {
             attach_error_page_to_stack(
                 task.stack,
@@ -2888,6 +2904,10 @@ fn handle_unclaimed_page_open_tasks(
             );
             commands.entity(entity).insert(PageOpenHandled);
         } else if task.url.starts_with("vmux://") {
+            if deferred_once.is_none() {
+                commands.entity(entity).insert(PageOpenFallbackDeferred);
+                continue;
+            }
             attach_error_page_to_stack(
                 task.stack,
                 &task.url,
@@ -4679,6 +4699,9 @@ mod tests {
                     },
                 });
 
+            // One extra update vs. the other navigate tests: the fallback now grants
+            // unknown `vmux://` URLs a one-frame grace before rendering the error page.
+            app.update();
             app.update();
             app.update();
 
