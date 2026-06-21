@@ -54,9 +54,9 @@ fn App() -> Element {
         document::Meta { name: "viewport", content: "width=device-width, initial-scale=1" }
         document::Meta {
             name: "description",
-            content: "An agent-first workspace with a browser and IDE built in — co-work with agents in one shared space.",
+            content: "An agent co-working space with a browser and IDE built in — people and agents, side by side.",
         }
-        document::Title { "Vmux — agent-first workspace" }
+        document::Title { "Vmux — agent co-working space" }
         document::Stylesheet { href: "/style.css" }
         ToastProvider {
             Router::<Route> {}

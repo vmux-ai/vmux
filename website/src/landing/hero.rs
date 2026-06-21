@@ -33,7 +33,7 @@ pub fn Hero() -> Element {
                     "The workspace that bridges chat and IDE."
                 }
                 p { class: "text-base sm:text-lg text-text-muted mb-10 max-w-xl mx-auto",
-                    "An agent-first workspace with a browser and IDE built in — co-work with agents in one shared space."
+                    "An agent co-working space with a browser and IDE built in — people and agents, side by side."
                 }
                 div { class: "flex flex-wrap justify-center gap-3 mb-6",
                     button {

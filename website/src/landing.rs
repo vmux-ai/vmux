@@ -1,3 +1,4 @@
+mod agents;
 mod coworking;
 mod cta;
 mod hero;
@@ -7,6 +8,7 @@ mod scenes;
 #[cfg(target_arch = "wasm32")]
 mod scroll;
 
+use agents::Agents;
 use coworking::Coworking;
 use cta::Cta;
 use dioxus::prelude::*;
@@ -65,6 +67,7 @@ pub fn Landing() -> Element {
             Hero {}
             Pillars {}
             Coworking {}
+            Agents {}
             LayoutScene {}
             InputScene {}
             Platform {}
