@@ -209,7 +209,8 @@ impl Browsers {
                 ok_cef, 1,
                 "cef_register_scheme_handler_factory(cef) failed with code {ok_cef}"
             );
-            let mut embedded_factory = LocalSchemaHandlerBuilder::build(requester_for_global);
+            let mut embedded_factory =
+                LocalSchemaHandlerBuilder::build(requester_for_global.clone());
             let ok_embedded = register_scheme_handler_factory(
                 Some(&emb_scheme.as_str().into()),
                 None,
@@ -222,6 +223,20 @@ impl Browsers {
             assert_eq!(
                 ok_embedded, 1,
                 "cef_register_scheme_handler_factory(embedded page scheme) failed with code {ok_embedded}"
+            );
+            let mut files_factory = LocalSchemaHandlerBuilder::build(requester_for_global);
+            let ok_files = register_scheme_handler_factory(
+                Some(&crate::util::FILES_SCHEME.into()),
+                None,
+                Some(&mut files_factory),
+            );
+            webview_debug_log(format!(
+                "register_scheme_handler_factory {}://* ok={ok_files}",
+                crate::util::FILES_SCHEME
+            ));
+            assert_eq!(
+                ok_files, 1,
+                "cef_register_scheme_handler_factory(files scheme) failed with code {ok_files}"
             );
         });
 
@@ -1431,6 +1446,11 @@ impl Browsers {
             context.register_scheme_handler_factory(
                 Some(&emb_scheme.as_str().into()),
                 None,
+                Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
+            );
+            context.register_scheme_handler_factory(
+                Some(&crate::util::FILES_SCHEME.into()),
+                None,
                 Some(&mut LocalSchemaHandlerBuilder::build(requester)),
             );
         }
@@ -1451,6 +1471,11 @@ impl Browsers {
             );
             context.register_scheme_handler_factory(
                 Some(&emb_scheme.as_str().into()),
+                None,
+                Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
+            );
+            context.register_scheme_handler_factory(
+                Some(&crate::util::FILES_SCHEME.into()),
                 None,
                 Some(&mut LocalSchemaHandlerBuilder::build(requester)),
             );

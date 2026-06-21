@@ -244,10 +244,19 @@ fn on_file_scroll(
     emit_window(entity, buf, &vp, &browsers, &mut commands);
 }
 
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "files",
+    title: "Files",
+    keywords: &["file", "open"],
+    icon: "file",
+    command_bar: false,
+};
+
 pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
+        app.world_mut().spawn(PAGE_MANIFEST);
         app.add_plugins(BinEventEmitterPlugin::<(FileResizeEvent, FileScrollEvent)>::default())
             .add_systems(
                 Update,
