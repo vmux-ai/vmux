@@ -36,11 +36,11 @@ pub struct FileInitialMetaSent;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
-/// Parse the absolute filesystem path out of a `files://` URL.
-/// `files:///Users/me/a%20b.rs` -> `/Users/me/a b.rs`.
+/// Parse the absolute filesystem path out of a `file://` URL.
+/// `file:///Users/me/a%20b.rs` -> `/Users/me/a b.rs`.
 fn path_from_files_url(url: &str) -> Option<PathBuf> {
     let parsed = url::Url::parse(url).ok()?;
-    if parsed.scheme() != "files" {
+    if parsed.scheme() != "file" {
         return None;
     }
     let raw = parsed.path();
@@ -119,12 +119,12 @@ pub fn handle_file_page_open(
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for (entity, task) in &tasks {
-        if !task.url.starts_with("files:") {
+        if !task.url.starts_with("file:") {
             continue;
         }
         let Some(path) = path_from_files_url(&task.url) else {
             commands.entity(entity).insert(PageOpenError {
-                message: format!("malformed files URL '{}'", task.url),
+                message: format!("malformed file URL '{}'", task.url),
             });
             continue;
         };
@@ -275,7 +275,7 @@ mod url_tests {
     #[test]
     fn parses_simple_path() {
         assert_eq!(
-            path_from_files_url("files:///Users/me/src/main.rs"),
+            path_from_files_url("file:///Users/me/src/main.rs"),
             Some(PathBuf::from("/Users/me/src/main.rs"))
         );
     }
@@ -283,7 +283,7 @@ mod url_tests {
     #[test]
     fn decodes_percent_escapes() {
         assert_eq!(
-            path_from_files_url("files:///Users/me/a%20b.rs"),
+            path_from_files_url("file:///Users/me/a%20b.rs"),
             Some(PathBuf::from("/Users/me/a b.rs"))
         );
     }
@@ -295,7 +295,7 @@ mod url_tests {
 
     #[test]
     fn empty_path_is_root() {
-        assert_eq!(path_from_files_url("files:///"), Some(PathBuf::from("/")));
+        assert_eq!(path_from_files_url("file:///"), Some(PathBuf::from("/")));
     }
 }
 
@@ -322,7 +322,7 @@ mod page_open_tests {
             .spawn(PageOpenTask {
                 id: PageOpenId::new(),
                 stack,
-                url: "files:///etc/hostname".to_string(),
+                url: "file:///etc/hostname".to_string(),
                 request_id: None,
             })
             .id();

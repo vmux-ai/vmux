@@ -44,7 +44,10 @@ pub const EXTENSIONS_SWITCH: &str = "bevy-cef-extensions";
 
 pub const SCHEME_CEF: &str = "cef";
 
-pub const FILES_SCHEME: &str = "files";
+/// We override Chromium's built-in `file` scheme with our own handler factory so the
+/// text editor can be addressed as `file:///abs/path`. The internal embedded host id
+/// for the editor app stays `"files"`.
+pub const FILES_SCHEME: &str = "file";
 
 pub const HOST_CEF: &str = "localhost";
 
@@ -154,6 +157,7 @@ pub fn url_is_trusted_embedded_page(
 
 pub fn has_embedded_scheme(url: &str) -> bool {
     url_has_embedded_scheme(url, resolved_cef_embedded_page_config().scheme_prefix())
+        || url.starts_with("file://")
 }
 
 pub fn is_trusted_embedded_page(url: &str) -> bool {
@@ -210,56 +214,6 @@ pub fn cef_scheme_flags() -> u32 {
         | CEF_SCHEME_OPTION_LOCAL as u32
         | CEF_SCHEME_OPTION_CORS_ENABLED as u32
         | CEF_SCHEME_OPTION_FETCH_ENABLED as u32
-}
-
-/// Insert `<base href="...">` immediately after the first `<head>` so a document
-/// served on the `files://` scheme resolves relative asset URLs against the
-/// embedded `vmux://` scheme instead of the file's own directory.
-pub fn inject_base_href(html: &str, base: &str) -> String {
-    if html.contains("<base ") {
-        return html.to_string();
-    }
-    let tag = format!(r#"<base href="{base}">"#);
-    if let Some(idx) = html.find("<head>") {
-        let cut = idx + "<head>".len();
-        let mut out = String::with_capacity(html.len() + tag.len());
-        out.push_str(&html[..cut]);
-        out.push_str(&tag);
-        out.push_str(&html[cut..]);
-        out
-    } else {
-        format!("{tag}{html}")
-    }
-}
-
-#[cfg(test)]
-mod files_scheme_tests {
-    use super::*;
-
-    #[test]
-    fn injects_base_after_head() {
-        let html = "<!doctype html><html><head><title>x</title></head><body></body></html>";
-        let out = inject_base_href(html, "vmux://files/");
-        assert!(out.contains(r#"<base href="vmux://files/">"#));
-        let head = out.find("<head>").unwrap();
-        let base = out.find("<base").unwrap();
-        let title = out.find("<title>").unwrap();
-        assert!(head < base && base < title);
-    }
-
-    #[test]
-    fn no_head_falls_back_to_prepending() {
-        let html = "<html><body>hi</body></html>";
-        let out = inject_base_href(html, "vmux://files/");
-        assert!(out.contains(r#"<base href="vmux://files/">"#));
-    }
-
-    #[test]
-    fn idempotent_when_base_present() {
-        let html = r#"<head><base href="vmux://files/"></head>"#;
-        let out = inject_base_href(html, "vmux://files/");
-        assert_eq!(out.matches("<base").count(), 1);
-    }
 }
 
 pub fn debug_chromium_libraries_path() -> PathBuf {

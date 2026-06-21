@@ -83,7 +83,15 @@ pub(crate) fn asset_load_path_from_request_url_with(
     const EMBEDDED_LEAF: &str = "embedded/";
     const EMBEDDED_SCHEME: &str = "embedded://";
 
-    if url.starts_with("files://") {
+    // We override the built-in `file` scheme: the editor SPA is addressed as
+    // `file:///abs/path`. Serve the app's own assets (`/wasm/*`, `/assets/*`) same-scheme
+    // from the embedded `files` host; every other `file://` path is a document navigation
+    // and gets the SPA shell (the real source file's bytes arrive over the bin bridge).
+    if let Some(after) = url.strip_prefix("file://") {
+        let path = after.split(['?', '#']).next().unwrap_or(after);
+        if path.starts_with("/wasm/") || path.starts_with("/assets/") {
+            return format!("{EMBEDDED_SCHEME}files{path}");
+        }
         return format!("{EMBEDDED_SCHEME}files/index.html");
     }
 
@@ -309,7 +317,6 @@ impl ImplResourceHandler for LocalResourceHandlerBuilder {
             *handle_request = 0;
         }
         let url = request.url().into_string();
-        let is_files_doc = url.starts_with("files://");
         let uri = asset_load_path_from_request_url(&url);
         webview_debug_log(format!("scheme open url={url} uri={uri} range={range:?}"));
         let requester = self.requester.clone();
@@ -324,15 +331,7 @@ impl ImplResourceHandler for LocalResourceHandlerBuilder {
                         responser: Responser(tx),
                     })
                     .await;
-                let mut response = rx.recv().await.unwrap_or_default();
-                if is_files_doc && range.is_none() && response.mime_type.starts_with("text/html") {
-                    let html = String::from_utf8_lossy(&response.data).into_owned();
-                    let base = format!(
-                        "{}files/",
-                        resolved_cef_embedded_page_config().scheme_prefix()
-                    );
-                    response.data = crate::util::inject_base_href(&html, &base).into_bytes();
-                }
+                let response = rx.recv().await.unwrap_or_default();
                 webview_debug_log(format!(
                     "scheme response uri={uri} status={} mime={} len={}",
                     response.status_code,

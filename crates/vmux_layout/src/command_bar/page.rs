@@ -128,7 +128,7 @@ pub fn Page() -> Element {
             || trimmed.starts_with('/')
             || trimmed.starts_with('~')
             || trimmed.starts_with("vmux://")
-            || trimmed.starts_with("files:")
+            || trimmed.starts_with("file:")
         {
             history_suggestions.set(Vec::new());
             return;

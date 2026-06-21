@@ -1,14 +1,17 @@
-# Text Editor — `files://` Read-Only IDE Viewer (v1)
+# Text Editor — `file://` Read-Only IDE Viewer (v1)
 
 Date: 2026-06-21
 Status: Approved design, pre-plan
+Scheme revised 2026-06-21: use the real `file://` scheme (override the built-in CEF
+scheme with our own handler factory) instead of a custom `files://` scheme — see "Why
+overriding `file://` costs more" and §1. Internal host id stays `"files"`.
 
 ## Goal
 
 First step of the text editor feature: render a file's contents in a vim/VSCode-style
 page — path header, line-number gutter, monospace content, syntax highlighting —
-addressed by a genuine `files://` custom scheme and streamed with terminal-style
-server-owned viewport virtualization.
+addressed by the real `file://` scheme (overridden with our own CEF handler factory) and
+streamed with terminal-style server-owned viewport virtualization.
 
 Read-only. Editing, file tree, watch/live-reload, and LSP are explicitly out of scope.
 
@@ -16,25 +19,31 @@ Read-only. Editing, file tree, watch/live-reload, and LSP are explicitly out of 
 
 | Decision | Choice |
 | --- | --- |
-| URL scheme | Real top-level `files://` custom CEF scheme (e.g. `files:///Users/me/src/main.rs`) |
+| URL scheme | Override the built-in `file://` scheme with our own CEF handler factory (e.g. `file:///Users/me/src/main.rs`); internal host id `"files"` |
 | v1 scope | Read-only viewer + line numbers + path header + **syntax highlighting** |
 | Virtualization | Server-owned viewport (terminal-style); backend streams only the visible window |
 | Highlighter | `syntect` (native/backend side only) |
 
-## Why the real scheme costs more (consequences)
+## Why overriding `file://` costs more (consequences)
 
-The existing built-in pages are served at `vmux://<host>/` and selected by host. A real
-`files://` scheme bypasses that, with two direct consequences:
+The existing built-in pages are served at `vmux://<host>/` and selected by host. We
+override the built-in `file://` scheme with our own CEF handler factory instead, which has
+three direct consequences:
 
 1. **Page routing.** The shared WASM app selects its page from
-   `window.location.host()` (`vmux_server/src/lib.rs:66`). `files:///path` has **no
-   host**. Routing must switch to `location.protocol === "files:"`, and the file path is
-   read from `location.pathname`.
-2. **Relative assets.** `index.html` references assets relatively (`./wasm/...`,
-   `./assets/...`). Under a `files:///Users/me/x.rs` base they resolve to
-   `files:///Users/me/wasm/...`. Fix: the `files://` scheme handler injects
-   `<base href="vmux://files/">` so assets load via the existing (working) embedded
-   scheme, while the document stays on `files://` for path + routing.
+   `window.location.host()` (`vmux_server/src/lib.rs:66`). `file:///path` has **no
+   host**. Routing must switch to `location.protocol === "file:"` (mapping to the internal
+   host id `"files"`), and the file path is read from `location.pathname`.
+2. **No cross-scheme assets.** A `file://` document gets Chromium's locked-down file
+   origin — it cannot pull subresources cross-scheme from `vmux://` (the built-in `file`
+   scheme's CORS/secure flags are baked into Chromium and are **not** ours to change, even
+   with the fork). So `index.html` and **all** of `./wasm/*`, `./assets/*` must be served
+   **same-scheme** by the `file` handler itself (root-absolute refs), never touching
+   `vmux://`.
+3. **File-origin fetch.** `fetch()` / `WebAssembly.instantiateStreaming` of a `file://`
+   subresource needs the `--allow-file-access-from-files` switch plus a correct
+   `Content-Type` (`application/wasm`) from the handler. **This is the primary spike —
+   validate it before building anything else.**
 
 ## Architecture
 
@@ -46,31 +55,43 @@ New crate **`vmux_editor`**, mirroring `vmux_terminal`:
 No separate host process (unlike the terminal's `vmux_service` PTY host) — a file read
 is in-process.
 
-### 1. Scheme registration + handler (`patches/bevy_cef_core-0.5.2`)
+### 1. Scheme override + handler (`patches/bevy_cef_core-0.5.2`)
 
-- `browser_process/app.rs:92` (`on_register_custom_schemes`): register a second custom
-  scheme `files` alongside the existing embedded scheme. Flags: standard + secure +
-  CORS-enabled, so a `files://` document may pull assets cross-scheme from `vmux://`.
-- New `SchemeHandlerFactory` for `files://` in `browser_process/localhost.rs`: serve the
-  shared `index.html` for the document request, with `<base href="vmux://files/">`
-  injected into `<head>`. The handler does **not** read the target file — file content
-  arrives over the rkyv bin bridge (§4).
-- **Fallback** if cross-scheme asset loading fails CORS/secure checks: serve `/wasm/*`
-  and `/assets/*` from embedded assets inside the `files` handler itself, and serve
-  `index.html` (rewritten to root-absolute asset refs) for any other path. This keeps
-  everything on `files://` at the cost of asset/document branching in the handler.
+We own the binding layer, so we override the built-in `file` scheme rather than adding a
+new custom one:
 
-This is the primary technical risk; validate the `<base>` approach first, fall back if needed.
+- `browser_process/app.rs` (`on_register_custom_schemes` / scheme registrar): register a
+  `CefSchemeHandlerFactory` for the built-in `"file"` scheme. (You can replace the handler
+  for a built-in scheme, but you **cannot** re-flag its CORS/secure policy via
+  `AddCustomScheme` — only the bytes are ours.)
+- New `SchemeHandlerFactory` for `file://` in `browser_process/localhost.rs`: serve the
+  shared `index.html` for a document request, and serve `/wasm/*` and `/assets/*` from the
+  embedded assets **same-scheme** (root-absolute refs in `index.html`). The handler does
+  **not** read the target source file — file content arrives over the rkyv bin bridge (§4).
+- **Bridge gate:** extend the render-process trust check (`has_embedded_scheme` in the
+  patched `render_process/cef_api_handler.rs`) to also trust `file://`, so `window.cef`
+  (binEmit/binListen) is injected into the file document.
+- **Launch switch:** add `--allow-file-access-from-files` so the file document may
+  `fetch()` its same-scheme wasm/js/css.
+
+**Global-hijack caveat:** a factory for `file` intercepts **every** `file://` request in
+the browser. Acceptable only because vmux does not otherwise load raw local files; revisit
+if that changes. (A custom `files://` scheme would avoid this collision — keep it as the
+fallback if the spike below fails.)
+
+The `file://` origin policy + wasm-load path is the primary technical risk; spike
+consequence (3) above before building the rest.
 
 ### 2. App page routing (`vmux_server/src/lib.rs`)
 
-- `current_host()`: if `location.protocol() == "files:"`, return `"files"`.
+- `current_host()`: if `location.protocol() == "file:"`, return `"files"` (the internal
+  host id stays `"files"`).
 - Add `render_files: "files" => vmux_editor::page::Page` to the page-render macro.
 
 ### 3. Native page-open handler (`vmux_editor`, in `PageOpenSet::HandleKnownPages`)
 
-- Match `task.url.starts_with("files:")` → clear stack children, attach a CEF webview to
-  the `files://` URL (reuse the existing `attach_cef_page` path so the SPA loads), and
+- Match `task.url.starts_with("file:")` → clear stack children, attach a CEF webview to
+  the `file://` URL (reuse the existing `attach_cef_page` path so the SPA loads), and
   spawn a backend `FileView { path }` entity bound to that webview. Insert
   `PageOpenHandled`.
 - Parse the path from the URL (percent-decoded). Guards (→ `FILE_ERROR_EVENT`):
@@ -129,16 +150,16 @@ Mirrors `vmux_terminal::page::Page`:
 
 ### 7. Layout glue (`vmux_layout`)
 
-- `snapshot.rs:140` (`build_stack`): add `files:` → kind `"files"`.
-- `page.rs` `StackIcon`: a document/file icon for `files:` URLs.
-- `page.rs` `format_address`: show the file path for `files:` URLs (like the `vmux://`
+- `snapshot.rs:140` (`build_stack`): add `file:` → kind `"files"`.
+- `page.rs` `StackIcon`: a document/file icon for `file:` URLs.
+- `page.rs` `format_address`: show the file path for `file:` URLs (like the `vmux://`
   branch returns the raw URL).
-- `command_bar/page.rs:130`: treat a `files:` input as a navigable URL, not a search query.
+- `command_bar/page.rs:130`: treat a `file:` input as a navigable URL, not a search query.
 
 ### Opening a file (v1)
 
 By URL only: address bar, the `open` command, or MCP `open` with
-`url=files:///abs/path`. A dedicated "open file" command / picker is later scope.
+`url=file:///abs/path`. A dedicated "open file" command / picker is later scope.
 
 ## Testing (TDD)
 
@@ -152,9 +173,12 @@ Native (`cargo test -p vmux_editor`, `-p vmux_layout`):
 - `vmux_layout`: `build_stack` kind for `files:`; `format_address` for `files:`.
 
 Scheme (`patches/bevy_cef_core-0.5.2`):
-- `files://` document request → served `index.html` contains `<base href="vmux://files/">`.
-- Fallback branch: `/wasm/*` and `/assets/*` map to embedded asset paths; other paths →
-  index.html.
+- `file://` document request → served the shared `index.html` with root-absolute asset
+  refs (no `vmux://` references).
+- `file://` `/wasm/*` and `/assets/*` requests → mapped to embedded asset bytes with the
+  correct `Content-Type` (`application/wasm` for wasm).
+- Spike (manual, pre-build): a factory-served `file://` wasm subresource instantiates
+  under `--allow-file-access-from-files`.
 
 Frontend (pure helpers, like `render_model.rs` tests):
 - Gutter width from `total_lines`.
@@ -163,8 +187,11 @@ Frontend (pure helpers, like `render_model.rs` tests):
 
 ## Risks
 
-1. **Cross-scheme asset loading** (document on `files://`, assets on `vmux://`) — the main
-   uncertainty. Mitigation: correct scheme flags; fallback handler in §1.
+1. **`file://` origin + wasm load** — Chromium's built-in file origin blocks cross-scheme
+   assets, so everything is served same-scheme by our handler behind
+   `--allow-file-access-from-files`. The unproven part is wasm instantiate on a
+   factory-served `file://` subresource. Mitigation: spike consequence (3)/§1 before
+   building; a custom `files://` scheme remains the fallback if the spike fails.
 2. **Patched CEF crate** edit → run the appropriate package checks (per AGENTS.md).
 3. **Whole-file highlight memory** on very large files → size cap for v1; lazy
    highlighting later.

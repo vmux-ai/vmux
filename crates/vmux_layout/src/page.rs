@@ -184,7 +184,7 @@ fn favicon_src_for_tab(tab: &TabRow) -> Option<String> {
 }
 
 fn format_address(stack: &StackRow) -> String {
-    if stack.url.starts_with("vmux://") || stack.url.starts_with("files:") {
+    if stack.url.starts_with("vmux://") || stack.url.starts_with("file:") {
         return stack.url.clone();
     }
     let host = host_for_favicon_fallback(&stack.url);
@@ -328,7 +328,7 @@ fn StackIcon(
                 path { d: "M4 17 10 11 4 5" }
                 path { d: "M12 19h8" }
             }
-        } else if url.starts_with("files:") {
+        } else if url.starts_with("file:") {
             Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                 path { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }
                 path { d: "M14 2v6h6" }

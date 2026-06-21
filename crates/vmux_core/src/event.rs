@@ -17,7 +17,6 @@ pub const FILE_VIEWPORT_EVENT: &str = "file_viewport";
 pub const FILE_ERROR_EVENT: &str = "file_error";
 pub const FILE_RESIZE_EVENT: &str = "file_resize";
 pub const FILE_SCROLL_EVENT: &str = "file_scroll";
-pub const FILE_PAGE_SCHEME: &str = "files";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
 #[derive(

@@ -87,6 +87,10 @@ impl ImplApp for BrowserProcessAppBuilder {
         for (name, value) in &self.config.switch_values {
             command_line.append_switch_with_value(Some(&(*name).into()), Some(&(*value).into()));
         }
+
+        // The file:// document (text editor) loads its same-scheme wasm/js/css via
+        // fetch/module scripts; Chromium blocks file->file subresource access without this.
+        command_line.append_switch(Some(&"allow-file-access-from-files".into()));
     }
 
     fn on_register_custom_schemes(&self, registrar: Option<&mut SchemeRegistrar>) {
@@ -94,10 +98,6 @@ impl ImplApp for BrowserProcessAppBuilder {
             registrar.add_custom_scheme(Some(&SCHEME_CEF.into()), cef_scheme_flags() as _);
             let cfg = crate::util::resolved_cef_embedded_page_config();
             registrar.add_custom_scheme(Some(&cfg.scheme.as_str().into()), cef_scheme_flags() as _);
-            registrar.add_custom_scheme(
-                Some(&crate::util::FILES_SCHEME.into()),
-                cef_scheme_flags() as _,
-            );
         }
     }
 

@@ -134,7 +134,7 @@ fn build_node(
 fn stack_kind_for_url(url: &str) -> &'static str {
     if url.starts_with("vmux://terminal/") {
         "terminal"
-    } else if url.starts_with("files:") {
+    } else if url.starts_with("file:") {
         "files"
     } else {
         "browser"
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn files_url_maps_to_files_kind() {
-        assert_eq!(stack_kind_for_url("files:///a/b.rs"), "files");
+        assert_eq!(stack_kind_for_url("file:///a/b.rs"), "files");
         assert_eq!(stack_kind_for_url("vmux://terminal/"), "terminal");
         assert_eq!(stack_kind_for_url("https://x.com"), "browser");
     }
