@@ -12,7 +12,128 @@ pub const TERM_THEME_EVENT: &str = "term_theme";
 pub const TERM_TITLE_EVENT: &str = "term_title";
 pub const TERM_LOADING_EVENT: &str = "term_loading";
 pub const SERVICE_UNAVAILABLE_EVENT: &str = "service_unavailable";
+pub const FILE_META_EVENT: &str = "file_meta";
+pub const FILE_VIEWPORT_EVENT: &str = "file_viewport";
+pub const FILE_ERROR_EVENT: &str = "file_error";
+pub const FILE_RESIZE_EVENT: &str = "file_resize";
+pub const FILE_SCROLL_EVENT: &str = "file_scroll";
+pub const FILE_PAGE_SCHEME: &str = "files";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
+
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct StyledSpan {
+    pub text: String,
+    pub fg: [u8; 3],
+    pub bold: bool,
+    pub italic: bool,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct FileLine {
+    pub line_no: u32,
+    pub spans: Vec<StyledSpan>,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct FileMetaEvent {
+    pub path: String,
+    pub language: String,
+    pub total_lines: u32,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct FileViewportPatch {
+    pub first_line: u32,
+    pub total_lines: u32,
+    pub lines: Vec<FileLine>,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct FileErrorEvent {
+    pub message: String,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Default, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct FileResizeEvent {
+    pub char_height: f32,
+    pub viewport_height: f32,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct FileScrollEvent {
+    pub top_line: u32,
+}
+
+#[cfg(test)]
+mod file_event_tests {
+    use super::*;
+
+    #[test]
+    fn file_viewport_patch_rkyv_roundtrip() {
+        let patch = FileViewportPatch {
+            first_line: 100,
+            total_lines: 5000,
+            lines: vec![FileLine {
+                line_no: 100,
+                spans: vec![StyledSpan {
+                    text: "fn main() {".into(),
+                    fg: [220, 220, 170],
+                    bold: false,
+                    italic: false,
+                }],
+            }],
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&patch).expect("ser");
+        let decoded =
+            rkyv::from_bytes::<FileViewportPatch, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(decoded.first_line, 100);
+        assert_eq!(decoded.total_lines, 5000);
+        assert_eq!(decoded.lines[0].line_no, 100);
+        assert_eq!(decoded.lines[0].spans[0].text, "fn main() {");
+        assert_eq!(decoded.lines[0].spans[0].fg, [220, 220, 170]);
+    }
+
+    #[test]
+    fn file_scroll_and_resize_roundtrip() {
+        let s = FileScrollEvent { top_line: 42 };
+        let b = rkyv::to_bytes::<rkyv::rancor::Error>(&s).unwrap();
+        assert_eq!(
+            rkyv::from_bytes::<FileScrollEvent, rkyv::rancor::Error>(&b)
+                .unwrap()
+                .top_line,
+            42
+        );
+        let r = FileResizeEvent {
+            char_height: 16.0,
+            viewport_height: 480.0,
+        };
+        let b = rkyv::to_bytes::<rkyv::rancor::Error>(&r).unwrap();
+        let d = rkyv::from_bytes::<FileResizeEvent, rkyv::rancor::Error>(&b).unwrap();
+        assert_eq!(d.char_height, 16.0);
+        assert_eq!(d.viewport_height, 480.0);
+    }
+}
 
 #[derive(
     Debug,
