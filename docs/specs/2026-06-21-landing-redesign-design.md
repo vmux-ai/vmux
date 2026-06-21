@@ -93,28 +93,43 @@ the docs shell) into a focused module tree. Filename-based modules only (no
 - `website/src/landing/cta.rs`
 - `website/src/hooks.rs` — unchanged; `use_dmg_download` / `use_clipboard_copy` /
   `use_is_mac` reused by Hero + CTA.
-- `website/tailwind.input.css` — aurora tokens; `@keyframes` (fade-up, parallax-y,
-  float, split, morph); scroll-driven utility classes wrapped in `@supports`;
-  `prefers-reduced-motion` guard; `.glass` / `.grain` / `.aurora` / pinned-track
-  + sticky-stage component classes.
+- `website/tailwind.input.css` — kept minimal. Only what utilities can't express:
+  aurora color tokens, and `@theme` `--animate-*` + `@keyframes` (fade-up,
+  parallax-y, float, split, morph) so they're usable as `animate-*` utilities.
+  No bespoke component classes for layout/glass/aurora — those are utilities (see
+  below). At most a single `.grain` helper if the noise data-URI is too unwieldy
+  inline.
 
 Const note: `ICON`/`GITHUB_URL`/`INSTALL_CMD` move to `landing.rs`; if
 `main.rs`/docs still need any, re-export from there.
 
-## CSS mechanics (pure-CSS scroll-driven)
+## Animation mechanics (Tailwind-first)
 
-- **Reveal:** default state = visible/end. Inside
-  `@supports (animation-timeline: view())`: `animation: fade-up linear both;
-  animation-timeline: view(); animation-range: entry 0% cover 30%;`.
-- **Parallax:** per-layer `animation: parallax-y linear both;
-  animation-timeline: view();` translating Y by view progress (`translate3d`,
-  GPU).
-- **Pinned scenes:** track `min-h-[300vh]` with `scroll-timeline-name: --scene`
-  (or `view-timeline-name`); inner stage `position: sticky; top: 0;` full-height;
-  stage children animate with `animation-timeline: --scene` to scrub the
-  split/morph. Sticky is universal; named timelines need Safari 26+ (accepted).
-- **Reduced motion:** `@media (prefers-reduced-motion: reduce)` disables all
-  scroll animations; defaults already show final states.
+Maximize Tailwind: express animation through utilities, arbitrary properties, and
+variants in the RSX `class:` attributes. Custom CSS is limited to `@theme`
+keyframes/tokens (above). Patterns:
+
+- **Keyframes as utilities:** define `--animate-fade-up` etc. in `@theme`, apply
+  with `animate-fade-up` / `animate-float`.
+- **Bind to scroll via arbitrary properties + `supports-*` variant** (Tailwind
+  emits the `@supports` wrapper, so the animation only engages where supported):
+  - Reveal: `supports-[animation-timeline:view()]:[animation-timeline:view()]`
+    `[animation-range:entry_0%_cover_30%]`.
+  - Parallax: same `view()` timeline on a `translate3d` keyframe layer.
+- **Default = end state via utilities:** `opacity-100 translate-y-0` so
+  unsupported browsers (and SSR first paint) show the finished layout; the
+  animation only overrides under the `supports-*` variant.
+- **Reduced motion:** the built-in `motion-reduce:` variant —
+  `motion-reduce:animate-none motion-reduce:[animation-timeline:none]`. No custom
+  media query needed.
+- **Pinned scenes:** track `min-h-[300vh] [scroll-timeline-name:--scene]`; sticky
+  stage `sticky top-0 h-screen`; scrubbed children
+  `[animation-timeline:--scene]` + `animate-*`. Sticky is universal; named
+  timelines need Safari 26+ (accepted).
+- **Glass / aurora / grain via utilities:** glass = `bg-white/5 backdrop-blur
+  border border-white/10`; aurora blobs = positioned `blur-3xl` divs with
+  `bg-aurora-violet`/`bg-aurora-cyan`/`bg-accent` + `animate-float`; bloom
+  backdrops = `bg-[radial-gradient(...)]` arbitrary values.
 
 ## Error handling
 
