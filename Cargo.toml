@@ -83,6 +83,7 @@ portable-pty = "0.9"
 rfd = "0.15"
 rkyv = { version = "0.8", features = ["alloc"] }
 uuid = { version = "1", features = ["v4", "serde", "js"] }
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 
 # Dev builds of a Bevy + CEF app are unusably slow without optimizing dependencies.
 # Our crates stay at opt-level 1 for fast rebuilds; all deps compile at 3 (cached).
