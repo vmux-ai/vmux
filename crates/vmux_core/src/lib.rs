@@ -14,6 +14,8 @@ pub mod terminal;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod agent;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod team;
+#[cfg(not(target_arch = "wasm32"))]
 pub use page_open::{
     CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,
     PageOpenTarget, PageOpenTask,
