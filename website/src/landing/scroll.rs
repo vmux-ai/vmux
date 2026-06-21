@@ -3,6 +3,14 @@ use wasm_bindgen::prelude::Closure;
 use web_sys::HtmlElement;
 
 pub fn init() {
+    use std::cell::Cell;
+    thread_local! {
+        static INITED: Cell<bool> = const { Cell::new(false) };
+    }
+    if INITED.with(|c| c.replace(true)) {
+        return;
+    }
+
     let Some(win) = web_sys::window() else {
         return;
     };
@@ -54,6 +62,7 @@ pub fn init() {
         update();
         let cb = Closure::<dyn FnMut()>::new(update);
         let _ = win.add_event_listener_with_callback("scroll", cb.as_ref().unchecked_ref());
+        let _ = win.add_event_listener_with_callback("resize", cb.as_ref().unchecked_ref());
         cb.forget();
     }
 
