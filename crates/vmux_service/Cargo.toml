@@ -29,6 +29,7 @@ libc = "0.2"
 uuid = { workspace = true }
 tokio = { workspace = true }
 alacritty_terminal = { workspace = true }
+vte = "0.15"
 portable-pty = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
