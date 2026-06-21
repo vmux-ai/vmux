@@ -5,3 +5,5 @@ pub mod highlight;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod plugin;
+#[cfg(not(target_arch = "wasm32"))]
+pub use plugin::{EditorPlugin, FileView};

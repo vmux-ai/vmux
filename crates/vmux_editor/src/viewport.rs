@@ -19,6 +19,12 @@ pub fn rows_from_viewport(char_height: f32, viewport_height: f32) -> u16 {
     (viewport_height / char_height).floor() as u16
 }
 
+/// Index range into a buffer of `total` lines for the visible window.
+pub fn visible_slice(total: u32, top_line: u32, rows: u16) -> std::ops::Range<usize> {
+    let (first, end) = window_range(total, top_line, rows);
+    (first as usize)..(end as usize)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -55,5 +61,11 @@ mod tests {
         assert_eq!(rows_from_viewport(16.0, 480.0), 30);
         assert_eq!(rows_from_viewport(0.0, 480.0), 0);
         assert_eq!(rows_from_viewport(16.0, 8.0), 0);
+    }
+
+    #[test]
+    fn visible_slice_indices() {
+        assert_eq!(visible_slice(10, 8, 4), 6..10);
+        assert_eq!(visible_slice(0, 0, 10), 0..0);
     }
 }
