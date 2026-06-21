@@ -7,6 +7,7 @@ mod scenes;
 
 use dioxus::prelude::*;
 use hero::Hero;
+use pillars::Pillars;
 
 pub const ICON: Asset = asset!("/assets/icon.png");
 pub const GITHUB_URL: &str = "https://github.com/vmux-ai/vmux";
@@ -52,44 +53,8 @@ pub fn Landing() -> Element {
         div { id: "top",
             Banner {}
             Hero {}
-            Features {}
+            Pillars {}
             Footer {}
-        }
-    }
-}
-
-#[component]
-fn Features() -> Element {
-    let features = [
-        (
-            "Co-work with agents",
-            "People and agents build side by side in one shared space — from hands-on pairing to full autonomy, you set the balance.",
-        ),
-        (
-            "Browser simplicity, tmux power",
-            "Looks like the browser you already know; split, stack, and tile panes like tmux underneath.",
-        ),
-        (
-            "IDE power underneath",
-            "Keyboard-driven workflows and deep environment control — and agents drive the whole workspace over MCP.",
-        ),
-        (
-            "3D workspace",
-            "Powered by Bevy. Flip your panes into a live, GPU-rendered 3D scene — same workspace, still interactive.",
-        ),
-    ];
-
-    rsx! {
-        section { class: "max-w-3xl mx-auto py-12 px-8",
-            h2 { class: "text-center text-3xl mb-8", "Features" }
-            div { class: "grid grid-cols-1 md:grid-cols-2 gap-5",
-                for (title , desc) in features {
-                    div { class: "bg-surface border border-border rounded-xl p-6",
-                        h3 { class: "text-base mb-2 text-accent", "{title}" }
-                        p { class: "text-sm text-text-muted leading-relaxed", "{desc}" }
-                    }
-                }
-            }
         }
     }
 }
