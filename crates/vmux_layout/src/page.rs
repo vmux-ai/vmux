@@ -238,7 +238,6 @@ fn HeaderView(
                         NewTabButton {}
                     }
                 }
-                TeamFacepile { members: team }
             }
             div {
                 class: "{url_row_class}",
@@ -272,6 +271,7 @@ fn HeaderView(
                         active_row: active_row.clone(),
                         bg_color: active_bg_color.clone(),
                     }
+                    TeamFacepile { members: team }
                 }
             }
         }
