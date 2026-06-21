@@ -9,7 +9,7 @@ use coworking::Coworking;
 use dioxus::prelude::*;
 use hero::Hero;
 use pillars::Pillars;
-use scenes::LayoutScene;
+use scenes::{InputScene, LayoutScene};
 
 pub const ICON: Asset = asset!("/assets/icon.png");
 pub const GITHUB_URL: &str = "https://github.com/vmux-ai/vmux";
@@ -58,6 +58,7 @@ pub fn Landing() -> Element {
             Pillars {}
             Coworking {}
             LayoutScene {}
+            InputScene {}
             Footer {}
         }
     }

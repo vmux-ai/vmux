@@ -37,3 +37,63 @@ pub fn LayoutScene() -> Element {
         }
     }
 }
+
+struct Tier {
+    rank: &'static str,
+    title: &'static str,
+    body: &'static str,
+    range: &'static str,
+}
+
+const TIERS: &[Tier] = &[
+    Tier {
+        rank: "01",
+        title: "Talk or type",
+        body: "Direct the whole workspace in natural language. Type for precision, talk for hands-free speed.",
+        range: "entry 10% cover 35%",
+    },
+    Tier {
+        rank: "02",
+        title: "Keyboard shortcuts",
+        body: "Chrome-style for browsing, tmux-style <leader> commands for layout. High velocity, near-zero learning curve.",
+        range: "entry 30% cover 55%",
+    },
+    Tier {
+        rank: "03",
+        title: "Mouse",
+        body: "Plain, intuitive point-and-click that keeps everything grounded in predictable browser behavior.",
+        range: "entry 50% cover 75%",
+    },
+];
+
+#[component]
+pub fn InputScene() -> Element {
+    rsx! {
+        section { class: "relative min-h-[280vh] [scroll-timeline-name:--input] [scroll-timeline-axis:block]",
+            div { class: "sticky top-0 h-screen flex flex-col items-center justify-center px-6",
+                div { class: "max-w-2xl text-center mb-10",
+                    p { class: "text-sm uppercase tracking-[0.2em] text-accent mb-3", "Input" }
+                    h2 { class: "text-3xl sm:text-5xl font-bold tracking-tight mb-4",
+                        "Talk, type, click."
+                    }
+                    p { class: "text-text-muted leading-relaxed",
+                        "Interaction ordered from abstract delegation down to mechanical control."
+                    }
+                }
+                div { class: "w-full max-w-xl flex flex-col gap-4",
+                    for t in TIERS.iter() {
+                        div {
+                            class: "flex items-start gap-4 rounded-xl border border-white/10 bg-white/5 backdrop-blur p-5 [animation:fade-up_linear_both] [animation-timeline:--input] motion-reduce:animate-none supports-[animation-timeline:scroll()]:opacity-100",
+                            style: "animation-range: {t.range}",
+                            span { class: "text-accent font-mono text-sm pt-0.5", "{t.rank}" }
+                            div {
+                                h3 { class: "font-semibold mb-1", "{t.title}" }
+                                p { class: "text-sm text-text-muted leading-relaxed", "{t.body}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
