@@ -6,6 +6,7 @@ mod platform;
 mod scenes;
 
 use coworking::Coworking;
+use cta::Cta;
 use dioxus::prelude::*;
 use hero::Hero;
 use pillars::Pillars;
@@ -61,6 +62,7 @@ pub fn Landing() -> Element {
             LayoutScene {}
             InputScene {}
             Platform {}
+            Cta {}
             Footer {}
         }
     }
