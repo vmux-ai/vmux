@@ -76,6 +76,7 @@ pub struct Process {
     pub created_at: Instant,
     term: Term<ServiceEventProxy>,
     processor: Processor,
+    osc133: crate::osc133::Osc133Scanner,
     pty_writer: PtyInputWriter,
     master: Box<dyn portable_pty::MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -320,6 +321,7 @@ impl Process {
             created_at: Instant::now(),
             term,
             processor: Processor::new(),
+            osc133: crate::osc133::Osc133Scanner::new(),
             pty_writer: writer,
             master: pair.master,
             child,
@@ -1177,6 +1179,20 @@ impl Process {
                 break;
             };
             self.processor.advance(&mut self.term, &data);
+            for event in self.osc133.feed(&data) {
+                let kind = match event {
+                    crate::osc133::Osc133Event::CommandStart => {
+                        crate::protocol::CommandLifecycleKind::Started
+                    }
+                    crate::osc133::Osc133Event::CommandEnd(exit_code) => {
+                        crate::protocol::CommandLifecycleKind::Ended { exit_code }
+                    }
+                };
+                let _ = self.patch_tx.send(ServiceMessage::CommandLifecycle {
+                    process_id: self.id,
+                    kind,
+                });
+            }
             got_data = true;
         }
         if got_data && self.copy_mode.is_none() && self.selection.is_some() {
@@ -1720,6 +1736,41 @@ mod tests {
             process.poll();
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn poll_broadcasts_command_lifecycle_from_osc133() {
+        let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
+        let mut process = Process::new_with_wake(
+            ProcessId::new(),
+            "/bin/sh".to_string(),
+            vec!["-c".to_string(), "printf '\\033]133;D;0\\007'".to_string()],
+            String::new(),
+            vec![],
+            80,
+            24,
+            wake_tx,
+        )
+        .expect("spawn");
+        let mut rx = process.subscribe();
+
+        drain_process_output(&mut process, Duration::from_secs(2));
+
+        let mut saw_end = false;
+        while let Ok(msg) = rx.try_recv() {
+            if let ServiceMessage::CommandLifecycle {
+                kind: crate::protocol::CommandLifecycleKind::Ended { exit_code },
+                ..
+            } = msg
+            {
+                assert_eq!(exit_code, Some(0));
+                saw_end = true;
+            }
+        }
+        assert!(
+            saw_end,
+            "expected a CommandLifecycle Ended broadcast from OSC 133;D;0"
+        );
     }
 
     fn wait_for_snapshot_text(process: &mut Process, needle: &str) -> String {
