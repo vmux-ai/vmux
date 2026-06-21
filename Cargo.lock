@@ -9723,6 +9723,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_team"
+version = "0.0.16"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
+ "dioxus",
+ "rkyv",
+ "ron 0.8.1",
+ "serde",
+ "vmux_agent",
+ "vmux_command",
+ "vmux_core",
+ "vmux_layout",
+ "vmux_space",
+ "vmux_ui",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "vmux_terminal"
 version = "0.0.16"
 dependencies = [
