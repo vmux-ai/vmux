@@ -33,7 +33,7 @@ pub fn Pillars() -> Element {
             div { class: "grid grid-cols-1 md:grid-cols-3 gap-5",
                 for (i , p) in PILLARS.iter().enumerate() {
                     div {
-                        class: "rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-7 animate-fade-up supports-[animation-timeline:view()]:[animation-timeline:view()] supports-[animation-timeline:view()]:[animation-range:entry_0%_cover_35%] motion-reduce:animate-none",
+                        class: "rounded-2xl border border-white/10 bg-white/5 backdrop-blur p-7 animate-fade-up supports-[animation-timeline:view()]:[animation-timeline:view()] supports-[animation-timeline:view()]:[animation-range:entry_0px_cover_35%] motion-reduce:animate-none",
                         style: "animation-delay: {i * 120}ms",
                         h3 { class: "text-lg font-semibold text-accent mb-2", "{p.title}" }
                         p { class: "text-sm text-text-muted leading-relaxed", "{p.body}" }

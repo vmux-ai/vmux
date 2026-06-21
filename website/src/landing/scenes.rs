@@ -83,7 +83,7 @@ pub fn InputScene() -> Element {
                 div { class: "w-full max-w-xl flex flex-col gap-4",
                     for t in TIERS.iter() {
                         div {
-                            class: "flex items-start gap-4 rounded-xl border border-white/10 bg-white/5 backdrop-blur p-5 [animation:fade-up_linear_both] [animation-timeline:--input] motion-reduce:animate-none supports-[animation-timeline:scroll()]:opacity-100",
+                            class: "flex items-start gap-4 rounded-xl border border-white/10 bg-white/5 backdrop-blur p-5 opacity-100 motion-reduce:animate-none supports-[animation-timeline:scroll()]:[animation:fade-up_linear_both] supports-[animation-timeline:scroll()]:[animation-timeline:--input]",
                             style: "animation-range: {t.range}",
                             span { class: "text-accent font-mono text-sm pt-0.5", "{t.rank}" }
                             div {

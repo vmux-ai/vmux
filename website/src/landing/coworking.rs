@@ -5,7 +5,7 @@ pub fn Coworking() -> Element {
     rsx! {
         section { class: "relative max-w-5xl mx-auto px-6 py-24 sm:py-32",
             div { class: "grid grid-cols-1 md:grid-cols-2 gap-10 items-center",
-                div { class: "animate-fade-up supports-[animation-timeline:view()]:[animation-timeline:view()] supports-[animation-timeline:view()]:[animation-range:entry_0%_cover_40%] motion-reduce:animate-none",
+                div { class: "animate-fade-up supports-[animation-timeline:view()]:[animation-timeline:view()] supports-[animation-timeline:view()]:[animation-range:entry_0px_cover_40%] motion-reduce:animate-none",
                     p { class: "text-sm uppercase tracking-[0.2em] text-accent mb-3", "Co-working" }
                     h2 { class: "text-3xl sm:text-4xl font-bold tracking-tight mb-4",
                         "Build alongside your agents."

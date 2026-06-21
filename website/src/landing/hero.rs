@@ -14,9 +14,9 @@ pub fn Hero() -> Element {
     rsx! {
         section { class: "relative overflow-hidden text-center px-6 pt-24 pb-28 sm:pt-32 sm:pb-36",
             div { class: "pointer-events-none absolute inset-0 -z-10",
-                div { class: "absolute left-1/2 top-24 h-[28rem] w-[28rem] -translate-x-1/2 rounded-full bg-accent/30 blur-[120px] animate-float supports-[animation-timeline:scroll()]:[animation-timeline:scroll()] motion-reduce:animate-none" }
-                div { class: "absolute left-[20%] top-40 h-72 w-72 rounded-full bg-aurora-violet/25 blur-[100px] animate-float [animation-delay:-4s] motion-reduce:animate-none" }
-                div { class: "absolute right-[18%] top-32 h-72 w-72 rounded-full bg-aurora-cyan/20 blur-[100px] animate-float [animation-delay:-8s] motion-reduce:animate-none" }
+                div { class: "absolute left-1/2 top-24 h-[28rem] w-[28rem] -translate-x-1/2 rounded-full bg-accent/30 blur-[120px] animate-float motion-reduce:animate-none supports-[animation-timeline:scroll()]:[animation:parallax-up_linear_both] supports-[animation-timeline:scroll()]:[animation-timeline:scroll()]" }
+                div { class: "absolute left-[20%] top-40 h-72 w-72 rounded-full bg-aurora-violet/25 blur-[100px] animate-float [animation-delay:-4s] motion-reduce:animate-none supports-[animation-timeline:scroll()]:[animation:parallax-up_linear_both] supports-[animation-timeline:scroll()]:[animation-timeline:scroll()]" }
+                div { class: "absolute right-[18%] top-32 h-72 w-72 rounded-full bg-aurora-cyan/20 blur-[100px] animate-float [animation-delay:-8s] motion-reduce:animate-none supports-[animation-timeline:scroll()]:[animation:parallax-up_linear_both] supports-[animation-timeline:scroll()]:[animation-timeline:scroll()]" }
             }
             div { class: "relative mx-auto max-w-3xl animate-fade-up motion-reduce:animate-none",
                 img {
