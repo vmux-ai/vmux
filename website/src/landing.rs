@@ -9,6 +9,7 @@ use coworking::Coworking;
 use dioxus::prelude::*;
 use hero::Hero;
 use pillars::Pillars;
+use platform::Platform;
 use scenes::{InputScene, LayoutScene};
 
 pub const ICON: Asset = asset!("/assets/icon.png");
@@ -59,6 +60,7 @@ pub fn Landing() -> Element {
             Coworking {}
             LayoutScene {}
             InputScene {}
+            Platform {}
             Footer {}
         }
     }
