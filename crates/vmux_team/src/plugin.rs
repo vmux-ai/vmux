@@ -9,9 +9,12 @@ use vmux_core::event::team::{
 };
 use vmux_core::page::PageReady;
 use vmux_core::team::{Agent, Profile, User};
-use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
+use vmux_core::{
+    PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask, focus_pane_entity,
+};
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::space::{ActiveSpaceEntity, Space, space_of};
+use vmux_layout::stack::Stack;
 
 #[derive(Component)]
 struct Team;
@@ -274,12 +277,36 @@ fn reset_team_sent_on_page_ready(
     commands.entity(entity).remove::<TeamListSent>();
 }
 
+fn open_team_stack_in_space(
+    space: Entity,
+    stacks: &Query<(Entity, &PageMetadata), With<Stack>>,
+    child_of: &Query<&ChildOf>,
+    spaces: &Query<(), With<Space>>,
+) -> Option<Entity> {
+    stacks.iter().find_map(|(stack, meta)| {
+        (meta.url == TEAM_PAGE_URL && space_of(stack, child_of, spaces) == Some(space))
+            .then_some(stack)
+    })
+}
+
 fn on_team_command(
     _trigger: On<BinReceive<TeamCommandEvent>>,
     mut messages: ResMut<bevy::ecs::message::Messages<AppCommand>>,
     mut issued: ResMut<bevy::ecs::message::Messages<vmux_command::CommandIssued>>,
     user: Query<Entity, With<User>>,
+    active_space: Res<ActiveSpaceEntity>,
+    stacks: Query<(Entity, &PageMetadata), With<Stack>>,
+    child_of: Query<&ChildOf>,
+    spaces: Query<(), With<Space>>,
+    mut commands: Commands,
 ) {
+    if let Some(space) = active_space.0
+        && let Some(stack) = open_team_stack_in_space(space, &stacks, &child_of, &spaces)
+    {
+        focus_pane_entity(stack, &mut commands, &child_of);
+        return;
+    }
+
     let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
     let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
         url: Some(TEAM_PAGE_URL.to_string()),
@@ -289,4 +316,67 @@ fn on_team_command(
         command: cmd.clone(),
     });
     messages.write(cmd);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+
+    fn spawn_team_stack(world: &mut World, space: Entity) -> Entity {
+        world
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: TEAM_PAGE_URL.to_string(),
+                    ..default()
+                },
+                ChildOf(space),
+            ))
+            .id()
+    }
+
+    fn lookup(app: &mut App, space: Entity) -> Option<Entity> {
+        app.world_mut()
+            .run_system_once(
+                move |stacks: Query<(Entity, &PageMetadata), With<Stack>>,
+                      child_of: Query<&ChildOf>,
+                      spaces: Query<(), With<Space>>| {
+                    open_team_stack_in_space(space, &stacks, &child_of, &spaces)
+                },
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn finds_open_team_stack_in_active_space() {
+        let mut app = App::new();
+        let space = app.world_mut().spawn(Space).id();
+        let stack = spawn_team_stack(app.world_mut(), space);
+        assert_eq!(lookup(&mut app, space), Some(stack));
+    }
+
+    #[test]
+    fn ignores_team_stack_in_other_space() {
+        let mut app = App::new();
+        let active = app.world_mut().spawn(Space).id();
+        let other = app.world_mut().spawn(Space).id();
+        spawn_team_stack(app.world_mut(), other);
+        assert_eq!(lookup(&mut app, active), None);
+    }
+
+    #[test]
+    fn ignores_non_team_stack_in_active_space() {
+        let mut app = App::new();
+        let space = app.world_mut().spawn(Space).id();
+        app.world_mut().spawn((
+            Stack::default(),
+            PageMetadata {
+                url: "https://example.com".to_string(),
+                ..default()
+            },
+            ChildOf(space),
+        ));
+        assert_eq!(lookup(&mut app, space), None);
+    }
 }
