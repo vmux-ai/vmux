@@ -110,13 +110,14 @@ fn activate(id: &str) {
 fn TeamRow(member: TeamMemberRow, selected: bool) -> Element {
     let id = member.id.clone();
     let row_class = if selected {
-        "group flex cursor-pointer items-center gap-3 rounded-xl border border-foreground/25 bg-muted px-3 py-2.5"
+        "group flex cursor-pointer items-start gap-3 rounded-xl border border-foreground/25 bg-muted px-3 py-2.5"
     } else {
-        "group flex cursor-pointer items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors hover:border-border hover:bg-muted/50"
+        "group flex cursor-pointer items-start gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors hover:border-border hover:bg-muted/50"
     };
+    // Secondary line: the page title, unless it just repeats the name.
     let secondary = if member.is_user {
         "You".to_string()
-    } else if !member.title.is_empty() {
+    } else if !member.title.is_empty() && member.title != member.name {
         member.title.clone()
     } else {
         "Agent".to_string()
@@ -126,8 +127,8 @@ fn TeamRow(member: TeamMemberRow, selected: bool) -> Element {
         div {
             class: "{row_class}",
             onclick: move |_| activate(&id),
-            TeamAvatar { member: member.clone(), size: 40, ring_active: member.is_active }
-            div { class: "flex min-w-0 flex-1 flex-col gap-0.5",
+            TeamAvatar { member: member.clone(), size: 32, ring_active: member.is_active }
+            div { class: "flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5",
                 div { class: "flex min-w-0 items-center gap-2",
                     span { class: "truncate text-sm font-semibold text-foreground", "{member.name}" }
                     if member.is_active {
@@ -135,16 +136,16 @@ fn TeamRow(member: TeamMemberRow, selected: bool) -> Element {
                             "active"
                         }
                     }
+                    if member.is_running {
+                        span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400",
+                            span { class: "size-1.5 rounded-full bg-emerald-400 animate-pulse" }
+                            "running"
+                        }
+                    }
                 }
                 span { class: "truncate text-xs text-muted-foreground", "{secondary}" }
                 if !member.sid.is_empty() {
-                    span { class: "truncate font-mono text-[11px] text-muted-foreground/60", "{member.sid}" }
-                }
-            }
-            if member.is_running {
-                span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400",
-                    span { class: "size-1.5 rounded-full bg-emerald-400 animate-pulse" }
-                    "running"
+                    span { class: "truncate font-mono text-[11px] text-muted-foreground/55", "{member.sid}" }
                 }
             }
         }
