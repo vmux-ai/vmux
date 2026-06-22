@@ -177,6 +177,7 @@ fn toc_item(h: &markdown::Heading, effective: &str) -> Element {
 mod spy {
     use dioxus::prelude::*;
     use wasm_bindgen::JsCast;
+    use wasm_bindgen::JsValue;
     use wasm_bindgen::prelude::Closure;
 
     pub fn setup(mut active: Signal<String>) {
@@ -194,20 +195,36 @@ mod spy {
             let Ok(list) = scope.query_selector_all("h2[id], h3[id]") else {
                 return;
             };
-            let top = scope.get_bounding_client_rect().top();
+            let rect = scope.get_bounding_client_rect();
+            let line = rect.top() + rect.height() * 0.3;
             let mut current = String::new();
             for i in 0..list.length() {
-                if let Some(node) = list.item(i) {
-                    if let Some(el) = node.dyn_ref::<web_sys::Element>() {
-                        if el.get_bounding_client_rect().top() - top <= 96.0 {
-                            current = el.id();
-                        }
+                if let Some(el) = list
+                    .item(i)
+                    .and_then(|n| n.dyn_into::<web_sys::Element>().ok())
+                {
+                    if el.get_bounding_client_rect().top() <= line {
+                        current = el.id();
                     }
                 }
             }
-            let changed = *active.peek() != current;
-            if !current.is_empty() && changed {
-                active.set(current);
+            let at_bottom = f64::from(scope.scroll_top()) + f64::from(scope.client_height())
+                >= f64::from(scope.scroll_height()) - 8.0;
+            if at_bottom && list.length() > 0 {
+                if let Some(el) = list
+                    .item(list.length() - 1)
+                    .and_then(|n| n.dyn_into::<web_sys::Element>().ok())
+                {
+                    current = el.id();
+                }
+            }
+            if current.is_empty() || *active.peek() == current {
+                return;
+            }
+            active.set(current.clone());
+            if let Ok(history) = win.history() {
+                let _ =
+                    history.replace_state_with_url(&JsValue::NULL, "", Some(&format!("#{current}")));
             }
         };
         update();
@@ -219,19 +236,62 @@ mod spy {
 
 #[component]
 fn DocsIndex() -> Element {
+    use_effect(|| {
+        #[cfg(target_arch = "wasm32")]
+        scroll_doc_top();
+    });
     doc_body("experience")
 }
 
 #[component]
 fn DocPage(slug: String) -> Element {
+    let s = slug.clone();
+    use_effect(use_reactive!(|s| {
+        let _ = &s;
+        #[cfg(target_arch = "wasm32")]
+        scroll_doc_top();
+    }));
     doc_body(&slug)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn scroll_doc_top() {
+    if let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id("doc-main"))
+    {
+        el.set_scroll_top(0);
+    }
 }
 
 fn doc_body(slug: &str) -> Element {
     match docs::find(slug) {
-        Some(d) => rsx! {
-            markdown::Markdown { content: d.content.to_string() }
-        },
+        Some(d) => {
+            let (prev, next) = docs::neighbors(d.slug);
+            rsx! {
+                markdown::Markdown { content: d.content.to_string() }
+                nav { class: "mt-16 grid grid-cols-2 gap-4 border-t border-border pt-8",
+                    if let Some(p) = prev {
+                        Link {
+                            class: "group flex flex-col gap-1 rounded-lg border border-border px-4 py-3 no-underline transition-colors hover:border-accent",
+                            to: Route::DocPage { slug: p.slug.to_string() },
+                            span { class: "text-xs text-text-muted", "← Previous" }
+                            span { class: "text-sm font-medium text-text group-hover:text-accent", "{p.title}" }
+                        }
+                    } else {
+                        span {}
+                    }
+                    if let Some(n) = next {
+                        Link {
+                            class: "group col-start-2 flex flex-col items-end gap-1 rounded-lg border border-border px-4 py-3 text-right no-underline transition-colors hover:border-accent",
+                            to: Route::DocPage { slug: n.slug.to_string() },
+                            span { class: "text-xs text-text-muted", "Next →" }
+                            span { class: "text-sm font-medium text-text group-hover:text-accent", "{n.title}" }
+                        }
+                    }
+                }
+            }
+        }
         None => rsx! {
             div { class: "py-12 text-center text-text-muted",
                 h1 { class: "text-2xl font-bold text-text mb-2", "Not found" }

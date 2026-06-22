@@ -260,7 +260,7 @@ fn render_node(n: &Node) -> Element {
         },
         Node::Text(t) => rsx! { "{t}" },
         Node::Code(t) => rsx! {
-            code { class: "font-mono text-[0.85em] bg-code-bg text-accent rounded px-1.5 py-0.5", "{t}" }
+            code { class: "font-mono text-[0.85em] bg-code-bg text-accent rounded-md border border-border px-1.5 py-0.5", "{t}" }
         },
         Node::Strong(ch) => rsx! { strong { class: "font-semibold text-text", {render_nodes(ch)} } },
         Node::Emphasis(ch) => rsx! { em { class: "italic", {render_nodes(ch)} } },

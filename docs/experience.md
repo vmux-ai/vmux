@@ -36,20 +36,19 @@ layout you imagine.
 
 ---
 
-## Input: talk, type, click
+## Input: Talk › Type › Click
 
 Vmux orders interaction from abstract delegation down to mechanical control.
 
-1. **Agent prompts — type or talk.** *First priority.* Direct the whole workspace in
-   natural language. **Type** for silent, high-precision tasks; **talk** for hands-free
-   speed and live layout manipulation.
-2. **Keyboard shortcuts.** *Second priority.* High-velocity control with near-zero
-   learning curve, split intentionally to avoid friction:
+1. **Talk.** *First priority.* Direct the whole workspace in natural language —
+   hands-free and conversational. Just say what you want and watch it happen.
+2. **Type.** *Second priority.* Keyboard shortcuts — high-velocity control with
+   near-zero learning curve, split intentionally to avoid friction:
    - **Chrome-style** — standard browser actions (open tabs, navigate history, refresh)
      use the native shortcuts you already know by heart.
    - **Tmux-style** — layout commands (split panes, switch windows, cycle layouts) use a
      powerful `<leader>`-prefixed scheme built for terminal efficiency.
-3. **Mouse.** *Third priority.* Plain, intuitive point-and-click that keeps Vmux
+3. **Click.** *Third priority.* Plain, intuitive point-and-click that keeps Vmux
    grounded in predictable browser behavior.
 
 ---

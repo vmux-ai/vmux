@@ -1,4 +1,4 @@
-# The render stack: one window, many web surfaces
+# 2D / 3D renderer: one window, many web surfaces
 
 > Part of the [Vmux Architecture](../architecture.md) overview.
 
