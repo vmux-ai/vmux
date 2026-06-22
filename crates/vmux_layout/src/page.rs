@@ -583,8 +583,21 @@ fn SideSheetView(
     rsx! {
         div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3 pt-2 text-foreground",
             if let Some(space) = active_space {
-                div { class: "mb-2 flex flex-col gap-px",
-                    SideSheetSpaceRow { key: "{space.id}", space }
+                div { class: "glass mb-2 flex flex-col overflow-hidden rounded-md",
+                    SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
+                    if !space.startup_dir.is_empty() {
+                        div { class: "flex items-center gap-1.5 border-t border-white/5 px-2 py-1.5 text-muted-foreground",
+                            Icon { class: "h-3.5 w-3.5 shrink-0",
+                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                            }
+                            span {
+                                class: "min-w-0 flex-1 truncate text-xs",
+                                style: "direction:rtl;",
+                                title: "{space.startup_dir}",
+                                bdi { style: "unicode-bidi:isolate;direction:ltr;", "{space.startup_dir}" }
+                            }
+                        }
+                    }
                 }
             }
             if let Some(err) = pane_tree_error {
@@ -609,7 +622,7 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: "glass group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-foreground",
+            class: "group flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-foreground hover:bg-white/5",
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&vmux_core::event::space::SpaceCommandEvent {
                     command: "open_page".to_string(),

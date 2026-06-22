@@ -169,9 +169,19 @@ type SpaceListQuery<'w, 's> = Query<
     With<vmux_layout::space::Space>,
 >;
 
+fn display_dir(path: &std::path::Path) -> String {
+    if let Some(home) = std::env::home_dir()
+        && let Ok(rel) = path.strip_prefix(&home)
+    {
+        return format!("~/{}", rel.to_string_lossy());
+    }
+    path.to_string_lossy().to_string()
+}
+
 fn space_rows_from_world(
     spaces: &SpaceListQuery,
     tab_q: &Query<(), With<vmux_layout::tab::Tab>>,
+    settings: Option<&vmux_setting::AppSettings>,
 ) -> Vec<SpaceRow> {
     let mut rows: Vec<(u32, SpaceRow)> = spaces
         .iter()
@@ -179,6 +189,9 @@ fn space_rows_from_world(
             let tab_count = children
                 .map(|c| c.iter().filter(|e| tab_q.contains(*e)).count())
                 .unwrap_or(0) as u32;
+            let startup_dir = settings
+                .map(|s| display_dir(&vmux_setting::resolve_startup_dir(s, &sid.0)))
+                .unwrap_or_default();
             (
                 order.map(|o| o.0).unwrap_or(u32::MAX),
                 SpaceRow {
@@ -187,6 +200,7 @@ fn space_rows_from_world(
                     profile: crate::model::BOOTSTRAP_PROFILE_NAME.to_string(),
                     is_active,
                     tab_count,
+                    startup_dir,
                 },
             )
         })
@@ -217,6 +231,7 @@ fn broadcast_spaces_to_views(
         ),
     >,
     browsers: NonSend<Browsers>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
     mut last_body: Local<String>,
     mut commands: Commands,
 ) {
@@ -226,7 +241,7 @@ fn broadcast_spaces_to_views(
         return;
     }
     let payload = SpacesListEvent {
-        spaces: space_rows_from_world(&spaces, &tab_q),
+        spaces: space_rows_from_world(&spaces, &tab_q, settings.as_deref()),
     };
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     let body_changed = body != *last_body;
