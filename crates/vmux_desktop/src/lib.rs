@@ -38,10 +38,10 @@ use bevy::window::{
 
 use {
     os_menu::OsMenuPlugin, persistence::PersistencePlugin, shortcut::ShortcutPlugin,
-    vmux_browser::BrowserPlugin, vmux_command::CommandPlugin, vmux_core::page::ServerPlugin,
-    vmux_editor::EditorPlugin, vmux_layout::LayoutPlugin, vmux_layout::cef::LayoutCefPlugin,
-    vmux_service::plugin::ServicePlugin, vmux_setting::SettingsPlugin, vmux_space::SpacePlugin,
-    vmux_terminal::TerminalPlugin,
+    vmux_browser::BrowserPlugin, vmux_command::CommandPlugin, vmux_command::WriteAppCommands,
+    vmux_core::page::ServerPlugin, vmux_editor::EditorPlugin, vmux_layout::LayoutPlugin,
+    vmux_layout::cef::LayoutCefPlugin, vmux_service::plugin::ServicePlugin,
+    vmux_setting::SettingsPlugin, vmux_space::SpacePlugin, vmux_terminal::TerminalPlugin,
 };
 
 use vmux_agent::AgentPlugin;
@@ -142,7 +142,9 @@ impl Plugin for VmuxPlugin {
             )
             .add_systems(
                 Update,
-                (screenshot::start_screenshots, screenshot::drain_screenshots),
+                (screenshot::start_screenshots, screenshot::drain_screenshots)
+                    .chain()
+                    .after(WriteAppCommands),
             );
 
         #[cfg(target_os = "macos")]

@@ -324,8 +324,9 @@ mod capture {
         if let Err(e) = std::fs::create_dir_all(&dir) {
             return err_response(request_id, format!("cannot create {}: {e}", dir.display()));
         }
+        let rid: String = request_id[..8].iter().map(|b| format!("{b:02x}")).collect();
         let path = dir.join(format!(
-            "vmux-{}.png",
+            "vmux-{}-{rid}.png",
             chrono::Local::now().format("%Y%m%d-%H%M%S-%3f")
         ));
         if let Err(e) = rgba.save(&path) {
@@ -345,6 +346,16 @@ mod capture {
         }
     }
 
+    fn os_at_least_14() -> bool {
+        use objc2_foundation::{NSOperatingSystemVersion, NSProcessInfo};
+        let version = NSOperatingSystemVersion {
+            majorVersion: 14,
+            minorVersion: 0,
+            patchVersion: 0,
+        };
+        NSProcessInfo::processInfo().isOperatingSystemAtLeastVersion(version)
+    }
+
     pub(crate) fn capture(
         window_entity: Entity,
         img_w: u32,
@@ -354,6 +365,14 @@ mod capture {
         tx: Sender<ScreenshotResponse>,
         wake: Option<WakeFn>,
     ) {
+        if !os_at_least_14() {
+            finish(
+                &tx,
+                &wake,
+                err_response(request_id, "screenshot requires macOS 14 or later"),
+            );
+            return;
+        }
         if !unsafe { CGPreflightScreenCaptureAccess() } {
             unsafe {
                 CGRequestScreenCaptureAccess();

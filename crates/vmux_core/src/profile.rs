@@ -38,7 +38,6 @@ pub fn config_dir() -> PathBuf {
     home.join(".vmux")
 }
 
-/// Screenshot output directory: `~/.vmux/screenshots`.
 pub fn screenshots_dir() -> PathBuf {
     config_dir().join("screenshots")
 }
