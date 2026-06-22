@@ -11,7 +11,8 @@ pub(crate) struct LayoutNativePlugin;
 
 impl Plugin for LayoutNativePlugin {
     fn build(&self, app: &mut App) {
-        app.init_non_send::<LayoutGlassState>()
+        app.insert_resource(LayoutRenderer::from_env())
+            .init_non_send::<LayoutGlassState>()
             .add_systems(Last, sync_layout_glass);
     }
 }
