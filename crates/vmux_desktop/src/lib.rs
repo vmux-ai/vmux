@@ -112,6 +112,8 @@ impl Plugin for VmuxPlugin {
                 EditorPlugin,
                 ServicePlugin,
                 SpacePlugin,
+            ))
+            .add_plugins((
                 vmux_team::TeamPlugin,
                 vmux_history::HistoryPlugin,
                 vmux_vibe_setup::VibeSetupPlugin,
