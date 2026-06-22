@@ -74,7 +74,7 @@ impl Rc for BrowserProcessAppBuilder {
 impl ImplApp for BrowserProcessAppBuilder {
     fn on_before_command_line_processing(
         &self,
-        _: Option<&CefString>,
+        process_type: Option<&CefString>,
         command_line: Option<&mut CommandLine>,
     ) {
         let Some(command_line) = command_line else {
@@ -91,6 +91,22 @@ impl ImplApp for BrowserProcessAppBuilder {
         // The file:// document (text editor) loads its same-scheme wasm/js/css via
         // fetch/module scripts; Chromium blocks file->file subresource access without this.
         command_line.append_switch(Some(&"allow-file-access-from-files".into()));
+
+        // Dev-only Chrome DevTools Protocol server (browser process only). Enable with
+        // VMUX_REMOTE_DEBUG_PORT=<port>; off otherwise.
+        let is_browser_process = process_type
+            .map(|p| p.to_string())
+            .unwrap_or_default()
+            .is_empty();
+        if is_browser_process
+            && let Ok(port) = std::env::var("VMUX_REMOTE_DEBUG_PORT")
+            && !port.is_empty()
+        {
+            command_line.append_switch_with_value(
+                Some(&"remote-debugging-port".into()),
+                Some(&port.as_str().into()),
+            );
+        }
     }
 
     fn on_register_custom_schemes(&self, registrar: Option<&mut SchemeRegistrar>) {
