@@ -145,6 +145,45 @@ pub fn diff_into_ops(
     last.0 = Some(current.0.clone());
 }
 
+fn renderer_is_native(renderer: Res<LayoutRenderer>) -> bool {
+    *renderer == LayoutRenderer::Native
+}
+
+pub fn update_current_layout_view(
+    tabs_q: Query<(Entity, &crate::tab::Tab, Option<&Children>)>,
+    splits_q: Query<(Entity, &crate::pane::PaneSplit, Option<&Children>), With<crate::pane::Pane>>,
+    leaves_q: Query<
+        (Entity, Option<&Children>),
+        (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>),
+    >,
+    stacks_q: Query<
+        (Entity, Option<&Children>, Option<&vmux_core::PageMetadata>),
+        With<crate::stack::Stack>,
+    >,
+    pane_sizes_q: Query<&crate::pane::PaneSize>,
+    zoomed_q: Query<&crate::pane::Zoomed>,
+    focused: Option<Res<crate::stack::FocusedStack>>,
+    mut current: ResMut<CurrentLayoutView>,
+) {
+    let Some(focused) = focused else {
+        return;
+    };
+    let snapshot = crate::snapshot::build_layout_snapshot(
+        &tabs_q,
+        &splits_q,
+        &leaves_q,
+        &stacks_q,
+        &pane_sizes_q,
+        &zoomed_q,
+        &focused,
+        None,
+    );
+    let view = LayoutView::from_snapshot(&snapshot);
+    if current.0 != view {
+        current.0 = view;
+    }
+}
+
 pub struct NativeViewPlugin;
 
 impl Plugin for NativeViewPlugin {
@@ -153,7 +192,14 @@ impl Plugin for NativeViewPlugin {
             .init_resource::<CurrentLayoutView>()
             .init_resource::<LastRenderedView>()
             .init_resource::<RecordedViewOps>()
-            .add_systems(Update, diff_into_ops);
+            .add_systems(
+                Update,
+                (
+                    update_current_layout_view.run_if(renderer_is_native),
+                    diff_into_ops,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -385,6 +431,54 @@ mod tests {
         assert_eq!(
             *app.world().resource::<LayoutRenderer>(),
             LayoutRenderer::Cef
+        );
+    }
+
+    #[test]
+    fn producer_builds_layout_view_from_ecs_when_native() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(NativeViewPlugin);
+        *app.world_mut().resource_mut::<LayoutRenderer>() = LayoutRenderer::Native;
+        let t = app
+            .world_mut()
+            .spawn(crate::tab::Tab {
+                name: "Work".into(),
+            })
+            .id();
+        app.world_mut().insert_resource(crate::stack::FocusedStack {
+            tab: Some(t),
+            ..default()
+        });
+        app.update();
+        let view = &app.world().resource::<CurrentLayoutView>().0;
+        assert_eq!(view.tabs.len(), 1);
+        assert_eq!(view.tabs[0].name, "Work");
+        assert!(view.tabs[0].is_active);
+    }
+
+    #[test]
+    fn producer_skips_when_cef() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(NativeViewPlugin);
+        let t = app
+            .world_mut()
+            .spawn(crate::tab::Tab {
+                name: "Work".into(),
+            })
+            .id();
+        app.world_mut().insert_resource(crate::stack::FocusedStack {
+            tab: Some(t),
+            ..default()
+        });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<CurrentLayoutView>()
+                .0
+                .tabs
+                .is_empty()
         );
     }
 }
