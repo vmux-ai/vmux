@@ -135,9 +135,14 @@ impl Plugin for VmuxPlugin {
 
         app.init_resource::<boot_status::SplashStatus>()
             .init_resource::<boot_status::RestoreComplete>()
+            .init_resource::<screenshot::ScreenshotBridge>()
             .add_systems(
                 Update,
                 boot_status::compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
+            )
+            .add_systems(
+                Update,
+                (screenshot::start_screenshots, screenshot::drain_screenshots),
             );
 
         #[cfg(target_os = "macos")]
