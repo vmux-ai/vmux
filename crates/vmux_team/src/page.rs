@@ -71,7 +71,14 @@ fn TeamRow(member: TeamMemberRow) -> Element {
             TeamAvatar { member: member.clone(), size: 32 }
             div { class: "flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5",
                 div { class: "flex min-w-0 items-center gap-2",
-                    span { class: "truncate text-sm font-semibold text-foreground", "{member.name}" }
+                    span {
+                        class: if member.is_user {
+                            "text-sm font-semibold text-foreground"
+                        } else {
+                            "truncate text-sm font-semibold text-foreground"
+                        },
+                        "{member.name}"
+                    }
                     if member.is_running {
                         span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400",
                             span { class: "size-1.5 rounded-full bg-emerald-400 animate-pulse" }

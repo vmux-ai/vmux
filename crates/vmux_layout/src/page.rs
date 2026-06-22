@@ -530,7 +530,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                         div {
                             key: "{m.id}",
                             title: "{m.name}",
-                            class: "relative inline-flex size-6 items-center justify-center overflow-hidden rounded-full ring-2 {ring} text-[10px] font-semibold text-white",
+                            class: "relative inline-flex size-5 items-center justify-center overflow-hidden rounded-full ring-2 {ring} text-[9px] font-semibold text-white",
                             style: "{bg}",
                             if let Some(src) = src.as_ref() {
                                 img { class: "size-full object-cover", src: "{src}" }
@@ -538,7 +538,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                                 "{m.initials}"
                             }
                             if m.is_running {
-                                span { class: "absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-emerald-400 ring-2 ring-background" }
+                                span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-emerald-400 ring-2 ring-background" }
                             }
                         }
                     }
@@ -546,7 +546,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
             }
             if overflow > 0 {
                 div {
-                    class: "relative inline-flex size-6 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[10px] font-medium text-muted-foreground",
+                    class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground",
                     "+{overflow}"
                 }
             }
