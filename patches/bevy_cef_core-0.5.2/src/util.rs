@@ -161,6 +161,11 @@ pub fn has_embedded_scheme(url: &str) -> bool {
 }
 
 pub fn is_trusted_embedded_page(url: &str) -> bool {
+    // We override the built-in file:// scheme to host the editor SPA, so file://
+    // documents are trusted for the bin IPC bridge (both directions).
+    if url.starts_with("file://") {
+        return true;
+    }
     let config = resolved_cef_embedded_page_config();
     url_is_trusted_embedded_page(url, config.scheme_prefix(), &config.hosts)
 }

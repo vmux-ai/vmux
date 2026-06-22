@@ -98,10 +98,10 @@ impl ImplApp for BrowserProcessAppBuilder {
             .map(|p| p.to_string())
             .unwrap_or_default()
             .is_empty();
-        if is_browser_process
-            && let Ok(port) = std::env::var("VMUX_REMOTE_DEBUG_PORT")
-            && !port.is_empty()
-        {
+        let debug_port = std::env::var("VMUX_REMOTE_DEBUG_PORT")
+            .ok()
+            .filter(|p| !p.is_empty());
+        if is_browser_process && let Some(port) = debug_port {
             command_line.append_switch_with_value(
                 Some(&"remote-debugging-port".into()),
                 Some(&port.as_str().into()),
