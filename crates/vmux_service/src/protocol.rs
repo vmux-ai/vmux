@@ -164,6 +164,9 @@ pub enum AgentQuery {
     },
     GetSettings,
     ListSpaces,
+    Screenshot {
+        pane: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -173,6 +176,12 @@ pub enum AgentQueryResult {
     Settings(String),
     Spaces(String),
     CommandExit { seq: u64, exit: Option<i32> },
+    Image {
+        path: String,
+        png: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
     Error(String),
 }
 
@@ -612,6 +621,35 @@ mod tests {
         let recovered: AgentQuery =
             rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(recovered, AgentQuery::ReadLayout { anchor: None });
+    }
+
+    #[test]
+    fn agent_query_screenshot_rkyv_round_trip() {
+        let q = AgentQuery::Screenshot {
+            pane: Some("pane:42".into()),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
+        let back: AgentQuery = rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, q);
+
+        let none = AgentQuery::Screenshot { pane: None };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&none).unwrap();
+        let back: AgentQuery = rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, none);
+    }
+
+    #[test]
+    fn agent_query_result_image_rkyv_round_trip() {
+        let r = AgentQueryResult::Image {
+            path: "/tmp/x.png".into(),
+            png: vec![1, 2, 3, 4],
+            width: 320,
+            height: 200,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&r).unwrap();
+        let back: AgentQueryResult =
+            rkyv::from_bytes::<AgentQueryResult, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, r);
     }
 
     #[test]
