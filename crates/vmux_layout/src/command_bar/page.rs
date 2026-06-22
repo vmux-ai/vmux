@@ -198,7 +198,7 @@ pub fn Page() -> Element {
     let is_new_tab = is_new_stack();
     let results = {
         let history = history_suggestions();
-        let mut r = filter_results(&q, &tabs, &commands, &spaces, &pages, is_new_tab, &history);
+        let r = filter_results(&q, &tabs, &commands, &spaces, &pages, is_new_tab, &history);
         let completions = if completion_query(&q).is_some() {
             path_completions()
         } else {
