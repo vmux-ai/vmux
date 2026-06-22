@@ -1047,7 +1047,7 @@ impl Browsers {
     pub fn raise_windowed_to_front(&self, _: &Entity) {}
 
     /// Set the `zPosition` of a windowed browser's native view (the liquid-glass container when
-    /// present). The layout chrome composites as a sibling `CALayer` at `zPosition` 100, and a plain
+    /// present). The layout composites as a sibling `CALayer` at `zPosition` 100, and a plain
     /// windowed view sits at 0 — so `raise_windowed_to_front` (subview order) cannot lift the
     /// command-bar modal above the sidebar/header overlay. A higher `zPosition` can.
     #[cfg(target_os = "macos")]

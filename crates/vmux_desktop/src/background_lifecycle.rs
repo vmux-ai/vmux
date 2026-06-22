@@ -353,11 +353,11 @@ fn event_location_in_window_physical_px(event: &objc2_app_kit::NSEvent) -> Optio
 /// `react_to_device_events` is off in browse (User) mode: native CEF views own scroll/input, so only
 /// Player mode's free camera consumes `AccumulatedMouseMotion`.
 ///
-/// At rest `react_to_window_events` is on so the layout chrome mesh + camera respond to window events
+/// At rest `react_to_window_events` is on so the layout mesh + camera respond to window events
 /// (sizing, focus). During a live resize it flips off and `wait` drops to ~16ms: the loop is paced by
 /// the timer at ~60Hz instead of rendering on every 120Hz `Resized`, capping the resize CPU spike.
 /// `Resized` still updates the `Window` on delivery, so the timer reads the latest size each tick and
-/// the chrome tracks the drag. `live_resize` is driven by [`install_live_resize_monitor`].
+/// the layout tracks the drag. `live_resize` is driven by [`install_live_resize_monitor`].
 pub(crate) fn foreground_winit_settings(player: bool, live_resize: bool) -> WinitSettings {
     let focused_mode = if live_resize {
         UpdateMode::Reactive {
@@ -634,7 +634,7 @@ mod tests {
             settings.unfocused_mode,
             UpdateMode::reactive_low_power(Duration::from_secs(1))
         );
-        // At rest, window-event wakes are on so the chrome mesh + camera respond to window events;
+        // At rest, window-event wakes are on so the layout mesh + camera respond to window events;
         // device-event wakes stay off in browse mode.
         assert!(!react_to_device_events);
         assert!(react_to_window_events);

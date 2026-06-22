@@ -840,7 +840,7 @@ fn sync_windowed_content_mesh_materials(
     }
 }
 
-/// The layout chrome renders on the OSR mesh in both modes: a wgpu quad that resizes with the Bevy
+/// The layout renders on the OSR mesh in both modes: a wgpu quad that resizes with the Bevy
 /// frame, so it tracks a live window resize (a native overlay cannot — its frame only updates from a
 /// Bevy schedule the macOS resize loop starves). Keep the material visible.
 ///
@@ -3238,7 +3238,7 @@ mod tests {
         assert_eq!(
             mat.base.base_color.alpha(),
             1.0,
-            "User mode renders the layout chrome via the mesh (CPU OSR) so it tracks live resize"
+            "User mode renders the layout via the mesh (CPU OSR) so it tracks live resize"
         );
         assert_eq!(mat.base.alpha_mode, AlphaMode::Blend);
     }

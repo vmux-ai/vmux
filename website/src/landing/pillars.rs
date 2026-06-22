@@ -191,7 +191,7 @@ fn tab(icon: Element, title: &str, active: bool) -> Element {
     }
 }
 
-fn chrome(frame: &str, tabs: Element, address: &str, body: Element) -> Element {
+fn browser_frame(frame: &str, tabs: Element, address: &str, body: Element) -> Element {
     rsx! {
         div { class: "flex h-64 flex-col overflow-hidden rounded-lg border {frame}",
             div { class: "flex items-center gap-1 px-2 pt-2",
@@ -215,7 +215,7 @@ fn chrome(frame: &str, tabs: Element, address: &str, body: Element) -> Element {
 
 fn art(kind: Art) -> Element {
     match kind {
-        Art::Coworking => chrome(
+        Art::Coworking => browser_frame(
             "border-accent/20 bg-[#0d0d18] shadow-xl shadow-accent/20",
             rsx! {
                 {tab(icon_bot("h-3 w-3 text-aurora-violet"), "vibe", true)}
@@ -239,7 +239,7 @@ fn art(kind: Art) -> Element {
                 }
             },
         ),
-        Art::Browser => chrome(
+        Art::Browser => browser_frame(
             "border-aurora-cyan/20 bg-[#0b1418] shadow-xl shadow-aurora-cyan/20",
             rsx! {
                 {tab(icon_globe("h-3 w-3 text-aurora-cyan"), "New Tab", true)}
@@ -256,7 +256,7 @@ fn art(kind: Art) -> Element {
                 }
             },
         ),
-        Art::Terminal => chrome(
+        Art::Terminal => browser_frame(
             "border-aurora-violet/20 bg-[#120c1a] shadow-xl shadow-aurora-violet/20",
             rsx! {
                 {tab(icon_term("h-3 w-3 text-aurora-violet"), "pillars.rs", true)}
