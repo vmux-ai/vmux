@@ -8,10 +8,12 @@ use crossbeam_channel::{Receiver, Sender};
 use std::sync::Arc;
 use vmux_agent::{ScreenshotRequest, ScreenshotResponse};
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) const MAX_INLINE_EDGE: u32 = 1568;
 
 pub(crate) type WakeFn = Arc<dyn Fn() + Send + Sync>;
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const PERMISSION_MSG: &str = "Screen Recording permission required - grant it in System Settings > \
 Privacy & Security > Screen Recording, then call screenshot again.";
 
@@ -118,6 +120,7 @@ pub(crate) struct CropRect {
     pub h: u32,
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn downscale_dims(w: u32, h: u32, max_edge: u32) -> (u32, u32) {
     let long = w.max(h);
     if long == 0 {
@@ -155,6 +158,7 @@ pub(crate) fn crop_rect_from_node(
     }
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn encode_downscaled_png(
     img: &image::RgbaImage,
     max_edge: u32,
