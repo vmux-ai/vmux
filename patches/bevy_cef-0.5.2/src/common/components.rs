@@ -81,7 +81,7 @@ pub struct WebviewOpaqueWindowedBackground;
 pub struct WebviewWindowedNativeFocus;
 
 /// Caps an OSR webview's windowless frame rate (fps). `sync_windowless_frame_rate` clamps the
-/// monitor-derived rate to this value, so a mostly-static surface (e.g. layout chrome) repaints —
+/// monitor-derived rate to this value, so a mostly-static surface (e.g. the layout) repaints —
 /// and forces a Bevy re-render — far less often. No effect on windowed webviews.
 #[derive(Component, Debug, Clone, Copy, Reflect)]
 #[reflect(Component)]
