@@ -3,6 +3,7 @@
 use crate::page_model::{gutter_width, span_style};
 use dioxus::prelude::*;
 use vmux_core::event::*;
+use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -19,6 +20,8 @@ pub fn Page() -> Element {
     let mut first_line = use_signal(|| 0u32);
     let mut lines = use_signal(Vec::<FileLine>::new);
     let mut error = use_signal(String::new);
+    let mut dir_entries = use_signal(Vec::<FileDirEntry>::new);
+    let mut is_dir = use_signal(|| false);
     let cell_dims = use_signal(|| (0.0f64, 0.0f64));
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
@@ -39,6 +42,21 @@ pub fn Page() -> Element {
 
     let _err = use_bin_event_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
         error.set(e.message);
+    });
+
+    let _dir = use_bin_event_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            let name = d
+                .path
+                .rsplit('/')
+                .find(|s| !s.is_empty())
+                .unwrap_or(&d.path)
+                .to_string();
+            doc.set_title(&name);
+        }
+        path.set(d.path);
+        dir_entries.set(d.entries);
+        is_dir.set(true);
     });
 
     use_effect(move || setup_measurement(cell_dims));
@@ -112,17 +130,42 @@ pub fn Page() -> Element {
                 })
             }
 
-            div { class: "min-h-0 flex-1 overflow-hidden p-1",
-                for line in lines().iter() {
-                    div { key: "{line.line_no}", class: "flex whitespace-pre",
-                        span {
-                            class: "shrink-0 select-none pr-3 text-right opacity-40",
-                            style: "width:calc(var(--cw, 1ch) * {gw});",
-                            "{line.line_no + 1}"
+            if is_dir() {
+                div { class: "min-h-0 flex-1 overflow-y-auto p-3",
+                    div { class: "flex flex-wrap content-start gap-1",
+                        for entry in dir_entries().iter() {
+                            div {
+                                key: "{entry.path}",
+                                class: "flex w-28 cursor-default flex-col items-center gap-1 rounded-md p-2 text-center hover:bg-white/5",
+                                title: "{entry.path}",
+                                if entry.is_dir {
+                                    Icon { class: "h-10 w-10 text-blue-300/80",
+                                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                                    }
+                                } else {
+                                    Icon { class: "h-10 w-10 text-muted-foreground",
+                                        path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+                                        path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+                                    }
+                                }
+                                span { class: "w-full truncate text-xs text-foreground", "{entry.name}" }
+                            }
                         }
-                        span {
-                            for (i, s) in line.spans.iter().enumerate() {
-                                span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                    }
+                }
+            } else {
+                div { class: "min-h-0 flex-1 overflow-hidden p-1",
+                    for line in lines().iter() {
+                        div { key: "{line.line_no}", class: "flex whitespace-pre",
+                            span {
+                                class: "shrink-0 select-none pr-3 text-right opacity-40",
+                                style: "width:calc(var(--cw, 1ch) * {gw});",
+                                "{line.line_no + 1}"
+                            }
+                            span {
+                                for (i, s) in line.spans.iter().enumerate() {
+                                    span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                                }
                             }
                         }
                     }

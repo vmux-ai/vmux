@@ -17,6 +17,7 @@ pub const FILE_VIEWPORT_EVENT: &str = "file_viewport";
 pub const FILE_ERROR_EVENT: &str = "file_error";
 pub const FILE_RESIZE_EVENT: &str = "file_resize";
 pub const FILE_SCROLL_EVENT: &str = "file_scroll";
+pub const FILE_DIR_EVENT: &str = "file_dir";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
 #[derive(
@@ -127,6 +128,25 @@ pub struct FileResizeEvent {
 )]
 pub struct FileScrollEvent {
     pub top_line: u32,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct FileDirEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize,
+    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
+pub struct FileDirEvent {
+    pub path: String,
+    pub entries: Vec<FileDirEntry>,
 }
 
 #[cfg(test)]

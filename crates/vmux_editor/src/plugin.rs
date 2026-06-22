@@ -31,6 +31,12 @@ pub struct FileViewport {
     pub rows: u16,
 }
 
+/// Directory listing cached on a `FileView` entity whose path is a directory.
+#[derive(Component, Clone, Debug)]
+pub struct FileDir {
+    pub entries: Vec<FileDirEntry>,
+}
+
 #[derive(Component)]
 pub struct FileInitialMetaSent;
 
@@ -148,8 +154,40 @@ pub fn handle_file_page_open(
     }
 }
 
-fn load_file_buffers(q: Query<(Entity, &FileView), Without<FileBuffer>>, mut commands: Commands) {
+fn list_dir(path: &std::path::Path) -> Vec<FileDirEntry> {
+    let Ok(read) = std::fs::read_dir(path) else {
+        return Vec::new();
+    };
+    let mut entries: Vec<FileDirEntry> = read
+        .flatten()
+        .map(|e| {
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            FileDirEntry {
+                name: e.file_name().to_string_lossy().to_string(),
+                path: e.path().to_string_lossy().to_string(),
+                is_dir,
+            }
+        })
+        .collect();
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    entries
+}
+
+fn load_file_buffers(
+    q: Query<(Entity, &FileView), (Without<FileBuffer>, Without<FileDir>)>,
+    mut commands: Commands,
+) {
     for (entity, fv) in &q {
+        if fv.path.is_dir() {
+            commands.entity(entity).insert(FileDir {
+                entries: list_dir(&fv.path),
+            });
+            continue;
+        }
         let hl = Highlighter::new();
         match hl.load_file(&fv.path) {
             Ok(out) => {
@@ -196,6 +234,27 @@ fn send_initial_meta(
                 },
             ));
         }
+        commands.entity(entity).insert(FileInitialMetaSent);
+    }
+}
+
+fn send_initial_dir(
+    q: Query<(Entity, &FileView, &FileDir), Without<FileInitialMetaSent>>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, fv, dir) in &q {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            FILE_DIR_EVENT,
+            &FileDirEvent {
+                path: fv.path.to_string_lossy().to_string(),
+                entries: dir.entries.clone(),
+            },
+        ));
         commands.entity(entity).insert(FileInitialMetaSent);
     }
 }
@@ -273,7 +332,10 @@ impl Plugin for EditorPlugin {
                 Update,
                 handle_file_page_open.in_set(PageOpenSet::HandleKnownPages),
             )
-            .add_systems(Update, (load_file_buffers, send_initial_meta))
+            .add_systems(
+                Update,
+                (load_file_buffers, send_initial_meta, send_initial_dir),
+            )
             .add_observer(on_file_resize)
             .add_observer(on_file_scroll);
     }
