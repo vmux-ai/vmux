@@ -25,7 +25,7 @@ impl Plugin for TeamPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         app.add_systems(Startup, spawn_user_profile)
-            .add_systems(Update, emit_team)
+            .add_systems(Update, (sync_user_profile_name, emit_team).chain())
             .add_systems(
                 Update,
                 handle_team_page_open.in_set(PageOpenSet::HandleKnownPages),
@@ -39,29 +39,24 @@ impl Plugin for TeamPlugin {
 }
 
 fn spawn_user_profile(mut commands: Commands) {
-    let name = user_display_name();
-    commands.spawn((Profile::user_named(name), User, Name::new("Profile: User")));
+    commands.spawn((Profile::user(), User, Name::new("Profile: User")));
 }
 
-/// The human's display name for their profile: the macOS full name (`id -F`),
-/// falling back to `$USER` / `$USERNAME`, then "You".
-fn user_display_name() -> String {
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(output) = std::process::Command::new("id").arg("-F").output()
-            && output.status.success()
-        {
-            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !name.is_empty() {
-                return name;
-            }
-        }
+/// Keep the user profile's name in sync with the active space's profile name
+/// (e.g. "Personal").
+fn sync_user_profile_name(
+    active_space: Option<Res<vmux_space::ActiveSpace>>,
+    mut user: Query<&mut Profile, With<User>>,
+) {
+    let Some(active) = active_space else {
+        return;
+    };
+    let Ok(mut profile) = user.single_mut() else {
+        return;
+    };
+    if profile.name != active.record.profile {
+        *profile = Profile::user_named(active.record.profile.clone());
     }
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .ok()
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "You".to_string())
 }
 
 #[allow(clippy::too_many_arguments)]
