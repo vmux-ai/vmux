@@ -21,6 +21,9 @@ only consumes ordinary image files, with no code dependency on the screenshot wo
 
 - Replace the flat icon grid with a **yazi-style miller-column** directory view:
   parent column | current column | preview column.
+- **Modern "soft glass" look** (not the old boxy grid): translucent rounded panes,
+  generous padding, a rounded accent **selection pill**, subtle hover, file-type glyphs,
+  and **small inline image thumbnails** in the list. See Visual design.
 - Keyboard navigation (`j/k`, `h/l`, arrows, `Enter`, `Esc`) plus mouse
   (click = select, double-click = activate).
 - **Preview pane** renders, for the highlighted entry: image, code/text quick-look,
@@ -33,8 +36,9 @@ only consumes ordinary image files, with no code dependency on the screenshot wo
 
 ## Non-goals
 
-- No host-side image downscaling / thumbnails in v1 (browser scales via CSS
-  `object-fit: contain`). Revisit only if perf demands.
+- No host-side downscaling for the **full-size** image view (browser scales the capped
+  original via CSS `object-fit: contain`). Host-side downscaling is used **only** for the
+  small ~64px list thumbnails (see Visual design / Thumbnails).
 - No file mutation (rename/delete/move/create). Read-only browser.
 - No hidden-file toggle UI in v1 (dotfiles hidden; toggle is a later add).
 - No custom CEF scheme handler for filesystem bytes (considered and rejected — see
@@ -98,6 +102,54 @@ ignores a reply whose `path` no longer matches the current selection (stale guar
 - `Info { size, modified, kind }` — binary/unknown/other; show metadata.
 - `Error(message)` — unreadable / failed.
 
+## Visual design (soft glass)
+
+Styled with Tailwind utilities (project rule: prefer utilities/arbitrary values over
+hand-written CSS), reusing the existing theme tokens already used by the editor page
+(`bg-term-bg`, `text-term-fg`, `text-muted-foreground`, the `font_family`/`font_size`/
+`line_height` from `FileThemeEvent`). Target a modern macOS feel, not the old grid.
+
+- **Panes**: three columns, each a translucent rounded card —
+  `rounded-xl bg-white/[0.04] backdrop-blur-md ring-1 ring-white/[0.06]` — separated by
+  small gaps (`gap-2`), generous inner padding (`p-2`/`p-3`). The whole view sits on the
+  page's `bg-term-bg`.
+- **Rows**: comfortable height with `rounded-lg px-3 py-1.5`, left-aligned glyph + name,
+  `truncate` names. Hover `hover:bg-white/[0.05]`.
+- **Selection pill**: the selected middle-column row gets a filled rounded pill
+  (`bg-white/[0.10] ring-1 ring-white/15`) with an accent left marker; it scrolls into
+  view on `j/k`. The parent column highlights the current directory's row with a quieter
+  variant.
+- **Glyphs**: directory and generic-file glyphs reuse the existing `Icon` component (as
+  the current grid does). Image rows show a thumbnail (below) instead of the generic
+  glyph once loaded; until then, an image glyph placeholder.
+- **Preview card** (right column): centered content on a translucent card. Image →
+  `object-fit: contain` filling the card with rounded corners; text → small highlighted
+  snippet; dir → child listing styled like the middle column; info → name + size +
+  modified + kind in a tidy stack.
+- Columns are independently scrollable (`overflow-y-auto`), with momentum-style thin
+  scrollbars (existing utility classes).
+
+### Thumbnails (lazy, bounded)
+
+Inline list thumbnails reuse the **same** preview mechanism with a `thumb` flag rather
+than introducing a parallel protocol:
+
+- The page issues `FilePreviewRequest { path, thumb: true }` for image rows in the
+  **current** directory, lazily and debounced (only rows scrolled into view; a tiny
+  in-page cache keyed by `path` prevents refetching). Full-size selection previews use
+  `thumb: false`.
+- When `thumb` is set, the host decodes and downscales the image to a max edge of
+  **64px** (`image` crate), re-encodes to PNG, and returns `PreviewKind::Image`. Decode
+  + downscale runs **off the main thread** (`bevy::tasks::IoTaskPool`, mirroring the
+  localhost responser) so the app never blocks; the result is emitted when ready.
+- Failure to decode → the row keeps the image glyph placeholder (no error surfaced for a
+  thumbnail).
+- Thumbnail Blob URLs are cached per path and revoked when the current directory changes.
+
+This adds the `image` crate as a `vmux_editor` (native) dependency. The 64px cap keeps
+each thumbnail tiny over the bin channel; the full-size view path is unchanged (capped
+original bytes, browser scales).
+
 ## Protocol changes — `crates/vmux_core/src/event.rs`
 
 All types derive the existing set (`Debug, Clone, PartialEq, Serialize, Deserialize,
@@ -123,7 +175,7 @@ pub const FILE_PREVIEW_EVENT: &str = "file_preview";                 // host→p
 pub const FILE_OPEN_EVENT: &str = "file_open";                       // page→host
 pub const FILE_IMAGE_EVENT: &str = "file_image";                     // host→page
 
-pub struct FilePreviewRequest { pub path: String }
+pub struct FilePreviewRequest { pub path: String, pub thumb: bool } // thumb=true → ~64px list thumbnail
 
 pub enum PreviewKind {
     Dir(Vec<FileDirEntry>),
@@ -153,9 +205,11 @@ pub struct FileImageEvent { pub mime: String, pub bytes: Vec<u8> }
   ready/meta gating applies. Title = file name.
 - **Preview handler**: observe `BinReceive<FilePreviewRequest>`. Classify the path by
   type and extension, build the `PreviewKind`, emit `FilePreviewEvent`. Directory →
-  `Dir`. Image ext under cap → `Image`. Text (highlighter succeeds) → `Text` (first
-  200 lines). Else → `Info` (size/modified/kind from `fs::metadata`). Failure →
-  `Error`.
+  `Dir`. Image ext → `Image` (full bytes under the 25 MB cap when `thumb=false`; when
+  `thumb=true`, decode + downscale to a 64px max edge via the `image` crate, off the main
+  thread with `IoTaskPool`, re-encode PNG). Text (highlighter succeeds) → `Text` (first
+  200 lines). Else → `Info` (size/modified/kind from `fs::metadata`). Failure → `Error`
+  (full preview) or silently drop the thumbnail (page keeps the glyph).
 - **Open handler**: observe `BinReceive<FileOpenEvent>`. Resolve the `FileView`'s pane
   (walk `ChildOf` to the stack → pane) and write a single `PageOpenRequest` with
   `PageOpenTarget::ActiveStackInPane(pane)` and `url = file://<path>`. This **replaces
@@ -187,8 +241,14 @@ otherwise info.
   `FilePreviewRequest` via `try_cef_bin_emit_rkyv`.
 - Blob lifecycle: when a new `Image` preview or `FileImageEvent` arrives, revoke the
   previous object URL before creating the next (no leak).
-- Debounce preview requests (~80 ms) so holding `j` over large images does not spam the
-  host.
+- Debounce selection preview requests (~80 ms) so holding `j` over large images does not
+  spam the host.
+- **Inline thumbnails**: maintain a `HashMap<path, blobUrl>` cache. For image rows in the
+  current dir that scroll into view, issue `FilePreviewRequest { path, thumb: true }`
+  (skip if cached/in-flight); on the `Image` reply build a Blob URL and store it. Render
+  the thumbnail in place of the generic glyph. Revoke all cached thumbnail URLs and clear
+  the cache when the dir changes (new `FileDirEvent`). Soft-glass styling per Visual
+  design.
 
 ## Pure / testable helpers — `crates/vmux_editor/src/page_model.rs`
 
@@ -203,6 +263,8 @@ Host-side unit tests (native, `cargo test -p vmux_editor`):
 
 - parent computation for a nested dir vs. root (`/` → empty parent).
 - preview-kind selection by extension/type, including image cap → `Info`.
+- thumbnail downscale: a known test image downscales to ≤64px on its longest edge and
+  re-encodes to valid PNG.
 - `FileOpenEvent` resolves to a `PageOpenRequest` for the originating pane's stack.
 
 ## Edge cases
@@ -237,6 +299,8 @@ Host-side unit tests (native, `cargo test -p vmux_editor`):
   render + Blob lifecycle, mode switch.
 - `crates/vmux_editor/src/page_model.rs` — classification/selection/parent-index helpers
   + tests.
+- `crates/vmux_editor/Cargo.toml` — add `image` (native, non-wasm) for 64px thumbnail
+  downscale.
 - Possibly `crates/vmux_editor/src/highlight.rs` — expose a "first N lines" load if not
   already convenient (reuse `load_file`).
 
