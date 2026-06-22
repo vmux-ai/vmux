@@ -9703,6 +9703,7 @@ dependencies = [
 name = "vmux_mcp"
 version = "0.0.16"
 dependencies = [
+ "base64 0.22.1",
  "serde",
  "serde_json",
  "tokio",
