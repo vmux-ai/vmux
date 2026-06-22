@@ -132,10 +132,6 @@ mod tests {
                 radius: 0.0,
                 window: WindowSettings {
                     padding: 16.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
                 },
                 pane: PaneSettings { gap: 0.0 },
                 side_sheet: SideSheetSettings::default(),
@@ -167,10 +163,6 @@ mod tests {
                 radius: 0.0,
                 window: WindowSettings {
                     padding: 16.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
                 },
                 pane: PaneSettings { gap: 0.0 },
                 side_sheet: SideSheetSettings::default(),

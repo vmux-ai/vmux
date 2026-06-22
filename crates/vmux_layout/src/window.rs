@@ -695,8 +695,8 @@ fn sync_window_layout_to_settings(
 
     // MainColumn row_gap (between Header and Main pane container) is
     // managed by sync_main_column_gap_to_pane_count, which keeps it 0
-    // when the active tab has a single pane and switches to PANE_GAP_PX
-    // when split. Don't override here.
+    // when the active tab has a single pane and switches to the window
+    // padding when split. Don't override here.
     let _ = main_column_q.single_mut();
 
     // Side sheet width resource: initialise from settings on first run.
@@ -728,10 +728,12 @@ fn sync_window_layout_to_settings(
 }
 
 /// Keep MainColumn's row_gap at 0 when the active tab has a single pane
-/// (so the url row sits flush against the pane content) and switch to
-/// PANE_GAP_PX when it's split (so panes visually separate from CEF shell).
+/// (so the url row sits flush against the pane content) and switch to the
+/// window's top padding when it's split (so the panes get a visible gap
+/// below the url bar, matching their outer padding).
 fn sync_main_column_gap_to_pane_count(
     focus: Res<crate::stack::FocusedStack>,
+    settings: Res<LayoutSettings>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut main_column_q: Query<&mut Node, With<MainColumn>>,
@@ -745,7 +747,7 @@ fn sync_main_column_gap_to_pane_count(
         })
         .unwrap_or(0);
     let target = if pane_count > 1 {
-        crate::event::PANE_GAP_PX
+        settings.window.pad_top()
     } else {
         0.0
     };
@@ -975,10 +977,6 @@ mod tests {
             radius: 0.0,
             window: crate::settings::WindowSettings {
                 padding: 0.0,
-                padding_top: None,
-                padding_right: None,
-                padding_bottom: None,
-                padding_left: None,
             },
             pane: crate::settings::PaneSettings { gap },
             side_sheet: crate::settings::SideSheetSettings::default(),
@@ -1133,10 +1131,6 @@ mod tests {
                 radius: 0.0,
                 window: crate::settings::WindowSettings {
                     padding: 0.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
                 },
                 pane: crate::settings::PaneSettings { gap: 0.0 },
                 side_sheet: crate::settings::SideSheetSettings::default(),
@@ -1169,10 +1163,6 @@ mod tests {
                 radius: 0.0,
                 window: crate::settings::WindowSettings {
                     padding: 0.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
                 },
                 pane: crate::settings::PaneSettings { gap: 0.0 },
                 side_sheet: crate::settings::SideSheetSettings::default(),
@@ -1218,10 +1208,6 @@ mod tests {
                 radius: 0.0,
                 window: crate::settings::WindowSettings {
                     padding: 0.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
                 },
                 pane: crate::settings::PaneSettings { gap: 0.0 },
                 side_sheet: crate::settings::SideSheetSettings::default(),
@@ -1280,10 +1266,6 @@ mod tests {
                 radius: 0.0,
                 window: crate::settings::WindowSettings {
                     padding: 16.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
                 },
                 pane: crate::settings::PaneSettings { gap: 0.0 },
                 side_sheet: crate::settings::SideSheetSettings::default(),

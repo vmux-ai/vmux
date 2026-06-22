@@ -116,8 +116,8 @@ pub const TRAFFIC_LIGHTS_PAD_PX: f32 = 80.0;
 /// strip is needed.
 pub const CEF_RESERVED_HEIGHT_PX: f32 = HEADER_HEIGHT_PX;
 
-/// Hardcoded window edge padding (px). Not user-configurable.
-pub const WINDOW_PAD_PX: f32 = 4.0;
+/// Default window edge padding (px). Overridable via `settings.layout.window.padding`.
+pub const WINDOW_PAD_PX: f32 = 8.0;
 
 /// Default page bg color for terminal-like stacks (terminals, processes,
 /// agent CLIs). Matches catppuccin-mocha `base` so the CEF URL row

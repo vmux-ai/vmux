@@ -3,7 +3,9 @@
         startup_url: "https://www.google.com",
     ),
     layout: (
-        radius: 8.0,
+        window: (
+            padding: 8.0,
+        ),
     ),
     shortcuts: (
         leader: (key: "b", ctrl: true),

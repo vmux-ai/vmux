@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct LayoutSettings {
     /// Corner radius (px) applied across the design system: pane corner clip,
     /// focus ring, and the CEF CSS `--radius` variable.
-    #[serde(default)]
+    #[serde(default = "default_radius")]
     pub radius: f32,
     #[serde(default)]
     pub window: WindowSettings,
@@ -53,31 +53,23 @@ fn default_side_sheet_width() -> f32 {
 pub struct WindowSettings {
     #[serde(default = "default_window_padding")]
     pub padding: f32,
-    #[serde(default)]
-    pub padding_top: Option<f32>,
-    #[serde(default)]
-    pub padding_right: Option<f32>,
-    #[serde(default)]
-    pub padding_bottom: Option<f32>,
-    #[serde(default)]
-    pub padding_left: Option<f32>,
 }
 
 impl WindowSettings {
     pub fn pad_top(&self) -> f32 {
-        self.padding_top.unwrap_or(self.padding)
+        self.padding
     }
 
     pub fn pad_right(&self) -> f32 {
-        self.padding_right.unwrap_or(self.padding)
+        self.padding
     }
 
     pub fn pad_bottom(&self) -> f32 {
-        self.padding_bottom.unwrap_or(self.padding)
+        self.padding
     }
 
     pub fn pad_left(&self) -> f32 {
-        self.padding_left.unwrap_or(self.padding)
+        self.padding
     }
 }
 
@@ -85,16 +77,16 @@ impl Default for WindowSettings {
     fn default() -> Self {
         Self {
             padding: default_window_padding(),
-            padding_top: None,
-            padding_right: None,
-            padding_bottom: None,
-            padding_left: None,
         }
     }
 }
 
 fn default_window_padding() -> f32 {
     crate::event::WINDOW_PAD_PX
+}
+
+fn default_radius() -> f32 {
+    8.0
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -115,55 +107,11 @@ impl Default for FocusRingColor {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct FocusRingGlow {
-    #[serde(default = "default_outline_glow_spread")]
-    pub spread: f32,
-    #[serde(default = "default_outline_glow_intensity")]
-    pub intensity: f32,
-}
-
-impl Default for FocusRingGlow {
-    fn default() -> Self {
-        Self {
-            spread: default_outline_glow_spread(),
-            intensity: default_outline_glow_intensity(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct FocusRingGradient {
-    #[serde(default = "default_outline_gradient_enabled")]
-    pub enabled: bool,
-    #[serde(default = "default_outline_gradient_speed")]
-    pub speed: f32,
-    #[serde(default = "default_outline_gradient_cycles")]
-    pub cycles: f32,
-    #[serde(default = "default_outline_gradient_accent")]
-    pub accent: FocusRingColor,
-}
-
-impl Default for FocusRingGradient {
-    fn default() -> Self {
-        Self {
-            enabled: default_outline_gradient_enabled(),
-            speed: default_outline_gradient_speed(),
-            cycles: default_outline_gradient_cycles(),
-            accent: default_outline_gradient_accent(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FocusRingSettings {
     #[serde(default = "default_focus_ring_width")]
     pub width: f32,
     #[serde(default = "default_focus_ring_color")]
     pub color: FocusRingColor,
-    #[serde(default)]
-    pub glow: FocusRingGlow,
-    #[serde(default)]
-    pub gradient: FocusRingGradient,
 }
 
 impl Default for FocusRingSettings {
@@ -171,8 +119,6 @@ impl Default for FocusRingSettings {
         Self {
             width: default_focus_ring_width(),
             color: default_focus_ring_color(),
-            glow: FocusRingGlow::default(),
-            gradient: FocusRingGradient::default(),
         }
     }
 }
@@ -183,34 +129,6 @@ fn default_focus_ring_width() -> f32 {
 
 fn default_focus_ring_color() -> FocusRingColor {
     FocusRingColor::default()
-}
-
-fn default_outline_glow_spread() -> f32 {
-    8.0
-}
-
-fn default_outline_glow_intensity() -> f32 {
-    0.45
-}
-
-fn default_outline_gradient_enabled() -> bool {
-    true
-}
-
-fn default_outline_gradient_speed() -> f32 {
-    0.6
-}
-
-fn default_outline_gradient_cycles() -> f32 {
-    1.0
-}
-
-fn default_outline_gradient_accent() -> FocusRingColor {
-    FocusRingColor {
-        r: 0.7,
-        g: 0.7,
-        b: 0.78,
-    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

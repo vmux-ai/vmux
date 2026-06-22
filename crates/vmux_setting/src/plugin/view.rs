@@ -283,13 +283,7 @@ fn build_settings_schema() -> SettingsSchema {
                 "layout.window",
                 FieldSpec {
                     label: Some("Window".into()),
-                    order: vec![
-                        "padding".into(),
-                        "padding_top".into(),
-                        "padding_right".into(),
-                        "padding_bottom".into(),
-                        "padding_left".into(),
-                    ],
+                    order: vec!["padding".into()],
                     ..Default::default()
                 },
             ),
@@ -312,54 +306,7 @@ fn build_settings_schema() -> SettingsSchema {
                 "layout.focus_ring",
                 FieldSpec {
                     label: Some("Focus ring".into()),
-                    order: vec![
-                        "width".into(),
-                        "color".into(),
-                        "glow".into(),
-                        "gradient".into(),
-                    ],
-                    ..Default::default()
-                },
-            ),
-            field(
-                "layout.focus_ring.glow",
-                FieldSpec {
-                    label: Some("Glow".into()),
-                    order: vec!["spread".into(), "intensity".into()],
-                    ..Default::default()
-                },
-            ),
-            field(
-                "layout.focus_ring.gradient",
-                FieldSpec {
-                    label: Some("Gradient".into()),
-                    order: vec![
-                        "enabled".into(),
-                        "speed".into(),
-                        "cycles".into(),
-                        "accent".into(),
-                    ],
-                    ..Default::default()
-                },
-            ),
-            field(
-                "layout.focus_ring.glow.intensity",
-                FieldSpec {
-                    step: Some(0.05),
-                    ..Default::default()
-                },
-            ),
-            field(
-                "layout.focus_ring.gradient.speed",
-                FieldSpec {
-                    step: Some(0.1),
-                    ..Default::default()
-                },
-            ),
-            field(
-                "layout.focus_ring.gradient.cycles",
-                FieldSpec {
-                    step: Some(0.1),
+                    order: vec!["width".into(), "color".into()],
                     ..Default::default()
                 },
             ),

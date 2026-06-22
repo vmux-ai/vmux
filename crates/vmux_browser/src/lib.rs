@@ -3654,10 +3654,6 @@ mod tests {
                 radius,
                 window: vmux_layout::settings::WindowSettings {
                     padding: 0.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
                 },
                 pane: vmux_layout::settings::PaneSettings { gap: 0.0 },
                 side_sheet: vmux_layout::settings::SideSheetSettings::default(),
@@ -4431,10 +4427,6 @@ mod tests {
                     radius: 0.0,
                     window: WindowSettings {
                         padding: 0.0,
-                        padding_top: None,
-                        padding_right: None,
-                        padding_bottom: None,
-                        padding_left: None,
                     },
                     pane: PaneSettings { gap: 0.0 },
                     side_sheet: SideSheetSettings::default(),
