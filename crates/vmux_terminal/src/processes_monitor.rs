@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bevy::{ecs::relationship::Relationship, picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
@@ -65,15 +67,75 @@ pub struct ServiceProcessList {
     pub processes: Vec<vmux_service::protocol::ProcessInfo>,
 }
 
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub struct Usage {
+    pub cpu_percent: f32,
+    pub mem_bytes: u64,
+}
+
+#[derive(Resource, Default)]
+pub struct ProcessUsage(pub HashMap<u32, Usage>);
+
+struct ProcSample {
+    parent: Option<u32>,
+    cpu: f32,
+    mem: u64,
+}
+
+/// Sum cpu + memory over `root` and all its descendants in `procs`.
+/// Returns `Usage::default()` if `root` is absent.
+fn subtree_usage(root: u32, procs: &HashMap<u32, ProcSample>) -> Usage {
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (&pid, s) in procs {
+        if let Some(parent) = s.parent {
+            children.entry(parent).or_default().push(pid);
+        }
+    }
+    let mut total = Usage::default();
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![root];
+    while let Some(pid) = stack.pop() {
+        if !seen.insert(pid) {
+            continue;
+        }
+        if let Some(s) = procs.get(&pid) {
+            total.cpu_percent += s.cpu;
+            total.mem_bytes += s.mem;
+            if let Some(kids) = children.get(&pid) {
+                stack.extend(kids.iter().copied());
+            }
+        }
+    }
+    total
+}
+
 #[derive(Resource)]
 struct ProcessesPollTimer(Timer);
+
+#[derive(Resource)]
+struct SysinfoPollTimer(Timer);
+
+#[derive(Resource)]
+struct SysinfoState(sysinfo::System);
+
+impl Default for SysinfoState {
+    fn default() -> Self {
+        Self(sysinfo::System::new())
+    }
+}
 
 pub struct ProcessesMonitorPlugin;
 
 impl Plugin for ProcessesMonitorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ServiceProcessList>()
+            .init_resource::<ProcessUsage>()
+            .init_resource::<SysinfoState>()
             .insert_resource(ProcessesPollTimer(Timer::from_seconds(
+                1.0,
+                TimerMode::Repeating,
+            )))
+            .insert_resource(SysinfoPollTimer(Timer::from_seconds(
                 1.0,
                 TimerMode::Repeating,
             )))
@@ -84,7 +146,12 @@ impl Plugin for ProcessesMonitorPlugin {
             )>::for_hosts(&["services"]))
             .add_systems(
                 Update,
-                (request_process_list, broadcast_to_monitors).chain(),
+                (
+                    request_process_list,
+                    sample_process_usage,
+                    broadcast_to_monitors,
+                )
+                    .chain(),
             )
             .add_observer(on_process_navigate)
             .add_observer(on_process_kill)
@@ -110,16 +177,87 @@ fn request_process_list(
     }
 }
 
+/// Sample CPU + memory for each service-managed pid (process tree) while the
+/// services page is open. Runs on its own 1s cadence so cpu deltas are valid.
+fn sample_process_usage(
+    time: Res<Time>,
+    mut timer: ResMut<SysinfoPollTimer>,
+    monitors: Query<(), With<ProcessesMonitor>>,
+    process_list: Res<ServiceProcessList>,
+    mut sys: ResMut<SysinfoState>,
+    mut usage: ResMut<ProcessUsage>,
+) {
+    if monitors.is_empty() {
+        return;
+    }
+    timer.0.tick(time.delta());
+    if !timer.0.just_finished() {
+        return;
+    }
+
+    sys.0
+        .refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+
+    let procs: HashMap<u32, ProcSample> = sys
+        .0
+        .processes()
+        .iter()
+        .map(|(pid, p)| {
+            (
+                pid.as_u32(),
+                ProcSample {
+                    parent: p.parent().map(|pp| pp.as_u32()),
+                    cpu: p.cpu_usage(),
+                    mem: p.memory(),
+                },
+            )
+        })
+        .collect();
+
+    let mut map = HashMap::with_capacity(process_list.processes.len());
+    for info in &process_list.processes {
+        map.insert(info.pid, subtree_usage(info.pid, &procs));
+    }
+    usage.0 = map;
+}
+
+fn build_process_entries(
+    processes: &[vmux_service::protocol::ProcessInfo],
+    usage: &ProcessUsage,
+    attached_ids: &std::collections::HashSet<String>,
+) -> Vec<ProcessEntry> {
+    processes
+        .iter()
+        .map(|info| {
+            let u = usage.0.get(&info.pid).copied().unwrap_or_default();
+            ProcessEntry {
+                id: info.id.to_string(),
+                shell: info.shell.clone(),
+                cwd: info.cwd.clone(),
+                cols: info.cols,
+                rows: info.rows,
+                pid: info.pid,
+                uptime_secs: info.created_at_secs,
+                cpu_percent: u.cpu_percent,
+                mem_bytes: u.mem_bytes,
+                attached: attached_ids.contains(&info.id.to_string()),
+                preview_lines: Vec::new(),
+            }
+        })
+        .collect()
+}
+
 /// Broadcast the cached process list to all process monitor webviews.
 fn broadcast_to_monitors(
     process_list: Res<ServiceProcessList>,
+    usage: Res<ProcessUsage>,
     service: Option<Res<ServiceClient>>,
     monitors: Query<Entity, (With<ProcessesMonitor>, With<PageReady>)>,
     browsers: NonSend<Browsers>,
     terminal_pids: Query<&ProcessId, With<Terminal>>,
     mut commands: Commands,
 ) {
-    if monitors.is_empty() || !process_list.is_changed() {
+    if monitors.is_empty() || !(process_list.is_changed() || usage.is_changed()) {
         return;
     }
 
@@ -129,21 +267,7 @@ fn broadcast_to_monitors(
     let attached_ids: std::collections::HashSet<String> =
         terminal_pids.iter().map(|pid| pid.to_string()).collect();
 
-    let processes: Vec<ProcessEntry> = process_list
-        .processes
-        .iter()
-        .map(|info| ProcessEntry {
-            id: info.id.to_string(),
-            shell: info.shell.clone(),
-            cwd: info.cwd.clone(),
-            cols: info.cols,
-            rows: info.rows,
-            pid: info.pid,
-            uptime_secs: info.created_at_secs,
-            attached: attached_ids.contains(&info.id.to_string()),
-            preview_lines: Vec::new(), // TODO: add preview from snapshot
-        })
-        .collect();
+    let processes = build_process_entries(&process_list.processes, &usage, &attached_ids);
 
     let event = ProcessesListEvent {
         connected,
@@ -321,5 +445,81 @@ mod tests {
 
         assert_eq!(list.processes.len(), 1);
         assert_eq!(list.processes[0].id, keep);
+    }
+
+    #[test]
+    fn subtree_usage_sums_whole_tree() {
+        let mut procs = HashMap::new();
+        procs.insert(
+            1,
+            ProcSample {
+                parent: None,
+                cpu: 5.0,
+                mem: 100,
+            },
+        );
+        procs.insert(
+            2,
+            ProcSample {
+                parent: Some(1),
+                cpu: 10.0,
+                mem: 200,
+            },
+        );
+        procs.insert(
+            3,
+            ProcSample {
+                parent: Some(2),
+                cpu: 1.0,
+                mem: 50,
+            },
+        );
+        procs.insert(
+            99,
+            ProcSample {
+                parent: None,
+                cpu: 7.0,
+                mem: 999,
+            },
+        );
+        let u = subtree_usage(1, &procs);
+        assert_eq!(u.cpu_percent, 16.0);
+        assert_eq!(u.mem_bytes, 350);
+    }
+
+    #[test]
+    fn subtree_usage_missing_root_is_zero() {
+        let procs = HashMap::new();
+        assert_eq!(subtree_usage(5, &procs), Usage::default());
+    }
+
+    #[test]
+    fn build_entries_attaches_usage() {
+        let id = process_id(1);
+        let mut usage = ProcessUsage::default();
+        usage.0.insert(
+            42,
+            Usage {
+                cpu_percent: 12.5,
+                mem_bytes: 332 * 1024 * 1024,
+            },
+        );
+        let entries = build_process_entries(&[process_info(id)], &usage, &Default::default());
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].pid, 42);
+        assert_eq!(entries[0].cpu_percent, 12.5);
+        assert_eq!(entries[0].mem_bytes, 332 * 1024 * 1024);
+        assert!(!entries[0].attached);
+    }
+
+    #[test]
+    fn build_entries_defaults_usage_when_missing() {
+        let entries = build_process_entries(
+            &[process_info(process_id(1))],
+            &ProcessUsage::default(),
+            &Default::default(),
+        );
+        assert_eq!(entries[0].cpu_percent, 0.0);
+        assert_eq!(entries[0].mem_bytes, 0);
     }
 }

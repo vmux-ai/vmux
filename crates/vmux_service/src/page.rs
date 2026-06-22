@@ -216,6 +216,8 @@ fn ProcessCard(process: ProcessEntry) -> Element {
             // Row 2: metadata grid
             div { class: "grid grid-cols-2 gap-x-4 gap-y-1 text-xs",
                 MetaRow { label: "PID", value: process.pid.to_string() }
+                MetaRow { label: "CPU", value: format!("{:.0}%", process.cpu_percent) }
+                MetaRow { label: "Memory", value: format_mem(process.mem_bytes) }
                 MetaRow { label: "Size", value: format!("{}x{}", process.cols, process.rows) }
                 if !process.cwd.is_empty() {
                     MetaRow { label: "CWD", value: process.cwd.clone() }

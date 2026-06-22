@@ -41,6 +41,8 @@ pub struct ProcessEntry {
     pub rows: u16,
     pub pid: u32,
     pub uptime_secs: u64,
+    pub cpu_percent: f32,
+    pub mem_bytes: u64,
     /// Whether a GUI terminal is attached to this process.
     pub attached: bool,
     /// Last few lines of terminal output for preview.
@@ -60,6 +62,22 @@ pub struct ProcessEntry {
 )]
 pub struct PreviewLine {
     pub text: String,
+}
+
+/// Human-readable RSS. `0` (unsampled) renders as an em dash.
+pub fn format_mem(bytes: u64) -> String {
+    const MB: f64 = 1024.0 * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let b = bytes as f64;
+    if bytes == 0 {
+        "—".to_string()
+    } else if b < MB {
+        "<1 MB".to_string()
+    } else if b < GB {
+        format!("{:.0} MB", b / MB)
+    } else {
+        format!("{:.1} GB", b / GB)
+    }
 }
 
 /// Emitted by the processes webview when user clicks a process card.
@@ -89,4 +107,17 @@ pub struct ProcessKillEvent {
 pub struct ProcessKillAllEvent {
     /// Discriminator field so serde doesn't match arbitrary IPC payloads.
     pub kill_all: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_mem_buckets() {
+        assert_eq!(format_mem(0), "—");
+        assert_eq!(format_mem(512 * 1024), "<1 MB");
+        assert_eq!(format_mem(332 * 1024 * 1024), "332 MB");
+        assert_eq!(format_mem(3 * 1024 * 1024 * 1024 / 2), "1.5 GB");
+    }
 }
