@@ -101,13 +101,11 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         let q = query();
-        if !looks_like_path(q.trim()) {
+        let Some(path_query) = completion_query(&q) else {
             path_completions.set(Vec::new());
             return;
-        }
-        let _ = try_cef_bin_emit_rkyv(&PathCompleteRequest {
-            query: q.trim().to_string(),
-        });
+        };
+        let _ = try_cef_bin_emit_rkyv(&PathCompleteRequest { query: path_query });
     });
 
     let _history_listener = use_bin_event_listener::<HistorySuggestionsResponse, _>(
@@ -201,38 +199,24 @@ pub fn Page() -> Element {
     let results = {
         let history = history_suggestions();
         let mut r = filter_results(&q, &tabs, &commands, &spaces, &pages, is_new_tab, &history);
-        let completions = if looks_like_path(q.trim()) {
+        let completions = if completion_query(&q).is_some() {
             path_completions()
         } else {
             Vec::new()
         };
-        if !completions.is_empty() {
-            let path_items: Vec<ResultItem> = completions
+        if completions.is_empty() {
+            r
+        } else {
+            let mut combined: Vec<ResultItem> = completions
                 .iter()
-                .filter(|e| e.is_dir)
-                .take(5)
-                .map(|e| ResultItem::Terminal {
+                .take(8)
+                .map(|e| ResultItem::File {
                     path: e.full_path.clone(),
+                    is_dir: e.is_dir,
                 })
                 .collect();
-            let typed_terminal = r
-                .iter()
-                .find(|item| matches!(item, ResultItem::Terminal { path } if !path.is_empty()))
-                .cloned();
-            r.retain(|item| !matches!(item, ResultItem::Terminal { path } if !path.is_empty()));
-            let mut combined = Vec::new();
-            if let Some(ref entry @ ResultItem::Terminal { path: ref tp }) = typed_terminal
-                && !path_items
-                    .iter()
-                    .any(|item| matches!(item, ResultItem::Terminal { path } if *path == *tp))
-            {
-                combined.push(entry.clone());
-            }
-            combined.extend(path_items);
             combined.extend(r);
             combined
-        } else {
-            r
         }
     };
     let sel = selected().min(results.len().saturating_sub(1));
@@ -254,6 +238,7 @@ pub fn Page() -> Element {
                     title.clone()
                 }
             }
+            Some(ResultItem::File { path, .. }) => path.clone(),
             None => q.clone(),
         }
     } else {
@@ -262,7 +247,7 @@ pub fn Page() -> Element {
 
     let ghost_text = {
         let q_trimmed = q.trim();
-        let completions = if looks_like_path(q_trimmed) {
+        let completions = if completion_query(&q).is_some() {
             path_completions()
         } else {
             Vec::new()
@@ -324,6 +309,9 @@ pub fn Page() -> Element {
                     emit_action_with_target("open", url, open_target);
                 }
             }
+            ResultItem::File { path, .. } => {
+                emit_action_with_target("open", &format!("file://{path}"), open_target);
+            }
         }
     };
 
@@ -365,6 +353,7 @@ pub fn Page() -> Element {
                                         (false, false, is_u)
                                     }
                                     Some(ResultItem::History { .. }) => (false, false, true),
+                                    Some(ResultItem::File { .. }) => (false, true, false),
                                     None => (false, false, false),
                                 }
                             } else {
@@ -606,6 +595,37 @@ pub fn Page() -> Element {
                                             span { class: result_trailing_slot_class() }
                                         }
                                     },
+                                    ResultItem::File { path, is_dir } => {
+                                        let name = path
+                                            .trim_end_matches('/')
+                                            .rsplit('/')
+                                            .next()
+                                            .unwrap_or(path.as_str())
+                                            .to_string();
+                                        rsx! {
+                                            div { class: result_content_row_class(),
+                                                if *is_dir {
+                                                    Icon { class: result_leading_icon_class(),
+                                                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                                                    }
+                                                } else {
+                                                    Icon { class: result_leading_icon_class(),
+                                                        path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+                                                        path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+                                                    }
+                                                }
+                                                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                                                    span { class: result_primary_text_class(), "{name}" }
+                                                    span { class: result_secondary_text_class(), "{path}" }
+                                                }
+                                            }
+                                            if *is_dir {
+                                                span { class: result_trailing_slot_class() }
+                                            } else {
+                                                span { class: result_trailing_slot_class(), "\u{21b5}" }
+                                            }
+                                        }
+                                    },
                                 }
                             }
                         }
@@ -622,6 +642,20 @@ fn looks_like_path(s: &str) -> bool {
         || s.starts_with("./")
         || s.starts_with("../")
         || s.contains('/') && !s.contains(' ') && !s.contains("://")
+}
+
+/// The filesystem query to complete from the command-bar input, if any.
+/// `file://…` completes the path after the scheme (empty → local dir); bare paths
+/// (`/…`, `~/…`, `./…`) complete as typed.
+fn completion_query(input: &str) -> Option<String> {
+    let t = input.trim();
+    if let Some(rest) = t.strip_prefix("file://") {
+        Some(rest.to_string())
+    } else if looks_like_path(t) {
+        Some(t.to_string())
+    } else {
+        None
+    }
 }
 
 fn page_icon(icon: &str) -> Element {
