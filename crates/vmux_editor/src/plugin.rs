@@ -103,6 +103,17 @@ fn new_file_view_bundle(
     )
 }
 
+/// Build a `FileView` webview bundle for session restore. The path is parsed from the
+/// saved `file://` URL; returns `None` if it isn't a valid file URL.
+pub fn restore_file_view_bundle(
+    url: &str,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) -> Option<impl Bundle> {
+    let path = path_from_files_url(url)?;
+    Some(new_file_view_bundle(url, path, meshes, webview_mt))
+}
+
 fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
     if let Ok(children) = children_q.get(stack) {
         for child in children.iter() {

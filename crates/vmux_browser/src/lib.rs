@@ -2393,7 +2393,11 @@ fn handle_browser_commands(
                         .get(webview)
                         .map(|m| m.url.starts_with("vmux://"))
                         .unwrap_or(false);
-                    if is_terminal || on_native_view || resolved.starts_with("vmux://") {
+                    if is_terminal
+                        || on_native_view
+                        || resolved.starts_with("vmux://")
+                        || resolved.starts_with("file:")
+                    {
                         page_open_requests.write(PageOpenRequest {
                             target: PageOpenTarget::Stack(active),
                             url: resolved,
@@ -3126,7 +3130,7 @@ pub fn handle_browser_navigate_requests(
         } else if let Some(webview) =
             vmux_layout::target::active_webview_for_tab(focus.stack, &browsers, &terminals)
         {
-            if url.starts_with("vmux://") {
+            if url.starts_with("vmux://") || url.starts_with("file:") {
                 let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) else {
                     send_page_open_response(
                         &service,

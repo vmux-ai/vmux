@@ -495,6 +495,12 @@ pub(crate) fn rebuild_space_views(
                 .starts_with(SETTINGS_PAGE_URL.trim_end_matches('/'))
             {
                 commands.spawn((Settings::new(&mut meshes, &mut webview_mt), ChildOf(entity)));
+            } else if meta.url.starts_with("file:") {
+                if let Some(bundle) =
+                    vmux_editor::restore_file_view_bundle(&meta.url, &mut meshes, &mut webview_mt)
+                {
+                    commands.spawn((bundle, ChildOf(entity)));
+                }
             } else {
                 let browser = commands
                     .spawn((
