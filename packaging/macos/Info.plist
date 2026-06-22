@@ -29,7 +29,7 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright 2024-2025 Junichi Sugiura. MIT License.</string>
+	<string>Copyright 2024-2025 Junichi Sugiura. GPL-3.0-or-later.</string>
 	<key>LSUIElement</key>
 	<true/>
 </dict>

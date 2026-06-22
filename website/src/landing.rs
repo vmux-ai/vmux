@@ -96,7 +96,7 @@ fn Footer() -> Element {
                     href: "https://github.com/vmux-ai/vmux/blob/main/LICENSE",
                     target: "_blank",
                     rel: "noopener noreferrer",
-                    "MIT License"
+                    "GPL-3.0 License"
                 }
             }
         }
