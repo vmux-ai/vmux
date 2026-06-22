@@ -13,7 +13,9 @@ pub fn Page() -> Element {
 
     let members = team().members;
     let count = members.len();
-    let agent_count = members.iter().filter(|m| !m.is_user).count();
+    let user = members.iter().find(|m| m.is_user).cloned();
+    let agents: Vec<TeamMemberRow> = members.iter().filter(|m| !m.is_user).cloned().collect();
+    let agent_count = agents.len();
     let subtitle = match agent_count {
         0 => "Just you in this space".to_string(),
         1 => "You and 1 agent".to_string(),
@@ -52,9 +54,16 @@ pub fn Page() -> Element {
                         span { class: "text-sm", "No one here yet" }
                     }
                 } else {
-                    div { class: "flex flex-col gap-1.5",
-                        for member in members.iter() {
-                            TeamRow { key: "{member.id}", member: member.clone() }
+                    div { class: "flex flex-col gap-0.5",
+                        if let Some(user) = user.clone() {
+                            TeamRow { member: user }
+                        }
+                        if !agents.is_empty() {
+                            div { class: "ml-6 flex flex-col gap-0.5 border-l border-border/60 pl-3",
+                                for agent in agents.iter() {
+                                    TeamRow { key: "{agent.id}", member: agent.clone() }
+                                }
+                            }
                         }
                     }
                 }
@@ -67,7 +76,7 @@ pub fn Page() -> Element {
 fn TeamRow(member: TeamMemberRow) -> Element {
     rsx! {
         div {
-            class: "flex items-start gap-3 rounded-xl border border-border/60 bg-card/40 px-3 py-2.5",
+            class: "flex items-start gap-3 rounded-lg px-2 py-1.5 hover:bg-muted/40",
             TeamAvatar { member: member.clone(), size: 32 }
             div { class: "flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5",
                 div { class: "flex min-w-0 items-center gap-2",
