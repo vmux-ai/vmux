@@ -53,6 +53,8 @@ rfd = { workspace = true }
 notify = { workspace = true }
 tempfile = "3"
 semver = "1"
+crossbeam-channel = "0.5"
+image = { version = "0.25", default-features = false, features = ["png"] }
 cargo-packager-updater = "0.2"
 tray-icon = "0.24"
 
@@ -81,11 +83,25 @@ objc2-app-kit = { version = "0.3", features = [
 ] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSData", "NSString"] }
 objc2-quartz-core = { version = "0.3", features = ["CALayer", "objc2-core-foundation"] }
-objc2-core-graphics = { version = "0.3", features = ["CGEvent", "CGEventTypes"] }
+objc2-core-graphics = { version = "0.3", features = [
+    "CGEvent",
+    "CGEventTypes",
+    "CGImage",
+    "CGColorSpace",
+    "CGContext",
+    "CGBitmapContext",
+] }
 objc2-core-foundation = { version = "0.3", features = [
     "CFBase",
     "CFRunLoop",
     "CFMachPort",
+] }
+objc2-screen-capture-kit = { version = "0.3", features = [
+    "SCStream",
+    "SCShareableContent",
+    "SCScreenshotManager",
+    "objc2-core-graphics",
+    "block2",
 ] }
 block2 = "0.6"
 raw-window-handle = "0.6"

@@ -20,6 +20,7 @@ mod native_keyboard;
 mod os_menu;
 pub mod panic_hook;
 mod persistence;
+mod screenshot;
 
 #[cfg(target_os = "macos")]
 mod splash;
