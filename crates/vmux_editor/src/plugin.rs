@@ -300,6 +300,8 @@ fn send_initial_dir(
             &FileDirEvent {
                 path: display_path(&fv.path),
                 entries: dir.entries.clone(),
+                parent_path: String::new(),
+                parent_entries: Vec::new(),
             },
         ));
         commands.entity(entity).insert(FileInitialMetaSent);

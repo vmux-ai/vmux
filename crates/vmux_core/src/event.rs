@@ -19,6 +19,10 @@ pub const FILE_RESIZE_EVENT: &str = "file_resize";
 pub const FILE_SCROLL_EVENT: &str = "file_scroll";
 pub const FILE_DIR_EVENT: &str = "file_dir";
 pub const FILE_THEME_EVENT: &str = "file_theme";
+pub const FILE_PREVIEW_REQUEST_EVENT: &str = "file_preview_request";
+pub const FILE_PREVIEW_EVENT: &str = "file_preview";
+pub const FILE_OPEN_EVENT: &str = "file_open";
+pub const FILE_IMAGE_EVENT: &str = "file_image";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
 #[derive(
@@ -162,6 +166,8 @@ pub struct FileDirEntry {
 pub struct FileDirEvent {
     pub path: String,
     pub entries: Vec<FileDirEntry>,
+    pub parent_path: String,
+    pub parent_entries: Vec<FileDirEntry>,
 }
 
 #[derive(
@@ -179,6 +185,93 @@ pub struct FileThemeEvent {
     pub font_family: String,
     pub font_size: f32,
     pub line_height: f32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FilePreviewRequest {
+    pub path: String,
+    pub thumb: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum PreviewKind {
+    Dir(Vec<FileDirEntry>),
+    Text(Vec<FileLine>),
+    Image {
+        mime: String,
+        bytes: Vec<u8>,
+    },
+    Info {
+        size: u64,
+        modified: String,
+        kind: String,
+    },
+    Error(String),
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FilePreviewEvent {
+    pub path: String,
+    pub kind: PreviewKind,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileOpenEvent {
+    pub path: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileImageEvent {
+    pub mime: String,
+    pub bytes: Vec<u8>,
 }
 
 #[cfg(test)]
@@ -228,6 +321,28 @@ mod file_event_tests {
         let d = rkyv::from_bytes::<FileResizeEvent, rkyv::rancor::Error>(&b).unwrap();
         assert_eq!(d.char_height, 16.0);
         assert_eq!(d.viewport_height, 480.0);
+    }
+
+    #[test]
+    fn preview_kind_rkyv_roundtrip() {
+        let k = PreviewKind::Image {
+            mime: "image/png".into(),
+            bytes: vec![1, 2, 3],
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&k).unwrap();
+        let back = rkyv::from_bytes::<PreviewKind, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(k, back);
+    }
+
+    #[test]
+    fn file_dir_event_has_parent_fields() {
+        let e = FileDirEvent {
+            path: "/a/b".into(),
+            entries: vec![],
+            parent_path: "/a".into(),
+            parent_entries: vec![],
+        };
+        assert_eq!(e.parent_path, "/a");
     }
 }
 
