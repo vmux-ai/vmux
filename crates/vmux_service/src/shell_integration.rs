@@ -68,8 +68,13 @@ fn nu_config_dir() -> Option<std::path::PathBuf> {
     if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
         return Some(std::path::PathBuf::from(xdg).join("nushell"));
     }
-    let home = std::env::var_os("HOME")?;
-    Some(std::path::PathBuf::from(home).join("Library/Application Support/nushell"))
+    let home = std::path::PathBuf::from(std::env::var_os("HOME")?);
+    let base = if cfg!(target_os = "macos") {
+        home.join("Library/Application Support")
+    } else {
+        home.join(".config")
+    };
+    Some(base.join("nushell"))
 }
 
 fn nu_config() -> String {

@@ -12,7 +12,7 @@
 
 ---
 
-### Task 1: Add the `vte` dependency
+## Task 1: Add the `vte` dependency
 
 **Files:**
 - Modify: `crates/vmux_service/Cargo.toml`
@@ -44,7 +44,7 @@ git commit -m "build(service): add vte dependency for OSC 133 parsing"
 
 ---
 
-### Task 2: Add the `CommandLifecycle` message
+## Task 2: Add the `CommandLifecycle` message
 
 **Files:**
 - Modify: `crates/vmux_service/src/protocol.rs` (the `ServiceMessage` enum begins at line 433; `ProcessTitle` at 460 is the template)
@@ -89,7 +89,7 @@ git commit -m "feat(service): add CommandLifecycle service message"
 
 ---
 
-### Task 3: OSC 133 scanner (pure, unit-tested)
+## Task 3: OSC 133 scanner (pure, unit-tested)
 
 **Files:**
 - Create: `crates/vmux_service/src/osc133.rs`
@@ -257,7 +257,7 @@ git commit -m "feat(service): OSC 133 scanner over a parallel vte parser"
 
 ---
 
-### Task 4: Wire the scanner into `Process` and broadcast lifecycle events
+## Task 4: Wire the scanner into `Process` and broadcast lifecycle events
 
 **Files:**
 - Modify: `crates/vmux_service/src/process.rs` (struct at line 69, `new_with_wake` init around line 304-327, drain `poll()` at 1173-1198)
