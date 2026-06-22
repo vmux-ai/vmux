@@ -4,6 +4,11 @@ pub mod viewport;
 pub mod highlight;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod dir;
+#[cfg(not(target_arch = "wasm32"))]
+mod preview;
+
+#[cfg(not(target_arch = "wasm32"))]
 mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::{EditorPlugin, FileView, restore_file_view_bundle};
