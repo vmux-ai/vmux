@@ -1154,10 +1154,13 @@ fn on_command_bar_action(
                     custom_keyboard_restore = true;
                 } else {
                     let target = evt.target;
-                    let open_cmd = build_open_command(target, url);
-                    writer_params
-                        .p0()
-                        .write(AppCommand::Browser(BrowserCommand::Open(open_cmd)));
+                    let cmd =
+                        AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
+                    issued.write(vmux_command::CommandIssued {
+                        caller,
+                        command: cmd.clone(),
+                    });
+                    writer_params.p0().write(cmd);
                 }
             }
         }
@@ -1229,13 +1232,15 @@ fn on_command_bar_action(
                             target_stack: Some(stack_e),
                         });
                     } else {
-                        writer_params
-                            .p0()
-                            .write(AppCommand::Browser(BrowserCommand::Open(
-                                OpenCommand::InNewStack {
-                                    url: Some("vmux://terminal/".into()),
-                                },
-                            )));
+                        let cmd =
+                            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
+                                url: Some("vmux://terminal/".into()),
+                            }));
+                        issued.write(vmux_command::CommandIssued {
+                            caller,
+                            command: cmd.clone(),
+                        });
+                        writer_params.p0().write(cmd);
                     }
                 }
             } // end reattach else

@@ -277,10 +277,16 @@ fn reset_team_sent_on_page_ready(
 fn on_team_command(
     _trigger: On<BinReceive<TeamCommandEvent>>,
     mut messages: ResMut<bevy::ecs::message::Messages<AppCommand>>,
+    mut issued: ResMut<bevy::ecs::message::Messages<vmux_command::CommandIssued>>,
+    user: Query<Entity, With<User>>,
 ) {
-    messages.write(AppCommand::Browser(BrowserCommand::Open(
-        OpenCommand::InNewStack {
-            url: Some(TEAM_PAGE_URL.to_string()),
-        },
-    )));
+    let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
+    let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
+        url: Some(TEAM_PAGE_URL.to_string()),
+    }));
+    issued.write(vmux_command::CommandIssued {
+        caller,
+        command: cmd.clone(),
+    });
+    messages.write(cmd);
 }
