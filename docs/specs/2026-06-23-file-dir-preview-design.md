@@ -185,7 +185,7 @@ pub enum PreviewKind {
     Error(String),
 }
 
-pub struct FilePreviewEvent { pub path: String, pub kind: PreviewKind }
+pub struct FilePreviewEvent { pub path: String, pub thumb: bool, pub kind: PreviewKind } // thumb echoes the request so the page routes thumbnails vs selection previews
 
 pub struct FileOpenEvent { pub path: String }
 
