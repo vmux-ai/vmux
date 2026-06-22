@@ -32,7 +32,7 @@ Rejected — Approach A (sample in the service, add fields to `ProcessInfo`): ch
 
 Add `sysinfo` (native dep) and a usage resource:
 
-```
+```text
 Resource ProcessUsage(HashMap<u32 /*pid*/, Usage>)
 Usage { cpu_percent: f32, mem_bytes: u64 }
 ```
@@ -54,7 +54,7 @@ Pure, unit-testable helper:
 
 Add to `ProcessEntry` (additive; both serde + rkyv derived):
 
-```
+```text
 cpu_percent: f32,
 mem_bytes: u64,
 ```

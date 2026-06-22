@@ -64,7 +64,6 @@ pub struct PreviewLine {
     pub text: String,
 }
 
-/// Human-readable RSS. `0` (unsampled) renders as an em dash.
 pub fn format_mem(bytes: u64) -> String {
     const MB: f64 = 1024.0 * 1024.0;
     const GB: f64 = MB * 1024.0;

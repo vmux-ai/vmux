@@ -82,8 +82,6 @@ struct ProcSample {
     mem: u64,
 }
 
-/// Sum cpu + memory over `root` and all its descendants in `procs`.
-/// Returns `Usage::default()` if `root` is absent.
 fn subtree_usage(root: u32, procs: &HashMap<u32, ProcSample>) -> Usage {
     let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
     for (&pid, s) in procs {
@@ -177,8 +175,6 @@ fn request_process_list(
     }
 }
 
-/// Sample CPU + memory for each service-managed pid (process tree) while the
-/// services page is open. Runs on its own 1s cadence so cpu deltas are valid.
 fn sample_process_usage(
     time: Res<Time>,
     mut timer: ResMut<SysinfoPollTimer>,
