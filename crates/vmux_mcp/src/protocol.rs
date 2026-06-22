@@ -132,7 +132,7 @@ async fn tool_call_result(
             };
             run_blocking(run).await
         }
-        crate::tools::DispatchTarget::Command(command) => run_agent_command(command).await,
+        crate::tools::DispatchTarget::Command(command) => run_agent_command(command, anchor).await,
         crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
     }
 }
@@ -172,6 +172,7 @@ async fn run_blocking(run: AgentCommand) -> Result<Value, String> {
     connection
         .send(&ClientMessage::AgentCommand {
             request_id,
+            anchor: None,
             command: run,
         })
         .await
@@ -280,7 +281,10 @@ async fn read_full_text(
     }
 }
 
-async fn run_agent_command(command: AgentCommand) -> Result<Value, String> {
+async fn run_agent_command(
+    command: AgentCommand,
+    anchor: Option<vmux_service::protocol::ProcessId>,
+) -> Result<Value, String> {
     let request_id = vmux_service::protocol::AgentRequestId::new();
     let connection = vmux_service::client::ServiceConnection::connect()
         .await
@@ -288,6 +292,7 @@ async fn run_agent_command(command: AgentCommand) -> Result<Value, String> {
     connection
         .send(&ClientMessage::AgentCommand {
             request_id,
+            anchor,
             command,
         })
         .await

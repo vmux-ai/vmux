@@ -1327,12 +1327,17 @@ fn poll_service_messages(
             }
             ServiceMessage::AgentCommand {
                 request_id,
+                anchor,
                 command,
             } => {
                 writers
                     .agent_commands
                     .write(vmux_service::agent_events::AgentCommandRequest {
                         request_id,
+                        origin: vmux_service::agent_events::CommandOrigin::Agent {
+                            sid: None,
+                            anchor,
+                        },
                         command,
                     });
             }
@@ -1343,14 +1348,15 @@ fn poll_service_messages(
             }
             ServiceMessage::AgentToolCall {
                 request_id,
+                sid,
                 name,
                 args_json,
-                ..
             } => {
                 writers
                     .agent_tool_calls
                     .write(vmux_service::agent_events::AgentToolCallRequest {
                         request_id,
+                        sid,
                         name,
                         args_json,
                     });
@@ -2470,12 +2476,19 @@ fn on_term_key(
     settings: Option<Res<AppSettings>>,
     mut web_shortcuts: ResMut<TerminalWebShortcutState>,
     mut app_commands: MessageWriter<AppCommand>,
+    mut issued: MessageWriter<vmux_command::CommandIssued>,
+    user_q: Query<Entity, With<vmux_core::team::User>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
     match resolve_terminal_web_shortcut(event, settings.as_deref(), &mut web_shortcuts) {
         TerminalWebShortcutAction::Command(cmd) => {
+            let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
+            issued.write(vmux_command::CommandIssued {
+                caller,
+                command: cmd.clone(),
+            });
             app_commands.write(cmd);
             if let Some(proxy) = proxy.as_ref() {
                 let _ = (**proxy).send_event(WinitUserEvent::WakeUp);

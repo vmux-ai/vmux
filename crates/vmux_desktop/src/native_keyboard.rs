@@ -229,7 +229,10 @@ pub(crate) fn install_native_key_monitor(proxy: Option<Res<EventLoopProxyWrapper
     });
 }
 
-pub(crate) fn process_monitored_keys(mut writer: MessageWriter<AppCommand>) {
+pub(crate) fn process_monitored_keys(
+    mut issuer: vmux_command::CommandIssuer,
+    user: Query<Entity, With<vmux_core::team::User>>,
+) {
     let drained = {
         let mut queue = PENDING_COMMANDS.lock();
         if queue.is_empty() {
@@ -237,8 +240,9 @@ pub(crate) fn process_monitored_keys(mut writer: MessageWriter<AppCommand>) {
         }
         std::mem::take(&mut *queue)
     };
+    let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
     for cmd in drained {
-        writer.write(cmd);
+        issuer.issue(caller, cmd);
     }
 }
 

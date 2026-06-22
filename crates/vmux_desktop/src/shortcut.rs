@@ -82,9 +82,11 @@ fn process_key_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     bindings: Res<ShortcutMap>,
     mut chord_state: ResMut<ChordState>,
-    mut writer: MessageWriter<AppCommand>,
+    mut issuer: vmux_command::CommandIssuer,
+    user: Query<Entity, With<vmux_core::team::User>>,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
 ) {
+    let caller = user.single().unwrap_or(Entity::PLACEHOLDER);
     let current_modifiers = read_current_modifiers(&keyboard);
 
     if let Some((_, instant)) = &chord_state.pending_prefix {
@@ -111,7 +113,7 @@ fn process_key_input(
                 .iter()
                 .find_map(|pressed| chord_command(&bindings, &prefix, pressed))
         {
-            writer.write(cmd);
+            issuer.issue(caller, cmd);
             chord_state.pending_prefix = None;
             suppress.0 = false;
             return;
@@ -125,7 +127,7 @@ fn process_key_input(
 
     for (index, pressed) in just_pressed.iter().enumerate() {
         if let Some(cmd) = direct_command(&bindings, pressed) {
-            writer.write(cmd);
+            issuer.issue(caller, cmd);
             return;
         }
         if has_chord_prefix(&bindings, pressed) {
@@ -136,7 +138,7 @@ fn process_key_input(
                     continue;
                 }
                 if let Some(cmd) = chord_command(&bindings, pressed, second) {
-                    writer.write(cmd);
+                    issuer.issue(caller, cmd);
                     chord_state.pending_prefix = None;
                     suppress.0 = false;
                     return;

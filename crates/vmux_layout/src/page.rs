@@ -6,6 +6,7 @@ use crate::event::{
     TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
 use dioxus::prelude::*;
+use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{GlobeIcon, favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
@@ -59,6 +60,11 @@ pub fn Page() -> Element {
             spaces_state.set(data);
         },
     );
+
+    let mut team_state = use_signal(TeamEvent::default);
+    let _team_listener = use_bin_event_listener::<TeamEvent, _>(TEAM_EVENT, move |data| {
+        team_state.set(data);
+    });
 
     let mut update_version = use_signal(|| None::<String>);
     let _update_ready_listener = use_bin_event_listener::<crate::event::UpdateReadyEvent, _>(
@@ -141,6 +147,7 @@ pub fn Page() -> Element {
                     HeaderView {
                         stacks_state: stacks,
                         tabs_state: tabs,
+                        team: team_state().members,
                         reload_key: reload_key(),
                         stacks_error: stacks_error.clone(),
                         tabs_error: tabs_error.clone(),
@@ -194,6 +201,7 @@ fn format_address(stack: &StackRow) -> String {
 fn HeaderView(
     stacks_state: StacksHostEvent,
     tabs_state: TabsHostEvent,
+    team: Vec<TeamMemberRow>,
     reload_key: u32,
     stacks_error: Option<String>,
     tabs_error: Option<String>,
@@ -263,6 +271,7 @@ fn HeaderView(
                         active_row: active_row.clone(),
                         bg_color: active_bg_color.clone(),
                     }
+                    TeamFacepile { members: team }
                 }
             }
         }
@@ -490,6 +499,71 @@ fn NewTabButton() -> Element {
             Icon { class: "h-3.5 w-3.5",
                 path { d: "M12 5v14" }
                 path { d: "M5 12h14" }
+            }
+        }
+    }
+}
+
+#[component]
+fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
+    if members.is_empty() {
+        return rsx! {};
+    }
+    let user = members.iter().find(|m| m.is_user).cloned();
+    let agents: Vec<TeamMemberRow> = members.iter().filter(|m| !m.is_user).cloned().collect();
+    let max = 5usize;
+    let overflow = agents.len().saturating_sub(max);
+    rsx! {
+        div {
+            class: "flex shrink-0 items-center gap-2 pl-3 pr-3 cursor-pointer transition-opacity hover:opacity-80",
+            title: "Team",
+            onclick: move |_| {
+                let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
+                    command: "open".to_string(),
+                    member_id: None,
+                });
+            },
+            if let Some(user) = user {
+                div { class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5",
+                    div {
+                        class: "inline-flex size-5 items-center justify-center rounded-full text-[9px] font-semibold text-white",
+                        style: "background:{user.color}",
+                        "{user.initials}"
+                    }
+                    span { class: "whitespace-nowrap text-xs font-medium text-foreground", "{user.name}" }
+                }
+            }
+            if !agents.is_empty() {
+                div { class: "flex items-center -space-x-1.5",
+                    for m in agents.iter().take(max) {
+                        {
+                            let src = favicon_src_for_url(&m.icon, &m.url);
+                            let bg = if src.is_some() { String::new() } else { format!("background:{}", m.color) };
+                            rsx! {
+                                div {
+                                    key: "{m.id}",
+                                    title: "{m.name}",
+                                    class: "relative inline-flex size-5 items-center justify-center overflow-hidden rounded-full ring-2 ring-background text-[9px] font-semibold text-white",
+                                    style: "{bg}",
+                                    if let Some(src) = src.as_ref() {
+                                        img { class: "size-full object-cover", src: "{src}" }
+                                    } else {
+                                        "{m.initials}"
+                                    }
+                                    if m.is_running {
+                                        span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-emerald-400 ring-2 ring-background" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if overflow > 0 {
+                        div {
+                            class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground",
+                            "+{overflow}"
+                        }
+                    }
+                }
             }
         }
     }

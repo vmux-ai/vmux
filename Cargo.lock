@@ -9537,6 +9537,7 @@ dependencies = [
  "vmux_service",
  "vmux_setting",
  "vmux_space",
+ "vmux_team",
  "vmux_terminal",
  "vmux_ui",
  "vmux_vibe_setup",
@@ -9633,6 +9634,7 @@ dependencies = [
  "vmux_service",
  "vmux_setting",
  "vmux_space",
+ "vmux_team",
  "vmux_terminal",
  "vmux_vibe_setup",
  "web-sys",
@@ -9717,6 +9719,27 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_setting",
+ "vmux_ui",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "vmux_team"
+version = "0.0.16"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
+ "dioxus",
+ "rkyv",
+ "ron 0.8.1",
+ "serde",
+ "vmux_agent",
+ "vmux_command",
+ "vmux_core",
+ "vmux_layout",
+ "vmux_space",
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",

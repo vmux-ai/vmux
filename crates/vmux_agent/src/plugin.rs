@@ -33,7 +33,7 @@ use crate::AgentVariant;
 use crate::client::cli::claude::ClaudeStrategy;
 use crate::client::cli::codex::CodexStrategy;
 use crate::client::cli::vibe::VibeStrategy;
-use crate::events::{AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest};
+use crate::events::{AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin};
 use crate::session::{
     self, AgentSession, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
     PendingAgentSession, SessionId, agent_session_dirty_run_condition,
@@ -235,6 +235,11 @@ pub fn attach_page_agent_to_stack(
         crate::AgentMessages::default(),
         crate::AgentApprovalPolicy::default(),
         crate::AgentRunState::default(),
+        vmux_core::team::Profile::agent(kind),
+        vmux_core::team::Agent {
+            sid: sid.to_string(),
+            kind,
+        },
     ));
     let placeholder = page_agent_placeholder_url(provider, model, sid);
     commands.spawn((
@@ -283,9 +288,20 @@ pub struct AgentLookups<'w> {
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-struct AgentSpaceWriters<'w> {
+struct AgentSpaceWriters<'w, 's> {
     layout_apply: MessageWriter<'w, vmux_layout::reconcile::LayoutApplyRequest>,
     space_command: MessageWriter<'w, vmux_space::SpaceCommandRequest>,
+    issued: MessageWriter<'w, vmux_command::CommandIssued>,
+    agents: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static vmux_core::team::Agent,
+            Option<&'static vmux_service::protocol::ProcessId>,
+        ),
+    >,
+    user: Query<'w, 's, Entity, With<vmux_core::team::User>>,
 }
 
 fn handle_agent_tool_calls(
@@ -301,6 +317,10 @@ fn handle_agent_tool_calls(
             Ok(vmux_mcp::tools::DispatchTarget::Command(command)) => {
                 command_writer.write(AgentCommandRequest {
                     request_id: req.request_id,
+                    origin: CommandOrigin::Agent {
+                        sid: Some(req.sid.clone()),
+                        anchor: None,
+                    },
                     command,
                 });
             }
@@ -345,6 +365,22 @@ fn handle_agent_commands(
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
 
     for request in reader.read() {
+        let caller = match &request.origin {
+            CommandOrigin::Agent {
+                anchor: Some(pid), ..
+            } => writers
+                .agents
+                .iter()
+                .find(|(_, _, p)| p.is_some_and(|p| p == pid))
+                .map(|(e, _, _)| e),
+            CommandOrigin::Agent { sid: Some(sid), .. } if !sid.is_empty() => writers
+                .agents
+                .iter()
+                .find(|(_, a, _)| &a.sid == sid)
+                .map(|(e, _, _)| e),
+            CommandOrigin::User => writers.user.single().ok(),
+            _ => None,
+        };
         let result = match &request.command {
             ServiceAgentCommand::AppCommand { id, args_json } => {
                 let args: serde_json::Value = if args_json.is_empty() {
@@ -354,12 +390,24 @@ fn handle_agent_commands(
                 };
                 match AppCommand::from_mcp_call(id, args) {
                     Some(Ok(command)) => {
+                        if let Some(caller) = caller {
+                            writers.issued.write(vmux_command::CommandIssued {
+                                caller,
+                                command: command.clone(),
+                            });
+                        }
                         app_commands.write(command);
                         AgentCommandResult::Ok
                     }
                     Some(Err(message)) => AgentCommandResult::Error(message),
                     None => match AppCommand::from_mcp_id(id) {
                         Some(command) => {
+                            if let Some(caller) = caller {
+                                writers.issued.write(vmux_command::CommandIssued {
+                                    caller,
+                                    command: command.clone(),
+                                });
+                            }
                             app_commands.write(command);
                             AgentCommandResult::Ok
                         }
@@ -851,7 +899,9 @@ pub fn detect_agent_session_process_exit(
             .entity(entity)
             .remove::<AgentSession>()
             .remove::<SessionId>()
-            .remove::<PendingAgentSession>();
+            .remove::<PendingAgentSession>()
+            .remove::<vmux_core::team::Agent>()
+            .remove::<vmux_core::team::Profile>();
         // A vibe agent terminal that exits should close its pane entirely, not
         // linger as a shell/terminal. The terminal is a child of a stack, which
         // is a child of a pane; mark that pane for a no-dialog force close. If
@@ -899,6 +949,7 @@ pub(crate) fn forward_history_open_intent(
         };
         requests.write(AgentCommandRequest {
             request_id: AgentRequestId::new(),
+            origin: CommandOrigin::User,
             command,
         });
     }
@@ -1340,6 +1391,11 @@ fn handle_spawn_agent_requests(
                     launch,
                     AgentSession { kind: req.kind },
                     process_id,
+                    vmux_core::team::Profile::agent(req.kind),
+                    vmux_core::team::Agent {
+                        sid: req.session_id.clone().unwrap_or_default(),
+                        kind: req.kind,
+                    },
                 ));
                 if let Some(id) = req.session_id.clone() {
                     commands.entity(terminal).insert(SessionId(id));
@@ -1775,6 +1831,7 @@ mod tests {
             .resource_mut::<Messages<AgentCommandRequest>>()
             .write(AgentCommandRequest {
                 request_id: AgentRequestId::new(),
+                origin: CommandOrigin::User,
                 command: ServiceAgentCommand::TerminalSend {
                     text: "ls".to_string(),
                     terminal: None,

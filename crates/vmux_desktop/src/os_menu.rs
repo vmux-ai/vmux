@@ -213,6 +213,16 @@ fn forward_menu_events(world: &mut World) {
         if event_id == "app_quit" {
             handle_quit_request(world);
         } else if let Some(cmd) = AppCommand::from_menu_id(event_id.as_str()) {
+            let caller = {
+                let mut q = world.query_filtered::<Entity, With<vmux_core::team::User>>();
+                q.iter(world).next().unwrap_or(Entity::PLACEHOLDER)
+            };
+            world
+                .resource_mut::<Messages<vmux_command::CommandIssued>>()
+                .write(vmux_command::CommandIssued {
+                    caller,
+                    command: cmd.clone(),
+                });
             world.resource_mut::<Messages<AppCommand>>().write(cmd);
         } else {
             crate::tray::PENDING_TRAY_EVENTS.lock().push(event_id);

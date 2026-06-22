@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use serde_json::Value;
 
 pub use vmux_service::agent_events::{
-    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest,
+    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin,
 };
 
 #[derive(Event, Clone, Debug)]

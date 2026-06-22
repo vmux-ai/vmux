@@ -35,11 +35,11 @@ pub fn favicon_src_for_url(favicon_url: &str, url: &str) -> Option<String> {
     }
     if let Some(host) = agent_host(url) {
         return Some(format!(
-            "https://www.google.com/s2/favicons?domain={host}&sz=32"
+            "https://www.google.com/s2/favicons?domain={host}&sz=64"
         ));
     }
     host_for_favicon_fallback(url)
-        .map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=32"))
+        .map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=64"))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -184,7 +184,7 @@ mod tests {
     fn favicon_src_falls_back_to_google_s2_for_http_url() {
         assert_eq!(
             favicon_src_for_url("", "https://mistral.ai/"),
-            Some("https://www.google.com/s2/favicons?domain=mistral.ai&sz=32".to_string())
+            Some("https://www.google.com/s2/favicons?domain=mistral.ai&sz=64".to_string())
         );
     }
 
@@ -192,7 +192,7 @@ mod tests {
     fn favicon_src_falls_back_to_google_s2_for_google_search() {
         assert_eq!(
             favicon_src_for_url("", "https://www.google.com/search?q=mistral.ai"),
-            Some("https://www.google.com/s2/favicons?domain=www.google.com&sz=32".to_string())
+            Some("https://www.google.com/s2/favicons?domain=www.google.com&sz=64".to_string())
         );
     }
 
@@ -200,7 +200,7 @@ mod tests {
     fn favicon_src_falls_back_to_agent_host() {
         assert_eq!(
             favicon_src_for_url("", "vmux://agent/vibe/chat/abc"),
-            Some("https://www.google.com/s2/favicons?domain=chat.mistral.ai&sz=32".to_string())
+            Some("https://www.google.com/s2/favicons?domain=chat.mistral.ai&sz=64".to_string())
         );
     }
 

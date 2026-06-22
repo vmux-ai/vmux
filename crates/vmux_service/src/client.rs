@@ -53,6 +53,7 @@ pub struct ServiceHandle {
 
 pub type ServiceWake = Arc<dyn Fn() + Send + Sync + 'static>;
 
+#[allow(clippy::result_large_err)]
 fn forward_service_message(
     msg_tx: &std::sync::mpsc::Sender<ServiceMessage>,
     wake: Option<&ServiceWake>,

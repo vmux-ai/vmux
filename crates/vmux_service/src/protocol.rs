@@ -300,6 +300,7 @@ pub enum ClientMessage {
     SubscribeAgentCommands,
     AgentCommand {
         request_id: AgentRequestId,
+        anchor: Option<ProcessId>,
         command: AgentCommand,
     },
     Shutdown,
@@ -500,6 +501,7 @@ pub enum ServiceMessage {
     },
     AgentCommand {
         request_id: AgentRequestId,
+        anchor: Option<ProcessId>,
         command: AgentCommand,
     },
     AgentQuery {

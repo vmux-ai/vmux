@@ -307,17 +307,24 @@ fn on_tabs_command_emit(
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
     mut messages: ResMut<Messages<AppCommand>>,
+    mut issued: ResMut<Messages<vmux_command::CommandIssued>>,
+    user_q: Query<Entity, With<vmux_core::team::User>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut last_tab_close: ResMut<LastTabCloseAt>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
     let active_tab = active_tab_param.get();
+    let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
     match evt.command.as_str() {
         "new" => {
-            messages.write(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewTab { url: None },
-            )));
+            let cmd =
+                AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewTab { url: None }));
+            issued.write(vmux_command::CommandIssued {
+                caller,
+                command: cmd.clone(),
+            });
+            messages.write(cmd);
         }
         "close" => {
             last_tab_close.0 = Some(Instant::now());
