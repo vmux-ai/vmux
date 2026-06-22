@@ -43,7 +43,6 @@ pub struct TeamMemberRow {
     #[serde(default)]
     pub sid: String,
     pub is_user: bool,
-    pub is_active: bool,
     pub is_running: bool,
 }
 
@@ -81,10 +80,9 @@ mod tests {
             title: String::new(),
             sid: String::new(),
             is_user: false,
-            is_active: true,
             is_running: true,
         };
-        assert!(row.is_active && row.is_running && !row.is_user);
+        assert!(row.is_running && !row.is_user);
     }
 
     #[test]
@@ -100,7 +98,6 @@ mod tests {
                 title: String::new(),
                 sid: String::new(),
                 is_user: true,
-                is_active: true,
                 is_running: false,
             }],
         };
