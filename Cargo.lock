@@ -9851,6 +9851,7 @@ dependencies = [
  "rfd",
  "rkyv",
  "serde",
+ "sysinfo",
  "tempfile",
  "tracing",
  "unicode-width",
