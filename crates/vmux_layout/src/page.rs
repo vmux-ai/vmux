@@ -520,16 +520,17 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
     let overflow = agents.len().saturating_sub(max);
     rsx! {
         div {
-            class: "flex shrink-0 items-center gap-2 pl-3 pr-3 cursor-pointer transition-opacity hover:opacity-80",
-            title: "Team",
-            onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
-                    command: "open".to_string(),
-                    member_id: None,
-                });
-            },
+            class: "flex shrink-0 items-center gap-2 pl-3 pr-3",
             if let Some(user) = user {
-                div { class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5",
+                div {
+                    class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5 cursor-pointer transition-opacity hover:opacity-80",
+                    title: "Team",
+                    onclick: move |_| {
+                        let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
+                            command: "open".to_string(),
+                            member_id: None,
+                        });
+                    },
                     div {
                         class: "inline-flex size-5 items-center justify-center rounded-full text-[9px] font-semibold text-white",
                         style: "background:{user.color}",
@@ -544,12 +545,19 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                         {
                             let src = favicon_src_for_url(&m.icon, &m.url);
                             let bg = if src.is_some() { String::new() } else { format!("background:{}", m.color) };
+                            let id = m.id.clone();
                             rsx! {
                                 div {
                                     key: "{m.id}",
                                     title: "{m.name}",
-                                    class: "relative inline-flex size-5 items-center justify-center overflow-hidden rounded-full ring-2 ring-background text-[9px] font-semibold text-white",
+                                    class: "relative inline-flex size-5 items-center justify-center overflow-hidden rounded-full ring-2 ring-background text-[9px] font-semibold text-white cursor-pointer transition-opacity hover:opacity-80",
                                     style: "{bg}",
+                                    onclick: move |_| {
+                                        let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
+                                            command: "focus".to_string(),
+                                            member_id: Some(id.clone()),
+                                        });
+                                    },
                                     if let Some(src) = src.as_ref() {
                                         img { class: "size-full object-cover", src: "{src}" }
                                     } else {
@@ -564,7 +572,14 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                     }
                     if overflow > 0 {
                         div {
-                            class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground",
+                            class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground cursor-pointer transition-opacity hover:opacity-80",
+                            title: "Team",
+                            onclick: move |_| {
+                                let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
+                                    command: "open".to_string(),
+                                    member_id: None,
+                                });
+                            },
                             "+{overflow}"
                         }
                     }
