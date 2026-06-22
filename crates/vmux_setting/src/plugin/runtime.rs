@@ -344,7 +344,7 @@ fn default_shell() -> String {
 }
 
 fn default_terminal_font_family() -> String {
-    "JetBrainsMono Nerd Font".to_string()
+    String::new()
 }
 
 impl TerminalSettings {
@@ -599,10 +599,11 @@ fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
         ));
     }
     if differs("terminal") {
-        parts.push(format!(
-            "    terminal: {},",
-            section_ron(&settings.terminal)?
-        ));
+        let terminal_ron = match &settings.terminal {
+            Some(terminal) => sparse_terminal_ron(terminal, default.terminal.as_ref())?,
+            None => section_ron(&settings.terminal)?,
+        };
+        parts.push(format!("    terminal: {terminal_ron},"));
     }
     if differs("auto_update") {
         parts.push(format!(
@@ -620,6 +621,112 @@ fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
         return Ok("()\n".to_string());
     }
     Ok(format!("(\n{}\n)\n", parts.join("\n")))
+}
+
+fn leaf_ron<T: Serialize>(value: &T) -> Result<String, String> {
+    ron::ser::to_string(value).map_err(|e| format!("RON serialize failed: {e}"))
+}
+
+fn sparse_terminal_ron(
+    cur: &TerminalSettings,
+    default: Option<&TerminalSettings>,
+) -> Result<String, String> {
+    let fallback;
+    let def = match default {
+        Some(d) => d,
+        None => {
+            fallback = TerminalSettings::default();
+            &fallback
+        }
+    };
+    let cur_json = serde_json::to_value(cur).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let def_json = serde_json::to_value(def).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let differs = |key: &str| cur_json.get(key) != def_json.get(key);
+
+    let mut fields: Vec<String> = Vec::new();
+    if differs("shell") {
+        fields.push(format!("shell: {}", leaf_ron(&cur.shell)?));
+    }
+    if differs("font_family") {
+        fields.push(format!("font_family: {}", leaf_ron(&cur.font_family)?));
+    }
+    if differs("default_theme") {
+        fields.push(format!("default_theme: {}", leaf_ron(&cur.default_theme)?));
+    }
+    if differs("themes") {
+        fields.push(format!(
+            "themes: {}",
+            sparse_themes_ron(&cur.themes, &def.themes)?
+        ));
+    }
+    if differs("custom_themes") {
+        fields.push(format!("custom_themes: {}", leaf_ron(&cur.custom_themes)?));
+    }
+    if differs("confirm_close") {
+        fields.push(format!("confirm_close: {}", leaf_ron(&cur.confirm_close)?));
+    }
+    if differs("startup_dir") {
+        fields.push(format!("startup_dir: {}", leaf_ron(&cur.startup_dir)?));
+    }
+    Ok(format!("({})", fields.join(", ")))
+}
+
+fn sparse_themes_ron(cur: &[TerminalTheme], default: &[TerminalTheme]) -> Result<String, String> {
+    let mut items: Vec<String> = Vec::new();
+    for theme in cur {
+        let base = default.iter().find(|d| d.name == theme.name);
+        items.push(sparse_theme_ron(theme, base)?);
+    }
+    Ok(format!("[{}]", items.join(", ")))
+}
+
+fn sparse_theme_ron(theme: &TerminalTheme, base: Option<&TerminalTheme>) -> Result<String, String> {
+    let mut fields: Vec<String> = vec![format!("name: {}", leaf_ron(&theme.name)?)];
+    if theme.color_scheme
+        != base
+            .map(|b| b.color_scheme.clone())
+            .unwrap_or_else(default_color_scheme)
+    {
+        fields.push(format!("color_scheme: {}", leaf_ron(&theme.color_scheme)?));
+    }
+    if theme.font_family
+        != base
+            .map(|b| b.font_family.clone())
+            .unwrap_or_else(default_terminal_font_family)
+    {
+        fields.push(format!("font_family: {}", leaf_ron(&theme.font_family)?));
+    }
+    if theme.font_size != base.map(|b| b.font_size).unwrap_or_else(default_font_size) {
+        fields.push(format!("font_size: {}", leaf_ron(&theme.font_size)?));
+    }
+    if theme.line_height
+        != base
+            .map(|b| b.line_height)
+            .unwrap_or_else(default_line_height)
+    {
+        fields.push(format!("line_height: {}", leaf_ron(&theme.line_height)?));
+    }
+    if theme.padding != base.map(|b| b.padding).unwrap_or_else(default_padding) {
+        fields.push(format!("padding: {}", leaf_ron(&theme.padding)?));
+    }
+    if theme.cursor_style
+        != base
+            .map(|b| b.cursor_style.clone())
+            .unwrap_or_else(default_cursor_style)
+    {
+        fields.push(format!("cursor_style: {}", leaf_ron(&theme.cursor_style)?));
+    }
+    if theme.cursor_blink
+        != base
+            .map(|b| b.cursor_blink)
+            .unwrap_or_else(default_cursor_blink)
+    {
+        fields.push(format!("cursor_blink: {}", leaf_ron(&theme.cursor_blink)?));
+    }
+    if theme.shell != base.map(|b| b.shell.clone()).unwrap_or_else(default_shell) {
+        fields.push(format!("shell: {}", leaf_ron(&theme.shell)?));
+    }
+    Ok(format!("({})", fields.join(", ")))
 }
 
 pub fn serialize_settings_to_json(settings: &AppSettings) -> String {
@@ -1262,5 +1369,73 @@ mod tests {
             .count();
         assert_eq!(writes, 0);
         assert!(app.world().resource::<SettingsSaveDebounce>().due.is_some());
+    }
+
+    #[test]
+    fn sparse_save_omits_terminal_when_unchanged() {
+        let s = load_embedded_settings();
+        let ron = sparse_settings_ron(&s).unwrap();
+        assert!(
+            !ron.contains("terminal"),
+            "unchanged terminal must be omitted: {ron}"
+        );
+    }
+
+    #[test]
+    fn sparse_save_omits_default_equal_theme_fields() {
+        let mut s = load_embedded_settings();
+        s.terminal
+            .as_mut()
+            .unwrap()
+            .themes
+            .iter_mut()
+            .find(|t| t.name == "default")
+            .unwrap()
+            .font_size = 12.0;
+
+        let ron = sparse_settings_ron(&s).unwrap();
+        assert!(ron.contains("font_size"), "changed field persisted: {ron}");
+        assert!(ron.contains("12"), "changed value persisted: {ron}");
+        assert!(
+            !ron.contains("font_family"),
+            "default-equal font_family must be omitted: {ron}"
+        );
+        assert!(
+            !ron.contains("color_scheme"),
+            "default-equal color_scheme must be omitted: {ron}"
+        );
+        assert!(
+            !ron.contains("cursor_style"),
+            "default-equal cursor_style must be omitted: {ron}"
+        );
+
+        let reloaded = parse_settings(&ron).unwrap();
+        let theme = reloaded.terminal.unwrap().resolve_theme("default");
+        assert_eq!(theme.font_size, 12.0);
+        assert_eq!(theme.font_family, default_terminal_font_family());
+    }
+
+    #[test]
+    fn sparse_save_keeps_genuinely_overridden_field() {
+        let mut s = load_embedded_settings();
+        s.terminal
+            .as_mut()
+            .unwrap()
+            .themes
+            .iter_mut()
+            .find(|t| t.name == "default")
+            .unwrap()
+            .font_family = "Menlo".to_string();
+
+        let ron = sparse_settings_ron(&s).unwrap();
+        assert!(
+            ron.contains("Menlo"),
+            "explicit override must be persisted: {ron}"
+        );
+        let reloaded = parse_settings(&ron).unwrap();
+        assert_eq!(
+            reloaded.terminal.unwrap().resolve_theme("default").font_family,
+            "Menlo"
+        );
     }
 }
