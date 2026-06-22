@@ -33,7 +33,10 @@ use crate::AgentVariant;
 use crate::client::cli::claude::ClaudeStrategy;
 use crate::client::cli::codex::CodexStrategy;
 use crate::client::cli::vibe::VibeStrategy;
-use crate::events::{AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin};
+use crate::events::{
+    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin, ScreenshotImage,
+    ScreenshotRequest, ScreenshotResponse,
+};
 use crate::session::{
     self, AgentSession, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
     PendingAgentSession, SessionId, agent_session_dirty_run_condition,
@@ -106,6 +109,8 @@ impl Plugin for AgentPlugin {
             .init_resource::<AgentSessionDirty>()
             .add_message::<AgentCommandRequest>()
             .add_message::<AgentQueryRequest>()
+            .add_message::<ScreenshotRequest>()
+            .add_message::<ScreenshotResponse>()
             .add_message::<AgentToolCallRequest>()
             .add_message::<AgentSessionExited>()
             .add_message::<SpawnAgentInStackRequest>()
@@ -168,6 +173,7 @@ impl Plugin for AgentPlugin {
                 (
                     forward_layout_apply_responses,
                     forward_layout_snapshot_responses,
+                    forward_screenshot_responses,
                 ),
             )
             .add_systems(
@@ -969,6 +975,7 @@ fn handle_agent_queries(
         With<vmux_layout::space::Space>,
     >,
     mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
+    mut screenshot_writer: MessageWriter<ScreenshotRequest>,
 ) {
     let Some(service) = service else { return };
 
@@ -1011,6 +1018,12 @@ fn handle_agent_queries(
                     result: AgentQueryResult::Spaces(json),
                 });
             }
+            AgentQuery::Screenshot { ref pane } => {
+                screenshot_writer.write(ScreenshotRequest {
+                    request_id: request.request_id.0,
+                    pane: pane.clone(),
+                });
+            }
             // ReadTerminal/ReadTerminalFull/CommandExit are answered by the
             // service directly; they never reach the GUI.
             AgentQuery::ReadTerminal { .. }
@@ -1046,6 +1059,33 @@ fn forward_layout_snapshot_responses(
         service.0.send(ClientMessage::AgentQueryResponse {
             request_id: AgentRequestId(response.request_id),
             result: AgentQueryResult::Layout(response.snapshot.clone()),
+        });
+    }
+}
+
+fn screenshot_response_to_query_result(
+    result: &Result<ScreenshotImage, String>,
+) -> AgentQueryResult {
+    match result {
+        Ok(img) => AgentQueryResult::Image {
+            path: img.path.clone(),
+            png: img.png.clone(),
+            width: img.width,
+            height: img.height,
+        },
+        Err(message) => AgentQueryResult::Error(message.clone()),
+    }
+}
+
+fn forward_screenshot_responses(
+    mut reader: MessageReader<ScreenshotResponse>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else { return };
+    for response in reader.read() {
+        service.0.send(ClientMessage::AgentQueryResponse {
+            request_id: AgentRequestId(response.request_id),
+            result: screenshot_response_to_query_result(&response.result),
         });
     }
 }
@@ -1668,6 +1708,24 @@ mod tests {
     };
     use vmux_setting::{BrowserSettings, ShortcutSettings};
     use vmux_terminal::Terminal;
+
+    #[test]
+    fn screenshot_response_maps_ok_and_err() {
+        let ok = screenshot_response_to_query_result(&Ok(ScreenshotImage {
+            path: "/tmp/a.png".into(),
+            png: vec![9, 8, 7],
+            width: 10,
+            height: 20,
+        }));
+        assert!(matches!(
+            ok,
+            AgentQueryResult::Image { path, png, width, height }
+                if path == "/tmp/a.png" && png == vec![9, 8, 7] && width == 10 && height == 20
+        ));
+
+        let err = screenshot_response_to_query_result(&Err("nope".to_string()));
+        assert!(matches!(err, AgentQueryResult::Error(m) if m == "nope"));
+    }
 
     pub(super) fn test_settings() -> AppSettings {
         AppSettings {
