@@ -891,35 +891,49 @@ pub fn handle_open_beside_requests(
     pane_children: Query<&Children, With<Pane>>,
     split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<Stack>>,
+    child_of_q: Query<&ChildOf>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut new_stack_ctx: ResMut<NewStackContext>,
 ) {
-    // Anchors split during this batch: several `open_page`s dispatched in one
-    // tick all resolve to the same agent pane; the first splits it, the rest must
-    // extend that split rather than re-split the leaf (which orphans empties).
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     for req in reader.read() {
-        let existing_tabs: Vec<Entity> = pane_children
-            .get(req.pane)
-            .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
-            .unwrap_or_default();
-        let split_dir = direction_to_split(&req.direction);
-        let already_split = !split_this_batch.insert(req.pane) || split_dir_q.contains(req.pane);
-        let p2 = split_or_extend(
-            &mut commands,
+        let target_pane = match find_sibling_pane(
             req.pane,
-            split_dir,
-            &existing_tabs,
-            req.focus,
-            already_split,
-        );
+            &req.direction,
+            &child_of_q,
+            &split_dir_q,
+            &pane_children,
+            &leaf_panes,
+        ) {
+            Some(sibling) => sibling,
+            None => {
+                let existing_tabs: Vec<Entity> = pane_children
+                    .get(req.pane)
+                    .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+                    .unwrap_or_default();
+                let split_dir = direction_to_split(&req.direction);
+                let already_split =
+                    !split_this_batch.insert(req.pane) || split_dir_q.contains(req.pane);
+                split_or_extend(
+                    &mut commands,
+                    req.pane,
+                    split_dir,
+                    &existing_tabs,
+                    req.focus,
+                    already_split,
+                )
+            }
+        };
         let stack_ts = if req.focus {
             LastActivatedAt::now()
         } else {
             LastActivatedAt(0)
         };
-        let new_stack = commands.spawn((stack_bundle(), stack_ts, ChildOf(p2))).id();
+        let new_stack = commands
+            .spawn((stack_bundle(), stack_ts, ChildOf(target_pane)))
+            .id();
         open_or_prompt_stack(
             new_stack,
             Some(req.url.clone()),
@@ -1975,6 +1989,98 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(id)));
         id
+    }
+
+    #[test]
+    fn open_beside_reuses_sibling_pane_as_stack() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OpenBesideRequest>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .add_systems(Update, handle_open_beside_requests);
+
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+            ))
+            .id();
+        let agent_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(split)))
+            .id();
+        app.world_mut().spawn((
+            Stack::default(),
+            LastActivatedAt::now(),
+            ChildOf(agent_pane),
+        ));
+        let other_pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(split)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: agent_pane,
+                direction: PaneDirection::Right,
+                url: "file:///x.rs".to_string(),
+                request_id: [0u8; 16],
+                focus: false,
+            });
+        app.update();
+
+        assert!(
+            app.world().get::<PaneSplit>(agent_pane).is_none(),
+            "agent pane must not be split when a sibling exists"
+        );
+        let kids: Vec<Entity> = app
+            .world()
+            .get::<Children>(other_pane)
+            .map(|c| c.iter().collect())
+            .unwrap_or_default();
+        let stacks = kids
+            .into_iter()
+            .filter(|&e| app.world().get::<Stack>(e).is_some())
+            .count();
+        assert_eq!(
+            stacks, 1,
+            "page should open as a new stack in the sibling pane"
+        );
+    }
+
+    #[test]
+    fn open_beside_splits_when_no_sibling() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OpenBesideRequest>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .add_systems(Update, handle_open_beside_requests);
+
+        let pane = app.world_mut().spawn((Pane, LastActivatedAt::now())).id();
+        app.world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)));
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane,
+                direction: PaneDirection::Right,
+                url: "file:///x.rs".to_string(),
+                request_id: [0u8; 16],
+                focus: true,
+            });
+        app.update();
+
+        assert!(
+            app.world().get::<PaneSplit>(pane).is_some(),
+            "a lone pane should split when there is no sibling"
+        );
     }
 
     #[test]
