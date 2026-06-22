@@ -18,6 +18,7 @@ pub const FILE_ERROR_EVENT: &str = "file_error";
 pub const FILE_RESIZE_EVENT: &str = "file_resize";
 pub const FILE_SCROLL_EVENT: &str = "file_scroll";
 pub const FILE_DIR_EVENT: &str = "file_dir";
+pub const FILE_THEME_EVENT: &str = "file_theme";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
 #[derive(
@@ -131,8 +132,15 @@ pub struct FileScrollEvent {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 pub struct FileDirEntry {
     pub name: String,
@@ -141,12 +149,36 @@ pub struct FileDirEntry {
 }
 
 #[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize,
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
 )]
 pub struct FileDirEvent {
     pub path: String,
     pub entries: Vec<FileDirEntry>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileThemeEvent {
+    pub font_family: String,
+    pub font_size: f32,
+    pub line_height: f32,
 }
 
 #[cfg(test)]

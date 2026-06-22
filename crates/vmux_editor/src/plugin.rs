@@ -40,6 +40,9 @@ pub struct FileDir {
 #[derive(Component)]
 pub struct FileInitialMetaSent;
 
+#[derive(Component)]
+pub struct FileThemeSent;
+
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
 /// Parse the absolute filesystem path out of a `file://` URL.
@@ -183,9 +186,8 @@ fn load_file_buffers(
 ) {
     for (entity, fv) in &q {
         if fv.path.is_dir() {
-            commands.entity(entity).insert(FileDir {
-                entries: list_dir(&fv.path),
-            });
+            let entries = list_dir(&fv.path);
+            commands.entity(entity).insert(FileDir { entries });
             continue;
         }
         let hl = Highlighter::new();
@@ -206,8 +208,28 @@ fn load_file_buffers(
     }
 }
 
+fn display_path(path: &std::path::Path) -> String {
+    if let Ok(cwd) = std::env::current_dir()
+        && let Ok(rel) = path.strip_prefix(&cwd)
+    {
+        return rel.to_string_lossy().to_string();
+    }
+    if let Some(home) = std::env::home_dir()
+        && let Ok(rel) = path.strip_prefix(&home)
+    {
+        return format!("~/{}", rel.to_string_lossy());
+    }
+    path.to_string_lossy().to_string()
+}
+
 fn send_initial_meta(
-    q: Query<(Entity, &FileView, &FileBuffer), Without<FileInitialMetaSent>>,
+    q: Query<
+        (Entity, &FileView, &FileBuffer),
+        (
+            Without<FileInitialMetaSent>,
+            With<vmux_core::page::PageReady>,
+        ),
+    >,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -228,7 +250,7 @@ fn send_initial_meta(
                 entity,
                 FILE_META_EVENT,
                 &FileMetaEvent {
-                    path: fv.path.to_string_lossy().to_string(),
+                    path: display_path(&fv.path),
                     language: buf.language.clone(),
                     total_lines: buf.lines.len() as u32,
                 },
@@ -238,8 +260,52 @@ fn send_initial_meta(
     }
 }
 
+fn send_file_theme(
+    q: Query<
+        Entity,
+        (
+            With<FileView>,
+            Without<FileThemeSent>,
+            With<vmux_core::page::PageReady>,
+        ),
+    >,
+    settings: Res<vmux_setting::AppSettings>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for entity in &q {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        let (font_family, font_size, line_height) = settings
+            .terminal
+            .as_ref()
+            .map(|t| {
+                let th = t.resolve_theme(&t.default_theme);
+                (th.font_family.clone(), th.font_size, th.line_height)
+            })
+            .unwrap_or_else(|| (String::new(), 0.0, 0.0));
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            FILE_THEME_EVENT,
+            &FileThemeEvent {
+                font_family,
+                font_size,
+                line_height,
+            },
+        ));
+        commands.entity(entity).insert(FileThemeSent);
+    }
+}
+
 fn send_initial_dir(
-    q: Query<(Entity, &FileView, &FileDir), Without<FileInitialMetaSent>>,
+    q: Query<
+        (Entity, &FileView, &FileDir),
+        (
+            Without<FileInitialMetaSent>,
+            With<vmux_core::page::PageReady>,
+        ),
+    >,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -251,7 +317,7 @@ fn send_initial_dir(
             entity,
             FILE_DIR_EVENT,
             &FileDirEvent {
-                path: fv.path.to_string_lossy().to_string(),
+                path: display_path(&fv.path),
                 entries: dir.entries.clone(),
             },
         ));
@@ -282,6 +348,21 @@ fn emit_window(
             lines,
         },
     ));
+}
+
+fn reset_file_sent_markers_on_page_ready(
+    trigger: On<BinReceive<vmux_core::page::PageReady>>,
+    file_views: Query<(), With<FileView>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    if file_views.get(entity).is_err() {
+        return;
+    }
+    commands
+        .entity(entity)
+        .remove::<FileInitialMetaSent>()
+        .remove::<FileThemeSent>();
 }
 
 fn on_file_resize(
@@ -334,8 +415,14 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(
                 Update,
-                (load_file_buffers, send_initial_meta, send_initial_dir),
+                (
+                    load_file_buffers,
+                    send_initial_meta,
+                    send_initial_dir,
+                    send_file_theme,
+                ),
             )
+            .add_observer(reset_file_sent_markers_on_page_ready)
             .add_observer(on_file_resize)
             .add_observer(on_file_scroll);
     }

@@ -22,6 +22,7 @@ pub fn Page() -> Element {
     let mut error = use_signal(String::new);
     let mut dir_entries = use_signal(Vec::<FileDirEntry>::new);
     let mut is_dir = use_signal(|| false);
+    let mut theme_style = use_signal(String::new);
     let cell_dims = use_signal(|| (0.0f64, 0.0f64));
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
@@ -59,7 +60,26 @@ pub fn Page() -> Element {
         is_dir.set(true);
     });
 
-    use_effect(move || setup_measurement(cell_dims));
+    let _theme = use_bin_event_listener::<FileThemeEvent, _>(FILE_THEME_EVENT, move |t| {
+        let mut s = String::new();
+        if !t.font_family.is_empty() {
+            s.push_str(&format!(
+                "font-family:\"{}\",\"JetBrainsMono NF\",monospace;",
+                t.font_family
+            ));
+        }
+        if t.font_size > 0.0 {
+            s.push_str(&format!("font-size:{}px;", t.font_size));
+        }
+        if t.line_height > 0.0 {
+            s.push_str(&format!("line-height:{};", t.line_height));
+        }
+        theme_style.set(s);
+    });
+
+    use_effect(move || {
+        setup_measurement(cell_dims);
+    });
 
     let gw = gutter_width(total_lines());
 
@@ -67,8 +87,8 @@ pub fn Page() -> Element {
         div {
             id: CONTAINER_ID,
             tabindex: "0",
-            class: "relative flex h-full w-full flex-col overflow-hidden bg-term-bg text-term-fg font-mono text-sm leading-tight select-none",
-            style: "outline:none;",
+            class: "relative flex h-full w-full flex-col overflow-hidden bg-term-bg text-term-fg font-mono text-sm leading-normal",
+            style: "outline:none;{theme_style}",
 
             onmousedown: move |_| focus_container(),
 
@@ -109,10 +129,13 @@ pub fn Page() -> Element {
             },
 
             div {
-                class: "flex h-7 shrink-0 items-center gap-2 border-b border-white/10 px-3 text-xs text-muted-foreground",
+                class: "flex h-9 shrink-0 items-center gap-2 border-b border-white/[0.07] bg-black/20 px-4 font-sans text-xs text-muted-foreground",
                 span { class: "truncate", "{path}" }
                 if !language().is_empty() {
-                    span { class: "ml-auto shrink-0 opacity-60", "{language}" }
+                    span {
+                        class: "ml-auto shrink-0 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] uppercase tracking-wide opacity-80",
+                        "{language}"
+                    }
                 }
             }
 
@@ -154,17 +177,19 @@ pub fn Page() -> Element {
                     }
                 }
             } else {
-                div { class: "min-h-0 flex-1 overflow-hidden p-1",
-                    for line in lines().iter() {
-                        div { key: "{line.line_no}", class: "flex whitespace-pre",
-                            span {
-                                class: "shrink-0 select-none pr-3 text-right opacity-40",
-                                style: "width:calc(var(--cw, 1ch) * {gw});",
-                                "{line.line_no + 1}"
-                            }
-                            span {
-                                for (i, s) in line.spans.iter().enumerate() {
-                                    span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                div { class: "min-h-0 flex-1 overflow-auto",
+                    div { class: "min-w-max py-2",
+                        for line in lines().iter() {
+                            div { key: "{line.line_no}", class: "group flex hover:bg-white/[0.035]",
+                                span {
+                                    class: "sticky left-0 z-[1] shrink-0 select-none bg-term-bg pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
+                                    style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
+                                    "{line.line_no + 1}"
+                                }
+                                span { class: "whitespace-pre pr-8",
+                                    for (i, s) in line.spans.iter().enumerate() {
+                                        span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                                    }
                                 }
                             }
                         }
