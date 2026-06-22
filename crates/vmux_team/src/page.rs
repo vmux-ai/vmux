@@ -74,9 +74,25 @@ pub fn Page() -> Element {
 
 #[component]
 fn TeamRow(member: TeamMemberRow) -> Element {
+    // Secondary line: a real page title (skip the default "Kind (sid)" one,
+    // since the session id is shown on its own line), else a role label.
+    let default_title = format!("{} (", member.name);
+    let subtitle = if member.is_user {
+        Some("You".to_string())
+    } else if !member.title.is_empty()
+        && member.title != member.name
+        && !member.title.starts_with(&default_title)
+    {
+        Some(member.title.clone())
+    } else if member.sid.is_empty() {
+        Some("Agent".to_string())
+    } else {
+        None
+    };
+
     rsx! {
         div {
-            class: "flex items-start gap-3 rounded-lg px-2 py-1.5 hover:bg-muted/40",
+            class: "flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-muted/40",
             TeamAvatar { member: member.clone(), size: 32 }
             div { class: "flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5",
                 div { class: "flex min-w-0 items-center gap-2",
@@ -95,15 +111,11 @@ fn TeamRow(member: TeamMemberRow) -> Element {
                         }
                     }
                 }
-                if member.is_user {
-                    span { class: "truncate text-xs text-muted-foreground", "You" }
-                } else {
-                    if !member.title.is_empty() {
-                        span { class: "truncate text-xs text-muted-foreground", "{member.title}" }
-                    }
-                    if !member.sid.is_empty() {
-                        span { class: "truncate font-mono text-[11px] text-muted-foreground/55", "{member.sid}" }
-                    }
+                if let Some(subtitle) = subtitle {
+                    span { class: "truncate text-xs text-muted-foreground", "{subtitle}" }
+                }
+                if !member.is_user && !member.sid.is_empty() {
+                    span { class: "truncate font-mono text-[11px] text-muted-foreground/50", "{member.sid}" }
                 }
             }
         }
