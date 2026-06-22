@@ -23,6 +23,10 @@ of truth.
 - Render header, side sheets, and command bar as native AppKit views on macOS.
 - Real `NSGlassEffectView` glass per region (header strip, each side-sheet panel),
   blurring the page content behind them — GPU/WindowServer, ~0 CPU.
+- **Maximize Liquid Glass; minimize chrome.** Surfaces are clear glass
+  (`NSGlassEffectViewStyle::Clear`, clear tint), not opaque colored panels. Keep visual
+  styling minimal — no solid fills, heavy tint, or borders; content is text/icons
+  floating over glass. Let the glass carry the look.
 - Drive the native views entirely from existing ECS data: the `LayoutSnapshot`
   (pane/tab tree) plus the header HostEmit payloads (url/title/favicon, tabs, profile,
   facepile, indicators). No new "source of truth."
@@ -149,6 +153,13 @@ content view
 - This extends `glass.rs` from one full-window backdrop to N region panels driven by the
   layout. The existing full-window backdrop can be retired once regions cover it.
 - Corner radius / insets reuse the existing `LayoutSettings` (padding, radius).
+- **Visual direction — maximize glass, minimize chrome.** Default to `Style::Clear` +
+  clear tint (as `glass.rs` already does); no opaque backgrounds, gradients, or borders
+  on the panels. Active/hover/focus states use subtle glass variations (slightly brighter
+  glass, a thin accent underline on the active tab) rather than solid color fills.
+  Text/icons sit directly on glass. The page showing through is the primary visual; the
+  chrome is near-invisible furniture. Avoid introducing new colors/opacity unless a state
+  genuinely can't read without it.
 
 ### 5. Input, focus, and commands
 
