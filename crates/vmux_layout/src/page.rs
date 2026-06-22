@@ -509,11 +509,13 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
     if members.is_empty() {
         return rsx! {};
     }
+    let user = members.iter().find(|m| m.is_user).cloned();
+    let agents: Vec<TeamMemberRow> = members.iter().filter(|m| !m.is_user).cloned().collect();
     let max = 5usize;
-    let overflow = members.len().saturating_sub(max);
+    let overflow = agents.len().saturating_sub(max);
     rsx! {
         div {
-            class: "flex shrink-0 items-center -space-x-1.5 pl-3 pr-3 cursor-pointer transition-opacity hover:opacity-80",
+            class: "flex shrink-0 items-center gap-2 pl-3 pr-3 cursor-pointer transition-opacity hover:opacity-80",
             title: "Team",
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
@@ -521,33 +523,46 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                     member_id: None,
                 });
             },
-            for m in members.iter().take(max) {
-                {
-                    let ring = "ring-background";
-                    let src = favicon_src_for_url(&m.icon, &m.url);
-                    let bg = if src.is_some() { String::new() } else { format!("background:{}", m.color) };
-                    rsx! {
-                        div {
-                            key: "{m.id}",
-                            title: "{m.name}",
-                            class: "relative inline-flex size-5 items-center justify-center overflow-hidden rounded-full ring-2 {ring} text-[9px] font-semibold text-white",
-                            style: "{bg}",
-                            if let Some(src) = src.as_ref() {
-                                img { class: "size-full object-cover", src: "{src}" }
-                            } else {
-                                "{m.initials}"
-                            }
-                            if m.is_running {
-                                span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-emerald-400 ring-2 ring-background" }
+            if let Some(user) = user {
+                div { class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5",
+                    div {
+                        class: "inline-flex size-5 items-center justify-center rounded-full text-[9px] font-semibold text-white",
+                        style: "background:{user.color}",
+                        "{user.initials}"
+                    }
+                    span { class: "whitespace-nowrap text-xs font-medium text-foreground", "{user.name}" }
+                }
+            }
+            if !agents.is_empty() {
+                div { class: "flex items-center -space-x-1.5",
+                    for m in agents.iter().take(max) {
+                        {
+                            let src = favicon_src_for_url(&m.icon, &m.url);
+                            let bg = if src.is_some() { String::new() } else { format!("background:{}", m.color) };
+                            rsx! {
+                                div {
+                                    key: "{m.id}",
+                                    title: "{m.name}",
+                                    class: "relative inline-flex size-5 items-center justify-center overflow-hidden rounded-full ring-2 ring-background text-[9px] font-semibold text-white",
+                                    style: "{bg}",
+                                    if let Some(src) = src.as_ref() {
+                                        img { class: "size-full object-cover", src: "{src}" }
+                                    } else {
+                                        "{m.initials}"
+                                    }
+                                    if m.is_running {
+                                        span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-emerald-400 ring-2 ring-background" }
+                                    }
+                                }
                             }
                         }
                     }
-                }
-            }
-            if overflow > 0 {
-                div {
-                    class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground",
-                    "+{overflow}"
+                    if overflow > 0 {
+                        div {
+                            class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground",
+                            "+{overflow}"
+                        }
+                    }
                 }
             }
         }
