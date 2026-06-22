@@ -4,7 +4,7 @@
 @source ".";
 
 @theme {
-  --font-mono: "JetBrainsMono NF", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-mono: ui-monospace, "JetBrainsMono NF", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 @font-face {

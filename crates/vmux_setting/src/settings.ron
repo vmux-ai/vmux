@@ -40,7 +40,7 @@
             (
                 name: "default",
                 color_scheme: "catppuccin-mocha",
-                font_family: "JetBrainsMono Nerd Font",
+                font_family: "",
                 font_size: 14.0,
                 line_height: 1.2,
                 padding: 4.0,
