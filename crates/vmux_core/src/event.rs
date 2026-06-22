@@ -240,6 +240,7 @@ pub enum PreviewKind {
 )]
 pub struct FilePreviewEvent {
     pub path: String,
+    pub thumb: bool,
     pub kind: PreviewKind,
 }
 

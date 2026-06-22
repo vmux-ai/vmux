@@ -446,6 +446,7 @@ fn on_file_preview_request(
         FILE_PREVIEW_EVENT,
         &FilePreviewEvent {
             path: req.path,
+            thumb: false,
             kind,
         },
     ));
@@ -468,6 +469,7 @@ fn drain_thumb_tasks(
                     FILE_PREVIEW_EVENT,
                     &FilePreviewEvent {
                         path,
+                        thumb: true,
                         kind: PreviewKind::Image {
                             mime: "image/png".to_string(),
                             bytes,
