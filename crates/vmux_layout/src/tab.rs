@@ -706,4 +706,54 @@ mod tests {
         assert!(app.world().get_entity(other_tab).is_ok());
         assert!(app.world().resource::<LastTabCloseAt>().0.is_some());
     }
+
+    #[test]
+    fn tab_next_activates_and_reveals_target_in_a_single_update() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, crate::space::SpacePlugin))
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
+            .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout));
+
+        app.world_mut().spawn(PrimaryWindow);
+        let main = app.world_mut().spawn(MainNode).id();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .id();
+        let tab_a = app
+            .world_mut()
+            .spawn((
+                tab_bundle(),
+                LastActivatedAt(2),
+                vmux_core::Active,
+                ChildOf(space),
+            ))
+            .id();
+        let tab_b = app
+            .world_mut()
+            .spawn((tab_bundle(), LastActivatedAt(1), ChildOf(space)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::Next)));
+
+        app.update();
+
+        assert!(
+            app.world().entity(tab_b).contains::<vmux_core::Active>(),
+            "target tab must become Active in the same update as the switch command"
+        );
+        assert_eq!(
+            app.world().get::<Node>(tab_b).unwrap().display,
+            Display::Flex,
+            "target tab must be revealed in the same update (no one-frame lag)"
+        );
+        assert_eq!(
+            app.world().get::<Node>(tab_a).unwrap().display,
+            Display::None,
+            "previously active tab must hide in the same update"
+        );
+    }
 }
