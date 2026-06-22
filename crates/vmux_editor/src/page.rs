@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 
-use crate::page_model::{gutter_width, span_style};
+use std::collections::HashMap;
+
+use crate::page_model::{gutter_width, image_mime, span_style};
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::components::icon::Icon;
@@ -10,6 +12,165 @@ use wasm_bindgen::prelude::*;
 
 const CONTAINER_ID: &str = "file-container";
 const MEASURE_ID: &str = "file-measure";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Dir,
+    Text,
+    Image,
+}
+
+#[derive(Clone, PartialEq)]
+enum Preview {
+    None,
+    Dir(Vec<FileDirEntry>),
+    Text(Vec<FileLine>),
+    Image(String),
+    Info {
+        size: u64,
+        modified: String,
+        kind: String,
+    },
+    Error(String),
+}
+
+fn blob_url(bytes: &[u8]) -> Option<String> {
+    let arr = js_sys::Uint8Array::from(bytes);
+    let parts = js_sys::Array::new();
+    parts.push(&arr.buffer());
+    let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).ok()?;
+    web_sys::Url::create_object_url_with_blob(&blob).ok()
+}
+
+fn revoke(url: &str) {
+    let _ = web_sys::Url::revoke_object_url(url);
+}
+
+fn request_preview(path: String) {
+    let _ = try_cef_bin_emit_rkyv(&FilePreviewRequest { path, thumb: false });
+}
+
+fn request_thumb(path: String) {
+    let _ = try_cef_bin_emit_rkyv(&FilePreviewRequest { path, thumb: true });
+}
+
+fn open_path(path: String) {
+    let _ = try_cef_bin_emit_rkyv(&FileOpenEvent { path });
+}
+
+fn format_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.1} GB", b / GB)
+    } else if b >= MB {
+        format!("{:.1} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.1} KB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+fn row_class(selected: bool) -> String {
+    let base = "flex items-center gap-2 rounded-lg px-3 py-1.5 cursor-default";
+    if selected {
+        format!("{base} bg-white/10 ring-1 ring-white/15 text-foreground")
+    } else {
+        format!("{base} text-foreground/90 hover:bg-white/5")
+    }
+}
+
+fn folder_glyph(class: &str) -> Element {
+    rsx! {
+        Icon { class: "{class}",
+            path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+        }
+    }
+}
+
+fn file_glyph(class: &str) -> Element {
+    rsx! {
+        Icon { class: "{class}",
+            path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+            path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+        }
+    }
+}
+
+fn image_glyph(class: &str) -> Element {
+    rsx! {
+        Icon { class: "{class}",
+            path { d: "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z" }
+            path { d: "m21 15-5-5L5 21" }
+        }
+    }
+}
+
+fn entry_visual(entry: &FileDirEntry, thumb: Option<&String>) -> Element {
+    if let Some(url) = thumb {
+        return rsx! {
+            img { src: "{url}", class: "h-6 w-6 shrink-0 rounded object-cover ring-1 ring-white/10" }
+        };
+    }
+    if entry.is_dir {
+        return folder_glyph("h-5 w-5 shrink-0 text-blue-300/80");
+    }
+    if image_mime(&entry.path).is_some() {
+        return image_glyph("h-5 w-5 shrink-0 text-emerald-300/70");
+    }
+    file_glyph("h-5 w-5 shrink-0 text-muted-foreground")
+}
+
+fn render_preview(preview: &Preview) -> Element {
+    match preview {
+        Preview::None => rsx! {
+            div { class: "text-xs text-muted-foreground opacity-60", "" }
+        },
+        Preview::Image(url) => rsx! {
+            img { src: "{url}", class: "max-h-full max-w-full rounded-lg object-contain" }
+        },
+        Preview::Text(lines) => rsx! {
+            div { class: "h-full w-full overflow-auto font-mono text-xs leading-snug",
+                for line in lines.iter() {
+                    div { key: "{line.line_no}", class: "whitespace-pre",
+                        for (i, s) in line.spans.iter().enumerate() {
+                            span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                        }
+                    }
+                }
+            }
+        },
+        Preview::Dir(entries) => rsx! {
+            div { class: "h-full w-full overflow-auto",
+                for e in entries.iter() {
+                    div { key: "{e.path}", class: "flex items-center gap-2 rounded px-2 py-1 text-foreground/90",
+                        {entry_visual(e, None)}
+                        span { class: "truncate text-xs", "{e.name}" }
+                    }
+                }
+            }
+        },
+        Preview::Info {
+            size,
+            modified,
+            kind,
+        } => rsx! {
+            div { class: "space-y-1 text-center text-xs text-muted-foreground",
+                div { class: "uppercase tracking-wide text-foreground/80", "{kind}" }
+                div { "{format_size(*size)}" }
+                if !modified.is_empty() {
+                    div { class: "opacity-70", "{modified}" }
+                }
+            }
+        },
+        Preview::Error(m) => rsx! {
+            div { class: "text-xs text-ansi-1", "{m}" }
+        },
+    }
+}
 
 #[component]
 pub fn Page() -> Element {
@@ -21,7 +182,13 @@ pub fn Page() -> Element {
     let mut lines = use_signal(Vec::<FileLine>::new);
     let mut error = use_signal(String::new);
     let mut dir_entries = use_signal(Vec::<FileDirEntry>::new);
-    let mut is_dir = use_signal(|| false);
+    let mut parent_entries = use_signal(Vec::<FileDirEntry>::new);
+    let mut parent_path = use_signal(String::new);
+    let mut selected = use_signal(|| 0usize);
+    let mut mode = use_signal(|| Mode::Text);
+    let mut image_url = use_signal(|| Option::<String>::None);
+    let mut preview = use_signal(|| Preview::None);
+    let mut thumbs = use_signal(HashMap::<String, String>::new);
     let mut theme_style = use_signal(String::new);
     let cell_dims = use_signal(|| (0.0f64, 0.0f64));
 
@@ -33,6 +200,7 @@ pub fn Page() -> Element {
         path.set(m.path);
         language.set(m.language);
         total_lines.set(m.total_lines);
+        mode.set(Mode::Text);
     });
 
     let _vp = use_bin_event_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
@@ -55,9 +223,73 @@ pub fn Page() -> Element {
                 .to_string();
             doc.set_title(&name);
         }
+        for url in thumbs.read().values() {
+            revoke(url);
+        }
+        thumbs.set(HashMap::new());
         path.set(d.path);
+        parent_path.set(d.parent_path);
+        parent_entries.set(d.parent_entries);
+        selected.set(0);
+        preview.set(Preview::None);
+        mode.set(Mode::Dir);
+        if let Some(first) = d.entries.first() {
+            request_preview(first.path.clone());
+        }
+        for e in &d.entries {
+            if !e.is_dir && image_mime(&e.path).is_some() {
+                request_thumb(e.path.clone());
+            }
+        }
         dir_entries.set(d.entries);
-        is_dir.set(true);
+    });
+
+    let _img = use_bin_event_listener::<FileImageEvent, _>(FILE_IMAGE_EVENT, move |e| {
+        if let Some(old) = image_url() {
+            revoke(&old);
+        }
+        image_url.set(blob_url(&e.bytes));
+        mode.set(Mode::Image);
+    });
+
+    let _prev = use_bin_event_listener::<FilePreviewEvent, _>(FILE_PREVIEW_EVENT, move |ev| {
+        if ev.thumb {
+            if let PreviewKind::Image { bytes, .. } = ev.kind
+                && let Some(url) = blob_url(&bytes)
+            {
+                let old = thumbs.write().insert(ev.path.clone(), url);
+                if let Some(old) = old {
+                    revoke(&old);
+                }
+            }
+            return;
+        }
+        let sel_path = dir_entries.read().get(selected()).map(|e| e.path.clone());
+        if sel_path.as_deref() != Some(ev.path.as_str()) {
+            return;
+        }
+        let next = match ev.kind {
+            PreviewKind::Image { bytes, .. } => match blob_url(&bytes) {
+                Some(u) => Preview::Image(u),
+                None => Preview::Error("failed to decode image".into()),
+            },
+            PreviewKind::Text(l) => Preview::Text(l),
+            PreviewKind::Dir(e) => Preview::Dir(e),
+            PreviewKind::Info {
+                size,
+                modified,
+                kind,
+            } => Preview::Info {
+                size,
+                modified,
+                kind,
+            },
+            PreviewKind::Error(m) => Preview::Error(m),
+        };
+        if let Preview::Image(old) = &*preview.read() {
+            revoke(old);
+        }
+        preview.set(next);
     });
 
     let _theme = use_bin_event_listener::<FileThemeEvent, _>(FILE_THEME_EVENT, move |t| {
@@ -82,6 +314,12 @@ pub fn Page() -> Element {
     });
 
     let gw = gutter_width(total_lines());
+    let cur_basename = path()
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_string();
 
     rsx! {
         div {
@@ -93,6 +331,9 @@ pub fn Page() -> Element {
             onmousedown: move |_| focus_container(),
 
             onwheel: move |e: Event<WheelData>| {
+                if mode() != Mode::Text {
+                    return;
+                }
                 e.prevent_default();
                 let (_, ch) = cell_dims();
                 let line_px = if ch > 0.0 { ch } else { 16.0 };
@@ -118,19 +359,66 @@ pub fn Page() -> Element {
                 let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
                     return;
                 };
-                let cur = first_line() as i64;
-                let next = match raw.key().as_str() {
-                    "ArrowDown" => cur + 1,
-                    "ArrowUp" => cur - 1,
-                    "PageDown" => cur + 20,
-                    "PageUp" => cur - 20,
-                    "Home" => 0,
-                    _ => return,
-                };
-                e.prevent_default();
-                let _ = try_cef_bin_emit_rkyv(&FileScrollEvent {
-                    top_line: next.max(0) as u32,
-                });
+                let key = raw.key();
+                match mode() {
+                    Mode::Dir => {
+                        let len = dir_entries.read().len();
+                        let cur = selected();
+                        match key.as_str() {
+                            "j" | "ArrowDown" => {
+                                e.prevent_default();
+                                let next = if len == 0 { 0 } else { (cur + 1).min(len - 1) };
+                                selected.set(next);
+                                if let Some(p) =
+                                    dir_entries.read().get(next).map(|x| x.path.clone())
+                                {
+                                    request_preview(p);
+                                }
+                            }
+                            "k" | "ArrowUp" => {
+                                e.prevent_default();
+                                let next = cur.saturating_sub(1);
+                                selected.set(next);
+                                if let Some(p) =
+                                    dir_entries.read().get(next).map(|x| x.path.clone())
+                                {
+                                    request_preview(p);
+                                }
+                            }
+                            "l" | "ArrowRight" | "Enter" => {
+                                e.prevent_default();
+                                if let Some(p) =
+                                    dir_entries.read().get(cur).map(|x| x.path.clone())
+                                {
+                                    open_path(p);
+                                }
+                            }
+                            "h" | "ArrowLeft" | "Escape" => {
+                                let pp = parent_path();
+                                if !pp.is_empty() {
+                                    e.prevent_default();
+                                    open_path(pp);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {
+                        let cur = first_line() as i64;
+                        let next = match key.as_str() {
+                            "ArrowDown" => cur + 1,
+                            "ArrowUp" => cur - 1,
+                            "PageDown" => cur + 20,
+                            "PageUp" => cur - 20,
+                            "Home" => 0,
+                            _ => return,
+                        };
+                        e.prevent_default();
+                        let _ = try_cef_bin_emit_rkyv(&FileScrollEvent {
+                            top_line: next.max(0) as u32,
+                        });
+                    }
+                }
             },
 
             div {
@@ -158,48 +446,79 @@ pub fn Page() -> Element {
                 })
             }
 
-            if is_dir() {
-                div { class: "min-h-0 flex-1 overflow-y-auto p-3",
-                    div { class: "flex flex-wrap content-start gap-1",
-                        for entry in dir_entries().iter() {
-                            div {
-                                key: "{entry.path}",
-                                class: "flex w-28 cursor-default flex-col items-center gap-1 rounded-md p-2 text-center hover:bg-white/5",
-                                title: "{entry.path}",
-                                if entry.is_dir {
-                                    Icon { class: "h-10 w-10 text-blue-300/80",
-                                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                                    }
-                                } else {
-                                    Icon { class: "h-10 w-10 text-muted-foreground",
-                                        path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
-                                        path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
-                                    }
-                                }
-                                span { class: "w-full truncate text-xs text-foreground", "{entry.name}" }
-                            }
+            match mode() {
+                Mode::Image => rsx! {
+                    div { class: "flex min-h-0 flex-1 items-center justify-center overflow-auto p-4",
+                        if let Some(url) = image_url() {
+                            img { src: "{url}", class: "max-h-full max-w-full rounded-lg object-contain" }
                         }
                     }
-                }
-            } else {
-                div { class: "min-h-0 flex-1 overflow-auto",
-                    div { class: "min-w-max py-2",
-                        for line in lines().iter() {
-                            div { key: "{line.line_no}", class: "group flex hover:bg-white/[0.035]",
-                                span {
-                                    class: "sticky left-0 z-[1] shrink-0 select-none bg-term-bg pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
-                                    style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
-                                    "{line.line_no + 1}"
-                                }
-                                span { class: "whitespace-pre pr-8",
-                                    for (i, s) in line.spans.iter().enumerate() {
-                                        span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
-                                    }
+                },
+                Mode::Dir => rsx! {
+                    div {
+                        class: "grid min-h-0 flex-1 gap-2 p-2",
+                        style: "grid-template-columns: minmax(8rem,14rem) minmax(10rem,1fr) minmax(12rem,1.3fr);",
+
+                        div { class: "overflow-y-auto rounded-xl bg-white/[0.04] p-2 ring-1 ring-white/[0.06] backdrop-blur-md",
+                            for e in parent_entries() {
+                                div {
+                                    key: "{e.path}",
+                                    class: if e.name == cur_basename { "flex items-center gap-2 rounded-lg bg-white/[0.06] px-3 py-1.5 text-foreground" } else { "flex items-center gap-2 rounded-lg px-3 py-1.5 text-foreground/70" },
+                                    {entry_visual(&e, None)}
+                                    span { class: "truncate text-xs", "{e.name}" }
                                 }
                             }
                         }
+
+                        div { class: "overflow-y-auto rounded-xl bg-white/[0.04] p-2 ring-1 ring-white/[0.06] backdrop-blur-md",
+                            for (i, e) in dir_entries().into_iter().enumerate() {
+                                {
+                                    let p_sel = e.path.clone();
+                                    let p_open = e.path.clone();
+                                    let thumb = thumbs().get(&e.path).cloned();
+                                    rsx! {
+                                        div {
+                                            key: "{e.path}",
+                                            class: row_class(i == selected()),
+                                            title: "{e.path}",
+                                            onclick: move |_| {
+                                                selected.set(i);
+                                                request_preview(p_sel.clone());
+                                            },
+                                            ondoubleclick: move |_| open_path(p_open.clone()),
+                                            {entry_visual(&e, thumb.as_ref())}
+                                            span { class: "truncate text-xs", "{e.name}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-xl bg-white/[0.04] p-3 ring-1 ring-white/[0.06] backdrop-blur-md",
+                            {render_preview(&preview())}
+                        }
                     }
-                }
+                },
+                Mode::Text => rsx! {
+                    div { class: "min-h-0 flex-1 overflow-auto",
+                        div { class: "min-w-max py-2",
+                            for line in lines().iter() {
+                                div { key: "{line.line_no}", class: "group flex hover:bg-white/[0.035]",
+                                    span {
+                                        class: "sticky left-0 z-[1] shrink-0 select-none bg-term-bg pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
+                                        style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
+                                        "{line.line_no + 1}"
+                                    }
+                                    span { class: "whitespace-pre pr-8",
+                                        for (i, s) in line.spans.iter().enumerate() {
+                                            span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
             }
         }
     }

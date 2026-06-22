@@ -43,7 +43,9 @@ vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = [
     "Window", "Document", "Element", "HtmlElement", "Node",
-    "DomRect", "CssStyleDeclaration",
+    "DomRect", "DomRectReadOnly", "CssStyleDeclaration",
     "ResizeObserver", "ResizeObserverEntry",
-    "WheelEvent", "KeyboardEvent", "Location",
+    "IntersectionObserver", "IntersectionObserverEntry", "IntersectionObserverInit",
+    "WheelEvent", "KeyboardEvent", "MouseEvent", "Location",
+    "Blob", "BlobPropertyBag", "Url",
 ] }
