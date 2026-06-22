@@ -628,20 +628,35 @@ fn sync_children_to_ui(
             continue;
         }
 
+        let is_cef_ui = status.is_some() || side_sheet.is_some() || modal.is_some();
+
+        let under_inactive_tab = parent != glass_entity
+            && !is_cef_ui
+            && match tab_ancestor(parent, &child_of_q, &tabs_q) {
+                Some(tab) => !active_tab_q.contains(tab),
+                None => false,
+            };
+
         let size_px = computed.size;
-        if !webview_layout_is_renderable(
+        let renderable = webview_layout_is_renderable(
             size_px,
             visibility,
             pending_webview_reveal || pending_command_bar_reveal,
-        ) {
-            tf.scale = Vec3::splat(1.0e-6);
-            if webview_size.0 != Vec2::ONE {
-                webview_size.0 = Vec2::ONE;
+        );
+        match hidden_webview_sizing(renderable, under_inactive_tab) {
+            HiddenWebviewSizing::Render => {}
+            HiddenWebviewSizing::HideKeepSize => {
+                tf.scale = Vec3::splat(1.0e-6);
+                continue;
             }
-            continue;
+            HiddenWebviewSizing::Collapse => {
+                tf.scale = Vec3::splat(1.0e-6);
+                if webview_size.0 != Vec2::ONE {
+                    webview_size.0 = Vec2::ONE;
+                }
+                continue;
+            }
         }
-
-        let is_cef_ui = status.is_some() || side_sheet.is_some() || modal.is_some();
 
         // Check if this browser's parent tab is the active tab in its pane
         let is_active_stack = if parent != glass_entity && !is_cef_ui {
@@ -658,12 +673,7 @@ fn sync_children_to_ui(
         let is_inactive_stack =
             parent != glass_entity && !is_cef_ui && !is_active_stack && !is_previous_stack;
 
-        let is_inactive_tab = parent != glass_entity
-            && !is_cef_ui
-            && match tab_ancestor(parent, &child_of_q, &tabs_q) {
-                Some(tab) => !active_tab_q.contains(tab),
-                None => false,
-            };
+        let is_inactive_tab = under_inactive_tab;
 
         let sx = size_px.x / glass_size_px.x;
         let sy = size_px.y / glass_size_px.y;
@@ -1759,6 +1769,23 @@ fn sync_osr_webview_focus(
         } else {
             browsers.set_osr_hidden(&e);
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HiddenWebviewSizing {
+    Render,
+    HideKeepSize,
+    Collapse,
+}
+
+fn hidden_webview_sizing(renderable: bool, under_inactive_tab: bool) -> HiddenWebviewSizing {
+    if renderable {
+        HiddenWebviewSizing::Render
+    } else if under_inactive_tab {
+        HiddenWebviewSizing::HideKeepSize
+    } else {
+        HiddenWebviewSizing::Collapse
     }
 }
 
@@ -3364,6 +3391,26 @@ mod tests {
             Some(&Visibility::Hidden),
             true
         ));
+    }
+
+    #[test]
+    fn inactive_tab_pages_keep_size_other_hidden_pages_collapse() {
+        assert_eq!(
+            hidden_webview_sizing(true, false),
+            HiddenWebviewSizing::Render
+        );
+        assert_eq!(
+            hidden_webview_sizing(true, true),
+            HiddenWebviewSizing::Render
+        );
+        assert_eq!(
+            hidden_webview_sizing(false, true),
+            HiddenWebviewSizing::HideKeepSize
+        );
+        assert_eq!(
+            hidden_webview_sizing(false, false),
+            HiddenWebviewSizing::Collapse
+        );
     }
 
     #[test]
