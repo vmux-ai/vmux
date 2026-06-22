@@ -35,6 +35,7 @@ pub struct SpaceRow {
     pub profile: String,
     pub is_active: bool,
     pub tab_count: u32,
+    pub startup_dir: String,
 }
 
 #[derive(
@@ -69,6 +70,7 @@ mod tests {
             profile: "Personal".to_string(),
             is_active: true,
             tab_count: 3,
+            startup_dir: "~/work".to_string(),
         };
         assert_eq!(row.profile, "Personal");
         assert!(row.is_active);
@@ -107,6 +109,7 @@ mod tests {
                 profile: "Personal".to_string(),
                 is_active: true,
                 tab_count: 2,
+                startup_dir: "~/work".to_string(),
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");

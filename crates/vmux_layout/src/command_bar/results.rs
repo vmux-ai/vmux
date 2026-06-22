@@ -35,6 +35,10 @@ pub enum CommandBarResultItem {
     Navigate {
         url: String,
     },
+    File {
+        path: String,
+        is_dir: bool,
+    },
     History {
         url: String,
         title: String,

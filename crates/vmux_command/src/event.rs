@@ -319,6 +319,7 @@ mod tests {
     fn looks_like_url_protocols() {
         assert!(looks_like_url("http://example.com"));
         assert!(looks_like_url("https://example.com/path"));
+        assert!(looks_like_url("file:///Users/me/main.rs"));
     }
 
     #[test]

@@ -131,22 +131,27 @@ fn build_node(
     }
 }
 
+fn stack_kind_for_url(url: &str) -> &'static str {
+    if url.starts_with("vmux://terminal/") {
+        "terminal"
+    } else if url.starts_with("file:") {
+        "files"
+    } else {
+        "browser"
+    }
+}
+
 fn build_stack(
     stack_entity: Entity,
     page: Option<&PageMetadata>,
     self_stack: Option<Entity>,
 ) -> StackDto {
     let url = page.map(|p| p.url.clone()).unwrap_or_default();
-    let kind = if url.starts_with("vmux://terminal/") {
-        "terminal"
-    } else {
-        "browser"
-    };
     StackDto {
         id: Some(format_id(NodeKind::Stack, stack_entity.to_bits())),
         title: page.map(|p| p.title.clone()).unwrap_or_default(),
+        kind: stack_kind_for_url(&url).to_string(),
         url,
-        kind: kind.to_string(),
         is_loading: false,
         favicon_url: page.map(|p| p.favicon_url.clone()).unwrap_or_default(),
         is_self: Some(stack_entity) == self_stack,
@@ -167,6 +172,13 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(FocusedStack::default());
         app
+    }
+
+    #[test]
+    fn files_url_maps_to_files_kind() {
+        assert_eq!(stack_kind_for_url("file:///a/b.rs"), "files");
+        assert_eq!(stack_kind_for_url("vmux://terminal/"), "terminal");
+        assert_eq!(stack_kind_for_url("https://x.com"), "browser");
     }
 
     #[test]

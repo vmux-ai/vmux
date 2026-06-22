@@ -1669,7 +1669,7 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
     } else if parent_str.starts_with('/') {
         std::path::PathBuf::from(parent_str)
     } else if parent_str.is_empty() {
-        std::path::PathBuf::from(&home)
+        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(&home))
     } else {
         std::path::PathBuf::from(&home).join(parent_str)
     };
@@ -1695,10 +1695,12 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
             name.clone()
         };
 
-        let full_path = if parent_str.is_empty() {
-            display_name.clone()
+        // Absolute path so the file:// editor (and terminal cwd) can open it directly.
+        let child = resolved_parent.join(&name);
+        let full_path = if is_dir {
+            format!("{}/", child.display())
         } else {
-            format!("{}{}", parent_str, display_name)
+            child.display().to_string()
         };
 
         results.push(PathEntry {

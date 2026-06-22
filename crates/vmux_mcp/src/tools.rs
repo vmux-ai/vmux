@@ -294,6 +294,28 @@ false keeps focus on your own pane."
     }
 }
 
+fn open_file_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "open_file".into(),
+        description: "Open a local file (or directory) in the vmux editor, in a new pane beside \
+YOUR pane (the agent calling this). path is an absolute filesystem path, e.g. \
+/Users/me/project/src/main.rs. Files render with syntax highlighting; directories show a listing. \
+direction is one of right|left|top|bottom (default right). focus (default true) moves focus to the \
+new pane."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+                "path": {"type": "string"},
+                "direction": {"enum": ["right", "left", "top", "bottom"]},
+                "focus": {"type": "boolean"}
+            }
+        }),
+    }
+}
+
 fn run_definition() -> ToolDefinition {
     ToolDefinition {
         name: "run".into(),
@@ -368,6 +390,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(get_settings_definition());
     defs.push(list_spaces_definition());
     defs.push(open_page_definition());
+    defs.push(open_file_definition());
     defs.push(run_definition());
     defs.push(read_terminal_definition());
     defs
@@ -407,6 +430,35 @@ pub fn dispatch_with_anchor(
         if url.trim().is_empty() {
             return Err("open_page.url is empty".to_string());
         }
+        let direction = parse_direction(&arguments)?;
+        let focus = arguments
+            .get("focus")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        return Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
+            anchor,
+            direction,
+            url,
+            focus,
+        }));
+    }
+    if name == "open_file" {
+        let anchor =
+            anchor.ok_or("open_file requires an agent anchor (not available to this client)")?;
+        let path = arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if path.is_empty() {
+            return Err("open_file.path is empty".to_string());
+        }
+        let url = if path.starts_with("file:") {
+            path
+        } else {
+            format!("file://{path}")
+        };
         let direction = parse_direction(&arguments)?;
         let focus = arguments
             .get("focus")

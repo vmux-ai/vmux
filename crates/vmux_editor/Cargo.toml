@@ -1,0 +1,48 @@
+[package]
+name = "vmux_editor"
+description = "Bevy + CEF + Dioxus file viewer webview"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+web = []
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+rkyv = { workspace = true }
+vmux_core = { path = "../vmux_core" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+tracing = "0.1"
+url = { workspace = true }
+percent-encoding = "2"
+syntect = { workspace = true }
+vmux_command = { path = "../vmux_command" }
+vmux_layout = { path = "../vmux_layout" }
+vmux_setting = { path = "../vmux_setting" }
+vmux_space = { path = "../vmux_space" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus = { workspace = true }
+js-sys = "0.3"
+unicode-width = "0.2"
+vmux_ui = { path = "../vmux_ui", default-features = false }
+wasm-bindgen = { workspace = true }
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "Element", "HtmlElement", "Node",
+    "DomRect", "CssStyleDeclaration",
+    "ResizeObserver", "ResizeObserverEntry",
+    "WheelEvent", "KeyboardEvent", "Location",
+] }

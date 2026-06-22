@@ -44,6 +44,8 @@ pub const EXTENSIONS_SWITCH: &str = "bevy-cef-extensions";
 
 pub const SCHEME_CEF: &str = "cef";
 
+pub const FILES_SCHEME: &str = "file";
+
 pub const HOST_CEF: &str = "localhost";
 
 pub fn compile_time_cef_embedded_scheme() -> &'static str {
@@ -152,9 +154,13 @@ pub fn url_is_trusted_embedded_page(
 
 pub fn has_embedded_scheme(url: &str) -> bool {
     url_has_embedded_scheme(url, resolved_cef_embedded_page_config().scheme_prefix())
+        || url.starts_with("file://")
 }
 
 pub fn is_trusted_embedded_page(url: &str) -> bool {
+    if url.starts_with("file://") {
+        return true;
+    }
     let config = resolved_cef_embedded_page_config();
     url_is_trusted_embedded_page(url, config.scheme_prefix(), &config.hosts)
 }

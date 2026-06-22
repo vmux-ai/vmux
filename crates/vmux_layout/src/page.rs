@@ -184,7 +184,7 @@ fn favicon_src_for_tab(tab: &TabRow) -> Option<String> {
 }
 
 fn format_address(stack: &StackRow) -> String {
-    if stack.url.starts_with("vmux://") {
+    if stack.url.starts_with("vmux://") || stack.url.starts_with("file:") {
         return stack.url.clone();
     }
     let host = host_for_favicon_fallback(&stack.url);
@@ -327,6 +327,11 @@ fn StackIcon(
             Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                 path { d: "M4 17 10 11 4 5" }
                 path { d: "M12 19h8" }
+            }
+        } else if url.starts_with("file:") {
+            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                path { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }
+                path { d: "M14 2v6h6" }
             }
         } else if let Some(src) = favicon_src.as_ref() {
             if favicon_error() {
@@ -578,8 +583,21 @@ fn SideSheetView(
     rsx! {
         div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3 pt-2 text-foreground",
             if let Some(space) = active_space {
-                div { class: "mb-2 flex flex-col gap-px",
-                    SideSheetSpaceRow { key: "{space.id}", space }
+                div { class: "glass mb-2 flex flex-col overflow-hidden rounded-md",
+                    SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
+                    if !space.startup_dir.is_empty() {
+                        div { class: "flex items-center gap-1.5 border-t border-white/5 px-2 py-1.5 text-muted-foreground",
+                            Icon { class: "h-3.5 w-3.5 shrink-0",
+                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                            }
+                            span {
+                                class: "min-w-0 flex-1 truncate text-xs",
+                                style: "direction:rtl;",
+                                title: "{space.startup_dir}",
+                                bdi { style: "unicode-bidi:isolate;direction:ltr;", "{space.startup_dir}" }
+                            }
+                        }
+                    }
                 }
             }
             if let Some(err) = pane_tree_error {
@@ -604,7 +622,7 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: "glass group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-foreground",
+            class: "group flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-foreground hover:bg-white/5",
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&vmux_core::event::space::SpaceCommandEvent {
                     command: "open_page".to_string(),

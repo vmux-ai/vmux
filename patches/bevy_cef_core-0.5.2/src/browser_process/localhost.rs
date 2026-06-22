@@ -83,6 +83,18 @@ pub(crate) fn asset_load_path_from_request_url_with(
     const EMBEDDED_LEAF: &str = "embedded/";
     const EMBEDDED_SCHEME: &str = "embedded://";
 
+    // We override the built-in `file` scheme: the editor SPA is addressed as
+    // `file:///abs/path`. Serve the app's own assets (`/wasm/*`, `/assets/*`) same-scheme
+    // from the embedded `files` host; every other `file://` path is a document navigation
+    // and gets the SPA shell (the real source file's bytes arrive over the bin bridge).
+    if let Some(after) = url.strip_prefix("file://") {
+        let path = after.split(['?', '#']).next().unwrap_or(after);
+        if path.starts_with("/wasm/") || path.starts_with("/assets/") {
+            return format!("{EMBEDDED_SCHEME}files{path}");
+        }
+        return format!("{EMBEDDED_SCHEME}files/index.html");
+    }
+
     if let Some(rest) = url.strip_prefix(CEF_LOCAL) {
         if let Some(tail) = rest.strip_prefix(EMBEDDED_LEAF) {
             format!("{EMBEDDED_SCHEME}{tail}")
