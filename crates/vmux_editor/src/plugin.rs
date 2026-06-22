@@ -44,6 +44,16 @@ pub struct FileInitialMetaSent;
 pub struct FileThemeSent;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
+type UnloadedFileView = (Without<FileBuffer>, Without<FileDir>);
+type ReadyUnsentMeta = (
+    Without<FileInitialMetaSent>,
+    With<vmux_core::page::PageReady>,
+);
+type ReadyUnsentTheme = (
+    With<FileView>,
+    Without<FileThemeSent>,
+    With<vmux_core::page::PageReady>,
+);
 
 /// Parse the absolute filesystem path out of a `file://` URL.
 /// `file:///Users/me/a%20b.rs` -> `/Users/me/a b.rs`.
@@ -180,10 +190,7 @@ fn list_dir(path: &std::path::Path) -> Vec<FileDirEntry> {
     entries
 }
 
-fn load_file_buffers(
-    q: Query<(Entity, &FileView), (Without<FileBuffer>, Without<FileDir>)>,
-    mut commands: Commands,
-) {
+fn load_file_buffers(q: Query<(Entity, &FileView), UnloadedFileView>, mut commands: Commands) {
     for (entity, fv) in &q {
         if fv.path.is_dir() {
             let entries = list_dir(&fv.path);
@@ -223,13 +230,7 @@ fn display_path(path: &std::path::Path) -> String {
 }
 
 fn send_initial_meta(
-    q: Query<
-        (Entity, &FileView, &FileBuffer),
-        (
-            Without<FileInitialMetaSent>,
-            With<vmux_core::page::PageReady>,
-        ),
-    >,
+    q: Query<(Entity, &FileView, &FileBuffer), ReadyUnsentMeta>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -261,14 +262,7 @@ fn send_initial_meta(
 }
 
 fn send_file_theme(
-    q: Query<
-        Entity,
-        (
-            With<FileView>,
-            Without<FileThemeSent>,
-            With<vmux_core::page::PageReady>,
-        ),
-    >,
+    q: Query<Entity, ReadyUnsentTheme>,
     settings: Res<vmux_setting::AppSettings>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -299,13 +293,7 @@ fn send_file_theme(
 }
 
 fn send_initial_dir(
-    q: Query<
-        (Entity, &FileView, &FileDir),
-        (
-            Without<FileInitialMetaSent>,
-            With<vmux_core::page::PageReady>,
-        ),
-    >,
+    q: Query<(Entity, &FileView, &FileDir), ReadyUnsentMeta>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
