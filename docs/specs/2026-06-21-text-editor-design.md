@@ -105,18 +105,22 @@ files exceed `u16`, unlike terminal rows).
 
 Backend → frontend:
 - `FILE_META_EVENT` → `FileMetaEvent { path: String, language: String, total_lines: u32 }`
-  (drives the header + scrollbar; sent once on open and on reload).
+  (drives the header; sent on open and re-sent on reload).
 - `FILE_VIEWPORT_EVENT` → `FileViewportPatch { first_line: u32, total_lines: u32, lines: Vec<FileLine> }`
   — the visible window only.
   - `FileLine { line_no: u32, spans: Vec<StyledSpan> }`
   - `StyledSpan { text: String, fg: [u8; 3], bold: bool, italic: bool }`
 - `FILE_ERROR_EVENT` → `FileErrorEvent { message: String }`.
+- `FILE_DIR_EVENT` → `FileDirEvent { path: String, entries: Vec<FileDirEntry> }` when the
+  path is a directory (Finder-like icon grid instead of file content).
+- `FILE_THEME_EVENT` → `FileThemeEvent { font_family, font_size, line_height }` mirrors the
+  terminal theme font so the editor matches the terminal.
 
 Frontend → backend:
 - `FILE_RESIZE_EVENT` → `FileResizeEvent { char_height: f32, viewport_height: f32 }`
   (backend derives `rows = floor(viewport_height / char_height)`).
-- `FILE_SCROLL_EVENT` → `FileScrollEvent { top_line: u32 }` (absolute; frontend owns the
-  synthetic scrollbar position).
+- `FILE_SCROLL_EVENT` → `FileScrollEvent { top_line: u32 }` (absolute scroll offset; wheel
+  and arrow/page keys drive it).
 
 Note: v1 sends the full visible window on each scroll/resize (window is bounded by
 `rows`, so transfer is constant regardless of file size — this is the virtualization).
@@ -128,8 +132,9 @@ static-file scroll and can be added later if profiling shows a need.
 - On open, syntect highlights the **whole file once** into a cached `Vec<FileLine>` stored
   with the `FileView` entity. Windows are then served O(rows) from cache.
 - Language detected by file extension; fall back to plaintext.
-- Map syntect token colors onto the existing theme (`--ansi-*` / theme CSS vars) so the
-  viewer respects the active theme.
+- Syntax token colors come from a fixed `syntect` theme (`base16-ocean.dark`), emitted as
+  inline RGB per span. The editor surface (background/foreground) and font follow the
+  active terminal theme; the syntax palette itself is fixed in v1.
 - Tradeoff: cached spans use memory ∝ file size. Acceptable for v1; note for later —
   parse-state checkpoints to highlight lazily per-window.
 
@@ -142,8 +147,9 @@ Mirrors `vmux_terminal::page::Page`:
 - **Content**: monospace, per-row Dioxus signals (cheap re-render), colored spans from
   `StyledSpan`.
 - **No native scroll container** — renders exactly the server-provided window (like the
-  terminal). A synthetic scrollbar reflects `top_line / total_lines`; wheel + arrow/page
-  keys emit `FILE_SCROLL_EVENT { top_line }` (clamped to `[0, total_lines - rows]`).
+  terminal). Wheel + arrow/page keys emit `FILE_SCROLL_EVENT { top_line }` (clamped to
+  `[0, total_lines - rows]`). A visible position indicator/scrollbar is a future
+  enhancement, not part of v1.
 - Reuses the terminal's cell-measurement span + `ResizeObserver`, emitting
   `FILE_RESIZE_EVENT`.
 - Read-only: no input/cursor/selection editing.

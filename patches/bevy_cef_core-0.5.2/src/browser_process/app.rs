@@ -88,12 +88,8 @@ impl ImplApp for BrowserProcessAppBuilder {
             command_line.append_switch_with_value(Some(&(*name).into()), Some(&(*value).into()));
         }
 
-        // The file:// document (text editor) loads its same-scheme wasm/js/css via
-        // fetch/module scripts; Chromium blocks file->file subresource access without this.
         command_line.append_switch(Some(&"allow-file-access-from-files".into()));
 
-        // Dev-only Chrome DevTools Protocol server (browser process only). Enable with
-        // VMUX_REMOTE_DEBUG_PORT=<port>; off otherwise.
         let is_browser_process = process_type
             .map(|p| p.to_string())
             .unwrap_or_default()

@@ -1,17 +1,14 @@
-/// Largest valid `top_line` so a full viewport stays in range.
 pub fn clamp_top_line(top_line: u32, total_lines: u32, rows: u16) -> u32 {
     let max_top = total_lines.saturating_sub(rows as u32);
     top_line.min(max_top)
 }
 
-/// Visible line range `[first, end)` after clamping the scroll offset.
 pub fn window_range(total_lines: u32, top_line: u32, rows: u16) -> (u32, u32) {
     let first = clamp_top_line(top_line, total_lines, rows);
     let end = first.saturating_add(rows as u32).min(total_lines);
     (first, end)
 }
 
-/// Whole rows that fit in `viewport_height` at `char_height` px per row.
 pub fn rows_from_viewport(char_height: f32, viewport_height: f32) -> u16 {
     if char_height <= 0.0 || viewport_height <= 0.0 {
         return 0;
@@ -19,7 +16,6 @@ pub fn rows_from_viewport(char_height: f32, viewport_height: f32) -> u16 {
     (viewport_height / char_height).floor() as u16
 }
 
-/// Index range into a buffer of `total` lines for the visible window.
 pub fn visible_slice(total: u32, top_line: u32, rows: u16) -> std::ops::Range<usize> {
     let (first, end) = window_range(total, top_line, rows);
     (first as usize)..(end as usize)

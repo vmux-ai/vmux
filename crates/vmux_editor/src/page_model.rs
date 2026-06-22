@@ -1,12 +1,10 @@
 use vmux_core::event::StyledSpan;
 
-/// Gutter character width = digits in the largest line number, min 3.
 pub fn gutter_width(total_lines: u32) -> usize {
     let digits = total_lines.max(1).to_string().len();
     digits.max(3)
 }
 
-/// Inline CSS for a styled span: `color` + optional bold/italic.
 pub fn span_style(span: &StyledSpan) -> String {
     let [r, g, b] = span.fg;
     let mut s = format!("color:rgb({r},{g},{b});");

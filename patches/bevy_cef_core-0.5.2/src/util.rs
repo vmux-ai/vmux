@@ -44,9 +44,6 @@ pub const EXTENSIONS_SWITCH: &str = "bevy-cef-extensions";
 
 pub const SCHEME_CEF: &str = "cef";
 
-/// We override Chromium's built-in `file` scheme with our own handler factory so the
-/// text editor can be addressed as `file:///abs/path`. The internal embedded host id
-/// for the editor app stays `"files"`.
 pub const FILES_SCHEME: &str = "file";
 
 pub const HOST_CEF: &str = "localhost";
@@ -161,8 +158,6 @@ pub fn has_embedded_scheme(url: &str) -> bool {
 }
 
 pub fn is_trusted_embedded_page(url: &str) -> bool {
-    // We override the built-in file:// scheme to host the editor SPA, so file://
-    // documents are trusted for the bin IPC bridge (both directions).
     if url.starts_with("file://") {
         return true;
     }

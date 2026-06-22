@@ -11,27 +11,23 @@ use vmux_layout::event::TERMINAL_CEF_BG_COLOR;
 use crate::highlight::Highlighter;
 use crate::viewport::{clamp_top_line, rows_from_viewport, visible_slice};
 
-/// Webview entity marker carrying the file being viewed.
 #[derive(Component, Clone, Debug)]
 pub struct FileView {
     pub path: PathBuf,
 }
 
-/// Whole-file highlighted content, cached on the `FileView` entity.
 #[derive(Component, Clone, Debug)]
 pub struct FileBuffer {
     pub language: String,
     pub lines: Vec<FileLine>,
 }
 
-/// Current scroll offset + viewport height (in rows) for a `FileView`.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct FileViewport {
     pub top_line: u32,
     pub rows: u16,
 }
 
-/// Directory listing cached on a `FileView` entity whose path is a directory.
 #[derive(Component, Clone, Debug)]
 pub struct FileDir {
     pub entries: Vec<FileDirEntry>,
@@ -55,8 +51,6 @@ type ReadyUnsentTheme = (
     With<vmux_core::page::PageReady>,
 );
 
-/// Parse the absolute filesystem path out of a `file://` URL.
-/// `file:///Users/me/a%20b.rs` -> `/Users/me/a b.rs`.
 fn path_from_files_url(url: &str) -> Option<PathBuf> {
     let parsed = url::Url::parse(url).ok()?;
     if parsed.scheme() != "file" {
@@ -69,7 +63,8 @@ fn path_from_files_url(url: &str) -> Option<PathBuf> {
     let decoded = percent_encoding::percent_decode_str(raw)
         .decode_utf8()
         .ok()?;
-    Some(PathBuf::from(decoded.as_ref()))
+    let path = PathBuf::from(decoded.as_ref());
+    path.is_absolute().then_some(path)
 }
 
 fn new_file_view_bundle(
@@ -122,8 +117,6 @@ fn new_file_view_bundle(
     )
 }
 
-/// Build a `FileView` webview bundle for session restore. The path is parsed from the
-/// saved `file://` URL; returns `None` if it isn't a valid file URL.
 pub fn restore_file_view_bundle(
     url: &str,
     meshes: &mut ResMut<Assets<Mesh>>,

@@ -100,7 +100,12 @@ pub fn Page() -> Element {
                 let Some(raw) = data.downcast::<web_sys::WheelEvent>() else {
                     return;
                 };
-                let notches = (raw.delta_y() / line_px).round() as i64;
+                let delta_lines = match raw.delta_mode() {
+                    web_sys::WheelEvent::DOM_DELTA_LINE => raw.delta_y(),
+                    web_sys::WheelEvent::DOM_DELTA_PAGE => raw.delta_y() * 20.0,
+                    _ => raw.delta_y() / line_px,
+                };
+                let notches = delta_lines.round() as i64;
                 if notches == 0 {
                     return;
                 }
@@ -220,6 +225,11 @@ fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
     let Some(container) = document.get_element_by_id(CONTAINER_ID) else {
         return;
     };
+
+    if document.get_element_by_id(MEASURE_ID).is_some() {
+        do_measure(cell_dims);
+        return;
+    }
 
     let measure: web_sys::Element = document.create_element("span").unwrap();
     measure

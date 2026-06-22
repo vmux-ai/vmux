@@ -61,8 +61,6 @@ impl Highlighter {
         }
     }
 
-    /// Boundary: read a real file from disk, with guards, then highlight it.
-    /// Returns a user-facing error string on failure.
     pub fn load_file(&self, path: &Path) -> Result<HighlightedFile, String> {
         let meta =
             std::fs::metadata(path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
