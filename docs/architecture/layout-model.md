@@ -1,4 +1,4 @@
-# The layout model: Space → Tab → Pane → Stack
+# Vmux Layout: Space → Tab → Pane → Stack
 
 > Part of the [Vmux Architecture](../architecture.md) overview.
 

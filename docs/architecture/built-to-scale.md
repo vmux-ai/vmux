@@ -1,4 +1,4 @@
-# Built to scale
+# ECS: Build to scale
 
 > Part of the [Vmux Architecture](../architecture.md) overview.
 

@@ -30,6 +30,7 @@ web-sys = { version = "0.3", features = [
     "DomRect",
     "Element",
     "EventTarget",
+    "History",
     "HtmlAnchorElement",
     "HtmlElement",
     "MediaQueryList",

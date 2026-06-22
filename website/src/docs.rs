@@ -32,25 +32,25 @@ pub const DOCS: &[Doc] = &[
     },
     Doc {
         slug: "built-to-scale",
-        title: "Built to scale",
+        title: "ECS: Build to scale",
         group: "Architecture",
         content: include_str!("../../docs/architecture/built-to-scale.md"),
     },
     Doc {
         slug: "agent-first",
-        title: "Agent-first API",
+        title: "Vmux MCP",
         group: "Architecture",
         content: include_str!("../../docs/architecture/agent-first.md"),
     },
     Doc {
         slug: "layout-model",
-        title: "The layout model",
+        title: "Vmux Layout",
         group: "Architecture",
         content: include_str!("../../docs/architecture/layout-model.md"),
     },
     Doc {
         slug: "render-stack",
-        title: "The render stack",
+        title: "2D / 3D renderer",
         group: "Architecture",
         content: include_str!("../../docs/architecture/render-stack.md"),
     },
@@ -58,6 +58,16 @@ pub const DOCS: &[Doc] = &[
 
 pub fn find(slug: &str) -> Option<&'static Doc> {
     DOCS.iter().find(|d| d.slug == slug)
+}
+
+pub fn neighbors(slug: &str) -> (Option<&'static Doc>, Option<&'static Doc>) {
+    match DOCS.iter().position(|d| d.slug == slug) {
+        Some(i) => {
+            let prev = if i > 0 { Some(&DOCS[i - 1]) } else { None };
+            (prev, DOCS.get(i + 1))
+        }
+        None => (None, None),
+    }
 }
 
 pub fn groups() -> Vec<(&'static str, Vec<usize>)> {

@@ -7,6 +7,10 @@ struct Addr {
 
 const ADDRS: &[Addr] = &[
     Addr {
+        url: "vmux://agent/claude/8d1f2c…",
+        hot: true,
+    },
+    Addr {
         url: "vmux://agent/codex/4f3a91…",
         hot: true,
     },
@@ -36,6 +40,14 @@ const TOOLS: &[&str] = &[
     "create_space",
 ];
 
+fn key(label: &str, cls: &str) -> Element {
+    rsx! {
+        kbd { class: "inline-flex items-center justify-center rounded-md border border-white/20 bg-gradient-to-b from-white/[0.14] to-white/[0.03] font-semibold text-text shadow-[0_1px_2px_rgba(0,0,0,0.4)] {cls}",
+            "{label}"
+        }
+    }
+}
+
 #[component]
 pub fn Agents() -> Element {
     rsx! {
@@ -43,14 +55,21 @@ pub fn Agents() -> Element {
             div { class: "grid grid-cols-1 md:grid-cols-2 gap-10 items-center",
                 div { class: "reveal",
                     p { class: "text-sm uppercase tracking-[0.2em] text-accent mb-3", "Agents" }
-                    h2 { class: "text-3xl sm:text-4xl font-bold tracking-tight mb-4",
-                        "The workspace is an API."
+                    h2 { class: "mb-5",
+                        span { class: "block text-3xl sm:text-4xl font-bold tracking-tight",
+                            "Every agent has a home."
+                        }
+                        span { class: "mt-3 flex flex-wrap items-center gap-2 text-lg sm:text-xl font-medium text-text-muted",
+                            "Hit"
+                            {key("⌘ L", "h-6 px-2 text-sm")}
+                            "to visit."
+                        }
                     }
                     p { class: "text-text-muted leading-relaxed mb-4",
-                        "Agents drive Vmux over MCP — browse, run commands in a terminal you can watch and take over, and reshape the layout declaratively."
+                        "Every agent, terminal, and space lives at its own address, ready to share or jump back to. A background run stays anchored in its own space, so it never disrupts the one you're in."
                     }
                     p { class: "text-text-muted leading-relaxed",
-                        "Every agent session is a first-class, addressable surface — anchored in its own space, so a background run never disrupts the one you're in."
+                        "Under the hood, agents drive Vmux over MCP: browse, run commands in a terminal you can watch and take over, and reshape the layout declaratively."
                     }
                     div { class: "mt-6 flex flex-wrap gap-2",
                         for t in TOOLS.iter() {
@@ -69,7 +88,10 @@ pub fn Agents() -> Element {
                         span { class: "h-2.5 w-2.5 rounded-full bg-white/15" }
                         span { class: "h-2.5 w-2.5 rounded-full bg-white/15" }
                         span { class: "h-2.5 w-2.5 rounded-full bg-white/15" }
-                        span { class: "ml-2 text-[11px] text-text-muted", "addressable surfaces" }
+                        span { class: "ml-2 flex items-center gap-1.5 text-[11px] text-text-muted",
+                            {key("⌘ L", "h-4 px-1.5 text-[10px]")}
+                            "to visit"
+                        }
                     }
                     div { class: "flex flex-col gap-2.5",
                         for a in ADDRS.iter() {

@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::toast::{ToastOptions, use_toast};
 
 use crate::hooks::{use_clipboard_copy, use_dmg_download, use_is_mac};
-use crate::landing::{GITHUB_URL, ICON, INSTALL_CMD};
+use crate::landing::{ICON, INSTALL_CMD};
 
 #[component]
 pub fn Hero() -> Element {
@@ -30,14 +30,25 @@ pub fn Hero() -> Element {
                     "Vmux"
                 }
                 p { class: "text-lg sm:text-2xl text-text mb-3 max-w-2xl mx-auto",
-                    "The workspace that bridges chat and IDE."
+                    "The browser that bridges chat and IDE."
                 }
                 p { class: "text-base sm:text-lg text-text-muted mb-10 max-w-xl mx-auto",
                     "An agent co-working space with a browser and IDE built in — people and agents, side by side."
                 }
-                div { class: "flex flex-wrap justify-center gap-3 mb-6",
+                div { class: "inline-flex flex-col sm:flex-row items-center gap-2 sm:gap-3 bg-code-bg/80 backdrop-blur border border-border rounded-lg px-4 py-3 text-sm sm:text-base mb-6",
+                    code { class: "font-mono text-accent", "{INSTALL_CMD}" }
                     button {
-                        class: "inline-flex items-center px-6 py-3 rounded-lg text-base font-semibold border border-transparent bg-accent text-black cursor-pointer transition-colors hover:bg-accent-hover",
+                        class: "bg-accent text-black border-0 rounded px-3 py-1.5 text-sm font-semibold cursor-pointer transition-colors hover:bg-accent-hover",
+                        onclick: move |_| {
+                            copy(INSTALL_CMD.to_string());
+                            toast_api.success("Copied!".to_string(), ToastOptions::new());
+                        },
+                        "Copy"
+                    }
+                }
+                div { class: "flex justify-center",
+                    button {
+                        class: "inline-flex items-center px-7 py-3.5 rounded-lg text-base font-semibold border border-transparent bg-accent text-black cursor-pointer transition-colors hover:bg-accent-hover",
                         onclick: move |_| {
                             if is_mac {
                                 download(());
@@ -52,26 +63,8 @@ pub fn Hero() -> Element {
                         },
                         "Download .dmg"
                     }
-                    a {
-                        class: "inline-flex items-center px-6 py-3 rounded-lg text-base font-semibold no-underline border border-border bg-transparent text-text transition-colors hover:border-accent hover:text-accent",
-                        href: GITHUB_URL,
-                        target: "_blank",
-                        rel: "noopener noreferrer",
-                        "GitHub"
-                    }
                 }
-                div { class: "inline-flex flex-col sm:flex-row items-center gap-2 sm:gap-3 bg-code-bg/80 backdrop-blur border border-border rounded-lg px-4 py-3 text-sm sm:text-base mb-4",
-                    code { class: "font-mono text-accent", "{INSTALL_CMD}" }
-                    button {
-                        class: "bg-accent text-black border-0 rounded px-3 py-1.5 text-sm font-semibold cursor-pointer transition-colors hover:bg-accent-hover",
-                        onclick: move |_| {
-                            copy(INSTALL_CMD.to_string());
-                            toast_api.success("Copied!".to_string(), ToastOptions::new());
-                        },
-                        "Copy"
-                    }
-                }
-                p { class: "text-sm text-text-muted", "Requires macOS 13.0 (Ventura) or later." }
+                p { class: "mt-5 text-sm text-text-muted", "Requires macOS 13.0 (Ventura) or later." }
             }
         }
     }
