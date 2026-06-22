@@ -43,7 +43,7 @@ impl Plugin for TeamPlugin {
                 handle_team_page_open.in_set(PageOpenSet::HandleKnownPages),
             )
             .add_plugins(BinEventEmitterPlugin::<(TeamCommandEvent,)>::for_hosts(&[
-                "layout",
+                "team", "layout",
             ]))
             .add_observer(on_team_command)
             .add_observer(reset_team_sent_on_page_ready);
