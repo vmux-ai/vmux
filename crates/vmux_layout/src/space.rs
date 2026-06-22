@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
+use vmux_command::ReadAppCommands;
 
 pub struct SpacePlugin;
 
@@ -24,7 +25,8 @@ impl Plugin for SpacePlugin {
                     crate::active::ensure_active_tab,
                     crate::active::ensure_active_stack,
                     crate::active::ensure_active_branch,
-                ),
+                )
+                    .after(ReadAppCommands),
             )
             .add_systems(
                 PostUpdate,
