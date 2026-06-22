@@ -1,4 +1,5 @@
 use bevy::ecs::relationship::Relationship;
+use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::ui::{ComputedNode, UiGlobalTransform};
 use bevy::window::PrimaryWindow;
@@ -57,6 +58,7 @@ fn resolve_crop(
 }
 
 pub(crate) fn start_screenshots(
+    _non_send: NonSendMarker,
     mut reader: MessageReader<ScreenshotRequest>,
     bridge: Res<ScreenshotBridge>,
     window_q: Query<(Entity, &Window), With<PrimaryWindow>>,

@@ -455,7 +455,12 @@ mod tests {
         let content = resp["content"].as_array().unwrap();
         assert_eq!(content.len(), 2);
         assert_eq!(content[0]["type"], "text");
-        assert!(content[0]["text"].as_str().unwrap().contains("/tmp/shot.png"));
+        assert!(
+            content[0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("/tmp/shot.png")
+        );
         assert!(content[0]["text"].as_str().unwrap().contains("800"));
         assert_eq!(content[1]["type"], "image");
         assert_eq!(content[1]["mimeType"], "image/png");

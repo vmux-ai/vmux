@@ -772,7 +772,8 @@ mod tests {
         ));
 
         let target =
-            dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": "stack:7" })).unwrap();
+            dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": "stack:7" }))
+                .unwrap();
         assert!(matches!(
             target,
             DispatchTarget::Query(vmux_service::protocol::AgentQuery::Screenshot { pane: Some(p) })

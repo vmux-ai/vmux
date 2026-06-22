@@ -175,7 +175,10 @@ pub enum AgentQueryResult {
     Text(String),
     Settings(String),
     Spaces(String),
-    CommandExit { seq: u64, exit: Option<i32> },
+    CommandExit {
+        seq: u64,
+        exit: Option<i32>,
+    },
     Image {
         path: String,
         png: Vec<u8>,
