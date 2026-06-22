@@ -34,4 +34,6 @@ See [Makefile](Makefile) for all targets.
 
 ## License
 
-[MIT](LICENSE)
+Copyright (c) 2024-2025 Junichi Sugiura
+
+Licensed under the [GNU General Public License v3.0 or later](LICENSE).

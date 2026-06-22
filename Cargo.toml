@@ -8,7 +8,7 @@ resolver = "3"
 version = "0.0.16"
 edition = "2024"
 description = "AI-native workspace combining browser and terminal panes"
-license = "MIT"
+license = "GPL-3.0-or-later"
 homepage = "https://vmux.ai"
 repository = "https://github.com/vmux-ai/vmux"
 
