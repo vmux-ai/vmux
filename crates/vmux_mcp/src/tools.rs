@@ -558,11 +558,14 @@ pub fn dispatch_with_anchor(
         ));
     }
     if name == "screenshot" {
-        let pane = arguments
-            .get("pane")
-            .and_then(Value::as_str)
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+        let pane = match arguments.get("pane") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => {
+                let s = s.trim();
+                (!s.is_empty()).then(|| s.to_string())
+            }
+            Some(_) => return Err("screenshot.pane must be a string".to_string()),
+        };
         return Ok(DispatchTarget::Query(
             vmux_service::protocol::AgentQuery::Screenshot { pane },
         ));
@@ -786,6 +789,8 @@ mod tests {
             target,
             DispatchTarget::Query(vmux_service::protocol::AgentQuery::Screenshot { pane: None })
         ));
+
+        assert!(dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": 123 })).is_err());
     }
 
     #[test]
