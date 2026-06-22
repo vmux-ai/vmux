@@ -39,7 +39,29 @@ impl Plugin for TeamPlugin {
 }
 
 fn spawn_user_profile(mut commands: Commands) {
-    commands.spawn((Profile::user(), User, Name::new("Profile: You")));
+    let name = user_display_name();
+    commands.spawn((Profile::user_named(name), User, Name::new("Profile: User")));
+}
+
+/// The human's display name for their profile: the macOS full name (`id -F`),
+/// falling back to `$USER` / `$USERNAME`, then "You".
+fn user_display_name() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("id").arg("-F").output()
+            && output.status.success()
+        {
+            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !name.is_empty() {
+                return name;
+            }
+        }
+    }
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .ok()
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "You".to_string())
 }
 
 #[allow(clippy::too_many_arguments)]

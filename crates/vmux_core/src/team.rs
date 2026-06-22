@@ -31,6 +31,13 @@ impl AvatarSpec {
         }
     }
 
+    pub fn for_user_named(name: &str) -> Self {
+        Self {
+            initials: initials_of(name),
+            color: "#3b82f6".into(),
+        }
+    }
+
     pub fn for_agent(kind: AgentKind) -> Self {
         let (initials, color) = match kind {
             AgentKind::Claude => ("CL", "#d97757"),
@@ -44,12 +51,33 @@ impl AvatarSpec {
     }
 }
 
+/// Up to two uppercase initials from a display name ("Junichi Sugiura" -> "JS").
+pub fn initials_of(name: &str) -> String {
+    let initials: String = name
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .take(2)
+        .filter_map(|word| word.chars().next())
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    if initials.is_empty() {
+        "?".to_string()
+    } else {
+        initials
+    }
+}
+
 impl Profile {
     pub fn user() -> Self {
         Self {
             name: "You".into(),
             avatar: AvatarSpec::for_user(),
         }
+    }
+
+    pub fn user_named(name: String) -> Self {
+        let avatar = AvatarSpec::for_user_named(&name);
+        Self { name, avatar }
     }
 
     pub fn agent(kind: AgentKind) -> Self {
