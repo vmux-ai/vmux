@@ -639,8 +639,10 @@ fn sparse_terminal_ron(
             &fallback
         }
     };
-    let cur_json = serde_json::to_value(cur).map_err(|e| format!("settings to JSON failed: {e}"))?;
-    let def_json = serde_json::to_value(def).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let cur_json =
+        serde_json::to_value(cur).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let def_json =
+        serde_json::to_value(def).map_err(|e| format!("settings to JSON failed: {e}"))?;
     let differs = |key: &str| cur_json.get(key) != def_json.get(key);
 
     let mut fields: Vec<String> = Vec::new();
@@ -1434,7 +1436,11 @@ mod tests {
         );
         let reloaded = parse_settings(&ron).unwrap();
         assert_eq!(
-            reloaded.terminal.unwrap().resolve_theme("default").font_family,
+            reloaded
+                .terminal
+                .unwrap()
+                .resolve_theme("default")
+                .font_family,
             "Menlo"
         );
     }
