@@ -385,8 +385,9 @@ fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult
             })
         }
         AgentQueryResult::CommandExit { seq, exit } => {
+            let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
             json!({
-                "content": [{"type": "text", "text": format!("seq={seq} exit={exit:?}")}]
+                "content": [{"type": "text", "text": format!("{{\"seq\":{seq},\"exit\":{exit}}}")}]
             })
         }
         AgentQueryResult::Error(message) => {

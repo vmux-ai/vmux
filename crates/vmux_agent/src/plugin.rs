@@ -55,8 +55,6 @@ pub struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool
 /// pane). A bare `run` stacks new terminals into this pane instead of splitting
 /// the agent's own pane again; the first `run` creates it. Self-healing: a stale
 /// pane (closed) is replaced by a fresh split.
-/// `run_terminals` tracks each anchor's live run terminal so a default (`auto`)
-/// `run` reuses that one persistent shell instead of stacking a new terminal.
 #[derive(Resource, Default)]
 pub struct AgentTerminalRegions {
     pub panes: std::collections::HashMap<ProcessId, Entity>,

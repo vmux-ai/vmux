@@ -61,7 +61,6 @@ fn prepend_args(args: &mut Vec<String>, mut head: Vec<String>) {
     *args = head;
 }
 
-/// Resolve the user's nushell config dir so the generated config can re-source it.
 fn nu_config_dir() -> Option<std::path::PathBuf> {
     if let Some(dir) = std::env::var_os("NU_CONFIG_DIR") {
         return Some(std::path::PathBuf::from(dir));
@@ -75,19 +74,15 @@ fn nu_config_dir() -> Option<std::path::PathBuf> {
 
 fn nu_config() -> String {
     let mut out = String::new();
-    if let Some(user) = nu_config_dir().map(|d| d.join("config.nu")) {
-        if user.exists() {
-            out.push_str(&format!("source \"{}\"\n", user.display()));
-        }
+    if let Some(user) = nu_config_dir().map(|d| d.join("config.nu"))
+        && user.exists()
+    {
+        out.push_str(&format!("source \"{}\"\n", user.display()));
     }
     out.push_str(NU_HOOKS);
     out
 }
 
-/// Augment `args`/`env` so the spawned shell emits OSC 133 command-lifecycle
-/// markers. No-op for unrecognized shells and for one-shot `-c` invocations
-/// (those are command executions, not interactive prompt loops). Snippet files
-/// are written under `dir`.
 pub fn inject(command: &str, args: &mut Vec<String>, env: &mut Vec<(String, String)>, dir: &Path) {
     if args.iter().any(|a| a == "-c") {
         return;

@@ -45,8 +45,6 @@ pub fn log_dir() -> PathBuf {
     shared_data_dir().join("logs")
 }
 
-/// Directory holding the generated per-shell OSC 133 integration snippets that
-/// spawned shells source at startup.
 pub fn shell_integration_dir() -> PathBuf {
     shared_data_dir().join("shell-integration")
 }

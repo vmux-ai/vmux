@@ -176,7 +176,8 @@ fn query_result_to_content(result: crate::protocol::AgentQueryResult) -> (String
         AgentQueryResult::Settings(json) => (json, false),
         AgentQueryResult::Spaces(json) => (json, false),
         AgentQueryResult::CommandExit { seq, exit } => {
-            (format!("{{\"seq\":{seq},\"exit\":{exit:?}}}"), false)
+            let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
+            (format!("{{\"seq\":{seq},\"exit\":{exit}}}"), false)
         }
         AgentQueryResult::Error(message) => (message, true),
     }

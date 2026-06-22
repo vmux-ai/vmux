@@ -351,9 +351,6 @@ impl Process {
         self.patch_tx.subscribe()
     }
 
-    /// Monotonic count of completed commands (OSC 133;D seen) and the most
-    /// recent command's exit code. A `run` captures the count as a baseline,
-    /// then waits for it to advance to learn its command finished.
     pub fn command_status(&self) -> (u64, Option<i32>) {
         (self.command_ended_seq, self.last_command_exit)
     }

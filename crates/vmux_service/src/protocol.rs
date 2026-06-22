@@ -159,9 +159,6 @@ pub enum AgentQuery {
     ReadTerminalFull {
         process_id: ProcessId,
     },
-    /// Lifecycle status of a process: the count of completed commands (OSC
-    /// 133;D) and the most recent exit code. Used by `run` to detect when its
-    /// command finished without a sentinel marker in the command line.
     CommandExit {
         process_id: ProcessId,
     },
