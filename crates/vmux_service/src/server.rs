@@ -175,6 +175,10 @@ fn query_result_to_content(result: crate::protocol::AgentQueryResult) -> (String
         AgentQueryResult::Text(text) => (text, false),
         AgentQueryResult::Settings(json) => (json, false),
         AgentQueryResult::Spaces(json) => (json, false),
+        AgentQueryResult::CommandExit { seq, exit } => {
+            let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
+            (format!("{{\"seq\":{seq},\"exit\":{exit}}}"), false)
+        }
         AgentQueryResult::Error(message) => (message, true),
     }
 }
@@ -563,6 +567,24 @@ async fn handle_client(
                             match mgr.processes.get(&process_id) {
                                 Some(process) => {
                                     crate::protocol::AgentQueryResult::Text(process.full_text())
+                                }
+                                None => crate::protocol::AgentQueryResult::Error(format!(
+                                    "process not found: {process_id}"
+                                )),
+                            }
+                        };
+                        let resp = ServiceMessage::AgentQueryResult { request_id, result };
+                        let mut w = writer.lock().await;
+                        write_message!(&mut *w, &resp)?;
+                        continue;
+                    }
+                    crate::protocol::AgentQuery::CommandExit { process_id } => {
+                        let result = {
+                            let mgr = manager.lock().await;
+                            match mgr.processes.get(&process_id) {
+                                Some(process) => {
+                                    let (seq, exit) = process.command_status();
+                                    crate::protocol::AgentQueryResult::CommandExit { seq, exit }
                                 }
                                 None => crate::protocol::AgentQueryResult::Error(format!(
                                     "process not found: {process_id}"

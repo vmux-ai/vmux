@@ -56,7 +56,10 @@ pub struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool
 /// the agent's own pane again; the first `run` creates it. Self-healing: a stale
 /// pane (closed) is replaced by a fresh split.
 #[derive(Resource, Default)]
-pub struct AgentTerminalRegions(pub std::collections::HashMap<ProcessId, Entity>);
+pub struct AgentTerminalRegions {
+    pub panes: std::collections::HashMap<ProcessId, Entity>,
+    pub run_terminals: std::collections::HashMap<ProcessId, ProcessId>,
+}
 
 fn resolve_agent_executable(
     kind: AgentKind,
@@ -687,6 +690,17 @@ fn handle_agent_self_commands(
                         AgentCommandResult::Text(pid.to_string())
                     }
                     None => 'spawn: {
+                        if beside.is_none()
+                            && *mode == vmux_service::protocol::PlacementMode::Auto
+                            && let Some(pid) = regions.run_terminals.get(anchor).copied()
+                            && term_pids.iter().any(|(_, p)| *p == pid)
+                        {
+                            service.0.send(ClientMessage::ProcessInput {
+                                process_id: pid,
+                                data,
+                            });
+                            break 'spawn AgentCommandResult::Text(pid.to_string());
+                        }
                         let Some((agent_term, self_pane)) =
                             resolve_self_pane(*anchor, &agent_terms, &child_of_q)
                         else {
@@ -727,7 +741,7 @@ fn handle_agent_self_commands(
                             // off the agent the first time (don't spawn a pane unless needed).
                             (None, _) => {
                                 let region = regions
-                                    .0
+                                    .panes
                                     .get(anchor)
                                     .copied()
                                     .filter(|p| panes.contains(*p));
@@ -745,7 +759,7 @@ fn handle_agent_self_commands(
                                 })
                             }
                         };
-                        regions.0.insert(*anchor, target_pane);
+                        regions.panes.insert(*anchor, target_pane);
                         let new_pid = ProcessId::new();
                         let agent_cwd = launch_q.get(agent_term).ok().map(|l| l.cwd.clone());
                         let cwd = run_terminal_cwd(agent_cwd.as_deref(), active_space.as_deref());
@@ -756,6 +770,10 @@ fn handle_agent_self_commands(
                             process_id: Some(new_pid),
                             activate: *focus,
                         });
+                        if beside.is_none() && *mode != vmux_service::protocol::PlacementMode::Split
+                        {
+                            regions.run_terminals.insert(*anchor, new_pid);
+                        }
                         AgentCommandResult::Text(new_pid.to_string())
                     }
                 }
@@ -942,9 +960,11 @@ fn handle_agent_queries(
                     result: AgentQueryResult::Spaces(json),
                 });
             }
-            // ReadTerminal/ReadTerminalFull are answered by the service directly;
-            // they never reach the GUI.
-            AgentQuery::ReadTerminal { .. } | AgentQuery::ReadTerminalFull { .. } => {}
+            // ReadTerminal/ReadTerminalFull/CommandExit are answered by the
+            // service directly; they never reach the GUI.
+            AgentQuery::ReadTerminal { .. }
+            | AgentQuery::ReadTerminalFull { .. }
+            | AgentQuery::CommandExit { .. } => {}
         }
     }
 }

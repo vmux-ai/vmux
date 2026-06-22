@@ -120,7 +120,6 @@ async fn tool_call_result(
             terminal,
             ..
         }) => {
-            let token = run_token();
             let run = AgentCommand::Run {
                 anchor,
                 command,
@@ -129,55 +128,22 @@ async fn tool_call_result(
                 beside,
                 mode,
                 terminal,
-                done_marker: Some(token.clone()),
+                done_marker: None,
             };
-            run_blocking(run, &token).await
+            run_blocking(run).await
         }
         crate::tools::DispatchTarget::Command(command) => run_agent_command(command).await,
         crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
     }
 }
 
-fn run_token() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("v{nanos:x}")
-}
-
-/// Parse the exit code from a line containing `__VMUX_DONE_<token>_<digits>__`.
-/// Returns `None` for the echoed command line (which carries the unresolved
-/// `%s`/`($env...)` placeholder rather than digits).
-fn marker_code(line: &str, token: &str) -> Option<i32> {
-    let prefix = format!("__VMUX_DONE_{token}_");
-    let start = line.find(&prefix)? + prefix.len();
-    let rest = &line[start..];
-    let end = rest.find("__")?;
-    rest[..end].parse::<i32>().ok()
-}
-
-/// Find the resolved completion marker anywhere in `text` and return its exit code.
-fn parse_done_marker(text: &str, token: &str) -> Option<i32> {
-    text.lines().rev().find_map(|line| marker_code(line, token))
-}
-
-/// Extract command output from the full terminal buffer: the lines between the
-/// echoed command (the first line carrying the token) and the resolved marker
-/// line, with both boundary lines removed.
-fn clean_run_output(text: &str, token: &str) -> String {
-    let token_pat = format!("__VMUX_DONE_{token}");
-    let lines: Vec<&str> = text.lines().collect();
-    let end = lines
-        .iter()
-        .position(|line| marker_code(line, token).is_some())
-        .unwrap_or(lines.len());
-    let start = lines[..end]
-        .iter()
-        .rposition(|line| line.contains(&token_pat))
-        .map(|i| i + 1)
-        .unwrap_or(0);
-    lines[start..end].join("\n").trim_end().to_string()
+fn output_since(baseline: &str, final_text: &str) -> String {
+    final_text
+        .strip_prefix(baseline)
+        .unwrap_or(final_text)
+        .trim_matches('\n')
+        .trim_end()
+        .to_string()
 }
 
 fn run_result(pid: &str, exit: Option<i32>, output: &str, timed_out: bool) -> Value {
@@ -197,7 +163,7 @@ fn run_result(pid: &str, exit: Option<i32>, output: &str, timed_out: bool) -> Va
 
 /// Send `run`, then block (polling the full terminal buffer) until the command's
 /// completion marker appears, returning the output + exit code in one response.
-async fn run_blocking(run: AgentCommand, token: &str) -> Result<Value, String> {
+async fn run_blocking(run: AgentCommand) -> Result<Value, String> {
     let connection = vmux_service::client::ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
@@ -241,63 +207,76 @@ async fn run_blocking(run: AgentCommand, token: &str) -> Result<Value, String> {
         .map_err(|_| format!("run: service returned an invalid terminal id: {pid}"))?;
 
     let start = Instant::now();
-    let deadline = start + RUN_BLOCK_TIMEOUT;
-    let mut last_text = String::new();
-    let mut got_text = false;
-    loop {
-        let query_id = AgentRequestId::new();
-        connection
-            .send(&ClientMessage::AgentQuery {
-                request_id: query_id,
-                query: AgentQuery::ReadTerminalFull { process_id },
-            })
-            .await
-            .map_err(|error| format!("cannot poll terminal: {error}"))?;
-
-        let read = loop {
-            let Some(message) = connection
-                .recv()
-                .await
-                .map_err(|error| format!("cannot read terminal poll: {error}"))?
-            else {
-                return Err("vmux_service disconnected".to_string());
-            };
-            match message {
-                ServiceMessage::AgentQueryResult {
-                    request_id: received,
-                    result,
-                } if received == query_id => break result,
-                ServiceMessage::Error { message } => {
-                    return Err(message);
-                }
-                _ => {}
-            }
-        };
-
-        match read {
-            AgentQueryResult::Text(text) => {
-                got_text = true;
-                last_text = text;
-                if let Some(code) = parse_done_marker(&last_text, token) {
-                    let output = clean_run_output(&last_text, token);
-                    return Ok(run_result(&pid, Some(code), &output, false));
-                }
-            }
+    let baseline_seq = loop {
+        match agent_query(&connection, AgentQuery::CommandExit { process_id }).await? {
+            AgentQueryResult::CommandExit { seq, .. } => break seq,
             AgentQueryResult::Error(message) => {
-                // The terminal may not be created yet; tolerate "process not
-                // found" during the grace window, but surface a persistent error.
-                if !got_text && start.elapsed() > RUN_CREATE_GRACE {
+                if start.elapsed() > RUN_CREATE_GRACE {
                     return Err(message);
                 }
+                tokio::time::sleep(RUN_POLL_INTERVAL).await;
             }
-            other => return Err(format!("run: unexpected terminal read: {other:?}")),
+            other => return Err(format!("run: unexpected command-exit result: {other:?}")),
         }
+    };
+    let baseline_text = read_full_text(&connection, process_id).await;
 
+    let deadline = start + RUN_BLOCK_TIMEOUT;
+    loop {
+        match agent_query(&connection, AgentQuery::CommandExit { process_id }).await? {
+            AgentQueryResult::CommandExit { seq, exit } if seq > baseline_seq => {
+                let final_text = read_full_text(&connection, process_id).await;
+                let output = output_since(&baseline_text, &final_text);
+                return Ok(run_result(&pid, exit, &output, false));
+            }
+            AgentQueryResult::CommandExit { .. } => {}
+            AgentQueryResult::Error(message) => return Err(message),
+            other => return Err(format!("run: unexpected command-exit result: {other:?}")),
+        }
         if Instant::now() >= deadline {
-            let output = clean_run_output(&last_text, token);
+            let final_text = read_full_text(&connection, process_id).await;
+            let output = output_since(&baseline_text, &final_text);
             return Ok(run_result(&pid, None, &output, true));
         }
         tokio::time::sleep(RUN_POLL_INTERVAL).await;
+    }
+}
+
+async fn agent_query(
+    connection: &vmux_service::client::ServiceConnection,
+    query: AgentQuery,
+) -> Result<AgentQueryResult, String> {
+    let request_id = AgentRequestId::new();
+    connection
+        .send(&ClientMessage::AgentQuery { request_id, query })
+        .await
+        .map_err(|error| format!("cannot send query: {error}"))?;
+    loop {
+        let Some(message) = connection
+            .recv()
+            .await
+            .map_err(|error| format!("cannot read query response: {error}"))?
+        else {
+            return Err("vmux_service disconnected".to_string());
+        };
+        match message {
+            ServiceMessage::AgentQueryResult {
+                request_id: received,
+                result,
+            } if received == request_id => return Ok(result),
+            ServiceMessage::Error { message } => return Err(message),
+            _ => {}
+        }
+    }
+}
+
+async fn read_full_text(
+    connection: &vmux_service::client::ServiceConnection,
+    process_id: vmux_service::protocol::ProcessId,
+) -> String {
+    match agent_query(connection, AgentQuery::ReadTerminalFull { process_id }).await {
+        Ok(AgentQueryResult::Text(text)) => text,
+        _ => String::new(),
     }
 }
 
@@ -405,6 +384,12 @@ fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult
                 "content": [{"type": "text", "text": json_str}]
             })
         }
+        AgentQueryResult::CommandExit { seq, exit } => {
+            let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
+            json!({
+                "content": [{"type": "text", "text": format!("{{\"seq\":{seq},\"exit\":{exit}}}")}]
+            })
+        }
         AgentQueryResult::Error(message) => {
             json!({
                 "isError": true,
@@ -439,53 +424,20 @@ mod tests {
     }
 
     #[test]
-    fn marker_code_parses_resolved_exit_only() {
-        assert_eq!(marker_code("__VMUX_DONE_tok_0__", "tok"), Some(0));
+    fn output_since_returns_appended_tail() {
+        let baseline = "prompt$ ";
+        let final_text = "prompt$ ls\nfile_a\nfile_b\nprompt$ ";
         assert_eq!(
-            marker_code("prefix __VMUX_DONE_tok_130__ suffix", "tok"),
-            Some(130)
+            output_since(baseline, final_text),
+            "ls\nfile_a\nfile_b\nprompt$"
         );
-        // Echoed command line carries the unresolved placeholder, not digits.
-        assert_eq!(
-            marker_code("ls; printf '__VMUX_DONE_tok_%s__' \"$?\"", "tok"),
-            None
-        );
-        assert_eq!(
-            marker_code("__VMUX_DONE_tok_($env.LAST_EXIT_CODE)__", "tok"),
-            None
-        );
-        // nushell catch-branch echo (interpolated expr, not digits) must not match.
-        assert_eq!(
-            marker_code(
-                "print $\"__VMUX_DONE_tok_($e.exit_code? | default 1)__\"",
-                "tok"
-            ),
-            None
-        );
-        // Wrong token never matches.
-        assert_eq!(marker_code("__VMUX_DONE_other_0__", "tok"), None);
     }
 
     #[test]
-    fn parse_done_marker_finds_code_ignoring_echo() {
-        let text =
-            "$ ls; printf '__VMUX_DONE_tok_%s__' \"$?\"\nfile_a\nfile_b\n__VMUX_DONE_tok_0__\n$ ";
-        assert_eq!(parse_done_marker(text, "tok"), Some(0));
-        assert_eq!(parse_done_marker("nothing here", "tok"), None);
-    }
-
-    #[test]
-    fn clean_run_output_strips_echo_and_marker() {
-        let text =
-            "$ ls; printf '__VMUX_DONE_tok_%s__' \"$?\"\nfile_a\nfile_b\n__VMUX_DONE_tok_0__\n$ ";
-        assert_eq!(clean_run_output(text, "tok"), "file_a\nfile_b");
-    }
-
-    #[test]
-    fn clean_run_output_timeout_keeps_output_after_echo() {
-        // No resolved marker yet (command still running).
-        let text = "$ sleep 9; printf '__VMUX_DONE_tok_%s__' \"$?\"\nworking...";
-        assert_eq!(clean_run_output(text, "tok"), "working...");
+    fn output_since_falls_back_to_full_when_prefix_shifted() {
+        let baseline = "old prompt$ ";
+        let final_text = "different\noutput here";
+        assert_eq!(output_since(baseline, final_text), "different\noutput here");
     }
 
     #[test]

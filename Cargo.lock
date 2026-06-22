@@ -9669,6 +9669,7 @@ dependencies = [
  "vmux_core",
  "vmux_layout",
  "vmux_ui",
+ "vte",
  "wasm-bindgen",
  "web-sys",
 ]

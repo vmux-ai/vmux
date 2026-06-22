@@ -303,13 +303,13 @@ Blocks until the command finishes and returns its full output plus the exit code
 (`terminal: <id>`, `exit: <code>`, `output: ...`). If it has not finished within ~50s, returns the \
 output so far with a note to call read_terminal for the rest. \
 \
-PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses your one terminal region \
-(new terminals stack into a single pane beside you), so your own pane never keeps shrinking and the \
-layout stays tidy. The first `run` opens that region; later ones stack into it. Rule of thumb: don't \
-open a new pane unless you actually need one. \
+PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses ONE persistent terminal \
+beside you — the SAME shell across calls, so its working directory and environment persist. Do NOT `cd` \
+into your project on every run; the shell stays where it was. The first `run` opens it; later ones run \
+in that same shell. Rule of thumb: don't open a new pane unless you actually need one. \
 Override only when you mean to: \
-- `mode`: `auto` (default, reuse your region) | `split` (force a NEW pane) | `stack` (force a stacked \
-tab into the anchor's pane). \
+- `mode`: `auto` (default, reuse your one persistent shell) | `split` (force a NEW pane) | `stack` \
+(force a new stacked terminal in the anchor's pane). \
 - `beside`: anchor to a specific page — a terminal id a previous run returned, or \"self\" for your own \
 pane. With `beside` set, `stack` tabs into that page's pane and `split` splits off it. \
 - `direction`: which side for `split` (right|left|top|bottom, default right). \

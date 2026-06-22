@@ -26,6 +26,8 @@ pub mod launchd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod message;
 #[cfg(not(target_arch = "wasm32"))]
+mod osc133;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod process;
@@ -39,6 +41,8 @@ pub mod registry;
 pub mod server;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod service;
+#[cfg(not(target_arch = "wasm32"))]
+mod shell_integration;
 #[cfg(all(target_os = "macos", not(target_arch = "wasm32")))]
 pub mod sm_app_service;
 #[cfg(not(target_arch = "wasm32"))]
