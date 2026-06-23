@@ -87,9 +87,9 @@ const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-white/[0.035] p
 fn row_class(selected: bool) -> String {
     let base = "flex items-center gap-2.5 rounded-lg px-3 py-2 cursor-default transition-colors duration-100";
     if selected {
-        format!("{base} bg-sky-400/15 text-foreground ring-1 ring-inset ring-sky-300/30 shadow-sm")
+        format!("{base} bg-accent text-accent-foreground ring-1 ring-inset ring-border")
     } else {
-        format!("{base} text-foreground/80 hover:bg-white/[0.06]")
+        format!("{base} text-foreground/80 hover:bg-accent/50")
     }
 }
 
@@ -110,6 +110,36 @@ fn file_glyph(class: &str) -> Element {
     }
 }
 
+fn text_glyph(class: &str) -> Element {
+    rsx! {
+        Icon { class: "{class}",
+            path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+            path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+            path { d: "M16 13H8" }
+            path { d: "M16 17H8" }
+            path { d: "M10 9H8" }
+        }
+    }
+}
+
+fn code_glyph(class: &str) -> Element {
+    rsx! {
+        Icon { class: "{class}",
+            path { d: "m16 18 6-6-6-6" }
+            path { d: "m8 6-6 6 6 6" }
+        }
+    }
+}
+
+fn config_glyph(class: &str) -> Element {
+    rsx! {
+        Icon { class: "{class}",
+            path { d: "M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" }
+            path { d: "M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" }
+        }
+    }
+}
+
 fn image_glyph(class: &str) -> Element {
     rsx! {
         Icon { class: "{class}",
@@ -119,19 +149,47 @@ fn image_glyph(class: &str) -> Element {
     }
 }
 
+fn markdown_glyph(class: &str) -> Element {
+    rsx! {
+        Icon { class: "{class}", fill: "currentColor", stroke: "none",
+            path { d: "M22.27 19.385H1.73A1.73 1.73 0 0 1 0 17.655V6.345a1.73 1.73 0 0 1 1.73-1.73h20.54A1.73 1.73 0 0 1 24 6.345v11.31a1.73 1.73 0 0 1-1.73 1.73zM5.769 15.923v-4.5l2.308 2.885 2.307-2.885v4.5h2.308V8.078h-2.308l-2.307 2.885-2.308-2.885H3.46v7.847zM21.232 12h-2.309V8.077h-2.307V12h-2.308l3.461 4.039z" }
+        }
+    }
+}
+
+fn ext_of(path: &str) -> String {
+    path.rsplit('/')
+        .next()
+        .unwrap_or("")
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+fn type_icon(path: &str, is_dir: bool, class: &str) -> Element {
+    if is_dir {
+        return folder_glyph(class);
+    }
+    match ext_of(path).as_str() {
+        "md" | "markdown" | "mdx" => markdown_glyph(class),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico" => image_glyph(class),
+        "rs" | "js" | "jsx" | "ts" | "tsx" | "py" | "go" | "c" | "cpp" | "cc" | "h" | "hpp"
+        | "java" | "rb" | "php" | "sh" | "bash" | "zsh" | "lua" | "vue" | "svelte" | "swift"
+        | "kt" | "html" | "css" | "scss" => code_glyph(class),
+        "json" | "toml" | "yaml" | "yml" | "ron" | "ini" | "cfg" | "conf" | "lock" | "env"
+        | "properties" => config_glyph(class),
+        "txt" | "log" | "csv" | "text" => text_glyph(class),
+        _ => file_glyph(class),
+    }
+}
+
 fn entry_visual(entry: &FileDirEntry, thumb: Option<&String>) -> Element {
     if let Some(url) = thumb {
         return rsx! {
-            img { src: "{url}", class: "h-6 w-6 shrink-0 rounded object-cover ring-1 ring-white/10" }
+            img { src: "{url}", class: "h-6 w-6 shrink-0 rounded object-cover ring-1 ring-border" }
         };
     }
-    if entry.is_dir {
-        return folder_glyph("h-5 w-5 shrink-0 text-blue-300/80");
-    }
-    if image_mime(&entry.path).is_some() {
-        return image_glyph("h-5 w-5 shrink-0 text-emerald-300/70");
-    }
-    file_glyph("h-5 w-5 shrink-0 text-muted-foreground")
+    type_icon(&entry.path, entry.is_dir, "h-5 w-5 shrink-0 opacity-80")
 }
 
 fn render_preview(preview: &Preview) -> Element {
@@ -490,7 +548,7 @@ pub fn Page() -> Element {
                             for e in parent_entries() {
                                 div {
                                     key: "{e.path}",
-                                    class: if e.name == cur_basename { "flex items-center gap-2.5 rounded-lg bg-sky-400/10 px-3 py-2 text-foreground" } else { "flex items-center gap-2.5 rounded-lg px-3 py-2 text-foreground/55 transition-colors hover:bg-white/[0.04]" },
+                                    class: if e.name == cur_basename { "flex items-center gap-2.5 rounded-lg bg-accent/60 px-3 py-2 text-foreground" } else { "flex items-center gap-2.5 rounded-lg px-3 py-2 text-foreground/55 transition-colors hover:bg-accent/40" },
                                     {entry_visual(&e, None)}
                                     span { class: "truncate text-xs", "{e.name}" }
                                 }
