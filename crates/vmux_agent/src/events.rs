@@ -72,3 +72,39 @@ pub struct ScreenshotResponse {
     pub request_id: [u8; 16],
     pub result: Result<ScreenshotImage, String>,
 }
+
+#[derive(Message, Clone)]
+pub struct RecordStartRequest {
+    pub request_id: [u8; 16],
+    pub gif: bool,
+    pub max_secs: u32,
+    pub pane: Option<String>,
+}
+
+#[derive(Message, Clone)]
+pub struct RecordStartResponse {
+    pub request_id: [u8; 16],
+    pub result: Result<u32, String>,
+}
+
+#[derive(Message, Clone)]
+pub struct RecordStopRequest {
+    pub request_id: [u8; 16],
+    pub dir: Option<String>,
+    pub name: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct RecordingInfo {
+    pub mp4_path: String,
+    pub gif_path: Option<String>,
+    pub duration_ms: u64,
+    pub bytes: u64,
+    pub auto_stopped: bool,
+}
+
+#[derive(Message, Clone)]
+pub struct RecordStopResponse {
+    pub request_id: [u8; 16],
+    pub result: Result<RecordingInfo, String>,
+}
