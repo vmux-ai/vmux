@@ -968,6 +968,7 @@ fn sync_windowed_frames(
     >,
     child_of_q: Query<&ChildOf>,
     pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
+    header_rect: Query<(&ComputedNode, &UiGlobalTransform), (With<Header>, With<Open>)>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
@@ -975,6 +976,9 @@ fn sync_windowed_frames(
 ) {
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
+    let header_frame = header_rect
+        .iter()
+        .find_map(|(computed, ui_gt)| windowed_frame_rect_from_computed(computed, ui_gt));
     let force_raise = layout_hidden.is_changed();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
@@ -989,17 +993,30 @@ fn sync_windowed_frames(
         let (computed, ui_gt) = pane_rect
             .get(pane_entity)
             .unwrap_or((self_computed, self_ui_gt));
-        let size_px = computed.size;
-        let center = ui_gt.transform_point2(Vec2::ZERO);
-        let left = center.x - size_px.x * 0.5;
-        let top = center.y - size_px.y * 0.5;
+        let Some(pane_frame) = windowed_frame_rect_from_computed(computed, ui_gt) else {
+            continue;
+        };
         let scale = 1.0 / computed.inverse_scale_factor.max(1.0e-6);
+        let frame = windowed_page_frame_rect(
+            pane_frame,
+            header_frame,
+            layout_hidden.0,
+            visible_pane_count,
+            settings.layout.radius * scale * 0.25,
+        );
         let became_visible = !last_visible_pages.contains(&entity);
         if became_visible {
             browsers.set_windowed_hidden(&entity, false);
         }
-        browsers.set_windowed_frame(&entity, left, top, size_px.x, size_px.y, scale);
-        let all_corners = layout_hidden.0 || visible_pane_count > 1;
+        browsers.set_windowed_frame(
+            &entity,
+            frame.left,
+            frame.top,
+            frame.width,
+            frame.height,
+            scale,
+        );
+        let all_corners = windowed_page_all_corners(layout_hidden.0, visible_pane_count);
         browsers.set_windowed_corner_radius(
             &entity,
             settings.layout.radius * scale,
@@ -1028,10 +1045,10 @@ fn sync_windowed_frames(
         );
         if browsers.has_browser(entity) {
             let key = (
-                left.round() as i32,
-                top.round() as i32,
-                size_px.x.round() as i32,
-                size_px.y.round() as i32,
+                frame.left.round() as i32,
+                frame.top.round() as i32,
+                frame.width.round() as i32,
+                frame.height.round() as i32,
             );
             let changed = last_raised_frame.insert(entity, key) != Some(key);
             if force_raise || changed || became_visible {
@@ -1044,6 +1061,74 @@ fn sync_windowed_frames(
         browsers.set_windowed_hidden(&entity, true);
     }
     *last_visible_pages = visible;
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct WindowedFrameRect {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+
+impl WindowedFrameRect {
+    fn right(self) -> f32 {
+        self.left + self.width
+    }
+
+    fn bottom(self) -> f32 {
+        self.top + self.height
+    }
+}
+
+fn windowed_frame_rect_from_computed(
+    computed: &ComputedNode,
+    ui_gt: &UiGlobalTransform,
+) -> Option<WindowedFrameRect> {
+    let size = computed.size;
+    if size.x <= 0.0 || size.y <= 0.0 || !size.x.is_finite() || !size.y.is_finite() {
+        return None;
+    }
+    let center = ui_gt.transform_point2(Vec2::ZERO);
+    Some(WindowedFrameRect {
+        left: center.x - size.x * 0.5,
+        top: center.y - size.y * 0.5,
+        width: size.x,
+        height: size.y,
+    })
+}
+
+fn windowed_page_frame_rect(
+    pane: WindowedFrameRect,
+    header: Option<WindowedFrameRect>,
+    layout_hidden: bool,
+    visible_pane_count: usize,
+    straight_edge_inset: f32,
+) -> WindowedFrameRect {
+    let Some(header) = header else {
+        return pane;
+    };
+    if layout_hidden || visible_pane_count != 1 {
+        return pane;
+    }
+    let inset = if straight_edge_inset.is_finite() {
+        straight_edge_inset.max(0.0).ceil()
+    } else {
+        0.0
+    };
+    let left = header.left.ceil() + inset;
+    let right = header.right().floor() - inset;
+    let top = header.bottom().ceil().max(pane.top.ceil());
+    let bottom = pane.bottom().floor();
+    if right <= left || bottom <= top {
+        return pane;
+    }
+    WindowedFrameRect {
+        left,
+        top,
+        width: right - left,
+        height: bottom - top,
+    }
 }
 
 fn visible_pane_count_for_windowed_sync(
@@ -1071,6 +1156,10 @@ fn windowed_pages_to_hide(
         .copied()
         .filter(|entity| prev_visible.contains(entity) || !ever_shown.contains(entity))
         .collect()
+}
+
+fn windowed_page_all_corners(layout_hidden: bool, visible_pane_count: usize) -> bool {
+    layout_hidden || visible_pane_count > 1
 }
 
 fn sync_windowed_layout(
@@ -1957,13 +2046,47 @@ fn layout_window_padding_from_settings(settings: &AppSettings) -> LayoutWindowPa
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LayoutFixedOffsets {
+    left: f32,
+    top: f32,
+    right: f32,
+    height: f32,
+}
+
+fn layout_fixed_offsets_from_computed(
+    computed: &ComputedNode,
+    transform: &UiGlobalTransform,
+    window_width_px: f32,
+) -> Option<LayoutFixedOffsets> {
+    if computed.size.x <= 0.0 || computed.size.y <= 0.0 || window_width_px <= 0.0 {
+        return None;
+    }
+
+    let inverse_scale = computed.inverse_scale_factor.max(1.0e-6);
+    let size = computed.size * inverse_scale;
+    let center = transform.transform_point2(Vec2::ZERO) * inverse_scale;
+    let window_width = window_width_px * inverse_scale;
+    let left = center.x - size.x * 0.5;
+    let top = center.y - size.y * 0.5;
+    let right = window_width - (center.x + size.x * 0.5);
+
+    Some(LayoutFixedOffsets {
+        left,
+        top,
+        right,
+        height: size.y,
+    })
+}
+
 fn push_layout_state_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    header_q: Query<Has<Open>, With<Header>>,
+    header_q: Query<(Has<Open>, Option<&ComputedNode>, Option<&UiGlobalTransform>), With<Header>>,
     side_sheet_q: Query<(&SideSheetPosition, Has<Open>), With<SideSheet>>,
     window_q: Query<&Node, With<VmuxWindow>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     side_sheet_width: Res<SideSheetWidth>,
     settings: Res<AppSettings>,
     mut last: Local<String>,
@@ -1979,16 +2102,32 @@ fn push_layout_state_emit(
         .ok()
         .map(layout_window_padding_from_node)
         .unwrap_or_else(|| layout_window_padding_from_settings(&settings));
+    let header_open = header_q.iter().any(|(is_open, _, _)| is_open);
+    let window_width_px = windows
+        .single()
+        .ok()
+        .map(|window| window.resolution.physical_width() as f32)
+        .unwrap_or(0.0);
+    let header_offsets = header_q.iter().find_map(|(_, computed, transform)| {
+        let computed = computed?;
+        let transform = transform?;
+        layout_fixed_offsets_from_computed(computed, transform, window_width_px)
+    });
 
     let payload = LayoutStateEvent {
-        header_open: header_q.iter().any(|is_open| is_open),
+        header_open,
         side_sheet_open: side_sheet_q
             .iter()
             .any(|(pos, is_open)| *pos == SideSheetPosition::Left && is_open),
-        header_height: HEADER_HEIGHT_PX,
+        header_height: header_offsets
+            .map(|offsets| offsets.height)
+            .unwrap_or(HEADER_HEIGHT_PX),
         side_sheet_width: side_sheet_width.0,
         pane_gap: vmux_layout::event::PANE_GAP_PX,
         radius: settings.layout.radius,
+        header_left: header_offsets.map(|offsets| offsets.left),
+        header_top: header_offsets.map(|offsets| offsets.top),
+        header_right: header_offsets.map(|offsets| offsets.right),
         window_pad_top: window_padding.top,
         window_pad_right: window_padding.right,
         window_pad_bottom: window_padding.bottom,
@@ -3631,6 +3770,26 @@ mod tests {
     }
 
     #[test]
+    fn layout_fixed_offsets_use_computed_header_rect() {
+        let computed = ComputedNode {
+            size: Vec2::new(1_544.0, 168.0),
+            inverse_scale_factor: 0.5,
+            ..default()
+        };
+        let transform = UiGlobalTransform::from(bevy::math::Affine2::from_translation(Vec2::new(
+            788.0, 84.0,
+        )));
+
+        let offsets =
+            layout_fixed_offsets_from_computed(&computed, &transform, 1_600.0).expect("offsets");
+
+        assert_eq!(offsets.left, 8.0);
+        assert_eq!(offsets.top, 0.0);
+        assert_eq!(offsets.right, 20.0);
+        assert_eq!(offsets.height, 84.0);
+    }
+
+    #[test]
     fn windowed_content_mesh_material_is_hidden() {
         let mut material = WebviewExtendStandardMaterial::default();
 
@@ -3652,13 +3811,7 @@ mod tests {
             },
             layout: vmux_layout::settings::LayoutSettings {
                 radius,
-                window: vmux_layout::settings::WindowSettings {
-                    padding: 0.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
-                },
+                window: vmux_layout::settings::WindowSettings { padding: 0.0 },
                 pane: vmux_layout::settings::PaneSettings { gap: 0.0 },
                 side_sheet: vmux_layout::settings::SideSheetSettings::default(),
                 focus_ring: vmux_layout::settings::FocusRingSettings::default(),
@@ -3808,7 +3961,7 @@ mod tests {
     }
 
     #[test]
-    fn windowed_page_sync_rounds_all_corners_from_visible_tab_leaf_count() {
+    fn windowed_page_sync_uses_native_corner_policy() {
         let source = include_str!("lib.rs");
         let sync_fn = source
             .split("fn sync_windowed_frames")
@@ -3817,7 +3970,88 @@ mod tests {
             .unwrap_or_default();
 
         assert!(sync_fn.contains("visible_pane_count_for_windowed_sync"));
-        assert!(sync_fn.contains("let all_corners = layout_hidden.0 || visible_pane_count > 1"));
+        assert!(sync_fn.contains("windowed_page_all_corners(layout_hidden.0, visible_pane_count)"));
+    }
+
+    #[test]
+    fn windowed_page_keeps_single_pane_top_edge_flat_under_header() {
+        assert!(!windowed_page_all_corners(false, 1));
+    }
+
+    #[test]
+    fn windowed_page_rounds_when_layout_hidden_or_split() {
+        assert!(windowed_page_all_corners(true, 1));
+        assert!(windowed_page_all_corners(false, 2));
+    }
+
+    #[test]
+    fn windowed_page_sync_aligns_single_pane_frame_to_header() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_frames")
+            .nth(1)
+            .and_then(|tail| tail.split("fn visible_pane_count_for_windowed_sync").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("header_rect"));
+        assert!(sync_fn.contains("windowed_page_frame_rect("));
+        assert!(sync_fn.contains("settings.layout.radius * scale * 0.25"));
+    }
+
+    #[test]
+    fn single_pane_windowed_frame_uses_header_width_and_bottom_edge() {
+        let pane = WindowedFrameRect {
+            left: 60.2,
+            top: 84.0,
+            width: 150.6,
+            height: 300.0,
+        };
+        let header = WindowedFrameRect {
+            left: 72.1,
+            top: 0.0,
+            width: 130.8,
+            height: 84.2,
+        };
+
+        let frame = windowed_page_frame_rect(pane, Some(header), false, 1, 0.0);
+
+        assert_eq!(
+            frame,
+            WindowedFrameRect {
+                left: 73.0,
+                top: 85.0,
+                width: 129.0,
+                height: 299.0,
+            }
+        );
+    }
+
+    #[test]
+    fn single_pane_windowed_frame_insets_quarter_radius_to_header_visible_edge() {
+        let pane = WindowedFrameRect {
+            left: 60.2,
+            top: 84.0,
+            width: 150.6,
+            height: 300.0,
+        };
+        let header = WindowedFrameRect {
+            left: 72.1,
+            top: 0.0,
+            width: 130.8,
+            height: 84.2,
+        };
+
+        let frame = windowed_page_frame_rect(pane, Some(header), false, 1, 4.0);
+
+        assert_eq!(
+            frame,
+            WindowedFrameRect {
+                left: 77.0,
+                top: 85.0,
+                width: 121.0,
+                height: 299.0,
+            }
+        );
     }
 
     #[test]
@@ -4429,13 +4663,7 @@ mod tests {
                 },
                 layout: LayoutSettings {
                     radius: 0.0,
-                    window: WindowSettings {
-                        padding: 0.0,
-                        padding_top: None,
-                        padding_right: None,
-                        padding_bottom: None,
-                        padding_left: None,
-                    },
+                    window: WindowSettings { padding: 0.0 },
                     pane: PaneSettings { gap: 0.0 },
                     side_sheet: SideSheetSettings::default(),
                     focus_ring: FocusRingSettings::default(),

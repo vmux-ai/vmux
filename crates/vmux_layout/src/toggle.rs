@@ -2,9 +2,8 @@ use crate::Open;
 use crate::header::Header;
 use crate::settings::LayoutSettings;
 use crate::side_sheet::SideSheet;
-use crate::window::{VmuxWindow, window_uses_full_padding};
+use crate::window::VmuxWindow;
 use bevy::prelude::*;
-use bevy::window::{Monitor, PrimaryWindow};
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, ToggleLayoutCommand};
 
 /// Tracks whether the layout CEF shell (header + side sheet) is currently hidden.
@@ -31,15 +30,9 @@ impl Plugin for TogglePlugin {
 fn sync_window_padding_to_layout_hidden(
     hidden: Res<LayoutHidden>,
     settings: Res<LayoutSettings>,
-    primary_window: Query<&Window, With<PrimaryWindow>>,
-    monitors: Query<&Monitor>,
     mut window_q: Query<&mut Node, With<VmuxWindow>>,
 ) {
-    let fullscreen = primary_window
-        .single()
-        .ok()
-        .is_some_and(|window| window_uses_full_padding(window, &monitors));
-    let (top, left) = if hidden.0 || fullscreen {
+    let (top, left) = if hidden.0 {
         (settings.window.pad_top(), settings.window.pad_left())
     } else {
         (0.0, 0.0)
@@ -91,7 +84,7 @@ mod tests {
         },
         window::VmuxWindow,
     };
-    use bevy::window::{Monitor, MonitorSelection, WindowMode};
+    use bevy::window::{Monitor, MonitorSelection, PrimaryWindow, WindowMode};
 
     #[test]
     fn window_padding_sync_runs_before_ui_layout() {
@@ -124,19 +117,13 @@ mod tests {
     }
 
     #[test]
-    fn fullscreen_window_padding_uses_layout_window_settings() {
+    fn visible_fullscreen_layout_clears_top_left_padding() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(LayoutHidden(false))
             .insert_resource(LayoutSettings {
                 radius: 0.0,
-                window: WindowSettings {
-                    padding: 16.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
-                },
+                window: WindowSettings { padding: 16.0 },
                 pane: PaneSettings { gap: 0.0 },
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
@@ -154,24 +141,18 @@ mod tests {
         app.update();
 
         let node = app.world().get::<Node>(root).expect("window node");
-        assert_eq!(node.padding.top, Val::Px(16.0));
-        assert_eq!(node.padding.left, Val::Px(16.0));
+        assert_eq!(node.padding.top, Val::Px(0.0));
+        assert_eq!(node.padding.left, Val::Px(0.0));
     }
 
     #[test]
-    fn maximized_window_padding_uses_layout_window_settings() {
+    fn visible_maximized_layout_clears_top_left_padding() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(LayoutHidden(false))
             .insert_resource(LayoutSettings {
                 radius: 0.0,
-                window: WindowSettings {
-                    padding: 16.0,
-                    padding_top: None,
-                    padding_right: None,
-                    padding_bottom: None,
-                    padding_left: None,
-                },
+                window: WindowSettings { padding: 16.0 },
                 pane: PaneSettings { gap: 0.0 },
                 side_sheet: SideSheetSettings::default(),
                 focus_ring: FocusRingSettings::default(),
@@ -193,6 +174,35 @@ mod tests {
             scale_factor: 1.0,
             video_modes: Vec::new(),
         });
+        let root = app.world_mut().spawn((VmuxWindow, Node::default())).id();
+
+        app.update();
+
+        let node = app.world().get::<Node>(root).expect("window node");
+        assert_eq!(node.padding.top, Val::Px(0.0));
+        assert_eq!(node.padding.left, Val::Px(0.0));
+    }
+
+    #[test]
+    fn hidden_layout_uses_top_left_padding() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(LayoutHidden(true))
+            .insert_resource(LayoutSettings {
+                radius: 0.0,
+                window: WindowSettings { padding: 16.0 },
+                pane: PaneSettings { gap: 0.0 },
+                side_sheet: SideSheetSettings::default(),
+                focus_ring: FocusRingSettings::default(),
+            })
+            .add_systems(Update, sync_window_padding_to_layout_hidden);
+        app.world_mut().spawn((
+            Window {
+                resolution: (1200, 800).into(),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
         let root = app.world_mut().spawn((VmuxWindow, Node::default())).id();
 
         app.update();

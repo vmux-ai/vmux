@@ -228,16 +228,12 @@ fn build_focus_ring_material(
     let r_o = (r_i + b).min(m_o * 0.5);
     let c = &settings.focus_ring.color;
     let border_color = Color::srgb(c.r, c.g, c.b).to_linear().to_vec4();
-    let g = &settings.focus_ring.gradient;
-    let accent = &g.accent;
-    let border_accent = Color::srgb(accent.r, accent.g, accent.b)
-        .to_linear()
-        .to_vec4();
-    let grad_on = if g.enabled { 1.0 } else { 0.0 };
-    let speed = if is_loading { g.speed * 3.0 } else { g.speed };
-    let gradient_params = Vec4::new(grad_on, speed, g.cycles.max(0.01), time_secs);
-    let spread = settings.focus_ring.glow.spread.max(0.5);
-    let intensity = settings.focus_ring.glow.intensity.max(0.0);
+    // Glow + gradient are no longer user-configurable; keep the tuned defaults.
+    let border_accent = Color::srgb(0.7, 0.7, 0.78).to_linear().to_vec4();
+    let speed = if is_loading { 1.8 } else { 0.6 };
+    let gradient_params = Vec4::new(1.0, speed, 1.0, time_secs);
+    let spread = 8.0;
+    let intensity = 0.45;
     let glow_on = if intensity > 1.0e-4 { 1.0 } else { 0.0 };
     FocusRingMaterial {
         pane_inner: Vec4::new(r_i, w_i, h_i, 0.0),
@@ -262,13 +258,7 @@ mod tests {
     fn test_layout_settings() -> LayoutSettings {
         LayoutSettings {
             radius: 0.0,
-            window: crate::settings::WindowSettings {
-                padding: 0.0,
-                padding_top: None,
-                padding_right: None,
-                padding_bottom: None,
-                padding_left: None,
-            },
+            window: crate::settings::WindowSettings { padding: 0.0 },
             pane: crate::settings::PaneSettings { gap: 0.0 },
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),

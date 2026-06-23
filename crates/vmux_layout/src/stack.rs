@@ -707,13 +707,7 @@ mod tests {
     fn test_settings() -> LayoutSettings {
         LayoutSettings {
             radius: 0.0,
-            window: WindowSettings {
-                padding: 0.0,
-                padding_top: None,
-                padding_right: None,
-                padding_bottom: None,
-                padding_left: None,
-            },
+            window: WindowSettings { padding: 0.0 },
             pane: PaneSettings { gap: 0.0 },
             side_sheet: SideSheetSettings::default(),
             focus_ring: FocusRingSettings::default(),

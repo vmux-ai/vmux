@@ -323,10 +323,10 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_document_disables_horizontal_overflow() {
+    fn command_bar_document_disables_document_overflow() {
         let css = include_str!("../../assets/index.css");
 
-        assert!(css.contains("overflow-x-hidden"));
+        assert!(css.contains("overflow-hidden"));
     }
 
     #[test]

@@ -115,9 +115,9 @@ pub fn Page() -> Element {
     );
     let header_vars = format!(
         "--vmux-header-top:{}px;--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;",
-        state.window_pad_top,
-        state.main_cef_left(),
-        state.window_pad_right,
+        state.header_top(),
+        state.header_left(),
+        state.header_right(),
         state.header_height,
         state.tab_row_pad_left(),
     );
