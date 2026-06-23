@@ -308,6 +308,29 @@ jobs:
           fi
           echo "Test gate ok (code=$CODE rust=$RESULT)"
 
+  build-macos:
+    name: Build macOS
+    runs-on: ubuntu-latest
+    needs: [changes, build-mac]
+    if: always()
+    steps:
+      - name: Gate
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          PACKAGING: ${{ needs.changes.outputs.packaging }}
+          RESULT: ${{ needs.build-mac.result }}
+        run: |
+          if [ "$CHANGES" != "success" ]; then
+            echo "::error::Detect Changes did not succeed ($CHANGES)"
+            exit 1
+          fi
+          if { [ "$CODE" = "true" ] || [ "$PACKAGING" = "true" ]; } && [ "$RESULT" != "success" ]; then
+            echo "::error::Build macOS App result: $RESULT"
+            exit 1
+          fi
+          echo "Build macOS gate ok (code=$CODE packaging=$PACKAGING build=$RESULT)"
+
   website:
     name: Website Build
     needs: changes
@@ -355,7 +378,7 @@ jobs:
   build-mac:
     name: Build macOS App
     needs: [changes, cef-version]
-    if: needs.changes.outputs.packaging == 'true'
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.packaging == 'true'
     runs-on: macos-latest
     permissions:
       contents: write
