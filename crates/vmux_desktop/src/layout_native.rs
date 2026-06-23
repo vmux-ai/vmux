@@ -106,10 +106,28 @@ fn rounded_bg(view: &NSView, radius: f64, bg: Option<&NSColor>) {
     view.setWantsLayer(true);
     if let Some(layer) = view.layer() {
         layer.setCornerRadius(radius);
+        layer.setZPosition(GLASS_Z);
         if let Some(c) = bg {
             layer.setBackgroundColor(Some(&c.CGColor()));
         }
     }
+}
+
+/// A plain rounded background panel (the seamless frame the controls sit on). Not glass — so the
+/// active tab is the only glass element on it.
+fn panel(
+    content: &NSView,
+    mtm: MainThreadMarker,
+    frame: NSRect,
+    radius: f64,
+    bg: &NSColor,
+) -> Retained<NSView> {
+    let p: Retained<NSView> = NSView::new(mtm);
+    let v: &NSView = &p;
+    v.setFrame(frame);
+    rounded_bg(v, radius, Some(bg));
+    content.addSubview(v);
+    p
 }
 
 fn add_label(parent: &NSView, mtm: MainThreadMarker, text: &str, frame: NSRect, fg: &NSColor) {
@@ -268,6 +286,19 @@ fn rebuild(
         (band_top + ROW_H, band_top)
     };
     let main_x0 = sheet_w + 12.0;
+
+    // Seamless header background: a dark frame the controls sit on, flush to the page top. Not
+    // glass, so the active tab stays the only glass element.
+    state.fills.push(panel(
+        content,
+        mtm,
+        NSRect::new(
+            NSPoint::new(sheet_w, band_top),
+            NSSize::new((width - sheet_w).max(10.0), header_h),
+        ),
+        12.0,
+        &black(0.32),
+    ));
 
     // Row 1: tabs (active = glass pill, others = subtle fill) + new-tab
     let tab_w = 120.0_f64;
