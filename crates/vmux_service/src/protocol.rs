@@ -129,6 +129,10 @@ pub enum AgentCommand {
         /// terminal output. `None` keeps the legacy fire-and-forget behavior.
         done_marker: Option<String>,
     },
+    Notify {
+        title: Option<String>,
+        body: Option<String>,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -531,6 +535,7 @@ pub enum ServiceMessage {
         mouse_capture: bool,
         copy_mode: bool,
         alt_screen: bool,
+        focus_reporting: bool,
     },
     AgentCommand {
         request_id: AgentRequestId,
@@ -548,6 +553,9 @@ pub enum ServiceMessage {
     AgentCommandResult {
         request_id: AgentRequestId,
         result: AgentCommandResult,
+    },
+    Bell {
+        process_id: ProcessId,
     },
     AgentDelta {
         sid: String,
@@ -712,6 +720,31 @@ mod tests {
         let back: AgentQueryResult =
             rkyv::from_bytes::<AgentQueryResult, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back, r);
+    }
+
+    #[test]
+    fn notify_command_rkyv_roundtrip() {
+        let cmd = AgentCommand::Notify {
+            title: Some("done".to_string()),
+            body: None,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
+        let back: AgentCommand =
+            rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(cmd, back);
+    }
+
+    #[test]
+    fn bell_service_message_rkyv_roundtrip() {
+        let pid = ProcessId::new();
+        let msg = ServiceMessage::Bell { process_id: pid };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
+        let back: ServiceMessage =
+            rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        match back {
+            ServiceMessage::Bell { process_id } => assert_eq!(process_id, pid),
+            _ => panic!("expected ServiceMessage::Bell"),
+        }
     }
 
     #[test]

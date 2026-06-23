@@ -363,6 +363,8 @@ pub struct TabRow {
     pub url: String,
     #[serde(default)]
     pub favicon_url: String,
+    #[serde(default)]
+    pub is_done_unseen: bool,
 }
 
 #[derive(

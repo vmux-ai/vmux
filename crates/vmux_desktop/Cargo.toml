@@ -85,6 +85,7 @@ objc2-app-kit = { version = "0.3", features = [
     "NSFont",
 ] }
 objc2-foundation = { version = "0.3", features = [
+    "NSBundle",
     "NSGeometry",
     "NSData",
     "NSString",
@@ -116,6 +117,14 @@ objc2-av-foundation = { version = "0.3", features = ["objc2-core-media"] }
 objc2-core-media = "0.3"
 objc2-core-video = "0.3"
 dispatch2 = "0.3"
+objc2-user-notifications = { version = "0.3", features = [
+    "UNNotificationContent",
+    "UNNotificationRequest",
+    "UNNotificationSound",
+    "UNNotificationTrigger",
+    "UNUserNotificationCenter",
+    "block2",
+] }
 block2 = "0.6"
 raw-window-handle = "0.6"
 

@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 pub mod mcp;
+pub mod notify;
 pub mod open;
 pub mod service;
 
@@ -14,6 +15,14 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Mcp {
+        #[arg(long)]
+        anchor: Option<String>,
+    },
+    Notify {
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        body: Option<String>,
         #[arg(long)]
         anchor: Option<String>,
     },

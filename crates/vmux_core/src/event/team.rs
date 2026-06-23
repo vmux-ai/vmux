@@ -44,6 +44,8 @@ pub struct TeamMemberRow {
     pub sid: String,
     pub is_user: bool,
     pub is_running: bool,
+    #[serde(default)]
+    pub is_done_unseen: bool,
 }
 
 #[derive(
@@ -81,6 +83,7 @@ mod tests {
             sid: String::new(),
             is_user: false,
             is_running: true,
+            is_done_unseen: false,
         };
         assert!(row.is_running && !row.is_user);
     }
@@ -99,6 +102,7 @@ mod tests {
                 sid: "021fb65c".to_string(),
                 is_user: true,
                 is_running: false,
+                is_done_unseen: true,
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");

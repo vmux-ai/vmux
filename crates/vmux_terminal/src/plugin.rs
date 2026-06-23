@@ -146,7 +146,11 @@ pub struct TerminalModeFlags {
     pub mouse_capture: bool,
     pub copy_mode: bool,
     pub alt_screen: bool,
+    pub focus_reporting: bool,
 }
+
+#[derive(Component)]
+pub struct AgentFocusBlurred;
 
 const AGENT_LOADING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -332,8 +336,10 @@ fn on_terminal_removed(
 fn add_terminal_update_systems(app: &mut App) -> &mut App {
     app.add_message::<ProcessExitedEvent>()
         .add_message::<OscTitleChanged>()
+        .add_message::<vmux_core::notify::BellReceived>()
         .add_systems(Update, apply_osc_title.after(poll_service_messages))
         .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
+        .add_systems(Update, blur_focus_aware_agents.after(poll_service_messages))
         .add_systems(
             Update,
             handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
@@ -1011,6 +1017,7 @@ struct PollServiceWriters<'w> {
     page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
     osc_title: MessageWriter<'w, OscTitleChanged>,
+    bell: MessageWriter<'w, vmux_core::notify::BellReceived>,
 }
 
 /// True when a rendered line carries any non-whitespace text. Used to decide
@@ -1018,6 +1025,34 @@ struct PollServiceWriters<'w> {
 /// pending `run` input is flushed only once the line editor is ready.
 fn line_has_content(line: &vmux_core::event::TermLine) -> bool {
     line.spans.iter().any(|s| !s.text.trim().is_empty())
+}
+
+fn blur_focus_aware_agents(
+    agents: Query<
+        (Entity, &ProcessId),
+        (
+            With<vmux_core::agent::AgentSession>,
+            Without<AgentFocusBlurred>,
+        ),
+    >,
+    mode_map: Res<TerminalModeMap>,
+    service: Option<Res<ServiceClient>>,
+    mut commands: Commands,
+) {
+    let Some(service) = service else { return };
+    for (entity, process_id) in &agents {
+        if mode_map
+            .modes
+            .get(process_id)
+            .is_some_and(|m| m.focus_reporting)
+        {
+            service.0.send(ClientMessage::ProcessInput {
+                process_id: *process_id,
+                data: b"\x1b[O".to_vec(),
+            });
+            commands.entity(entity).insert(AgentFocusBlurred);
+        }
+    }
 }
 
 fn poll_service_messages(
@@ -1159,6 +1194,11 @@ fn poll_service_messages(
                         break;
                     }
                 }
+            }
+            ServiceMessage::Bell { process_id } => {
+                writers
+                    .bell
+                    .write(vmux_core::notify::BellReceived { process_id });
             }
             ServiceMessage::ProcessTitle { process_id, title } => {
                 writers.osc_title.write(OscTitleChanged {
@@ -1308,6 +1348,7 @@ fn poll_service_messages(
                 mouse_capture,
                 copy_mode,
                 alt_screen,
+                focus_reporting,
             } => {
                 mode_map.modes.insert(
                     process_id,
@@ -1315,6 +1356,7 @@ fn poll_service_messages(
                         mouse_capture,
                         copy_mode,
                         alt_screen,
+                        focus_reporting,
                     },
                 );
                 set_local_copy_mode(&mut local_copy_mode, process_id, copy_mode);
@@ -3679,6 +3721,7 @@ mod tests {
                 mouse_capture: false,
                 copy_mode: false,
                 alt_screen: false,
+                focus_reporting: false,
             },
         );
         set_local_copy_mode(&mut local_copy_mode, process_id, false);
@@ -3882,6 +3925,7 @@ mod tests {
                     mouse_capture: false,
                     copy_mode: false,
                     alt_screen: true,
+                    focus_reporting: false,
                 },
             );
         app.update();

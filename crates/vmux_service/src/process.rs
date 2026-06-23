@@ -43,6 +43,11 @@ impl TermEventListener for ServiceEventProxy {
                     title,
                 });
             }
+            TermEvent::Bell => {
+                let _ = self.patch_tx.send(ServiceMessage::Bell {
+                    process_id: self.process_id,
+                });
+            }
             _ => {}
         }
     }
@@ -98,7 +103,7 @@ pub struct Process {
     /// Last copy-mode value emitted in a viewport patch.
     last_viewport_copy_mode: Option<bool>,
     /// Last broadcast (mouse_capture, copy_mode, alt_screen) flags.
-    last_terminal_mode: Option<(bool, bool, bool)>,
+    last_terminal_mode: Option<(bool, bool, bool, bool)>,
     /// Active copy-mode state (cursor, anchor, visual state). None when not in copy mode.
     copy_mode: Option<CopyModeState>,
 }
@@ -560,13 +565,15 @@ impl Process {
         }
     }
 
-    /// Broadcast TerminalMode whenever mouse-capture, copy-mode, or alt-screen changes.
+    /// Broadcast TerminalMode whenever mouse-capture, copy-mode, alt-screen, or
+    /// focus-reporting changes.
     fn maybe_broadcast_mode(&mut self) {
         use alacritty_terminal::term::TermMode;
         let mouse_capture = self.term.mode().intersects(TermMode::MOUSE_MODE);
         let copy_mode = self.copy_mode.is_some();
         let alt_screen = self.term.mode().contains(TermMode::ALT_SCREEN);
-        let cur = (mouse_capture, copy_mode, alt_screen);
+        let focus_reporting = self.term.mode().contains(TermMode::FOCUS_IN_OUT);
+        let cur = (mouse_capture, copy_mode, alt_screen, focus_reporting);
         if self.last_terminal_mode != Some(cur) {
             self.last_terminal_mode = Some(cur);
             let _ = self.patch_tx.send(ServiceMessage::TerminalMode {
@@ -574,6 +581,7 @@ impl Process {
                 mouse_capture,
                 copy_mode,
                 alt_screen,
+                focus_reporting,
             });
         }
     }
@@ -2089,6 +2097,28 @@ mod tests {
                 assert_eq!(title, "hello-osc");
             }
             other => panic!("expected ProcessTitle, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn proxy_broadcasts_bell_on_term_bell_event() {
+        use std::io;
+
+        let (tx, mut rx) = broadcast::channel::<ServiceMessage>(8);
+        let writer: PtyInputWriter = Arc::new(Mutex::new(Box::new(io::sink())));
+        let process_id = ProcessId::new();
+        let proxy = ServiceEventProxy {
+            process_id,
+            pty_writer: writer,
+            patch_tx: tx,
+        };
+
+        proxy.send_event(TermEvent::Bell);
+
+        let msg = rx.try_recv().expect("Bell should be broadcast");
+        match msg {
+            ServiceMessage::Bell { process_id: got_id } => assert_eq!(got_id, process_id),
+            other => panic!("expected Bell, got {other:?}"),
         }
     }
 }

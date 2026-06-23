@@ -121,7 +121,16 @@ impl Plugin for AgentPlugin {
             .add_message::<TerminalStackSpawnRequest>()
             .add_message::<ProcessStackSpawnRequest>()
             .add_message::<RestartAgentPty>()
+            .add_message::<vmux_core::notify::BellReceived>()
+            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_message::<vmux_core::notify::OsNotify>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
+            .add_systems(
+                Update,
+                (agent_bell_to_attention, mark_agent_done, clear_agent_done)
+                    .chain()
+                    .after(vmux_layout::stack::ComputeFocusSet),
+            )
             .add_systems(Startup, session::start_agent_session_watchers)
             .add_systems(
                 Update,
@@ -300,6 +309,7 @@ struct AgentSpaceWriters<'w, 's> {
     layout_apply: MessageWriter<'w, vmux_layout::reconcile::LayoutApplyRequest>,
     space_command: MessageWriter<'w, vmux_space::SpaceCommandRequest>,
     issued: MessageWriter<'w, vmux_command::CommandIssued>,
+    attention: MessageWriter<'w, vmux_core::notify::AgentAttention>,
     agents: Query<
         'w,
         's,
@@ -347,6 +357,135 @@ fn handle_agent_tool_calls(
                     });
                 }
             }
+        }
+    }
+}
+
+fn agent_bell_to_attention(
+    mut reader: MessageReader<vmux_core::notify::BellReceived>,
+    mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
+    agents: Query<(Entity, &vmux_service::protocol::ProcessId), With<vmux_core::team::Agent>>,
+) {
+    for ev in reader.read() {
+        if let Some((entity, _)) = agents.iter().find(|(_, pid)| **pid == ev.process_id) {
+            attention.write(vmux_core::notify::AgentAttention {
+                entity,
+                title: None,
+                body: None,
+            });
+        }
+    }
+}
+
+const DONE_DEDUP_WINDOW_SECS: f64 = 3.0;
+
+fn window_foreground(windows: &Query<&Window, With<bevy::window::PrimaryWindow>>) -> bool {
+    windows
+        .iter()
+        .next()
+        .map(|w| w.focused && w.visible)
+        .unwrap_or(false)
+}
+
+fn agent_is_viewed(
+    entity: Entity,
+    foreground: bool,
+    focused: &vmux_layout::stack::FocusedStack,
+    child_of: &Query<&ChildOf>,
+) -> bool {
+    let stack = child_of.get(entity).ok().map(|c| c.parent());
+    foreground && focused.stack.is_some() && focused.stack == stack
+}
+
+fn mark_agent_done(
+    mut reader: MessageReader<vmux_core::notify::AgentAttention>,
+    mut notify: MessageWriter<vmux_core::notify::OsNotify>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    focused: Res<vmux_layout::stack::FocusedStack>,
+    child_of: Query<&ChildOf>,
+    meta: Query<(
+        &vmux_core::team::Profile,
+        Option<&SessionId>,
+        Option<&vmux_core::team::Agent>,
+    )>,
+    time: Res<Time>,
+    mut last_notify: Local<std::collections::HashMap<Entity, f64>>,
+    mut commands: Commands,
+) {
+    let foreground = window_foreground(&windows);
+    for att in reader.read() {
+        commands
+            .entity(att.entity)
+            .insert(vmux_core::notify::AgentDoneUnseen);
+        if agent_is_viewed(att.entity, foreground, &focused, &child_of) {
+            continue;
+        }
+        let now = time.elapsed_secs_f64();
+        if last_notify
+            .get(&att.entity)
+            .is_some_and(|t| now - t < DONE_DEDUP_WINDOW_SECS)
+        {
+            continue;
+        }
+        last_notify.insert(att.entity, now);
+        let (name, sid) = match meta.get(att.entity) {
+            Ok((profile, session, agent)) => {
+                let sid = session
+                    .map(|s| s.0.clone())
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| agent.map(|a| a.sid.clone()).filter(|s| !s.is_empty()))
+                    .unwrap_or_default();
+                (profile.name.clone(), sid)
+            }
+            Err(_) => ("Agent".to_string(), String::new()),
+        };
+        let short_sid: String = sid.chars().take(8).collect();
+        let title = att
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("{name} finished"));
+        let body = att
+            .body
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| {
+                if short_sid.is_empty() {
+                    String::new()
+                } else {
+                    format!("session {short_sid}")
+                }
+            });
+        notify.write(vmux_core::notify::OsNotify { title, body });
+    }
+}
+
+fn clear_agent_done(
+    done: Query<Entity, With<vmux_core::notify::AgentDoneUnseen>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    focused: Res<vmux_layout::stack::FocusedStack>,
+    child_of: Query<&ChildOf>,
+    mut prev_focused: Local<Option<Entity>>,
+    mut commands: Commands,
+) {
+    let foreground = window_foreground(&windows);
+    let current = if foreground { focused.stack } else { None };
+    if current == *prev_focused {
+        return;
+    }
+    *prev_focused = current;
+    let Some(stack) = current else {
+        return;
+    };
+    for entity in &done {
+        if child_of.get(entity).ok().map(|c| c.parent()) == Some(stack) {
+            commands
+                .entity(entity)
+                .remove::<vmux_core::notify::AgentDoneUnseen>();
         }
     }
 }
@@ -489,6 +628,17 @@ fn handle_agent_commands(
                 });
                 AgentCommandResult::Ok
             }
+            ServiceAgentCommand::Notify { title, body } => match caller {
+                Some(caller) => {
+                    writers.attention.write(vmux_core::notify::AgentAttention {
+                        entity: caller,
+                        title: title.clone(),
+                        body: body.clone(),
+                    });
+                    AgentCommandResult::Ok
+                }
+                None => AgentCommandResult::Error("notify: caller not found".to_string()),
+            },
             ServiceAgentCommand::UpdateSettings { path, value_json } => {
                 match serde_json::from_str::<serde_json::Value>(value_json) {
                     Ok(value) => {
@@ -1760,6 +1910,173 @@ mod tests {
     };
     use vmux_setting::{BrowserSettings, ShortcutSettings};
     use vmux_terminal::Terminal;
+
+    fn bell_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<vmux_core::notify::BellReceived>()
+            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_systems(Update, agent_bell_to_attention);
+        app
+    }
+
+    fn spawn_agent_with_pid(app: &mut App, pid: vmux_service::protocol::ProcessId) -> Entity {
+        app.world_mut()
+            .spawn((
+                vmux_core::team::Agent {
+                    sid: "s".to_string(),
+                    kind: vmux_core::agent::AgentKind::Claude,
+                },
+                pid,
+            ))
+            .id()
+    }
+
+    fn attentions(app: &App) -> Vec<Entity> {
+        let messages = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<vmux_core::notify::AgentAttention>>();
+        let mut cursor = messages.get_cursor();
+        cursor.read(messages).map(|a| a.entity).collect()
+    }
+
+    #[test]
+    fn bell_resolves_to_agent_attention() {
+        use vmux_service::protocol::ProcessId;
+        let mut app = bell_test_app();
+        let pid = ProcessId::new();
+        let agent = spawn_agent_with_pid(&mut app, pid);
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<vmux_core::notify::BellReceived>>()
+            .write(vmux_core::notify::BellReceived { process_id: pid });
+        app.update();
+        assert_eq!(attentions(&app), vec![agent]);
+    }
+
+    #[test]
+    fn bell_unknown_process_id_emits_nothing() {
+        use vmux_service::protocol::ProcessId;
+        let mut app = bell_test_app();
+        let _agent = spawn_agent_with_pid(&mut app, ProcessId::new());
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<vmux_core::notify::BellReceived>>()
+            .write(vmux_core::notify::BellReceived {
+                process_id: ProcessId::new(),
+            });
+        app.update();
+        assert!(attentions(&app).is_empty());
+    }
+
+    fn done_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_message::<vmux_core::notify::OsNotify>()
+            .init_resource::<vmux_layout::stack::FocusedStack>()
+            .add_systems(Update, (mark_agent_done, clear_agent_done));
+        app
+    }
+
+    fn spawn_agent_in_stack(app: &mut App) -> (Entity, Entity) {
+        let stack = app.world_mut().spawn_empty().id();
+        let agent = app
+            .world_mut()
+            .spawn((
+                vmux_core::team::Profile::agent(vmux_core::agent::AgentKind::Claude),
+                ChildOf(stack),
+            ))
+            .id();
+        (agent, stack)
+    }
+
+    fn set_window(app: &mut App, focused: bool) {
+        app.world_mut().spawn((
+            Window {
+                focused,
+                visible: true,
+                ..default()
+            },
+            bevy::window::PrimaryWindow,
+        ));
+    }
+
+    fn os_notify_count(app: &App) -> usize {
+        let messages = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<vmux_core::notify::OsNotify>>();
+        let mut cursor = messages.get_cursor();
+        cursor.read(messages).count()
+    }
+
+    fn send_attention(app: &mut App, entity: Entity) {
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<vmux_core::notify::AgentAttention>>()
+            .write(vmux_core::notify::AgentAttention {
+                entity,
+                title: None,
+                body: None,
+            });
+    }
+
+    #[test]
+    fn done_notifies_and_marks_when_backgrounded() {
+        let mut app = done_test_app();
+        let (agent, _stack) = spawn_agent_in_stack(&mut app);
+        set_window(&mut app, false);
+        send_attention(&mut app, agent);
+        app.update();
+        assert!(
+            app.world()
+                .get::<vmux_core::notify::AgentDoneUnseen>(agent)
+                .is_some()
+        );
+        assert_eq!(os_notify_count(&app), 1);
+    }
+
+    #[test]
+    fn no_banner_when_foreground_but_dot_still_set() {
+        let mut app = done_test_app();
+        let (agent, stack) = spawn_agent_in_stack(&mut app);
+        set_window(&mut app, true);
+        app.world_mut()
+            .resource_mut::<vmux_layout::stack::FocusedStack>()
+            .stack = Some(stack);
+        app.update();
+        send_attention(&mut app, agent);
+        app.update();
+        assert!(
+            app.world()
+                .get::<vmux_core::notify::AgentDoneUnseen>(agent)
+                .is_some(),
+            "dot shows even when foreground"
+        );
+        assert_eq!(os_notify_count(&app), 0, "no banner when foreground");
+    }
+
+    #[test]
+    fn clear_removes_marker_on_focus_transition() {
+        let mut app = done_test_app();
+        let (agent, stack) = spawn_agent_in_stack(&mut app);
+        set_window(&mut app, true);
+        app.world_mut()
+            .entity_mut(agent)
+            .insert(vmux_core::notify::AgentDoneUnseen);
+        app.update();
+        assert!(
+            app.world()
+                .get::<vmux_core::notify::AgentDoneUnseen>(agent)
+                .is_some()
+        );
+        app.world_mut()
+            .resource_mut::<vmux_layout::stack::FocusedStack>()
+            .stack = Some(stack);
+        app.update();
+        assert!(
+            app.world()
+                .get::<vmux_core::notify::AgentDoneUnseen>(agent)
+                .is_none()
+        );
+    }
 
     #[test]
     fn screenshot_response_maps_ok_and_err() {

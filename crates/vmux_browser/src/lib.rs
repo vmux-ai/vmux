@@ -550,6 +550,23 @@ fn sync_keyboard_target(
     }
 }
 
+fn tab_of(
+    start: Entity,
+    child_of_q: &Query<&ChildOf>,
+    tab_q: &Query<Entity, With<Tab>>,
+) -> Option<Entity> {
+    let mut e = start;
+    loop {
+        if tab_q.contains(e) {
+            return Some(e);
+        }
+        match child_of_q.get(e) {
+            Ok(co) => e = co.get(),
+            Err(_) => return None,
+        }
+    }
+}
+
 fn tab_ancestor(
     start: Entity,
     child_of_q: &Query<&ChildOf>,
@@ -2376,6 +2393,7 @@ fn push_tabs_host_emit(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_children: Query<&Children>,
     browser_meta: Query<(&PageMetadata, Option<&OscTitle>), With<Browser>>,
+    done_agents: Query<Entity, With<vmux_core::notify::AgentDoneUnseen>>,
     mut last: Local<String>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
@@ -2386,6 +2404,11 @@ fn push_tabs_host_emit(
     }
 
     let active_tab = active_tab_param.get();
+
+    let done_tabs: std::collections::HashSet<Entity> = done_agents
+        .iter()
+        .filter_map(|agent| tab_of(agent, &child_of_q, &tab_q))
+        .collect();
 
     let ordered = if let Some(anchor) = active_tab {
         vmux_layout::tab::active_tab_siblings(anchor, &child_of_q, &all_children, &tab_q)
@@ -2431,6 +2454,7 @@ fn push_tabs_host_emit(
                 title,
                 url,
                 favicon_url,
+                is_done_unseen: done_tabs.contains(&entity),
             }
         })
         .collect();

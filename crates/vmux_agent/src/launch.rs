@@ -18,6 +18,7 @@ pub fn build_agent_launch(
     let args = strategy.build_args(&mcp_cfg, session_id);
     let mut env: Vec<(String, String)> = std::env::vars().collect();
     env.extend(strategy.build_env(&mcp_cfg));
+    env.push(("VMUX_ANCHOR".to_string(), anchor.to_string()));
     Ok(TerminalLaunch {
         command: exe_path.to_string_lossy().to_string(),
         args,
