@@ -115,6 +115,15 @@ fn rounded_bg(view: &NSView, radius: f64, bg: Option<&NSColor>) {
     }
 }
 
+/// Thin accent outline marking the focused pane (mirrors OSR `ring-2 ring-ring`).
+fn accent_ring(view: &NSView) {
+    view.setWantsLayer(true);
+    if let Some(layer) = view.layer() {
+        layer.setBorderWidth(2.0);
+        layer.setBorderColor(Some(&NSColor::controlAccentColor().CGColor()));
+    }
+}
+
 /// Round only the top corners (so a tab/toolbar merges flush into what's below it).
 fn round_top(view: &NSView, radius: f64) {
     view.setWantsLayer(true);
@@ -451,9 +460,12 @@ fn rebuild(
             content,
             NSRect::new(NSPoint::new(card_x, card_top), NSSize::new(card_w, card_h)),
             12.0,
-            pane.is_active,
+            false,
         );
         let cv: &NSView = &card;
+        if pane.is_active {
+            accent_ring(cv);
+        }
         add_label(
             cv,
             mtm,
