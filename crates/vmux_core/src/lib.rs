@@ -14,7 +14,11 @@ pub mod terminal;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod agent;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod archive;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod team;
+#[cfg(not(target_arch = "wasm32"))]
+pub use archive::{ArchivedPage, PageArchiveRequest};
 #[cfg(not(target_arch = "wasm32"))]
 pub use page_open::{
     CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,
@@ -33,6 +37,7 @@ pub struct CorePlugin;
 impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<PageMetadata>()
+            .register_type::<ArchivedPage>()
             .register_type::<CreatedAt>()
             .register_type::<LastActivatedAt>()
             .register_type::<Visit>()
