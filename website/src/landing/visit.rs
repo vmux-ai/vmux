@@ -20,7 +20,7 @@ pub fn Visit() -> Element {
                     div { class: "absolute left-1/2 top-1/3 h-[30rem] w-[30rem] -translate-x-1/2 rounded-full bg-accent/20 blur-[130px] animate-aurora motion-reduce:animate-none" }
                 }
                 div { class: "mx-auto max-w-2xl text-center mb-10",
-                    {headline("The pivot", "Hit ⌘L.", "Visit an agent.")}
+                    {headline("The pivot", "Hit ⌘K.", "Visit an agent.")}
                     p { class: "mt-5 text-base sm:text-lg text-text-muted reveal",
                         "Every agent, terminal, and space lives at its own address — ready to share or jump back to."
                     }
