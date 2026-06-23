@@ -622,7 +622,7 @@ impl Browsers {
         };
     }
 
-    pub fn request_snapshot(&self, webview: &Entity, request_id: &str) {
+    pub fn request_snapshot(&self, webview: &Entity, request_id: &str) -> bool {
         if let Some(mut process_message) = process_message_create(Some(&PROCESS_MESSAGE_SNAPSHOT.into()))
             && let Some(argument_list) = process_message.argument_list()
             && let Some(browser) = self.browsers.get(webview)
@@ -633,7 +633,10 @@ impl Browsers {
                 ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
                 Some(&mut process_message),
             );
-        };
+            true
+        } else {
+            false
+        }
     }
 
     #[allow(dead_code)]

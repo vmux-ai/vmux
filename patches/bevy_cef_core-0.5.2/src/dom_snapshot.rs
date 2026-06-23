@@ -1,10 +1,11 @@
-use crate::util::IntoString;
+use crate::prelude::{IntoString, PROCESS_MESSAGE_SNAPSHOT_RESULT};
 use cef::rc::Rc;
 use cef::{
     Domdocument, Domnode, Domvisitor, Frame, ImplDomdocument, ImplDomnode, ImplDomvisitor, ImplFrame,
-    WrapDomvisitor, wrap_domvisitor,
+    ImplListValue, ImplProcessMessage, ProcessId, WrapDomvisitor, process_message_create,
+    wrap_domvisitor,
 };
-use std::cell::RefCell;
+use cef_dll_sys::cef_process_id_t;
 
 const SNAPSHOT_ATTRS: &[&str] = &[
     "role",
@@ -25,45 +26,46 @@ const SNAPSHOT_ATTRS: &[&str] = &[
 ];
 
 const NAME_CAP: usize = 200;
+const RAW_NODE_CAP: usize = 3000;
+const MAX_WALK_DEPTH: usize = 2048;
 const EMPTY_SNAPSHOT: &str = "{\"url\":\"\",\"title\":\"\",\"nodes\":[]}";
 
-pub fn capture_snapshot_json(frame: &Frame) -> String {
-    let sink = std::rc::Rc::new(RefCell::new(String::new()));
-    let mut visitor = SnapshotVisitor::new(sink.clone());
+pub fn request_dom_snapshot(frame: &Frame, request_id: &str) {
+    let mut visitor = SnapshotVisitor::new(frame.clone(), request_id.to_string());
     frame.visit_dom(Some(&mut visitor));
-    let json = sink.borrow().clone();
-    if json.is_empty() {
-        EMPTY_SNAPSHOT.to_string()
-    } else {
-        json
-    }
 }
 
 fn build_json(document: Option<&mut Domdocument>) -> String {
     let Some(document) = document else {
-        return String::new();
+        return EMPTY_SNAPSHOT.to_string();
     };
     let url = document.base_url().into_string();
     let title = document.title().into_string();
     let mut nodes: Vec<serde_json::Value> = Vec::new();
     if let Some(body) = document.body() {
-        walk(&body, &mut nodes);
+        walk(&body, &mut nodes, 0);
     }
     let value = serde_json::json!({
         "url": url,
         "title": title,
         "nodes": nodes,
     });
-    serde_json::to_string(&value).unwrap_or_default()
+    serde_json::to_string(&value).unwrap_or_else(|_| EMPTY_SNAPSHOT.to_string())
 }
 
-fn walk(node: &Domnode, out: &mut Vec<serde_json::Value>) {
+fn walk(node: &Domnode, out: &mut Vec<serde_json::Value>, depth: usize) {
+    if out.len() >= RAW_NODE_CAP || depth >= MAX_WALK_DEPTH {
+        return;
+    }
     if node.is_element() != 0 {
         out.push(node_json(node));
     }
     let mut child = node.first_child();
     while let Some(current) = child {
-        walk(&current, out);
+        if out.len() >= RAW_NODE_CAP {
+            break;
+        }
+        walk(&current, out, depth + 1);
         child = current.next_sibling();
     }
 }
@@ -74,7 +76,6 @@ fn node_json(node: &Domnode) -> serde_json::Value {
     if text.chars().count() > NAME_CAP {
         text = text.chars().take(NAME_CAP).collect();
     }
-    let value = node.value().into_string();
     let mut attrs: Vec<(String, String)> = Vec::new();
     for key in SNAPSHOT_ATTRS {
         let cef_key: cef::CefString = (*key).into();
@@ -83,6 +84,15 @@ fn node_json(node: &Domnode) -> serde_json::Value {
             attrs.push(((*key).to_string(), v));
         }
     }
+    let is_password = tag == "input"
+        && attrs
+            .iter()
+            .any(|(k, v)| k == "type" && v.eq_ignore_ascii_case("password"));
+    let value = if is_password {
+        String::new()
+    } else {
+        node.value().into_string()
+    };
     let bounds = node.element_bounds();
     serde_json::json!({
         "tag": tag,
@@ -93,13 +103,28 @@ fn node_json(node: &Domnode) -> serde_json::Value {
     })
 }
 
+fn send_result(frame: &Frame, request_id: &str, json: &str) {
+    if let Some(mut message) = process_message_create(Some(&PROCESS_MESSAGE_SNAPSHOT_RESULT.into()))
+        && let Some(args) = message.argument_list()
+    {
+        args.set_string(0, Some(&request_id.into()));
+        args.set_string(1, Some(&json.into()));
+        frame.send_process_message(
+            ProcessId::from(cef_process_id_t::PID_BROWSER),
+            Some(&mut message),
+        );
+    }
+}
+
 wrap_domvisitor! {
     struct SnapshotVisitor {
-        sink: std::rc::Rc<RefCell<String>>,
+        frame: Frame,
+        request_id: String,
     }
     impl Domvisitor {
         fn visit(&self, document: Option<&mut Domdocument>) {
-            *self.sink.borrow_mut() = build_json(document);
+            let json = build_json(document);
+            send_result(&self.frame, &self.request_id, &json);
         }
     }
 }

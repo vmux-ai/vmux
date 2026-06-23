@@ -177,7 +177,11 @@ fn derive_name(node: &RawDomNode) -> String {
 }
 
 fn derive_value(node: &RawDomNode) -> Option<String> {
-    matches!(node.tag.as_str(), "input" | "textarea" | "select").then(|| node.value.clone())
+    match node.tag.as_str() {
+        "input" if attr(node, "type") == Some("password") => None,
+        "input" | "textarea" | "select" => Some(node.value.clone()),
+        _ => None,
+    }
 }
 
 fn derive_state(node: &RawDomNode) -> Vec<String> {
@@ -252,6 +256,15 @@ mod tests {
         assert_eq!(n.role, "textbox");
         assert_eq!(n.name, "Email");
         assert_eq!(n.value.as_deref(), Some("a@b.com"));
+    }
+
+    #[test]
+    fn password_input_value_is_redacted() {
+        let mut pw = node("input", "", &[("type", "password")], [0, 0, 200, 30]);
+        pw.value = "hunter2".to_string();
+        let snap = shape_snapshot(raw(vec![pw]));
+        assert_eq!(snap.nodes[0].role, "textbox");
+        assert_eq!(snap.nodes[0].value, None);
     }
 
     #[test]

@@ -804,6 +804,16 @@ mod tests {
     }
 
     #[test]
+    fn browser_snapshot_rejects_non_string_target() {
+        let err = dispatch_query(
+            "vmux_browser_snapshot",
+            serde_json::json!({ "target": 123 }),
+        )
+        .unwrap_err();
+        assert!(err.contains("target"));
+    }
+
+    #[test]
     fn record_start_dispatch_defaults() {
         let q = dispatch_query("record_start", serde_json::json!({})).unwrap();
         assert_eq!(

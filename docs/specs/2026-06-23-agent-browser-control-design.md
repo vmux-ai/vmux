@@ -28,11 +28,11 @@ Expose MCP tools so an in-app assistant (vibe / Le Chat, or vmux's own agent) ca
 
 Reads cross CEF's two processes natively; no JS runs in the page.
 
-```
+```text
 MCP tool ─► AgentQuery ─► Bevy RequestSnapshot(entity)
   └► browser proc: frame.send_process_message(RENDERER, "VMUX_SNAPSHOT", id)
        └► render proc handler: frame.visit_dom(visitor)        ← native walk, no eval
-            visitor builds {url,title,viewport,scroll,nodes[]} with refs+bboxes
+            visitor (in visit() callback) builds {url,title,nodes[]} with refs+bboxes
             → frame.send_process_message(BROWSER, "VMUX_SNAPSHOT_RESULT", id, payload)
        └► browser proc inbound handler → channel keyed by id → resolves AgentQueryResult
   ◄── snapshot text back to the agent
@@ -63,8 +63,6 @@ Flat list of *interesting* nodes only — interactive (`a`, `button`, `input`, `
 {
   "url": "https://…",
   "title": "…",
-  "viewport": [1280, 800],
-  "scroll": [0, 240],
   "nodes": [
     { "ref": 12, "role": "button", "name": "Sign in", "bbox": [x, y, w, h] },
     { "ref": 13, "role": "textbox", "name": "Email", "value": "", "bbox": [x, y, w, h], "state": ["required"] }
@@ -72,6 +70,8 @@ Flat list of *interesting* nodes only — interactive (`a`, `button`, `input`, `
   "truncated": false
 }
 ```
+
+`viewport` and `scroll` are deferred to the interaction follow-on plan (not in the v1 read-path data model).
 
 - `role` = aria `role` attribute, else tag-derived.
 - `name` = `aria-label` ‖ `alt` ‖ `title` ‖ `placeholder` ‖ trimmed innerText (capped). Approximate accessible name — no full a11y engine in v1.

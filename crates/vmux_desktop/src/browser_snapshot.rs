@@ -52,14 +52,14 @@ pub(crate) fn start_snapshots(
                 &terminals,
             )
         });
-        match webview {
-            Some(webview) => cef_browsers.request_snapshot(&webview, &hex(&request.request_id)),
-            None => {
-                writer.write(BrowserSnapshotResponse {
-                    request_id: request.request_id,
-                    result: Err("no browser page to snapshot".to_string()),
-                });
-            }
+        let sent = webview
+            .map(|webview| cef_browsers.request_snapshot(&webview, &hex(&request.request_id)))
+            .unwrap_or(false);
+        if !sent {
+            writer.write(BrowserSnapshotResponse {
+                request_id: request.request_id,
+                result: Err("no browser page to snapshot".to_string()),
+            });
         }
     }
 }

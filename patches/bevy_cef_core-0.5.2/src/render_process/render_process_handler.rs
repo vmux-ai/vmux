@@ -10,10 +10,9 @@ use cef::{
     Browser, CefString, DictionaryValue, Frame, ImplBinaryValue, ImplBrowser, ImplCommandLine,
     ImplDictionaryValue, ImplFrame, ImplListValue, ImplProcessMessage, ImplRenderProcessHandler,
     ImplV8Context, ImplV8Exception, ImplV8Value, ProcessId, ProcessMessage, V8Context, V8Handler,
-    V8Value, WrapRenderProcessHandler, command_line_get_global, process_message_create,
-    register_extension, sys, v8_value_create_array_buffer_with_copy, v8_value_create_object,
+    V8Value, WrapRenderProcessHandler, command_line_get_global, register_extension, sys,
+    v8_value_create_array_buffer_with_copy, v8_value_create_object,
 };
-use cef_dll_sys::cef_process_id_t;
 use std::collections::HashMap as StdHashMap;
 use std::os::raw::c_int;
 use std::sync::Mutex;
@@ -146,8 +145,7 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
                     .argument_list()
                     .map(|args| args.string(0).into_string())
                     .unwrap_or_default();
-                let json = crate::dom_snapshot::capture_snapshot_json(&*frame);
-                send_snapshot_result(&*frame, &request_id, &json);
+                crate::dom_snapshot::request_dom_snapshot(&*frame, &request_id);
             }
             return 1;
         }
@@ -210,19 +208,6 @@ fn inject_initialize_scripts(browser: &mut Browser, context: &mut V8Context, fra
             crate::util::webview_debug_log(format!("render init_script eval ok id={id}"));
         }
         context.exit();
-    }
-}
-
-fn send_snapshot_result(frame: &Frame, request_id: &str, json: &str) {
-    if let Some(mut message) = process_message_create(Some(&PROCESS_MESSAGE_SNAPSHOT_RESULT.into()))
-        && let Some(args) = message.argument_list()
-    {
-        args.set_string(0, Some(&request_id.into()));
-        args.set_string(1, Some(&json.into()));
-        frame.send_process_message(
-            ProcessId::from(cef_process_id_t::PID_BROWSER),
-            Some(&mut message),
-        );
     }
 }
 
