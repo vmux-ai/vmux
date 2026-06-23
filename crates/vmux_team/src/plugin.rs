@@ -289,17 +289,32 @@ fn open_team_stack_in_space(
     })
 }
 
+fn parse_member_entity(member_id: &str) -> Option<Entity> {
+    let bits = member_id.parse::<u64>().ok()?;
+    Entity::try_from_bits(bits)
+}
+
 fn on_team_command(
-    _trigger: On<BinReceive<TeamCommandEvent>>,
+    trigger: On<BinReceive<TeamCommandEvent>>,
     mut messages: ResMut<bevy::ecs::message::Messages<AppCommand>>,
     mut issued: ResMut<bevy::ecs::message::Messages<vmux_command::CommandIssued>>,
     user: Query<Entity, With<User>>,
     active_space: Res<ActiveSpaceEntity>,
     stacks: Query<(Entity, &PageMetadata), With<Stack>>,
+    agents: Query<Entity, With<Agent>>,
     child_of: Query<&ChildOf>,
     spaces: Query<(), With<Space>>,
     mut commands: Commands,
 ) {
+    if let Some(member_id) = trigger.event().payload.member_id.as_deref() {
+        if let Some(entity) = parse_member_entity(member_id)
+            && agents.get(entity).is_ok()
+        {
+            focus_pane_entity(entity, &mut commands, &child_of);
+        }
+        return;
+    }
+
     if let Some(space) = active_space.0
         && let Some(stack) = open_team_stack_in_space(space, &stacks, &child_of, &spaces)
     {
@@ -322,6 +337,8 @@ fn on_team_command(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
+    use vmux_core::LastActivatedAt;
+    use vmux_core::agent::AgentKind;
 
     fn spawn_team_stack(world: &mut World, space: Entity) -> Entity {
         world
@@ -378,5 +395,72 @@ mod tests {
             ChildOf(space),
         ));
         assert_eq!(lookup(&mut app, space), None);
+    }
+
+    #[test]
+    fn parse_member_entity_roundtrips_and_rejects_garbage() {
+        let mut app = App::new();
+        let entity = app.world_mut().spawn_empty().id();
+        let bits = entity.to_bits().to_string();
+        assert_eq!(parse_member_entity(&bits), Some(entity));
+        assert_eq!(parse_member_entity("not-a-number"), None);
+        assert_eq!(parse_member_entity(""), None);
+    }
+
+    fn command_app() -> App {
+        let mut app = App::new();
+        app.add_message::<AppCommand>()
+            .add_message::<vmux_command::CommandIssued>()
+            .add_observer(on_team_command);
+        app
+    }
+
+    #[test]
+    fn agent_avatar_click_focuses_agent_stack() {
+        let mut app = command_app();
+        let space = app.world_mut().spawn(Space).id();
+        app.insert_resource(ActiveSpaceEntity(Some(space)));
+        let stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                Agent {
+                    sid: "s".to_string(),
+                    kind: AgentKind::Claude,
+                },
+                ChildOf(space),
+            ))
+            .id();
+
+        app.world_mut().trigger(BinReceive::<TeamCommandEvent> {
+            webview: Entity::PLACEHOLDER,
+            payload: TeamCommandEvent {
+                command: "focus".to_string(),
+                member_id: Some(stack.to_bits().to_string()),
+            },
+        });
+        app.world_mut().flush();
+
+        assert!(app.world().get::<LastActivatedAt>(stack).is_some());
+        assert_eq!(lookup(&mut app, space), None);
+    }
+
+    #[test]
+    fn user_click_reuses_open_team_stack() {
+        let mut app = command_app();
+        let space = app.world_mut().spawn(Space).id();
+        app.insert_resource(ActiveSpaceEntity(Some(space)));
+        let team = spawn_team_stack(app.world_mut(), space);
+
+        app.world_mut().trigger(BinReceive::<TeamCommandEvent> {
+            webview: Entity::PLACEHOLDER,
+            payload: TeamCommandEvent {
+                command: "open".to_string(),
+                member_id: None,
+            },
+        });
+        app.world_mut().flush();
+
+        assert!(app.world().get::<LastActivatedAt>(team).is_some());
     }
 }
