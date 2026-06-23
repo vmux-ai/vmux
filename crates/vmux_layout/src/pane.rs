@@ -54,8 +54,15 @@ impl Plugin for PanePlugin {
             .register_type::<PaneSplit>()
             .register_type::<PaneSplitDirection>()
             .register_type::<PaneSize>()
+            .register_type::<SpawnSeq>()
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
+            .init_resource::<SpawnCounter>()
+            .add_systems(Update, stamp_spawn_seq)
+            .add_systems(
+                Startup,
+                reseed_spawn_counter.in_set(crate::LayoutStartupSet::Post),
+            )
             .add_systems(Update, on_pane_select.in_set(ReadAppCommands))
             .add_systems(Update, handle_pane_commands.in_set(ReadAppCommands))
             .add_systems(Update, handle_open_in_pane.in_set(ReadAppCommands))
@@ -316,6 +323,33 @@ pub struct PaneSize {
 impl Default for PaneSize {
     fn default() -> Self {
         Self { flex_grow: 1.0 }
+    }
+}
+
+#[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::pane"]
+#[require(Save)]
+pub struct SpawnSeq(pub u64);
+
+#[derive(Resource, Default)]
+pub struct SpawnCounter(pub u64);
+
+pub fn stamp_spawn_seq(
+    mut counter: ResMut<SpawnCounter>,
+    new_panes: Query<Entity, (With<Pane>, Without<SpawnSeq>)>,
+    mut commands: Commands,
+) {
+    for pane in &new_panes {
+        counter.0 += 1;
+        commands.entity(pane).insert(SpawnSeq(counter.0));
+    }
+}
+
+pub fn reseed_spawn_counter(seqs: Query<&SpawnSeq>, mut counter: ResMut<SpawnCounter>) {
+    let max = seqs.iter().map(|s| s.0).max().unwrap_or(0);
+    if counter.0 <= max {
+        counter.0 = max + 1;
     }
 }
 
@@ -1989,6 +2023,40 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(id)));
         id
+    }
+
+    #[test]
+    fn stamp_spawn_seq_assigns_increasing_values_to_new_panes() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SpawnCounter>()
+            .add_systems(Update, stamp_spawn_seq);
+
+        let a = app.world_mut().spawn(Pane).id();
+        app.update();
+        let b = app.world_mut().spawn(Pane).id();
+        app.update();
+
+        let sa = app.world().get::<SpawnSeq>(a).expect("a stamped").0;
+        let sb = app.world().get::<SpawnSeq>(b).expect("b stamped").0;
+        assert!(
+            sb > sa,
+            "later-created pane must have higher SpawnSeq ({sb} > {sa})"
+        );
+    }
+
+    #[test]
+    fn reseed_spawn_counter_exceeds_max_existing() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SpawnCounter>()
+            .add_systems(Update, reseed_spawn_counter);
+
+        app.world_mut().spawn((Pane, SpawnSeq(7)));
+        app.world_mut().spawn((Pane, SpawnSeq(3)));
+        app.update();
+
+        assert_eq!(app.world().resource::<SpawnCounter>().0, 8);
     }
 
     #[test]
