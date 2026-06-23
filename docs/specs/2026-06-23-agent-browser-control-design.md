@@ -30,10 +30,10 @@ Reads cross CEF's two processes natively; no JS runs in the page.
 
 ```text
 MCP tool ─► AgentQuery ─► Bevy RequestSnapshot(entity)
-  └► browser proc: frame.send_process_message(RENDERER, "VMUX_SNAPSHOT", id)
+  └► browser proc: frame.send_process_message(RENDERER, "vmux-snapshot", id)
        └► render proc handler: frame.visit_dom(visitor)        ← native walk, no eval
             visitor (in visit() callback) builds {url,title,nodes[]} with refs+bboxes
-            → frame.send_process_message(BROWSER, "VMUX_SNAPSHOT_RESULT", id, payload)
+            → frame.send_process_message(BROWSER, "vmux-snapshot-result", id, payload)
        └► browser proc inbound handler → channel keyed by id → resolves AgentQueryResult
   ◄── snapshot text back to the agent
 ```
@@ -46,7 +46,7 @@ All tools take an optional `target`; default = `FocusedStack` active webview. Al
 
 | Tool | Params | Behavior |
 |------|--------|----------|
-| `vmux_browser_snapshot` | `target?`, `mode=interactive\|text` | Perception primitive. `interactive` = filtered node list; `text` = readable innerText for articles. |
+| `browser_snapshot` | `target?` | Perception primitive — filtered interactive-node list. (A `text`/innerText mode is deferred to a follow-on plan.) |
 | `vmux_browser_navigate` | `url`, `new_tab?`, `target?` | Upgrade existing tool: load, auto-wait, return snapshot. `new_tab` covers "open browser". |
 | `vmux_browser_click` | `ref` \| `x,y`, `button?`, `target?` | `ref` → cached bbox center → native click; or raw coords (vision escape hatch). |
 | `vmux_browser_type` | `ref?`, `text`, `submit?`, `target?` | Focus bbox (native click) → native `send_key` per char. `submit=true` sends Enter. |
@@ -101,7 +101,7 @@ Optional `target` = `pane:<bits>` | `stack:<bits>`; default = `FocusedStack` act
 
 ## Where code lands
 
-- `patches/bevy_cef_core-0.5.2`: render-process visitor + `VMUX_SNAPSHOT` / `VMUX_SNAPSHOT_RESULT` process messages; browser-process inbound routing → channel. **Confirm/patch the `cef` binding to expose `DomVisitor` / `DomNode` / `DomDocument`.**
+- `patches/bevy_cef_core-0.5.2`: render-process visitor + `vmux-snapshot` / `vmux-snapshot-result` process messages; browser-process inbound routing → channel. (The `cef` 148 binding already exposes `Domvisitor` / `Domnode` / `Domdocument` — no patch needed.)
 - `patches/bevy_cef-0.5.2`: Bevy `RequestSnapshot` message + result channel (mirror existing `src/common/ipc/js_emit.rs` plumbing); ensure loading-state is surfaced for auto-wait.
 - `vmux_browser`: handler systems, targeting, auto-wait state machine, `ref → bbox` cache resource, native input dispatch, node filter + role/name derivation, find filter.
 - `vmux_service`: new `AgentQuery` / `AgentCommand` variants (Snapshot, Click, Type, PressKey, Scroll, Find; Navigate gains snapshot return).
