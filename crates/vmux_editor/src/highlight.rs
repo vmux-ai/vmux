@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
@@ -7,6 +8,13 @@ use vmux_core::event::{FileLine, StyledSpan};
 
 pub const FILE_VIEW_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
+/// Broad language coverage (~200 syntaxes from the bat project) instead of
+/// syntect's small default set.
+fn syntaxes() -> &'static SyntaxSet {
+    static SET: OnceLock<SyntaxSet> = OnceLock::new();
+    SET.get_or_init(two_face::syntax::extra_newlines)
+}
+
 #[derive(Debug)]
 pub struct HighlightedFile {
     pub language: String,
@@ -14,7 +22,6 @@ pub struct HighlightedFile {
 }
 
 pub struct Highlighter {
-    syntaxes: SyntaxSet,
     themes: ThemeSet,
 }
 
@@ -27,24 +34,23 @@ impl Default for Highlighter {
 impl Highlighter {
     pub fn new() -> Self {
         Self {
-            syntaxes: SyntaxSet::load_defaults_newlines(),
             themes: ThemeSet::load_defaults(),
         }
     }
 
     pub fn highlight(&self, content: &str, path: &Path) -> HighlightedFile {
+        let syntaxes = syntaxes();
         let syntax = path
             .extension()
             .and_then(|e| e.to_str())
-            .and_then(|ext| self.syntaxes.find_syntax_by_extension(ext))
-            .unwrap_or_else(|| self.syntaxes.find_syntax_plain_text());
+            .and_then(|ext| syntaxes.find_syntax_by_extension(ext))
+            .unwrap_or_else(|| syntaxes.find_syntax_plain_text());
         let theme = &self.themes.themes["base16-ocean.dark"];
         let mut h = HighlightLines::new(syntax, theme);
 
         let mut lines = Vec::new();
         for (idx, line) in LinesWithEndings::from(content).enumerate() {
-            let ranges: Vec<(Style, &str)> =
-                h.highlight_line(line, &self.syntaxes).unwrap_or_default();
+            let ranges: Vec<(Style, &str)> = h.highlight_line(line, syntaxes).unwrap_or_default();
             let spans = ranges
                 .into_iter()
                 .map(|(style, text)| to_styled_span(style, text))
@@ -110,6 +116,39 @@ mod tests {
             distinct.len() > 1,
             "expected multiple colors, got {distinct:?}"
         );
+    }
+
+    #[test]
+    fn recognizes_toml() {
+        let hl = Highlighter::new();
+        let out = hl.highlight(
+            "[package]\nname = \"x\"\n",
+            std::path::Path::new("Cargo.toml"),
+        );
+        assert_eq!(out.language, "TOML");
+        let colors: std::collections::HashSet<_> = out
+            .lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.fg))
+            .collect();
+        assert!(colors.len() > 1, "expected highlighting, got {colors:?}");
+    }
+
+    #[test]
+    fn recognizes_languages_beyond_syntect_defaults() {
+        let hl = Highlighter::new();
+        for (file, sample) in [
+            ("a.ts", "const x = 1;\n"),
+            ("a.tsx", "const x = <div/>;\n"),
+            ("a.go", "package main\n"),
+            ("a.py", "import os\n"),
+            ("a.kt", "fun main() {}\n"),
+            ("a.swift", "let x = 1\n"),
+            ("a.zig", "const x = 1;\n"),
+        ] {
+            let out = hl.highlight(sample, std::path::Path::new(file));
+            assert_ne!(out.language, "Plain Text", "{file} not recognized");
+        }
     }
 
     #[test]

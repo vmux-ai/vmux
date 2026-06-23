@@ -69,6 +69,7 @@ pub struct FileLine {
 )]
 pub struct FileMetaEvent {
     pub path: String,
+    pub abs_path: String,
     pub language: String,
     pub total_lines: u32,
 }
@@ -165,6 +166,7 @@ pub struct FileDirEntry {
 )]
 pub struct FileDirEvent {
     pub path: String,
+    pub abs_path: String,
     pub entries: Vec<FileDirEntry>,
     pub parent_path: String,
     pub parent_entries: Vec<FileDirEntry>,
@@ -339,6 +341,7 @@ mod file_event_tests {
     fn file_dir_event_has_parent_fields() {
         let e = FileDirEvent {
             path: "/a/b".into(),
+            abs_path: "/a/b".into(),
             entries: vec![],
             parent_path: "/a".into(),
             parent_entries: vec![],

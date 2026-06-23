@@ -1,8 +1,11 @@
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::PageMetadata;
 use vmux_core::event::*;
 use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
@@ -265,6 +268,7 @@ fn send_initial_meta(
                 FILE_META_EVENT,
                 &FileMetaEvent {
                     path: display_path(&fv.path),
+                    abs_path: fv.path.to_string_lossy().into_owned(),
                     language: buf.language.clone(),
                     total_lines: buf.lines.len() as u32,
                 },
@@ -323,6 +327,7 @@ fn send_initial_dir(
             FILE_DIR_EVENT,
             &FileDirEvent {
                 path: display_path(&fv.path),
+                abs_path: fv.path.to_string_lossy().into_owned(),
                 entries: dir.entries.clone(),
                 parent_path,
                 parent_entries,
@@ -531,6 +536,159 @@ fn on_file_open(
         .remove::<FileInitialMetaSent>();
 }
 
+#[derive(Component)]
+struct FileReloadRequested;
+
+struct FileWatch {
+    watcher: RecommendedWatcher,
+    rx: mpsc::Receiver<notify::Result<notify::Event>>,
+    dirs: HashSet<PathBuf>,
+}
+
+fn canon(p: &Path) -> PathBuf {
+    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+fn watch_dir_for(path: &Path) -> Option<PathBuf> {
+    if path.is_dir() {
+        Some(path.to_path_buf())
+    } else {
+        path.parent().map(Path::to_path_buf)
+    }
+}
+
+fn reconcile_file_watches(q: Query<&FileView>, watch: Option<NonSendMut<FileWatch>>) {
+    let Some(mut watch) = watch else {
+        return;
+    };
+    for fv in &q {
+        let Some(dir) = watch_dir_for(&fv.path) else {
+            continue;
+        };
+        if watch.dirs.insert(dir.clone()) {
+            let _ = watch.watcher.watch(&dir, RecursiveMode::NonRecursive);
+        }
+    }
+}
+
+fn drain_file_changes(
+    watch: Option<NonSend<FileWatch>>,
+    q: Query<(Entity, &FileView)>,
+    mut commands: Commands,
+) {
+    let Some(watch) = watch else {
+        return;
+    };
+    let mut changed: HashSet<PathBuf> = HashSet::new();
+    while let Ok(res) = watch.rx.try_recv() {
+        if let Ok(event) = res {
+            for p in event.paths {
+                changed.insert(canon(&p));
+            }
+        }
+    }
+    if changed.is_empty() {
+        return;
+    }
+    for (entity, fv) in &q {
+        if changed.contains(&canon(&fv.path)) {
+            commands.entity(entity).insert(FileReloadRequested);
+        }
+    }
+}
+
+fn reload_changed_files(
+    mut q: Query<(Entity, &FileView, &mut FileViewport), With<FileReloadRequested>>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, fv, mut vp) in &mut q {
+        commands.entity(entity).remove::<FileReloadRequested>();
+        let ready = browsers.has_browser(entity) && browsers.host_emit_ready(&entity);
+
+        if fv.path.is_dir() {
+            let entries = list_dir(&fv.path);
+            commands.entity(entity).insert(FileDir {
+                entries: entries.clone(),
+            });
+            if ready {
+                let (parent_path, parent_entries) = parent_listing(&fv.path);
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    entity,
+                    FILE_DIR_EVENT,
+                    &FileDirEvent {
+                        path: display_path(&fv.path),
+                        abs_path: fv.path.to_string_lossy().into_owned(),
+                        entries,
+                        parent_path,
+                        parent_entries,
+                    },
+                ));
+            }
+            continue;
+        }
+
+        if preview::is_image_path(&fv.path) {
+            let within = std::fs::metadata(&fv.path)
+                .map(|m| m.len() <= preview::IMAGE_BYTES_CAP)
+                .unwrap_or(false);
+            if within && let Ok(bytes) = std::fs::read(&fv.path) {
+                let mime = preview::image_mime(&fv.path).unwrap_or("image/png");
+                commands.entity(entity).insert(FileImage {
+                    mime: mime.to_string(),
+                    bytes: bytes.clone(),
+                });
+                if ready {
+                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                        entity,
+                        FILE_IMAGE_EVENT,
+                        &FileImageEvent {
+                            mime: mime.to_string(),
+                            bytes,
+                        },
+                    ));
+                }
+            }
+            continue;
+        }
+
+        let hl = Highlighter::new();
+        let buf = match hl.load_file(&fv.path) {
+            Ok(out) => FileBuffer {
+                language: out.language,
+                lines: out.lines,
+            },
+            Err(message) => {
+                if ready {
+                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                        entity,
+                        FILE_ERROR_EVENT,
+                        &FileErrorEvent { message },
+                    ));
+                }
+                continue;
+            }
+        };
+        let total = buf.lines.len() as u32;
+        vp.top_line = clamp_top_line(vp.top_line, total, vp.rows);
+        if ready {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                FILE_META_EVENT,
+                &FileMetaEvent {
+                    path: display_path(&fv.path),
+                    abs_path: fv.path.to_string_lossy().into_owned(),
+                    language: buf.language.clone(),
+                    total_lines: total,
+                },
+            ));
+            let vpc = *vp;
+            emit_window(entity, &buf, &vpc, &browsers, &mut commands);
+        }
+        commands.entity(entity).insert(buf);
+    }
+}
+
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "files",
     title: "Files",
@@ -544,6 +702,19 @@ pub struct EditorPlugin;
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
+        let (tx, rx) = mpsc::channel();
+        match notify::recommended_watcher(move |res| {
+            let _ = tx.send(res);
+        }) {
+            Ok(watcher) => {
+                app.insert_non_send(FileWatch {
+                    watcher,
+                    rx,
+                    dirs: HashSet::new(),
+                });
+            }
+            Err(e) => tracing::warn!("file watcher init failed: {e}"),
+        }
         app.add_plugins(BinEventEmitterPlugin::<(
             FileResizeEvent,
             FileScrollEvent,
@@ -563,6 +734,8 @@ impl Plugin for EditorPlugin {
                     send_initial_image,
                     send_file_theme,
                     drain_thumb_tasks,
+                    reconcile_file_watches,
+                    (drain_file_changes, reload_changed_files).chain(),
                 ),
             )
             .add_observer(reset_file_sent_markers_on_page_ready)

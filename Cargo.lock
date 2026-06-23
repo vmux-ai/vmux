@@ -9349,6 +9349,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "two-face"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b285c51f8a6ade109ed4566d33ac4fb289fb5d6cf87ed70908a5eaf65e948e34"
+dependencies = [
+ "serde",
+ "serde_derive",
+ "syntect",
+]
+
+[[package]]
 name = "twox-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9687,6 +9698,7 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_editor",
+ "vmux_git",
  "vmux_history",
  "vmux_layout",
  "vmux_macro",
@@ -9711,22 +9723,42 @@ dependencies = [
  "dioxus",
  "image",
  "js-sys",
+ "notify 6.1.1",
  "percent-encoding",
  "rkyv",
  "serde",
  "syntect",
  "tempfile",
  "tracing",
+ "two-face",
  "unicode-width",
  "url",
  "vmux_command",
  "vmux_core",
+ "vmux_git",
  "vmux_layout",
  "vmux_setting",
  "vmux_space",
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "vmux_git"
+version = "0.0.16"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_cef_core",
+ "bevy_ecs",
+ "dioxus",
+ "rkyv",
+ "serde",
+ "syntect",
+ "tempfile",
+ "two-face",
+ "vmux_ui",
 ]
 
 [[package]]

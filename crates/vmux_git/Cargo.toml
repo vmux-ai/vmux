@@ -1,0 +1,31 @@
+[package]
+name = "vmux_git"
+description = "Host-side git engine + bridge for the file:// editor page"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rkyv = { workspace = true }
+serde = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bevy = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_cef = { workspace = true }
+bevy_cef_core = { workspace = true }
+syntect = { workspace = true }
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus = { workspace = true }
+vmux_ui = { path = "../vmux_ui", default-features = false }
