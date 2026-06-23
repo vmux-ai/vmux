@@ -611,7 +611,10 @@ pub fn dispatch_with_anchor(
         ));
     }
     if name == "record_start" {
-        let gif = arguments.get("gif").and_then(Value::as_bool).unwrap_or(false);
+        let gif = arguments
+            .get("gif")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let max_secs = arguments
             .get("max_secs")
             .and_then(Value::as_u64)
@@ -644,7 +647,10 @@ pub fn dispatch_with_anchor(
         let dir = parse_opt("dir")?;
         let out_name = parse_opt("name")?;
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::RecordStop { dir, name: out_name },
+            vmux_service::protocol::AgentQuery::RecordStop {
+                dir,
+                name: out_name,
+            },
         ));
     }
     if name == "read_layout" {
@@ -769,7 +775,13 @@ mod tests {
             }
         );
         let empty = dispatch_query("record_stop", serde_json::json!({})).unwrap();
-        assert_eq!(empty, AgentQuery::RecordStop { dir: None, name: None });
+        assert_eq!(
+            empty,
+            AgentQuery::RecordStop {
+                dir: None,
+                name: None
+            }
+        );
     }
 
     #[test]

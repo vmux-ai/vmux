@@ -34,9 +34,9 @@ use crate::client::cli::claude::ClaudeStrategy;
 use crate::client::cli::codex::CodexStrategy;
 use crate::client::cli::vibe::VibeStrategy;
 use crate::events::{
-    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin, RecordStartRequest,
-    RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo, ScreenshotImage,
-    ScreenshotRequest, ScreenshotResponse,
+    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin,
+    RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
+    ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
 };
 use crate::session::{
     self, AgentSession, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
@@ -1796,7 +1796,9 @@ mod tests {
             bytes: 42,
             auto_stopped: false,
         }));
-        assert!(matches!(ok, AgentQueryResult::Recording { mp4_path, .. } if mp4_path == "/tmp/x.mp4"));
+        assert!(
+            matches!(ok, AgentQueryResult::Recording { mp4_path, .. } if mp4_path == "/tmp/x.mp4")
+        );
         let err = record_stop_response_to_query_result(&Err("boom".to_string()));
         assert!(matches!(err, AgentQueryResult::Error(m) if m == "boom"));
     }
