@@ -176,6 +176,7 @@ impl Plugin for BrowserPlugin {
                     sync_windowed_frames,
                     sync_windowed_command_bar,
                     apply_repaint_nudge,
+                    bump_osr_size_on_ready,
                     sync_cef_webview_resize_after_ui,
                     sync_webview_pane_corner_clip,
                     sync_osr_webview_focus,
@@ -1572,6 +1573,14 @@ fn sync_windowed_command_bar(
 fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Added<PageReady>>) {
     for entity in &ready {
         browsers.nudge_windowed_repaint(&entity);
+    }
+}
+
+fn bump_osr_size_on_ready(
+    mut ready: Query<&mut WebviewSize, (Added<PageReady>, With<Browser>, Without<WebviewWindowed>)>,
+) {
+    for mut size in &mut ready {
+        size.set_changed();
     }
 }
 
@@ -3368,6 +3377,51 @@ mod tests {
         assert!(should_show_osr_webview(true, false, true, false, false));
         assert!(should_show_osr_webview(true, true, false, false, false));
         assert!(should_show_osr_webview(true, true, true, false, true));
+    }
+
+    #[test]
+    fn osr_page_ready_rebumps_webview_size_so_resize_refires() {
+        #[derive(Resource, Default)]
+        struct ChangedProbe(Vec<Entity>);
+
+        fn record_changed(mut probe: ResMut<ChangedProbe>, q: Query<Entity, Changed<WebviewSize>>) {
+            probe.0 = q.iter().collect();
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ChangedProbe>()
+            .add_systems(Update, (bump_osr_size_on_ready, record_changed).chain());
+
+        let osr = app
+            .world_mut()
+            .spawn((Browser, WebviewSize(Vec2::new(100.0, 100.0))))
+            .id();
+        let windowed = app
+            .world_mut()
+            .spawn((
+                Browser,
+                WebviewWindowed,
+                WebviewSize(Vec2::new(100.0, 100.0)),
+            ))
+            .id();
+
+        app.update();
+
+        app.world_mut().entity_mut(osr).insert(PageReady {});
+        app.world_mut().entity_mut(windowed).insert(PageReady {});
+
+        app.update();
+
+        let changed = &app.world().resource::<ChangedProbe>().0;
+        assert!(
+            changed.contains(&osr),
+            "OSR page should re-bump WebviewSize on ready so the edge-gated resize re-fires after CEF's first paint"
+        );
+        assert!(
+            !changed.contains(&windowed),
+            "windowed pages refresh via the native repaint nudge, not a size re-bump"
+        );
     }
 
     fn layout_material_after_mode(
