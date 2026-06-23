@@ -13,7 +13,9 @@ fn main() {
     PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
         .track_manifest_rel_paths(&[
             "../vmux_ui/assets/theme.css",
+            "../vmux_ui/src",
             "../vmux_editor/src",
+            "../vmux_git/src",
             "../vmux_history/src",
             "../vmux_layout/src",
             "../vmux_service/src",

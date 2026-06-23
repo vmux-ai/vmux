@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::page_model::{clamp_selection, gutter_width, image_mime, span_style};
 use dioxus::prelude::*;
 use vmux_core::event::*;
+use vmux_git::ui::{DiffView, GitBar, GitFooter};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
@@ -344,6 +345,15 @@ pub fn Page() -> Element {
     let mut thumbs = use_signal(HashMap::<String, String>::new);
     let mut theme_style = use_signal(String::new);
     let cell_dims = use_signal(|| (0.0f64, 0.0f64));
+    let mut git_path = use_signal(String::new);
+    let show_diff = use_signal(|| false);
+    let mut git_nonce = use_signal(|| 0u32);
+    let git_display = use_signal(String::new);
+    let git_branch = use_signal(String::new);
+    let git_ahead = use_signal(|| 0u32);
+    let git_behind = use_signal(|| 0u32);
+    let git_staged = use_signal(|| 0u32);
+    let git_message = use_signal(String::new);
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
         clear_blob_state(image_url, preview, thumbs);
@@ -352,9 +362,11 @@ pub fn Page() -> Element {
             doc.set_title(&name);
         }
         path.set(m.path);
+        git_path.set(m.abs_path);
         language.set(m.language);
         total_lines.set(m.total_lines);
         mode.set(Mode::Text);
+        git_nonce.set(git_nonce() + 1);
     });
 
     let _vp = use_bin_event_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
@@ -379,6 +391,8 @@ pub fn Page() -> Element {
             doc.set_title(&name);
         }
         parent_path.set(d.parent_path);
+        git_path.set(d.abs_path);
+        git_nonce.set(git_nonce() + 1);
         mode.set(Mode::Dir);
         apply_dir(
             dir_entries,
@@ -481,7 +495,7 @@ pub fn Page() -> Element {
             onmousedown: move |_| focus_container(),
 
             onwheel: move |e: Event<WheelData>| {
-                if mode() != Mode::Text {
+                if mode() != Mode::Text || show_diff() {
                     return;
                 }
                 e.prevent_default();
@@ -609,7 +623,7 @@ pub fn Page() -> Element {
                             open_path(d);
                             return;
                         }
-                        if mode() != Mode::Text {
+                        if mode() != Mode::Text || show_diff() {
                             return;
                         }
                         let cur = first_line() as i64;
@@ -631,13 +645,25 @@ pub fn Page() -> Element {
 
             div {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-white/[0.07] bg-black/20 px-4 font-sans text-xs text-muted-foreground",
-                span { class: "truncate", "{path}" }
+                span { class: "truncate", { if git_display().is_empty() { path() } else { git_display() } } }
                 if !language().is_empty() {
                     span {
                         class: "ml-auto shrink-0 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] uppercase tracking-wide opacity-80",
                         "{language}"
                     }
                 }
+            }
+
+            GitBar {
+                path: git_path,
+                show_diff,
+                nonce: git_nonce,
+                display_path: git_display,
+                branch: git_branch,
+                ahead: git_ahead,
+                behind: git_behind,
+                staged_count: git_staged,
+                message: git_message,
             }
 
             {
@@ -714,18 +740,22 @@ pub fn Page() -> Element {
                     }
                 },
                 Mode::Text => rsx! {
-                    div { class: "min-h-0 flex-1 overflow-auto",
-                        div { class: "min-w-max py-2",
-                            for line in lines().iter() {
-                                div { key: "{line.line_no}", class: "group flex hover:bg-white/[0.035]",
-                                    span {
-                                        class: "sticky left-0 z-[1] shrink-0 select-none bg-background pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
-                                        style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
-                                        "{line.line_no + 1}"
-                                    }
-                                    span { class: "whitespace-pre pr-8",
-                                        for (i, s) in line.spans.iter().enumerate() {
-                                            span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                    if show_diff() {
+                        DiffView { path: git_path, nonce: git_nonce }
+                    } else {
+                        div { class: "min-h-0 flex-1 overflow-auto",
+                            div { class: "min-w-max py-2",
+                                for line in lines().iter() {
+                                    div { key: "{line.line_no}", class: "group flex hover:bg-white/[0.035]",
+                                        span {
+                                            class: "sticky left-0 z-[1] shrink-0 select-none bg-background pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
+                                            style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
+                                            "{line.line_no + 1}"
+                                        }
+                                        span { class: "whitespace-pre pr-8",
+                                            for (i, s) in line.spans.iter().enumerate() {
+                                                span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                                            }
                                         }
                                     }
                                 }
@@ -733,6 +763,15 @@ pub fn Page() -> Element {
                         }
                     }
                 },
+            }
+
+            GitFooter {
+                path: git_path,
+                branch: git_branch,
+                ahead: git_ahead,
+                behind: git_behind,
+                staged_count: git_staged,
+                message: git_message,
             }
         }
     }

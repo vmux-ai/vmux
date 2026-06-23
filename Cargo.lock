@@ -9687,6 +9687,7 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_editor",
+ "vmux_git",
  "vmux_history",
  "vmux_layout",
  "vmux_macro",
@@ -9711,6 +9712,7 @@ dependencies = [
  "dioxus",
  "image",
  "js-sys",
+ "notify 6.1.1",
  "percent-encoding",
  "rkyv",
  "serde",
@@ -9721,12 +9723,29 @@ dependencies = [
  "url",
  "vmux_command",
  "vmux_core",
+ "vmux_git",
  "vmux_layout",
  "vmux_setting",
  "vmux_space",
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "vmux_git"
+version = "0.0.16"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_cef_core",
+ "bevy_ecs",
+ "dioxus",
+ "rkyv",
+ "serde",
+ "syntect",
+ "tempfile",
+ "vmux_ui",
 ]
 
 [[package]]

@@ -25,6 +25,7 @@ bevy_reflect = { workspace = true }
 tracing = "0.1"
 url = { workspace = true }
 percent-encoding = "2"
+notify = { workspace = true }
 syntect = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 vmux_command = { path = "../vmux_command" }
@@ -39,6 +40,7 @@ tempfile = "3"
 dioxus = { workspace = true }
 js-sys = "0.3"
 unicode-width = "0.2"
+vmux_git = { path = "../vmux_git" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = [

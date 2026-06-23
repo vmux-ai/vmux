@@ -69,6 +69,7 @@ pub struct FileLine {
 )]
 pub struct FileMetaEvent {
     pub path: String,
+    pub abs_path: String,
     pub language: String,
     pub total_lines: u32,
 }
@@ -165,6 +166,7 @@ pub struct FileDirEntry {
 )]
 pub struct FileDirEvent {
     pub path: String,
+    pub abs_path: String,
     pub entries: Vec<FileDirEntry>,
     pub parent_path: String,
     pub parent_entries: Vec<FileDirEntry>,
