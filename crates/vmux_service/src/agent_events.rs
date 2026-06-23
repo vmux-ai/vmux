@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 
-use crate::protocol::{AgentCommand, AgentQuery, AgentRequestId, AgentRunStatus, ProcessId};
+use crate::protocol::{
+    AgentCommand, AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, AgentRunStatus,
+    ProcessId,
+};
 
 /// Who issued a command relayed through the agent request plumbing. Most
 /// `AgentCommandRequest`s originate from an agent (`Agent`), but some user
@@ -35,6 +38,25 @@ pub struct AgentToolCallRequest {
     pub sid: String,
     pub name: String,
     pub args_json: String,
+}
+
+/// An `AgentCommandResult` the service routed back to this client (correlated by
+/// `request_id`). Surfaced as a Bevy message so in-process issuers — like the
+/// le-chat host-MCP bridge — can await their own command results. The normal
+/// in-app command handlers do NOT consume this; they *produce* the underlying
+/// response that the service correlates.
+#[derive(Message)]
+pub struct AgentCommandResultEvent {
+    pub request_id: AgentRequestId,
+    pub result: AgentCommandResult,
+}
+
+/// An `AgentQueryResult` the service routed back to this client (correlated by
+/// `request_id`). See [`AgentCommandResultEvent`].
+#[derive(Message)]
+pub struct AgentQueryResultEvent {
+    pub request_id: AgentRequestId,
+    pub result: AgentQueryResult,
 }
 
 #[derive(Message)]
