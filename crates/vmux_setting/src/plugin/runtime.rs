@@ -30,6 +30,16 @@ pub struct AppSettings {
     pub agent: AgentSettings,
     #[serde(default)]
     pub spaces: std::collections::BTreeMap<String, SpaceOverrides>,
+    #[serde(default)]
+    pub recording: RecordingSettings,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct RecordingSettings {
+    /// Output directory for screenshots and screen recordings. Absent falls back
+    /// to the default `~/.vmux/recording` (see [`vmux_core::profile::recording_dir`]).
+    #[serde(default)]
+    pub output_dir: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -396,6 +406,8 @@ struct PartialAppSettings {
     agent: Option<AgentSettings>,
     #[serde(default)]
     spaces: Option<std::collections::BTreeMap<String, SpaceOverrides>>,
+    #[serde(default)]
+    recording: Option<RecordingSettings>,
 }
 
 fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
@@ -420,6 +432,9 @@ fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
     }
     if let Some(spaces) = partial.spaces {
         settings.spaces = spaces;
+    }
+    if let Some(recording) = partial.recording {
+        settings.recording = recording;
     }
     settings
 }
@@ -616,6 +631,12 @@ fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
     }
     if differs("spaces") {
         parts.push(format!("    spaces: {},", section_ron(&settings.spaces)?));
+    }
+    if differs("recording") {
+        parts.push(format!(
+            "    recording: {},",
+            section_ron(&settings.recording)?
+        ));
     }
     if parts.is_empty() {
         return Ok("()\n".to_string());
@@ -976,6 +997,7 @@ mod tests {
             auto_update: false,
             agent: crate::plugin::runtime::AgentSettings::default(),
             spaces: Default::default(),
+            recording: Default::default(),
         }
     }
 

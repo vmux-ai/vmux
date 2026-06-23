@@ -1820,6 +1820,7 @@ mod tests {
             auto_update: false,
             agent: vmux_setting::AgentSettings::default(),
             spaces: Default::default(),
+            recording: Default::default(),
         }
     }
 

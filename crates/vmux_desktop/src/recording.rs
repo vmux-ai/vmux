@@ -4,11 +4,12 @@ use bevy::ui::{ComputedNode, UiGlobalTransform};
 use bevy::window::PrimaryWindow;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::{Receiver, Sender};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use vmux_agent::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
 };
+use vmux_setting::AppSettings;
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) const GIF_FPS: u32 = 12;
@@ -51,16 +52,31 @@ fn start_err(request_id: [u8; 16], message: impl Into<String>) -> RecordStartRes
     }
 }
 
-/// Resolve dir/name into final mp4 + optional gif paths.
+/// Configured output directory for screenshots and recordings: the
+/// `recording.output_dir` setting if set, else the default `~/.vmux/recording`.
+pub(crate) fn capture_output_dir(settings: &AppSettings) -> PathBuf {
+    settings
+        .recording
+        .output_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(vmux_core::profile::recording_dir)
+}
+
+/// Resolve dir/name into final mp4 + optional gif paths. `default_dir` is used
+/// when `dir` is not given (the configured/default output directory).
 pub(crate) fn resolve_output_paths(
     dir: Option<&str>,
     name: Option<&str>,
     gif: bool,
     timestamp: &str,
+    default_dir: &Path,
 ) -> (PathBuf, Option<PathBuf>) {
     let base_dir = dir
         .map(PathBuf::from)
-        .unwrap_or_else(vmux_core::profile::screenshots_dir);
+        .unwrap_or_else(|| default_dir.to_path_buf());
     let base_name = name
         .map(|s| s.to_string())
         .unwrap_or_else(|| format!("vmux-{timestamp}"));
@@ -176,11 +192,13 @@ pub(crate) fn start_recording(
     mut stop_reader: MessageReader<RecordStopRequest>,
     mut start_responses: MessageWriter<RecordStartResponse>,
     bridge: Res<RecordingBridge>,
+    settings: Res<AppSettings>,
     window_q: Query<(Entity, &Window), With<PrimaryWindow>>,
     node_q: Query<(&ComputedNode, &UiGlobalTransform)>,
     child_of_q: Query<&ChildOf>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
+    let default_dir = capture_output_dir(&settings);
     for req in start_reader.read() {
         let Ok((window_entity, window)) = window_q.single() else {
             start_responses.write(start_err(req.request_id, "no primary vmux window"));
@@ -213,6 +231,7 @@ pub(crate) fn start_recording(
             req.request_id,
             req.gif,
             req.max_secs,
+            default_dir.clone(),
             bridge.tx.clone(),
             wake,
         );
@@ -257,15 +276,22 @@ mod tests {
 
     #[test]
     fn output_paths_default_dir_and_name() {
-        let (mp4, gif) = resolve_output_paths(None, None, false, "20260623-101010-001");
-        assert!(mp4.ends_with("vmux-20260623-101010-001.mp4"));
-        assert!(mp4.starts_with(vmux_core::profile::screenshots_dir()));
+        let default_dir = Path::new("/tmp/def");
+        let (mp4, gif) =
+            resolve_output_paths(None, None, false, "20260623-101010-001", default_dir);
+        assert_eq!(mp4, PathBuf::from("/tmp/def/vmux-20260623-101010-001.mp4"));
         assert!(gif.is_none());
     }
 
     #[test]
     fn output_paths_custom_dir_name_and_gif() {
-        let (mp4, gif) = resolve_output_paths(Some("/tmp/out"), Some("feature-x"), true, "ts");
+        let (mp4, gif) = resolve_output_paths(
+            Some("/tmp/out"),
+            Some("feature-x"),
+            true,
+            "ts",
+            Path::new("/tmp/def"),
+        );
         assert_eq!(mp4, PathBuf::from("/tmp/out/feature-x.mp4"));
         assert_eq!(gif, Some(PathBuf::from("/tmp/out/feature-x.gif")));
     }
@@ -310,6 +336,7 @@ mod capture {
     use super::{CropRect, RecordOutcome, WakeFn};
     use bevy::prelude::Entity;
     use crossbeam_channel::Sender;
+    use std::path::PathBuf;
     use vmux_agent::RecordStartResponse;
 
     #[allow(clippy::too_many_arguments)]
@@ -321,6 +348,7 @@ mod capture {
         request_id: [u8; 16],
         _gif: bool,
         _max_secs: u32,
+        _default_dir: PathBuf,
         _tx: Sender<RecordOutcome>,
         _wake: Option<WakeFn>,
     ) -> RecordStartResponse {

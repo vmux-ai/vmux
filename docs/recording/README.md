@@ -10,10 +10,13 @@ From an agent with vmux MCP tools:
 
 1. `vmux_record_start { "gif": true, "max_secs": 60 }`
 2. Drive the feature (open pages, run commands, switch tabs).
-3. `vmux_record_stop { "dir": "<repo>/docs/features", "name": "<feature>" }`
+3. `vmux_record_stop { "dir": "<repo>/docs/recording", "name": "<feature>" }`
 
 This writes `<feature>.mp4` (+ `<feature>.gif`) here. Drag the `.mp4` into a PR
 description to embed an inline player, or reference the `.gif` from markdown.
+
+By default (no `dir`) clips land in `~/.vmux/recording/`; override the default
+with the `recording.output_dir` setting in `settings.ron`.
 
 ## Keep clips small
 

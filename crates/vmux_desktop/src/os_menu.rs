@@ -335,6 +335,7 @@ mod tests {
             auto_update: false,
             agent: AgentSettings::default(),
             spaces: Default::default(),
+            recording: Default::default(),
         }
     }
 
