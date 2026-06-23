@@ -1145,6 +1145,55 @@ fn find_reuse_in_space(
     None
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct PlacementCtx<'w, 's> {
+    pub child_of_q: Query<'w, 's, &'static ChildOf>,
+    pub tab_q: Query<'w, 's, Entity, With<Tab>>,
+    pub all_children: Query<'w, 's, &'static Children>,
+    pub leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    pub pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    pub split_dir_q: Query<'w, 's, &'static PaneSplit>,
+    pub tab_filter: Query<'w, 's, Entity, With<Stack>>,
+    pub seq_q: Query<'w, 's, &'static SpawnSeq>,
+    pub node_q: Query<'w, 's, &'static ComputedNode>,
+    pub page_q: Query<'w, 's, &'static vmux_core::PageMetadata, With<Stack>>,
+}
+
+pub fn resolve_spiral_pane(
+    commands: &mut Commands,
+    anchor_pane: Entity,
+    url: &str,
+    focus: bool,
+    split_batch: &mut std::collections::HashSet<Entity>,
+    ctx: &PlacementCtx,
+) -> Entity {
+    let Some(tab) = tab_of_pane(anchor_pane, &ctx.child_of_q, &ctx.tab_q) else {
+        return anchor_pane;
+    };
+    let leaves = collect_leaf_infos(
+        tab,
+        &ctx.all_children,
+        &ctx.leaf_panes,
+        &ctx.pane_children,
+        &ctx.seq_q,
+        &ctx.node_q,
+        &ctx.page_q,
+    );
+    match crate::placement::resolve_placement(url, None, &leaves, anchor_pane) {
+        crate::placement::Placement::AddTab { pane } => pane,
+        crate::placement::Placement::Spiral { anchor, axis } => {
+            let existing_tabs: Vec<Entity> = ctx
+                .pane_children
+                .get(anchor)
+                .map(|c| c.iter().filter(|&e| ctx.tab_filter.contains(e)).collect())
+                .unwrap_or_default();
+            let already_split = !split_batch.insert(anchor) || ctx.split_dir_q.contains(anchor);
+            split_or_extend(commands, anchor, axis, &existing_tabs, focus, already_split)
+        }
+        crate::placement::Placement::Focus { .. } => anchor_pane,
+    }
+}
+
 fn is_after_direction(direction: &PaneDirection) -> bool {
     matches!(direction, PaneDirection::Right | PaneDirection::Bottom)
 }
@@ -2499,6 +2548,116 @@ mod tests {
         assert!(
             app.world().get::<PaneSplit>(browser_pane).is_none(),
             "reuse must not split"
+        );
+    }
+
+    #[derive(Resource)]
+    struct SpiralInput {
+        anchor: Entity,
+        url: String,
+    }
+    #[derive(Resource, Default)]
+    struct SpiralOut(Option<Entity>);
+
+    fn spiral_test_sys(
+        input: Res<SpiralInput>,
+        mut commands: Commands,
+        ctx: PlacementCtx,
+        mut out: ResMut<SpiralOut>,
+    ) {
+        let mut batch = std::collections::HashSet::new();
+        out.0 = Some(resolve_spiral_pane(
+            &mut commands,
+            input.anchor,
+            &input.url,
+            false,
+            &mut batch,
+            &ctx,
+        ));
+    }
+
+    fn spiral_app(anchor_url: &str, other: Option<(&str, u64, Vec2)>) -> (App, Entity) {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SpiralOut>()
+            .add_systems(Update, spiral_test_sys);
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent = place_pane_with_url(&mut app, tab, 1, Vec2::new(800.0, 900.0), anchor_url);
+        if let Some((url, seq, size)) = other {
+            place_pane_with_url(&mut app, tab, seq, size, url);
+        }
+        (app, agent)
+    }
+
+    #[test]
+    fn run_terminal_spirals_off_newest_nonagent_leaf() {
+        let (mut app, agent) = spiral_app(
+            "vmux://agent/vibe/x",
+            Some(("https://a.com", 9, Vec2::new(1600.0, 900.0))),
+        );
+        let browser = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Pane>, Without<PaneSplit>)>()
+            .iter(app.world())
+            .find(|&e| e != agent)
+            .unwrap();
+        app.world_mut().insert_resource(SpiralInput {
+            anchor: agent,
+            url: "vmux://terminal/".into(),
+        });
+        app.update();
+
+        let split = app
+            .world()
+            .get::<PaneSplit>(browser)
+            .expect("newest non-agent (browser) leaf must split for the new terminal type");
+        assert_eq!(split.direction, PaneSplitDirection::Row, "wide => Row");
+        assert!(
+            app.world().get::<PaneSplit>(agent).is_none(),
+            "agent pane untouched"
+        );
+        let out = app.world().resource::<SpiralOut>().0.unwrap();
+        assert_ne!(out, browser, "returns the new leaf, not the split node");
+    }
+
+    #[test]
+    fn run_terminal_adds_tab_to_existing_terminal_stack() {
+        let (mut app, agent) = spiral_app(
+            "vmux://agent/vibe/x",
+            Some(("vmux://terminal/7", 9, Vec2::new(1600.0, 900.0))),
+        );
+        let term_pane = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Pane>, Without<PaneSplit>)>()
+            .iter(app.world())
+            .find(|&e| e != agent)
+            .unwrap();
+        app.world_mut().insert_resource(SpiralInput {
+            anchor: agent,
+            url: "vmux://terminal/".into(),
+        });
+        app.update();
+
+        assert!(
+            app.world().get::<PaneSplit>(term_pane).is_none(),
+            "existing terminal stack must not split"
+        );
+        assert_eq!(
+            app.world().resource::<SpiralOut>().0,
+            Some(term_pane),
+            "new terminal tabs into the existing terminal pane"
         );
     }
 
