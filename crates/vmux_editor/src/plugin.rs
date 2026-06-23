@@ -1,14 +1,16 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::event::*;
 use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_layout::Browser;
-use vmux_layout::event::TERMINAL_CEF_BG_COLOR;
 
+use crate::dir::{list_dir, parent_listing};
 use crate::highlight::Highlighter;
+use crate::preview;
 use crate::viewport::{clamp_top_line, rows_from_viewport, visible_slice};
 
 #[derive(Component, Clone, Debug)]
@@ -33,6 +35,18 @@ pub struct FileDir {
     pub entries: Vec<FileDirEntry>,
 }
 
+#[derive(Component, Clone, Debug)]
+pub struct FileImage {
+    pub mime: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Component)]
+struct ThumbTask {
+    webview: Entity,
+    task: Task<(String, Result<Vec<u8>, String>)>,
+}
+
 #[derive(Component)]
 pub struct FileInitialMetaSent;
 
@@ -40,7 +54,7 @@ pub struct FileInitialMetaSent;
 pub struct FileThemeSent;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
-type UnloadedFileView = (Without<FileBuffer>, Without<FileDir>);
+type UnloadedFileView = (Without<FileBuffer>, Without<FileDir>, Without<FileImage>);
 type ReadyUnsentMeta = (
     Without<FileInitialMetaSent>,
     With<vmux_core::page::PageReady>,
@@ -85,11 +99,14 @@ fn new_file_view_bundle(
                 rows: 0,
             },
             Browser,
+            WebviewWindowed,
+            WebviewWindowedNativeFocus,
+            WebviewOpaqueWindowedBackground,
             PageMetadata {
                 title,
                 url: url.to_string(),
                 favicon_url: String::new(),
-                bg_color: Some(TERMINAL_CEF_BG_COLOR.to_string()),
+                bg_color: None,
             },
             WebviewSource::new(url),
             ResolvedWebviewUri(url.to_string()),
@@ -160,34 +177,37 @@ pub fn handle_file_page_open(
     }
 }
 
-fn list_dir(path: &std::path::Path) -> Vec<FileDirEntry> {
-    let Ok(read) = std::fs::read_dir(path) else {
-        return Vec::new();
-    };
-    let mut entries: Vec<FileDirEntry> = read
-        .flatten()
-        .map(|e| {
-            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            FileDirEntry {
-                name: e.file_name().to_string_lossy().to_string(),
-                path: e.path().to_string_lossy().to_string(),
-                is_dir,
-            }
-        })
-        .collect();
-    entries.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-    entries
-}
-
 fn load_file_buffers(q: Query<(Entity, &FileView), UnloadedFileView>, mut commands: Commands) {
     for (entity, fv) in &q {
         if fv.path.is_dir() {
             let entries = list_dir(&fv.path);
             commands.entity(entity).insert(FileDir { entries });
+            continue;
+        }
+        if preview::is_image_path(&fv.path) {
+            match std::fs::metadata(&fv.path).map(|m| m.len()) {
+                Ok(len) if len <= preview::IMAGE_BYTES_CAP => match std::fs::read(&fv.path) {
+                    Ok(bytes) => {
+                        let mime = preview::image_mime(&fv.path).unwrap_or("image/png");
+                        commands.entity(entity).insert(FileImage {
+                            mime: mime.to_string(),
+                            bytes,
+                        });
+                    }
+                    Err(e) => {
+                        commands.entity(entity).insert(FileBuffer {
+                            language: format!("__error__:{e}"),
+                            lines: Vec::new(),
+                        });
+                    }
+                },
+                _ => {
+                    commands.entity(entity).insert(FileBuffer {
+                        language: "__error__:image too large to preview".into(),
+                        lines: Vec::new(),
+                    });
+                }
+            }
             continue;
         }
         let hl = Highlighter::new();
@@ -223,11 +243,11 @@ fn display_path(path: &std::path::Path) -> String {
 }
 
 fn send_initial_meta(
-    q: Query<(Entity, &FileView, &FileBuffer), ReadyUnsentMeta>,
+    q: Query<(Entity, &FileView, &FileBuffer, &FileViewport), ReadyUnsentMeta>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, fv, buf) in &q {
+    for (entity, fv, buf, vp) in &q {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
@@ -249,6 +269,9 @@ fn send_initial_meta(
                     total_lines: buf.lines.len() as u32,
                 },
             ));
+            if vp.rows > 0 {
+                emit_window(entity, buf, vp, &browsers, &mut commands);
+            }
         }
         commands.entity(entity).insert(FileInitialMetaSent);
     }
@@ -294,12 +317,15 @@ fn send_initial_dir(
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
+        let (parent_path, parent_entries) = parent_listing(&fv.path);
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             FILE_DIR_EVENT,
             &FileDirEvent {
                 path: display_path(&fv.path),
                 entries: dir.entries.clone(),
+                parent_path,
+                parent_entries,
             },
         ));
         commands.entity(entity).insert(FileInitialMetaSent);
@@ -348,17 +374,19 @@ fn reset_file_sent_markers_on_page_ready(
 
 fn on_file_resize(
     trigger: On<BinReceive<FileResizeEvent>>,
-    mut q: Query<(&FileBuffer, &mut FileViewport)>,
+    mut q: Query<(&mut FileViewport, Option<&FileBuffer>)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let Ok((buf, mut vp)) = q.get_mut(entity) else {
+    let Ok((mut vp, buf)) = q.get_mut(entity) else {
         return;
     };
     vp.rows = rows_from_viewport(evt.char_height, evt.viewport_height);
-    emit_window(entity, buf, &vp, &browsers, &mut commands);
+    if let Some(buf) = buf {
+        emit_window(entity, buf, &vp, &browsers, &mut commands);
+    }
 }
 
 fn on_file_scroll(
@@ -376,6 +404,133 @@ fn on_file_scroll(
     emit_window(entity, buf, &vp, &browsers, &mut commands);
 }
 
+fn send_initial_image(
+    q: Query<(Entity, &FileImage), ReadyUnsentMeta>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, img) in &q {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            FILE_IMAGE_EVENT,
+            &FileImageEvent {
+                mime: img.mime.clone(),
+                bytes: img.bytes.clone(),
+            },
+        ));
+        commands.entity(entity).insert(FileInitialMetaSent);
+    }
+}
+
+fn on_file_preview_request(
+    trigger: On<BinReceive<FilePreviewRequest>>,
+    file_views: Query<(), With<FileView>>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    if file_views.get(entity).is_err() {
+        return;
+    }
+    let req = trigger.event().payload.clone();
+    let path = PathBuf::from(&req.path);
+    if req.thumb && preview::is_image_path(&path) {
+        let within_cap = std::fs::metadata(&path)
+            .map(|m| m.len() <= preview::IMAGE_BYTES_CAP)
+            .unwrap_or(false);
+        if !within_cap {
+            return;
+        }
+        let pool = IoTaskPool::get();
+        let p = req.path.clone();
+        let task = pool.spawn(async move {
+            let r = std::fs::read(&p)
+                .map_err(|e| e.to_string())
+                .and_then(|b| preview::downscale_to_png(&b, preview::THUMB_MAX_EDGE));
+            (p, r)
+        });
+        commands.spawn(ThumbTask {
+            webview: entity,
+            task,
+        });
+        return;
+    }
+    if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        return;
+    }
+    let kind = preview::build_preview_sync(&path);
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        entity,
+        FILE_PREVIEW_EVENT,
+        &FilePreviewEvent {
+            path: req.path,
+            thumb: false,
+            kind,
+        },
+    ));
+}
+
+fn drain_thumb_tasks(
+    mut q: Query<(Entity, &mut ThumbTask)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (task_entity, mut t) in &mut q {
+        if let Some((path, result)) = future::block_on(future::poll_once(&mut t.task)) {
+            let webview = t.webview;
+            commands.entity(task_entity).despawn();
+            if let Ok(bytes) = result
+                && browsers.has_browser(webview)
+                && browsers.host_emit_ready(&webview)
+            {
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    webview,
+                    FILE_PREVIEW_EVENT,
+                    &FilePreviewEvent {
+                        path,
+                        thumb: true,
+                        kind: PreviewKind::Image {
+                            mime: "image/png".to_string(),
+                            bytes,
+                        },
+                    },
+                ));
+            }
+        }
+    }
+}
+
+fn on_file_open(
+    trigger: On<BinReceive<FileOpenEvent>>,
+    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let path = PathBuf::from(&trigger.event().payload.path);
+    let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
+        return;
+    };
+    let url = url::Url::from_file_path(&path)
+        .map(|u| u.to_string())
+        .unwrap_or_else(|_| format!("file://{}", path.to_string_lossy()));
+    meta.title = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string());
+    meta.url = url;
+    fv.path = path;
+    vp.top_line = 0;
+    commands
+        .entity(entity)
+        .remove::<FileDir>()
+        .remove::<FileBuffer>()
+        .remove::<FileImage>()
+        .remove::<FileInitialMetaSent>();
+}
+
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "files",
     title: "Files",
@@ -389,7 +544,12 @@ pub struct EditorPlugin;
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
-        app.add_plugins(BinEventEmitterPlugin::<(FileResizeEvent, FileScrollEvent)>::default())
+        app.add_plugins(BinEventEmitterPlugin::<(
+            FileResizeEvent,
+            FileScrollEvent,
+            FilePreviewRequest,
+            FileOpenEvent,
+        )>::default())
             .add_systems(
                 Update,
                 handle_file_page_open.in_set(PageOpenSet::HandleKnownPages),
@@ -400,12 +560,16 @@ impl Plugin for EditorPlugin {
                     load_file_buffers,
                     send_initial_meta,
                     send_initial_dir,
+                    send_initial_image,
                     send_file_theme,
+                    drain_thumb_tasks,
                 ),
             )
             .add_observer(reset_file_sent_markers_on_page_ready)
             .add_observer(on_file_resize)
-            .add_observer(on_file_scroll);
+            .add_observer(on_file_scroll)
+            .add_observer(on_file_preview_request)
+            .add_observer(on_file_open);
     }
 }
 
@@ -493,5 +657,47 @@ mod page_open_tests {
             .id();
         app.update();
         assert!(app.world().get::<PageOpenHandled>(task).is_none());
+    }
+
+    #[test]
+    fn navigate_relists_when_path_changes() {
+        use std::fs;
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a");
+        fs::create_dir(&a).unwrap();
+        fs::write(a.join("f1"), "").unwrap();
+        let b = tmp.path().join("b");
+        fs::create_dir(&b).unwrap();
+        fs::write(b.join("f2"), "").unwrap();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, load_file_buffers);
+        let e = app
+            .world_mut()
+            .spawn((
+                FileView { path: a.clone() },
+                FileViewport {
+                    top_line: 0,
+                    rows: 0,
+                },
+            ))
+            .id();
+        app.update();
+        assert!(
+            app.world()
+                .get::<FileDir>(e)
+                .unwrap()
+                .entries
+                .iter()
+                .any(|x| x.name == "f1")
+        );
+
+        app.world_mut().get_mut::<FileView>(e).unwrap().path = b.clone();
+        app.world_mut().entity_mut(e).remove::<FileDir>();
+        app.update();
+        let dir = app.world().get::<FileDir>(e).unwrap();
+        assert!(dir.entries.iter().any(|x| x.name == "f2"));
+        assert!(!dir.entries.iter().any(|x| x.name == "f1"));
     }
 }

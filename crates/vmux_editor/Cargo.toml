@@ -26,6 +26,7 @@ tracing = "0.1"
 url = { workspace = true }
 percent-encoding = "2"
 syntect = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 vmux_command = { path = "../vmux_command" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_setting = { path = "../vmux_setting" }
@@ -45,4 +46,5 @@ web-sys = { version = "0.3", features = [
     "DomRect", "CssStyleDeclaration",
     "ResizeObserver", "ResizeObserverEntry",
     "WheelEvent", "KeyboardEvent", "Location",
+    "Blob", "Url",
 ] }
