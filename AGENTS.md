@@ -18,6 +18,10 @@ If a change affects an excluded patched CEF crate, run the appropriate package c
 
 If any check fails, fix the issue before committing. Do not push broken code.
 
+## Debugging
+
+When adding temporary diagnostics to investigate a bug, make logging unconditional (default-on) — never gate it behind an env var or flag the user must set. The user runs the normal build; logs must appear without extra setup. Strip every temporary diagnostic before committing the fix.
+
 ## Platform-Specific Code
 
 This project targets macOS (primary) and Linux (CI). When adding imports or code that uses platform-specific APIs (CEF, winit, AppKit), always add appropriate `#[cfg(...)]` gates. Let rustfmt reorder cfg-gated imports.
