@@ -13,6 +13,7 @@ use objc2_av_foundation::{
     AVAssetWriter, AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor, AVFileTypeMPEG4,
     AVMediaTypeVideo, AVVideoCodecKey, AVVideoCodecTypeH264, AVVideoHeightKey, AVVideoWidthKey,
 };
+use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_media::{CMSampleBuffer, CMTime};
 use objc2_core_video::{
     CVPixelBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow,
@@ -51,7 +52,6 @@ struct EncodeState {
     input: SendCell<Retained<AVAssetWriterInput>>,
     adaptor: SendCell<Retained<AVAssetWriterInputPixelBufferAdaptor>>,
     started_session: bool,
-    crop: Option<CropRect>,
     start: Instant,
     last_gif_ms: Option<u64>,
     gif_tx: Option<Sender<GifMsg>>,
@@ -176,17 +176,14 @@ fn handle_sample(state: &Arc<RecordingState>, sample: &CMSampleBuffer) {
         let elapsed_ms = enc.start.elapsed().as_millis() as u64;
         if should_sample_gif_frame(elapsed_ms, enc.last_gif_ms, GIF_FPS) {
             enc.last_gif_ms = Some(elapsed_ms);
-            if let Some(frame) = pixel_buffer_to_downscaled_rgba(&image_buffer, enc.crop) {
+            if let Some(frame) = pixel_buffer_to_downscaled_rgba(&image_buffer) {
                 let _ = gif_tx.try_send(frame);
             }
         }
     }
 }
 
-fn pixel_buffer_to_downscaled_rgba(
-    pb: &CVPixelBuffer,
-    crop: Option<CropRect>,
-) -> Option<(Vec<u8>, u32, u32)> {
+fn pixel_buffer_to_downscaled_rgba(pb: &CVPixelBuffer) -> Option<(Vec<u8>, u32, u32)> {
     unsafe {
         CVPixelBufferLockBaseAddress(pb, CVPixelBufferLockFlags::ReadOnly);
         let w = CVPixelBufferGetWidth(pb) as u32;
@@ -207,10 +204,7 @@ fn pixel_buffer_to_downscaled_rgba(
         CVPixelBufferUnlockBaseAddress(pb, CVPixelBufferLockFlags::ReadOnly);
 
         let rgba = bgra_to_rgba(&bgra);
-        let mut img = image::RgbaImage::from_raw(w, h, rgba)?;
-        if let Some(c) = crop {
-            img = image::imageops::crop_imm(&img, c.x, c.y, c.w, c.h).to_image();
-        }
+        let img = image::RgbaImage::from_raw(w, h, rgba)?;
         let (dw, dh) = downscale_to(img.width(), img.height(), GIF_MAX_EDGE);
         let scaled = if (dw, dh) == img.dimensions() {
             img
@@ -351,6 +345,7 @@ pub(crate) fn start(
     gif: bool,
     max_secs: u32,
     default_dir: PathBuf,
+    scale: f64,
     tx: Sender<RecordOutcome>,
     wake: Option<WakeFn>,
 ) -> RecordStartResponse {
@@ -388,11 +383,10 @@ pub(crate) fn start(
         setup_stream(
             content,
             window_id,
-            img_w,
-            img_h,
             out_w,
             out_h,
             crop,
+            scale,
             gif,
             max_secs,
             &temp_mp4,
@@ -422,11 +416,10 @@ pub(crate) fn start(
 fn setup_stream(
     content: *mut SCShareableContent,
     window_id: u32,
-    img_w: u32,
-    img_h: u32,
     out_w: u32,
     out_h: u32,
     crop: Option<CropRect>,
+    scale: f64,
     gif: bool,
     max_secs: u32,
     temp_mp4: &Path,
@@ -455,12 +448,20 @@ fn setup_stream(
     };
     let config = unsafe { SCStreamConfiguration::new() };
     unsafe {
-        config.setWidth(img_w as usize);
-        config.setHeight(img_h as usize);
+        config.setWidth(out_w as usize);
+        config.setHeight(out_h as usize);
         config.setPixelFormat(PIXEL_FORMAT_BGRA);
         config.setMinimumFrameInterval(CMTime::new(1, 60));
         config.setShowsCursor(true);
         config.setQueueDepth(6);
+        // For pane recording, capture only the crop sub-region. sourceRect is in
+        // points (logical, top-left origin); our CropRect is physical px.
+        if let Some(c) = crop {
+            config.setSourceRect(CGRect::new(
+                CGPoint::new(c.x as f64 / scale, c.y as f64 / scale),
+                CGSize::new(c.w as f64 / scale, c.h as f64 / scale),
+            ));
+        }
     }
 
     let (writer, input, adaptor) = match build_writer(temp_mp4, out_w, out_h) {
@@ -488,7 +489,6 @@ fn setup_stream(
             input: SendCell(input),
             adaptor: SendCell(adaptor),
             started_session: false,
-            crop,
             start,
             last_gif_ms: None,
             gif_tx,

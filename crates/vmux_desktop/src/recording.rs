@@ -249,6 +249,7 @@ pub(crate) fn start_recording(
         };
         let img_w = window.resolution.physical_width();
         let img_h = window.resolution.physical_height();
+        let scale = window.resolution.scale_factor() as f64;
         let crop = match &req.pane {
             Some(id) => match resolve_crop(id, &node_q, &child_of_q, img_w, img_h) {
                 Some(rect) => Some(rect),
@@ -275,6 +276,7 @@ pub(crate) fn start_recording(
             req.gif,
             req.max_secs,
             default_dir.clone(),
+            scale,
             bridge.tx.clone(),
             wake,
         );
@@ -397,6 +399,7 @@ mod capture {
         _gif: bool,
         _max_secs: u32,
         _default_dir: PathBuf,
+        _scale: f64,
         _tx: Sender<RecordOutcome>,
         _wake: Option<WakeFn>,
     ) -> RecordStartResponse {
