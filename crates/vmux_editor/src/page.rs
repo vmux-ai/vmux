@@ -46,6 +46,25 @@ fn revoke(url: &str) {
     let _ = web_sys::Url::revoke_object_url(url);
 }
 
+fn clear_blob_state(
+    mut image_url: Signal<Option<String>>,
+    mut preview: Signal<Preview>,
+    mut thumbs: Signal<HashMap<String, String>>,
+) {
+    if let Some(old) = image_url() {
+        revoke(&old);
+        image_url.set(None);
+    }
+    if let Preview::Image(old) = &*preview.read() {
+        revoke(old);
+    }
+    preview.set(Preview::None);
+    for url in thumbs.read().values() {
+        revoke(url);
+    }
+    thumbs.set(HashMap::new());
+}
+
 fn request_preview(path: String) {
     let _ = try_cef_bin_emit_rkyv(&FilePreviewRequest { path, thumb: false });
 }
@@ -125,6 +144,9 @@ fn apply_dir(
     }
     thumbs.set(HashMap::new());
     selected.set(0);
+    if let Preview::Image(old) = &*preview.read() {
+        revoke(old);
+    }
     preview.set(Preview::None);
     parent_entries.set(parent);
     path.set(new_path);
@@ -324,13 +346,10 @@ pub fn Page() -> Element {
     let cell_dims = use_signal(|| (0.0f64, 0.0f64));
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
+        clear_blob_state(image_url, preview, thumbs);
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             let name = m.path.rsplit('/').next().unwrap_or(&m.path).to_string();
             doc.set_title(&name);
-        }
-        if let Some(old) = image_url() {
-            revoke(&old);
-            image_url.set(None);
         }
         path.set(m.path);
         language.set(m.language);
@@ -349,6 +368,7 @@ pub fn Page() -> Element {
     });
 
     let _dir = use_bin_event_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
+        clear_blob_state(image_url, preview, thumbs);
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             let name = d
                 .path
@@ -357,10 +377,6 @@ pub fn Page() -> Element {
                 .unwrap_or(&d.path)
                 .to_string();
             doc.set_title(&name);
-        }
-        if let Some(old) = image_url() {
-            revoke(&old);
-            image_url.set(None);
         }
         parent_path.set(d.parent_path);
         mode.set(Mode::Dir);
@@ -379,9 +395,7 @@ pub fn Page() -> Element {
     });
 
     let _img = use_bin_event_listener::<FileImageEvent, _>(FILE_IMAGE_EVENT, move |e| {
-        if let Some(old) = image_url() {
-            revoke(&old);
-        }
+        clear_blob_state(image_url, preview, thumbs);
         image_url.set(blob_url(&e.bytes));
         mode.set(Mode::Image);
     });

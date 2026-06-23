@@ -9,10 +9,13 @@ pub fn list_dir(path: &Path) -> Vec<FileDirEntry> {
     let mut entries: Vec<FileDirEntry> = read
         .flatten()
         .map(|e| {
-            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let path = e.path();
+            let is_dir = std::fs::metadata(&path)
+                .map(|m| m.is_dir())
+                .unwrap_or(false);
             FileDirEntry {
                 name: e.file_name().to_string_lossy().to_string(),
-                path: e.path().to_string_lossy().to_string(),
+                path: path.to_string_lossy().to_string(),
                 is_dir,
             }
         })
