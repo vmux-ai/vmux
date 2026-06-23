@@ -49,16 +49,6 @@ pub fn icon_globe(class: &str) -> Element {
     )
 }
 
-pub fn icon_term(class: &str) -> Element {
-    svg_icon(
-        class,
-        rsx! {
-            path { d: "M4 17 10 11 4 5" }
-            path { d: "M12 19h8" }
-        },
-    )
-}
-
 pub fn icon_search(class: &str) -> Element {
     svg_icon(
         class,
@@ -291,6 +281,40 @@ pub fn scroll_cue() -> Element {
         div { class: "mt-12 flex justify-center",
             span { class: "inline-flex h-9 w-6 items-start justify-center rounded-full border border-text-muted/40 p-1.5",
                 span { class: "h-2 w-1 rounded-full bg-text-muted/70 animate-cue motion-reduce:animate-none" }
+            }
+        }
+    }
+}
+
+pub fn nav_pill() -> Element {
+    rsx! {
+        header {
+            "data-tone": "light",
+            class: "fixed top-4 inset-x-0 z-50 flex justify-center px-4",
+            nav { class: "glass flex items-center gap-2 sm:gap-4 rounded-full px-4 py-2 text-sm",
+                a {
+                    class: "flex items-center gap-2 font-bold tracking-tight text-text no-underline hover:text-accent",
+                    href: "#top",
+                    img { src: crate::landing::ICON, alt: "Vmux", class: "w-6 h-6 rounded-md" }
+                    "Vmux"
+                }
+                a {
+                    class: "no-underline text-text-muted hover:text-text px-2 py-1",
+                    href: crate::landing::GITHUB_URL,
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    "GitHub"
+                }
+                Link {
+                    class: "no-underline text-text-muted hover:text-text px-2 py-1",
+                    to: crate::Route::DocsIndex {},
+                    "Docs"
+                }
+                a {
+                    class: "no-underline bg-accent text-black font-semibold rounded-full px-4 py-1.5 hover:bg-accent-hover",
+                    href: "#install",
+                    "Install"
+                }
             }
         }
     }
