@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use bevy::prelude::*;
 use vmux_core::event::{FileLine, PreviewKind};
 
 use crate::dir::list_dir;
@@ -99,22 +98,6 @@ fn info_kind(meta: &std::fs::Metadata, kind: &str) -> PreviewKind {
         modified,
         kind: kind.to_string(),
     }
-}
-
-pub fn resolve_open_target(
-    fileview: Entity,
-    parents: &Query<&ChildOf>,
-    is_pane: &Query<(), With<vmux_layout::pane::Pane>>,
-) -> Option<Entity> {
-    let mut cur = fileview;
-    for _ in 0..8 {
-        let parent = parents.get(cur).ok()?.0;
-        if is_pane.get(parent).is_ok() {
-            return Some(parent);
-        }
-        cur = parent;
-    }
-    None
 }
 
 #[cfg(test)]

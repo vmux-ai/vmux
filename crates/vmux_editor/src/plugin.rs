@@ -5,9 +5,7 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::event::*;
-use vmux_core::page_open::{
-    PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
-};
+use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_layout::Browser;
 use vmux_layout::event::TERMINAL_CEF_BG_COLOR;
 
@@ -240,11 +238,11 @@ fn display_path(path: &std::path::Path) -> String {
 }
 
 fn send_initial_meta(
-    q: Query<(Entity, &FileView, &FileBuffer), ReadyUnsentMeta>,
+    q: Query<(Entity, &FileView, &FileBuffer, &FileViewport), ReadyUnsentMeta>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, fv, buf) in &q {
+    for (entity, fv, buf, vp) in &q {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
@@ -266,6 +264,9 @@ fn send_initial_meta(
                     total_lines: buf.lines.len() as u32,
                 },
             ));
+            if vp.rows > 0 {
+                emit_window(entity, buf, vp, &browsers, &mut commands);
+            }
         }
         commands.entity(entity).insert(FileInitialMetaSent);
     }
@@ -483,20 +484,21 @@ fn drain_thumb_tasks(
 
 fn on_file_open(
     trigger: On<BinReceive<FileOpenEvent>>,
-    parents: Query<&ChildOf>,
-    panes: Query<(), With<vmux_layout::pane::Pane>>,
-    mut writer: MessageWriter<PageOpenRequest>,
+    mut views: Query<(&mut FileView, &mut FileViewport)>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let path = trigger.event().payload.path.clone();
-    let Some(pane) = preview::resolve_open_target(entity, &parents, &panes) else {
+    let Ok((mut fv, mut vp)) = views.get_mut(entity) else {
         return;
     };
-    writer.write(PageOpenRequest {
-        target: PageOpenTarget::ActiveStackInPane(pane),
-        url: format!("file://{path}"),
-        request_id: None,
-    });
+    fv.path = PathBuf::from(&trigger.event().payload.path);
+    vp.top_line = 0;
+    commands
+        .entity(entity)
+        .remove::<FileDir>()
+        .remove::<FileBuffer>()
+        .remove::<FileImage>()
+        .remove::<FileInitialMetaSent>();
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -628,24 +630,44 @@ mod page_open_tests {
     }
 
     #[test]
-    fn resolve_open_target_walks_to_pane() {
-        use bevy::ecs::system::RunSystemOnce;
-        use vmux_layout::pane::Pane;
+    fn navigate_relists_when_path_changes() {
+        use std::fs;
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a");
+        fs::create_dir(&a).unwrap();
+        fs::write(a.join("f1"), "").unwrap();
+        let b = tmp.path().join("b");
+        fs::create_dir(&b).unwrap();
+        fs::write(b.join("f2"), "").unwrap();
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        let pane = app.world_mut().spawn(Pane).id();
-        let stack = app.world_mut().spawn(ChildOf(pane)).id();
-        let fv = app.world_mut().spawn(ChildOf(stack)).id();
-
-        let got = app
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, load_file_buffers);
+        let e = app
             .world_mut()
-            .run_system_once(
-                move |parents: Query<&ChildOf>, panes: Query<(), With<Pane>>| {
-                    preview::resolve_open_target(fv, &parents, &panes)
+            .spawn((
+                FileView { path: a.clone() },
+                FileViewport {
+                    top_line: 0,
+                    rows: 0,
                 },
-            )
-            .unwrap();
-        assert_eq!(got, Some(pane));
+            ))
+            .id();
+        app.update();
+        assert!(
+            app.world()
+                .get::<FileDir>(e)
+                .unwrap()
+                .entries
+                .iter()
+                .any(|x| x.name == "f1")
+        );
+
+        app.world_mut().get_mut::<FileView>(e).unwrap().path = b.clone();
+        app.world_mut().entity_mut(e).remove::<FileDir>();
+        app.update();
+        let dir = app.world().get::<FileDir>(e).unwrap();
+        assert!(dir.entries.iter().any(|x| x.name == "f2"));
+        assert!(!dir.entries.iter().any(|x| x.name == "f1"));
     }
 }
