@@ -23,19 +23,28 @@
 //!      `vmux_mcp::protocol` mappers), and `execute_js`-delivers it to the page.
 //!
 //! Anchor: the chat webview has no `ProcessId`/`AgentSession`, so it can't act as
-//! an agent self-anchor. Pane-targeting tools (`open_page`, `open_file`, `run`)
-//! therefore fail fast in `dispatch_with_anchor` and return a clean MCP error for
-//! that tool only; every non-anchor tool (`get_settings`, `list_spaces`,
-//! `screenshot`, `read_layout`, `read_terminal`, `update_layout`,
-//! `browser_navigate`, settings/space/app commands, ...) executes end-to-end.
+//! an agent self-anchor. Anchor-only tools (`open_file`, `run`) therefore fail
+//! fast in `dispatch_with_anchor` and return a clean MCP error for that tool
+//! only; every non-anchor tool (`get_settings`, `list_spaces`, `screenshot`,
+//! `read_layout`, `read_terminal`, `update_layout`, settings/space/app commands,
+//! ...) executes end-to-end.
+//!
+//! URL placement: a tool that would navigate the *focused* webview in place
+//! would replace the chat page itself. So `browser_navigate` (without an explicit
+//! `pane`), `open_page`, and `in_place` are intercepted in `handle_call_tool`
+//! (see `url_opening_tool_url`) and rewritten to `BrowserNavigate { pane:
+//! Some(chat_pane) }`, which vmux routes to `NewStackInPane` — a new stack beside
+//! the chat, leaving the chat webview untouched.
 
 use std::collections::HashMap;
 
+use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, JsEmitEventPlugin, Receive, WebviewCommittedNavigationEvent};
+use vmux_layout::pane::{Pane, PaneSplit};
 use vmux_service::agent_events::{AgentCommandResultEvent, AgentQueryResultEvent};
 use vmux_service::client::ServiceClient;
-use vmux_service::protocol::{AgentRequestId, ClientMessage};
+use vmux_service::protocol::{AgentCommand, AgentRequestId, ClientMessage};
 
 pub struct LeChatBridgePlugin;
 
@@ -137,11 +146,66 @@ fn execute_js_deliver(browsers: &Browsers, webview: &Entity, payload: &serde_jso
     );
 }
 
+/// Tools that, called with no anchor and no explicit `pane`, would navigate the
+/// *focused* webview in place — i.e. replace the le-chat page itself. We remap
+/// these to a `BrowserNavigate` targeting the chat's own pane so vmux opens a new
+/// stack beside the chat instead (see `handle_browser_navigate_requests`:
+/// `pane=Some` -> `NewStackInPane`). Names are matched after stripping the
+/// `vmux_` prefix, mirroring `dispatch_with_anchor`.
+fn url_opening_tool_url(name: &str, arguments: &serde_json::Value) -> Option<String> {
+    let name = name.strip_prefix("vmux_").unwrap_or(name);
+    match name {
+        // `browser_navigate` with an explicit `pane` already targets that pane;
+        // only intercept the in-place (no-pane) case.
+        "browser_navigate"
+            if arguments
+                .get("pane")
+                .and_then(serde_json::Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .is_none() => {}
+        // `open_page` requires an agent anchor the chat webview can't provide, so
+        // it errors today; remap it to open beside the chat instead.
+        "open_page" => {}
+        // `in_place` (OpenCommand::InPlace) navigates the focused stack in place.
+        "in_place" => {}
+        _ => return None,
+    }
+    let url = arguments
+        .get("url")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .trim();
+    // Only http(s) urls would navigate the chat webview in place. vmux:// and
+    // file: urls already route to a new stack even without a pane, so leave them
+    // to the normal dispatch path. An absent/empty url (e.g. in_place's startup
+    // default) also falls through.
+    if url.starts_with("http://") || url.starts_with("https://") {
+        Some(url.to_string())
+    } else {
+        None
+    }
+}
+
+/// Walk `webview -> Stack -> Pane` via `ChildOf` and return the pane entity iff
+/// it is a leaf pane (`With<Pane>, Without<PaneSplit>`), which is what
+/// `parse_pane_target` requires. Mirrors `spawn_popup_stacks` in vmux_browser.
+fn chat_pane_for_webview(
+    webview: Entity,
+    child_of: &Query<&ChildOf>,
+    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+) -> Option<Entity> {
+    let stack = child_of.get(webview).ok()?.get();
+    let pane = child_of.get(stack).ok()?.get();
+    leaf_panes.contains(pane).then_some(pane)
+}
+
 fn on_bridge_request(
     trigger: On<Receive<ChatBridgeRequest>>,
     browsers: NonSend<Browsers>,
     service: Option<Res<ServiceClient>>,
     mut pending: ResMut<PendingBridgeCalls>,
+    child_of: Query<&ChildOf>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
 ) {
     let req = &trigger.payload;
     if req.channel != BRIDGE_CHANNEL {
@@ -159,12 +223,14 @@ fn on_bridge_request(
             );
         }
         "callTool" => {
+            let chat_pane = chat_pane_for_webview(trigger.webview, &child_of, &leaf_panes);
             handle_call_tool(
                 req,
                 trigger.webview,
                 &browsers,
                 service.as_deref(),
                 &mut pending,
+                chat_pane,
             );
         }
         other => {
@@ -187,6 +253,7 @@ fn handle_call_tool(
     browsers: &Browsers,
     service: Option<&ServiceClient>,
     pending: &mut PendingBridgeCalls,
+    chat_pane: Option<Entity>,
 ) {
     let deliver_tool_error = |message: String| {
         execute_js_deliver(
@@ -206,14 +273,31 @@ fn handle_call_tool(
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
 
-    // The chat webview is not an agent, so there is no self-anchor. Pane-targeting
-    // tools fail fast inside dispatch and surface as a clean MCP error here.
-    let target = match vmux_mcp::tools::dispatch_with_anchor(name, arguments, None) {
-        Ok(target) => target,
-        Err(message) => {
-            deliver_tool_error(message);
-            return;
+    // URL-opening tools (browser_navigate without a pane, open_page, in_place)
+    // would otherwise navigate the focused webview — the le-chat page — in place.
+    // Force the target to the chat's own pane so vmux routes to NewStackInPane,
+    // opening a new stack beside the chat and leaving it untouched. If the chat
+    // pane can't be resolved, fall through to the normal dispatch path rather
+    // than erroring.
+    let target = match chat_pane
+        .and_then(|pane| url_opening_tool_url(name, &arguments).map(|url| (pane, url)))
+    {
+        Some((pane, url)) => {
+            vmux_mcp::tools::DispatchTarget::Command(AgentCommand::BrowserNavigate {
+                url,
+                pane: Some(pane.to_bits().to_string()),
+            })
         }
+        // The chat webview is not an agent, so there is no self-anchor. Other
+        // pane-targeting tools fail fast inside dispatch and surface as a clean
+        // MCP error here.
+        None => match vmux_mcp::tools::dispatch_with_anchor(name, arguments, None) {
+            Ok(target) => target,
+            Err(message) => {
+                deliver_tool_error(message);
+                return;
+            }
+        },
     };
 
     let Some(service) = service else {
@@ -360,5 +444,90 @@ mod tests {
             vmux_service::protocol::AgentQueryResult::Settings("{\"a\":1}".to_string()),
         );
         assert_eq!(value["content"][0]["text"], "{\"a\":1}");
+    }
+
+    #[test]
+    fn remap_browser_navigate_http_url_to_pane() {
+        // A plain browser_navigate (no pane) with an http(s) url is the in-place
+        // case that replaces le-chat; it must be remapped.
+        let url = url_opening_tool_url(
+            "browser_navigate",
+            &serde_json::json!({"url": "https://example.com"}),
+        );
+        assert_eq!(url.as_deref(), Some("https://example.com"));
+
+        // vmux_-prefixed name (as the bridge actually receives) also matches.
+        let url = url_opening_tool_url(
+            "vmux_browser_navigate",
+            &serde_json::json!({"url": "http://example.com/path"}),
+        );
+        assert_eq!(url.as_deref(), Some("http://example.com/path"));
+    }
+
+    #[test]
+    fn remap_open_page_and_in_place_http_url() {
+        assert_eq!(
+            url_opening_tool_url("open_page", &serde_json::json!({"url": "https://a.com"}))
+                .as_deref(),
+            Some("https://a.com"),
+        );
+        assert_eq!(
+            url_opening_tool_url(
+                "vmux_in_place",
+                &serde_json::json!({"url": "https://b.com"})
+            )
+            .as_deref(),
+            Some("https://b.com"),
+        );
+    }
+
+    #[test]
+    fn remap_skips_browser_navigate_with_explicit_pane() {
+        // An explicit pane already targets a pane (NewStackInPane); don't override.
+        assert!(
+            url_opening_tool_url(
+                "browser_navigate",
+                &serde_json::json!({"url": "https://example.com", "pane": "12345"}),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn remap_skips_non_http_urls() {
+        // vmux:// and file: already route to a new stack without a pane.
+        assert!(
+            url_opening_tool_url(
+                "browser_navigate",
+                &serde_json::json!({"url": "vmux://terminal/"}),
+            )
+            .is_none()
+        );
+        assert!(
+            url_opening_tool_url("in_place", &serde_json::json!({"url": "file:///tmp/x"}))
+                .is_none()
+        );
+        // Missing/empty url (e.g. in_place startup default) falls through.
+        assert!(url_opening_tool_url("in_place", &serde_json::json!({})).is_none());
+        assert!(url_opening_tool_url("open_page", &serde_json::json!({"url": "  "})).is_none());
+    }
+
+    #[test]
+    fn remap_skips_unrelated_tools() {
+        // Tools that don't navigate the chat webview in place are left alone.
+        for name in [
+            "in_new_stack",
+            "in_new_tab",
+            "in_new_space",
+            "open_file",
+            "run",
+            "list_spaces",
+            "screenshot",
+        ] {
+            assert!(
+                url_opening_tool_url(name, &serde_json::json!({"url": "https://x.com"})).is_none(),
+                "{name} should not be remapped"
+            );
+        }
     }
 }
