@@ -341,6 +341,7 @@ mod file_event_tests {
     fn file_dir_event_has_parent_fields() {
         let e = FileDirEvent {
             path: "/a/b".into(),
+            abs_path: "/a/b".into(),
             entries: vec![],
             parent_path: "/a".into(),
             parent_entries: vec![],
