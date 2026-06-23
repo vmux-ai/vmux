@@ -1274,11 +1274,7 @@ mod tests {
             dispatch_from_tool_call("read_terminal", serde_json::json!({"terminal": "bad"}))
                 .is_err()
         );
-        assert!(
-            tool_definitions()
-                .iter()
-                .any(|d| d.name == "read_terminal")
-        );
+        assert!(tool_definitions().iter().any(|d| d.name == "read_terminal"));
     }
 
     #[test]
