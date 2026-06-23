@@ -466,6 +466,69 @@ fn discard_startup_tab_layout_requests(mut requests: ResMut<Messages<TabLayoutSp
     requests.clear();
 }
 
+pub struct TabScaffold {
+    pub tab: Entity,
+    pub pane: Entity,
+    pub stack: Entity,
+}
+
+pub fn spawn_tab_scaffold_in_space(
+    commands: &mut Commands,
+    space: Entity,
+    primary_window: Entity,
+    gap_px: f32,
+) -> TabScaffold {
+    let tab = commands
+        .spawn((
+            tab_bundle(),
+            LastActivatedAt::now(),
+            CreatedAt::now(),
+            ChildOf(space),
+        ))
+        .id();
+
+    let gap = pane_split_gaps(PaneSplitDirection::Row, gap_px);
+    let split_root = commands
+        .spawn((
+            Pane,
+            PaneSplit {
+                direction: PaneSplitDirection::Row,
+            },
+            HostWindow(primary_window),
+            ZIndex(0),
+            Transform::default(),
+            GlobalTransform::default(),
+            Node {
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                column_gap: gap.column_gap,
+                row_gap: gap.row_gap,
+                ..default()
+            },
+            ChildOf(tab),
+        ))
+        .id();
+
+    let pane = commands
+        .spawn((
+            leaf_pane_bundle(),
+            LastActivatedAt::now(),
+            ChildOf(split_root),
+        ))
+        .id();
+
+    let stack = commands
+        .spawn((
+            stack_bundle(),
+            LastActivatedAt::now(),
+            CreatedAt::now(),
+            ChildOf(pane),
+        ))
+        .id();
+
+    TabScaffold { tab, pane, stack }
+}
+
 pub fn spawn_requested_tab_layouts(
     mut reader: MessageReader<TabLayoutSpawnRequest>,
     settings: Res<LayoutSettings>,
@@ -487,56 +550,19 @@ pub fn spawn_requested_tab_layouts(
             .next()
             .or_else(|| any_space.iter().next())
             .unwrap_or(request.main);
-        let tab_e = commands
-            .spawn((
-                tab_bundle(),
-                LastActivatedAt::now(),
-                CreatedAt::now(),
-                ChildOf(parent),
-            ))
-            .id();
+        let TabScaffold {
+            tab: tab_e,
+            pane: leaf,
+            stack,
+        } = spawn_tab_scaffold_in_space(
+            &mut commands,
+            parent,
+            request.primary_window,
+            settings.pane.gap,
+        );
         if let Some(name) = request.name.clone() {
             commands.entity(tab_e).insert(Tab { name });
         }
-
-        let gap = pane_split_gaps(PaneSplitDirection::Row, settings.pane.gap);
-        let split_root = commands
-            .spawn((
-                Pane,
-                PaneSplit {
-                    direction: PaneSplitDirection::Row,
-                },
-                HostWindow(request.primary_window),
-                ZIndex(0),
-                Transform::default(),
-                GlobalTransform::default(),
-                Node {
-                    flex_grow: 1.0,
-                    min_height: Val::Px(0.0),
-                    column_gap: gap.column_gap,
-                    row_gap: gap.row_gap,
-                    ..default()
-                },
-                ChildOf(tab_e),
-            ))
-            .id();
-
-        let leaf = commands
-            .spawn((
-                leaf_pane_bundle(),
-                LastActivatedAt::now(),
-                ChildOf(split_root),
-            ))
-            .id();
-
-        let stack = commands
-            .spawn((
-                stack_bundle(),
-                LastActivatedAt::now(),
-                CreatedAt::now(),
-                ChildOf(leaf),
-            ))
-            .id();
 
         if request.clear_pending_stack
             && let Some(old_stack) = new_stack_ctx.stack.take()
@@ -792,6 +818,30 @@ mod tests {
     use crate::cef::LayoutCef;
     use bevy::ecs::relationship::Relationship;
     use bevy_cef::prelude::WebviewExtendStandardMaterial;
+
+    #[test]
+    fn scaffold_builds_tab_pane_stack_under_space() {
+        use bevy::ecs::system::SystemState;
+        let mut app = App::new();
+        let space = app.world_mut().spawn(crate::space::Space).id();
+        let window = app.world_mut().spawn_empty().id();
+        let result = {
+            let world = app.world_mut();
+            let mut state = SystemState::<Commands>::new(world);
+            let mut commands = state.get_mut(world).unwrap();
+            let r = spawn_tab_scaffold_in_space(&mut commands, space, window, 8.0);
+            state.apply(world);
+            r
+        };
+        assert!(app.world().get::<crate::tab::Tab>(result.tab).is_some());
+        assert!(app.world().get::<crate::pane::Pane>(result.pane).is_some());
+        assert!(
+            app.world()
+                .get::<crate::stack::Stack>(result.stack)
+                .is_some()
+        );
+        assert_eq!(app.world().get::<ChildOf>(result.tab).unwrap().get(), space);
+    }
 
     static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
