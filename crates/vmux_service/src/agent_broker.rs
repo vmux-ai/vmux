@@ -14,6 +14,13 @@ pub type PendingToolCalls = Arc<Mutex<HashMap<AgentRequestId, oneshot::Sender<(S
 
 const NO_SUBSCRIBER: &str = "no desktop subscribed to agent commands";
 
+fn query_timeout(query: &AgentQuery) -> std::time::Duration {
+    match query {
+        AgentQuery::RecordStop { .. } => crate::protocol::RECORD_STOP_TIMEOUT,
+        _ => AGENT_QUERY_TIMEOUT,
+    }
+}
+
 #[derive(Clone)]
 pub struct AgentBroker {
     agent_tx: broadcast::Sender<ServiceMessage>,
@@ -81,6 +88,7 @@ impl AgentBroker {
         }
         let (tx, rx) = oneshot::channel::<AgentQueryResult>();
         self.pending_queries.lock().await.insert(request_id, tx);
+        let timeout = query_timeout(&query);
 
         if self
             .agent_tx
@@ -91,7 +99,7 @@ impl AgentBroker {
             return Err(NO_SUBSCRIBER.to_string());
         }
 
-        match tokio::time::timeout(AGENT_QUERY_TIMEOUT, rx).await {
+        match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(result)) => Ok(result),
             _ => {
                 self.pending_queries.lock().await.remove(&request_id);
@@ -159,6 +167,16 @@ mod tests {
             pending_tool_calls,
         );
         (b, agent_tx)
+    }
+
+    #[test]
+    fn record_stop_gets_longer_timeout() {
+        let stop = AgentQuery::RecordStop {
+            dir: None,
+            name: None,
+        };
+        assert_eq!(query_timeout(&stop), crate::protocol::RECORD_STOP_TIMEOUT);
+        assert_eq!(query_timeout(&AgentQuery::GetSettings), AGENT_QUERY_TIMEOUT);
     }
 
     #[tokio::test]
