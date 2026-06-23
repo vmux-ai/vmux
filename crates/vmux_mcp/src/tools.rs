@@ -399,6 +399,46 @@ call again."
     }
 }
 
+fn record_start_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "vmux_record_start".into(),
+        description: "Start recording the vmux window to an mp4 video (optionally also a GIF). \
+Returns immediately so you can drive the UI with other tools to demonstrate a feature, then call \
+vmux_record_stop. Auto-stops after `max_secs` (default 120) as a safety cap. Only one recording at a \
+time. macOS only; the first call may prompt for Screen Recording permission - grant it in System \
+Settings > Privacy & Security > Screen Recording, then call again."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "gif": {"type": "boolean", "description": "Also emit a GIF next to the mp4 (default false)."},
+                "max_secs": {"type": "integer", "description": "Auto-stop cap in seconds (default 120)."},
+                "pane": {"type": "string", "description": "Optional pane:<id> or stack:<id> to crop to; whole window if omitted."}
+            }
+        }),
+    }
+}
+
+fn record_stop_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "vmux_record_stop".into(),
+        description: "Stop the active recording and write the file(s). Returns the mp4 path, duration, \
+and size (plus the GIF path if one was requested). By default saves to ~/.vmux/screenshots/; pass `dir` \
+(absolute) and `name` (basename, no extension) to save elsewhere - e.g. dir=<repo>/docs/features, \
+name=<feature> to drop a demo straight into the repo."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "dir": {"type": "string", "description": "Absolute output directory (default ~/.vmux/screenshots)."},
+                "name": {"type": "string", "description": "Output basename without extension (default vmux-<timestamp>)."}
+            }
+        }),
+    }
+}
+
 pub fn tool_definitions() -> Vec<ToolDefinition> {
     let mut defs: Vec<ToolDefinition> = AppCommand::mcp_tool_entries()
         .into_iter()
@@ -418,6 +458,8 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(run_definition());
     defs.push(read_terminal_definition());
     defs.push(screenshot_definition());
+    defs.push(record_start_definition());
+    defs.push(record_stop_definition());
     defs
 }
 
@@ -568,6 +610,43 @@ pub fn dispatch_with_anchor(
             vmux_service::protocol::AgentQuery::Screenshot { pane },
         ));
     }
+    if name == "record_start" {
+        let gif = arguments.get("gif").and_then(Value::as_bool).unwrap_or(false);
+        let max_secs = arguments
+            .get("max_secs")
+            .and_then(Value::as_u64)
+            .unwrap_or(120) as u32;
+        let pane = match arguments.get("pane") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => {
+                let s = s.trim();
+                (!s.is_empty()).then(|| s.to_string())
+            }
+            Some(_) => return Err("record_start.pane must be a string".to_string()),
+        };
+        return Ok(DispatchTarget::Query(
+            vmux_service::protocol::AgentQuery::RecordStart {
+                gif,
+                max_secs,
+                pane,
+            },
+        ));
+    }
+    if name == "record_stop" {
+        let parse_opt = |key: &str| match arguments.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(s)) => {
+                let s = s.trim();
+                Ok((!s.is_empty()).then(|| s.to_string()))
+            }
+            Some(_) => Err(format!("record_stop.{key} must be a string")),
+        };
+        let dir = parse_opt("dir")?;
+        let out_name = parse_opt("name")?;
+        return Ok(DispatchTarget::Query(
+            vmux_service::protocol::AgentQuery::RecordStop { dir, name: out_name },
+        ));
+    }
     if name == "read_layout" {
         return Ok(DispatchTarget::Query(
             vmux_service::protocol::AgentQuery::ReadLayout { anchor },
@@ -629,6 +708,68 @@ mod tests {
             DispatchTarget::Command(cmd) => Ok(cmd),
             DispatchTarget::Query(_) => Err("expected Command, got Query".to_string()),
         }
+    }
+
+    fn dispatch_query(name: &str, args: serde_json::Value) -> Result<AgentQuery, String> {
+        match dispatch_from_tool_call(name, args)? {
+            DispatchTarget::Query(q) => Ok(q),
+            DispatchTarget::Command(_) => Err("expected Query, got Command".to_string()),
+        }
+    }
+
+    #[test]
+    fn record_tools_are_listed() {
+        let names = tool_names();
+        assert!(names.contains(&"vmux_record_start".to_string()));
+        assert!(names.contains(&"vmux_record_stop".to_string()));
+    }
+
+    #[test]
+    fn record_start_dispatch_defaults() {
+        let q = dispatch_query("record_start", serde_json::json!({})).unwrap();
+        assert_eq!(
+            q,
+            AgentQuery::RecordStart {
+                gif: false,
+                max_secs: 120,
+                pane: None
+            }
+        );
+    }
+
+    #[test]
+    fn record_start_dispatch_args() {
+        let q = dispatch_query(
+            "record_start",
+            serde_json::json!({"gif": true, "max_secs": 30, "pane": "pane:3"}),
+        )
+        .unwrap();
+        assert_eq!(
+            q,
+            AgentQuery::RecordStart {
+                gif: true,
+                max_secs: 30,
+                pane: Some("pane:3".into())
+            }
+        );
+    }
+
+    #[test]
+    fn record_stop_dispatch_args() {
+        let q = dispatch_query(
+            "record_stop",
+            serde_json::json!({"dir": "/tmp/out", "name": "feature-x"}),
+        )
+        .unwrap();
+        assert_eq!(
+            q,
+            AgentQuery::RecordStop {
+                dir: Some("/tmp/out".into()),
+                name: Some("feature-x".into())
+            }
+        );
+        let empty = dispatch_query("record_stop", serde_json::json!({})).unwrap();
+        assert_eq!(empty, AgentQuery::RecordStop { dir: None, name: None });
     }
 
     #[test]
