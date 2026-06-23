@@ -2,6 +2,7 @@ mod agents;
 mod coworking;
 mod cta;
 mod hero;
+mod parts;
 mod pillars;
 mod platform;
 mod scenes;
