@@ -847,7 +847,7 @@ mod tests {
 
     #[test]
     fn list_tools_includes_notify() {
-        assert!(tool_names().contains(&"vmux_notify".to_string()));
+        assert!(tool_names().contains(&"notify".to_string()));
     }
 
     #[test]
