@@ -375,6 +375,30 @@ Pass `terminal` = a terminal id returned by run, or a terminal stack's process_i
     }
 }
 
+fn screenshot_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "screenshot".into(),
+        description: "Capture the vmux window as a PNG and return it inline so you can SEE the current UI \
+(use it to verify your own UI changes). Captures the whole window exactly as it appears on screen - all \
+visible panes (browser, terminal, editor) and layout chrome. Optionally pass `pane` (a pane:<id> or \
+stack:<id> from read_layout) to crop to just that region. The full-resolution image is saved under \
+~/.vmux/screenshots/ and a downscaled copy is returned inline. macOS only; the first call may prompt for \
+Screen Recording permission - grant it in System Settings > Privacy & Security > Screen Recording, then \
+call again."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "pane": {
+                    "type": "string",
+                    "description": "Optional pane:<id> or stack:<id> to crop to; whole window if omitted."
+                }
+            }
+        }),
+    }
+}
+
 pub fn tool_definitions() -> Vec<ToolDefinition> {
     let mut defs: Vec<ToolDefinition> = AppCommand::mcp_tool_entries()
         .into_iter()
@@ -393,6 +417,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(open_file_definition());
     defs.push(run_definition());
     defs.push(read_terminal_definition());
+    defs.push(screenshot_definition());
     defs
 }
 
@@ -530,6 +555,19 @@ pub fn dispatch_with_anchor(
             .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string())?;
         return Ok(DispatchTarget::Query(
             vmux_service::protocol::AgentQuery::ReadTerminal { process_id },
+        ));
+    }
+    if name == "screenshot" {
+        let pane = match arguments.get("pane") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => {
+                let s = s.trim();
+                (!s.is_empty()).then(|| s.to_string())
+            }
+            Some(_) => return Err("screenshot.pane must be a string".to_string()),
+        };
+        return Ok(DispatchTarget::Query(
+            vmux_service::protocol::AgentQuery::Screenshot { pane },
         ));
     }
     if name == "read_layout" {
@@ -721,6 +759,38 @@ mod tests {
         let names = tool_names();
         assert!(names.contains(&"read_layout".to_string()));
         assert!(names.contains(&"update_layout".to_string()));
+    }
+
+    #[test]
+    fn list_tools_includes_screenshot() {
+        assert!(tool_names().contains(&"screenshot".to_string()));
+    }
+
+    #[test]
+    fn screenshot_dispatches_to_query_with_and_without_pane() {
+        let target = dispatch_from_tool_call("screenshot", serde_json::json!({})).unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Query(vmux_service::protocol::AgentQuery::Screenshot { pane: None })
+        ));
+
+        let target =
+            dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": "stack:7" }))
+                .unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Query(vmux_service::protocol::AgentQuery::Screenshot { pane: Some(p) })
+                if p == "stack:7"
+        ));
+
+        let target =
+            dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": "  " })).unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Query(vmux_service::protocol::AgentQuery::Screenshot { pane: None })
+        ));
+
+        assert!(dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": 123 })).is_err());
     }
 
     #[test]

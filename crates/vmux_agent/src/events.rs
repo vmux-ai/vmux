@@ -52,3 +52,23 @@ pub enum ApprovalDecision {
     AllowAlways,
     Deny,
 }
+
+#[derive(Message, Clone)]
+pub struct ScreenshotRequest {
+    pub request_id: [u8; 16],
+    pub pane: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct ScreenshotImage {
+    pub path: String,
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Message, Clone)]
+pub struct ScreenshotResponse {
+    pub request_id: [u8; 16],
+    pub result: Result<ScreenshotImage, String>,
+}

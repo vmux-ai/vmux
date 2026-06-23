@@ -395,6 +395,21 @@ fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult
                 "content": [{"type": "text", "text": format!("{{\"seq\":{seq},\"exit\":{exit}}}")}]
             })
         }
+        AgentQueryResult::Image {
+            path,
+            png,
+            width,
+            height,
+        } => {
+            use base64::Engine;
+            let data = base64::engine::general_purpose::STANDARD.encode(&png);
+            json!({
+                "content": [
+                    {"type": "text", "text": format!("saved {path} ({width}×{height})")},
+                    {"type": "image", "data": data, "mimeType": "image/png"}
+                ]
+            })
+        }
         AgentQueryResult::Error(message) => {
             json!({
                 "isError": true,
@@ -426,6 +441,30 @@ mod tests {
         let request = read_json_line(&mut lines).unwrap().unwrap();
 
         assert_eq!(request["method"], "tools/list");
+    }
+
+    #[test]
+    fn image_query_result_maps_to_text_and_image_blocks() {
+        use vmux_service::protocol::AgentQueryResult;
+        let resp = query_result_to_mcp_response(AgentQueryResult::Image {
+            path: "/tmp/shot.png".into(),
+            png: vec![137, 80, 78, 71],
+            width: 800,
+            height: 600,
+        });
+        let content = resp["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert!(
+            content[0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("/tmp/shot.png")
+        );
+        assert!(content[0]["text"].as_str().unwrap().contains("800"));
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["mimeType"], "image/png");
+        assert_eq!(content[1]["data"], "iVBORw==");
     }
 
     #[test]

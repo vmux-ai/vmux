@@ -179,6 +179,12 @@ fn query_result_to_content(result: crate::protocol::AgentQueryResult) -> (String
             let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
             (format!("{{\"seq\":{seq},\"exit\":{exit}}}"), false)
         }
+        AgentQueryResult::Image {
+            path,
+            width,
+            height,
+            ..
+        } => (format!("saved {path} ({width}×{height})"), false),
         AgentQueryResult::Error(message) => (message, true),
     }
 }

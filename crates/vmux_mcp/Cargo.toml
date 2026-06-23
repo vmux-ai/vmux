@@ -10,6 +10,7 @@ name = "vmux_mcp"
 path = "src/lib.rs"
 
 [dependencies]
+base64 = "0.22"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

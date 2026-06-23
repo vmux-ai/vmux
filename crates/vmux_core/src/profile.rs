@@ -38,6 +38,10 @@ pub fn config_dir() -> PathBuf {
     home.join(".vmux")
 }
 
+pub fn screenshots_dir() -> PathBuf {
+    config_dir().join("screenshots")
+}
+
 /// Per-build config subdir, or `None` for the shared (release) settings.
 fn config_suffix() -> Option<&'static str> {
     match env!("VMUX_BUILD_PROFILE") {
@@ -206,6 +210,12 @@ pub fn prune_orphan_space_dirs(live: &std::collections::HashSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn screenshots_dir_is_under_config_dir() {
+        assert_eq!(screenshots_dir(), config_dir().join("screenshots"));
+        assert!(screenshots_dir().ends_with(".vmux/screenshots"));
+    }
 
     #[test]
     fn data_dir_suffix_maps_each_profile() {
