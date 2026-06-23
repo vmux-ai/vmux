@@ -139,7 +139,7 @@ impl CefApiHandler {
         let Some(frame) = context.frame() else {
             return 0;
         };
-        if !crate::util::has_embedded_scheme(&frame.url().into_string()) {
+        if !crate::util::ipc_allowed_render(&frame.url().into_string()) {
             return 1;
         }
 

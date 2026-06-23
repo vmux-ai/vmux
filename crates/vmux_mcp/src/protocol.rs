@@ -311,26 +311,32 @@ async fn run_agent_command(
                 request_id: received,
                 result,
             } if received == request_id => {
-                use vmux_service::protocol::AgentCommandResult;
-                return match result {
-                    AgentCommandResult::Ok => Ok(json!({
-                        "content": [{"type": "text", "text": "ok"}]
-                    })),
-                    AgentCommandResult::Text(text) => Ok(json!({
-                        "content": [{"type": "text", "text": text}]
-                    })),
-                    AgentCommandResult::Layout(snapshot) => {
-                        let text = serde_json::to_string(&snapshot).unwrap_or_default();
-                        Ok(json!({
-                            "content": [{"type": "text", "text": text}]
-                        }))
-                    }
-                    AgentCommandResult::Error(message) => Err(message),
-                };
+                return command_result_to_mcp_response(result);
             }
             ServiceMessage::Error { message } => return Err(message),
             _ => {}
         }
+    }
+}
+
+pub fn command_result_to_mcp_response(
+    result: vmux_service::protocol::AgentCommandResult,
+) -> Result<Value, String> {
+    use vmux_service::protocol::AgentCommandResult;
+    match result {
+        AgentCommandResult::Ok => Ok(json!({
+            "content": [{"type": "text", "text": "ok"}]
+        })),
+        AgentCommandResult::Text(text) => Ok(json!({
+            "content": [{"type": "text", "text": text}]
+        })),
+        AgentCommandResult::Layout(snapshot) => {
+            let text = serde_json::to_string(&snapshot).unwrap_or_default();
+            Ok(json!({
+                "content": [{"type": "text", "text": text}]
+            }))
+        }
+        AgentCommandResult::Error(message) => Err(message),
     }
 }
 
@@ -365,7 +371,7 @@ async fn run_agent_query(query: vmux_service::protocol::AgentQuery) -> Result<Va
     }
 }
 
-fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult) -> Value {
+pub fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult) -> Value {
     use vmux_service::protocol::AgentQueryResult;
     match result {
         AgentQueryResult::Layout(snapshot) => {
@@ -438,7 +444,7 @@ fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult
     }
 }
 
-fn tool_error(message: &str) -> Value {
+pub fn tool_error(message: &str) -> Value {
     json!({
         "isError": true,
         "content": [

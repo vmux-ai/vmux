@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 
-use crate::protocol::{AgentCommand, AgentQuery, AgentRequestId, AgentRunStatus, ProcessId};
+use crate::protocol::{
+    AgentCommand, AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, AgentRunStatus,
+    ProcessId,
+};
 
 /// Who issued a command relayed through the agent request plumbing. Most
 /// `AgentCommandRequest`s originate from an agent (`Agent`), but some user
@@ -35,6 +38,18 @@ pub struct AgentToolCallRequest {
     pub sid: String,
     pub name: String,
     pub args_json: String,
+}
+
+#[derive(Message)]
+pub struct AgentCommandResultEvent {
+    pub request_id: AgentRequestId,
+    pub result: AgentCommandResult,
+}
+
+#[derive(Message)]
+pub struct AgentQueryResultEvent {
+    pub request_id: AgentRequestId,
+    pub result: AgentQueryResult,
 }
 
 #[derive(Message)]

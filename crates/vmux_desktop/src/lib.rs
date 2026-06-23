@@ -14,6 +14,7 @@ mod event_tap;
 mod focus_native;
 #[cfg(target_os = "macos")]
 mod glass;
+mod lechat_bridge;
 mod log_forward;
 #[cfg(target_os = "macos")]
 mod native_keyboard;
@@ -124,6 +125,7 @@ impl Plugin for VmuxPlugin {
                 vmux_vibe_setup::VibeSetupPlugin,
                 LayoutCefPlugin,
                 BrowserPlugin,
+                lechat_bridge::LeChatBridgePlugin,
             ))
             .add_plugins((
                 AgentPlugin,

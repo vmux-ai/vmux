@@ -251,6 +251,8 @@ impl Plugin for TerminalPlugin {
             .add_message::<TerminalSpawnRequest>()
             .add_message::<ProcessesMonitorSpawnRequest>()
             .add_message::<TerminalFontSizeCommand>()
+            .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
+            .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
             .init_resource::<pid::PidToEntity>()
             .add_systems(
                 Update,
@@ -1015,6 +1017,8 @@ struct PollServiceWriters<'w> {
     page_agent_run_status: MessageWriter<'w, vmux_service::agent_events::PageAgentRunStatus>,
     page_agent_awaiting: MessageWriter<'w, vmux_service::agent_events::PageAgentAwaitingApproval>,
     page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
+    agent_command_results: MessageWriter<'w, vmux_service::agent_events::AgentCommandResultEvent>,
+    agent_query_results: MessageWriter<'w, vmux_service::agent_events::AgentQueryResultEvent>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
     osc_title: MessageWriter<'w, OscTitleChanged>,
     bell: MessageWriter<'w, vmux_core::notify::BellReceived>,
@@ -1432,6 +1436,16 @@ fn poll_service_messages(
                 writers
                     .page_agent_snapshot
                     .write(vmux_service::agent_events::PageAgentSnapshot { sid, messages_json });
+            }
+            ServiceMessage::AgentCommandResult { request_id, result } => {
+                writers.agent_command_results.write(
+                    vmux_service::agent_events::AgentCommandResultEvent { request_id, result },
+                );
+            }
+            ServiceMessage::AgentQueryResult { request_id, result } => {
+                writers.agent_query_results.write(
+                    vmux_service::agent_events::AgentQueryResultEvent { request_id, result },
+                );
             }
             _ => {}
         }

@@ -165,6 +165,24 @@ pub fn is_trusted_embedded_page(url: &str) -> bool {
     url_is_trusted_embedded_page(url, config.scheme_prefix(), &config.hosts)
 }
 
+pub const BRIDGE_ALLOWED_AUTHORITIES: &[&str] = &["chat.mistral.ai", "chat.local.mistral.ai:8443"];
+
+pub fn is_bridge_allowed_origin(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    BRIDGE_ALLOWED_AUTHORITIES.contains(&authority)
+}
+
+pub fn ipc_allowed_render(url: &str) -> bool {
+    has_embedded_scheme(url) || is_bridge_allowed_origin(url)
+}
+
+pub fn ipc_allowed_browser(url: &str) -> bool {
+    is_trusted_embedded_page(url) || is_bridge_allowed_origin(url)
+}
+
 pub fn embedded_page_host_of(url: &str) -> Option<String> {
     embedded_page_host(url, resolved_cef_embedded_page_config().scheme_prefix())
 }
