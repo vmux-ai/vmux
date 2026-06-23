@@ -21,9 +21,7 @@ pub fn Hero() -> Element {
                 video {
                     "data-hero-video": "1",
                     class: "absolute inset-0 h-full w-full object-cover opacity-60 mix-blend-screen motion-reduce:hidden",
-                    autoplay: true,
                     muted: true,
-                    "loop": true,
                     "playsinline": true,
                 }
                 div { class: "absolute left-1/2 top-1/4 h-[34rem] w-[34rem] -translate-x-1/2 rounded-full bg-accent/25 blur-[130px] animate-aurora motion-reduce:animate-none" }

@@ -9,7 +9,7 @@
 Rebuild the landing page as a single, cinematic, scroll-driven story with strong
 single-line headlines and dramatic parallax. The page tells one narrative arc:
 
-> It starts as **just a browser** → hit ⌘L, **visit an agent** → it **splits into
+> It starts as **just a browser** → hit ⌘K, **visit an agent** → it **splits into
 > an IDE** → where **people and agents work side by side** → **more OS than app** →
 > install.
 
@@ -111,9 +111,9 @@ wording tuned during implementation).
 ### Act 2 — Visit an agent · ☀ light glass (pivot)
 
 - Address bar is the hero of this beat. As `--p` progresses, scroll scrubs: the
-  address bar "types" `⌘L → vmux://agent/…`, and the frame body morphs from a web
+  address bar "types" `⌘K → vmux://agent/…`, and the frame body morphs from a web
   page into an agent chat. Cyan accents warm toward accent/indigo (still on light).
-- Headline: **"Hit ⌘L. Visit an agent."**
+- Headline: **"Hit ⌘K. Visit an agent."**
 - Sub: every agent, terminal, and space lives at its own address — ready to share
   or jump back to.
 - Parallax: frame tilts/zooms on `--p`; `[data-tilt]` mouse parallax.
@@ -174,8 +174,10 @@ Folds the current Coworking and InputScene into one beat.
 - **Staged scenes**: extend `[data-scene]` so a single tall sticky section drives
   multiple sub-stages off `--p` thresholds (Act 2 morph, Act 3 split).
 - **Reduced motion**: `prefers-reduced-motion: reduce` keeps each act at its final
-  tone (no animated flip), reveals shown, scenes pinned at a representative `--p`,
-  video paused on a poster, aurora animations disabled.
+  tone (no animated flip), reveals shown, scenes pinned at a representative `--p`
+  (set by `scroll.rs`'s early-return branch), aurora/reveal animations disabled
+  via `motion-reduce:*` utilities, and the hero `<video>` hidden via
+  `motion-reduce:hidden`.
 
 ## Old → new mapping (fold / cut)
 
@@ -212,9 +214,12 @@ Folds the current Coworking and InputScene into one beat.
 - **Tailwind**: add aurora-flow keyframes and light-surface tokens to
   `tailwind.input.css` `@theme`. Prefer utilities / arbitrary props over
   hand-written CSS; keep the input file minimal.
-- **Hero clip**: wire a `<video muted loop playsinline>` slot with a light code-gen
-  aurora fallback as default. The actual cinematic mp4 (Seedance-generated) drops
-  into `website/assets/` later; poster frame used for reduced-motion.
+- **Hero clip**: wire a `<video muted playsinline>` slot (no `autoplay`/`loop` —
+  playback is scroll-scrubbed via `currentTime`, so natural playback would fight
+  the seek) with a light code-gen aurora fallback as default. Hidden under
+  reduced motion via `motion-reduce:hidden`. The actual cinematic mp4
+  (Seedance-generated) drops into `website/assets/` later; an optional `poster`
+  can be added with it.
 
 ## Terminology
 
