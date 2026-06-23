@@ -123,8 +123,8 @@ pub struct PageArchiveRequest {
   because no existing primitive opens a tab into a non-active space.
 - **Reconstruct by kind** into the new stack:
   - web → `PageOpenRequest { target: Stack(new), url, request_id: None }`
-  - terminal → `PageOpenRequest` with `vmux://terminal/?cwd=…` (fresh shell at the
-    captured cwd)
+  - terminal → `TerminalSpawnRequest { cwd, target_stack }` (fresh shell at the
+    captured cwd; cwd passed as a `PathBuf`, avoiding URL-encoding pitfalls)
   - agent → `SpawnAgentInStackRequest { kind, cwd, session_id, stack: new }`,
     where `session_id` is recovered from the captured url suffix
     (`vmux://agent/{kind}/{sid}`) if present, else `None`. This mirrors how

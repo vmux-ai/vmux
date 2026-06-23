@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, StackCommand};
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
-use vmux_core::terminal::TerminalLaunch;
+use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest};
 use vmux_core::{
     ArchivedPage, PageArchiveRequest, PageMetadata, PageOpenRequest, PageOpenTarget, now_millis,
 };
@@ -12,7 +12,7 @@ use vmux_core::{
 use crate::event::TERMINAL_PAGE_URL;
 use crate::settings::LayoutSettings;
 use crate::space::{ActiveSpaceEntity, Space, SpaceId, space_of};
-use crate::stack::{FocusedStack, Stack};
+use crate::stack::{FocusedStack, Stack, StackCommandSet};
 use crate::window::spawn_tab_scaffold_in_space;
 
 const MAX_ARCHIVE_ENTRIES: usize = 25;
@@ -26,7 +26,11 @@ impl Plugin for ArchivePlugin {
             .add_systems(Update, (capture_archived_pages, maintain_archive))
             .add_systems(
                 Update,
-                (archive_on_stack_close, handle_reopen_closed_page).in_set(ReadAppCommands),
+                (
+                    archive_on_stack_close.before(StackCommandSet),
+                    handle_reopen_closed_page,
+                )
+                    .in_set(ReadAppCommands),
             );
     }
 }
@@ -117,6 +121,7 @@ fn handle_reopen_closed_page(
     primary_window: Single<Entity, With<PrimaryWindow>>,
     mut page_open: MessageWriter<PageOpenRequest>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
+    mut terminal_spawn: MessageWriter<TerminalSpawnRequest>,
     mut commands: Commands,
 ) {
     let mut reopen = false;
@@ -144,7 +149,7 @@ fn handle_reopen_closed_page(
         .iter()
         .find(|(_, id)| id.0 == page.space_id)
         .map(|(e, _)| e)
-        .or(active_space.0)
+        .or_else(|| active_space.0.filter(|e| any_space.get(*e).is_ok()))
         .or_else(|| any_space.iter().next());
     let Some(space) = target_space else {
         return;
@@ -179,14 +184,15 @@ fn handle_reopen_closed_page(
             stack: scaffold.stack,
         });
     } else if page.url.starts_with(TERMINAL_PAGE_URL) {
-        let url = match page.launch.as_ref() {
-            Some(l) if !l.cwd.is_empty() => format!("{TERMINAL_PAGE_URL}?cwd={}", l.cwd),
-            _ => page.url.clone(),
-        };
-        page_open.write(PageOpenRequest {
-            target: PageOpenTarget::Stack(scaffold.stack),
-            url,
-            request_id: None,
+        let cwd = page
+            .launch
+            .as_ref()
+            .map(|l| l.cwd.clone())
+            .filter(|c| !c.is_empty())
+            .map(PathBuf::from);
+        terminal_spawn.write(TerminalSpawnRequest {
+            cwd,
+            target_stack: Some(scaffold.stack),
         });
     } else {
         page_open.write(PageOpenRequest {
@@ -352,6 +358,7 @@ mod tests {
         app.add_message::<AppCommand>()
             .add_message::<PageOpenRequest>()
             .add_message::<SpawnAgentInStackRequest>()
+            .add_message::<TerminalSpawnRequest>()
             .init_resource::<crate::space::ActiveSpaceEntity>()
             .init_resource::<crate::settings::LayoutSettings>()
             .add_systems(Update, super::handle_reopen_closed_page);
@@ -432,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn reopen_terminal_encodes_cwd() {
+    fn reopen_terminal_respawns_at_cwd() {
         let mut app = reopen_app();
         app.world_mut()
             .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
@@ -450,9 +457,15 @@ mod tests {
             }),
         });
         dispatch_reopen(&mut app);
-        let opens = drain_opens(&mut app);
-        assert_eq!(opens.len(), 1);
-        assert_eq!(opens[0].url, "vmux://terminal/?cwd=/work");
+        assert!(drain_opens(&mut app).is_empty());
+        let spawns: Vec<TerminalSpawnRequest> = app
+            .world_mut()
+            .resource_mut::<Messages<TerminalSpawnRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(spawns.len(), 1);
+        assert_eq!(spawns[0].cwd, Some(PathBuf::from("/work")));
+        assert!(spawns[0].target_stack.is_some());
     }
 
     fn drain_agent_spawns(app: &mut App) -> Vec<SpawnAgentInStackRequest> {
