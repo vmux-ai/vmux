@@ -6,7 +6,7 @@ use moonshine_save::prelude::*;
 use std::path::{Path, PathBuf};
 
 use vmux_browser::Browser;
-use vmux_core::{CreatedAt, Order, PageMetadata};
+use vmux_core::{ArchivedPage, CreatedAt, Order, PageMetadata};
 use vmux_layout::event::SERVICES_PAGE_URL;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
@@ -127,6 +127,8 @@ fn mark_dirty_on_change(
     changed_size: Query<(), Changed<PaneSize>>,
     changed_children: Query<(), Changed<Children>>,
     changed_geometry: Query<(), Changed<WindowGeometry>>,
+    added_archived: Query<(), Added<ArchivedPage>>,
+    mut removed_archived: RemovedComponents<ArchivedPage>,
 ) {
     if !added_stacks.is_empty()
         || !added_panes.is_empty()
@@ -137,6 +139,8 @@ fn mark_dirty_on_change(
         || !changed_size.is_empty()
         || !changed_children.is_empty()
         || !changed_geometry.is_empty()
+        || !added_archived.is_empty()
+        || removed_archived.read().count() > 0
     {
         auto_save.dirty = true;
         auto_save.debounce.reset();
@@ -184,6 +188,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<Profile>()
         .allow::<Open>()
         .allow::<PageMetadata>()
+        .allow::<ArchivedPage>()
         .allow::<vmux_history::CreatedAt>()
         .allow::<vmux_history::LastActivatedAt>()
         .allow::<vmux_history::Visit>()
@@ -582,6 +587,22 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
+
+    #[test]
+    fn adding_archived_page_marks_store_dirty() {
+        let mut app = App::new();
+        app.insert_resource(AutoSave {
+            debounce: Timer::from_seconds(0.5, TimerMode::Once),
+            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+            dirty: false,
+        })
+        .add_systems(Update, mark_dirty_on_change);
+        app.update();
+        app.world_mut().resource_mut::<AutoSave>().dirty = false;
+        app.world_mut().spawn(ArchivedPage::default());
+        app.update();
+        assert!(app.world().resource::<AutoSave>().dirty);
+    }
 
     #[test]
     fn sort_tabs_orders_by_order_field() {
