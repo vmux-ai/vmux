@@ -371,17 +371,19 @@ fn reset_file_sent_markers_on_page_ready(
 
 fn on_file_resize(
     trigger: On<BinReceive<FileResizeEvent>>,
-    mut q: Query<(&FileBuffer, &mut FileViewport)>,
+    mut q: Query<(&mut FileViewport, Option<&FileBuffer>)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let Ok((buf, mut vp)) = q.get_mut(entity) else {
+    let Ok((mut vp, buf)) = q.get_mut(entity) else {
         return;
     };
     vp.rows = rows_from_viewport(evt.char_height, evt.viewport_height);
-    emit_window(entity, buf, &vp, &browsers, &mut commands);
+    if let Some(buf) = buf {
+        emit_window(entity, buf, &vp, &browsers, &mut commands);
+    }
 }
 
 fn on_file_scroll(
