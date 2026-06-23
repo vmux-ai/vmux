@@ -409,12 +409,12 @@ call again."
 
 fn browser_snapshot_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "vmux_browser_snapshot".into(),
+        name: "browser_snapshot".into(),
         description:
             "Read the current page's DOM as a compact semantic snapshot. Returns JSON with \
 the page url/title and a list of interactive elements, each with a stable `ref`, `role`, `name`, \
 `value`, `bbox` ([x,y,w,h] in CSS px), and `state` flags. Use the `ref` values to target later \
-interaction tools. Pass `target` = a pane:<id> or stack:<id> from vmux_read_layout to pick a \
+interaction tools. Pass `target` = a pane:<id> or stack:<id> from read_layout to pick a \
 specific page; defaults to the focused page."
                 .into(),
         input_schema: serde_json::json!({
@@ -780,7 +780,7 @@ mod tests {
     #[test]
     fn browser_snapshot_dispatches_to_query_with_pane() {
         let q = dispatch_query(
-            "vmux_browser_snapshot",
+            "browser_snapshot",
             serde_json::json!({ "target": "pane:42" }),
         )
         .unwrap();
@@ -794,22 +794,19 @@ mod tests {
 
     #[test]
     fn browser_snapshot_defaults_pane_to_none() {
-        let q = dispatch_query("vmux_browser_snapshot", serde_json::json!({})).unwrap();
+        let q = dispatch_query("browser_snapshot", serde_json::json!({})).unwrap();
         assert_eq!(q, AgentQuery::BrowserSnapshot { pane: None });
     }
 
     #[test]
     fn browser_snapshot_is_listed() {
-        assert!(tool_names().contains(&"vmux_browser_snapshot".to_string()));
+        assert!(tool_names().contains(&"browser_snapshot".to_string()));
     }
 
     #[test]
     fn browser_snapshot_rejects_non_string_target() {
-        let err = dispatch_query(
-            "vmux_browser_snapshot",
-            serde_json::json!({ "target": 123 }),
-        )
-        .unwrap_err();
+        let err =
+            dispatch_query("browser_snapshot", serde_json::json!({ "target": 123 })).unwrap_err();
         assert!(err.contains("target"));
     }
 
