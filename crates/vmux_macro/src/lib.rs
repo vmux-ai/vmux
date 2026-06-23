@@ -1292,7 +1292,7 @@ fn impl_mcp_tool_leaf_fielded(
         }
         let variant_ident = &variant.ident;
         let tool_name = heck_variant_snake_case(&variant_ident.to_string());
-        let advertised_name = format!("vmux_{tool_name}");
+        let advertised_name = tool_name.clone();
         let description = mcp_props.description.clone().ok_or_else(|| {
             syn::Error::new_spanned(
                 variant_ident,
@@ -1550,7 +1550,7 @@ fn impl_mcp_tool_leaf_unit(
             None => continue,
         };
         let id_lit = id.as_str();
-        let advertised_id = format!("vmux_{id}");
+        let advertised_id = id.clone();
         let variant_ident = &variant.ident;
 
         let description = mcp_props

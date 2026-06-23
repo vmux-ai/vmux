@@ -32,7 +32,7 @@ pub enum McpParamTool {
     SelectTab { index: u8 },
     #[mcp(description = "Update a single vmux setting by dot-path. \
             Example: { path: 'layout.pane.gap', value: 12 }. \
-            Use vmux_get_settings to discover the available paths and current values. \
+            Use get_settings to discover the available paths and current values. \
             For nested arrays, use bracket indexing like 'terminal.themes[0].font_size'.")]
     UpdateSettings {
         path: String,
@@ -53,10 +53,10 @@ pub enum McpParamTool {
     )]
     CreateSpace { name: Option<String> },
     #[mcp(
-        description = "Rename a space by id (the id is stable; only the display name changes). Use vmux_list_spaces to discover ids."
+        description = "Rename a space by id (the id is stable; only the display name changes). Use list_spaces to discover ids."
     )]
     RenameSpace { space_id: String, name: String },
-    #[mcp(description = "Delete a space by id. Use vmux_list_spaces to discover ids.")]
+    #[mcp(description = "Delete a space by id. Use list_spaces to discover ids.")]
     DeleteSpace { space_id: String },
     #[mcp(
         description = "Notify the user that you (this agent) need their attention - typically that you have finished your turn. Shows a macOS notification when they are not looking at your page, and a dot on your avatar in the team facepile until they view it. Optional `title` and `body` customize the message; with neither, a default \"<agent> finished\" is shown."
@@ -164,9 +164,9 @@ pub enum DispatchTarget {
 
 fn read_layout_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "vmux_read_layout".into(),
+        name: "read_layout".into(),
         description: "Returns the full vmux layout (tabs, recursive pane tree, focused). \
-Call this FIRST before vmux_update_layout - you need the current tree (with ids) to construct a valid update. \
+Call this FIRST before update_layout - you need the current tree (with ids) to construct a valid update. \
 Useful for: answering questions about what's open; finding the focused tab/pane/stack; \
 reading a stack's url/kind so you can duplicate it elsewhere. \
 Terminal stacks appear as stacks with kind=\"terminal\"; browser stacks use kind=\"browser\"."
@@ -177,11 +177,11 @@ Terminal stacks appear as stacks with kind=\"terminal\"; browser stacks use kind
 
 fn update_layout_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "vmux_update_layout".into(),
+        name: "update_layout".into(),
         description: "Submit the desired layout tree; vmux diffs against current state and reconciles by id (React-style). \
 Use this for compound or structural changes that the per-action tools can't express. \
 \
-Workflow: (1) call vmux_read_layout, (2) mutate the returned tree, (3) submit it back here. \
+Workflow: (1) call read_layout, (2) mutate the returned tree, (3) submit it back here. \
 \
 Recipes: \
 - Add a new pane to a tab: keep the existing root split's id, append a new pane (id: null) to its children. Do NOT wrap the existing pane in a new split - the tab's root split is always present. \
@@ -266,7 +266,7 @@ Identifiers use kind:value format (tab:N, pane:N, split:N, stack:N). Omit id to 
 
 fn get_settings_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "vmux_get_settings".into(),
+        name: "get_settings".into(),
         description: "Return the full vmux settings as a JSON snapshot.".into(),
         input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
     }
@@ -274,17 +274,17 @@ fn get_settings_definition() -> ToolDefinition {
 
 fn list_spaces_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "vmux_list_spaces".into(),
-        description: "List all spaces as a JSON array of { id, name, profile, is_active }. Use the `id` with vmux_rename_space / vmux_delete_space.".into(),
+        name: "list_spaces".into(),
+        description: "List all spaces as a JSON array of { id, name, profile, is_active }. Use the `id` with rename_space / delete_space.".into(),
         input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
     }
 }
 
 fn open_page_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "vmux_open_page".into(),
+        name: "open_page".into(),
         description: "Open a page in a new pane directly beside YOUR pane (the agent calling this). \
-direction is one of right|left|top|bottom (default right). url uses the same rules as vmux_browser_navigate \
+direction is one of right|left|top|bottom (default right). url uses the same rules as browser_navigate \
 (vmux://terminal/ opens a terminal; anything else loads as a browser). \
 focus (default true): true moves focus to the new pane (use when the human will interact with it); \
 false keeps focus on your own pane."
@@ -304,7 +304,7 @@ false keeps focus on your own pane."
 
 fn open_file_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "vmux_open_file".into(),
+        name: "open_file".into(),
         description: "Open a local file (or directory) in the vmux editor, in a new pane beside \
 YOUR pane (the agent calling this). path is an absolute filesystem path, e.g. \
 /Users/me/project/src/main.rs. Files render with syntax highlighting; directories show a listing. \
@@ -326,12 +326,12 @@ new pane."
 
 fn run_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "vmux_run".into(),
+        name: "run".into(),
         description:
             "Run a shell command in a visible terminal pane the user can watch live and take over. \
 Blocks until the command finishes and returns its full output plus the exit code \
 (`terminal: <id>`, `exit: <code>`, `output: ...`). If it has not finished within ~50s, returns the \
-output so far with a note to call vmux_read_terminal for the rest. \
+output so far with a note to call read_terminal for the rest. \
 \
 PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses ONE persistent terminal \
 beside you — the SAME shell across calls, so its working directory and environment persist. Do NOT `cd` \
@@ -367,10 +367,10 @@ is typed into an interactive shell, so the terminal stays usable afterwards."
 
 fn read_terminal_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "vmux_read_terminal".into(),
+        name: "read_terminal".into(),
         description:
             "Return the current visible scrollback text of a terminal (the same text the user sees). \
-Pass `terminal` = a terminal id returned by vmux_run, or a terminal stack's process_id from vmux_read_layout."
+Pass `terminal` = a terminal id returned by run, or a terminal stack's process_id from read_layout."
                 .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -385,7 +385,7 @@ Pass `terminal` = a terminal id returned by vmux_run, or a terminal stack's proc
 
 fn screenshot_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "vmux_screenshot".into(),
+        name: "screenshot".into(),
         description: "Capture the vmux window as a PNG and return it inline so you can SEE the current UI \
 (use it to verify your own UI changes). Captures the whole window exactly as it appears on screen - all \
 visible panes (browser, terminal, editor) and layout chrome. Optionally pass `pane` (a pane:<id> or \
@@ -409,10 +409,10 @@ call again."
 
 fn record_start_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "vmux_record_start".into(),
+        name: "record_start".into(),
         description: "Start recording the vmux window to an mp4 video (optionally also a GIF). \
 Returns immediately so you can drive the UI with other tools to demonstrate a feature, then call \
-vmux_record_stop. Record in ONE live take: start, perform the few actions you want to show, then \
+record_stop. Record in ONE live take: start, perform the few actions you want to show, then \
 stop. Do NOT rehearse, build elaborate layouts, or take screenshots to verify - just capture the \
 live interaction in a single pass. Auto-stops after `max_secs` (default 120) as a safety cap. Only \
 one recording at a time. macOS only; the first call may prompt for Screen Recording permission - \
@@ -432,7 +432,7 @@ grant it in System Settings > Privacy & Security > Screen Recording, then call a
 
 fn record_stop_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "vmux_record_stop".into(),
+        name: "record_stop".into(),
         description: "Stop the active recording and write the file(s). Returns the mp4 path, duration, \
 and size (plus the GIF path if one was requested). By default saves to ~/.vmux/recording/; pass `dir` \
 (absolute) and `name` (basename, no extension) to save elsewhere - e.g. dir=<repo>/docs/recording, \
@@ -736,8 +736,8 @@ mod tests {
     #[test]
     fn record_tools_are_listed() {
         let names = tool_names();
-        assert!(names.contains(&"vmux_record_start".to_string()));
-        assert!(names.contains(&"vmux_record_stop".to_string()));
+        assert!(names.contains(&"record_start".to_string()));
+        assert!(names.contains(&"record_stop".to_string()));
     }
 
     #[test]
@@ -798,32 +798,27 @@ mod tests {
     fn list_tools_includes_auto_generated_and_handwritten() {
         let names = tool_names();
 
-        for hand in [
-            "vmux_open_command_bar",
-            "vmux_open_page",
-            "vmux_run",
-            "vmux_read_terminal",
-        ] {
+        for hand in ["open_command_bar", "open_page", "run", "read_terminal"] {
             assert!(
                 names.contains(&hand.to_string()),
                 "missing hand-written {hand}"
             );
         }
-        for removed_tool in ["vmux_new_terminal_tab", "vmux_run_shell", "vmux_in_pane"] {
+        for removed_tool in ["new_terminal_tab", "run_shell", "in_pane"] {
             assert!(
                 !names.contains(&removed_tool.to_string()),
                 "superseded tool {removed_tool} should no longer appear in MCP tools"
             );
         }
-        for auto in ["vmux_terminal_clear", "vmux_browser_reload"] {
+        for auto in ["terminal_clear", "browser_reload"] {
             assert!(
                 names.contains(&auto.to_string()),
                 "missing auto-generated {auto}"
             );
         }
         assert!(
-            names.iter().all(|n| n.starts_with("vmux_")),
-            "every MCP tool must be vmux_-prefixed: {names:?}"
+            names.iter().all(|n| !n.starts_with("vmux_")),
+            "MCP tool names must not be vmux_-prefixed (server is already named vmux): {names:?}"
         );
         for removed in ["stack_new", "close_tab", "split_v"] {
             assert!(
@@ -852,7 +847,7 @@ mod tests {
 
     #[test]
     fn list_tools_includes_notify() {
-        assert!(tool_names().contains(&"vmux_notify".to_string()));
+        assert!(tool_names().contains(&"notify".to_string()));
     }
 
     #[test]
@@ -886,7 +881,7 @@ mod tests {
     #[test]
     fn list_tools_includes_browser_navigate() {
         let names = tool_names();
-        assert!(names.contains(&"vmux_browser_navigate".to_string()));
+        assert!(names.contains(&"browser_navigate".to_string()));
     }
 
     #[test]
@@ -929,7 +924,7 @@ mod tests {
     #[test]
     fn list_tools_includes_terminal_send() {
         let names = tool_names();
-        assert!(names.contains(&"vmux_terminal_send".to_string()));
+        assert!(names.contains(&"terminal_send".to_string()));
     }
 
     #[test]
@@ -952,7 +947,7 @@ mod tests {
     #[test]
     fn list_tools_includes_select_tab() {
         let names = tool_names();
-        assert!(names.contains(&"vmux_select_tab".to_string()));
+        assert!(names.contains(&"select_tab".to_string()));
     }
 
     #[test]
@@ -976,13 +971,13 @@ mod tests {
     #[test]
     fn tool_list_includes_read_and_update_layout() {
         let names = tool_names();
-        assert!(names.contains(&"vmux_read_layout".to_string()));
-        assert!(names.contains(&"vmux_update_layout".to_string()));
+        assert!(names.contains(&"read_layout".to_string()));
+        assert!(names.contains(&"update_layout".to_string()));
     }
 
     #[test]
     fn list_tools_includes_screenshot() {
-        assert!(tool_names().contains(&"vmux_screenshot".to_string()));
+        assert!(tool_names().contains(&"screenshot".to_string()));
     }
 
     #[test]
@@ -1019,10 +1014,10 @@ mod tests {
             .map(|(name, _, _)| name)
             .collect();
         for expected in [
-            "vmux_open_command_bar",
-            "vmux_browser_navigate",
-            "vmux_terminal_send",
-            "vmux_select_tab",
+            "open_command_bar",
+            "browser_navigate",
+            "terminal_send",
+            "select_tab",
         ] {
             assert!(names.contains(&expected), "missing param tool {expected}");
         }
@@ -1032,8 +1027,8 @@ mod tests {
     fn mcp_param_tool_browser_navigate_schema_marks_url_required() {
         let entry = McpParamTool::mcp_tool_entries()
             .into_iter()
-            .find(|(name, _, _)| *name == "vmux_browser_navigate")
-            .expect("vmux_browser_navigate present");
+            .find(|(name, _, _)| *name == "browser_navigate")
+            .expect("browser_navigate present");
         let schema = entry.2;
         let required = schema.get("required").expect("required key");
         assert_eq!(required, &serde_json::json!(["url"]));
@@ -1145,12 +1140,8 @@ mod tests {
                 .is_err()
         );
         assert!(dispatch_with_anchor("open_page", serde_json::json!({"url": "x"}), None).is_err());
-        assert!(
-            tool_definitions()
-                .iter()
-                .any(|d| d.name == "vmux_open_page")
-        );
-        assert!(tool_definitions().iter().any(|d| d.name == "vmux_run"));
+        assert!(tool_definitions().iter().any(|d| d.name == "open_page"));
+        assert!(tool_definitions().iter().any(|d| d.name == "run"));
     }
 
     #[test]
@@ -1283,11 +1274,7 @@ mod tests {
             dispatch_from_tool_call("read_terminal", serde_json::json!({"terminal": "bad"}))
                 .is_err()
         );
-        assert!(
-            tool_definitions()
-                .iter()
-                .any(|d| d.name == "vmux_read_terminal")
-        );
+        assert!(tool_definitions().iter().any(|d| d.name == "read_terminal"));
     }
 
     #[test]
@@ -1336,8 +1323,8 @@ mod tests {
     #[test]
     fn list_tools_includes_update_settings_and_get_settings() {
         let names = tool_names();
-        assert!(names.contains(&"vmux_update_settings".to_string()));
-        assert!(names.contains(&"vmux_get_settings".to_string()));
+        assert!(names.contains(&"update_settings".to_string()));
+        assert!(names.contains(&"get_settings".to_string()));
     }
 
     #[test]
@@ -1427,20 +1414,15 @@ mod tests {
     #[test]
     fn open_command_tools_are_exposed() {
         let names = tool_names();
-        for expected in [
-            "vmux_in_place",
-            "vmux_in_new_stack",
-            "vmux_in_new_tab",
-            "vmux_in_new_space",
-        ] {
+        for expected in ["in_place", "in_new_stack", "in_new_tab", "in_new_space"] {
             assert!(
                 names.contains(&expected.to_string()),
                 "missing OpenCommand tool: {expected}"
             );
         }
         assert!(
-            !names.contains(&"vmux_in_pane".to_string()),
-            "in_pane is hidden, superseded by vmux_open_page"
+            !names.contains(&"in_pane".to_string()),
+            "in_pane is hidden, superseded by open_page"
         );
     }
 

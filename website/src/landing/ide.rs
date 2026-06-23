@@ -3,11 +3,11 @@ use dioxus::prelude::*;
 use crate::landing::parts::{editor_pane, headline, terminal_pane, website_pane};
 
 const TOOLS: &[&str] = &[
-    "vmux_browser_navigate",
-    "vmux_run",
-    "vmux_read_layout",
-    "vmux_update_layout",
-    "vmux_create_space",
+    "browser_navigate",
+    "run",
+    "read_layout",
+    "update_layout",
+    "create_space",
 ];
 
 #[component]
