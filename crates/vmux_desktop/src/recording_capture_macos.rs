@@ -58,6 +58,13 @@ struct EncodeState {
     /// Count of pixel buffers successfully appended. Zero at finalize means the
     /// capture produced no frames (the writer never started a session).
     appended: u64,
+    /// Paused state. While paused, frames are dropped (mp4 + gif) and the gap is
+    /// folded into `pts_offset` on resume for a seamless (cut) timeline.
+    paused: bool,
+    /// PTS of the frame at which the current pause began.
+    pause_anchor: Option<CMTime>,
+    /// Accumulated paused duration subtracted from every appended frame's PTS.
+    pts_offset: CMTime,
 }
 
 struct RecordingState {
@@ -134,15 +141,31 @@ fn handle_sample(state: &Arc<RecordingState>, sample: &CMSampleBuffer) {
     let pts = unsafe { sample.presentation_time_stamp() };
     let mut enc = state.encode.lock().unwrap();
 
+    if enc.paused {
+        // Drop frames while paused; remember where the pause began so the gap
+        // can be removed on resume.
+        if enc.pause_anchor.is_none() {
+            enc.pause_anchor = Some(pts);
+        }
+        return;
+    }
+    // Resuming after a pause: fold the paused span into the running offset so the
+    // output timeline is continuous (a seamless cut, no frozen gap).
+    if let Some(anchor) = enc.pause_anchor.take() {
+        let gap = unsafe { pts.subtract(anchor) };
+        enc.pts_offset = unsafe { enc.pts_offset.add(gap) };
+    }
+    let adj = unsafe { pts.subtract(enc.pts_offset) };
+
     if !enc.started_session {
-        unsafe { enc.writer.0.startSessionAtSourceTime(pts) };
+        unsafe { enc.writer.0.startSessionAtSourceTime(adj) };
         enc.started_session = true;
     }
     if unsafe { enc.input.0.isReadyForMoreMediaData() } {
         let appended = unsafe {
             enc.adaptor
                 .0
-                .appendPixelBuffer_withPresentationTime(&image_buffer, pts)
+                .appendPixelBuffer_withPresentationTime(&image_buffer, adj)
         };
         if appended {
             enc.appended += 1;
@@ -470,6 +493,9 @@ fn setup_stream(
             last_gif_ms: None,
             gif_tx,
             appended: 0,
+            paused: false,
+            pause_anchor: None,
+            pts_offset: unsafe { CMTime::new(0, 1) },
         }),
         gif_join: Mutex::new(gif_join),
         _queue: SendCell(queue),
@@ -540,6 +566,35 @@ pub(crate) fn poll_auto_stop() {
     if Instant::now() < state.deadline {
         return;
     }
+    {
+        let mut out = state.out.lock().unwrap();
+        if out.finalizing {
+            return;
+        }
+        out.request_id = None;
+        out.finalizing = true;
+    }
+    finalize(state);
+}
+
+pub(crate) fn pause() {
+    if let Some(state) = active().lock().unwrap().clone() {
+        state.encode.lock().unwrap().paused = true;
+    }
+}
+
+pub(crate) fn resume() {
+    if let Some(state) = active().lock().unwrap().clone() {
+        state.encode.lock().unwrap().paused = false;
+    }
+}
+
+/// Finalize an in-progress recording to the default dir (no explicit dir/name),
+/// driven from the tray. Mirrors the auto-stop path (`request_id == None`).
+pub(crate) fn done() {
+    let Some(state) = active().lock().unwrap().clone() else {
+        return;
+    };
     {
         let mut out = state.out.lock().unwrap();
         if out.finalizing {

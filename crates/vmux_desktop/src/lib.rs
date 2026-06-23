@@ -138,6 +138,8 @@ impl Plugin for VmuxPlugin {
             .init_resource::<boot_status::RestoreComplete>()
             .init_resource::<screenshot::ScreenshotBridge>()
             .init_resource::<recording::RecordingBridge>()
+            .init_resource::<recording::RecordingStatus>()
+            .add_message::<recording::RecordingControl>()
             .add_systems(
                 Update,
                 boot_status::compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
@@ -148,6 +150,7 @@ impl Plugin for VmuxPlugin {
                     screenshot::start_screenshots,
                     screenshot::drain_screenshots,
                     recording::start_recording,
+                    recording::handle_recording_control,
                     recording::auto_stop_recordings,
                     recording::drain_recordings,
                 )

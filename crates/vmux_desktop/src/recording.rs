@@ -44,6 +44,48 @@ impl Default for RecordingBridge {
     }
 }
 
+/// Recording lifecycle state, mirrored from the capture layer so the tray can
+/// react. Single source of truth for the tray icon + menu.
+#[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum RecordingStatus {
+    #[default]
+    Idle,
+    Recording,
+    Paused,
+}
+
+/// Human-driven recording controls issued from the tray menu.
+#[derive(Message, Clone, Copy, Debug)]
+pub(crate) enum RecordingControl {
+    Pause,
+    Resume,
+    Done,
+}
+
+pub(crate) fn handle_recording_control(
+    _non_send: NonSendMarker,
+    mut reader: MessageReader<RecordingControl>,
+    mut status: ResMut<RecordingStatus>,
+) {
+    for ctrl in reader.read() {
+        match ctrl {
+            RecordingControl::Pause => {
+                capture::pause();
+                *status = RecordingStatus::Paused;
+            }
+            RecordingControl::Resume => {
+                capture::resume();
+                *status = RecordingStatus::Recording;
+            }
+            RecordingControl::Done => {
+                // Finalizes to the default dir; `drain_recordings` flips the
+                // status back to Idle once the outcome arrives.
+                capture::done();
+            }
+        }
+    }
+}
+
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn start_err(request_id: [u8; 16], message: impl Into<String>) -> RecordStartResponse {
     RecordStartResponse {
@@ -193,6 +235,7 @@ pub(crate) fn start_recording(
     mut start_responses: MessageWriter<RecordStartResponse>,
     bridge: Res<RecordingBridge>,
     settings: Res<AppSettings>,
+    mut status: ResMut<RecordingStatus>,
     window_q: Query<(Entity, &Window), With<PrimaryWindow>>,
     node_q: Query<(&ComputedNode, &UiGlobalTransform)>,
     child_of_q: Query<&ChildOf>,
@@ -235,6 +278,9 @@ pub(crate) fn start_recording(
             bridge.tx.clone(),
             wake,
         );
+        if resp.result.is_ok() {
+            *status = RecordingStatus::Recording;
+        }
         start_responses.write(resp);
     }
 
@@ -250,9 +296,11 @@ pub(crate) fn auto_stop_recordings(_non_send: NonSendMarker) {
 pub(crate) fn drain_recordings(
     bridge: Res<RecordingBridge>,
     mut last_auto: Local<Option<RecordingInfo>>,
+    mut status: ResMut<RecordingStatus>,
     mut stop_responses: MessageWriter<RecordStopResponse>,
 ) {
     while let Ok(outcome) = bridge.rx.try_recv() {
+        *status = RecordingStatus::Idle;
         match outcome.request_id {
             Some(request_id) => {
                 let result = match (&outcome.result, last_auto.take()) {
@@ -361,6 +409,12 @@ mod capture {
     pub(crate) fn stop(_request_id: [u8; 16], _dir: Option<String>, _name: Option<String>) {}
 
     pub(crate) fn poll_auto_stop() {}
+
+    pub(crate) fn pause() {}
+
+    pub(crate) fn resume() {}
+
+    pub(crate) fn done() {}
 }
 
 #[cfg(target_os = "macos")]
