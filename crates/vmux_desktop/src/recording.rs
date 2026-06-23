@@ -109,6 +109,7 @@ pub(crate) fn capture_output_dir(settings: &AppSettings) -> PathBuf {
 
 /// Resolve dir/name into final mp4 + optional gif paths. `default_dir` is used
 /// when `dir` is not given (the configured/default output directory).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn resolve_output_paths(
     dir: Option<&str>,
     name: Option<&str>,
