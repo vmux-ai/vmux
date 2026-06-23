@@ -42,7 +42,10 @@ pub struct FileImage {
 }
 
 #[derive(Component)]
-struct ThumbTask(Task<(String, Result<Vec<u8>, String>)>);
+struct ThumbTask {
+    webview: Entity,
+    task: Task<(String, Result<Vec<u8>, String>)>,
+}
 
 #[derive(Component)]
 pub struct FileInitialMetaSent;
@@ -424,13 +427,23 @@ fn send_initial_image(
 
 fn on_file_preview_request(
     trigger: On<BinReceive<FilePreviewRequest>>,
+    file_views: Query<(), With<FileView>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
+    if file_views.get(entity).is_err() {
+        return;
+    }
     let req = trigger.event().payload.clone();
     let path = PathBuf::from(&req.path);
     if req.thumb && preview::is_image_path(&path) {
+        let within_cap = std::fs::metadata(&path)
+            .map(|m| m.len() <= preview::IMAGE_BYTES_CAP)
+            .unwrap_or(false);
+        if !within_cap {
+            return;
+        }
         let pool = IoTaskPool::get();
         let p = req.path.clone();
         let task = pool.spawn(async move {
@@ -439,7 +452,10 @@ fn on_file_preview_request(
                 .and_then(|b| preview::downscale_to_png(&b, preview::THUMB_MAX_EDGE));
             (p, r)
         });
-        commands.entity(entity).insert(ThumbTask(task));
+        commands.spawn(ThumbTask {
+            webview: entity,
+            task,
+        });
         return;
     }
     if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
@@ -462,15 +478,16 @@ fn drain_thumb_tasks(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, mut t) in &mut q {
-        if let Some((path, result)) = future::block_on(future::poll_once(&mut t.0)) {
-            commands.entity(entity).remove::<ThumbTask>();
+    for (task_entity, mut t) in &mut q {
+        if let Some((path, result)) = future::block_on(future::poll_once(&mut t.task)) {
+            let webview = t.webview;
+            commands.entity(task_entity).despawn();
             if let Ok(bytes) = result
-                && browsers.has_browser(entity)
-                && browsers.host_emit_ready(&entity)
+                && browsers.has_browser(webview)
+                && browsers.host_emit_ready(&webview)
             {
                 commands.trigger(BinHostEmitEvent::from_rkyv(
-                    entity,
+                    webview,
                     FILE_PREVIEW_EVENT,
                     &FilePreviewEvent {
                         path,
@@ -496,7 +513,9 @@ fn on_file_open(
     let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
         return;
     };
-    let url = format!("file://{}", path.to_string_lossy());
+    let url = url::Url::from_file_path(&path)
+        .map(|u| u.to_string())
+        .unwrap_or_else(|_| format!("file://{}", path.to_string_lossy()));
     meta.title = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())

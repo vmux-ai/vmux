@@ -609,6 +609,9 @@ pub fn Page() -> Element {
                             open_path(d);
                             return;
                         }
+                        if mode() != Mode::Text {
+                            return;
+                        }
                         let cur = first_line() as i64;
                         let next = match key.as_str() {
                             "ArrowDown" => cur + 1,
