@@ -258,9 +258,7 @@ mod tests {
     fn test_layout_settings() -> LayoutSettings {
         LayoutSettings {
             radius: 0.0,
-            window: crate::settings::WindowSettings {
-                padding: 0.0,
-            },
+            window: crate::settings::WindowSettings { padding: 0.0 },
             pane: crate::settings::PaneSettings { gap: 0.0 },
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),
