@@ -2,7 +2,8 @@ use crate::browser_process::BrpHandler;
 use crate::browser_process::ClientHandlerBuilder;
 use crate::browser_process::client_handler::FocusCanceler;
 use crate::browser_process::client_handler::{
-    BinEmitEventHandler, BinIpcEventRaw, IpcEventRaw, JsEmitEventHandler,
+    BinEmitEventHandler, BinIpcEventRaw, IpcEventRaw, JsEmitEventHandler, SnapshotResultHandler,
+    SnapshotResultRaw,
 };
 use crate::prelude::*;
 use async_channel::{Sender, TryRecvError};
@@ -134,6 +135,7 @@ impl Browsers {
         ipc_event_sender: Sender<IpcEventRaw>,
         bin_ipc_event_sender: Sender<BinIpcEventRaw>,
         brp_sender: Sender<BrpMessage>,
+        snapshot_result_sender: Sender<SnapshotResultRaw>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
         webview_committed_nav_sender: WebviewCommittedNavigationSenderInner,
@@ -171,6 +173,7 @@ impl Browsers {
             ipc_event_sender,
             bin_ipc_event_sender,
             brp_sender,
+            snapshot_result_sender,
             system_cursor_icon_sender,
             webview_loading_state_sender,
             webview_committed_nav_sender,
@@ -612,6 +615,20 @@ impl Browsers {
         {
             argument_list.set_string(0, Some(&id.into().as_str().into()));
             argument_list.set_string(1, Some(&json_body.into()));
+            frame.send_process_message(
+                ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
+                Some(&mut process_message),
+            );
+        };
+    }
+
+    pub fn request_snapshot(&self, webview: &Entity, request_id: &str) {
+        if let Some(mut process_message) = process_message_create(Some(&PROCESS_MESSAGE_SNAPSHOT.into()))
+            && let Some(argument_list) = process_message.argument_list()
+            && let Some(browser) = self.browsers.get(webview)
+            && let Some(frame) = browser.client.main_frame()
+        {
+            argument_list.set_string(0, Some(&request_id.into()));
             frame.send_process_message(
                 ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
                 Some(&mut process_message),
@@ -1491,6 +1508,7 @@ impl Browsers {
         ipc_event_sender: Sender<IpcEventRaw>,
         bin_ipc_event_sender: Sender<BinIpcEventRaw>,
         brp_sender: Sender<BrpMessage>,
+        snapshot_result_sender: Sender<SnapshotResultRaw>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
         webview_committed_nav_sender: WebviewCommittedNavigationSenderInner,
@@ -1532,6 +1550,7 @@ impl Browsers {
             .with_message_handler(JsEmitEventHandler::new(webview, ipc_event_sender))
             .with_message_handler(BinEmitEventHandler::new(webview, bin_ipc_event_sender))
             .with_message_handler(BrpHandler::new(brp_sender))
+            .with_message_handler(SnapshotResultHandler::new(webview, snapshot_result_sender))
             .build()
     }
 

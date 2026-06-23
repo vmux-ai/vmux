@@ -1,6 +1,7 @@
 mod bin_emit_event_handler;
 mod brp_handler;
 mod js_emit_event_handler;
+mod snapshot_result_handler;
 
 use crate::browser_process::ContextMenuHandlerBuilder;
 use crate::browser_process::renderer_handler::TextureWake;
@@ -17,6 +18,7 @@ use std::os::raw::c_int;
 pub use bin_emit_event_handler::{BinEmitEventHandler, BinIpcEventRaw};
 pub use brp_handler::BrpHandler;
 pub use js_emit_event_handler::{IpcEventRaw, JsEmitEventHandler};
+pub use snapshot_result_handler::{SnapshotResultHandler, SnapshotResultRaw};
 
 // Cancels CEF taking keyboard focus, so winit keeps the macOS first responder and Bevy owns
 // keyboard. Without this, a native (windowed) browser's NSView becomes first responder and steals
@@ -228,13 +230,15 @@ impl ImplClient for ClientHandlerBuilder {
         {
             let name = message.name().into_string();
             let url = frame.url().into_string();
-            if !crate::util::ipc_allowed_browser(&url) {
+            let is_snapshot_result = name == crate::prelude::PROCESS_MESSAGE_SNAPSHOT_RESULT;
+            if !is_snapshot_result && !crate::util::ipc_allowed_browser(&url) {
                 crate::util::webview_debug_log(format!(
                     "ipc: dropped inbound '{name}' from untrusted url={url}"
                 ));
                 return 1;
             }
-            if crate::util::is_bridge_allowed_origin(&url)
+            if !is_snapshot_result
+                && crate::util::is_bridge_allowed_origin(&url)
                 && name != crate::prelude::PROCESS_MESSAGE_JS_EMIT
             {
                 crate::util::webview_debug_log(format!(

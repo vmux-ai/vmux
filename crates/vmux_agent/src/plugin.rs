@@ -34,9 +34,10 @@ use crate::client::cli::claude::ClaudeStrategy;
 use crate::client::cli::codex::CodexStrategy;
 use crate::client::cli::vibe::VibeStrategy;
 use crate::events::{
-    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin,
-    RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
-    ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
+    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, BrowserSnapshotRequest,
+    BrowserSnapshotResponse, CommandOrigin, RecordStartRequest, RecordStartResponse,
+    RecordStopRequest, RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest,
+    ScreenshotResponse, snapshot_response_to_query_result,
 };
 use crate::session::{
     self, AgentSession, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
@@ -107,6 +108,8 @@ impl Plugin for AgentPlugin {
             .add_message::<AgentQueryRequest>()
             .add_message::<ScreenshotRequest>()
             .add_message::<ScreenshotResponse>()
+            .add_message::<BrowserSnapshotRequest>()
+            .add_message::<BrowserSnapshotResponse>()
             .add_message::<RecordStartRequest>()
             .add_message::<RecordStartResponse>()
             .add_message::<RecordStopRequest>()
@@ -183,6 +186,7 @@ impl Plugin for AgentPlugin {
                     forward_layout_apply_responses,
                     forward_layout_snapshot_responses,
                     forward_screenshot_responses,
+                    forward_snapshot_responses,
                     forward_record_start_responses,
                     forward_record_stop_responses,
                 ),
@@ -1109,6 +1113,7 @@ fn handle_agent_queries(
     >,
     mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
     mut screenshot_writer: MessageWriter<ScreenshotRequest>,
+    mut browser_snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
     mut record_start_writer: MessageWriter<RecordStartRequest>,
     mut record_stop_writer: MessageWriter<RecordStopRequest>,
 ) {
@@ -1155,6 +1160,12 @@ fn handle_agent_queries(
             }
             AgentQuery::Screenshot { ref pane } => {
                 screenshot_writer.write(ScreenshotRequest {
+                    request_id: request.request_id.0,
+                    pane: pane.clone(),
+                });
+            }
+            AgentQuery::BrowserSnapshot { ref pane } => {
+                browser_snapshot_writer.write(BrowserSnapshotRequest {
                     request_id: request.request_id.0,
                     pane: pane.clone(),
                 });
@@ -1240,6 +1251,19 @@ fn forward_screenshot_responses(
         service.0.send(ClientMessage::AgentQueryResponse {
             request_id: AgentRequestId(response.request_id),
             result: screenshot_response_to_query_result(&response.result),
+        });
+    }
+}
+
+fn forward_snapshot_responses(
+    mut reader: MessageReader<BrowserSnapshotResponse>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else { return };
+    for response in reader.read() {
+        service.0.send(ClientMessage::AgentQueryResponse {
+            request_id: AgentRequestId(response.request_id),
+            result: snapshot_response_to_query_result(&response.result),
         });
     }
 }

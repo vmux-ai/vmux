@@ -1,3 +1,4 @@
+pub mod dom_snapshot;
 pub mod event;
 pub mod process_id;
 pub use process_id::ProcessId;
