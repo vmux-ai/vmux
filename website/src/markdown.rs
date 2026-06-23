@@ -12,12 +12,15 @@ static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_ne
 static THEMES: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
 
 fn escape_html(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn highlight_html(lang: &str, code: &str) -> String {
+    let token = lang.split([' ', '\t', ',']).next().unwrap_or(lang);
     let syntax = SYNTAXES
-        .find_syntax_by_token(lang)
+        .find_syntax_by_token(token)
         .unwrap_or_else(|| SYNTAXES.find_syntax_plain_text());
     let theme = &THEMES.themes["base16-ocean.dark"];
     let mut hl = HighlightLines::new(syntax, theme);
@@ -112,7 +115,9 @@ fn parse(md: &str) -> Vec<Node> {
             Event::End(end) => {
                 let f = stack.pop().unwrap_or_default();
                 match end {
-                    TagEnd::Heading(_) => push_node(&mut stack, Node::Heading(f.heading, f.children)),
+                    TagEnd::Heading(_) => {
+                        push_node(&mut stack, Node::Heading(f.heading, f.children))
+                    }
                     TagEnd::Paragraph => push_node(&mut stack, Node::Paragraph(f.children)),
                     TagEnd::BlockQuote(_) => push_node(&mut stack, Node::BlockQuote(f.children)),
                     TagEnd::Strong => push_node(&mut stack, Node::Strong(f.children)),
@@ -231,12 +236,24 @@ fn render_node(n: &Node) -> Element {
         Node::Heading(level, ch) => {
             let id = slugify(&node_text(ch));
             match level {
-                1 => rsx! { h1 { id: "{id}", class: "scroll-mt-6 text-3xl sm:text-4xl font-bold tracking-tight mt-10 mb-4", {render_nodes(ch)} } },
-                2 => rsx! { h2 { id: "{id}", class: "scroll-mt-6 text-2xl font-semibold tracking-tight mt-10 mb-3 pb-2 border-b border-border", {render_nodes(ch)} } },
-                3 => rsx! { h3 { id: "{id}", class: "scroll-mt-6 text-lg font-semibold mt-6 mb-2 text-accent", {render_nodes(ch)} } },
-                4 => rsx! { h4 { id: "{id}", class: "scroll-mt-6 text-base font-semibold mt-5 mb-2", {render_nodes(ch)} } },
-                5 => rsx! { h5 { id: "{id}", class: "scroll-mt-6 text-sm font-semibold uppercase tracking-wide text-text-muted mt-4 mb-1", {render_nodes(ch)} } },
-                _ => rsx! { h6 { id: "{id}", class: "scroll-mt-6 text-sm font-semibold text-text-muted mt-4 mb-1", {render_nodes(ch)} } },
+                1 => {
+                    rsx! { h1 { id: "{id}", class: "scroll-mt-6 text-3xl sm:text-4xl font-bold tracking-tight mt-10 mb-4", {render_nodes(ch)} } }
+                }
+                2 => {
+                    rsx! { h2 { id: "{id}", class: "scroll-mt-6 text-2xl font-semibold tracking-tight mt-10 mb-3 pb-2 border-b border-border", {render_nodes(ch)} } }
+                }
+                3 => {
+                    rsx! { h3 { id: "{id}", class: "scroll-mt-6 text-lg font-semibold mt-6 mb-2 text-accent", {render_nodes(ch)} } }
+                }
+                4 => {
+                    rsx! { h4 { id: "{id}", class: "scroll-mt-6 text-base font-semibold mt-5 mb-2", {render_nodes(ch)} } }
+                }
+                5 => {
+                    rsx! { h5 { id: "{id}", class: "scroll-mt-6 text-sm font-semibold uppercase tracking-wide text-text-muted mt-4 mb-1", {render_nodes(ch)} } }
+                }
+                _ => {
+                    rsx! { h6 { id: "{id}", class: "scroll-mt-6 text-sm font-semibold text-text-muted mt-4 mb-1", {render_nodes(ch)} } }
+                }
             }
         }
         Node::Paragraph(ch) => rsx! { p { class: "my-4 leading-relaxed", {render_nodes(ch)} } },
@@ -303,9 +320,13 @@ fn render_node(n: &Node) -> Element {
         Node::Code(t) => rsx! {
             code { class: "font-mono text-[0.85em] bg-code-bg text-accent rounded-md border border-border px-1.5 py-0.5", "{t}" }
         },
-        Node::Strong(ch) => rsx! { strong { class: "font-semibold text-text", {render_nodes(ch)} } },
+        Node::Strong(ch) => {
+            rsx! { strong { class: "font-semibold text-text", {render_nodes(ch)} } }
+        }
         Node::Emphasis(ch) => rsx! { em { class: "italic", {render_nodes(ch)} } },
-        Node::Strikethrough(ch) => rsx! { s { class: "line-through opacity-70", {render_nodes(ch)} } },
+        Node::Strikethrough(ch) => {
+            rsx! { s { class: "line-through opacity-70", {render_nodes(ch)} } }
+        }
         Node::Link(href, ch) => {
             let resolved = resolve_link(href);
             let external = resolved.starts_with("http");

@@ -1208,8 +1208,10 @@ mod tests {
                 "missing OpenCommand tool: {expected}"
             );
         }
-        // in_pane is hidden (superseded by vmux_open_page).
-        assert!(!names.contains(&"vmux_in_pane".to_string()));
+        assert!(
+            !names.contains(&"vmux_in_pane".to_string()),
+            "in_pane is hidden, superseded by vmux_open_page"
+        );
     }
 
     #[test]

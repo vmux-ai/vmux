@@ -511,7 +511,6 @@ mod tests {
                 id.starts_with("vmux_"),
                 "advertised MCP tool name must be vmux_-prefixed: {id}"
             );
-            // Dispatch resolves on the bare command id; the vmux_ prefix is the MCP namespace.
             let bare = id.strip_prefix("vmux_").unwrap_or(id);
             let has_required_params = schema
                 .get("required")
