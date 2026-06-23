@@ -157,6 +157,14 @@ fn markdown_glyph(class: &str) -> Element {
     }
 }
 
+fn logo_icon(d: &str, class: &str) -> Element {
+    rsx! {
+        Icon { class: "{class}", fill: "currentColor", stroke: "none",
+            path { d: "{d}" }
+        }
+    }
+}
+
 fn ext_of(path: &str) -> String {
     path.rsplit('/')
         .next()
@@ -170,14 +178,20 @@ fn type_icon(path: &str, is_dir: bool, class: &str) -> Element {
     if is_dir {
         return folder_glyph(class);
     }
-    match ext_of(path).as_str() {
-        "md" | "markdown" | "mdx" => markdown_glyph(class),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico" => image_glyph(class),
-        "rs" | "js" | "jsx" | "ts" | "tsx" | "py" | "go" | "c" | "cpp" | "cc" | "h" | "hpp"
-        | "java" | "rb" | "php" | "sh" | "bash" | "zsh" | "lua" | "vue" | "svelte" | "swift"
-        | "kt" | "html" | "css" | "scss" => code_glyph(class),
-        "json" | "toml" | "yaml" | "yml" | "ron" | "ini" | "cfg" | "conf" | "lock" | "env"
-        | "properties" => config_glyph(class),
+    let ext = ext_of(path);
+    match ext.as_str() {
+        "md" | "markdown" | "mdx" => return markdown_glyph(class),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico" => {
+            return image_glyph(class);
+        }
+        _ => {}
+    }
+    if let Some(d) = crate::lang_icon::lang_logo(&ext) {
+        return logo_icon(d, class);
+    }
+    match ext.as_str() {
+        "vue" | "svelte" | "java" | "scala" | "zig" | "ron" => code_glyph(class),
+        "ini" | "cfg" | "conf" | "lock" | "env" | "properties" => config_glyph(class),
         "txt" | "log" | "csv" | "text" => text_glyph(class),
         _ => file_glyph(class),
     }

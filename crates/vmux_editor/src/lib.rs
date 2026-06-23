@@ -17,4 +17,6 @@ pub use plugin::{EditorPlugin, FileView, restore_file_view_bundle};
 pub mod page_model;
 
 #[cfg(target_arch = "wasm32")]
+mod lang_icon;
+#[cfg(target_arch = "wasm32")]
 pub mod page;
