@@ -24,14 +24,13 @@ use objc2_screen_capture_kit::{
     SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamOutput,
     SCStreamOutputType,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use vmux_agent::RecordStartResponse;
 
 const PIXEL_FORMAT_BGRA: u32 = 0x4247_5241; // 'BGRA' fourcc
-const MP4_BITRATE: i32 = 6_000_000;
 
 unsafe extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
@@ -245,7 +244,7 @@ fn window_number(window_entity: Entity) -> Option<u32> {
 }
 
 fn build_writer(
-    temp_mp4: &PathBuf,
+    temp_mp4: &Path,
     out_w: u32,
     out_h: u32,
 ) -> Result<
@@ -301,7 +300,6 @@ fn build_writer(
             return Err("AVAssetWriter.startWriting failed".to_string());
         }
     }
-    let _ = MP4_BITRATE;
     Ok((writer, input, adaptor))
 }
 
@@ -377,7 +375,7 @@ fn setup_stream(
     crop: Option<CropRect>,
     gif: bool,
     max_secs: u32,
-    temp_mp4: &PathBuf,
+    temp_mp4: &Path,
     temp_gif: &Option<PathBuf>,
     tx: &Sender<RecordOutcome>,
     wake: &Option<WakeFn>,
@@ -431,7 +429,7 @@ fn setup_stream(
         }),
         gif_join: Mutex::new(gif_join),
         _queue: SendCell(queue),
-        temp_mp4: temp_mp4.clone(),
+        temp_mp4: temp_mp4.to_path_buf(),
         temp_gif: temp_gif.clone(),
         gif,
         deadline: start + Duration::from_secs(max_secs as u64),
