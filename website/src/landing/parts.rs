@@ -1,4 +1,27 @@
 use dioxus::prelude::*;
+use dioxus_primitives::toast::{ToastOptions, use_toast};
+
+use crate::hooks::use_clipboard_copy;
+use crate::landing::INSTALL_CMD;
+
+#[component]
+pub fn InstallCard() -> Element {
+    let toast = use_toast();
+    let copy = use_clipboard_copy();
+    rsx! {
+        div { class: "glass inline-flex flex-col sm:flex-row items-center gap-2 sm:gap-3 rounded-xl px-4 py-3 text-sm sm:text-base",
+            code { class: "font-mono text-accent", "{INSTALL_CMD}" }
+            button {
+                class: "bg-accent text-black border-0 rounded px-3 py-1.5 text-sm font-semibold cursor-pointer transition-colors hover:bg-accent-hover",
+                onclick: move |_| {
+                    copy(INSTALL_CMD.to_string());
+                    toast.success("Copied!".to_string(), ToastOptions::new());
+                },
+                "Copy"
+            }
+        }
+    }
+}
 
 fn svg_icon(class: &str, body: Element) -> Element {
     rsx! {

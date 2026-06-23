@@ -1,54 +1,52 @@
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{ToastOptions, use_toast};
 
-use crate::hooks::{use_clipboard_copy, use_dmg_download, use_is_mac};
-use crate::landing::{ICON, INSTALL_CMD};
+use crate::hooks::{use_dmg_download, use_is_mac};
+use crate::landing::ICON;
+use crate::landing::parts::{InstallCard, scroll_cue};
 
 #[component]
 pub fn Hero() -> Element {
     let toast_api = use_toast();
     let is_mac = use_is_mac();
-    let copy = use_clipboard_copy();
     let download = use_dmg_download();
 
     rsx! {
-        section { class: "relative overflow-hidden text-center px-6 pt-24 pb-28 sm:pt-32 sm:pb-36",
+        section {
+            "data-tone": "light",
+            class: "relative isolate min-h-screen overflow-hidden flex flex-col items-center justify-center px-6 text-center bg-bg text-text",
             div {
                 class: "pointer-events-none absolute inset-0 -z-10",
-                style: "transform: translateY(calc(var(--sy, 0) * -0.05px))",
-                div { class: "absolute left-1/2 top-24 h-[28rem] w-[28rem] -translate-x-1/2 rounded-full bg-accent/30 blur-[120px]" }
-                div { class: "absolute left-[20%] top-40 h-72 w-72 rounded-full bg-aurora-violet/25 blur-[100px] animate-float [animation-delay:-4s] motion-reduce:animate-none" }
-                div { class: "absolute right-[18%] top-32 h-72 w-72 rounded-full bg-aurora-cyan/20 blur-[100px] animate-float [animation-delay:-8s] motion-reduce:animate-none" }
+                style: "transform: translateY(calc(var(--sy, 0) * -0.04px))",
+                video {
+                    "data-hero-video": "1",
+                    class: "absolute inset-0 h-full w-full object-cover opacity-60 mix-blend-screen motion-reduce:hidden",
+                    autoplay: true,
+                    muted: true,
+                    "loop": true,
+                    "playsinline": true,
+                }
+                div { class: "absolute left-1/2 top-1/4 h-[34rem] w-[34rem] -translate-x-1/2 rounded-full bg-accent/25 blur-[130px] animate-aurora motion-reduce:animate-none" }
+                div { class: "absolute left-[18%] top-1/3 h-80 w-80 rounded-full bg-aurora-cyan/30 blur-[110px] animate-aurora [animation-delay:-7s] motion-reduce:animate-none" }
+                div { class: "absolute right-[16%] top-1/4 h-80 w-80 rounded-full bg-aurora-violet/25 blur-[110px] animate-aurora [animation-delay:-13s] motion-reduce:animate-none" }
             }
             div { class: "relative mx-auto max-w-3xl reveal",
                 img {
                     src: ICON,
                     alt: "Vmux icon",
-                    class: "w-24 h-24 sm:w-28 sm:h-28 mb-6 inline-block rounded-3xl shadow-2xl shadow-accent/20",
+                    class: "w-20 h-20 mb-8 inline-block rounded-3xl shadow-2xl shadow-accent/20",
                 }
-                h1 { class: "text-5xl sm:text-7xl font-bold tracking-tight mb-4",
-                    "Vmux"
+                h1 { class: "font-bold tracking-tight leading-[1.02] mb-6",
+                    span { class: "block text-2xl sm:text-3xl text-text-muted", "It starts as" }
+                    span { class: "block text-6xl sm:text-8xl text-text", "just a browser." }
                 }
-                p { class: "text-lg sm:text-2xl text-text mb-3 max-w-2xl mx-auto",
+                p { class: "text-lg sm:text-2xl text-text-muted mb-10 max-w-xl mx-auto",
                     "The browser that bridges chat and IDE."
                 }
-                p { class: "text-base sm:text-lg text-text-muted mb-10 max-w-xl mx-auto",
-                    "An agent co-working space with a browser and IDE built in — people and agents, side by side."
-                }
-                div { class: "inline-flex flex-col sm:flex-row items-center gap-2 sm:gap-3 bg-code-bg/80 backdrop-blur border border-border rounded-lg px-4 py-3 text-sm sm:text-base mb-6",
-                    code { class: "font-mono text-accent", "{INSTALL_CMD}" }
+                InstallCard {}
+                div { class: "mt-6 flex justify-center",
                     button {
-                        class: "bg-accent text-black border-0 rounded px-3 py-1.5 text-sm font-semibold cursor-pointer transition-colors hover:bg-accent-hover",
-                        onclick: move |_| {
-                            copy(INSTALL_CMD.to_string());
-                            toast_api.success("Copied!".to_string(), ToastOptions::new());
-                        },
-                        "Copy"
-                    }
-                }
-                div { class: "flex justify-center",
-                    button {
-                        class: "inline-flex items-center px-7 py-3.5 rounded-lg text-base font-semibold border border-transparent bg-accent text-black cursor-pointer transition-colors hover:bg-accent-hover",
+                        class: "inline-flex items-center px-7 py-3.5 rounded-xl text-base font-semibold bg-accent text-black cursor-pointer transition-colors hover:bg-accent-hover",
                         onclick: move |_| {
                             if is_mac {
                                 download(());
@@ -64,7 +62,7 @@ pub fn Hero() -> Element {
                         "Download .dmg"
                     }
                 }
-                p { class: "mt-5 text-sm text-text-muted", "Requires macOS 13.0 (Ventura) or later." }
+                {scroll_cue()}
             }
         }
     }
