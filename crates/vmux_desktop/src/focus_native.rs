@@ -71,12 +71,6 @@ fn reclaim_first_responder(window_entity: Entity) -> ReclaimOutcome {
     let Some(window) = view.window() else {
         return ReclaimOutcome::NoView;
     };
-    // The window boots hidden and is revealed + activated asynchronously. `makeFirstResponder`
-    // on a not-yet-key window can report success without durably sticking, so a one-shot reclaim
-    // marks itself done while the view never actually holds first-responder once the window
-    // becomes key — keystrokes then go nowhere until a click. Wait for the window to be key so the
-    // reclaim that sticks happens on a live window. This matters most on space restore, where the
-    // active stack resolves while the window is still hidden.
     if !window.isKeyWindow() {
         return ReclaimOutcome::Failed;
     }
