@@ -78,24 +78,21 @@ struct LayoutGlassState {
     last_size: (f64, f64),
 }
 
-/// A Regular Liquid Glass element. Children go on the returned **content view**, never on the glass
-/// view itself: AppKit sizes the glass to its `contentView` and applies legibility treatments there;
+/// A Liquid Glass element. Children go on the returned **content view**, never on the glass view
+/// itself: AppKit sizes the glass to its `contentView` and applies legibility treatments there;
 /// adding siblings makes the glass material render larger than the content (a phantom outer panel).
-/// `active` applies a subtle accent tint to convey focus (HIG: tint conveys state, not a border).
+/// Convey focus by `style` (Regular = frosted/opaque for active, Clear = transparent for inactive) —
+/// never a tint or border (a tint only fills the inset content area, leaving an untinted glass margin
+/// that reads as a second layer).
 fn glass_pill(
     mtm: MainThreadMarker,
     content: &NSView,
     frame: NSRect,
     radius: f64,
-    active: bool,
+    style: NSGlassEffectViewStyle,
 ) -> (Retained<NSGlassEffectView>, Retained<NSView>) {
     let g: Retained<NSGlassEffectView> = NSGlassEffectView::new(mtm);
-    g.setStyle(NSGlassEffectViewStyle::Regular);
-    if active {
-        g.setTintColor(Some(
-            &NSColor::controlAccentColor().colorWithAlphaComponent(0.28),
-        ));
-    }
+    g.setStyle(style);
     g.setCornerRadius(radius);
     let v: &NSView = &g;
     v.setFrame(frame);
@@ -297,7 +294,7 @@ fn rebuild(
             NSSize::new((width - sheet_w).max(10.0), url_h),
         ),
         radius,
-        false,
+        NSGlassEffectViewStyle::Regular,
     );
     round_top(&url_glass, radius);
     let (uw, uh) = {
@@ -307,9 +304,9 @@ fn rebuild(
     };
     {
         let uv: &NSView = &url_c;
-        // nav (h-7 w-7 = 28)
-        let nav_y = (uh - 28.0) / 2.0;
-        let mut nx = 8.0;
+        let nav_d = 34.0;
+        let nav_y = (uh - nav_d) / 2.0;
+        let mut nx = 10.0;
         for (glyph, action) in [
             ("\u{2039}", LayoutAction::Back),
             ("\u{203a}", LayoutAction::Forward),
@@ -322,13 +319,14 @@ fn rebuild(
                 target_ref,
                 glyph,
                 tag,
-                NSRect::new(NSPoint::new(nx, nav_y), NSSize::new(28.0, 28.0)),
-                6.0,
+                NSRect::new(NSPoint::new(nx, nav_y), NSSize::new(nav_d, nav_d)),
+                8.0,
                 None,
             );
+            b.setFont(Some(&NSFont::systemFontOfSize(20.0)));
             state.buttons.push(b);
             state.actions.push(action);
-            nx += 30.0;
+            nx += nav_d + 4.0;
         }
         // profile (right)
         let profile = active_profile_name();
@@ -380,7 +378,7 @@ fn rebuild(
         let tag = state.actions.len();
         let frame = NSRect::new(NSPoint::new(x, tab_top), NSSize::new(tab_w, tab_h));
         if tab.is_active {
-            let (g, gc) = glass_pill(mtm, content, frame, 6.0, false);
+            let (g, gc) = glass_pill(mtm, content, frame, 6.0, NSGlassEffectViewStyle::Regular);
             round_top(&g, 6.0);
             {
                 let gv: &NSView = &gc;
@@ -452,12 +450,17 @@ fn rebuild(
         let inner = header_h + 4.0 + n_rows * row_h + (n_rows - 1.0) * row_gap;
         let card_h = pad * 2.0 + inner;
         let card_top = if flipped { cy } else { height - cy - card_h };
+        let pane_style = if pane.is_active {
+            NSGlassEffectViewStyle::Regular
+        } else {
+            NSGlassEffectViewStyle::Clear
+        };
         let (card, card_c) = glass_pill(
             mtm,
             content,
             NSRect::new(NSPoint::new(card_x, card_top), NSSize::new(card_w, card_h)),
             12.0,
-            pane.is_active,
+            pane_style,
         );
         let cv: &NSView = &card_c;
         add_label(
@@ -519,6 +522,40 @@ fn rebuild(
         }
         state.glass.push(card);
         cy += card_h + card_gap;
+    }
+
+    info!(
+        "DIAG panes={} glass_views={} content_subviews={}",
+        current.0.panes.len(),
+        state.glass.len(),
+        content.subviews().count()
+    );
+    for (i, g) in state.glass.iter().enumerate() {
+        let gv: &NSView = g;
+        let gf = gv.frame();
+        let cf = g.contentView().map(|c| c.frame());
+        info!(
+            "DIAG glass[{i}] frame=({:.0},{:.0} {:.0}x{:.0}) content={:?} subs={}",
+            gf.origin.x,
+            gf.origin.y,
+            gf.size.width,
+            gf.size.height,
+            cf.map(|f| (f.origin.x, f.origin.y, f.size.width, f.size.height)),
+            gv.subviews().count()
+        );
+    }
+    for v in content.subviews().iter() {
+        let f = v.frame();
+        if f.origin.x < sheet_w + 40.0 && f.origin.y < 320.0 {
+            info!(
+                "DIAG content-sub {:?} frame=({:.0},{:.0} {:.0}x{:.0})",
+                v.class(),
+                f.origin.x,
+                f.origin.y,
+                f.size.width,
+                f.size.height
+            );
+        }
     }
 }
 
