@@ -3,6 +3,7 @@ mod browser;
 mod coworking;
 mod cta;
 mod hero;
+mod ide;
 mod parts;
 mod pillars;
 mod platform;
