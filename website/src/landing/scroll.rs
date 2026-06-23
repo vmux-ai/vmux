@@ -58,6 +58,18 @@ pub fn init() {
                 let p = (-el.get_bounding_client_rect().top() / scrollable).clamp(0.0, 1.0);
                 set_var(el, "--p", &p.to_string());
             });
+            if let Some(v) = d
+                .query_selector("[data-hero-video]")
+                .ok()
+                .flatten()
+                .and_then(|e| e.dyn_into::<web_sys::HtmlMediaElement>().ok())
+            {
+                let dur = v.duration();
+                if dur.is_finite() && dur > 0.0 {
+                    let p = (sy / vh.max(1.0)).clamp(0.0, 1.0);
+                    v.set_current_time(p * dur);
+                }
+            }
         };
         update();
         let cb = Closure::<dyn FnMut()>::new(update);
