@@ -16,8 +16,8 @@ use vmux_layout::native_view::{CurrentLayoutView, LayoutRenderer, NodeId};
 use vmux_layout::protocol::parse_id;
 use vmux_layout::scene::InteractionMode;
 
-const PILL_Z: f64 = 200.0;
-const PILL_H: f64 = 28.0;
+const CARD_Z: f64 = 180.0;
+const ROW_H: f64 = 30.0;
 
 #[derive(Clone)]
 enum LayoutAction {
@@ -66,62 +66,58 @@ impl TabTarget {
 
 #[derive(Default)]
 struct LayoutGlassState {
-    pills: Vec<Retained<NSGlassEffectView>>,
+    header_card: Option<Retained<NSGlassEffectView>>,
+    sidesheet_card: Option<Retained<NSGlassEffectView>>,
+    buttons: Vec<Retained<NSButton>>,
+    fills: Vec<Retained<NSView>>,
     actions: Vec<LayoutAction>,
     target: Option<Retained<TabTarget>>,
     click_rx: Option<Receiver<isize>>,
-    last_width: f64,
+    last_size: (f64, f64),
 }
 
-/// A Regular Liquid Glass pill. Regular adapts to whatever is behind it for legibility (HIG);
-/// the active state is conveyed with a subtle accent tint rather than by dimming opacity.
-fn glass_pill(
+/// A Regular Liquid Glass card — the navigation *material* a region sits on. Controls on it use
+/// fills/vibrancy (not more glass), per the HIG.
+fn glass_card(
     mtm: MainThreadMarker,
     content: &NSView,
     frame: NSRect,
     radius: f64,
-    active: bool,
 ) -> Retained<NSGlassEffectView> {
-    let pill: Retained<NSGlassEffectView> = NSGlassEffectView::new(mtm);
-    pill.setStyle(NSGlassEffectViewStyle::Regular);
-    if active {
-        let accent = NSColor::controlAccentColor();
-        pill.setTintColor(Some(&accent.colorWithAlphaComponent(0.55)));
-    }
-    pill.setCornerRadius(radius);
-    let view: &NSView = &pill;
+    let card: Retained<NSGlassEffectView> = NSGlassEffectView::new(mtm);
+    card.setStyle(NSGlassEffectViewStyle::Regular);
+    card.setCornerRadius(radius);
+    let view: &NSView = &card;
     view.setFrame(frame);
     view.setWantsLayer(true);
     content.addSubview(view);
     if let Some(layer) = view.layer() {
-        layer.setZPosition(PILL_Z);
+        layer.setZPosition(CARD_Z);
     }
-    pill
+    card
 }
 
-fn add_label(pill: &NSGlassEffectView, mtm: MainThreadMarker, text: &str, color: &NSColor) {
-    let host: &NSView = pill;
-    let b = host.bounds();
-    let label = NSTextField::labelWithString(&NSString::from_str(text), mtm);
-    label.setFont(Some(&NSFont::systemFontOfSize(12.0)));
-    label.setTextColor(Some(color));
-    let lview: &NSView = &label;
-    lview.setFrame(NSRect::new(
-        NSPoint::new(10.0, (b.size.height - 16.0) / 2.0),
-        NSSize::new((b.size.width - 20.0).max(10.0), 16.0),
-    ));
-    host.addSubview(lview);
+fn rounded_bg(view: &NSView, radius: f64, bg: Option<&NSColor>) {
+    view.setWantsLayer(true);
+    if let Some(layer) = view.layer() {
+        layer.setCornerRadius(radius);
+        if let Some(c) = bg {
+            layer.setBackgroundColor(Some(&c.CGColor()));
+        }
+    }
 }
 
-fn add_button(
-    pill: &NSGlassEffectView,
+/// A clickable fill button (text + optional rounded fill background) placed inside a card.
+fn fill_button(
+    parent: &NSView,
     mtm: MainThreadMarker,
     target: &AnyObject,
     text: &str,
     tag: usize,
-) {
-    let host: &NSView = pill;
-    let b = host.bounds();
+    frame: NSRect,
+    radius: f64,
+    bg: Option<&NSColor>,
+) -> Retained<NSButton> {
     let button = NSButton::new(mtm);
     button.setTitle(&NSString::from_str(text));
     button.setBordered(false);
@@ -130,8 +126,51 @@ fn add_button(
     unsafe { button.setAction(Some(sel!(onTabClick:))) };
     button.setTag(tag as isize);
     let bview: &NSView = &button;
-    bview.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), b.size));
-    host.addSubview(bview);
+    bview.setFrame(frame);
+    rounded_bg(bview, radius, bg);
+    parent.addSubview(bview);
+    button
+}
+
+/// A non-interactive fill (rounded background + label) placed inside a card.
+fn fill_label(
+    parent: &NSView,
+    mtm: MainThreadMarker,
+    text: &str,
+    frame: NSRect,
+    radius: f64,
+    fg: &NSColor,
+    bg: Option<&NSColor>,
+) -> Retained<NSView> {
+    let fill: Retained<NSView> = NSView::new(mtm);
+    {
+        let fv: &NSView = &fill;
+        fv.setFrame(frame);
+    }
+    rounded_bg(&fill, radius, bg);
+    parent.addSubview(&fill);
+    let label = NSTextField::labelWithString(&NSString::from_str(text), mtm);
+    label.setFont(Some(&NSFont::systemFontOfSize(12.0)));
+    label.setTextColor(Some(fg));
+    let lview: &NSView = &label;
+    lview.setFrame(NSRect::new(
+        NSPoint::new(10.0, (frame.size.height - 16.0) / 2.0),
+        NSSize::new((frame.size.width - 20.0).max(10.0), 16.0),
+    ));
+    fill.addSubview(lview);
+    fill
+}
+
+fn accent(alpha: f64) -> Retained<NSColor> {
+    NSColor::controlAccentColor().colorWithAlphaComponent(alpha)
+}
+
+fn white(alpha: f64) -> Retained<NSColor> {
+    NSColor::whiteColor().colorWithAlphaComponent(alpha)
+}
+
+fn black(alpha: f64) -> Retained<NSColor> {
+    NSColor::blackColor().colorWithAlphaComponent(alpha)
 }
 
 fn sync_layout_glass(
@@ -144,12 +183,13 @@ fn sync_layout_glass(
     let want = *renderer == LayoutRenderer::Native && *mode == InteractionMode::User;
 
     if !want {
-        if !state.pills.is_empty() {
-            for pill in state.pills.drain(..) {
-                let view: &NSView = &pill;
-                view.removeFromSuperview();
-            }
-            state.actions.clear();
+        if let Some(card) = &state.header_card {
+            let v: &NSView = card;
+            v.setHidden(true);
+        }
+        if let Some(card) = &state.sidesheet_card {
+            let v: &NSView = card;
+            v.setHidden(true);
         }
         return;
     }
@@ -166,7 +206,7 @@ fn sync_layout_glass(
     let content: &NSView = unsafe { &*ns_view.cast::<NSView>() };
     let bounds = content.bounds();
     let flipped = content.isFlipped();
-    let width = bounds.size.width;
+    let size = (bounds.size.width, bounds.size.height);
 
     if state.target.is_none() {
         let (tx, rx) = channel();
@@ -174,177 +214,220 @@ fn sync_layout_glass(
         state.click_rx = Some(rx);
     }
 
-    let resized = (width - state.last_width).abs() > 0.5;
-    if !(current.is_changed() || state.pills.is_empty() || resized) {
-        return;
-    }
-    state.last_width = width;
-    rebuild(&mut state, &current, content, mtm, bounds, flipped);
-}
-
-fn rebuild(
-    state: &mut LayoutGlassState,
-    current: &CurrentLayoutView,
-    content: &NSView,
-    mtm: MainThreadMarker,
-    bounds: NSRect,
-    flipped: bool,
-) {
-    for pill in state.pills.drain(..) {
-        let view: &NSView = &pill;
-        view.removeFromSuperview();
-    }
-    state.actions.clear();
-    let Some(target) = state.target.clone() else {
-        return;
-    };
-    let target_ref: &AnyObject = &target;
-
     let header_h = CEF_RESERVED_HEIGHT_PX as f64;
     let sheet_w = SIDE_SHEET_WIDTH_PX as f64;
     let width = bounds.size.width;
     let height = bounds.size.height;
-    let band_top = if flipped { 0.0 } else { height - header_h };
-    // Stack the two header rows flush against the page top so tab -> toolbar -> page connect
-    // (no floating gap), matching the OSR browser-frame look.
-    let (row1_y, row2_y) = if flipped {
-        let r2 = header_h - PILL_H;
-        (r2 - PILL_H, r2)
-    } else {
-        (band_top + PILL_H, band_top)
-    };
-    let radius = PILL_H / 2.0;
-    // Header lives in the main column, aligned with the page (right of the side sheet).
-    let main_x0 = sheet_w + 12.0;
+    let top_inset = 38.0; // clear the traffic lights in the side column
+    let pad = 8.0;
 
-    // Row 1: tab pills + new-tab
+    // Persistent glass cards (the materials). Header is flush against the page top; the side
+    // sheet is the full-height left column.
+    let header_frame = NSRect::new(
+        NSPoint::new(sheet_w + pad, if flipped { pad } else { height - header_h }),
+        NSSize::new((width - sheet_w - pad * 2.0).max(10.0), header_h - pad),
+    );
+    let sheet_frame = NSRect::new(
+        NSPoint::new(pad, if flipped { top_inset } else { pad }),
+        NSSize::new(sheet_w - pad * 2.0, (height - top_inset - pad).max(10.0)),
+    );
+    if state.header_card.is_none() {
+        state.header_card = Some(glass_card(mtm, content, header_frame, 14.0));
+    }
+    if state.sidesheet_card.is_none() {
+        state.sidesheet_card = Some(glass_card(mtm, content, sheet_frame, 14.0));
+    }
+    if let Some(card) = &state.header_card {
+        let v: &NSView = card;
+        v.setFrame(header_frame);
+        v.setHidden(false);
+    }
+    if let Some(card) = &state.sidesheet_card {
+        let v: &NSView = card;
+        v.setFrame(sheet_frame);
+        v.setHidden(false);
+    }
+
+    let resized =
+        (size.0 - state.last_size.0).abs() > 0.5 || (size.1 - state.last_size.1).abs() > 0.5;
+    if !(current.is_changed() || state.buttons.is_empty() || resized) {
+        return;
+    }
+    state.last_size = size;
+    rebuild(&mut state, &current, mtm);
+}
+
+fn rebuild(state: &mut LayoutGlassState, current: &CurrentLayoutView, mtm: MainThreadMarker) {
+    for b in state.buttons.drain(..) {
+        let v: &NSView = &b;
+        v.removeFromSuperview();
+    }
+    for f in state.fills.drain(..) {
+        f.removeFromSuperview();
+    }
+    state.actions.clear();
+    let (Some(header), Some(sheet), Some(target)) = (
+        state.header_card.clone(),
+        state.sidesheet_card.clone(),
+        state.target.clone(),
+    ) else {
+        return;
+    };
+    let header_view: &NSView = &header;
+    let sheet_view: &NSView = &sheet;
+    let target_ref: &AnyObject = &target;
+
+    // --- Header card (local coords). Two rows: tabs on top, nav/url/profile below. ---
+    let hb = header_view.bounds();
+    let hflip = header_view.isFlipped();
+    let from_top = |off: f64, h: f64| {
+        if hflip { off } else { hb.size.height - off - h }
+    };
+    let row1 = from_top(10.0, ROW_H);
+    let row2 = from_top(10.0 + ROW_H + 6.0, ROW_H);
+
+    // Row 1: tabs + new-tab
     let tab_w = 120.0_f64;
-    let mut x = main_x0;
+    let mut x = 12.0_f64;
     for tab in &current.0.tabs {
         let tag = state.actions.len();
-        let pill = glass_pill(
+        let bg = if tab.is_active {
+            Some(accent(0.85))
+        } else {
+            Some(white(0.06))
+        };
+        let b = fill_button(
+            header_view,
             mtm,
-            content,
-            NSRect::new(NSPoint::new(x, row1_y), NSSize::new(tab_w, PILL_H)),
-            radius,
-            tab.is_active,
+            target_ref,
+            &tab.title,
+            tag,
+            NSRect::new(NSPoint::new(x, row1), NSSize::new(tab_w, ROW_H)),
+            8.0,
+            bg.as_deref(),
         );
-        add_button(&pill, mtm, target_ref, &tab.title, tag);
-        state.pills.push(pill);
+        state.buttons.push(b);
         state.actions.push(LayoutAction::SwitchTab(tab.id.clone()));
-        x += tab_w + 8.0;
+        x += tab_w + 6.0;
     }
     {
         let tag = state.actions.len();
-        let pill = glass_pill(
+        let b = fill_button(
+            header_view,
             mtm,
-            content,
-            NSRect::new(NSPoint::new(x, row1_y), NSSize::new(PILL_H, PILL_H)),
-            radius,
-            false,
+            target_ref,
+            "+",
+            tag,
+            NSRect::new(NSPoint::new(x, row1), NSSize::new(ROW_H, ROW_H)),
+            8.0,
+            None,
         );
-        add_button(&pill, mtm, target_ref, "+", tag);
-        state.pills.push(pill);
+        state.buttons.push(b);
         state.actions.push(LayoutAction::NewTab);
     }
 
     // Row 2: nav + address + profile
-    let mut nx = main_x0;
+    let mut nx = 12.0_f64;
     for (glyph, action) in [
         ("\u{2039}", LayoutAction::Back),
         ("\u{203a}", LayoutAction::Forward),
         ("\u{27f3}", LayoutAction::Reload),
     ] {
         let tag = state.actions.len();
-        let pill = glass_pill(
+        let b = fill_button(
+            header_view,
             mtm,
-            content,
-            NSRect::new(NSPoint::new(nx, row2_y), NSSize::new(PILL_H, PILL_H)),
-            radius,
-            false,
+            target_ref,
+            glyph,
+            tag,
+            NSRect::new(NSPoint::new(nx, row2), NSSize::new(ROW_H, ROW_H)),
+            ROW_H / 2.0,
+            None,
         );
-        add_button(&pill, mtm, target_ref, glyph, tag);
-        state.pills.push(pill);
+        state.buttons.push(b);
         state.actions.push(action);
-        nx += PILL_H + 6.0;
+        nx += ROW_H + 4.0;
     }
 
     let profile = active_profile_name();
-    let profile_w = 110.0_f64;
-    let profile_x = width - profile_w - 12.0;
+    let profile_w = 100.0_f64;
+    let profile_x = hb.size.width - profile_w - 12.0;
     if !profile.is_empty() {
-        let pill = glass_pill(
+        let f = fill_label(
+            header_view,
             mtm,
-            content,
-            NSRect::new(
-                NSPoint::new(profile_x, row2_y),
-                NSSize::new(profile_w, PILL_H),
-            ),
-            radius,
-            false,
+            profile,
+            NSRect::new(NSPoint::new(profile_x, row2), NSSize::new(profile_w, ROW_H)),
+            ROW_H / 2.0,
+            &NSColor::labelColor(),
+            Some(&white(0.08)),
         );
-        add_label(&pill, mtm, profile, &NSColor::labelColor());
-        state.pills.push(pill);
+        state.fills.push(f);
     }
 
-    let addr_x = nx + 4.0;
-    let addr_w = (profile_x - addr_x - 12.0).max(80.0);
+    let addr_x = nx + 6.0;
+    let addr_w = (profile_x - addr_x - 10.0).max(80.0);
     let addr_text = if current.0.address.is_empty() {
         " "
     } else {
         current.0.address.as_str()
     };
-    let pill = glass_pill(
+    let f = fill_label(
+        header_view,
         mtm,
-        content,
-        NSRect::new(NSPoint::new(addr_x, row2_y), NSSize::new(addr_w, PILL_H)),
-        radius,
-        false,
+        addr_text,
+        NSRect::new(NSPoint::new(addr_x, row2), NSSize::new(addr_w, ROW_H)),
+        ROW_H / 2.0,
+        &NSColor::secondaryLabelColor(),
+        Some(&black(0.22)),
     );
-    add_label(&pill, mtm, addr_text, &NSColor::secondaryLabelColor());
-    state.pills.push(pill);
+    state.fills.push(f);
 
-    // Side sheet (left column, anchored top-left): stack cards + new-stack
-    let card_h = 30.0_f64;
-    let card_gap = 8.0_f64;
-    let cards_top = if flipped {
-        44.0
-    } else {
-        height - 44.0 - card_h
-    };
-    let card_y = |row: usize| {
-        if flipped {
-            cards_top + row as f64 * (card_h + card_gap)
+    // --- Side sheet card (local coords): stack rows + new-stack ---
+    let sb = sheet_view.bounds();
+    let sflip = sheet_view.isFlipped();
+    let card_w = (sb.size.width - 16.0).max(40.0);
+    let row_y = |row: usize| {
+        let off = 12.0 + row as f64 * (ROW_H + 6.0);
+        if sflip {
+            off
         } else {
-            cards_top - row as f64 * (card_h + card_gap)
+            sb.size.height - off - ROW_H
         }
     };
-    let card_w = (sheet_w - 24.0).max(40.0);
     for (i, st) in current.0.stacks.iter().enumerate() {
-        let pill = glass_pill(
+        let bg = if st.is_active {
+            accent(0.85)
+        } else {
+            white(0.06)
+        };
+        let f = fill_label(
+            sheet_view,
             mtm,
-            content,
-            NSRect::new(NSPoint::new(12.0, card_y(i)), NSSize::new(card_w, card_h)),
-            10.0,
-            st.is_active,
+            &st.title,
+            NSRect::new(NSPoint::new(8.0, row_y(i)), NSSize::new(card_w, ROW_H)),
+            8.0,
+            &NSColor::labelColor(),
+            Some(&bg),
         );
-        add_label(&pill, mtm, &st.title, &NSColor::labelColor());
-        state.pills.push(pill);
+        state.fills.push(f);
     }
     {
         let tag = state.actions.len();
-        let pill = glass_pill(
+        let b = fill_button(
+            sheet_view,
             mtm,
-            content,
+            target_ref,
+            "+ New Stack",
+            tag,
             NSRect::new(
-                NSPoint::new(12.0, card_y(current.0.stacks.len())),
-                NSSize::new(card_w, card_h),
+                NSPoint::new(8.0, row_y(current.0.stacks.len())),
+                NSSize::new(card_w, ROW_H),
             ),
-            10.0,
-            false,
+            8.0,
+            Some(&white(0.04)),
         );
-        add_button(&pill, mtm, target_ref, "+ New Stack", tag);
-        state.pills.push(pill);
+        state.buttons.push(b);
         state.actions.push(LayoutAction::NewStack);
     }
 }
