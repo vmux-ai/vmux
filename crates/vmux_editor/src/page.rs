@@ -58,6 +58,14 @@ fn open_path(path: String) {
     let _ = try_cef_bin_emit_rkyv(&FileOpenEvent { path });
 }
 
+fn parent_of(path: &str) -> String {
+    match path.trim_end_matches('/').rsplit_once('/') {
+        Some(("", _)) => "/".to_string(),
+        Some((prefix, _)) => prefix.to_string(),
+        None => path.to_string(),
+    }
+}
+
 fn format_size(bytes: u64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = KB * 1024.0;
@@ -74,12 +82,14 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-white/[0.035] p-2 ring-1 ring-inset ring-white/10 backdrop-blur-xl";
+
 fn row_class(selected: bool) -> String {
-    let base = "flex items-center gap-2 rounded-lg px-3 py-1.5 cursor-default";
+    let base = "flex items-center gap-2.5 rounded-lg px-3 py-2 cursor-default transition-colors duration-100";
     if selected {
-        format!("{base} bg-white/10 ring-1 ring-white/15 text-foreground")
+        format!("{base} bg-sky-400/15 text-foreground ring-1 ring-inset ring-sky-300/30 shadow-sm")
     } else {
-        format!("{base} text-foreground/90 hover:bg-white/5")
+        format!("{base} text-foreground/80 hover:bg-white/[0.06]")
     }
 }
 
@@ -130,7 +140,7 @@ fn render_preview(preview: &Preview) -> Element {
             div { class: "text-xs text-muted-foreground opacity-60", "" }
         },
         Preview::Image(url) => rsx! {
-            img { src: "{url}", class: "max-h-full max-w-full rounded-lg object-contain" }
+            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-lg ring-1 ring-white/10" }
         },
         Preview::Text(lines) => rsx! {
             div { class: "h-full w-full overflow-auto font-mono text-xs leading-snug",
@@ -185,6 +195,7 @@ pub fn Page() -> Element {
     let mut parent_entries = use_signal(Vec::<FileDirEntry>::new);
     let mut parent_path = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
+    let mut back_dir = use_signal(|| Option::<String>::None);
     let mut mode = use_signal(|| Mode::Text);
     let mut image_url = use_signal(|| Option::<String>::None);
     let mut preview = use_signal(|| Preview::None);
@@ -196,6 +207,10 @@ pub fn Page() -> Element {
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             let name = m.path.rsplit('/').next().unwrap_or(&m.path).to_string();
             doc.set_title(&name);
+        }
+        if let Some(old) = image_url() {
+            revoke(&old);
+            image_url.set(None);
         }
         path.set(m.path);
         language.set(m.language);
@@ -227,6 +242,10 @@ pub fn Page() -> Element {
             revoke(url);
         }
         thumbs.set(HashMap::new());
+        if let Some(old) = image_url() {
+            revoke(&old);
+            image_url.set(None);
+        }
         path.set(d.path);
         parent_path.set(d.parent_path);
         parent_entries.set(d.parent_entries);
@@ -387,10 +406,11 @@ pub fn Page() -> Element {
                             }
                             "l" | "ArrowRight" | "Enter" => {
                                 e.prevent_default();
-                                if let Some(p) =
-                                    dir_entries.read().get(cur).map(|x| x.path.clone())
-                                {
-                                    open_path(p);
+                                if let Some(ent) = dir_entries.read().get(cur).cloned() {
+                                    if !ent.is_dir {
+                                        back_dir.set(Some(parent_of(&ent.path)));
+                                    }
+                                    open_path(ent.path);
                                 }
                             }
                             "h" | "ArrowLeft" | "Escape" => {
@@ -404,6 +424,13 @@ pub fn Page() -> Element {
                         }
                     }
                     _ => {
+                        if matches!(key.as_str(), "Escape" | "h")
+                            && let Some(d) = back_dir()
+                        {
+                            e.prevent_default();
+                            open_path(d);
+                            return;
+                        }
                         let cur = first_line() as i64;
                         let next = match key.as_str() {
                             "ArrowDown" => cur + 1,
@@ -450,31 +477,32 @@ pub fn Page() -> Element {
                 Mode::Image => rsx! {
                     div { class: "flex min-h-0 flex-1 items-center justify-center overflow-auto p-4",
                         if let Some(url) = image_url() {
-                            img { src: "{url}", class: "max-h-full max-w-full rounded-lg object-contain" }
+                            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-lg ring-1 ring-white/10" }
                         }
                     }
                 },
                 Mode::Dir => rsx! {
                     div {
-                        class: "grid min-h-0 flex-1 gap-2 p-2",
+                        class: "grid min-h-0 flex-1 gap-3 p-3",
                         style: "grid-template-columns: minmax(8rem,14rem) minmax(10rem,1fr) minmax(12rem,1.3fr);",
 
-                        div { class: "overflow-y-auto rounded-xl bg-white/[0.04] p-2 ring-1 ring-white/[0.06] backdrop-blur-md",
+                        div { class: PANE_CLASS,
                             for e in parent_entries() {
                                 div {
                                     key: "{e.path}",
-                                    class: if e.name == cur_basename { "flex items-center gap-2 rounded-lg bg-white/[0.06] px-3 py-1.5 text-foreground" } else { "flex items-center gap-2 rounded-lg px-3 py-1.5 text-foreground/70" },
+                                    class: if e.name == cur_basename { "flex items-center gap-2.5 rounded-lg bg-sky-400/10 px-3 py-2 text-foreground" } else { "flex items-center gap-2.5 rounded-lg px-3 py-2 text-foreground/55 transition-colors hover:bg-white/[0.04]" },
                                     {entry_visual(&e, None)}
                                     span { class: "truncate text-xs", "{e.name}" }
                                 }
                             }
                         }
 
-                        div { class: "overflow-y-auto rounded-xl bg-white/[0.04] p-2 ring-1 ring-white/[0.06] backdrop-blur-md",
+                        div { class: PANE_CLASS,
                             for (i, e) in dir_entries().into_iter().enumerate() {
                                 {
                                     let p_sel = e.path.clone();
                                     let p_open = e.path.clone();
+                                    let is_dir = e.is_dir;
                                     let thumb = thumbs().get(&e.path).cloned();
                                     rsx! {
                                         div {
@@ -485,7 +513,12 @@ pub fn Page() -> Element {
                                                 selected.set(i);
                                                 request_preview(p_sel.clone());
                                             },
-                                            ondoubleclick: move |_| open_path(p_open.clone()),
+                                            ondoubleclick: move |_| {
+                                                if !is_dir {
+                                                    back_dir.set(Some(parent_of(&p_open)));
+                                                }
+                                                open_path(p_open.clone());
+                                            },
                                             {entry_visual(&e, thumb.as_ref())}
                                             span { class: "truncate text-xs", "{e.name}" }
                                         }
@@ -494,7 +527,7 @@ pub fn Page() -> Element {
                             }
                         }
 
-                        div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-xl bg-white/[0.04] p-3 ring-1 ring-white/[0.06] backdrop-blur-md",
+                        div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-white/[0.025] p-4 ring-1 ring-inset ring-white/10 backdrop-blur-xl",
                             {render_preview(&preview())}
                         }
                     }
