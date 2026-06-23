@@ -14,6 +14,8 @@ mod event_tap;
 mod focus_native;
 #[cfg(target_os = "macos")]
 mod glass;
+#[cfg(target_os = "macos")]
+mod layout_native;
 mod log_forward;
 #[cfg(target_os = "macos")]
 mod native_keyboard;
@@ -148,8 +150,12 @@ impl Plugin for VmuxPlugin {
             );
 
         #[cfg(target_os = "macos")]
-        app.add_plugins((glass::GlassPlugin, splash::SplashPlugin))
-            .add_systems(Last, focus_native::apply_winit_host_focus);
+        app.add_plugins((
+            glass::GlassPlugin,
+            splash::SplashPlugin,
+            layout_native::LayoutNativePlugin,
+        ))
+        .add_systems(Last, focus_native::apply_winit_host_focus);
     }
 }
 

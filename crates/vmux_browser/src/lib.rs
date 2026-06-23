@@ -860,9 +860,14 @@ fn sync_windowed_content_mesh_materials(
 /// transparent areas.
 fn sync_layout_mesh_visibility(
     layout_q: Query<&MeshMaterial3d<WebviewExtendStandardMaterial>, With<LayoutCef>>,
+    renderer: Res<vmux_layout::native_view::LayoutRenderer>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
-    let want_alpha = 1.0;
+    let want_alpha = if *renderer == vmux_layout::native_view::LayoutRenderer::Native {
+        0.0
+    } else {
+        1.0
+    };
     for mat_handle in &layout_q {
         let Some(mut material) = materials.get_mut(mat_handle.id()) else {
             continue;

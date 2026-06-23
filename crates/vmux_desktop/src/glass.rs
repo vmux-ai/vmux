@@ -346,7 +346,7 @@ struct CommandBarOverlay {
     held: Option<bevy_cef_core::prelude::AcceleratedFrame>,
 }
 
-fn primary_content_view_ptr(entity: Entity) -> Option<*mut core::ffi::c_void> {
+pub(crate) fn primary_content_view_ptr(entity: Entity) -> Option<*mut core::ffi::c_void> {
     use bevy::winit::WINIT_WINDOWS;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     WINIT_WINDOWS.with_borrow(|windows| {

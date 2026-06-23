@@ -5,6 +5,7 @@ use vmux_core::page::{PAGE_READY_BIN_EVENT_ID, PageReady, mark_webview_page_read
 use crate::command_bar::handler::CommandBarInputPlugin;
 use crate::focus_ring::FocusRingPlugin;
 use crate::header::HeaderLayoutPlugin;
+use crate::native_view::NativeViewPlugin;
 use crate::pane::PanePlugin;
 use crate::profile::ProfilePlugin;
 use crate::scene::ScenePlugin;
@@ -80,6 +81,11 @@ impl Plugin for LayoutPlugin {
                 SideSheetLayoutPlugin,
                 HeaderLayoutPlugin,
             ))
-            .add_plugins((CommandBarInputPlugin, TogglePlugin, WebviewRevealPlugin));
+            .add_plugins((
+                CommandBarInputPlugin,
+                TogglePlugin,
+                WebviewRevealPlugin,
+                NativeViewPlugin,
+            ));
     }
 }

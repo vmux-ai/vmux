@@ -10,6 +10,8 @@ pub mod debug_page;
 #[cfg(target_arch = "wasm32")]
 pub mod error_page;
 pub mod event;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native_view;
 #[cfg(target_arch = "wasm32")]
 pub mod page;
 pub mod protocol;
