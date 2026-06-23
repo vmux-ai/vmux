@@ -71,6 +71,9 @@ fn reclaim_first_responder(window_entity: Entity) -> ReclaimOutcome {
     let Some(window) = view.window() else {
         return ReclaimOutcome::NoView;
     };
+    if !window.isKeyWindow() {
+        return ReclaimOutcome::Failed;
+    }
     let responder: &NSResponder = view;
     if let Some(current) = window.firstResponder()
         && core::ptr::eq(

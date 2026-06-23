@@ -1633,6 +1633,11 @@ mod hover_wake {
         }
     }
 
+    fn region_contains(region: &(u64, f32, f32, f32, f32), x: f32, y: f32) -> bool {
+        let (_, min_x, min_y, max_x, max_y) = *region;
+        x >= min_x && x <= max_x && y >= min_y && y <= max_y
+    }
+
     pub fn wake_on_move(x: f32, y: f32) -> bool {
         let Ok(regions) = REGIONS.lock() else {
             return false;
@@ -1640,9 +1645,7 @@ mod hover_wake {
         let hit = regions
             .panes
             .iter()
-            .find(|(_, min_x, min_y, max_x, max_y)| {
-                x >= *min_x && x <= *max_x && y >= *min_y && y <= *max_y
-            })
+            .find(|region| region_contains(region, x, y))
             .map(|(entity, ..)| *entity);
         match hit {
             Some(entity) if Some(entity) == regions.active => false,
@@ -1654,6 +1657,16 @@ mod hover_wake {
         }
     }
 
+    pub fn cursor_over_pane(x: f32, y: f32) -> bool {
+        let Ok(regions) = REGIONS.lock() else {
+            return false;
+        };
+        regions
+            .panes
+            .iter()
+            .any(|region| region_contains(region, x, y))
+    }
+
     pub fn take_pending_target() -> Option<u64> {
         match PENDING.swap(0, Ordering::Relaxed) {
             0 => None,
@@ -1663,7 +1676,7 @@ mod hover_wake {
 }
 
 #[cfg(target_os = "macos")]
-pub use hover_wake::wake_on_move;
+pub use hover_wake::{cursor_over_pane, wake_on_move};
 
 #[cfg(target_os = "macos")]
 fn publish_pane_hover_regions(

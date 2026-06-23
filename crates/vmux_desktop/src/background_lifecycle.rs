@@ -50,6 +50,7 @@ impl Plugin for BackgroundLifecyclePlugin {
                 Update,
                 keep_awake_while_command_bar_opening.after(vmux_command::ReadAppCommands),
             )
+            .add_systems(Update, grab_key_window_on_pane_hover)
             .add_systems(
                 Startup,
                 (
@@ -70,6 +71,8 @@ static LAST_NATIVE_MOUSE_WAKE: LazyLock<Mutex<Option<Instant>>> =
 static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "macos")]
 fn activate_primary_window_on_startup(
@@ -86,6 +89,26 @@ fn activate_primary_window_on_startup(
 
 #[cfg(not(target_os = "macos"))]
 fn activate_primary_window_on_startup() {}
+
+#[cfg(target_os = "macos")]
+fn grab_key_window_on_pane_hover(
+    intent: Res<vmux_browser::HostFocusIntent>,
+    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
+) {
+    if !HOVER_OVER_PANE.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    if *intent == vmux_browser::HostFocusIntent::Unmanaged {
+        return;
+    }
+    let Ok(window_entity) = primary_window.single() else {
+        return;
+    };
+    ensure_native_window_active(window_entity);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn grab_key_window_on_pane_hover() {}
 
 #[cfg(target_os = "macos")]
 pub(crate) fn activate_native_window(window_entity: Entity) {
@@ -239,8 +262,17 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         {
             vmux_browser::request_native_command_bar_dismiss_for_mouse_down(x_px, y_px);
         }
-        if event_type == NSEventType::MouseMoved {
-            let should_wake = event_location_in_window_physical_px(ev)
+        if matches!(
+            event_type,
+            NSEventType::MouseMoved | NSEventType::LeftMouseDown
+        ) {
+            let location = event_location_in_window_physical_px(ev);
+            if let Some((x, y)) = location
+                && vmux_layout::pane::cursor_over_pane(x, y)
+            {
+                HOVER_OVER_PANE.store(true, Ordering::Relaxed);
+            }
+            let should_wake = location
                 .map(|(x, y)| vmux_layout::pane::wake_on_move(x, y))
                 .unwrap_or(false);
             if should_wake {
