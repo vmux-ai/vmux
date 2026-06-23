@@ -205,8 +205,14 @@ fn rebuild(
     let width = bounds.size.width;
     let height = bounds.size.height;
     let band_top = if flipped { 0.0 } else { height - header_h };
-    let row1_y = band_top + 10.0;
-    let row2_y = band_top + 10.0 + PILL_H + 6.0;
+    // Stack the two header rows flush against the page top so tab -> toolbar -> page connect
+    // (no floating gap), matching the OSR browser-frame look.
+    let (row1_y, row2_y) = if flipped {
+        let r2 = header_h - PILL_H;
+        (r2 - PILL_H, r2)
+    } else {
+        (band_top + PILL_H, band_top)
+    };
     let radius = PILL_H / 2.0;
     // Header lives in the main column, aligned with the page (right of the side sheet).
     let main_x0 = sheet_w + 12.0;
@@ -302,9 +308,9 @@ fn rebuild(
     let card_h = 30.0_f64;
     let card_gap = 8.0_f64;
     let cards_top = if flipped {
-        12.0
+        44.0
     } else {
-        height - 12.0 - card_h
+        height - 44.0 - card_h
     };
     let card_y = |row: usize| {
         if flipped {
