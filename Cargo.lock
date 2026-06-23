@@ -9757,6 +9757,7 @@ dependencies = [
  "serde",
  "syntect",
  "tempfile",
+ "two-face",
  "vmux_ui",
 ]
 

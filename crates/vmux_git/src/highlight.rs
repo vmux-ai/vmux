@@ -16,7 +16,7 @@ struct Assets {
 fn assets() -> &'static Assets {
     static A: OnceLock<Assets> = OnceLock::new();
     A.get_or_init(|| Assets {
-        syntaxes: SyntaxSet::load_defaults_newlines(),
+        syntaxes: two_face::syntax::extra_newlines(),
         themes: ThemeSet::load_defaults(),
     })
 }
