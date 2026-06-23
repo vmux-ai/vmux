@@ -35,6 +35,8 @@ web-sys = { version = "0.3", features = [
     "History",
     "HtmlAnchorElement",
     "HtmlElement",
+    "HtmlMediaElement",
+    "HtmlVideoElement",
     "MediaQueryList",
     "MouseEvent",
     "Navigator",

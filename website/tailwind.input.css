@@ -33,6 +33,14 @@
         15% { opacity: 1; }
         45% { opacity: 0.12; }
     }
+
+    --animate-aurora: aurora 22s ease-in-out infinite;
+
+    @keyframes aurora {
+        0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+        33% { transform: translate3d(4%, -3%, 0) scale(1.08); }
+        66% { transform: translate3d(-3%, 4%, 0) scale(1.05); }
+    }
 }
 
 @layer base {
@@ -93,5 +101,36 @@
         opacity: 1;
         transform: none;
         transition: none;
+    }
+}
+
+@layer base {
+    [data-tone="dark"] {
+        --color-bg: #0a0a0a;
+        --color-surface: #151515;
+        --color-text: #e0e0e0;
+        --color-text-muted: #888;
+        --glass-bg: rgba(255, 255, 255, 0.06);
+        --glass-border: rgba(255, 255, 255, 0.12);
+        --glass-shadow: 0 40px 120px -30px rgba(0, 0, 0, 0.9);
+    }
+    [data-tone="light"] {
+        --color-bg: #eef1f7;
+        --color-surface: #ffffff;
+        --color-text: #10142a;
+        --color-text-muted: #565b73;
+        --glass-bg: rgba(255, 255, 255, 0.55);
+        --glass-border: rgba(255, 255, 255, 0.75);
+        --glass-shadow: 0 30px 90px -35px rgba(40, 50, 90, 0.45);
+    }
+}
+
+@layer components {
+    .glass {
+        background: var(--glass-bg);
+        border: 1px solid var(--glass-border);
+        backdrop-filter: blur(20px) saturate(1.2);
+        -webkit-backdrop-filter: blur(20px) saturate(1.2);
+        box-shadow: var(--glass-shadow);
     }
 }
