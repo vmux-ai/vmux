@@ -55,6 +55,8 @@ tempfile = "3"
 semver = "1"
 crossbeam-channel = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }
+gif = "0.14"
+color_quant = "2"
 cargo-packager-updater = "0.2"
 tray-icon = "0.24"
 
@@ -106,8 +108,13 @@ objc2-screen-capture-kit = { version = "0.3", features = [
     "SCShareableContent",
     "SCScreenshotManager",
     "objc2-core-graphics",
+    "objc2-core-media",
     "block2",
 ] }
+objc2-av-foundation = { version = "0.3", features = ["objc2-core-media"] }
+objc2-core-media = "0.3"
+objc2-core-video = "0.3"
+dispatch2 = "0.3"
 block2 = "0.6"
 raw-window-handle = "0.6"
 
