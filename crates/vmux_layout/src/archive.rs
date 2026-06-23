@@ -314,7 +314,9 @@ mod tests {
         app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)));
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
         app.update();
         let reqs = drain_archive_reqs(&mut app);
         assert_eq!(reqs.len(), 1);
@@ -336,7 +338,9 @@ mod tests {
         app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)));
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
         app.update();
         assert!(drain_archive_reqs(&mut app).is_empty());
     }
@@ -357,7 +361,9 @@ mod tests {
     fn dispatch_reopen(app: &mut App) {
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
-            .write(AppCommand::Layout(LayoutCommand::Stack(StackCommand::Reopen)));
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Reopen,
+            )));
         app.update();
     }
 
@@ -492,7 +498,10 @@ mod tests {
         let mut app = reopen_app();
         let active = app
             .world_mut()
-            .spawn((crate::space::Space, crate::space::SpaceId("active".to_string())))
+            .spawn((
+                crate::space::Space,
+                crate::space::SpaceId("active".to_string()),
+            ))
             .id();
         app.world_mut()
             .insert_resource(crate::space::ActiveSpaceEntity(Some(active)));

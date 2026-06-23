@@ -510,7 +510,11 @@ pub fn spawn_tab_scaffold_in_space(
         .id();
 
     let pane = commands
-        .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(split_root)))
+        .spawn((
+            leaf_pane_bundle(),
+            LastActivatedAt::now(),
+            ChildOf(split_root),
+        ))
         .id();
 
     let stack = commands
@@ -831,7 +835,11 @@ mod tests {
         };
         assert!(app.world().get::<crate::tab::Tab>(result.tab).is_some());
         assert!(app.world().get::<crate::pane::Pane>(result.pane).is_some());
-        assert!(app.world().get::<crate::stack::Stack>(result.stack).is_some());
+        assert!(
+            app.world()
+                .get::<crate::stack::Stack>(result.stack)
+                .is_some()
+        );
         assert_eq!(app.world().get::<ChildOf>(result.tab).unwrap().get(), space);
     }
 

@@ -72,7 +72,11 @@ pub enum StackCommand {
     #[shortcut(direct = "Super+Shift+K")]
     #[shortcut(direct = "Super+Shift+ArrowUp")]
     Previous,
-    #[menu(id = "stack_reopen", label = "Reopen Closed Page", accel = "super+shift+t")]
+    #[menu(
+        id = "stack_reopen",
+        label = "Reopen Closed Page",
+        accel = "super+shift+t"
+    )]
     #[shortcut(direct = "Ctrl+Shift+T")]
     Reopen,
     #[menu(id = "stack_duplicate", label = "Duplicate Stack\t<leader> d", hidden)]
