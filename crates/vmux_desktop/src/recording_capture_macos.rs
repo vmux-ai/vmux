@@ -25,7 +25,7 @@ use objc2_screen_capture_kit::{
     SCStreamOutputType,
 };
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, Weak, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use vmux_agent::RecordStartResponse;
@@ -55,6 +55,9 @@ struct EncodeState {
     start: Instant,
     last_gif_ms: Option<u64>,
     gif_tx: Option<Sender<GifMsg>>,
+    /// Count of pixel buffers successfully appended. Zero at finalize means the
+    /// capture produced no frames (the writer never started a session).
+    appended: u64,
 }
 
 struct RecordingState {
@@ -62,9 +65,15 @@ struct RecordingState {
     encode: Mutex<EncodeState>,
     gif_join: Mutex<Option<JoinHandle<()>>>,
     _queue: SendCell<DispatchRetained<DispatchQueue>>,
+    /// The SCStream output delegate, retained for the recording's lifetime.
+    /// SCStream does not strongly retain it, so without this it would dealloc
+    /// and stop delivering sample buffers.
+    _delegate: Mutex<Option<SendCell<Retained<StreamOutput>>>>,
     temp_mp4: PathBuf,
     temp_gif: Option<PathBuf>,
     gif: bool,
+    /// Configured/default output directory used when stop provides no explicit dir.
+    default_dir: PathBuf,
     deadline: Instant,
     out: Mutex<FinalizeTarget>,
     tx: Sender<RecordOutcome>,
@@ -87,7 +96,7 @@ fn active() -> &'static Mutex<Option<Arc<RecordingState>>> {
 define_class!(
     #[unsafe(super(NSObject))]
     #[name = "VmuxStreamOutput"]
-    #[ivars = Arc<RecordingState>]
+    #[ivars = Weak<RecordingState>]
     struct StreamOutput;
 
     unsafe impl NSObjectProtocol for StreamOutput {}
@@ -103,13 +112,16 @@ define_class!(
             if kind != SCStreamOutputType::Screen {
                 return;
             }
-            handle_sample(self.ivars(), sample);
+            let Some(state) = self.ivars().upgrade() else {
+                return;
+            };
+            handle_sample(&state, sample);
         }
     }
 );
 
 impl StreamOutput {
-    fn new(state: Arc<RecordingState>) -> Retained<Self> {
+    fn new(state: Weak<RecordingState>) -> Retained<Self> {
         let this = Self::alloc().set_ivars(state);
         unsafe { msg_send![super(this), init] }
     }
@@ -127,10 +139,13 @@ fn handle_sample(state: &Arc<RecordingState>, sample: &CMSampleBuffer) {
         enc.started_session = true;
     }
     if unsafe { enc.input.0.isReadyForMoreMediaData() } {
-        unsafe {
+        let appended = unsafe {
             enc.adaptor
                 .0
-                .appendPixelBuffer_withPresentationTime(&image_buffer, pts);
+                .appendPixelBuffer_withPresentationTime(&image_buffer, pts)
+        };
+        if appended {
+            enc.appended += 1;
         }
     }
 
@@ -312,6 +327,7 @@ pub(crate) fn start(
     request_id: [u8; 16],
     gif: bool,
     max_secs: u32,
+    default_dir: PathBuf,
     tx: Sender<RecordOutcome>,
     wake: Option<WakeFn>,
 ) -> RecordStartResponse {
@@ -337,7 +353,7 @@ pub(crate) fn start(
     let (out_w, out_h) = crop.map_or((img_w, img_h), |c| (c.w, c.h));
     let ts = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
     let rid: String = request_id[..4].iter().map(|b| format!("{b:02x}")).collect();
-    let tmp_dir = vmux_core::profile::screenshots_dir();
+    let tmp_dir = vmux_core::profile::recording_dir();
     if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
         return err(format!("cannot create {}: {e}", tmp_dir.display()));
     }
@@ -346,15 +362,30 @@ pub(crate) fn start(
 
     let (done_tx, done_rx) = mpsc::channel::<Result<(), String>>();
     let handler = RcBlock::new(move |content: *mut SCShareableContent, _e: *mut NSError| {
-        let res = setup_stream(
-            content, window_id, img_w, img_h, out_w, out_h, crop, gif, max_secs, &temp_mp4,
-            &temp_gif, &tx, &wake,
+        setup_stream(
+            content,
+            window_id,
+            img_w,
+            img_h,
+            out_w,
+            out_h,
+            crop,
+            gif,
+            max_secs,
+            &temp_mp4,
+            &temp_gif,
+            &default_dir,
+            &tx,
+            &wake,
+            done_tx.clone(),
         );
-        let _ = done_tx.send(res);
     });
     unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
 
-    match done_rx.recv_timeout(Duration::from_secs(5)) {
+    // Wait for the capture to actually start (or fail) so the agent sees real
+    // errors instead of a false "started". 8s covers the SCK content fetch +
+    // startCapture, comfortably under the broker query timeout.
+    match done_rx.recv_timeout(Duration::from_secs(8)) {
         Ok(Ok(())) => RecordStartResponse {
             request_id,
             result: Ok(max_secs),
@@ -377,18 +408,24 @@ fn setup_stream(
     max_secs: u32,
     temp_mp4: &Path,
     temp_gif: &Option<PathBuf>,
+    default_dir: &Path,
     tx: &Sender<RecordOutcome>,
     wake: &Option<WakeFn>,
-) -> Result<(), String> {
+    done_tx: mpsc::Sender<Result<(), String>>,
+) {
     if content.is_null() {
-        return Err("SCShareableContent unavailable".into());
+        let _ = done_tx.send(Err("SCShareableContent unavailable".into()));
+        return;
     }
     let content = unsafe { &*content };
     let windows = unsafe { content.windows() };
-    let window = windows
+    let Some(window) = windows
         .iter()
         .find(|w| unsafe { w.windowID() } == window_id)
-        .ok_or("vmux window not shareable")?;
+    else {
+        let _ = done_tx.send(Err("vmux window not shareable".into()));
+        return;
+    };
 
     let filter = unsafe {
         SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &window)
@@ -403,7 +440,13 @@ fn setup_stream(
         config.setQueueDepth(6);
     }
 
-    let (writer, input, adaptor) = build_writer(temp_mp4, out_w, out_h)?;
+    let (writer, input, adaptor) = match build_writer(temp_mp4, out_w, out_h) {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = done_tx.send(Err(e));
+            return;
+        }
+    };
 
     let (gif_tx, gif_join) = if let Some(path) = temp_gif.clone() {
         let (s, r) = crossbeam_channel::bounded::<GifMsg>(8);
@@ -426,38 +469,51 @@ fn setup_stream(
             start,
             last_gif_ms: None,
             gif_tx,
+            appended: 0,
         }),
         gif_join: Mutex::new(gif_join),
         _queue: SendCell(queue),
+        _delegate: Mutex::new(None),
         temp_mp4: temp_mp4.to_path_buf(),
         temp_gif: temp_gif.clone(),
         gif,
+        default_dir: default_dir.to_path_buf(),
         deadline: start + Duration::from_secs(max_secs as u64),
         out: Mutex::new(FinalizeTarget::default()),
         tx: tx.clone(),
         wake: wake.clone(),
     });
 
-    let delegate = StreamOutput::new(state.clone());
+    let delegate = StreamOutput::new(Arc::downgrade(&state));
     let stream = unsafe {
         SCStream::initWithFilter_configuration_delegate(SCStream::alloc(), &filter, &config, None)
     };
-    unsafe {
-        stream
-            .addStreamOutput_type_sampleHandlerQueue_error(
-                ProtocolObject::from_ref(&*delegate),
-                SCStreamOutputType::Screen,
-                Some(&state._queue.0),
-            )
-            .map_err(|e| format!("addStreamOutput failed: {e:?}"))?;
+    if let Err(e) = unsafe {
+        stream.addStreamOutput_type_sampleHandlerQueue_error(
+            ProtocolObject::from_ref(&*delegate),
+            SCStreamOutputType::Screen,
+            Some(&state._queue.0),
+        )
+    } {
+        let _ = done_tx.send(Err(format!("addStreamOutput failed: {e:?}")));
+        return;
     }
     *state.stream.lock().unwrap() = Some(SendCell(stream.clone()));
+    *state._delegate.lock().unwrap() = Some(SendCell(delegate));
 
-    let start_block = RcBlock::new(move |_e: *mut NSError| {});
+    // Only mark the session active once capture has actually started, and report
+    // any startCapture error back to `start` instead of swallowing it.
+    let start_state = state.clone();
+    let start_block = RcBlock::new(move |e: *mut NSError| {
+        if e.is_null() {
+            *active().lock().unwrap() = Some(start_state.clone());
+            let _ = done_tx.send(Ok(()));
+        } else {
+            let desc = unsafe { (*e).localizedDescription() };
+            let _ = done_tx.send(Err(format!("startCapture failed: {desc}")));
+        }
+    });
     unsafe { stream.startCaptureWithCompletionHandler(Some(&start_block)) };
-
-    *active().lock().unwrap() = Some(state);
-    Ok(())
 }
 
 pub(crate) fn stop(request_id: [u8; 16], dir: Option<String>, name: Option<String>) {
@@ -509,23 +565,37 @@ fn finalize(state: Arc<RecordingState>) {
 }
 
 fn finish_writer(state: Arc<RecordingState>) {
-    {
+    let appended = {
         let mut enc = state.encode.lock().unwrap();
         enc.gif_tx = None;
-        unsafe { enc.input.0.markAsFinished() };
-    }
+        if enc.appended > 0 {
+            unsafe { enc.input.0.markAsFinished() };
+        }
+        enc.appended
+    };
     if let Some(join) = state.gif_join.lock().unwrap().take() {
         let _ = join.join();
+    }
+    if appended == 0 {
+        // No frames captured: the writer never started a session, so calling
+        // finishWriting would hang. Abandon it and report a clear error.
+        deliver(
+            state,
+            Err(
+                "recording captured no frames (grant Screen Recording permission and retry)".into(),
+            ),
+        );
+        return;
     }
     let writer = state.encode.lock().unwrap().writer.0.clone();
     let s = state.clone();
     let completion = RcBlock::new(move || {
-        deliver(s.clone());
+        deliver(s.clone(), Ok(()));
     });
     unsafe { writer.finishWritingWithCompletionHandler(&completion) };
 }
 
-fn deliver(state: Arc<RecordingState>) {
+fn deliver(state: Arc<RecordingState>, finish_result: Result<(), String>) {
     let target = state.out.lock().unwrap().clone();
     let ts = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
     let (final_mp4, final_gif) = resolve_output_paths(
@@ -533,9 +603,10 @@ fn deliver(state: Arc<RecordingState>) {
         target.name.as_deref(),
         state.gif,
         &ts,
+        &state.default_dir,
     );
 
-    let result = (|| -> Result<RecordingInfo, String> {
+    let result = finish_result.and_then(|()| -> Result<RecordingInfo, String> {
         if let Some(parent) = final_mp4.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
@@ -558,7 +629,14 @@ fn deliver(state: Arc<RecordingState>) {
             bytes,
             auto_stopped: target.request_id.is_none(),
         })
-    })();
+    });
+
+    if result.is_err() {
+        let _ = std::fs::remove_file(&state.temp_mp4);
+        if let Some(tmp) = &state.temp_gif {
+            let _ = std::fs::remove_file(tmp);
+        }
+    }
 
     *active().lock().unwrap() = None;
     let _ = state.tx.send(RecordOutcome {
