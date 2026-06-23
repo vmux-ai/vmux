@@ -7,6 +7,7 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::Arc;
 use vmux_agent::{ScreenshotRequest, ScreenshotResponse};
+use vmux_setting::AppSettings;
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) const MAX_INLINE_EDGE: u32 = 1568;
@@ -63,11 +64,13 @@ pub(crate) fn start_screenshots(
     _non_send: NonSendMarker,
     mut reader: MessageReader<ScreenshotRequest>,
     bridge: Res<ScreenshotBridge>,
+    settings: Res<AppSettings>,
     window_q: Query<(Entity, &Window), With<PrimaryWindow>>,
     node_q: Query<(&ComputedNode, &UiGlobalTransform)>,
     child_of_q: Query<&ChildOf>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
+    let base_dir = crate::recording::capture_output_dir(&settings);
     for req in reader.read() {
         let Ok((window_entity, window)) = window_q.single() else {
             let _ = bridge
@@ -99,7 +102,16 @@ pub(crate) fn start_screenshots(
                 let _ = proxy.send_event(WinitUserEvent::WakeUp);
             }) as WakeFn
         });
-        capture::capture(window_entity, img_w, img_h, crop, req.request_id, tx, wake);
+        capture::capture(
+            window_entity,
+            img_w,
+            img_h,
+            crop,
+            req.request_id,
+            base_dir.clone(),
+            tx,
+            wake,
+        );
     }
 }
 
@@ -243,6 +255,7 @@ mod capture {
         SCContentFilter, SCScreenshotManager, SCShareableContent, SCStreamConfiguration,
     };
     use std::ffi::c_void;
+    use std::path::PathBuf;
     use vmux_agent::{ScreenshotImage, ScreenshotResponse};
 
     unsafe extern "C" {
@@ -316,11 +329,11 @@ mod capture {
         mut rgba: image::RgbaImage,
         crop: Option<CropRect>,
         request_id: [u8; 16],
+        dir: PathBuf,
     ) -> ScreenshotResponse {
         if let Some(c) = crop {
             rgba = image::imageops::crop_imm(&rgba, c.x, c.y, c.w, c.h).to_image();
         }
-        let dir = vmux_core::profile::screenshots_dir();
         if let Err(e) = std::fs::create_dir_all(&dir) {
             return err_response(request_id, format!("cannot create {}: {e}", dir.display()));
         }
@@ -362,6 +375,7 @@ mod capture {
         img_h: u32,
         crop: Option<CropRect>,
         request_id: [u8; 16],
+        base_dir: PathBuf,
         tx: Sender<ScreenshotResponse>,
         wake: Option<WakeFn>,
     ) {
@@ -427,6 +441,7 @@ mod capture {
 
                 let tx2 = tx.clone();
                 let wake2 = wake.clone();
+                let base_dir2 = base_dir.clone();
                 let capture_handler =
                     RcBlock::new(move |image: *mut CGImage, _err: *mut NSError| {
                         if image.is_null() {
@@ -439,7 +454,7 @@ mod capture {
                         }
                         let image_ref = unsafe { &*image };
                         let response = match cgimage_to_rgba(image_ref) {
-                            Ok(rgba) => encode_and_save(rgba, crop, request_id),
+                            Ok(rgba) => encode_and_save(rgba, crop, request_id, base_dir2.clone()),
                             Err(e) => err_response(request_id, e),
                         };
                         finish(&tx2, &wake2, response);
@@ -466,6 +481,7 @@ mod capture {
     use super::{CropRect, WakeFn, err_response};
     use bevy::prelude::Entity;
     use crossbeam_channel::Sender;
+    use std::path::PathBuf;
     use vmux_agent::ScreenshotResponse;
 
     pub(crate) fn capture(
@@ -474,6 +490,7 @@ mod capture {
         _img_h: u32,
         _crop: Option<CropRect>,
         request_id: [u8; 16],
+        _base_dir: PathBuf,
         tx: Sender<ScreenshotResponse>,
         _wake: Option<WakeFn>,
     ) {

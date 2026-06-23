@@ -185,6 +185,21 @@ fn query_result_to_content(result: crate::protocol::AgentQueryResult) -> (String
             height,
             ..
         } => (format!("saved {path} ({width}×{height})"), false),
+        AgentQueryResult::Recording {
+            mp4_path,
+            gif_path,
+            duration_ms,
+            bytes,
+            auto_stopped,
+        } => {
+            let secs = duration_ms as f64 / 1000.0;
+            let gif = gif_path.map(|g| format!(" + {g}")).unwrap_or_default();
+            let auto = if auto_stopped { " (auto-stopped)" } else { "" };
+            (
+                format!("recorded {secs:.1}s -> {mp4_path} ({bytes} bytes){gif}{auto}"),
+                false,
+            )
+        }
         AgentQueryResult::Error(message) => (message, true),
     }
 }

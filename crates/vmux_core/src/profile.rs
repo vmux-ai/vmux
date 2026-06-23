@@ -38,8 +38,10 @@ pub fn config_dir() -> PathBuf {
     home.join(".vmux")
 }
 
-pub fn screenshots_dir() -> PathBuf {
-    config_dir().join("screenshots")
+/// Default output directory for screenshots and screen recordings:
+/// `~/.vmux/recording`. Overridable via the `recording.output_dir` setting.
+pub fn recording_dir() -> PathBuf {
+    config_dir().join("recording")
 }
 
 /// Per-build config subdir, or `None` for the shared (release) settings.
@@ -212,9 +214,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn screenshots_dir_is_under_config_dir() {
-        assert_eq!(screenshots_dir(), config_dir().join("screenshots"));
-        assert!(screenshots_dir().ends_with(".vmux/screenshots"));
+    fn recording_dir_is_under_config_dir() {
+        assert_eq!(recording_dir(), config_dir().join("recording"));
+        assert!(recording_dir().ends_with(".vmux/recording"));
     }
 
     #[test]
