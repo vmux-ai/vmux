@@ -138,7 +138,7 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
     ) -> c_int {
         if let Some(message) = message
             && let Some(frame) = frame
-            && crate::util::has_embedded_scheme(&frame.url().into_string())
+            && crate::util::ipc_allowed_render(&frame.url().into_string())
             && let Some(ctx) = frame.v8_context()
         {
             match message.name().into_string().as_str() {

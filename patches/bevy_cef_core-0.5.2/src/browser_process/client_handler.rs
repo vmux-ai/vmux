@@ -228,7 +228,7 @@ impl ImplClient for ClientHandlerBuilder {
         {
             let name = message.name().into_string();
             let url = frame.url().into_string();
-            if !crate::util::is_trusted_embedded_page(&url) {
+            if !crate::util::ipc_allowed_browser(&url) {
                 crate::util::webview_debug_log(format!(
                     "ipc: dropped inbound '{name}' from untrusted url={url}"
                 ));

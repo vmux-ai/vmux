@@ -165,6 +165,41 @@ pub fn is_trusted_embedded_page(url: &str) -> bool {
     url_is_trusted_embedded_page(url, config.scheme_prefix(), &config.hosts)
 }
 
+/// https authorities allowed to use the JS<->Rust bridge despite not being
+/// embedded (`vmux://`) pages. A deliberate, tight exception to the
+/// bridge-scheme gate (see `docs/specs/2026-06-19-bridge-scheme-gate-design.md`)
+/// for the le-chat host-MCP integration: the le-chat web app (prod + local
+/// dev) injects/consumes `window.__LE_CHAT_MCP__`, which rides the same
+/// `window.cef` IPC. These are baked at compile time so both the browser and
+/// render processes agree without runtime propagation.
+pub const BRIDGE_ALLOWED_AUTHORITIES: &[&str] =
+    &["chat.mistral.ai", "chat.local.mistral.ai:8443"];
+
+/// True when `url` is an https page on an explicitly allow-listed bridge
+/// origin ([`BRIDGE_ALLOWED_AUTHORITIES`]). Used ONLY to widen the IPC gate so
+/// the le-chat host-MCP bridge works on chat.mistral.ai — it must not be used
+/// to grant embedded-asset / custom-scheme privileges to web origins.
+pub fn is_bridge_allowed_origin(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    BRIDGE_ALLOWED_AUTHORITIES.contains(&authority)
+}
+
+/// IPC gate predicate used by the render process: an embedded (`vmux://`/`file://`)
+/// page, or an allow-listed bridge origin. Only the IPC handlers use this; it
+/// does not grant embedded-asset/custom-scheme privileges.
+pub fn ipc_allowed_render(url: &str) -> bool {
+    has_embedded_scheme(url) || is_bridge_allowed_origin(url)
+}
+
+/// IPC gate predicate used by the browser process: a trusted embedded page, or
+/// an allow-listed bridge origin.
+pub fn ipc_allowed_browser(url: &str) -> bool {
+    is_trusted_embedded_page(url) || is_bridge_allowed_origin(url)
+}
+
 pub fn embedded_page_host_of(url: &str) -> Option<String> {
     embedded_page_host(url, resolved_cef_embedded_page_config().scheme_prefix())
 }
