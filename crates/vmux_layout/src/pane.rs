@@ -912,12 +912,24 @@ pub fn split_or_extend(
 #[derive(Message, Clone)]
 pub struct OpenBesideRequest {
     pub pane: Entity,
-    pub direction: PaneDirection,
+    /// `None` => automatic placement (type-stack + spiral). `Some` => explicit
+    /// split in that direction (caller override).
+    pub direction: Option<PaneDirection>,
     pub url: String,
     pub request_id: [u8; 16],
     /// When true, focus moves to the newly opened pane. When false, focus stays
     /// where it is (the agent keeps focus so it can drive the new pane itself).
     pub focus: bool,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct ResolverCtx<'w, 's> {
+    all_children: Query<'w, 's, &'static Children>,
+    seq_q: Query<'w, 's, &'static SpawnSeq>,
+    node_q: Query<'w, 's, &'static ComputedNode>,
+    page_q: Query<'w, 's, &'static vmux_core::PageMetadata, With<Stack>>,
+    spaces: Query<'w, 's, (), With<crate::space::Space>>,
+    tab_q: Query<'w, 's, Entity, With<Tab>>,
 }
 
 pub fn handle_open_beside_requests(
@@ -927,54 +939,216 @@ pub fn handle_open_beside_requests(
     tab_filter: Query<Entity, With<Stack>>,
     child_of_q: Query<&ChildOf>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    rc: ResolverCtx,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut new_stack_ctx: ResMut<NewStackContext>,
 ) {
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     for req in reader.read() {
-        let target_pane = match find_sibling_pane(
-            req.pane,
-            &req.direction,
-            &child_of_q,
-            &split_dir_q,
-            &pane_children,
+        // Explicit direction: caller override, today's behavior unchanged.
+        if let Some(direction) = req.direction {
+            let target_pane = match find_sibling_pane(
+                req.pane,
+                &direction,
+                &child_of_q,
+                &split_dir_q,
+                &pane_children,
+                &leaf_panes,
+            ) {
+                Some(sibling) => sibling,
+                None => {
+                    let existing_tabs: Vec<Entity> = pane_children
+                        .get(req.pane)
+                        .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+                        .unwrap_or_default();
+                    let split_dir = direction_to_split(&direction);
+                    let already_split =
+                        !split_this_batch.insert(req.pane) || split_dir_q.contains(req.pane);
+                    split_or_extend(
+                        &mut commands,
+                        req.pane,
+                        split_dir,
+                        &existing_tabs,
+                        req.focus,
+                        already_split,
+                    )
+                }
+            };
+            spawn_beside_stack(
+                target_pane,
+                req,
+                &mut commands,
+                &mut new_stack_ctx,
+                &mut page_open_requests,
+            );
+            continue;
+        }
+
+        // Auto: resolver decides Focus / AddTab / Spiral.
+        let Some(tab) = tab_of_pane(req.pane, &child_of_q, &rc.tab_q) else {
+            spawn_beside_stack(
+                req.pane,
+                req,
+                &mut commands,
+                &mut new_stack_ctx,
+                &mut page_open_requests,
+            );
+            continue;
+        };
+        let reuse = crate::space::space_of(req.pane, &child_of_q, &rc.spaces).and_then(|space| {
+            find_reuse_in_space(&req.url, space, &rc.tab_q, &rc.all_children, &rc.page_q)
+        });
+        let leaves = collect_leaf_infos(
+            tab,
+            &rc.all_children,
             &leaf_panes,
-        ) {
-            Some(sibling) => sibling,
-            None => {
+            &pane_children,
+            &rc.seq_q,
+            &rc.node_q,
+            &rc.page_q,
+        );
+
+        match crate::placement::resolve_placement(&req.url, reuse, &leaves, req.pane) {
+            crate::placement::Placement::Focus { tab, stack } => {
+                if let Ok(co) = child_of_q.get(stack) {
+                    commands.entity(co.get()).insert(LastActivatedAt::now());
+                }
+                commands.entity(stack).insert(LastActivatedAt::now());
+                commands.entity(tab).insert(LastActivatedAt::now());
+            }
+            crate::placement::Placement::AddTab { pane } => {
+                spawn_beside_stack(
+                    pane,
+                    req,
+                    &mut commands,
+                    &mut new_stack_ctx,
+                    &mut page_open_requests,
+                );
+            }
+            crate::placement::Placement::Spiral { anchor, axis } => {
                 let existing_tabs: Vec<Entity> = pane_children
-                    .get(req.pane)
+                    .get(anchor)
                     .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
                     .unwrap_or_default();
-                let split_dir = direction_to_split(&req.direction);
                 let already_split =
-                    !split_this_batch.insert(req.pane) || split_dir_q.contains(req.pane);
-                split_or_extend(
+                    !split_this_batch.insert(anchor) || split_dir_q.contains(anchor);
+                let target_pane = split_or_extend(
                     &mut commands,
-                    req.pane,
-                    split_dir,
+                    anchor,
+                    axis,
                     &existing_tabs,
                     req.focus,
                     already_split,
-                )
+                );
+                spawn_beside_stack(
+                    target_pane,
+                    req,
+                    &mut commands,
+                    &mut new_stack_ctx,
+                    &mut page_open_requests,
+                );
             }
-        };
-        let stack_ts = if req.focus {
-            LastActivatedAt::now()
-        } else {
-            LastActivatedAt(0)
-        };
-        let new_stack = commands
-            .spawn((stack_bundle(), stack_ts, ChildOf(target_pane)))
-            .id();
-        open_or_prompt_stack(
-            new_stack,
-            Some(req.url.clone()),
-            &mut new_stack_ctx,
-            &mut page_open_requests,
-        );
+        }
     }
+}
+
+fn spawn_beside_stack(
+    target_pane: Entity,
+    req: &OpenBesideRequest,
+    commands: &mut Commands,
+    new_stack_ctx: &mut NewStackContext,
+    page_open_requests: &mut MessageWriter<PageOpenRequest>,
+) {
+    let stack_ts = if req.focus {
+        LastActivatedAt::now()
+    } else {
+        LastActivatedAt(0)
+    };
+    let new_stack = commands
+        .spawn((stack_bundle(), stack_ts, ChildOf(target_pane)))
+        .id();
+    open_or_prompt_stack(
+        new_stack,
+        Some(req.url.clone()),
+        new_stack_ctx,
+        page_open_requests,
+    );
+}
+
+fn tab_of_pane(
+    pane: Entity,
+    child_of_q: &Query<&ChildOf>,
+    tab_q: &Query<Entity, With<Tab>>,
+) -> Option<Entity> {
+    let mut cur = pane;
+    for _ in 0..32 {
+        if tab_q.contains(cur) {
+            return Some(cur);
+        }
+        cur = child_of_q.get(cur).ok()?.get();
+    }
+    None
+}
+
+fn collect_leaf_infos(
+    tab: Entity,
+    all_children: &Query<&Children>,
+    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_children: &Query<&Children, With<Pane>>,
+    seq_q: &Query<&SpawnSeq>,
+    node_q: &Query<&ComputedNode>,
+    page_q: &Query<&vmux_core::PageMetadata, With<Stack>>,
+) -> Vec<crate::placement::LeafInfo> {
+    let mut panes = Vec::new();
+    crate::stack::collect_leaf_panes(tab, all_children, leaf_panes, &mut panes);
+    panes
+        .into_iter()
+        .map(|pane| {
+            let kinds = pane_children
+                .get(pane)
+                .map(|c| {
+                    c.iter()
+                        .filter_map(|child| page_q.get(child).ok())
+                        .map(|p| crate::placement::page_kind_for_url(&p.url))
+                        .collect()
+                })
+                .unwrap_or_default();
+            crate::placement::LeafInfo {
+                pane,
+                kinds,
+                spawn_seq: seq_q.get(pane).map(|s| s.0).unwrap_or(0),
+                size: node_q.get(pane).map(|n| n.size).unwrap_or(Vec2::ZERO),
+            }
+        })
+        .collect()
+}
+
+fn find_reuse_in_space(
+    url: &str,
+    space: Entity,
+    tab_q: &Query<Entity, With<Tab>>,
+    all_children: &Query<&Children>,
+    page_q: &Query<&vmux_core::PageMetadata, With<Stack>>,
+) -> Option<crate::placement::ReuseHit> {
+    let tabs: Vec<Entity> = all_children
+        .get(space)
+        .map(|c| c.iter().filter(|&e| tab_q.contains(e)).collect())
+        .unwrap_or_default();
+    for tab in tabs {
+        let mut frontier = vec![tab];
+        while let Some(node) = frontier.pop() {
+            if let Ok(meta) = page_q.get(node)
+                && meta.url == url
+            {
+                return Some(crate::placement::ReuseHit { tab, stack: node });
+            }
+            if let Ok(children) = all_children.get(node) {
+                frontier.extend(children.iter());
+            }
+        }
+    }
+    None
 }
 
 fn is_after_direction(direction: &PaneDirection) -> bool {
@@ -2095,7 +2269,7 @@ mod tests {
             .resource_mut::<Messages<OpenBesideRequest>>()
             .write(OpenBesideRequest {
                 pane: agent_pane,
-                direction: PaneDirection::Right,
+                direction: Some(PaneDirection::Right),
                 url: "file:///x.rs".to_string(),
                 request_id: [0u8; 16],
                 focus: false,
@@ -2138,7 +2312,7 @@ mod tests {
             .resource_mut::<Messages<OpenBesideRequest>>()
             .write(OpenBesideRequest {
                 pane,
-                direction: PaneDirection::Right,
+                direction: Some(PaneDirection::Right),
                 url: "file:///x.rs".to_string(),
                 request_id: [0u8; 16],
                 focus: true,
@@ -2148,6 +2322,189 @@ mod tests {
         assert!(
             app.world().get::<PaneSplit>(pane).is_some(),
             "a lone pane should split when there is no sibling"
+        );
+    }
+
+    fn place_pane_with_url(
+        app: &mut App,
+        parent: Entity,
+        seq: u64,
+        size: Vec2,
+        url: &str,
+    ) -> Entity {
+        use bevy::ui::{ComputedNode, UiGlobalTransform};
+        let pane = app
+            .world_mut()
+            .spawn((
+                Pane,
+                SpawnSeq(seq),
+                Node::default(),
+                LastActivatedAt::now(),
+                ChildOf(parent),
+                ComputedNode { size, ..default() },
+                UiGlobalTransform::from_translation(size * 0.5),
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
+            .id();
+        app.world_mut()
+            .entity_mut(stack)
+            .insert(vmux_core::PageMetadata {
+                url: url.to_string(),
+                ..default()
+            });
+        pane
+    }
+
+    fn open_beside_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<OpenBesideRequest>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .add_systems(Update, handle_open_beside_requests);
+        app
+    }
+
+    #[test]
+    fn auto_same_type_adds_tab_without_splitting() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let browser_pane =
+            place_pane_with_url(&mut app, tab, 5, Vec2::new(800.0, 600.0), "https://a.com");
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: browser_pane,
+                direction: None,
+                url: "https://b.com".into(),
+                request_id: [0u8; 16],
+                focus: false,
+            });
+        app.update();
+
+        assert!(
+            app.world().get::<PaneSplit>(browser_pane).is_none(),
+            "same type must not split"
+        );
+        let stacks = app
+            .world()
+            .get::<Children>(browser_pane)
+            .map(|c| {
+                c.iter()
+                    .filter(|&e| app.world().get::<Stack>(e).is_some())
+                    .count()
+            })
+            .unwrap_or(0);
+        assert_eq!(
+            stacks, 2,
+            "new browser page tabs into the existing browser pane"
+        );
+    }
+
+    #[test]
+    fn auto_new_type_splits_anchor() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let browser_pane =
+            place_pane_with_url(&mut app, tab, 5, Vec2::new(1600.0, 900.0), "https://a.com");
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: browser_pane,
+                direction: None,
+                url: "file:///x.rs".into(),
+                request_id: [0u8; 16],
+                focus: false,
+            });
+        app.update();
+
+        let split = app
+            .world()
+            .get::<PaneSplit>(browser_pane)
+            .expect("a new file type must split the anchor");
+        assert_eq!(
+            split.direction,
+            PaneSplitDirection::Row,
+            "wide anchor splits along its longer (x) side => Row"
+        );
+    }
+
+    #[test]
+    fn auto_reuse_focuses_existing_url_without_new_stack() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let browser_pane =
+            place_pane_with_url(&mut app, tab, 5, Vec2::new(800.0, 600.0), "https://a.com");
+        let before = app
+            .world_mut()
+            .query_filtered::<Entity, With<Stack>>()
+            .iter(app.world())
+            .count();
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: browser_pane,
+                direction: None,
+                url: "https://a.com".into(),
+                request_id: [0u8; 16],
+                focus: true,
+            });
+        app.update();
+
+        let after = app
+            .world_mut()
+            .query_filtered::<Entity, With<Stack>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            after, before,
+            "reuse focuses the existing page; no new stack spawned"
+        );
+        assert!(
+            app.world().get::<PaneSplit>(browser_pane).is_none(),
+            "reuse must not split"
         );
     }
 
@@ -3685,7 +4042,7 @@ mod tests {
             .resource_mut::<Messages<OpenBesideRequest>>()
             .write(OpenBesideRequest {
                 pane: anchor_pane,
-                direction: PaneDirection::Right,
+                direction: Some(PaneDirection::Right),
                 url: "vmux://terminal/".into(),
                 request_id: [0u8; 16],
                 focus: true,
@@ -3718,7 +4075,7 @@ mod tests {
             .resource_mut::<Messages<OpenBesideRequest>>()
             .write(OpenBesideRequest {
                 pane: anchor_pane,
-                direction: PaneDirection::Right,
+                direction: Some(PaneDirection::Right),
                 url: "vmux://terminal/".into(),
                 request_id: [0u8; 16],
                 focus: false,
@@ -3761,7 +4118,7 @@ mod tests {
                 .resource_mut::<Messages<OpenBesideRequest>>()
                 .write(OpenBesideRequest {
                     pane: anchor_pane,
-                    direction,
+                    direction: Some(direction),
                     url: "vmux://terminal/".into(),
                     request_id: [0u8; 16],
                     focus: false,

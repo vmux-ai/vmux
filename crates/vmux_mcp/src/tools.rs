@@ -432,17 +432,14 @@ pub fn dispatch_with_anchor(
 ) -> Result<DispatchTarget, String> {
     use vmux_service::protocol::AgentPaneDirection;
     let name = name.strip_prefix("vmux_").unwrap_or(name);
-    fn parse_direction(arguments: &Value) -> Result<AgentPaneDirection, String> {
-        match arguments
-            .get("direction")
-            .and_then(Value::as_str)
-            .unwrap_or("right")
-        {
-            "right" => Ok(AgentPaneDirection::Right),
-            "left" => Ok(AgentPaneDirection::Left),
-            "top" => Ok(AgentPaneDirection::Top),
-            "bottom" => Ok(AgentPaneDirection::Bottom),
-            other => Err(format!("unknown direction: {other}")),
+    fn parse_direction(arguments: &Value) -> Result<Option<AgentPaneDirection>, String> {
+        match arguments.get("direction").and_then(Value::as_str) {
+            None => Ok(None),
+            Some("right") => Ok(Some(AgentPaneDirection::Right)),
+            Some("left") => Ok(Some(AgentPaneDirection::Left)),
+            Some("top") => Ok(Some(AgentPaneDirection::Top)),
+            Some("bottom") => Ok(Some(AgentPaneDirection::Bottom)),
+            Some(other) => Err(format!("unknown direction: {other}")),
         }
     }
     if name == "open_page" {
@@ -507,7 +504,7 @@ pub fn dispatch_with_anchor(
         if command.trim().is_empty() {
             return Err("run.command is empty".to_string());
         }
-        let direction = parse_direction(&arguments)?;
+        let direction = parse_direction(&arguments)?.unwrap_or(AgentPaneDirection::Right);
         let focus = arguments
             .get("focus")
             .and_then(Value::as_bool)
@@ -892,6 +889,43 @@ mod tests {
             target,
             DispatchTarget::Query(AgentQuery::ReadLayout { .. })
         ));
+    }
+
+    #[test]
+    fn open_page_without_direction_is_auto() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_with_anchor(
+            "open_page",
+            serde_json::json!({"url": "https://x.com"}),
+            Some(anchor),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::OpenBeside { direction, .. }) => {
+                assert_eq!(direction, None, "absent direction => auto placement");
+            }
+            other => panic!("expected OpenBeside, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_page_with_direction_is_explicit() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_with_anchor(
+            "open_page",
+            serde_json::json!({"url": "https://x.com", "direction": "left"}),
+            Some(anchor),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::OpenBeside { direction, .. }) => {
+                assert_eq!(
+                    direction,
+                    Some(vmux_service::protocol::AgentPaneDirection::Left)
+                );
+            }
+            other => panic!("expected OpenBeside, got {other:?}"),
+        }
     }
 
     #[test]

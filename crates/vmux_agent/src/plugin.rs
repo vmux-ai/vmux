@@ -714,7 +714,7 @@ fn handle_agent_self_commands(
                 Some((_, pane)) => {
                     open_beside_writer.write(vmux_layout::OpenBesideRequest {
                         pane,
-                        direction: to_pane_direction(direction),
+                        direction: direction.as_ref().map(to_pane_direction),
                         url: url.clone(),
                         request_id: request.request_id.0,
                         focus: *focus,

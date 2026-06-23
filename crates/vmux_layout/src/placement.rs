@@ -24,9 +24,17 @@ pub fn page_kind_for_url(url: &str) -> PageKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Placement {
-    Focus { tab: Entity, stack: Entity },
-    AddTab { pane: Entity },
-    Spiral { anchor: Entity, axis: PaneSplitDirection },
+    Focus {
+        tab: Entity,
+        stack: Entity,
+    },
+    AddTab {
+        pane: Entity,
+    },
+    Spiral {
+        anchor: Entity,
+        axis: PaneSplitDirection,
+    },
 }
 
 #[derive(Debug, Clone)]
