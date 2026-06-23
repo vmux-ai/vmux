@@ -22,6 +22,7 @@ impl Plugin for LayoutNativePlugin {
 struct LayoutGlassState {
     header: Option<Retained<NSGlassEffectView>>,
     tabs: Vec<Retained<NSTextField>>,
+    address: Option<Retained<NSTextField>>,
     shown: bool,
 }
 
@@ -93,6 +94,10 @@ fn sync_layout_glass(
             let view: &NSView = &label;
             view.removeFromSuperview();
         }
+        if let Some(label) = state.address.take() {
+            let view: &NSView = &label;
+            view.removeFromSuperview();
+        }
         if let Some(glass) = state.header.clone() {
             let host: &NSView = &glass;
             let label_h = 20.0_f64;
@@ -116,6 +121,20 @@ fn sync_layout_glass(
                 host.addSubview(lview);
                 state.tabs.push(label);
                 x += label_w + 8.0;
+            }
+            if !current.0.address.is_empty() {
+                let addr =
+                    NSTextField::labelWithString(&NSString::from_str(&current.0.address), mtm);
+                addr.setFont(Some(&NSFont::systemFontOfSize(12.0)));
+                addr.setTextColor(Some(&NSColor::secondaryLabelColor()));
+                let aview: &NSView = &addr;
+                let addr_w = (bounds.size.width - x - 16.0).max(120.0);
+                aview.setFrame(NSRect::new(
+                    NSPoint::new(x + 16.0, y),
+                    NSSize::new(addr_w, label_h),
+                ));
+                host.addSubview(aview);
+                state.address = Some(addr);
             }
         }
     }

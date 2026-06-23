@@ -17,6 +17,7 @@ pub struct NodeId(pub String);
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LayoutView {
     pub tabs: Vec<TabView>,
+    pub address: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -42,7 +43,33 @@ impl LayoutView {
                 })
             })
             .collect();
-        LayoutView { tabs }
+        LayoutView {
+            tabs,
+            address: focused_stack_url(snapshot),
+        }
+    }
+}
+
+fn focused_stack_url(snapshot: &LayoutSnapshot) -> String {
+    let Some(stack_id) = snapshot.focused.stack.as_deref() else {
+        return String::new();
+    };
+    snapshot
+        .tabs
+        .iter()
+        .find_map(|t| find_stack_url(&t.root, stack_id))
+        .unwrap_or_default()
+}
+
+fn find_stack_url(node: &LayoutNode, stack_id: &str) -> Option<String> {
+    match node {
+        LayoutNode::Pane { stacks, .. } => stacks
+            .iter()
+            .find(|s| s.id.as_deref() == Some(stack_id))
+            .map(|s| s.url.clone()),
+        LayoutNode::Split { children, .. } => {
+            children.iter().find_map(|c| find_stack_url(c, stack_id))
+        }
     }
 }
 
@@ -299,6 +326,35 @@ mod tests {
         assert_eq!(view.tabs[0].name, "");
     }
 
+    #[test]
+    fn from_snapshot_address_from_focused_stack() {
+        let snapshot = LayoutSnapshot {
+            tabs: vec![Tab {
+                id: Some("tab:1".into()),
+                name: "T".into(),
+                is_active: true,
+                root: LayoutNode::Pane {
+                    id: Some("pane:1".into()),
+                    is_zoomed: false,
+                    stacks: vec![crate::protocol::Stack {
+                        id: Some("stack:9".into()),
+                        url: "https://example.com/".into(),
+                        ..Default::default()
+                    }],
+                },
+            }],
+            focused: Focus {
+                tab: Some("tab:1".into()),
+                pane: Some("pane:1".into()),
+                stack: Some("stack:9".into()),
+            },
+        };
+        assert_eq!(
+            LayoutView::from_snapshot(&snapshot).address,
+            "https://example.com/"
+        );
+    }
+
     fn view(tabs: &[(&str, &str, bool)]) -> LayoutView {
         LayoutView {
             tabs: tabs
@@ -310,6 +366,7 @@ mod tests {
                     is_active: *active,
                 })
                 .collect(),
+            address: String::new(),
         }
     }
 
