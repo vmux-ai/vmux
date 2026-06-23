@@ -377,7 +377,7 @@ Pass `terminal` = a terminal id returned by vmux_run, or a terminal stack's proc
 
 fn screenshot_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "screenshot".into(),
+        name: "vmux_screenshot".into(),
         description: "Capture the vmux window as a PNG and return it inline so you can SEE the current UI \
 (use it to verify your own UI changes). Captures the whole window exactly as it appears on screen - all \
 visible panes (browser, terminal, editor) and layout chrome. Optionally pass `pane` (a pane:<id> or \
@@ -789,7 +789,7 @@ mod tests {
 
     #[test]
     fn list_tools_includes_screenshot() {
-        assert!(tool_names().contains(&"screenshot".to_string()));
+        assert!(tool_names().contains(&"vmux_screenshot".to_string()));
     }
 
     #[test]
