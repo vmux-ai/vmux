@@ -37,11 +37,11 @@ pub fn Hero() -> Element {
                     class: "w-20 h-20 mb-8 inline-block rounded-3xl shadow-2xl shadow-accent/20",
                 }
                 h1 { class: "font-bold tracking-tight leading-[1.02] mb-6",
-                    span { class: "block text-2xl sm:text-3xl text-text-muted", "It starts as" }
-                    span { class: "block text-6xl sm:text-8xl text-text", "just a browser." }
+                    span { class: "block text-2xl sm:text-3xl text-text-muted", "The browser" }
+                    span { class: "block text-6xl sm:text-8xl text-text", "that ships code." }
                 }
                 p { class: "text-lg sm:text-2xl text-text-muted mb-10 max-w-xl mx-auto",
-                    "The browser that bridges chat and IDE."
+                    "Browse, prompt, and build with agents — in one space."
                 }
                 InstallCard {}
                 div { class: "mt-6 flex justify-center",
