@@ -14,6 +14,12 @@ use vmux_layout::native_view::{CurrentLayoutView, LayoutRenderer, NodeId};
 use vmux_layout::protocol::parse_id;
 use vmux_layout::scene::InteractionMode;
 
+#[derive(Clone)]
+enum LayoutAction {
+    SwitchTab(NodeId),
+    NewTab,
+}
+
 pub(crate) struct LayoutNativePlugin;
 
 impl Plugin for LayoutNativePlugin {
@@ -54,7 +60,7 @@ struct LayoutGlassState {
     header: Option<Retained<NSGlassEffectView>>,
     sidesheet: Option<Retained<NSGlassEffectView>>,
     tabs: Vec<Retained<NSButton>>,
-    tab_ids: Vec<NodeId>,
+    actions: Vec<LayoutAction>,
     address: Option<Retained<NSTextField>>,
     stacks: Vec<Retained<NSTextField>>,
     target: Option<Retained<TabTarget>>,
@@ -85,6 +91,26 @@ fn label_color(is_active: bool) -> Retained<NSColor> {
     } else {
         NSColor::secondaryLabelColor()
     }
+}
+
+fn make_click_button(
+    mtm: MainThreadMarker,
+    target: &TabTarget,
+    title: &str,
+    tag: usize,
+    alpha: f64,
+) -> Retained<NSButton> {
+    let button = NSButton::new(mtm);
+    button.setTitle(&NSString::from_str(title));
+    button.setBordered(false);
+    button.setFont(Some(&NSFont::systemFontOfSize(13.0)));
+    let target_ref: &AnyObject = target;
+    unsafe { button.setTarget(Some(target_ref)) };
+    unsafe { button.setAction(Some(sel!(onTabClick:))) };
+    button.setTag(tag as isize);
+    let bview: &NSView = &button;
+    bview.setAlphaValue(alpha);
+    button
 }
 
 fn sync_layout_glass(
@@ -184,7 +210,7 @@ fn rebuild_tabs_and_address(
         let view: &NSView = &button;
         view.removeFromSuperview();
     }
-    state.tab_ids.clear();
+    state.actions.clear();
     if let Some(label) = state.address.take() {
         let view: &NSView = &label;
         view.removeFromSuperview();
@@ -193,26 +219,30 @@ fn rebuild_tabs_and_address(
         return;
     };
     let host: &NSView = &glass;
-    let target_ref: &AnyObject = &target;
     let item_h = 24.0_f64;
     let tab_w = 160.0_f64;
     let y = (header_h - item_h) / 2.0;
     let mut x = 12.0_f64;
-    for (idx, tab) in current.0.tabs.iter().enumerate() {
-        let button = NSButton::new(mtm);
-        button.setTitle(&NSString::from_str(&tab.title));
-        button.setBordered(false);
-        button.setFont(Some(&NSFont::systemFontOfSize(13.0)));
-        unsafe { button.setTarget(Some(target_ref)) };
-        unsafe { button.setAction(Some(sel!(onTabClick:))) };
-        button.setTag(idx as isize);
+    for tab in current.0.tabs.iter() {
+        let tag = state.actions.len();
+        let alpha = if tab.is_active { 1.0 } else { 0.55 };
+        let button = make_click_button(mtm, &target, &tab.title, tag, alpha);
         let bview: &NSView = &button;
-        bview.setAlphaValue(if tab.is_active { 1.0 } else { 0.55 });
         bview.setFrame(NSRect::new(NSPoint::new(x, y), NSSize::new(tab_w, item_h)));
         host.addSubview(bview);
         state.tabs.push(button);
-        state.tab_ids.push(tab.id.clone());
+        state.actions.push(LayoutAction::SwitchTab(tab.id.clone()));
         x += tab_w + 8.0;
+    }
+    {
+        let tag = state.actions.len();
+        let button = make_click_button(mtm, &target, "+", tag, 0.7);
+        let bview: &NSView = &button;
+        bview.setFrame(NSRect::new(NSPoint::new(x, y), NSSize::new(28.0, item_h)));
+        host.addSubview(bview);
+        state.tabs.push(button);
+        state.actions.push(LayoutAction::NewTab);
+        x += 28.0 + 8.0;
     }
     if !current.0.address.is_empty() {
         let addr = NSTextField::labelWithString(&NSString::from_str(&current.0.address), mtm);
@@ -268,23 +298,33 @@ fn rebuild_stacks(
 }
 
 fn drain_tab_clicks(state: NonSendMut<LayoutGlassState>, mut commands: Commands) {
-    let mut clicked: Vec<NodeId> = Vec::new();
+    let mut fired: Vec<LayoutAction> = Vec::new();
     if let Some(rx) = &state.click_rx {
         while let Ok(tag) = rx.try_recv() {
-            if let Some(id) = state.tab_ids.get(tag as usize) {
-                clicked.push(id.clone());
+            if let Some(action) = state.actions.get(tag as usize) {
+                fired.push(action.clone());
             }
         }
     }
-    for id in clicked {
-        if let Ok((_, bits)) = parse_id(&id.0) {
-            commands.trigger(bevy_cef::prelude::BinReceive::<TabsCommandEvent> {
-                webview: Entity::PLACEHOLDER,
-                payload: TabsCommandEvent {
+    for action in fired {
+        let payload = match action {
+            LayoutAction::SwitchTab(id) => {
+                let Ok((_, bits)) = parse_id(&id.0) else {
+                    continue;
+                };
+                TabsCommandEvent {
                     command: "switch".to_string(),
                     tab_id: Some(bits.to_string()),
-                },
-            });
-        }
+                }
+            }
+            LayoutAction::NewTab => TabsCommandEvent {
+                command: "new".to_string(),
+                tab_id: None,
+            },
+        };
+        commands.trigger(bevy_cef::prelude::BinReceive::<TabsCommandEvent> {
+            webview: Entity::PLACEHOLDER,
+            payload,
+        });
     }
 }
