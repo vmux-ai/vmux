@@ -118,12 +118,14 @@ fn mcp_tool_entries_has_all_variants() {
     let entries = OpenCommand::mcp_tool_entries();
     assert!(!entries.is_empty());
     let names: Vec<_> = entries.iter().map(|(name, _, _)| *name).collect();
-    assert!(names.contains(&"in_place"));
-    assert!(names.contains(&"in_new_stack"));
-    assert!(names.contains(&"in_new_tab"));
-    assert!(names.contains(&"in_new_space"));
-    // in_pane is #[mcp(skip)] (superseded by the self-relative open_page tool).
-    assert!(!names.contains(&"in_pane"));
+    assert!(names.contains(&"vmux_in_place"));
+    assert!(names.contains(&"vmux_in_new_stack"));
+    assert!(names.contains(&"vmux_in_new_tab"));
+    assert!(names.contains(&"vmux_in_new_space"));
+    assert!(
+        !names.contains(&"vmux_in_pane"),
+        "in_pane is #[mcp(skip)], superseded by the self-relative vmux_open_page tool"
+    );
 }
 
 #[test]

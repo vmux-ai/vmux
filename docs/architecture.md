@@ -26,11 +26,13 @@ both humans and agents tile, persist, and reconcile in real time.
 
 - **[Why Rust + CEF](architecture/why-rust-cef.md)** — the runtime inversion, and
   why a web sandbox is the wrong ceiling for an OS-level workspace.
-- **[Rust without the headaches](architecture/rust-without-the-headaches.md)** — Bevy ECS as an
+- **[Rust for React JS developers](architecture/rust-without-the-headaches.md)** — Bevy ECS as an
   in-memory database, lock-free concurrency, and Rust as the universal FFI glue.
-- **[Built to scale](architecture/built-to-scale.md)** — composition over inheritance, plugins per
-  crate, and what compounds as features, surfaces, and agents grow.
-- **[Agent-first: the workspace is an API](architecture/agent-first.md)** — the MCP surface,
+- **[ECS: Design to scale](architecture/built-to-scale.md)** — composition over inheritance,
+  and what compounds as features, surfaces, and agents grow.
+- **[Plugins](architecture/plugins.md)** — the `build()` contract, one capability per crate,
+  and how the whole app is assembled from the plugin stack.
+- **[Co-working with agents](architecture/agent-first.md)** — the MCP surface,
   the persistence daemon, and the scheme-gated security bridge.
 - **[The layout model](architecture/layout-model.md)** — Space → Tab → Pane → Stack, the
   selection invariant, and structural persistence.

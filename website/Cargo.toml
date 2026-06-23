@@ -16,6 +16,7 @@ dioxus = { version = "=0.7.4", features = ["fullstack", "router"] }
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = true }
 pulldown-cmark = { version = "0.13", default-features = false }
 serde = { version = "1", features = ["derive"] }
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", features = [

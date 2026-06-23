@@ -1,4 +1,4 @@
-# Vmux MCP: the workspace is an API
+# MCP Integration: the workspace is an API
 
 > Part of the [Vmux Architecture](../architecture.md) overview.
 
@@ -24,20 +24,22 @@ Every agent is launched **anchored to its own Space** (`vmux mcp --anchor <id>`)
 Tool calls resolve relative to that anchor, so a background agent spawns its pages
 and terminals in its own space and can't read or disrupt the one you're looking at.
 
-## The tool surface
+## MCP methods
 
-From atomic mutations to declarative reconciliation:
+Agents discover the full set via `tools/list`; every tool is namespaced with a `vmux_`
+prefix. The core methods:
 
-- **Atomic** — `browser_navigate`, `terminal_send`, `select_tab`, `create_space`,
-  `update_settings`.
-- **Spatial** — `open_page` spawns a page in a new pane beside the requesting agent's own.
-- **Interactive shell** — `run` starts a process in a human-visible terminal: the user
-  watches live and can take over the prompt, while the agent gets stdout/stderr and the
-  exit code.
-- **Declarative reconciliation** — `read_layout` / `update_layout`: the agent fetches the
-  tree (with stable ids), mutates it, and commits it back; Vmux diffs against the live
-  graph and reconciles **React-style** — add panes, move stacks, shift focus, in one
-  atomic transaction.
+- `vmux_browser_navigate` — point the active (or a target) pane at a URL.
+- `vmux_terminal_send` — send raw text to the active terminal.
+- `vmux_select_tab` — focus a tab by index.
+- `vmux_create_space` — create a new space and switch to it.
+- `vmux_update_settings` — set a single setting by dot-path.
+- `vmux_open_page` — open a page in a new pane beside the requesting agent's own.
+- `vmux_run` — run a process in a human-visible terminal: the user watches live and can take
+  over the prompt, while the agent gets stdout/stderr and the exit code.
+- `vmux_read_layout` / `vmux_update_layout` — fetch the pane tree (stable ids), mutate it, and
+  commit it back; Vmux diffs against the live graph and reconciles **React-style** — add
+  panes, move stacks, shift focus, in one atomic transaction.
 
 ## Persistence via a daemon
 

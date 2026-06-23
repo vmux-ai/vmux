@@ -1292,6 +1292,7 @@ fn impl_mcp_tool_leaf_fielded(
         }
         let variant_ident = &variant.ident;
         let tool_name = heck_variant_snake_case(&variant_ident.to_string());
+        let advertised_name = format!("vmux_{tool_name}");
         let description = mcp_props.description.clone().ok_or_else(|| {
             syn::Error::new_spanned(
                 variant_ident,
@@ -1491,7 +1492,7 @@ fn impl_mcp_tool_leaf_fielded(
                     "properties": ::serde_json::Value::Object(properties),
                     "required": #required_array
                 });
-                (#tool_name, #description, schema)
+                (#advertised_name, #description, schema)
             })
         });
 
@@ -1549,6 +1550,7 @@ fn impl_mcp_tool_leaf_unit(
             None => continue,
         };
         let id_lit = id.as_str();
+        let advertised_id = format!("vmux_{id}");
         let variant_ident = &variant.ident;
 
         let description = mcp_props
@@ -1563,7 +1565,7 @@ fn impl_mcp_tool_leaf_unit(
             .unwrap_or_default();
 
         entries.push(quote! {
-            (#id_lit, #description, ::serde_json::json!({
+            (#advertised_id, #description, ::serde_json::json!({
                 "type": "object",
                 "properties": {}
             }))
