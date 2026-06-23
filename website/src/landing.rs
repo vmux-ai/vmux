@@ -1,4 +1,5 @@
 mod agents;
+mod browser;
 mod coworking;
 mod cta;
 mod hero;
