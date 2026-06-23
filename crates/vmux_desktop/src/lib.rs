@@ -20,6 +20,7 @@ mod native_keyboard;
 mod os_menu;
 pub mod panic_hook;
 mod persistence;
+mod recording;
 mod screenshot;
 
 #[cfg(target_os = "macos")]
@@ -136,13 +137,20 @@ impl Plugin for VmuxPlugin {
         app.init_resource::<boot_status::SplashStatus>()
             .init_resource::<boot_status::RestoreComplete>()
             .init_resource::<screenshot::ScreenshotBridge>()
+            .init_resource::<recording::RecordingBridge>()
             .add_systems(
                 Update,
                 boot_status::compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
             )
             .add_systems(
                 Update,
-                (screenshot::start_screenshots, screenshot::drain_screenshots)
+                (
+                    screenshot::start_screenshots,
+                    screenshot::drain_screenshots,
+                    recording::start_recording,
+                    recording::auto_stop_recordings,
+                    recording::drain_recordings,
+                )
                     .chain()
                     .after(WriteAppCommands),
             );
