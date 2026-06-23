@@ -23,7 +23,7 @@
     --glass-active: oklch(1 0 0 / 0.14);
     --glass-border: oklch(1 0 0 / 0.20);
     color: var(--foreground);
-    font-family: "Inter", system-ui, -apple-system, sans-serif;
+    font-family: -apple-system, system-ui, sans-serif;
   }
 }
 
