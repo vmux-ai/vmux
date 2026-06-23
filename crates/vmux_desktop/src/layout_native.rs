@@ -9,6 +9,7 @@ use objc2_app_kit::{
     NSView,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use objc2_quartz_core::CACornerMask;
 use vmux_command::{AppCommand, BrowserCommand, BrowserNavigationCommand, OpenCommand};
 use vmux_core::profile::active_profile_name;
 use vmux_layout::event::{CEF_RESERVED_HEIGHT_PX, SIDE_SHEET_WIDTH_PX, TabsCommandEvent};
@@ -108,6 +109,18 @@ fn rounded_bg(view: &NSView, radius: f64, bg: Option<&NSColor>) {
         if let Some(c) = bg {
             layer.setBackgroundColor(Some(&c.CGColor()));
         }
+    }
+}
+
+/// Round only the top corners (so a tab/toolbar merges flush into what's below it).
+fn round_top(view: &NSView, radius: f64) {
+    view.setWantsLayer(true);
+    if let Some(layer) = view.layer() {
+        layer.setCornerRadius(radius);
+        layer.setZPosition(GLASS_Z);
+        layer.setMaskedCorners(
+            CACornerMask::LayerMinXMaxYCorner | CACornerMask::LayerMaxXMaxYCorner,
+        );
     }
 }
 
@@ -277,6 +290,7 @@ fn rebuild(
         radius,
         false,
     );
+    round_top(&url_glass, radius);
     let (uw, uh) = {
         let v: &NSView = &url_glass;
         let b = v.bounds();
@@ -358,6 +372,7 @@ fn rebuild(
         let frame = NSRect::new(NSPoint::new(x, tab_top), NSSize::new(tab_w, tab_h));
         if tab.is_active {
             let g = glass_pill(mtm, content, frame, 6.0, false);
+            round_top(&g, 6.0);
             {
                 let gv: &NSView = &g;
                 let b = fill_button(
@@ -384,6 +399,10 @@ fn rebuild(
                 6.0,
                 Some(&white(0.05)),
             );
+            {
+                let bv: &NSView = &b;
+                round_top(bv, 6.0);
+            }
             state.buttons.push(b);
         }
         state.actions.push(LayoutAction::SwitchTab(tab.id.clone()));
