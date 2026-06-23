@@ -40,19 +40,12 @@ pub struct AgentToolCallRequest {
     pub args_json: String,
 }
 
-/// An `AgentCommandResult` the service routed back to this client (correlated by
-/// `request_id`). Surfaced as a Bevy message so in-process issuers — like the
-/// le-chat host-MCP bridge — can await their own command results. The normal
-/// in-app command handlers do NOT consume this; they *produce* the underlying
-/// response that the service correlates.
 #[derive(Message)]
 pub struct AgentCommandResultEvent {
     pub request_id: AgentRequestId,
     pub result: AgentCommandResult,
 }
 
-/// An `AgentQueryResult` the service routed back to this client (correlated by
-/// `request_id`). See [`AgentCommandResultEvent`].
 #[derive(Message)]
 pub struct AgentQueryResultEvent {
     pub request_id: AgentRequestId,

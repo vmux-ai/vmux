@@ -234,6 +234,14 @@ impl ImplClient for ClientHandlerBuilder {
                 ));
                 return 1;
             }
+            if crate::util::is_bridge_allowed_origin(&url)
+                && name != crate::prelude::PROCESS_MESSAGE_JS_EMIT
+            {
+                crate::util::webview_debug_log(format!(
+                    "ipc: dropped non-emit '{name}' from bridge origin url={url}"
+                ));
+                return 1;
+            }
             if name == crate::prelude::PROCESS_MESSAGE_BRP
                 && crate::util::embedded_page_host_of(&url).as_deref() != Some("debug")
             {

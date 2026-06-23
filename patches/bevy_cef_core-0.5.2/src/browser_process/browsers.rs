@@ -590,7 +590,7 @@ impl Browsers {
             && let Some(argument_list) = process_message.argument_list()
             && let Some(browser) = self.browsers.get(webview)
             && let Some(frame) = browser.client.main_frame()
-            && crate::util::ipc_allowed_browser(&frame.url().into_string())
+            && crate::util::is_trusted_embedded_page(&frame.url().into_string())
         {
             argument_list.set_string(0, Some(&id.into().as_str().into()));
             argument_list.set_string(1, Some(&event.to_string().as_str().into()));
@@ -608,7 +608,7 @@ impl Browsers {
             && let Some(argument_list) = process_message.argument_list()
             && let Some(browser) = self.browsers.get(webview)
             && let Some(frame) = browser.client.main_frame()
-            && crate::util::ipc_allowed_browser(&frame.url().into_string())
+            && crate::util::is_trusted_embedded_page(&frame.url().into_string())
         {
             argument_list.set_string(0, Some(&id.into().as_str().into()));
             argument_list.set_string(1, Some(&json_body.into()));
@@ -626,7 +626,7 @@ impl Browsers {
             && let Some(argument_list) = process_message.argument_list()
             && let Some(browser) = self.browsers.get(webview)
             && let Some(frame) = browser.client.main_frame()
-            && crate::util::ipc_allowed_browser(&frame.url().into_string())
+            && crate::util::is_trusted_embedded_page(&frame.url().into_string())
         {
             argument_list.set_string(0, Some(&id.into().as_str().into()));
             // CEF's BinaryValue rejects zero-length data. For unit-shaped payloads

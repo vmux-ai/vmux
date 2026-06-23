@@ -43,13 +43,16 @@ window.__LE_CHAT_MCP__ = {
 ## vmux implementation
 
 ### Webview targeting
-- Implement the bridge **only** for the chat.mistral.ai frame. Hook committed
+- Implement the bridge **only** for the le-chat frames: `chat.mistral.ai`
+  (production) and `chat.local.mistral.ai:8443` (local dev). Both are
+  allow-listed for the CEF IPC gate and shim injection. Hook committed
   navigation (`bevy_cef_core::prelude::WebviewCommittedNavigationEvent`, see
   `crates/vmux_history/src/spawn.rs`) and check origin (chat.mistral.ai is already
   recognized, `crates/vmux_ui/src/favicon.rs:18`). Never inject into other pages.
 
 ### JS shim injection
-- On navigation to chat.mistral.ai, inject a JS shim that defines
+- On navigation to a le-chat origin (`chat.mistral.ai` or
+  `chat.local.mistral.ai:8443`), inject a JS shim that defines
   `window.__LE_CHAT_MCP__`. `listTools`/`callTool` marshal requests over
   bevy_cef's JS↔Rust IPC channel and await replies.
 - bevy_cef IPC primitives already used in vmux:

@@ -319,9 +319,6 @@ async fn run_agent_command(
     }
 }
 
-/// Map an `AgentCommandResult` to an MCP `{ content }` (or `Err` for the
-/// caller to wrap). Shared by the stdio MCP server and the le-chat host-MCP
-/// bridge so both produce identical tool-call payloads.
 pub fn command_result_to_mcp_response(
     result: vmux_service::protocol::AgentCommandResult,
 ) -> Result<Value, String> {
@@ -374,8 +371,6 @@ async fn run_agent_query(query: vmux_service::protocol::AgentQuery) -> Result<Va
     }
 }
 
-/// Map an `AgentQueryResult` to an MCP `{ content, isError? }`. Shared by the
-/// stdio MCP server and the le-chat host-MCP bridge.
 pub fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult) -> Value {
     use vmux_service::protocol::AgentQueryResult;
     match result {
@@ -430,9 +425,6 @@ pub fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryRe
     }
 }
 
-/// An MCP tool-call result representing a clean error: `isError: true` with the
-/// message as text content. Shared by the stdio MCP server and the le-chat
-/// host-MCP bridge so a failed tool resolves (rather than rejects) on the page.
 pub fn tool_error(message: &str) -> Value {
     json!({
         "isError": true,

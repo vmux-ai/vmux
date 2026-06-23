@@ -1,41 +1,3 @@
-//! Host-MCP bridge for le-chat (chat.mistral.ai).
-//!
-//! Injects `window.__LE_CHAT_MCP__` into the chat page on navigation and answers
-//! the page's JSON-RPC-ish calls over CEF IPC:
-//!   - `listTools` returns vmux's real MCP tool definitions.
-//!   - `callTool` executes the tool against the running workspace via the in-app
-//!     `ServiceClient` and returns the MCP `{ content, isError? }` result.
-//!
-//! Page -> Rust:  `cef.emit({ channel, id, method, params })` is delivered to the
-//! `on_bridge_request` observer via `Receive<ChatBridgeRequest>`.
-//! Rust -> page:  `Browsers::execute_js` calls `window.__LE_CHAT_MCP__.__deliver(msg)`.
-//!
-//! ## callTool execution + correlation
-//! Bevy observers are sync, but a tool's result arrives later (the service routes
-//! it back asynchronously). So `callTool` is split across two systems:
-//!   1. `on_bridge_request` parses `{ name, arguments }`, builds the
-//!      `AgentCommand`/`AgentQuery` via `vmux_mcp::tools::dispatch_with_anchor`,
-//!      sends it on the shared `ServiceClient` with a fresh `request_id`, and
-//!      records `request_id -> { webview, bridge_id }` in `PendingBridgeCalls`.
-//!   2. `deliver_bridge_results` reads `AgentCommandResultEvent` /
-//!      `AgentQueryResultEvent` (forwarded from the service drain), matches the
-//!      `request_id`, maps the result to MCP `{ content, isError? }` (reusing the
-//!      `vmux_mcp::protocol` mappers), and `execute_js`-delivers it to the page.
-//!
-//! Anchor: the chat webview has no `ProcessId`/`AgentSession`, so it can't act as
-//! an agent self-anchor. Anchor-only tools (`open_file`, `run`) therefore fail
-//! fast in `dispatch_with_anchor` and return a clean MCP error for that tool
-//! only; every non-anchor tool (`get_settings`, `list_spaces`, `screenshot`,
-//! `read_layout`, `read_terminal`, `update_layout`, settings/space/app commands,
-//! ...) executes end-to-end.
-//!
-//! URL placement: a tool that would navigate the *focused* webview in place
-//! would replace the chat page itself. So `browser_navigate` (without an explicit
-//! `pane`), `open_page`, and `in_place` are intercepted in `handle_call_tool`
-//! (see `url_opening_tool_url`) and rewritten to `BrowserNavigate { pane:
-//! Some(chat_pane) }`, which vmux routes to `NewStackInPane` — a new stack beside
-//! the chat, leaving the chat webview untouched.
-
 use std::collections::HashMap;
 
 use bevy::ecs::relationship::Relationship;
@@ -53,12 +15,18 @@ impl Plugin for LeChatBridgePlugin {
         app.add_plugins(JsEmitEventPlugin::<ChatBridgeRequest>::default())
             .init_resource::<PendingBridgeCalls>()
             .add_observer(on_bridge_request)
-            .add_systems(Update, (inject_shim_on_chat_nav, deliver_bridge_results));
+            .add_systems(
+                Update,
+                (
+                    clear_pending_on_main_frame_nav,
+                    inject_shim_on_chat_nav,
+                    deliver_bridge_results,
+                )
+                    .chain(),
+            );
     }
 }
 
-/// Distinctive shape so `receive_events::<ChatBridgeRequest>` only fires for our
-/// payloads (every emitted JS object is attempted against every registered type).
 #[derive(serde::Deserialize)]
 struct ChatBridgeRequest {
     channel: String,
@@ -68,12 +36,8 @@ struct ChatBridgeRequest {
     params: serde_json::Value,
 }
 
-/// A `callTool` request awaiting its async service result. Keyed by the
-/// `AgentRequestId` sent to the service; carries what we need to deliver the
-/// result back to the right page promise.
 struct PendingBridgeCall {
     webview: Entity,
-    /// The page-side promise id (`msg.id` the shim's `__deliver` matches on).
     bridge_id: String,
 }
 
@@ -82,14 +46,10 @@ struct PendingBridgeCalls(HashMap<AgentRequestId, PendingBridgeCall>);
 
 const BRIDGE_CHANNEL: &str = "le-chat-mcp";
 
-/// Authorities allowed to receive the bridge shim. Mirrors the CEF IPC gate in
-/// `bevy_cef_core` (`is_bridge_allowed_origin`); kept as a small local dup to
-/// avoid depending on bevy_cef_core internals.
 fn is_chat_origin(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("https://") else {
         return false;
     };
-    // Authority ends at the first '/', '?' or '#'.
     let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
     authority == "chat.mistral.ai" || authority == "chat.local.mistral.ai:8443"
 }
@@ -123,15 +83,21 @@ fn inject_shim_on_chat_nav(
     }
 }
 
-/// Build the `__deliver` payload for a successful tool result.
+fn clear_pending_on_main_frame_nav(
+    mut events: MessageReader<WebviewCommittedNavigationEvent>,
+    mut pending: ResMut<PendingBridgeCalls>,
+) {
+    for ev in events.read() {
+        if ev.is_main_frame {
+            pending.0.retain(|_, call| call.webview != ev.webview);
+        }
+    }
+}
+
 fn delivery_result(bridge_id: &str, result: serde_json::Value) -> serde_json::Value {
     serde_json::json!({ "id": bridge_id, "result": result })
 }
 
-/// Build the `__deliver` payload for a transport-level error (unknown method,
-/// malformed request). Tool *execution* failures are delivered as a resolved
-/// MCP error result (`isError: true`) instead, so the page block submits a clean
-/// tool result rather than rejecting.
 fn delivery_error(bridge_id: &str, message: String) -> serde_json::Value {
     serde_json::json!({ "id": bridge_id, "error": message })
 }
@@ -146,27 +112,16 @@ fn execute_js_deliver(browsers: &Browsers, webview: &Entity, payload: &serde_jso
     );
 }
 
-/// Tools that, called with no anchor and no explicit `pane`, would navigate the
-/// *focused* webview in place — i.e. replace the le-chat page itself. We remap
-/// these to a `BrowserNavigate` targeting the chat's own pane so vmux opens a new
-/// stack beside the chat instead (see `handle_browser_navigate_requests`:
-/// `pane=Some` -> `NewStackInPane`). Names are matched after stripping the
-/// `vmux_` prefix, mirroring `dispatch_with_anchor`.
 fn url_opening_tool_url(name: &str, arguments: &serde_json::Value) -> Option<String> {
     let name = name.strip_prefix("vmux_").unwrap_or(name);
     match name {
-        // `browser_navigate` with an explicit `pane` already targets that pane;
-        // only intercept the in-place (no-pane) case.
         "browser_navigate"
             if arguments
                 .get("pane")
                 .and_then(serde_json::Value::as_str)
                 .filter(|s| !s.trim().is_empty())
                 .is_none() => {}
-        // `open_page` requires an agent anchor the chat webview can't provide, so
-        // it errors today; remap it to open beside the chat instead.
         "open_page" => {}
-        // `in_place` (OpenCommand::InPlace) navigates the focused stack in place.
         "in_place" => {}
         _ => return None,
     }
@@ -175,10 +130,6 @@ fn url_opening_tool_url(name: &str, arguments: &serde_json::Value) -> Option<Str
         .and_then(serde_json::Value::as_str)
         .unwrap_or("")
         .trim();
-    // Only http(s) urls would navigate the chat webview in place. vmux:// and
-    // file: urls already route to a new stack even without a pane, so leave them
-    // to the normal dispatch path. An absent/empty url (e.g. in_place's startup
-    // default) also falls through.
     if url.starts_with("http://") || url.starts_with("https://") {
         Some(url.to_string())
     } else {
@@ -186,9 +137,6 @@ fn url_opening_tool_url(name: &str, arguments: &serde_json::Value) -> Option<Str
     }
 }
 
-/// Walk `webview -> Stack -> Pane` via `ChildOf` and return the pane entity iff
-/// it is a leaf pane (`With<Pane>, Without<PaneSplit>`), which is what
-/// `parse_pane_target` requires. Mirrors `spawn_popup_stacks` in vmux_browser.
 fn chat_pane_for_webview(
     webview: Entity,
     child_of: &Query<&ChildOf>,
@@ -243,10 +191,6 @@ fn on_bridge_request(
     }
 }
 
-/// Parse `{ name, arguments }`, dispatch to an `AgentCommand`/`AgentQuery`, and
-/// send it to the service. The result is delivered later by
-/// `deliver_bridge_results`. Synchronous failures (bad params, dispatch error,
-/// no service) are delivered immediately as a resolved MCP error result.
 fn handle_call_tool(
     req: &ChatBridgeRequest,
     webview: Entity,
@@ -273,12 +217,6 @@ fn handle_call_tool(
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
 
-    // URL-opening tools (browser_navigate without a pane, open_page, in_place)
-    // would otherwise navigate the focused webview — the le-chat page — in place.
-    // Force the target to the chat's own pane so vmux routes to NewStackInPane,
-    // opening a new stack beside the chat and leaving it untouched. If the chat
-    // pane can't be resolved, fall through to the normal dispatch path rather
-    // than erroring.
     let target = match chat_pane
         .and_then(|pane| url_opening_tool_url(name, &arguments).map(|url| (pane, url)))
     {
@@ -288,9 +226,6 @@ fn handle_call_tool(
                 pane: Some(pane.to_bits().to_string()),
             })
         }
-        // The chat webview is not an agent, so there is no self-anchor. Other
-        // pane-targeting tools fail fast inside dispatch and surface as a clean
-        // MCP error here.
         None => match vmux_mcp::tools::dispatch_with_anchor(name, arguments, None) {
             Ok(target) => target,
             Err(message) => {
@@ -326,9 +261,6 @@ fn handle_call_tool(
     service.0.send(message);
 }
 
-/// Match async service results to pending `callTool` requests and deliver the
-/// mapped MCP payload to the originating page. A failed command (`Err`) is
-/// delivered as a resolved MCP error result, not a rejection.
 fn deliver_bridge_results(
     mut command_results: MessageReader<AgentCommandResultEvent>,
     mut query_results: MessageReader<AgentQueryResultEvent>,
@@ -376,11 +308,11 @@ mod tests {
 
     #[test]
     fn is_chat_origin_rejects_others() {
-        assert!(!is_chat_origin("http://chat.mistral.ai/")); // not https
+        assert!(!is_chat_origin("http://chat.mistral.ai/"));
         assert!(!is_chat_origin("https://evil.com/"));
         assert!(!is_chat_origin("https://chat.mistral.ai.evil.com/"));
         assert!(!is_chat_origin("https://notchat.mistral.ai/"));
-        assert!(!is_chat_origin("https://chat.local.mistral.ai/")); // wrong port
+        assert!(!is_chat_origin("https://chat.local.mistral.ai/"));
         assert!(!is_chat_origin("vmux://terminal/"));
         assert!(!is_chat_origin(""));
     }
@@ -391,7 +323,6 @@ mod tests {
         assert!(result.is_array());
         let arr = result.as_array().unwrap();
         assert!(!arr.is_empty());
-        // Tool definitions serialize camelCase: name/description/inputSchema.
         let first = &arr[0];
         assert!(first.get("name").is_some());
         assert!(first.get("inputSchema").is_some());
@@ -415,8 +346,6 @@ mod tests {
 
     #[test]
     fn command_error_maps_to_resolved_mcp_error() {
-        // A failed command must resolve as an MCP error result (isError:true),
-        // not reject — so the le-chat block submits a clean tool result.
         let mapped = match vmux_mcp::protocol::command_result_to_mcp_response(
             vmux_service::protocol::AgentCommandResult::Error("nope".to_string()),
         ) {
@@ -448,15 +377,12 @@ mod tests {
 
     #[test]
     fn remap_browser_navigate_http_url_to_pane() {
-        // A plain browser_navigate (no pane) with an http(s) url is the in-place
-        // case that replaces le-chat; it must be remapped.
         let url = url_opening_tool_url(
             "browser_navigate",
             &serde_json::json!({"url": "https://example.com"}),
         );
         assert_eq!(url.as_deref(), Some("https://example.com"));
 
-        // vmux_-prefixed name (as the bridge actually receives) also matches.
         let url = url_opening_tool_url(
             "vmux_browser_navigate",
             &serde_json::json!({"url": "http://example.com/path"}),
@@ -483,7 +409,6 @@ mod tests {
 
     #[test]
     fn remap_skips_browser_navigate_with_explicit_pane() {
-        // An explicit pane already targets a pane (NewStackInPane); don't override.
         assert!(
             url_opening_tool_url(
                 "browser_navigate",
@@ -495,7 +420,6 @@ mod tests {
 
     #[test]
     fn remap_skips_non_http_urls() {
-        // vmux:// and file: already route to a new stack without a pane.
         assert!(
             url_opening_tool_url(
                 "browser_navigate",
@@ -507,14 +431,12 @@ mod tests {
             url_opening_tool_url("in_place", &serde_json::json!({"url": "file:///tmp/x"}))
                 .is_none()
         );
-        // Missing/empty url (e.g. in_place startup default) falls through.
         assert!(url_opening_tool_url("in_place", &serde_json::json!({})).is_none());
         assert!(url_opening_tool_url("open_page", &serde_json::json!({"url": "  "})).is_none());
     }
 
     #[test]
     fn remap_skips_unrelated_tools() {
-        // Tools that don't navigate the chat webview in place are left alone.
         for name in [
             "in_new_stack",
             "in_new_tab",
