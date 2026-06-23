@@ -1,4 +1,4 @@
-# Rust without the headaches
+# Rust for React JS developers
 
 > Part of the [Vmux Architecture](../architecture.md) overview.
 
@@ -7,10 +7,49 @@ fights, lifetimes, and FFI boilerplate. The surprise: in day-to-day feature work
 none of that shows up. The scary Rust lives deep in the engine — the code you write looks a
 lot like the front-end you already write.
 
+## The UI is React — in Rust
+
+Vmux's own surfaces — header, command bar, settings, error pages — are built with
+**[Dioxus](https://dioxuslabs.com)**, which ports React's model to Rust almost one-to-one:
+function components, a JSX-like `rsx!` macro, and hooks.
+
+```rust
+#[component]
+fn Counter(start: i32) -> Element {
+    let mut count = use_signal(|| start);
+    rsx! {
+        button {
+            class: "rounded bg-accent px-3 py-1",
+            onclick: move |_| count += 1,
+            "clicked {count} times"
+        }
+    }
+}
+```
+
+If you've written a React function component, that reads exactly how you'd expect: state in
+a hook, markup returned declaratively, a click handler that updates state — and the view
+re-renders on its own. The names barely change:
+
+| React | Dioxus (Rust) |
+| :--- | :--- |
+| JSX | the `rsx!` macro |
+| function component → JSX | `fn` → `Element` |
+| `useState` | `use_signal` |
+| `useEffect` | `use_effect` |
+| `useMemo` | `use_memo` |
+| `useContext` | `use_context` |
+| props object | typed `#[component]` arguments |
+| `className` + Tailwind | `class:` + the same Tailwind utilities |
+
+Same component-and-hook mental model, now type-checked end to end — no `undefined is not a
+function`, no prop-shape drift. The toolkit (`crates/vmux_ui`) even mirrors **shadcn/ui** on
+Dioxus primitives, so the dialogs, dropdowns, and popovers are the ones you already reach for.
+
 ## Coming from React? You already know this
 
-Vmux is built on **Bevy**, a data-oriented **Entity-Component-System (ECS)**. Squint and
-it's a shape you've seen:
+Below the UI, the host is built on **Bevy**, a data-oriented **Entity-Component-System
+(ECS)**. Squint and it's a shape you've seen:
 
 - The **world** is one big store — a single Redux store, or an in-memory database.
 - **Entities** are rows; **components** are typed columns (your state).

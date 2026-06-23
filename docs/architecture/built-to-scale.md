@@ -1,42 +1,34 @@
-# ECS: Build to scale
+# ECS: Design to scale
 
 > Part of the [Vmux Architecture](../architecture.md) overview.
 
 The same property that makes Vmux pleasant to write makes it compound as it grows:
-**composition over inheritance**. An entity is defined entirely by the components attached
-to it — no base classes, no inheritance trees:
+**composition over inheritance**. An entity is just an id, defined entirely by the
+components attached to it — no base classes, no inheritance trees:
 
 - A web view *becomes* a shell by adding a `Terminal` component.
 - A web view switches to a native surface via `WebviewWindowed`.
 - Systems query for component sets (e.g. the `Active` tag), so behavior is opt-in — you
   add a capability, you don't inherit one.
 
-## Modular extensibility via plugins
+## State in components, behavior in systems
 
-A Bevy `Plugin` is the unit of modularity: it bundles the components, systems, resources,
-and messages for one domain and registers them into the `App` in a single call. Vmux is
-assembled by stacking them:
+Vmux holds no object graph. Every pane, stack, space, and surface is an **entity**; its
+state lives in **components** (plain data), and every behavior is a **system** — a function
+that queries for a set of components and runs over each matching entity. The `World` ties
+them together as the one source of truth: an in-memory database the systems read and write.
 
-```
-crates/vmux_desktop/src/lib.rs
-├── LayoutPlugin
-├── BrowserPlugin
-├── TerminalPlugin
-├── AgentPlugin
-├── ServicePlugin
-└── SpacePlugin        (…and a dozen more, one per crate)
-```
-
-Adding a feature means adding a plugin; each stays decoupled in its own crate and
-independently testable. The same composition that builds an entity from components builds
-the *app* from plugins.
+Because components are stored contiguously by type, a system touches only the data it asks
+for — cache-friendly by construction. Bevy then schedules systems with non-overlapping
+queries across cores in **parallel** on its own: you declare *what* data you need, the
+engine decides *when* it runs.
 
 ## What compounds as you grow
 
-- **More features → more plugins.** Each domain is an isolated plugin in its own crate;
-  adding one doesn't touch the rest.
+- **More behavior → more systems.** A capability is a system over a query; independent
+  systems run in parallel, so adding one rarely costs the others.
 - **More surfaces → more entities.** Panes, stacks, and spaces are just entities; the ECS
-  stores them contiguously and runs systems over them in parallel.
+  stores them contiguously and iterates them at speed.
 - **More agents → more spaces.** Each agent is anchored to its own Space subtree, so many
   can work concurrently without touching the space you're in.
 - **Heavier pages → the GPU.** Web surfaces composite on the GPU while the host loop stays

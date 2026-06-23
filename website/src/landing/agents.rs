@@ -33,11 +33,11 @@ const ADDRS: &[Addr] = &[
 ];
 
 const TOOLS: &[&str] = &[
-    "browser_navigate",
-    "run",
-    "read_layout",
-    "update_layout",
-    "create_space",
+    "vmux_browser_navigate",
+    "vmux_run",
+    "vmux_read_layout",
+    "vmux_update_layout",
+    "vmux_create_space",
 ];
 
 fn key(label: &str, cls: &str) -> Element {

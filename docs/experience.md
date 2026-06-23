@@ -1,6 +1,6 @@
 # Vmux — UX Philosophy
 
-The line between consuming and creating is blurring. AI agents are turning professionals
+The line between consumers and creators is blurring. AI agents are turning professionals
 into generalists — giving anyone with an idea and tokens the power not just to search,
 but to build software.
 

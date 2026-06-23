@@ -46,6 +46,20 @@ Dioxus is React-shaped, so web devs are instantly at home: declarative UI throug
 `rsx!` macro (JSX-like markup) and `use_state` / `use_effect`-style **hooks** for state
 and side effects — the same component-and-hook model, in Rust.
 
+A surface is a tree of components; state lives in hooks, and the view re-renders reactively
+when it changes — you describe the UI, not the DOM mutations:
+
+```rust
+#[component]
+fn UrlBar(initial: String) -> Element {
+    let mut url = use_signal(|| initial);
+    rsx! {
+        input { value: "{url}", oninput: move |e| url.set(e.value()) }
+        button { onclick: move |_| navigate(url()), "Go" }
+    }
+}
+```
+
 Our UI toolkit (`crates/vmux_ui`) is a design system matching **shadcn/ui** (dialogs,
 dropdowns, popovers, calendars) on Dioxus primitives, styled with **Tailwind** and
 shadcn design tokens (`bg-background`, `text-foreground`, themeable light/dark). Classic

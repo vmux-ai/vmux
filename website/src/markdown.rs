@@ -1,12 +1,45 @@
+use std::sync::LazyLock;
+
 use dioxus::prelude::*;
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use syntect::easy::HighlightLines;
+use syntect::highlighting::ThemeSet;
+use syntect::html::{IncludeBackground, styled_line_to_highlighted_html};
+use syntect::parsing::SyntaxSet;
+use syntect::util::LinesWithEndings;
+
+static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static THEMES: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
+
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+fn highlight_html(lang: &str, code: &str) -> String {
+    let syntax = SYNTAXES
+        .find_syntax_by_token(lang)
+        .unwrap_or_else(|| SYNTAXES.find_syntax_plain_text());
+    let theme = &THEMES.themes["base16-ocean.dark"];
+    let mut hl = HighlightLines::new(syntax, theme);
+    let mut out = String::new();
+    for line in LinesWithEndings::from(code) {
+        let Ok(ranges) = hl.highlight_line(line, &SYNTAXES) else {
+            return escape_html(code);
+        };
+        match styled_line_to_highlighted_html(&ranges, IncludeBackground::No) {
+            Ok(html) => out.push_str(&html),
+            Err(_) => return escape_html(code),
+        }
+    }
+    out
+}
 
 #[derive(Clone, PartialEq)]
 enum Node {
     Heading(u8, Vec<Node>),
     Paragraph(Vec<Node>),
     BlockQuote(Vec<Node>),
-    CodeBlock(String),
+    CodeBlock(String, String),
     List(Option<u64>, Vec<Vec<Node>>),
     Rule,
     Table(Vec<Vec<Node>>, Vec<Vec<Vec<Node>>>),
@@ -31,6 +64,7 @@ struct Frame {
     heading: u8,
     is_code: bool,
     code: String,
+    code_lang: String,
 }
 
 fn hlevel(h: HeadingLevel) -> u8 {
@@ -67,7 +101,9 @@ fn parse(md: &str) -> Vec<Node> {
                     Tag::Link { dest_url, .. } => f.link_href = dest_url.to_string(),
                     Tag::CodeBlock(kind) => {
                         f.is_code = true;
-                        if let CodeBlockKind::Fenced(_) = kind {}
+                        if let CodeBlockKind::Fenced(lang) = kind {
+                            f.code_lang = lang.to_string();
+                        }
                     }
                     _ => {}
                 }
@@ -83,7 +119,9 @@ fn parse(md: &str) -> Vec<Node> {
                     TagEnd::Emphasis => push_node(&mut stack, Node::Emphasis(f.children)),
                     TagEnd::Strikethrough => push_node(&mut stack, Node::Strikethrough(f.children)),
                     TagEnd::Link => push_node(&mut stack, Node::Link(f.link_href, f.children)),
-                    TagEnd::CodeBlock => push_node(&mut stack, Node::CodeBlock(f.code)),
+                    TagEnd::CodeBlock => {
+                        push_node(&mut stack, Node::CodeBlock(f.code_lang, f.code))
+                    }
                     TagEnd::Item => {
                         if let Some(top) = stack.last_mut() {
                             top.items.push(f.children);
@@ -207,11 +245,14 @@ fn render_node(n: &Node) -> Element {
                 {render_nodes(ch)}
             }
         },
-        Node::CodeBlock(code) => rsx! {
-            pre { class: "bg-code-bg border border-border rounded-lg p-4 my-5 overflow-x-auto",
-                code { class: "font-mono text-sm leading-relaxed", "{code}" }
+        Node::CodeBlock(lang, code) => {
+            let html = highlight_html(lang, code);
+            rsx! {
+                pre { class: "bg-code-bg border border-border rounded-lg p-4 my-5 overflow-x-auto",
+                    code { class: "font-mono text-sm leading-relaxed", dangerous_inner_html: "{html}" }
+                }
             }
-        },
+        }
         Node::List(start, items) => {
             if start.is_some() {
                 rsx! {
