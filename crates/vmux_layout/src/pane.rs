@@ -912,13 +912,9 @@ pub fn split_or_extend(
 #[derive(Message, Clone)]
 pub struct OpenBesideRequest {
     pub pane: Entity,
-    /// `None` => automatic placement (type-stack + spiral). `Some` => explicit
-    /// split in that direction (caller override).
     pub direction: Option<PaneDirection>,
     pub url: String,
     pub request_id: [u8; 16],
-    /// When true, focus moves to the newly opened pane. When false, focus stays
-    /// where it is (the agent keeps focus so it can drive the new pane itself).
     pub focus: bool,
 }
 
@@ -946,7 +942,6 @@ pub fn handle_open_beside_requests(
 ) {
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
     for req in reader.read() {
-        // Explicit direction: caller override, today's behavior unchanged.
         if let Some(direction) = req.direction {
             let target_pane = match find_sibling_pane(
                 req.pane,
@@ -985,7 +980,6 @@ pub fn handle_open_beside_requests(
             continue;
         }
 
-        // Auto: resolver decides Focus / AddTab / Spiral.
         let Some(tab) = tab_of_pane(req.pane, &child_of_q, &rc.tab_q) else {
             spawn_beside_stack(
                 req.pane,

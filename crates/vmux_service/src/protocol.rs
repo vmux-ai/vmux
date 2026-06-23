@@ -104,8 +104,6 @@ pub enum AgentCommand {
     },
     OpenBeside {
         anchor: ProcessId,
-        /// `None` => automatic placement (type-stack + spiral). `Some` => explicit
-        /// split in that direction (caller override).
         direction: Option<AgentPaneDirection>,
         url: String,
         focus: bool,

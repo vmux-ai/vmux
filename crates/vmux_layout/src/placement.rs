@@ -66,12 +66,6 @@ fn newest_nonagent_leaf(leaves: &[LeafInfo]) -> Option<&LeafInfo> {
         .max_by_key(|l| l.spawn_seq)
 }
 
-/// Decide where a page (`url`) should open.
-///
-/// `reuse`: an exact-URL hit anywhere in the space, if any (highest priority).
-/// `leaves`: leaf panes in the CURRENT tab, each with the kinds of its stacks,
-/// its `SpawnSeq`, and its pixel size.
-/// `self_pane`: the calling agent's own pane, used as a fallback target.
 pub fn resolve_placement(
     url: &str,
     reuse: Option<ReuseHit>,
