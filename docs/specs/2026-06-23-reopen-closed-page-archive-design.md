@@ -46,7 +46,7 @@ This is a **backing store only** — there is no archive panel, list, or search.
 | Question | Decision |
 | --- | --- |
 | Archive role | Backing store only — no UI. |
-| Page kinds | All: web, terminal, agent. Terminal/agent reopen **respawns fresh**. |
+| Page kinds | All: web, terminal, agent. Terminal respawns fresh at cwd; agent **resumes its session id** if one was captured, else fresh. |
 | Restore target | Origin space, new tab. Fallback: active space if origin gone. |
 | Bounds | Cap 25 most-recent **and** purge entries older than 30 days. |
 | Capture mechanism | Approach C: message-driven archive plugin. |
@@ -123,10 +123,13 @@ pub struct PageArchiveRequest {
   because no existing primitive opens a tab into a non-active space.
 - **Reconstruct by kind** into the new stack:
   - web → `PageOpenRequest { target: Stack(new), url, request_id: None }`
-  - terminal → `PageOpenRequest` with `vmux://terminal/?cwd=…`, then re-insert
-    the stored `TerminalLaunch` for full command/args/env
-  - agent → `SpawnAgentInStackRequest { kind, cwd, session_id: None, stack: new }`
-    (fresh session)
+  - terminal → `PageOpenRequest` with `vmux://terminal/?cwd=…` (fresh shell at the
+    captured cwd)
+  - agent → `SpawnAgentInStackRequest { kind, cwd, session_id, stack: new }`,
+    where `session_id` is recovered from the captured url suffix
+    (`vmux://agent/{kind}/{sid}`) if present, else `None`. This mirrors how
+    `rebuild_space_views` resumes agents on restart — reopening an agent page
+    resumes its session when one existed, and starts fresh otherwise.
 - **Consume:** despawn the `ArchivedPage` entity. Repeated presses reopen
   successively older pages.
 
@@ -162,8 +165,10 @@ pub struct PageArchiveRequest {
 - No archive panel, list, or search.
 - Web restore is **URL only** — no scroll position, back/forward history, or form
   state.
-- Terminal/agent restore is a **fresh respawn** — no scrollback, no live process,
-  no agent conversation continuity.
+- Terminal restore is a **fresh respawn** at the captured cwd — no scrollback, no
+  live process. Agent restore resumes the captured session id when present (no
+  live process is revived, but the agent CLI reattaches its session), else starts
+  fresh.
 - No dedup — closing the same URL twice produces two entries.
 - No exact pane-split restoration — a reopened page lands as a new tab in its
   origin space, not its former split position.

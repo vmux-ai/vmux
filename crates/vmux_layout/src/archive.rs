@@ -170,10 +170,12 @@ fn handle_reopen_closed_page(
             .as_ref()
             .map(|l| PathBuf::from(&l.cwd))
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
+        let id_part = page.url.strip_prefix(&kind.cli_url_prefix()).unwrap_or("");
+        let session_id = (!id_part.is_empty()).then(|| id_part.to_string());
         spawn_agent.write(SpawnAgentInStackRequest {
             kind,
             cwd,
-            session_id: None,
+            session_id,
             stack: scaffold.stack,
         });
     } else if page.url.starts_with(TERMINAL_PAGE_URL) {
@@ -453,8 +455,15 @@ mod tests {
         assert_eq!(opens[0].url, "vmux://terminal/?cwd=/work");
     }
 
+    fn drain_agent_spawns(app: &mut App) -> Vec<SpawnAgentInStackRequest> {
+        app.world_mut()
+            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
+            .drain()
+            .collect()
+    }
+
     #[test]
-    fn reopen_agent_emits_spawn_request_fresh_session() {
+    fn reopen_agent_starts_fresh_when_no_session_id() {
         let mut app = reopen_app();
         app.world_mut()
             .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
@@ -473,15 +482,37 @@ mod tests {
         });
         dispatch_reopen(&mut app);
         assert!(drain_opens(&mut app).is_empty());
-        let spawns: Vec<SpawnAgentInStackRequest> = app
-            .world_mut()
-            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
-            .drain()
-            .collect();
+        let spawns = drain_agent_spawns(&mut app);
         assert_eq!(spawns.len(), 1);
         assert_eq!(spawns[0].kind, AgentKind::Claude);
         assert_eq!(spawns[0].cwd, PathBuf::from("/proj"));
         assert!(spawns[0].session_id.is_none());
+    }
+
+    #[test]
+    fn reopen_agent_recovers_session_id_from_url() {
+        let mut app = reopen_app();
+        app.world_mut()
+            .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
+        app.world_mut().spawn(ArchivedPage {
+            url: format!("{}sess-123", AgentKind::Claude.cli_url_prefix()),
+            title: String::new(),
+            space_id: "s1".to_string(),
+            closed_at: 5,
+            launch: Some(TerminalLaunch {
+                command: "claude".to_string(),
+                args: vec![],
+                cwd: "/proj".to_string(),
+                env: vec![],
+                kind: TerminalKind::Claude,
+            }),
+        });
+        dispatch_reopen(&mut app);
+        assert!(drain_opens(&mut app).is_empty());
+        let spawns = drain_agent_spawns(&mut app);
+        assert_eq!(spawns.len(), 1);
+        assert_eq!(spawns[0].kind, AgentKind::Claude);
+        assert_eq!(spawns[0].session_id.as_deref(), Some("sess-123"));
     }
 
     #[test]
