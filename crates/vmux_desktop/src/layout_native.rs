@@ -73,22 +73,25 @@ struct LayoutGlassState {
     last_width: f64,
 }
 
-/// A Clear glass pill (rounded) added directly onto the (already-glass) window content view.
+/// A Regular Liquid Glass pill. Regular adapts to whatever is behind it for legibility (HIG);
+/// the active state is conveyed with a subtle accent tint rather than by dimming opacity.
 fn glass_pill(
     mtm: MainThreadMarker,
     content: &NSView,
     frame: NSRect,
     radius: f64,
-    alpha: f64,
+    active: bool,
 ) -> Retained<NSGlassEffectView> {
     let pill: Retained<NSGlassEffectView> = NSGlassEffectView::new(mtm);
-    pill.setStyle(NSGlassEffectViewStyle::Clear);
-    pill.setTintColor(Some(&NSColor::clearColor()));
+    pill.setStyle(NSGlassEffectViewStyle::Regular);
+    if active {
+        let accent = NSColor::controlAccentColor();
+        pill.setTintColor(Some(&accent.colorWithAlphaComponent(0.55)));
+    }
     pill.setCornerRadius(radius);
     let view: &NSView = &pill;
     view.setFrame(frame);
     view.setWantsLayer(true);
-    view.setAlphaValue(alpha);
     content.addSubview(view);
     if let Some(layer) = view.layer() {
         layer.setZPosition(PILL_Z);
@@ -205,19 +208,20 @@ fn rebuild(
     let row1_y = band_top + 10.0;
     let row2_y = band_top + 10.0 + PILL_H + 6.0;
     let radius = PILL_H / 2.0;
+    // Header lives in the main column, aligned with the page (right of the side sheet).
+    let main_x0 = sheet_w + 12.0;
 
     // Row 1: tab pills + new-tab
     let tab_w = 120.0_f64;
-    let mut x = 12.0_f64;
+    let mut x = main_x0;
     for tab in &current.0.tabs {
         let tag = state.actions.len();
-        let alpha = if tab.is_active { 1.0 } else { 0.5 };
         let pill = glass_pill(
             mtm,
             content,
             NSRect::new(NSPoint::new(x, row1_y), NSSize::new(tab_w, PILL_H)),
             radius,
-            alpha,
+            tab.is_active,
         );
         add_button(&pill, mtm, target_ref, &tab.title, tag);
         state.pills.push(pill);
@@ -231,7 +235,7 @@ fn rebuild(
             content,
             NSRect::new(NSPoint::new(x, row1_y), NSSize::new(PILL_H, PILL_H)),
             radius,
-            0.7,
+            false,
         );
         add_button(&pill, mtm, target_ref, "+", tag);
         state.pills.push(pill);
@@ -239,7 +243,7 @@ fn rebuild(
     }
 
     // Row 2: nav + address + profile
-    let mut nx = 12.0_f64;
+    let mut nx = main_x0;
     for (glyph, action) in [
         ("\u{2039}", LayoutAction::Back),
         ("\u{203a}", LayoutAction::Forward),
@@ -251,7 +255,7 @@ fn rebuild(
             content,
             NSRect::new(NSPoint::new(nx, row2_y), NSSize::new(PILL_H, PILL_H)),
             radius,
-            0.7,
+            false,
         );
         add_button(&pill, mtm, target_ref, glyph, tag);
         state.pills.push(pill);
@@ -271,7 +275,7 @@ fn rebuild(
                 NSSize::new(profile_w, PILL_H),
             ),
             radius,
-            0.8,
+            false,
         );
         add_label(&pill, mtm, profile, &NSColor::labelColor());
         state.pills.push(pill);
@@ -289,18 +293,18 @@ fn rebuild(
         content,
         NSRect::new(NSPoint::new(addr_x, row2_y), NSSize::new(addr_w, PILL_H)),
         radius,
-        0.6,
+        false,
     );
     add_label(&pill, mtm, addr_text, &NSColor::secondaryLabelColor());
     state.pills.push(pill);
 
-    // Side sheet: stack cards + new-stack
+    // Side sheet (left column, anchored top-left): stack cards + new-stack
     let card_h = 30.0_f64;
     let card_gap = 8.0_f64;
     let cards_top = if flipped {
-        band_top + header_h + 12.0
+        12.0
     } else {
-        height - header_h - 12.0 - card_h
+        height - 12.0 - card_h
     };
     let card_y = |row: usize| {
         if flipped {
@@ -311,15 +315,14 @@ fn rebuild(
     };
     let card_w = (sheet_w - 24.0).max(40.0);
     for (i, st) in current.0.stacks.iter().enumerate() {
-        let alpha = if st.is_active { 0.95 } else { 0.55 };
         let pill = glass_pill(
             mtm,
             content,
             NSRect::new(NSPoint::new(12.0, card_y(i)), NSSize::new(card_w, card_h)),
             10.0,
-            alpha,
+            st.is_active,
         );
-        add_label(&pill, mtm, &st.title, &label_color(st.is_active));
+        add_label(&pill, mtm, &st.title, &NSColor::labelColor());
         state.pills.push(pill);
     }
     {
@@ -332,19 +335,11 @@ fn rebuild(
                 NSSize::new(card_w, card_h),
             ),
             10.0,
-            0.6,
+            false,
         );
         add_button(&pill, mtm, target_ref, "+ New Stack", tag);
         state.pills.push(pill);
         state.actions.push(LayoutAction::NewStack);
-    }
-}
-
-fn label_color(is_active: bool) -> Retained<NSColor> {
-    if is_active {
-        NSColor::labelColor()
-    } else {
-        NSColor::secondaryLabelColor()
     }
 }
 
