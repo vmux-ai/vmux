@@ -1,10 +1,12 @@
 use bevy::prelude::*;
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
-use objc2_app_kit::{NSColor, NSGlassEffectView, NSGlassEffectViewStyle, NSView};
-use objc2_foundation::{NSPoint, NSRect, NSSize};
+use objc2_app_kit::{
+    NSColor, NSFont, NSGlassEffectView, NSGlassEffectViewStyle, NSTextField, NSView,
+};
+use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use vmux_layout::event::CEF_RESERVED_HEIGHT_PX;
-use vmux_layout::native_view::LayoutRenderer;
+use vmux_layout::native_view::{CurrentLayoutView, LayoutRenderer};
 use vmux_layout::scene::InteractionMode;
 
 pub(crate) struct LayoutNativePlugin;
@@ -19,6 +21,7 @@ impl Plugin for LayoutNativePlugin {
 #[derive(Default)]
 struct LayoutGlassState {
     header: Option<Retained<NSGlassEffectView>>,
+    tabs: Vec<Retained<NSTextField>>,
     shown: bool,
 }
 
@@ -26,6 +29,7 @@ fn sync_layout_glass(
     mut state: NonSendMut<LayoutGlassState>,
     renderer: Res<LayoutRenderer>,
     mode: Res<InteractionMode>,
+    current: Res<CurrentLayoutView>,
     window_q: Query<Entity, With<bevy::window::PrimaryWindow>>,
 ) {
     let want = *renderer == LayoutRenderer::Native && *mode == InteractionMode::User;
@@ -63,7 +67,8 @@ fn sync_layout_glass(
         NSSize::new(bounds.size.width, header_h),
     );
 
-    if state.header.is_none() {
+    let header_created = state.header.is_none();
+    if header_created {
         let glass: Retained<NSGlassEffectView> = NSGlassEffectView::new(mtm);
         glass.setStyle(NSGlassEffectViewStyle::Clear);
         glass.setTintColor(Some(&NSColor::clearColor()));
@@ -82,4 +87,36 @@ fn sync_layout_glass(
         view.setHidden(false);
     }
     state.shown = true;
+
+    if current.is_changed() || header_created {
+        for label in state.tabs.drain(..) {
+            let view: &NSView = &label;
+            view.removeFromSuperview();
+        }
+        if let Some(glass) = state.header.clone() {
+            let host: &NSView = &glass;
+            let label_h = 20.0_f64;
+            let label_w = 160.0_f64;
+            let y = (header_h - label_h) / 2.0;
+            let mut x = 12.0_f64;
+            for tab in &current.0.tabs {
+                let label = NSTextField::labelWithString(&NSString::from_str(&tab.title), mtm);
+                label.setFont(Some(&NSFont::systemFontOfSize(13.0)));
+                let color = if tab.is_active {
+                    NSColor::labelColor()
+                } else {
+                    NSColor::secondaryLabelColor()
+                };
+                label.setTextColor(Some(&color));
+                let lview: &NSView = &label;
+                lview.setFrame(NSRect::new(
+                    NSPoint::new(x, y),
+                    NSSize::new(label_w, label_h),
+                ));
+                host.addSubview(lview);
+                state.tabs.push(label);
+                x += label_w + 8.0;
+            }
+        }
+    }
 }

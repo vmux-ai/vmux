@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 
-use crate::protocol::LayoutSnapshot;
+use crate::protocol::{LayoutNode, LayoutSnapshot};
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LayoutRenderer {
@@ -23,6 +23,7 @@ pub struct LayoutView {
 pub struct TabView {
     pub id: NodeId,
     pub name: String,
+    pub title: String,
     pub is_active: bool,
 }
 
@@ -36,11 +37,34 @@ impl LayoutView {
                 Some(TabView {
                     id: NodeId(id),
                     name: t.name.clone(),
+                    title: tab_display_title(&t.name, &t.root),
                     is_active: t.is_active,
                 })
             })
             .collect();
         LayoutView { tabs }
+    }
+}
+
+fn tab_display_title(name: &str, root: &LayoutNode) -> String {
+    let name = name.trim();
+    if !name.is_empty() {
+        return name.to_string();
+    }
+    first_stack_title(root).unwrap_or_else(|| "New Tab".to_string())
+}
+
+fn first_stack_title(node: &LayoutNode) -> Option<String> {
+    match node {
+        LayoutNode::Pane { stacks, .. } => stacks.iter().find_map(|s| {
+            let t = s.title.trim();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t.to_string())
+            }
+        }),
+        LayoutNode::Split { children, .. } => children.iter().find_map(first_stack_title),
     }
 }
 
@@ -222,11 +246,13 @@ mod tests {
                 TabView {
                     id: NodeId("tab:1".into()),
                     name: "A".into(),
+                    title: "A".into(),
                     is_active: true
                 },
                 TabView {
                     id: NodeId("tab:2".into()),
                     name: "B".into(),
+                    title: "B".into(),
                     is_active: false
                 },
             ]
@@ -249,6 +275,30 @@ mod tests {
         assert!(LayoutView::default().tabs.is_empty());
     }
 
+    #[test]
+    fn from_snapshot_uses_stack_title_when_tab_unnamed() {
+        let snapshot = LayoutSnapshot {
+            tabs: vec![Tab {
+                id: Some("tab:1".into()),
+                name: String::new(),
+                is_active: true,
+                root: LayoutNode::Pane {
+                    id: Some("pane:1".into()),
+                    is_zoomed: false,
+                    stacks: vec![crate::protocol::Stack {
+                        id: Some("stack:2".into()),
+                        title: "GitHub".into(),
+                        ..Default::default()
+                    }],
+                },
+            }],
+            focused: Focus::default(),
+        };
+        let view = LayoutView::from_snapshot(&snapshot);
+        assert_eq!(view.tabs[0].title, "GitHub");
+        assert_eq!(view.tabs[0].name, "");
+    }
+
     fn view(tabs: &[(&str, &str, bool)]) -> LayoutView {
         LayoutView {
             tabs: tabs
@@ -256,6 +306,7 @@ mod tests {
                 .map(|(id, name, active)| TabView {
                     id: NodeId((*id).into()),
                     name: (*name).into(),
+                    title: (*name).into(),
                     is_active: *active,
                 })
                 .collect(),
