@@ -58,6 +58,13 @@ pub enum McpParamTool {
     RenameSpace { space_id: String, name: String },
     #[mcp(description = "Delete a space by id. Use vmux_list_spaces to discover ids.")]
     DeleteSpace { space_id: String },
+    #[mcp(
+        description = "Notify the user that you (this agent) need their attention - typically that you have finished your turn. Shows a macOS notification when they are not looking at your page, and a dot on your avatar in the team facepile until they view it. Optional `title` and `body` customize the message; with neither, a default \"<agent> finished\" is shown."
+    )]
+    Notify {
+        title: Option<String>,
+        body: Option<String>,
+    },
 }
 
 impl McpParamTool {
@@ -144,6 +151,7 @@ impl McpParamTool {
                     name: None,
                 })
             }
+            McpParamTool::Notify { title, body } => Ok(AgentCommand::Notify { title, body }),
         }
     }
 }
@@ -840,6 +848,39 @@ mod tests {
     #[test]
     fn unknown_tool_returns_error() {
         assert!(dispatch_from_tool_call("nope_not_a_tool", serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn list_tools_includes_notify() {
+        assert!(tool_names().contains(&"vmux_notify".to_string()));
+    }
+
+    #[test]
+    fn notify_dispatches_to_notify_command() {
+        let command = dispatch_command(
+            "notify",
+            serde_json::json!({"title": "done", "body": "built X"}),
+        )
+        .unwrap();
+        assert_eq!(
+            command,
+            AgentCommand::Notify {
+                title: Some("done".to_string()),
+                body: Some("built X".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn notify_allows_empty_args() {
+        let command = dispatch_command("notify", serde_json::json!({})).unwrap();
+        assert_eq!(
+            command,
+            AgentCommand::Notify {
+                title: None,
+                body: None,
+            }
+        );
     }
 
     #[test]

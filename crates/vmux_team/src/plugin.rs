@@ -72,6 +72,7 @@ fn team_member_row(
     sid: String,
     is_user: bool,
     is_running: bool,
+    is_done_unseen: bool,
 ) -> TeamMemberRow {
     TeamMemberRow {
         id: entity.to_bits().to_string(),
@@ -84,6 +85,7 @@ fn team_member_row(
         sid,
         is_user,
         is_running,
+        is_done_unseen,
     }
 }
 
@@ -133,6 +135,7 @@ fn build_team_members(
         &Agent,
         Option<&AgentRunState>,
         Option<&SessionId>,
+        Option<&vmux_core::notify::AgentDoneUnseen>,
     )>,
     child_of: &Query<&ChildOf>,
     space_marker: &Query<(), With<Space>>,
@@ -152,12 +155,14 @@ fn build_team_members(
             String::new(),
             true,
             false,
+            false,
         ));
     }
     if let Some(active) = active {
-        for (entity, profile, agent, run, session) in agent_q {
+        for (entity, profile, agent, run, session, done) in agent_q {
             if space_of(entity, child_of, space_marker) == Some(active) {
                 let is_running = matches!(run, Some(AgentRunState::Streaming));
+                let is_done_unseen = done.is_some();
                 let (icon, title) = agent_page(entity, meta_q, children_q, child_of);
                 let url = agent.kind.cli_url_prefix();
                 let sid = session
@@ -165,7 +170,15 @@ fn build_team_members(
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| agent.sid.clone());
                 members.push(team_member_row(
-                    entity, profile, icon, url, title, sid, false, is_running,
+                    entity,
+                    profile,
+                    icon,
+                    url,
+                    title,
+                    sid,
+                    false,
+                    is_running,
+                    is_done_unseen,
                 ));
             }
         }
@@ -187,6 +200,7 @@ fn emit_team(
         &Agent,
         Option<&AgentRunState>,
         Option<&SessionId>,
+        Option<&vmux_core::notify::AgentDoneUnseen>,
     )>,
     child_of: Query<&ChildOf>,
     space_marker: Query<(), With<Space>>,
@@ -363,6 +377,22 @@ mod tests {
                 },
             )
             .unwrap()
+    }
+
+    #[test]
+    fn done_unseen_sets_row_flag() {
+        let row = team_member_row(
+            Entity::PLACEHOLDER,
+            &Profile::agent(AgentKind::Claude),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            false,
+            false,
+            true,
+        );
+        assert!(row.is_done_unseen);
     }
 
     #[test]

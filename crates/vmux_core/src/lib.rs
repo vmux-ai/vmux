@@ -16,9 +16,13 @@ pub mod agent;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod archive;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod notify;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod team;
 #[cfg(not(target_arch = "wasm32"))]
 pub use archive::{ArchivedPage, PageArchiveRequest};
+#[cfg(not(target_arch = "wasm32"))]
+pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 #[cfg(not(target_arch = "wasm32"))]
 pub use page_open::{
     CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,

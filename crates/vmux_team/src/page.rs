@@ -109,6 +109,11 @@ fn TeamRow(member: TeamMemberRow) -> Element {
                             span { class: "size-1.5 rounded-full bg-emerald-400 animate-pulse" }
                             "running"
                         }
+                    } else if member.is_done_unseen {
+                        span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400",
+                            span { class: "size-1.5 rounded-full bg-amber-400 animate-pulse" }
+                            "done"
+                        }
                     }
                 }
                 if let Some(subtitle) = subtitle {
@@ -145,6 +150,8 @@ fn TeamAvatar(member: TeamMemberRow, size: u32) -> Element {
             }
             if member.is_running {
                 span { class: "absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-emerald-400 ring-2 ring-background animate-pulse" }
+            } else if member.is_done_unseen {
+                span { class: "absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-amber-400 ring-2 ring-background animate-pulse" }
             }
         }
     }

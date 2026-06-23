@@ -461,6 +461,9 @@ fn Tab(tab: TabRow) -> Element {
                 }
                 span { class: "{title_class}", "{display_title}" }
             }
+            if tab.is_done_unseen {
+                span { class: "size-2 shrink-0 rounded-full bg-amber-400 ring-2 ring-background animate-pulse" }
+            }
             button {
                 r#type: "button",
                 aria_label: "Close tab",
@@ -550,21 +553,26 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                                 div {
                                     key: "{m.id}",
                                     title: "{m.name}",
-                                    class: "relative inline-flex size-5 items-center justify-center overflow-hidden rounded-full ring-2 ring-background text-[9px] font-semibold text-white cursor-pointer transition-opacity hover:opacity-80",
-                                    style: "{bg}",
+                                    class: "relative inline-flex size-5 shrink-0 cursor-pointer transition-opacity hover:opacity-80",
                                     onclick: move |_| {
                                         let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
                                             command: "focus".to_string(),
                                             member_id: Some(id.clone()),
                                         });
                                     },
-                                    if let Some(src) = src.as_ref() {
-                                        img { class: "size-full object-cover", src: "{src}" }
-                                    } else {
-                                        "{m.initials}"
+                                    div {
+                                        class: "inline-flex size-5 items-center justify-center overflow-hidden rounded-full ring-2 ring-background text-[9px] font-semibold text-white",
+                                        style: "{bg}",
+                                        if let Some(src) = src.as_ref() {
+                                            img { class: "size-full object-cover", src: "{src}" }
+                                        } else {
+                                            "{m.initials}"
+                                        }
                                     }
                                     if m.is_running {
                                         span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-emerald-400 ring-2 ring-background" }
+                                    } else if m.is_done_unseen {
+                                        span { class: "absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-amber-400 ring-2 ring-background animate-pulse" }
                                     }
                                 }
                             }

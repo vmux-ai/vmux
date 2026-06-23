@@ -17,6 +17,7 @@ mod glass;
 mod log_forward;
 #[cfg(target_os = "macos")]
 mod native_keyboard;
+mod notify;
 mod os_menu;
 pub mod panic_hook;
 mod persistence;
@@ -158,7 +159,9 @@ impl Plugin for VmuxPlugin {
                 )
                     .chain()
                     .after(WriteAppCommands),
-            );
+            )
+            .add_systems(Startup, notify::request_notification_auth)
+            .add_systems(Update, notify::post_os_notifications);
 
         #[cfg(target_os = "macos")]
         app.add_plugins((glass::GlassPlugin, splash::SplashPlugin))
