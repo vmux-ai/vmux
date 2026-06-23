@@ -9,6 +9,7 @@ use objc2_app_kit::{
     NSView,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use vmux_core::profile::active_profile_name;
 use vmux_layout::event::{CEF_RESERVED_HEIGHT_PX, SIDE_SHEET_WIDTH_PX, TabsCommandEvent};
 use vmux_layout::native_view::{CurrentLayoutView, LayoutRenderer, NodeId};
 use vmux_layout::protocol::parse_id;
@@ -62,6 +63,7 @@ struct LayoutGlassState {
     tabs: Vec<Retained<NSButton>>,
     actions: Vec<LayoutAction>,
     address: Option<Retained<NSTextField>>,
+    profile: Option<Retained<NSTextField>>,
     stacks: Vec<Retained<NSTextField>>,
     target: Option<Retained<TabTarget>>,
     click_rx: Option<Receiver<isize>>,
@@ -215,6 +217,10 @@ fn rebuild_tabs_and_address(
         let view: &NSView = &label;
         view.removeFromSuperview();
     }
+    if let Some(label) = state.profile.take() {
+        let view: &NSView = &label;
+        view.removeFromSuperview();
+    }
     let (Some(glass), Some(target)) = (state.header.clone(), state.target.clone()) else {
         return;
     };
@@ -244,18 +250,32 @@ fn rebuild_tabs_and_address(
         state.actions.push(LayoutAction::NewTab);
         x += 28.0 + 8.0;
     }
+    let profile_name = active_profile_name();
+    let profile_w = 120.0_f64;
     if !current.0.address.is_empty() {
         let addr = NSTextField::labelWithString(&NSString::from_str(&current.0.address), mtm);
         addr.setFont(Some(&NSFont::systemFontOfSize(12.0)));
         addr.setTextColor(Some(&NSColor::secondaryLabelColor()));
         let aview: &NSView = &addr;
-        let addr_w = (window_w - x - 16.0).max(120.0);
+        let addr_w = (window_w - x - profile_w - 40.0).max(120.0);
         aview.setFrame(NSRect::new(
             NSPoint::new(x + 16.0, y),
             NSSize::new(addr_w, item_h),
         ));
         host.addSubview(aview);
         state.address = Some(addr);
+    }
+    if !profile_name.is_empty() {
+        let prof = NSTextField::labelWithString(&NSString::from_str(profile_name), mtm);
+        prof.setFont(Some(&NSFont::systemFontOfSize(12.0)));
+        prof.setTextColor(Some(&NSColor::labelColor()));
+        let pview: &NSView = &prof;
+        pview.setFrame(NSRect::new(
+            NSPoint::new(window_w - profile_w - 16.0, y),
+            NSSize::new(profile_w, item_h),
+        ));
+        host.addSubview(pview);
+        state.profile = Some(prof);
     }
 }
 
