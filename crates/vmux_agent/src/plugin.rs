@@ -34,7 +34,8 @@ use crate::client::cli::claude::ClaudeStrategy;
 use crate::client::cli::codex::CodexStrategy;
 use crate::client::cli::vibe::VibeStrategy;
 use crate::events::{
-    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin, ScreenshotImage,
+    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin, RecordStartRequest,
+    RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo, ScreenshotImage,
     ScreenshotRequest, ScreenshotResponse,
 };
 use crate::session::{
@@ -106,6 +107,10 @@ impl Plugin for AgentPlugin {
             .add_message::<AgentQueryRequest>()
             .add_message::<ScreenshotRequest>()
             .add_message::<ScreenshotResponse>()
+            .add_message::<RecordStartRequest>()
+            .add_message::<RecordStartResponse>()
+            .add_message::<RecordStopRequest>()
+            .add_message::<RecordStopResponse>()
             .add_message::<AgentToolCallRequest>()
             .add_message::<AgentSessionExited>()
             .add_message::<SpawnAgentInStackRequest>()
@@ -169,6 +174,8 @@ impl Plugin for AgentPlugin {
                     forward_layout_apply_responses,
                     forward_layout_snapshot_responses,
                     forward_screenshot_responses,
+                    forward_record_start_responses,
+                    forward_record_stop_responses,
                 ),
             )
             .add_systems(
@@ -952,6 +959,8 @@ fn handle_agent_queries(
     >,
     mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
     mut screenshot_writer: MessageWriter<ScreenshotRequest>,
+    mut record_start_writer: MessageWriter<RecordStartRequest>,
+    mut record_stop_writer: MessageWriter<RecordStopRequest>,
 ) {
     let Some(service) = service else { return };
 
@@ -998,6 +1007,25 @@ fn handle_agent_queries(
                 screenshot_writer.write(ScreenshotRequest {
                     request_id: request.request_id.0,
                     pane: pane.clone(),
+                });
+            }
+            AgentQuery::RecordStart {
+                gif,
+                max_secs,
+                ref pane,
+            } => {
+                record_start_writer.write(RecordStartRequest {
+                    request_id: request.request_id.0,
+                    gif,
+                    max_secs,
+                    pane: pane.clone(),
+                });
+            }
+            AgentQuery::RecordStop { ref dir, ref name } => {
+                record_stop_writer.write(RecordStopRequest {
+                    request_id: request.request_id.0,
+                    dir: dir.clone(),
+                    name: name.clone(),
                 });
             }
             // ReadTerminal/ReadTerminalFull/CommandExit are answered by the
@@ -1062,6 +1090,54 @@ fn forward_screenshot_responses(
         service.0.send(ClientMessage::AgentQueryResponse {
             request_id: AgentRequestId(response.request_id),
             result: screenshot_response_to_query_result(&response.result),
+        });
+    }
+}
+
+fn record_start_response_to_query_result(result: &Result<u32, String>) -> AgentQueryResult {
+    match result {
+        Ok(max_secs) => AgentQueryResult::Text(format!("recording started, max {max_secs}s")),
+        Err(message) => AgentQueryResult::Error(message.clone()),
+    }
+}
+
+fn forward_record_start_responses(
+    mut reader: MessageReader<RecordStartResponse>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else { return };
+    for response in reader.read() {
+        service.0.send(ClientMessage::AgentQueryResponse {
+            request_id: AgentRequestId(response.request_id),
+            result: record_start_response_to_query_result(&response.result),
+        });
+    }
+}
+
+fn record_stop_response_to_query_result(
+    result: &Result<RecordingInfo, String>,
+) -> AgentQueryResult {
+    match result {
+        Ok(info) => AgentQueryResult::Recording {
+            mp4_path: info.mp4_path.clone(),
+            gif_path: info.gif_path.clone(),
+            duration_ms: info.duration_ms,
+            bytes: info.bytes,
+            auto_stopped: info.auto_stopped,
+        },
+        Err(message) => AgentQueryResult::Error(message.clone()),
+    }
+}
+
+fn forward_record_stop_responses(
+    mut reader: MessageReader<RecordStopResponse>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else { return };
+    for response in reader.read() {
+        service.0.send(ClientMessage::AgentQueryResponse {
+            request_id: AgentRequestId(response.request_id),
+            result: record_stop_response_to_query_result(&response.result),
         });
     }
 }
@@ -1701,6 +1777,28 @@ mod tests {
 
         let err = screenshot_response_to_query_result(&Err("nope".to_string()));
         assert!(matches!(err, AgentQueryResult::Error(m) if m == "nope"));
+    }
+
+    #[test]
+    fn record_start_response_maps_ok_and_err() {
+        let ok = record_start_response_to_query_result(&Ok(120));
+        assert!(matches!(ok, AgentQueryResult::Text(t) if t.contains("120")));
+        let err = record_start_response_to_query_result(&Err("nope".to_string()));
+        assert!(matches!(err, AgentQueryResult::Error(m) if m == "nope"));
+    }
+
+    #[test]
+    fn record_stop_response_maps_ok_and_err() {
+        let ok = record_stop_response_to_query_result(&Ok(RecordingInfo {
+            mp4_path: "/tmp/x.mp4".into(),
+            gif_path: None,
+            duration_ms: 1000,
+            bytes: 42,
+            auto_stopped: false,
+        }));
+        assert!(matches!(ok, AgentQueryResult::Recording { mp4_path, .. } if mp4_path == "/tmp/x.mp4"));
+        let err = record_stop_response_to_query_result(&Err("boom".to_string()));
+        assert!(matches!(err, AgentQueryResult::Error(m) if m == "boom"));
     }
 
     pub(super) fn test_settings() -> AppSettings {
