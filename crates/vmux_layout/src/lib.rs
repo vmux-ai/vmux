@@ -45,6 +45,8 @@ pub mod active;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pane;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod placement;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod side_sheet;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod space;

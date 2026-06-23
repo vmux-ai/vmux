@@ -104,7 +104,7 @@ pub enum AgentCommand {
     },
     OpenBeside {
         anchor: ProcessId,
-        direction: AgentPaneDirection,
+        direction: Option<AgentPaneDirection>,
         url: String,
         focus: bool,
     },
@@ -659,7 +659,7 @@ mod tests {
     fn open_beside_round_trips_and_validates() {
         let cmd = AgentCommand::OpenBeside {
             anchor: ProcessId::new(),
-            direction: AgentPaneDirection::Right,
+            direction: Some(AgentPaneDirection::Right),
             url: "vmux://terminal/".into(),
             focus: true,
         };
@@ -671,7 +671,7 @@ mod tests {
 
         let empty = AgentCommand::OpenBeside {
             anchor: ProcessId::new(),
-            direction: AgentPaneDirection::Right,
+            direction: Some(AgentPaneDirection::Right),
             url: "  ".into(),
             focus: true,
         };
