@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
+use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
 
 use crate::event::*;
@@ -231,8 +232,13 @@ pub fn GitFooter(
         div {
             class: "flex h-7 shrink-0 items-center gap-3 border-t border-white/[0.07] bg-black/20 px-4 font-sans text-xs text-muted-foreground",
 
-            span { class: "flex shrink-0 items-center gap-1 text-term-fg",
-                span { class: "font-mono", "\u{e0a0}" }
+            span { class: "flex shrink-0 items-center gap-1.5 text-term-fg",
+                Icon { class: "h-3.5 w-3.5 shrink-0 opacity-80",
+                    line { x1: "6", x2: "6", y1: "3", y2: "15" }
+                    circle { cx: "18", cy: "6", r: "3" }
+                    circle { cx: "6", cy: "18", r: "3" }
+                    path { d: "M18 9a9 9 0 0 1-9 9" }
+                }
                 span { "{branch}" }
             }
             if ahead() > 0 || behind() > 0 {
