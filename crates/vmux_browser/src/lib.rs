@@ -840,16 +840,22 @@ fn sync_windowed_content_mesh_materials(
     }
 }
 
-/// The layout chrome renders on the OSR mesh in both modes: a wgpu quad that resizes with the Bevy
-/// frame, so it tracks a live window resize (a native overlay cannot — its frame only updates from a
-/// Bevy schedule the macOS resize loop starves). Keep the material visible.
+/// The layout renders on the OSR mesh in CEF mode: a wgpu quad that resizes with the Bevy frame, so
+/// it tracks a live window resize (a native overlay cannot — its frame only updates from a Bevy
+/// schedule the macOS resize loop starves). In Native mode the layout is drawn by AppKit
+/// (`vmux_desktop::layout_native`), so every OSR layout region — the `LayoutCef` page, the `Header`,
+/// and the `SideSheet`s — must be hidden, not just the header. Hiding only `LayoutCef` left the OSR
+/// side-sheet panel rendering behind the native cards (a phantom second glass layer).
 ///
 /// This drives the material's alpha rather than `Visibility`: the OSR focus pipeline treats a
 /// `Visibility::Hidden` webview as hidden and tells CEF to stop rendering it. Keeping the entity
 /// visible leaves OSR running. Alpha mode stays `Blend` so pages show through the layout's
 /// transparent areas.
 fn sync_layout_mesh_visibility(
-    layout_q: Query<&MeshMaterial3d<WebviewExtendStandardMaterial>, With<LayoutCef>>,
+    layout_q: Query<
+        &MeshMaterial3d<WebviewExtendStandardMaterial>,
+        Or<(With<LayoutCef>, With<Header>, With<SideSheet>)>,
+    >,
     renderer: Res<vmux_layout::native_view::LayoutRenderer>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
@@ -3209,58 +3215,68 @@ mod tests {
         assert!(should_show_osr_webview(true, true, true, false, true));
     }
 
-    fn layout_material_after_mode(
-        mode: vmux_layout::scene::InteractionMode,
-        initial_alpha: f32,
-    ) -> WebviewExtendStandardMaterial {
+    /// Runs `sync_layout_mesh_visibility` for the given renderer against one mesh per layout region
+    /// (`LayoutCef`, `Header`, `SideSheet`) and returns their resulting alphas in that order.
+    fn layout_alphas_after_renderer(
+        renderer: vmux_layout::native_view::LayoutRenderer,
+    ) -> (f32, f32, f32) {
+        fn add_mat(app: &mut App) -> Handle<WebviewExtendStandardMaterial> {
+            let mut material = WebviewExtendStandardMaterial::default();
+            material.base.alpha_mode = AlphaMode::Blend;
+            material.base.base_color.set_alpha(0.5);
+            app.world_mut()
+                .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
+                .add(material)
+        }
+
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
-            .insert_resource(mode)
+            .insert_resource(renderer)
             .add_systems(Update, sync_layout_mesh_visibility);
-        let mut material = WebviewExtendStandardMaterial::default();
-        material.base.alpha_mode = AlphaMode::Blend;
-        material.base.base_color.set_alpha(initial_alpha);
-        let handle = app
-            .world_mut()
-            .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
-            .add(material);
+        let cef = add_mat(&mut app);
+        let header = add_mat(&mut app);
+        let sheet = add_mat(&mut app);
         app.world_mut()
-            .spawn((LayoutCef, MeshMaterial3d(handle.clone())));
+            .spawn((LayoutCef, MeshMaterial3d(cef.clone())));
+        app.world_mut()
+            .spawn((Header, MeshMaterial3d(header.clone())));
+        app.world_mut()
+            .spawn((SideSheet, MeshMaterial3d(sheet.clone())));
 
         app.update();
 
-        app.world()
-            .resource::<Assets<WebviewExtendStandardMaterial>>()
-            .get(handle.id())
-            .expect("layout material")
-            .clone()
+        let mats = app
+            .world()
+            .resource::<Assets<WebviewExtendStandardMaterial>>();
+        let alpha = |h: &Handle<WebviewExtendStandardMaterial>| {
+            mats.get(h.id()).expect("material").base.base_color.alpha()
+        };
+        (alpha(&cef), alpha(&header), alpha(&sheet))
     }
 
     #[test]
-    fn user_mode_makes_layout_mesh_visible() {
-        let mat = layout_material_after_mode(vmux_layout::scene::InteractionMode::User, 0.0);
+    fn native_renderer_hides_every_layout_region_mesh() {
+        let (cef, header, sheet) =
+            layout_alphas_after_renderer(vmux_layout::native_view::LayoutRenderer::Native);
         assert_eq!(
-            mat.base.base_color.alpha(),
-            1.0,
-            "User mode renders the layout chrome via the mesh (CPU OSR) so it tracks live resize"
+            cef, 0.0,
+            "AppKit draws the layout, so the OSR layout page hides"
         );
-        assert_eq!(mat.base.alpha_mode, AlphaMode::Blend);
+        assert_eq!(header, 0.0, "native header replaces the OSR header mesh");
+        assert_eq!(
+            sheet, 0.0,
+            "native side sheet replaces the OSR side-sheet mesh (no phantom panel)"
+        );
     }
 
     #[test]
-    fn player_mode_makes_layout_mesh_visible_and_transparent() {
-        let mat = layout_material_after_mode(vmux_layout::scene::InteractionMode::Player, 0.0);
-        assert_eq!(
-            mat.base.base_color.alpha(),
-            1.0,
-            "Player mode renders the layout via the mesh, so it must be visible"
-        );
-        assert_eq!(
-            mat.base.alpha_mode,
-            AlphaMode::Blend,
-            "Player keeps Blend so pages show through the layout's transparent areas"
-        );
+    fn cef_renderer_keeps_every_layout_region_mesh_visible() {
+        let (cef, header, sheet) =
+            layout_alphas_after_renderer(vmux_layout::native_view::LayoutRenderer::Cef);
+        assert_eq!(cef, 1.0);
+        assert_eq!(header, 1.0);
+        assert_eq!(sheet, 1.0);
     }
 
     #[test]
