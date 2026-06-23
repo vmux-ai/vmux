@@ -75,6 +75,7 @@ objc2-app-kit = { version = "0.3", features = [
     "NSScreen",
     "NSAnimation",
     "NSControl",
+    "NSButton",
     "NSText",
     "NSTextField",
     "NSFont",
