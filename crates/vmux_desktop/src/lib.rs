@@ -7,6 +7,7 @@
 
 mod background_lifecycle;
 mod boot_status;
+mod browser_snapshot;
 mod display;
 #[cfg(target_os = "macos")]
 mod event_tap;
@@ -154,6 +155,8 @@ impl Plugin for VmuxPlugin {
                 (
                     screenshot::start_screenshots,
                     screenshot::drain_screenshots,
+                    browser_snapshot::start_snapshots,
+                    browser_snapshot::shape_snapshot_results,
                     recording::start_recording,
                     recording::handle_recording_control,
                     recording::auto_stop_recordings,

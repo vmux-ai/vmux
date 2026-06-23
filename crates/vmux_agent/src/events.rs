@@ -74,6 +74,28 @@ pub struct ScreenshotResponse {
 }
 
 #[derive(Message, Clone)]
+pub struct BrowserSnapshotRequest {
+    pub request_id: [u8; 16],
+    pub pane: Option<String>,
+}
+
+#[derive(Message, Clone)]
+pub struct BrowserSnapshotResponse {
+    pub request_id: [u8; 16],
+    pub result: Result<String, String>,
+}
+
+pub fn snapshot_response_to_query_result(
+    result: &Result<String, String>,
+) -> vmux_service::protocol::AgentQueryResult {
+    use vmux_service::protocol::AgentQueryResult;
+    match result {
+        Ok(json) => AgentQueryResult::Text(json.clone()),
+        Err(message) => AgentQueryResult::Error(message.clone()),
+    }
+}
+
+#[derive(Message, Clone)]
 pub struct RecordStartRequest {
     pub request_id: [u8; 16],
     pub gif: bool,
@@ -107,4 +129,22 @@ pub struct RecordingInfo {
 pub struct RecordStopResponse {
     pub request_id: [u8; 16],
     pub result: Result<RecordingInfo, String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_service::protocol::AgentQueryResult;
+
+    #[test]
+    fn ok_snapshot_maps_to_text() {
+        let out = snapshot_response_to_query_result(&Ok("{\"url\":\"x\"}".to_string()));
+        assert_eq!(out, AgentQueryResult::Text("{\"url\":\"x\"}".to_string()));
+    }
+
+    #[test]
+    fn err_snapshot_maps_to_error() {
+        let out = snapshot_response_to_query_result(&Err("no page".to_string()));
+        assert_eq!(out, AgentQueryResult::Error("no page".to_string()));
+    }
 }

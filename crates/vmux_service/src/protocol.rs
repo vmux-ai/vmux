@@ -176,6 +176,9 @@ pub enum AgentQuery {
     Screenshot {
         pane: Option<String>,
     },
+    BrowserSnapshot {
+        pane: Option<String>,
+    },
     RecordStart {
         gif: bool,
         max_secs: u32,

@@ -45,6 +45,8 @@ pub const PROCESS_MESSAGE_HOST_EMIT: &str = "host-emit";
 pub const PROCESS_MESSAGE_JS_EMIT: &str = "js-emit";
 pub const PROCESS_MESSAGE_BIN_HOST_EMIT: &str = "bin-host-emit";
 pub const PROCESS_MESSAGE_BIN_JS_EMIT: &str = "bin-js-emit";
+pub const PROCESS_MESSAGE_SNAPSHOT: &str = "vmux-snapshot";
+pub const PROCESS_MESSAGE_SNAPSHOT_RESULT: &str = "vmux-snapshot-result";
 
 pub struct RenderProcessHandlerBuilder {
     object: *mut RcImpl<sys::_cef_render_process_handler_t, Self>,
@@ -136,6 +138,17 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
         _: ProcessId,
         message: Option<&mut ProcessMessage>,
     ) -> c_int {
+        let name = message.as_ref().map(|m| m.name().into_string());
+        if name.as_deref() == Some(PROCESS_MESSAGE_SNAPSHOT) {
+            if let (Some(message), Some(frame)) = (message, frame) {
+                let request_id = message
+                    .argument_list()
+                    .map(|args| args.string(0).into_string())
+                    .unwrap_or_default();
+                crate::dom_snapshot::request_dom_snapshot(&*frame, &request_id);
+            }
+            return 1;
+        }
         if let Some(message) = message
             && let Some(frame) = frame
             && crate::util::has_embedded_scheme(&frame.url().into_string())

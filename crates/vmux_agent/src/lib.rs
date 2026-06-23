@@ -30,8 +30,9 @@ pub use client::cli::strategy::CliAgentStrategy;
 pub use client::page::plugin::PageAgentPlugin;
 pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};
 pub use events::{
-    RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
-    ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
+    BrowserSnapshotRequest, BrowserSnapshotResponse, RecordStartRequest, RecordStartResponse,
+    RecordStopRequest, RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest,
+    ScreenshotResponse,
 };
 pub use launch::build_agent_launch;
 pub use mcp::McpServerConfig;

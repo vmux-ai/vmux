@@ -407,6 +407,29 @@ call again."
     }
 }
 
+fn browser_snapshot_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "browser_snapshot".into(),
+        description:
+            "Read the current page's DOM as a compact semantic snapshot. Returns JSON with \
+the page url/title and a list of interactive elements, each with a stable `ref`, `role`, `name`, \
+`value`, `bbox` ([x,y,w,h] in CSS px), and `state` flags. Use the `ref` values to target later \
+interaction tools. Pass `target` = a pane:<id> or stack:<id> from read_layout to pick a \
+specific page; defaults to the focused page."
+                .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "Optional pane:<id> or stack:<id>; focused page if omitted."
+                }
+            }
+        }),
+    }
+}
+
 fn record_start_definition() -> ToolDefinition {
     ToolDefinition {
         name: "record_start".into(),
@@ -468,6 +491,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(run_definition());
     defs.push(read_terminal_definition());
     defs.push(screenshot_definition());
+    defs.push(browser_snapshot_definition());
     defs.push(record_start_definition());
     defs.push(record_stop_definition());
     defs
@@ -620,6 +644,19 @@ pub fn dispatch_with_anchor(
             vmux_service::protocol::AgentQuery::Screenshot { pane },
         ));
     }
+    if name == "browser_snapshot" {
+        let pane = match arguments.get("target") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => {
+                let s = s.trim();
+                (!s.is_empty()).then(|| s.to_string())
+            }
+            Some(_) => return Err("browser_snapshot.target must be a string".to_string()),
+        };
+        return Ok(DispatchTarget::Query(
+            vmux_service::protocol::AgentQuery::BrowserSnapshot { pane },
+        ));
+    }
     if name == "record_start" {
         let gif = arguments
             .get("gif")
@@ -738,6 +775,39 @@ mod tests {
         let names = tool_names();
         assert!(names.contains(&"record_start".to_string()));
         assert!(names.contains(&"record_stop".to_string()));
+    }
+
+    #[test]
+    fn browser_snapshot_dispatches_to_query_with_pane() {
+        let q = dispatch_query(
+            "browser_snapshot",
+            serde_json::json!({ "target": "pane:42" }),
+        )
+        .unwrap();
+        assert_eq!(
+            q,
+            AgentQuery::BrowserSnapshot {
+                pane: Some("pane:42".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn browser_snapshot_defaults_pane_to_none() {
+        let q = dispatch_query("browser_snapshot", serde_json::json!({})).unwrap();
+        assert_eq!(q, AgentQuery::BrowserSnapshot { pane: None });
+    }
+
+    #[test]
+    fn browser_snapshot_is_listed() {
+        assert!(tool_names().contains(&"browser_snapshot".to_string()));
+    }
+
+    #[test]
+    fn browser_snapshot_rejects_non_string_target() {
+        let err =
+            dispatch_query("browser_snapshot", serde_json::json!({ "target": 123 })).unwrap_err();
+        assert!(err.contains("target"));
     }
 
     #[test]
