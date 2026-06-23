@@ -6,26 +6,9 @@ use crate::protocol::LayoutSnapshot;
 
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LayoutRenderer {
-    #[default]
     Cef,
+    #[default]
     Native,
-}
-
-pub fn parse_renderer(s: &str) -> LayoutRenderer {
-    match s {
-        "native" => LayoutRenderer::Native,
-        _ => LayoutRenderer::Cef,
-    }
-}
-
-impl LayoutRenderer {
-    pub fn from_env() -> Self {
-        parse_renderer(
-            std::env::var("VMUX_LAYOUT_RENDERER")
-                .as_deref()
-                .unwrap_or(""),
-        )
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -209,16 +192,8 @@ mod tests {
     use crate::protocol::{Focus, LayoutNode, LayoutSnapshot, Tab};
 
     #[test]
-    fn layout_renderer_defaults_to_cef() {
-        assert_eq!(LayoutRenderer::default(), LayoutRenderer::Cef);
-    }
-
-    #[test]
-    fn parse_renderer_only_native_string_selects_native() {
-        assert_eq!(parse_renderer("native"), LayoutRenderer::Native);
-        assert_eq!(parse_renderer("cef"), LayoutRenderer::Cef);
-        assert_eq!(parse_renderer(""), LayoutRenderer::Cef);
-        assert_eq!(parse_renderer("NATIVE"), LayoutRenderer::Cef);
+    fn layout_renderer_defaults_to_native() {
+        assert_eq!(LayoutRenderer::default(), LayoutRenderer::Native);
     }
 
     fn tab(id: &str, name: &str, is_active: bool) -> Tab {
@@ -430,7 +405,7 @@ mod tests {
             .add_plugins(NativeViewPlugin);
         assert_eq!(
             *app.world().resource::<LayoutRenderer>(),
-            LayoutRenderer::Cef
+            LayoutRenderer::Native
         );
     }
 
@@ -462,6 +437,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(NativeViewPlugin);
+        *app.world_mut().resource_mut::<LayoutRenderer>() = LayoutRenderer::Cef;
         let t = app
             .world_mut()
             .spawn(crate::tab::Tab {
