@@ -19,7 +19,7 @@ use bevy::{
     render::render_resource::AsBindGroup,
     shader::ShaderRef,
     ui::{FlexDirection, UiTargetCamera},
-    window::{Monitor, PrimaryWindow, WindowMode},
+    window::PrimaryWindow,
     winit::WINIT_WINDOWS,
 };
 use bevy_cef::prelude::*;
@@ -196,21 +196,6 @@ fn handle_window_commands(
     }
 }
 
-pub(crate) fn window_uses_full_padding(window: &Window, monitors: &Query<&Monitor>) -> bool {
-    matches!(
-        &window.mode,
-        WindowMode::BorderlessFullscreen(_) | WindowMode::Fullscreen(_, _)
-    ) || window_fills_monitor(window, monitors)
-}
-
-fn window_fills_monitor(window: &Window, monitors: &Query<&Monitor>) -> bool {
-    let size = window.resolution.physical_size();
-    monitors.iter().any(|monitor| {
-        let monitor_size = monitor.physical_size();
-        size.x >= monitor_size.x.saturating_sub(2) && size.y >= monitor_size.y.saturating_sub(2)
-    })
-}
-
 #[derive(Bundle)]
 struct WindowBundle<M>
 where
@@ -293,7 +278,7 @@ fn setup(
                     right: Val::Px(settings.window.pad_right()),
                     bottom: Val::Px(settings.window.pad_bottom()),
                 },
-                column_gap: Val::Px(0.0),
+                column_gap: Val::Px(crate::event::PANE_GAP_PX),
                 ..default()
             },
             ui_target: UiTargetCamera(*main_camera),
@@ -651,8 +636,6 @@ fn apply_webview_material_defaults(
 fn sync_window_layout_to_settings(
     settings: Res<LayoutSettings>,
     hidden: Option<Res<crate::toggle::LayoutHidden>>,
-    primary_window: Query<&Window, With<PrimaryWindow>>,
-    monitors: Query<&Monitor>,
     mut window_q: Query<&mut Node, (With<VmuxWindow>, Without<SideSheet>, Without<MainColumn>)>,
     mut main_column_q: Query<
         &mut Node,
@@ -674,11 +657,7 @@ fn sync_window_layout_to_settings(
     let pad_left = settings.window.pad_left();
     let gap = crate::event::PANE_GAP_PX;
     let cfg_width = crate::event::SIDE_SHEET_WIDTH_PX;
-    let full_padding = hidden.as_deref().is_some_and(|hidden| hidden.0)
-        || primary_window
-            .single()
-            .ok()
-            .is_some_and(|window| window_uses_full_padding(window, &monitors));
+    let full_padding = hidden.as_deref().is_some_and(|hidden| hidden.0);
 
     // Root window: padding + flex-row column gap. Top and left are flush
     // with the window so the CEF shell / pane meet the system edge; right
@@ -793,6 +772,7 @@ mod tests {
     use super::*;
     use crate::cef::LayoutCef;
     use bevy::ecs::relationship::Relationship;
+    use bevy::window::Monitor;
     use bevy_cef::prelude::WebviewExtendStandardMaterial;
 
     static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -975,9 +955,7 @@ mod tests {
     fn test_settings(gap: f32) -> LayoutSettings {
         LayoutSettings {
             radius: 0.0,
-            window: crate::settings::WindowSettings {
-                padding: 0.0,
-            },
+            window: crate::settings::WindowSettings { padding: 0.0 },
             pane: crate::settings::PaneSettings { gap },
             side_sheet: crate::settings::SideSheetSettings::default(),
             focus_ring: crate::settings::FocusRingSettings::default(),
@@ -1040,6 +1018,21 @@ mod tests {
             .count();
 
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn setup_window_gap_matches_header_layout_gap() {
+        let mut app = setup_window_app();
+        app.update();
+
+        let root = app
+            .world_mut()
+            .query_filtered::<Entity, With<VmuxWindow>>()
+            .single(app.world())
+            .expect("window root");
+        let node = app.world().get::<Node>(root).expect("window node");
+
+        assert_eq!(node.column_gap, Val::Px(crate::event::PANE_GAP_PX));
     }
 
     #[test]
@@ -1129,9 +1122,7 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
-                window: crate::settings::WindowSettings {
-                    padding: 0.0,
-                },
+                window: crate::settings::WindowSettings { padding: 0.0 },
                 pane: crate::settings::PaneSettings { gap: 0.0 },
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
@@ -1161,9 +1152,7 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
-                window: crate::settings::WindowSettings {
-                    padding: 0.0,
-                },
+                window: crate::settings::WindowSettings { padding: 0.0 },
                 pane: crate::settings::PaneSettings { gap: 0.0 },
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
@@ -1206,9 +1195,7 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
-                window: crate::settings::WindowSettings {
-                    padding: 0.0,
-                },
+                window: crate::settings::WindowSettings { padding: 0.0 },
                 pane: crate::settings::PaneSettings { gap: 0.0 },
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
@@ -1258,15 +1245,13 @@ mod tests {
     }
 
     #[test]
-    fn fills_monitor_window_sync_applies_all_window_padding_edges() {
+    fn visible_fills_monitor_window_sync_clears_top_left_padding() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(crate::toggle::LayoutHidden(false))
             .insert_resource(LayoutSettings {
                 radius: 0.0,
-                window: crate::settings::WindowSettings {
-                    padding: 16.0,
-                },
+                window: crate::settings::WindowSettings { padding: 16.0 },
                 pane: crate::settings::PaneSettings { gap: 0.0 },
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
@@ -1294,8 +1279,8 @@ mod tests {
         app.update();
 
         let node = app.world().get::<Node>(root).expect("window node");
-        assert_eq!(node.padding.top, Val::Px(16.0));
-        assert_eq!(node.padding.left, Val::Px(16.0));
+        assert_eq!(node.padding.top, Val::Px(0.0));
+        assert_eq!(node.padding.left, Val::Px(0.0));
         assert_eq!(node.padding.right, Val::Px(16.0));
         assert_eq!(node.padding.bottom, Val::Px(16.0));
     }

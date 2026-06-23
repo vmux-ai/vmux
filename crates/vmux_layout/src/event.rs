@@ -49,6 +49,12 @@ pub struct LayoutStateEvent {
     #[serde(default)]
     pub radius: f32,
     #[serde(default)]
+    pub header_left: Option<f32>,
+    #[serde(default)]
+    pub header_top: Option<f32>,
+    #[serde(default)]
+    pub header_right: Option<f32>,
+    #[serde(default)]
     pub window_pad_top: f32,
     #[serde(default = "default_window_pad")]
     pub window_pad_right: f32,
@@ -65,6 +71,18 @@ impl LayoutStateEvent {
         } else {
             self.window_pad_left
         }
+    }
+
+    pub fn header_left(&self) -> f32 {
+        self.header_left.unwrap_or_else(|| self.main_cef_left())
+    }
+
+    pub fn header_top(&self) -> f32 {
+        self.header_top.unwrap_or(self.window_pad_top)
+    }
+
+    pub fn header_right(&self) -> f32 {
+        self.header_right.unwrap_or(self.window_pad_right)
     }
 
     pub fn header_visible(&self) -> bool {
@@ -170,6 +188,27 @@ mod tests {
 
         assert_eq!(closed.main_cef_left(), 16.0);
         assert_eq!(open.main_cef_left(), 304.0);
+    }
+
+    #[test]
+    fn header_offsets_can_override_derived_window_padding() {
+        let state = LayoutStateEvent {
+            side_sheet_open: true,
+            side_sheet_width: 220.0,
+            pane_gap: 4.0,
+            window_pad_left: 8.0,
+            window_pad_top: 2.0,
+            window_pad_right: 8.0,
+            header_left: Some(230.0),
+            header_top: Some(1.0),
+            header_right: Some(9.0),
+            ..Default::default()
+        };
+
+        assert_eq!(state.main_cef_left(), 232.0);
+        assert_eq!(state.header_left(), 230.0);
+        assert_eq!(state.header_top(), 1.0);
+        assert_eq!(state.header_right(), 9.0);
     }
 
     #[test]

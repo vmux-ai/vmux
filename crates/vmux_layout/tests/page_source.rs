@@ -109,6 +109,21 @@ fn layout_page_offsets_header_and_side_sheet_by_window_padding() {
 }
 
 #[test]
+fn layout_page_uses_computed_header_right_offset() {
+    let source = include_str!("../src/page.rs");
+
+    assert!(source.contains("state.header_right()"));
+    assert!(source.contains("--vmux-header-right"));
+}
+
+#[test]
+fn layout_document_disables_both_scroll_axes() {
+    let css = include_str!("../assets/index.css");
+
+    assert!(css.contains("overflow-hidden"));
+}
+
+#[test]
 fn layout_page_gates_header_and_side_sheet_until_host_state_arrives() {
     let source = include_str!("../src/page.rs");
 
