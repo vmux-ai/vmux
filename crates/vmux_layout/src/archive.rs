@@ -4,11 +4,15 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, StackCommand};
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
-use vmux_core::{ArchivedPage, PageArchiveRequest, PageOpenRequest, PageOpenTarget, now_millis};
+use vmux_core::terminal::TerminalLaunch;
+use vmux_core::{
+    ArchivedPage, PageArchiveRequest, PageMetadata, PageOpenRequest, PageOpenTarget, now_millis,
+};
 
 use crate::event::TERMINAL_PAGE_URL;
 use crate::settings::LayoutSettings;
-use crate::space::{ActiveSpaceEntity, Space, SpaceId};
+use crate::space::{ActiveSpaceEntity, Space, SpaceId, space_of};
+use crate::stack::{FocusedStack, Stack};
 use crate::window::spawn_tab_scaffold_in_space;
 
 const MAX_ARCHIVE_ENTRIES: usize = 25;
@@ -20,8 +24,53 @@ impl Plugin for ArchivePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PageArchiveRequest>()
             .add_systems(Update, (capture_archived_pages, maintain_archive))
-            .add_systems(Update, handle_reopen_closed_page.in_set(ReadAppCommands));
+            .add_systems(
+                Update,
+                (archive_on_stack_close, handle_reopen_closed_page).in_set(ReadAppCommands),
+            );
     }
+}
+
+fn archive_on_stack_close(
+    mut reader: MessageReader<AppCommand>,
+    focused: Res<FocusedStack>,
+    stack_pages: Query<(&PageMetadata, Option<&TerminalLaunch>), With<Stack>>,
+    child_of: Query<&ChildOf>,
+    spaces: Query<(), With<Space>>,
+    space_ids: Query<&SpaceId>,
+    mut writer: MessageWriter<PageArchiveRequest>,
+) {
+    let mut closing = false;
+    for cmd in reader.read() {
+        if matches!(
+            cmd,
+            AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close))
+        ) {
+            closing = true;
+        }
+    }
+    if !closing {
+        return;
+    }
+    let Some(stack) = focused.stack else {
+        return;
+    };
+    let Ok((meta, launch)) = stack_pages.get(stack) else {
+        return;
+    };
+    if meta.url.is_empty() {
+        return;
+    }
+    let space_id = space_of(stack, &child_of, &spaces)
+        .and_then(|s| space_ids.get(s).ok())
+        .map(|id| id.0.clone())
+        .unwrap_or_default();
+    writer.write(PageArchiveRequest {
+        url: meta.url.clone(),
+        title: meta.title.clone(),
+        space_id,
+        launch: launch.cloned(),
+    });
 }
 
 fn capture_archived_pages(mut reader: MessageReader<PageArchiveRequest>, mut commands: Commands) {
@@ -103,7 +152,7 @@ fn handle_reopen_closed_page(
 
     let scaffold =
         spawn_tab_scaffold_in_space(&mut commands, space, *primary_window, settings.pane.gap);
-    commands.entity(scaffold.stack).insert(vmux_core::PageMetadata {
+    commands.entity(scaffold.stack).insert(PageMetadata {
         url: page.url.clone(),
         title: page.title.clone(),
         ..default()
@@ -152,8 +201,7 @@ fn handle_reopen_closed_page(
 mod tests {
     use super::*;
     use bevy::ecs::relationship::Relationship;
-    use vmux_core::PageMetadata;
-    use vmux_core::terminal::{TerminalKind, TerminalLaunch};
+    use vmux_core::terminal::TerminalKind;
 
     fn page(url: &str, closed_at: i64) -> ArchivedPage {
         ArchivedPage {
@@ -231,6 +279,66 @@ mod tests {
         let mut q = app.world_mut().query::<&ArchivedPage>();
         let urls: Vec<String> = q.iter(app.world()).map(|p| p.url.clone()).collect();
         assert_eq!(urls, vec!["fresh".to_string()]);
+    }
+
+    fn drain_archive_reqs(app: &mut App) -> Vec<PageArchiveRequest> {
+        app.world_mut()
+            .resource_mut::<Messages<PageArchiveRequest>>()
+            .drain()
+            .collect()
+    }
+
+    #[test]
+    fn close_command_archives_focused_stack() {
+        let mut app = App::new();
+        app.add_message::<AppCommand>()
+            .add_message::<PageArchiveRequest>()
+            .init_resource::<FocusedStack>()
+            .add_systems(Update, super::archive_on_stack_close);
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "https://gone.example".to_string(),
+                    title: "Gone".to_string(),
+                    ..default()
+                },
+                ChildOf(space),
+            ))
+            .id();
+        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)));
+        app.update();
+        let reqs = drain_archive_reqs(&mut app);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].url, "https://gone.example");
+        assert_eq!(reqs[0].space_id, "s1");
+    }
+
+    #[test]
+    fn close_command_skips_empty_url_stack() {
+        let mut app = App::new();
+        app.add_message::<AppCommand>()
+            .add_message::<PageArchiveRequest>()
+            .init_resource::<FocusedStack>()
+            .add_systems(Update, super::archive_on_stack_close);
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), PageMetadata::default()))
+            .id();
+        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)));
+        app.update();
+        assert!(drain_archive_reqs(&mut app).is_empty());
     }
 
     fn reopen_app() -> App {
