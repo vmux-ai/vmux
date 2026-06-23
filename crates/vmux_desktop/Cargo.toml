@@ -32,6 +32,7 @@ vmux_core = { path = "../vmux_core" }
 vmux_editor = { path = "../vmux_editor" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_mcp = { path = "../vmux_mcp" }
 vmux_command = { path = "../vmux_command" }
 vmux_macro = { path = "../vmux_macro" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
