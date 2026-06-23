@@ -410,6 +410,25 @@ fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult
                 ]
             })
         }
+        AgentQueryResult::Recording {
+            mp4_path,
+            gif_path,
+            duration_ms,
+            bytes,
+            auto_stopped,
+        } => {
+            let secs = duration_ms as f64 / 1000.0;
+            let mut text = format!("recorded {secs:.1}s → {mp4_path} ({bytes} bytes)");
+            if let Some(g) = gif_path {
+                text.push_str(&format!(" + {g}"));
+            }
+            if auto_stopped {
+                text.push_str(" (auto-stopped)");
+            }
+            json!({
+                "content": [{"type": "text", "text": text}]
+            })
+        }
         AgentQueryResult::Error(message) => {
             json!({
                 "isError": true,
@@ -465,6 +484,23 @@ mod tests {
         assert_eq!(content[1]["type"], "image");
         assert_eq!(content[1]["mimeType"], "image/png");
         assert_eq!(content[1]["data"], "iVBORw==");
+    }
+
+    #[test]
+    fn recording_maps_to_text_block() {
+        use vmux_service::protocol::AgentQueryResult;
+        let v = query_result_to_mcp_response(AgentQueryResult::Recording {
+            mp4_path: "/tmp/x.mp4".into(),
+            gif_path: Some("/tmp/x.gif".into()),
+            duration_ms: 7400,
+            bytes: 1_000_000,
+            auto_stopped: true,
+        });
+        let text = v["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("/tmp/x.mp4"));
+        assert!(text.contains("/tmp/x.gif"));
+        assert!(text.contains("auto-stopped"));
+        assert!(v.get("isError").is_none());
     }
 
     #[test]
