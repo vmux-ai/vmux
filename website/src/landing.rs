@@ -9,6 +9,7 @@ mod platform;
 mod scenes;
 #[cfg(target_arch = "wasm32")]
 mod scroll;
+mod visit;
 
 use agents::Agents;
 use coworking::Coworking;
