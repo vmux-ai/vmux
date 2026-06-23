@@ -133,6 +133,11 @@ pub enum AgentCommand {
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Stop-recording round-trip bound. `finishWriting` after live encoding is
+/// fast, but a large clip's moov flush can take a few seconds. Comfortably
+/// under vibe's 60s MCP tool timeout.
+pub const RECORD_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub const AGENT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub const AGENT_TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
@@ -167,6 +172,15 @@ pub enum AgentQuery {
     Screenshot {
         pane: Option<String>,
     },
+    RecordStart {
+        gif: bool,
+        max_secs: u32,
+        pane: Option<String>,
+    },
+    RecordStop {
+        dir: Option<String>,
+        name: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -184,6 +198,13 @@ pub enum AgentQueryResult {
         png: Vec<u8>,
         width: u32,
         height: u32,
+    },
+    Recording {
+        mp4_path: String,
+        gif_path: Option<String>,
+        duration_ms: u64,
+        bytes: u64,
+        auto_stopped: bool,
     },
     Error(String),
 }
@@ -648,6 +669,44 @@ mod tests {
             png: vec![1, 2, 3, 4],
             width: 320,
             height: 200,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&r).unwrap();
+        let back: AgentQueryResult =
+            rkyv::from_bytes::<AgentQueryResult, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, r);
+    }
+
+    #[test]
+    fn agent_query_record_start_rkyv_round_trip() {
+        let q = AgentQuery::RecordStart {
+            gif: true,
+            max_secs: 120,
+            pane: Some("pane:7".into()),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
+        let back: AgentQuery = rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, q);
+    }
+
+    #[test]
+    fn agent_query_record_stop_rkyv_round_trip() {
+        let q = AgentQuery::RecordStop {
+            dir: Some("/tmp/out".into()),
+            name: None,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&q).unwrap();
+        let back: AgentQuery = rkyv::from_bytes::<AgentQuery, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, q);
+    }
+
+    #[test]
+    fn agent_query_result_recording_rkyv_round_trip() {
+        let r = AgentQueryResult::Recording {
+            mp4_path: "/tmp/x.mp4".into(),
+            gif_path: Some("/tmp/x.gif".into()),
+            duration_ms: 7400,
+            bytes: 1_234_567,
+            auto_stopped: false,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&r).unwrap();
         let back: AgentQueryResult =
