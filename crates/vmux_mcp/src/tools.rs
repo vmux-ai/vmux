@@ -32,7 +32,7 @@ pub enum McpParamTool {
     SelectTab { index: u8 },
     #[mcp(description = "Update a single vmux setting by dot-path. \
             Example: { path: 'layout.pane.gap', value: 12 }. \
-            Use get_settings to discover the available paths and current values. \
+            Use vmux_get_settings to discover the available paths and current values. \
             For nested arrays, use bracket indexing like 'terminal.themes[0].font_size'.")]
     UpdateSettings {
         path: String,
@@ -53,10 +53,10 @@ pub enum McpParamTool {
     )]
     CreateSpace { name: Option<String> },
     #[mcp(
-        description = "Rename a space by id (the id is stable; only the display name changes). Use list_spaces to discover ids."
+        description = "Rename a space by id (the id is stable; only the display name changes). Use vmux_list_spaces to discover ids."
     )]
     RenameSpace { space_id: String, name: String },
-    #[mcp(description = "Delete a space by id. Use list_spaces to discover ids.")]
+    #[mcp(description = "Delete a space by id. Use vmux_list_spaces to discover ids.")]
     DeleteSpace { space_id: String },
 }
 
@@ -156,9 +156,9 @@ pub enum DispatchTarget {
 
 fn read_layout_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "read_layout".into(),
+        name: "vmux_read_layout".into(),
         description: "Returns the full vmux layout (tabs, recursive pane tree, focused). \
-Call this FIRST before update_layout - you need the current tree (with ids) to construct a valid update. \
+Call this FIRST before vmux_update_layout - you need the current tree (with ids) to construct a valid update. \
 Useful for: answering questions about what's open; finding the focused tab/pane/stack; \
 reading a stack's url/kind so you can duplicate it elsewhere. \
 Terminal stacks appear as stacks with kind=\"terminal\"; browser stacks use kind=\"browser\"."
@@ -169,11 +169,11 @@ Terminal stacks appear as stacks with kind=\"terminal\"; browser stacks use kind
 
 fn update_layout_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "update_layout".into(),
+        name: "vmux_update_layout".into(),
         description: "Submit the desired layout tree; vmux diffs against current state and reconciles by id (React-style). \
 Use this for compound or structural changes that the per-action tools can't express. \
 \
-Workflow: (1) call read_layout, (2) mutate the returned tree, (3) submit it back here. \
+Workflow: (1) call vmux_read_layout, (2) mutate the returned tree, (3) submit it back here. \
 \
 Recipes: \
 - Add a new pane to a tab: keep the existing root split's id, append a new pane (id: null) to its children. Do NOT wrap the existing pane in a new split - the tab's root split is always present. \
@@ -258,7 +258,7 @@ Identifiers use kind:value format (tab:N, pane:N, split:N, stack:N). Omit id to 
 
 fn get_settings_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "get_settings".into(),
+        name: "vmux_get_settings".into(),
         description: "Return the full vmux settings as a JSON snapshot.".into(),
         input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
     }
@@ -266,17 +266,17 @@ fn get_settings_definition() -> ToolDefinition {
 
 fn list_spaces_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "list_spaces".into(),
-        description: "List all spaces as a JSON array of { id, name, profile, is_active }. Use the `id` with rename_space / delete_space.".into(),
+        name: "vmux_list_spaces".into(),
+        description: "List all spaces as a JSON array of { id, name, profile, is_active }. Use the `id` with vmux_rename_space / vmux_delete_space.".into(),
         input_schema: serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
     }
 }
 
 fn open_page_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "open_page".into(),
+        name: "vmux_open_page".into(),
         description: "Open a page in a new pane directly beside YOUR pane (the agent calling this). \
-direction is one of right|left|top|bottom (default right). url uses the same rules as browser_navigate \
+direction is one of right|left|top|bottom (default right). url uses the same rules as vmux_browser_navigate \
 (vmux://terminal/ opens a terminal; anything else loads as a browser). \
 focus (default true): true moves focus to the new pane (use when the human will interact with it); \
 false keeps focus on your own pane."
@@ -296,7 +296,7 @@ false keeps focus on your own pane."
 
 fn open_file_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "open_file".into(),
+        name: "vmux_open_file".into(),
         description: "Open a local file (or directory) in the vmux editor, in a new pane beside \
 YOUR pane (the agent calling this). path is an absolute filesystem path, e.g. \
 /Users/me/project/src/main.rs. Files render with syntax highlighting; directories show a listing. \
@@ -318,12 +318,12 @@ new pane."
 
 fn run_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "run".into(),
+        name: "vmux_run".into(),
         description:
             "Run a shell command in a visible terminal pane the user can watch live and take over. \
 Blocks until the command finishes and returns its full output plus the exit code \
 (`terminal: <id>`, `exit: <code>`, `output: ...`). If it has not finished within ~50s, returns the \
-output so far with a note to call read_terminal for the rest. \
+output so far with a note to call vmux_read_terminal for the rest. \
 \
 PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses ONE persistent terminal \
 beside you — the SAME shell across calls, so its working directory and environment persist. Do NOT `cd` \
@@ -359,10 +359,10 @@ is typed into an interactive shell, so the terminal stays usable afterwards."
 
 fn read_terminal_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "read_terminal".into(),
+        name: "vmux_read_terminal".into(),
         description:
             "Return the current visible scrollback text of a terminal (the same text the user sees). \
-Pass `terminal` = a terminal id returned by run, or a terminal stack's process_id from read_layout."
+Pass `terminal` = a terminal id returned by vmux_run, or a terminal stack's process_id from vmux_read_layout."
                 .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -431,6 +431,7 @@ pub fn dispatch_with_anchor(
     anchor: Option<vmux_service::protocol::ProcessId>,
 ) -> Result<DispatchTarget, String> {
     use vmux_service::protocol::AgentPaneDirection;
+    let name = name.strip_prefix("vmux_").unwrap_or(name);
     fn parse_direction(arguments: &Value) -> Result<AgentPaneDirection, String> {
         match arguments
             .get("direction")
@@ -637,24 +638,33 @@ mod tests {
     fn list_tools_includes_auto_generated_and_handwritten() {
         let names = tool_names();
 
-        for hand in ["open_command_bar", "open_page", "run", "read_terminal"] {
+        for hand in [
+            "vmux_open_command_bar",
+            "vmux_open_page",
+            "vmux_run",
+            "vmux_read_terminal",
+        ] {
             assert!(
                 names.contains(&hand.to_string()),
                 "missing hand-written {hand}"
             );
         }
-        for removed_tool in ["new_terminal_tab", "run_shell", "in_pane"] {
+        for removed_tool in ["vmux_new_terminal_tab", "vmux_run_shell", "vmux_in_pane"] {
             assert!(
                 !names.contains(&removed_tool.to_string()),
                 "superseded tool {removed_tool} should no longer appear in MCP tools"
             );
         }
-        for auto in ["terminal_clear", "browser_reload"] {
+        for auto in ["vmux_terminal_clear", "vmux_browser_reload"] {
             assert!(
                 names.contains(&auto.to_string()),
                 "missing auto-generated {auto}"
             );
         }
+        assert!(
+            names.iter().all(|n| n.starts_with("vmux_")),
+            "every MCP tool must be vmux_-prefixed: {names:?}"
+        );
         for removed in ["stack_new", "close_tab", "split_v"] {
             assert!(
                 !names.contains(&removed.to_string()),
@@ -683,7 +693,7 @@ mod tests {
     #[test]
     fn list_tools_includes_browser_navigate() {
         let names = tool_names();
-        assert!(names.contains(&"browser_navigate".to_string()));
+        assert!(names.contains(&"vmux_browser_navigate".to_string()));
     }
 
     #[test]
@@ -708,9 +718,25 @@ mod tests {
     }
 
     #[test]
+    fn vmux_prefixed_tool_name_dispatches() {
+        let command = dispatch_command(
+            "vmux_browser_navigate",
+            serde_json::json!({"url": "https://example.com"}),
+        )
+        .unwrap();
+        assert_eq!(
+            command,
+            AgentCommand::BrowserNavigate {
+                url: "https://example.com".to_string(),
+                pane: None,
+            }
+        );
+    }
+
+    #[test]
     fn list_tools_includes_terminal_send() {
         let names = tool_names();
-        assert!(names.contains(&"terminal_send".to_string()));
+        assert!(names.contains(&"vmux_terminal_send".to_string()));
     }
 
     #[test]
@@ -733,7 +759,7 @@ mod tests {
     #[test]
     fn list_tools_includes_select_tab() {
         let names = tool_names();
-        assert!(names.contains(&"select_tab".to_string()));
+        assert!(names.contains(&"vmux_select_tab".to_string()));
     }
 
     #[test]
@@ -757,8 +783,8 @@ mod tests {
     #[test]
     fn tool_list_includes_read_and_update_layout() {
         let names = tool_names();
-        assert!(names.contains(&"read_layout".to_string()));
-        assert!(names.contains(&"update_layout".to_string()));
+        assert!(names.contains(&"vmux_read_layout".to_string()));
+        assert!(names.contains(&"vmux_update_layout".to_string()));
     }
 
     #[test]
@@ -800,10 +826,10 @@ mod tests {
             .map(|(name, _, _)| name)
             .collect();
         for expected in [
-            "open_command_bar",
-            "browser_navigate",
-            "terminal_send",
-            "select_tab",
+            "vmux_open_command_bar",
+            "vmux_browser_navigate",
+            "vmux_terminal_send",
+            "vmux_select_tab",
         ] {
             assert!(names.contains(&expected), "missing param tool {expected}");
         }
@@ -813,8 +839,8 @@ mod tests {
     fn mcp_param_tool_browser_navigate_schema_marks_url_required() {
         let entry = McpParamTool::mcp_tool_entries()
             .into_iter()
-            .find(|(name, _, _)| *name == "browser_navigate")
-            .expect("browser_navigate present");
+            .find(|(name, _, _)| *name == "vmux_browser_navigate")
+            .expect("vmux_browser_navigate present");
         let schema = entry.2;
         let required = schema.get("required").expect("required key");
         assert_eq!(required, &serde_json::json!(["url"]));
@@ -889,8 +915,12 @@ mod tests {
                 .is_err()
         );
         assert!(dispatch_with_anchor("open_page", serde_json::json!({"url": "x"}), None).is_err());
-        assert!(tool_definitions().iter().any(|d| d.name == "open_page"));
-        assert!(tool_definitions().iter().any(|d| d.name == "run"));
+        assert!(
+            tool_definitions()
+                .iter()
+                .any(|d| d.name == "vmux_open_page")
+        );
+        assert!(tool_definitions().iter().any(|d| d.name == "vmux_run"));
     }
 
     #[test]
@@ -1023,7 +1053,11 @@ mod tests {
             dispatch_from_tool_call("read_terminal", serde_json::json!({"terminal": "bad"}))
                 .is_err()
         );
-        assert!(tool_definitions().iter().any(|d| d.name == "read_terminal"));
+        assert!(
+            tool_definitions()
+                .iter()
+                .any(|d| d.name == "vmux_read_terminal")
+        );
     }
 
     #[test]
@@ -1072,8 +1106,8 @@ mod tests {
     #[test]
     fn list_tools_includes_update_settings_and_get_settings() {
         let names = tool_names();
-        assert!(names.contains(&"update_settings".to_string()));
-        assert!(names.contains(&"get_settings".to_string()));
+        assert!(names.contains(&"vmux_update_settings".to_string()));
+        assert!(names.contains(&"vmux_get_settings".to_string()));
     }
 
     #[test]
@@ -1163,14 +1197,19 @@ mod tests {
     #[test]
     fn open_command_tools_are_exposed() {
         let names = tool_names();
-        for expected in ["in_place", "in_new_stack", "in_new_tab", "in_new_space"] {
+        for expected in [
+            "vmux_in_place",
+            "vmux_in_new_stack",
+            "vmux_in_new_tab",
+            "vmux_in_new_space",
+        ] {
             assert!(
                 names.contains(&expected.to_string()),
                 "missing OpenCommand tool: {expected}"
             );
         }
-        // in_pane is hidden (superseded by open_page).
-        assert!(!names.contains(&"in_pane".to_string()));
+        // in_pane is hidden (superseded by vmux_open_page).
+        assert!(!names.contains(&"vmux_in_pane".to_string()));
     }
 
     #[test]

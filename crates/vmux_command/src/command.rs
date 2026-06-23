@@ -507,6 +507,12 @@ mod tests {
         assert!(!entries.is_empty(), "mcp_tool_entries should not be empty");
 
         for (id, _description, schema) in &entries {
+            assert!(
+                id.starts_with("vmux_"),
+                "advertised MCP tool name must be vmux_-prefixed: {id}"
+            );
+            // Dispatch resolves on the bare command id; the vmux_ prefix is the MCP namespace.
+            let bare = id.strip_prefix("vmux_").unwrap_or(id);
             let has_required_params = schema
                 .get("required")
                 .and_then(|v| v.as_array())
@@ -514,13 +520,13 @@ mod tests {
                 .unwrap_or(false);
             if has_required_params {
                 assert!(
-                    AppCommand::from_mcp_call(id, serde_json::json!({})).is_some(),
+                    AppCommand::from_mcp_call(bare, serde_json::json!({})).is_some(),
                     "from_mcp_call failed to resolve {id}"
                 );
             } else {
-                let resolved_by_id = AppCommand::from_mcp_id(id).is_some();
+                let resolved_by_id = AppCommand::from_mcp_id(bare).is_some();
                 let resolved_by_call =
-                    AppCommand::from_mcp_call(id, serde_json::json!({})).is_some();
+                    AppCommand::from_mcp_call(bare, serde_json::json!({})).is_some();
                 assert!(
                     resolved_by_id || resolved_by_call,
                     "neither from_mcp_id nor from_mcp_call resolved {id}"
