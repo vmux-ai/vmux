@@ -17,8 +17,6 @@ use vmux_layout::protocol::parse_id;
 use vmux_layout::scene::InteractionMode;
 
 const GLASS_Z: f64 = 200.0;
-const ROW_H: f64 = 30.0;
-const CARD_H: f64 = 38.0;
 
 #[derive(Clone)]
 enum LayoutAction {
@@ -113,23 +111,6 @@ fn rounded_bg(view: &NSView, radius: f64, bg: Option<&NSColor>) {
     }
 }
 
-/// A plain rounded background panel (the seamless frame the controls sit on). Not glass — so the
-/// active tab is the only glass element on it.
-fn panel(
-    content: &NSView,
-    mtm: MainThreadMarker,
-    frame: NSRect,
-    radius: f64,
-    bg: &NSColor,
-) -> Retained<NSView> {
-    let p: Retained<NSView> = NSView::new(mtm);
-    let v: &NSView = &p;
-    v.setFrame(frame);
-    rounded_bg(v, radius, Some(bg));
-    content.addSubview(v);
-    p
-}
-
 fn add_label(parent: &NSView, mtm: MainThreadMarker, text: &str, frame: NSRect, fg: &NSColor) {
     let label = NSTextField::labelWithString(&NSString::from_str(text), mtm);
     label.setFont(Some(&NSFont::systemFontOfSize(12.0)));
@@ -194,10 +175,6 @@ fn fill_label(
 
 fn white(alpha: f64) -> Retained<NSColor> {
     NSColor::whiteColor().colorWithAlphaComponent(alpha)
-}
-
-fn black(alpha: f64) -> Retained<NSColor> {
-    NSColor::blackColor().colorWithAlphaComponent(alpha)
 }
 
 fn sync_layout_glass(
@@ -278,49 +255,124 @@ fn rebuild(
     let width = bounds.size.width;
     let height = bounds.size.height;
     let band_top = if flipped { 0.0 } else { height - header_h };
-    // Two header rows stacked flush against the page top.
-    let (row1_y, row2_y) = if flipped {
-        let r2 = header_h - ROW_H;
-        (r2 - ROW_H, r2)
+    let radius = 10.0; // --radius
+    let tab_h = 40.0; // h-10
+    let tab_w = 208.0; // w-52
+
+    // URL row = the glass toolbar (the seamless bg, flush to the page top). Tabs sit on top, the
+    // active one overlapping it by 3px (-mb-[3px]).
+    let url_h = header_h - (tab_h - 3.0);
+    let url_top = if flipped {
+        band_top + tab_h - 3.0
     } else {
-        (band_top + ROW_H, band_top)
+        band_top
     };
-    let main_x0 = sheet_w + 12.0;
-
-    // Seamless header background: a dark frame the controls sit on, flush to the page top. Not
-    // glass, so the active tab stays the only glass element.
-    state.fills.push(panel(
-        content,
+    let url_glass = glass_pill(
         mtm,
+        content,
         NSRect::new(
-            NSPoint::new(sheet_w, band_top),
-            NSSize::new((width - sheet_w).max(10.0), header_h),
+            NSPoint::new(sheet_w, url_top),
+            NSSize::new((width - sheet_w).max(10.0), url_h),
         ),
-        12.0,
-        &black(0.32),
-    ));
-
-    // Row 1: tabs (active = glass pill, others = subtle fill) + new-tab
-    let tab_w = 120.0_f64;
-    let mut x = main_x0;
-    for tab in &current.0.tabs {
-        let tag = state.actions.len();
-        let frame = NSRect::new(NSPoint::new(x, row1_y), NSSize::new(tab_w, ROW_H));
-        if tab.is_active {
-            let pill = glass_pill(mtm, content, frame, ROW_H / 2.0, false);
-            let pv: &NSView = &pill;
+        radius,
+        false,
+    );
+    let (uw, uh) = {
+        let v: &NSView = &url_glass;
+        let b = v.bounds();
+        (b.size.width, b.size.height)
+    };
+    {
+        let uv: &NSView = &url_glass;
+        // nav (h-7 w-7 = 28)
+        let nav_y = (uh - 28.0) / 2.0;
+        let mut nx = 8.0;
+        for (glyph, action) in [
+            ("\u{2039}", LayoutAction::Back),
+            ("\u{203a}", LayoutAction::Forward),
+            ("\u{27f3}", LayoutAction::Reload),
+        ] {
+            let tag = state.actions.len();
             let b = fill_button(
-                pv,
+                uv,
                 mtm,
                 target_ref,
-                &tab.title,
+                glyph,
                 tag,
-                NSRect::new(NSPoint::new(0.0, 0.0), frame.size),
-                0.0,
+                NSRect::new(NSPoint::new(nx, nav_y), NSSize::new(28.0, 28.0)),
+                6.0,
                 None,
             );
-            state.glass.push(pill);
             state.buttons.push(b);
+            state.actions.push(action);
+            nx += 30.0;
+        }
+        // profile (right)
+        let profile = active_profile_name();
+        let prof_w = 96.0;
+        let prof_x = uw - prof_w - 8.0;
+        if !profile.is_empty() {
+            let f = fill_label(
+                uv,
+                mtm,
+                profile,
+                NSRect::new(
+                    NSPoint::new(prof_x, (uh - 26.0) / 2.0),
+                    NSSize::new(prof_w, 26.0),
+                ),
+                13.0,
+                &NSColor::labelColor(),
+                Some(&white(0.08)),
+            );
+            state.fills.push(f);
+        }
+        // address (h-8 = 32), flex between nav and profile
+        let addr_x = nx + 4.0;
+        let addr_w = (prof_x - addr_x - 8.0).max(60.0);
+        let addr_text = if current.0.address.is_empty() {
+            " "
+        } else {
+            current.0.address.as_str()
+        };
+        let f = fill_label(
+            uv,
+            mtm,
+            addr_text,
+            NSRect::new(
+                NSPoint::new(addr_x, (uh - 32.0) / 2.0),
+                NSSize::new(addr_w, 32.0),
+            ),
+            8.0,
+            &NSColor::secondaryLabelColor(),
+            None,
+        );
+        state.fills.push(f);
+    }
+    state.glass.push(url_glass);
+
+    // Tab row (h-10 w-52 tabs) on top, overlapping the toolbar. Active = glass, inactive = fill.
+    let tab_top = band_top;
+    let mut x = sheet_w + 8.0;
+    for tab in &current.0.tabs {
+        let tag = state.actions.len();
+        let frame = NSRect::new(NSPoint::new(x, tab_top), NSSize::new(tab_w, tab_h));
+        if tab.is_active {
+            let g = glass_pill(mtm, content, frame, 6.0, false);
+            {
+                let gv: &NSView = &g;
+                let b = fill_button(
+                    gv,
+                    mtm,
+                    target_ref,
+                    &tab.title,
+                    tag,
+                    NSRect::new(NSPoint::new(0.0, 0.0), frame.size),
+                    0.0,
+                    None,
+                );
+                state.buttons.push(b);
+            }
+            state.glass.push(g);
         } else {
             let b = fill_button(
                 content,
@@ -329,13 +381,13 @@ fn rebuild(
                 &tab.title,
                 tag,
                 frame,
-                8.0,
+                6.0,
                 Some(&white(0.05)),
             );
             state.buttons.push(b);
         }
         state.actions.push(LayoutAction::SwitchTab(tab.id.clone()));
-        x += tab_w + 6.0;
+        x += tab_w + 4.0;
     }
     {
         let tag = state.actions.len();
@@ -345,87 +397,31 @@ fn rebuild(
             target_ref,
             "+",
             tag,
-            NSRect::new(NSPoint::new(x, row1_y), NSSize::new(ROW_H, ROW_H)),
-            ROW_H / 2.0,
+            NSRect::new(
+                NSPoint::new(x + 4.0, tab_top + (tab_h - 28.0) / 2.0),
+                NSSize::new(28.0, 28.0),
+            ),
+            6.0,
             None,
         );
         state.buttons.push(b);
         state.actions.push(LayoutAction::NewTab);
     }
 
-    // Row 2: nav + address + profile (all fills on the window glass)
-    let mut nx = main_x0;
-    for (glyph, action) in [
-        ("\u{2039}", LayoutAction::Back),
-        ("\u{203a}", LayoutAction::Forward),
-        ("\u{27f3}", LayoutAction::Reload),
-    ] {
-        let tag = state.actions.len();
-        let b = fill_button(
-            content,
-            mtm,
-            target_ref,
-            glyph,
-            tag,
-            NSRect::new(NSPoint::new(nx, row2_y), NSSize::new(ROW_H, ROW_H)),
-            ROW_H / 2.0,
-            None,
-        );
-        state.buttons.push(b);
-        state.actions.push(action);
-        nx += ROW_H + 4.0;
-    }
-
-    let profile = active_profile_name();
-    let profile_w = 100.0_f64;
-    let profile_x = width - profile_w - 12.0;
-    if !profile.is_empty() {
-        let f = fill_label(
-            content,
-            mtm,
-            profile,
-            NSRect::new(
-                NSPoint::new(profile_x, row2_y),
-                NSSize::new(profile_w, ROW_H),
-            ),
-            ROW_H / 2.0,
-            &NSColor::labelColor(),
-            Some(&white(0.08)),
-        );
-        state.fills.push(f);
-    }
-
-    let addr_x = nx + 6.0;
-    let addr_w = (profile_x - addr_x - 10.0).max(80.0);
-    let addr_text = if current.0.address.is_empty() {
-        " "
-    } else {
-        current.0.address.as_str()
-    };
-    let f = fill_label(
-        content,
-        mtm,
-        addr_text,
-        NSRect::new(NSPoint::new(addr_x, row2_y), NSSize::new(addr_w, ROW_H)),
-        ROW_H / 2.0,
-        &NSColor::secondaryLabelColor(),
-        Some(&black(0.22)),
-    );
-    state.fills.push(f);
-
-    // Side sheet: one glass card per stack + new-stack
+    // Side sheet: one glass card per stack (h-9) + new-stack
     let top_inset = 40.0;
     let card_w = (sheet_w - 24.0).max(40.0);
+    let row_h = 36.0; // h-9
     let card_y = |row: usize| {
-        let off = top_inset + row as f64 * (CARD_H + 8.0);
-        if flipped { off } else { height - off - CARD_H }
+        let off = top_inset + row as f64 * (row_h + 6.0);
+        if flipped { off } else { height - off - row_h }
     };
     for (i, st) in current.0.stacks.iter().enumerate() {
         let card = glass_pill(
             mtm,
             content,
-            NSRect::new(NSPoint::new(12.0, card_y(i)), NSSize::new(card_w, CARD_H)),
-            10.0,
+            NSRect::new(NSPoint::new(12.0, card_y(i)), NSSize::new(card_w, row_h)),
+            8.0,
             st.is_active,
         );
         let cv: &NSView = &card;
@@ -434,8 +430,8 @@ fn rebuild(
             mtm,
             &st.title,
             NSRect::new(
-                NSPoint::new(10.0, (CARD_H - 16.0) / 2.0),
-                NSSize::new(card_w - 20.0, 16.0),
+                NSPoint::new(12.0, (row_h - 16.0) / 2.0),
+                NSSize::new(card_w - 24.0, 16.0),
             ),
             &NSColor::labelColor(),
         );
@@ -451,7 +447,7 @@ fn rebuild(
             tag,
             NSRect::new(
                 NSPoint::new(12.0, card_y(current.0.stacks.len())),
-                NSSize::new(card_w, ROW_H),
+                NSSize::new(card_w, row_h),
             ),
             8.0,
             Some(&white(0.04)),
