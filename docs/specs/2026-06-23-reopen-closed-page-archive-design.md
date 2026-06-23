@@ -132,16 +132,23 @@ pub struct PageArchiveRequest {
 
 ### 4. Purge + cap
 
-- **Purge system:** a periodic system (timer modeled on `auto_save_system`)
-  despawns every `ArchivedPage` where `now_millis() - closed_at > 30 * 86_400_000`.
-- **Cap:** enforced at capture time (step 2).
-- Both removals are picked up by the existing dirty-tracking and auto-saved.
+- **`maintain_archive` system (Update):** scans all `ArchivedPage` entities each
+  frame (≤25, so trivially cheap) and despawns any where
+  `now_millis() - closed_at > 30 * 86_400_000` (30 days), then trims the survivors
+  to the 25 most-recent by `closed_at`, despawning the oldest overflow.
+- Running every Update keeps the bound continuously enforced and needs no timer
+  resource; it only does work (despawns) when something is expired or over cap.
 
 ### 5. Persistence
 
 - Add `.allow::<ArchivedPage>()` to the allowlist in `save_space_to_path`
   (`persistence.rs`), and `app.register_type::<ArchivedPage>()` where the other
   `vmux_core` types are registered.
+- **Extend dirty-tracking:** `mark_dirty_on_change` does **not** currently watch
+  `ArchivedPage`, so add `Added<ArchivedPage>` + `RemovedComponents<ArchivedPage>`
+  to it. Otherwise capture/reopen/purge would only persist incidentally (capture
+  co-occurs with a `Stack` despawn, but a standalone purge would wait for the 60s
+  periodic save).
 - **No `STORE_SCHEMA_VERSION` bump.** Bumping deletes the user's store on
   upgrade (and would wipe all saved spaces). Old stores simply load with zero
   `ArchivedPage` entities. (A downgrade to an older binary reading a newer store
