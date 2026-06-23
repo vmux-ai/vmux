@@ -2,25 +2,17 @@ use std::path::Path;
 use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Style, ThemeSet};
-use syntect::parsing::{SyntaxDefinition, SyntaxSet};
+use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use vmux_core::event::{FileLine, StyledSpan};
 
 pub const FILE_VIEW_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
+/// Broad language coverage (~200 syntaxes from the bat project) instead of
+/// syntect's small default set.
 fn syntaxes() -> &'static SyntaxSet {
     static SET: OnceLock<SyntaxSet> = OnceLock::new();
-    SET.get_or_init(|| {
-        let mut builder = SyntaxSet::load_defaults_newlines().into_builder();
-        if let Ok(def) = SyntaxDefinition::load_from_str(
-            include_str!("../assets/syntaxes/TOML.sublime-syntax"),
-            true,
-            None,
-        ) {
-            builder.add(def);
-        }
-        builder.build()
-    })
+    SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
 #[derive(Debug)]
@@ -140,6 +132,23 @@ mod tests {
             .flat_map(|l| l.spans.iter().map(|s| s.fg))
             .collect();
         assert!(colors.len() > 1, "expected highlighting, got {colors:?}");
+    }
+
+    #[test]
+    fn recognizes_languages_beyond_syntect_defaults() {
+        let hl = Highlighter::new();
+        for (file, sample) in [
+            ("a.ts", "const x = 1;\n"),
+            ("a.tsx", "const x = <div/>;\n"),
+            ("a.go", "package main\n"),
+            ("a.py", "import os\n"),
+            ("a.kt", "fun main() {}\n"),
+            ("a.swift", "let x = 1\n"),
+            ("a.zig", "const x = 1;\n"),
+        ] {
+            let out = hl.highlight(sample, std::path::Path::new(file));
+            assert_ne!(out.language, "Plain Text", "{file} not recognized");
+        }
     }
 
     #[test]
