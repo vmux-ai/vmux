@@ -7,7 +7,6 @@ use vmux_core::PageMetadata;
 use vmux_core::event::*;
 use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_layout::Browser;
-use vmux_layout::event::TERMINAL_CEF_BG_COLOR;
 
 use crate::dir::{list_dir, parent_listing};
 use crate::highlight::Highlighter;
@@ -97,11 +96,14 @@ fn new_file_view_bundle(
                 rows: 0,
             },
             Browser,
+            WebviewWindowed,
+            WebviewWindowedNativeFocus,
+            WebviewOpaqueWindowedBackground,
             PageMetadata {
                 title,
                 url: url.to_string(),
                 favicon_url: String::new(),
-                bg_color: Some(TERMINAL_CEF_BG_COLOR.to_string()),
+                bg_color: None,
             },
             WebviewSource::new(url),
             ResolvedWebviewUri(url.to_string()),
@@ -484,14 +486,21 @@ fn drain_thumb_tasks(
 
 fn on_file_open(
     trigger: On<BinReceive<FileOpenEvent>>,
-    mut views: Query<(&mut FileView, &mut FileViewport)>,
+    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    let Ok((mut fv, mut vp)) = views.get_mut(entity) else {
+    let path = PathBuf::from(&trigger.event().payload.path);
+    let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
         return;
     };
-    fv.path = PathBuf::from(&trigger.event().payload.path);
+    let url = format!("file://{}", path.to_string_lossy());
+    meta.title = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string());
+    meta.url = url;
+    fv.path = path;
     vp.top_line = 0;
     commands
         .entity(entity)

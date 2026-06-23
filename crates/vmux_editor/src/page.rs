@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::page_model::{gutter_width, image_mime, span_style};
+use crate::page_model::{clamp_selection, gutter_width, image_mime, span_style};
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::components::icon::Icon;
@@ -82,15 +82,62 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-white/[0.035] p-2 ring-1 ring-inset ring-white/10 backdrop-blur-xl";
+const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-white/[0.025] p-2 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
 
 fn row_class(selected: bool) -> String {
-    let base = "flex items-center gap-2.5 rounded-lg px-3 py-2 cursor-default transition-colors duration-100";
+    let base =
+        "flex items-center gap-2.5 rounded-lg px-3 py-2 cursor-default transition-all duration-100";
     if selected {
-        format!("{base} bg-accent text-accent-foreground ring-1 ring-inset ring-border")
+        format!(
+            "{base} bg-cyan-400/12 text-foreground shadow-[inset_2px_0_0_0_rgb(34,211,238),0_0_18px_-4px_rgba(34,211,238,0.45)]"
+        )
     } else {
-        format!("{base} text-foreground/80 hover:bg-accent/50")
+        format!("{base} text-foreground/75 hover:bg-white/[0.05]")
     }
+}
+
+fn visible_entries(all: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry> {
+    if show_hidden {
+        all.to_vec()
+    } else {
+        all.iter()
+            .filter(|e| !e.name.starts_with('.'))
+            .cloned()
+            .collect()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_dir(
+    mut dir_entries: Signal<Vec<FileDirEntry>>,
+    mut parent_entries: Signal<Vec<FileDirEntry>>,
+    mut path: Signal<String>,
+    mut selected: Signal<usize>,
+    mut preview: Signal<Preview>,
+    mut thumbs: Signal<HashMap<String, String>>,
+    show_hidden: bool,
+    entries: Vec<FileDirEntry>,
+    parent: Vec<FileDirEntry>,
+    new_path: String,
+) {
+    for url in thumbs.read().values() {
+        revoke(url);
+    }
+    thumbs.set(HashMap::new());
+    selected.set(0);
+    preview.set(Preview::None);
+    parent_entries.set(parent);
+    path.set(new_path);
+    let vis = visible_entries(&entries, show_hidden);
+    if let Some(first) = vis.first() {
+        request_preview(first.path.clone());
+    }
+    for e in &vis {
+        if !e.is_dir && image_mime(&e.path).is_some() {
+            request_thumb(e.path.clone());
+        }
+    }
+    dir_entries.set(entries);
 }
 
 fn folder_glyph(class: &str) -> Element {
@@ -212,7 +259,7 @@ fn render_preview(preview: &Preview) -> Element {
             div { class: "text-xs text-muted-foreground opacity-60", "" }
         },
         Preview::Image(url) => rsx! {
-            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-lg ring-1 ring-white/10" }
+            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
         },
         Preview::Text(lines) => rsx! {
             div { class: "h-full w-full overflow-auto font-mono text-xs leading-snug",
@@ -263,11 +310,12 @@ pub fn Page() -> Element {
     let mut first_line = use_signal(|| 0u32);
     let mut lines = use_signal(Vec::<FileLine>::new);
     let mut error = use_signal(String::new);
-    let mut dir_entries = use_signal(Vec::<FileDirEntry>::new);
-    let mut parent_entries = use_signal(Vec::<FileDirEntry>::new);
+    let dir_entries = use_signal(Vec::<FileDirEntry>::new);
+    let parent_entries = use_signal(Vec::<FileDirEntry>::new);
     let mut parent_path = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
     let mut back_dir = use_signal(|| Option::<String>::None);
+    let mut show_hidden = use_signal(|| true);
     let mut mode = use_signal(|| Mode::Text);
     let mut image_url = use_signal(|| Option::<String>::None);
     let mut preview = use_signal(|| Preview::None);
@@ -310,29 +358,24 @@ pub fn Page() -> Element {
                 .to_string();
             doc.set_title(&name);
         }
-        for url in thumbs.read().values() {
-            revoke(url);
-        }
-        thumbs.set(HashMap::new());
         if let Some(old) = image_url() {
             revoke(&old);
             image_url.set(None);
         }
-        path.set(d.path);
         parent_path.set(d.parent_path);
-        parent_entries.set(d.parent_entries);
-        selected.set(0);
-        preview.set(Preview::None);
         mode.set(Mode::Dir);
-        if let Some(first) = d.entries.first() {
-            request_preview(first.path.clone());
-        }
-        for e in &d.entries {
-            if !e.is_dir && image_mime(&e.path).is_some() {
-                request_thumb(e.path.clone());
-            }
-        }
-        dir_entries.set(d.entries);
+        apply_dir(
+            dir_entries,
+            parent_entries,
+            path,
+            selected,
+            preview,
+            thumbs,
+            show_hidden(),
+            d.entries,
+            d.parent_entries,
+            d.path,
+        );
     });
 
     let _img = use_bin_event_listener::<FileImageEvent, _>(FILE_IMAGE_EVENT, move |e| {
@@ -355,7 +398,8 @@ pub fn Page() -> Element {
             }
             return;
         }
-        let sel_path = dir_entries.read().get(selected()).map(|e| e.path.clone());
+        let vis = visible_entries(&dir_entries.read(), show_hidden());
+        let sel_path = vis.get(selected()).map(|e| e.path.clone());
         if sel_path.as_deref() != Some(ev.path.as_str()) {
             return;
         }
@@ -402,6 +446,7 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         setup_measurement(cell_dims);
+        focus_container();
     });
 
     let gw = gutter_width(total_lines());
@@ -416,8 +461,8 @@ pub fn Page() -> Element {
         div {
             id: CONTAINER_ID,
             tabindex: "0",
-            class: "relative flex h-full w-full flex-col overflow-hidden bg-term-bg text-term-fg font-mono text-sm leading-normal",
-            style: "outline:none;{theme_style}",
+            class: "relative flex h-full w-full flex-col overflow-hidden bg-background text-foreground font-mono text-sm leading-normal",
+            style: "outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);{theme_style}",
 
             onmousedown: move |_| focus_container(),
 
@@ -453,16 +498,15 @@ pub fn Page() -> Element {
                 let key = raw.key();
                 match mode() {
                     Mode::Dir => {
-                        let len = dir_entries.read().len();
+                        let vis = visible_entries(&dir_entries.read(), show_hidden());
+                        let len = vis.len();
                         let cur = selected();
                         match key.as_str() {
                             "j" | "ArrowDown" => {
                                 e.prevent_default();
                                 let next = if len == 0 { 0 } else { (cur + 1).min(len - 1) };
                                 selected.set(next);
-                                if let Some(p) =
-                                    dir_entries.read().get(next).map(|x| x.path.clone())
-                                {
+                                if let Some(p) = vis.get(next).map(|x| x.path.clone()) {
                                     request_preview(p);
                                 }
                             }
@@ -470,18 +514,39 @@ pub fn Page() -> Element {
                                 e.prevent_default();
                                 let next = cur.saturating_sub(1);
                                 selected.set(next);
-                                if let Some(p) =
-                                    dir_entries.read().get(next).map(|x| x.path.clone())
-                                {
+                                if let Some(p) = vis.get(next).map(|x| x.path.clone()) {
                                     request_preview(p);
                                 }
                             }
                             "l" | "ArrowRight" | "Enter" => {
                                 e.prevent_default();
-                                if let Some(ent) = dir_entries.read().get(cur).cloned() {
-                                    if !ent.is_dir {
-                                        back_dir.set(Some(parent_of(&ent.path)));
+                                let Some(ent) = vis.get(cur).cloned() else {
+                                    return;
+                                };
+                                if ent.is_dir {
+                                    let children = match &*preview.read() {
+                                        Preview::Dir(c) => Some(c.clone()),
+                                        _ => None,
+                                    };
+                                    if let Some(children) = children {
+                                        let cur_entries = dir_entries.read().clone();
+                                        parent_path.set(parent_of(&ent.path));
+                                        apply_dir(
+                                            dir_entries,
+                                            parent_entries,
+                                            path,
+                                            selected,
+                                            preview,
+                                            thumbs,
+                                            show_hidden(),
+                                            children,
+                                            cur_entries,
+                                            ent.path.clone(),
+                                        );
                                     }
+                                    open_path(ent.path);
+                                } else {
+                                    back_dir.set(Some(parent_of(&ent.path)));
                                     open_path(ent.path);
                                 }
                             }
@@ -489,7 +554,34 @@ pub fn Page() -> Element {
                                 let pp = parent_path();
                                 if !pp.is_empty() {
                                     e.prevent_default();
+                                    let pe = parent_entries.read().clone();
+                                    if !pe.is_empty() {
+                                        parent_path.set(parent_of(&pp));
+                                        apply_dir(
+                                            dir_entries,
+                                            parent_entries,
+                                            path,
+                                            selected,
+                                            preview,
+                                            thumbs,
+                                            show_hidden(),
+                                            pe,
+                                            Vec::new(),
+                                            pp.clone(),
+                                        );
+                                    }
                                     open_path(pp);
+                                }
+                            }
+                            "." => {
+                                e.prevent_default();
+                                let next = !show_hidden();
+                                show_hidden.set(next);
+                                let vis2 = visible_entries(&dir_entries.read(), next);
+                                let idx = clamp_selection(cur, vis2.len());
+                                selected.set(idx);
+                                if let Some(p) = vis2.get(idx).map(|x| x.path.clone()) {
+                                    request_preview(p);
                                 }
                             }
                             _ => {}
@@ -538,7 +630,7 @@ pub fn Page() -> Element {
                         class: "absolute inset-0 z-50 flex items-center justify-center",
                         style: "background:rgba(0,0,0,0.6);",
                         div {
-                            class: "rounded-md border border-ansi-1 bg-term-bg px-4 py-2 text-sm text-ansi-1",
+                            class: "rounded-md border border-ansi-1 bg-background px-4 py-2 text-sm text-ansi-1",
                             "{msg}"
                         }
                     }
@@ -549,7 +641,7 @@ pub fn Page() -> Element {
                 Mode::Image => rsx! {
                     div { class: "flex min-h-0 flex-1 items-center justify-center overflow-auto p-4",
                         if let Some(url) = image_url() {
-                            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-lg ring-1 ring-white/10" }
+                            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
                         }
                     }
                 },
@@ -559,10 +651,10 @@ pub fn Page() -> Element {
                         style: "grid-template-columns: minmax(8rem,14rem) minmax(10rem,1fr) minmax(12rem,1.3fr);",
 
                         div { class: PANE_CLASS,
-                            for e in parent_entries() {
+                            for e in visible_entries(&parent_entries(), show_hidden()) {
                                 div {
                                     key: "{e.path}",
-                                    class: if e.name == cur_basename { "flex items-center gap-2.5 rounded-lg bg-accent/60 px-3 py-2 text-foreground" } else { "flex items-center gap-2.5 rounded-lg px-3 py-2 text-foreground/55 transition-colors hover:bg-accent/40" },
+                                    class: if e.name == cur_basename { "flex items-center gap-2.5 rounded-lg bg-cyan-400/10 px-3 py-2 text-foreground shadow-[inset_2px_0_0_0_rgba(34,211,238,0.6)]" } else { "flex items-center gap-2.5 rounded-lg px-3 py-2 text-foreground/45 transition-colors hover:bg-white/[0.04]" },
                                     {entry_visual(&e, None)}
                                     span { class: "truncate text-xs", "{e.name}" }
                                 }
@@ -570,7 +662,7 @@ pub fn Page() -> Element {
                         }
 
                         div { class: PANE_CLASS,
-                            for (i, e) in dir_entries().into_iter().enumerate() {
+                            for (i, e) in visible_entries(&dir_entries(), show_hidden()).into_iter().enumerate() {
                                 {
                                     let p_sel = e.path.clone();
                                     let p_open = e.path.clone();
@@ -599,7 +691,7 @@ pub fn Page() -> Element {
                             }
                         }
 
-                        div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-white/[0.025] p-4 ring-1 ring-inset ring-white/10 backdrop-blur-xl",
+                        div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-white/[0.02] p-4 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]",
                             {render_preview(&preview())}
                         }
                     }
@@ -610,7 +702,7 @@ pub fn Page() -> Element {
                             for line in lines().iter() {
                                 div { key: "{line.line_no}", class: "group flex hover:bg-white/[0.035]",
                                     span {
-                                        class: "sticky left-0 z-[1] shrink-0 select-none bg-term-bg pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
+                                        class: "sticky left-0 z-[1] shrink-0 select-none bg-background pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
                                         style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
                                         "{line.line_no + 1}"
                                     }

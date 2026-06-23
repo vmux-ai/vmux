@@ -8,7 +8,6 @@ pub fn list_dir(path: &Path) -> Vec<FileDirEntry> {
     };
     let mut entries: Vec<FileDirEntry> = read
         .flatten()
-        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
         .map(|e| {
             let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
             FileDirEntry {
@@ -39,14 +38,14 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn lists_dir_hides_dotfiles_dirs_first() {
+    fn lists_dir_includes_dotfiles_dirs_first() {
         let tmp = tempfile::tempdir().unwrap();
         fs::create_dir(tmp.path().join("zdir")).unwrap();
         fs::write(tmp.path().join("a.txt"), "x").unwrap();
         fs::write(tmp.path().join(".hidden"), "x").unwrap();
         let entries = list_dir(tmp.path());
         let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["zdir", "a.txt"]);
+        assert_eq!(names, vec!["zdir", ".hidden", "a.txt"]);
     }
 
     #[test]
