@@ -9,6 +9,7 @@ use objc2_app_kit::{
     NSView,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use vmux_command::{AppCommand, BrowserCommand, BrowserNavigationCommand, OpenCommand};
 use vmux_core::profile::active_profile_name;
 use vmux_layout::event::{CEF_RESERVED_HEIGHT_PX, SIDE_SHEET_WIDTH_PX, TabsCommandEvent};
 use vmux_layout::native_view::{CurrentLayoutView, LayoutRenderer, NodeId};
@@ -22,6 +23,10 @@ const PILL_H: f64 = 28.0;
 enum LayoutAction {
     SwitchTab(NodeId),
     NewTab,
+    Back,
+    Forward,
+    Reload,
+    NewStack,
 }
 
 pub(crate) struct LayoutNativePlugin;
@@ -196,12 +201,13 @@ fn rebuild(
     let sheet_w = SIDE_SHEET_WIDTH_PX as f64;
     let width = bounds.size.width;
     let height = bounds.size.height;
-    let header_band_top = if flipped { 0.0 } else { height - header_h };
-    let pill_y = header_band_top + (header_h - PILL_H) / 2.0;
+    let band_top = if flipped { 0.0 } else { height - header_h };
+    let row1_y = band_top + 10.0;
+    let row2_y = band_top + 10.0 + PILL_H + 6.0;
     let radius = PILL_H / 2.0;
 
-    // Tab pills
-    let tab_w = 132.0_f64;
+    // Row 1: tab pills + new-tab
+    let tab_w = 120.0_f64;
     let mut x = 12.0_f64;
     for tab in &current.0.tabs {
         let tag = state.actions.len();
@@ -209,7 +215,7 @@ fn rebuild(
         let pill = glass_pill(
             mtm,
             content,
-            NSRect::new(NSPoint::new(x, pill_y), NSSize::new(tab_w, PILL_H)),
+            NSRect::new(NSPoint::new(x, row1_y), NSSize::new(tab_w, PILL_H)),
             radius,
             alpha,
         );
@@ -218,24 +224,41 @@ fn rebuild(
         state.actions.push(LayoutAction::SwitchTab(tab.id.clone()));
         x += tab_w + 8.0;
     }
-
-    // New-tab pill
     {
         let tag = state.actions.len();
         let pill = glass_pill(
             mtm,
             content,
-            NSRect::new(NSPoint::new(x, pill_y), NSSize::new(PILL_H, PILL_H)),
+            NSRect::new(NSPoint::new(x, row1_y), NSSize::new(PILL_H, PILL_H)),
             radius,
             0.7,
         );
         add_button(&pill, mtm, target_ref, "+", tag);
         state.pills.push(pill);
         state.actions.push(LayoutAction::NewTab);
-        x += PILL_H + 12.0;
     }
 
-    // Profile pill (right)
+    // Row 2: nav + address + profile
+    let mut nx = 12.0_f64;
+    for (glyph, action) in [
+        ("\u{2039}", LayoutAction::Back),
+        ("\u{203a}", LayoutAction::Forward),
+        ("\u{27f3}", LayoutAction::Reload),
+    ] {
+        let tag = state.actions.len();
+        let pill = glass_pill(
+            mtm,
+            content,
+            NSRect::new(NSPoint::new(nx, row2_y), NSSize::new(PILL_H, PILL_H)),
+            radius,
+            0.7,
+        );
+        add_button(&pill, mtm, target_ref, glyph, tag);
+        state.pills.push(pill);
+        state.actions.push(action);
+        nx += PILL_H + 6.0;
+    }
+
     let profile = active_profile_name();
     let profile_w = 110.0_f64;
     let profile_x = width - profile_w - 12.0;
@@ -244,7 +267,7 @@ fn rebuild(
             mtm,
             content,
             NSRect::new(
-                NSPoint::new(profile_x, pill_y),
+                NSPoint::new(profile_x, row2_y),
                 NSSize::new(profile_w, PILL_H),
             ),
             radius,
@@ -254,53 +277,66 @@ fn rebuild(
         state.pills.push(pill);
     }
 
-    // Address pill (fills the gap between tabs and profile)
-    if !current.0.address.is_empty() {
-        let addr_x = x;
-        let addr_w = (profile_x - addr_x - 12.0).max(80.0);
-        let pill = glass_pill(
-            mtm,
-            content,
-            NSRect::new(NSPoint::new(addr_x, pill_y), NSSize::new(addr_w, PILL_H)),
-            radius,
-            0.7,
-        );
-        add_label(
-            &pill,
-            mtm,
-            &current.0.address,
-            &NSColor::secondaryLabelColor(),
-        );
-        state.pills.push(pill);
-    }
+    let addr_x = nx + 4.0;
+    let addr_w = (profile_x - addr_x - 12.0).max(80.0);
+    let addr_text = if current.0.address.is_empty() {
+        " "
+    } else {
+        current.0.address.as_str()
+    };
+    let pill = glass_pill(
+        mtm,
+        content,
+        NSRect::new(NSPoint::new(addr_x, row2_y), NSSize::new(addr_w, PILL_H)),
+        radius,
+        0.6,
+    );
+    add_label(&pill, mtm, addr_text, &NSColor::secondaryLabelColor());
+    state.pills.push(pill);
 
-    // Stack cards (left column)
+    // Side sheet: stack cards + new-stack
     let card_h = 30.0_f64;
     let card_gap = 8.0_f64;
     let cards_top = if flipped {
-        header_h + 12.0
+        band_top + header_h + 12.0
     } else {
         height - header_h - 12.0 - card_h
     };
-    for (i, st) in current.0.stacks.iter().enumerate() {
-        let cy = if flipped {
-            cards_top + i as f64 * (card_h + card_gap)
+    let card_y = |row: usize| {
+        if flipped {
+            cards_top + row as f64 * (card_h + card_gap)
         } else {
-            cards_top - i as f64 * (card_h + card_gap)
-        };
+            cards_top - row as f64 * (card_h + card_gap)
+        }
+    };
+    let card_w = (sheet_w - 24.0).max(40.0);
+    for (i, st) in current.0.stacks.iter().enumerate() {
         let alpha = if st.is_active { 0.95 } else { 0.55 };
         let pill = glass_pill(
             mtm,
             content,
-            NSRect::new(
-                NSPoint::new(12.0, cy),
-                NSSize::new((sheet_w - 24.0).max(40.0), card_h),
-            ),
+            NSRect::new(NSPoint::new(12.0, card_y(i)), NSSize::new(card_w, card_h)),
             10.0,
             alpha,
         );
         add_label(&pill, mtm, &st.title, &label_color(st.is_active));
         state.pills.push(pill);
+    }
+    {
+        let tag = state.actions.len();
+        let pill = glass_pill(
+            mtm,
+            content,
+            NSRect::new(
+                NSPoint::new(12.0, card_y(current.0.stacks.len())),
+                NSSize::new(card_w, card_h),
+            ),
+            10.0,
+            0.6,
+        );
+        add_button(&pill, mtm, target_ref, "+ New Stack", tag);
+        state.pills.push(pill);
+        state.actions.push(LayoutAction::NewStack);
     }
 }
 
@@ -312,7 +348,11 @@ fn label_color(is_active: bool) -> Retained<NSColor> {
     }
 }
 
-fn drain_tab_clicks(state: NonSendMut<LayoutGlassState>, mut commands: Commands) {
+fn drain_tab_clicks(
+    state: NonSendMut<LayoutGlassState>,
+    mut commands: Commands,
+    mut app_commands: MessageWriter<AppCommand>,
+) {
     let mut fired: Vec<LayoutAction> = Vec::new();
     if let Some(rx) = &state.click_rx {
         while let Ok(tag) = rx.try_recv() {
@@ -322,24 +362,44 @@ fn drain_tab_clicks(state: NonSendMut<LayoutGlassState>, mut commands: Commands)
         }
     }
     for action in fired {
-        let payload = match action {
+        match action {
             LayoutAction::SwitchTab(id) => {
                 let Ok((_, bits)) = parse_id(&id.0) else {
                     continue;
                 };
-                TabsCommandEvent {
-                    command: "switch".to_string(),
-                    tab_id: Some(bits.to_string()),
-                }
+                trigger_tabs(&mut commands, "switch", Some(bits.to_string()));
             }
-            LayoutAction::NewTab => TabsCommandEvent {
-                command: "new".to_string(),
-                tab_id: None,
-            },
-        };
-        commands.trigger(bevy_cef::prelude::BinReceive::<TabsCommandEvent> {
-            webview: Entity::PLACEHOLDER,
-            payload,
-        });
+            LayoutAction::NewTab => trigger_tabs(&mut commands, "new", None),
+            LayoutAction::Back => {
+                app_commands.write(AppCommand::Browser(BrowserCommand::Navigation(
+                    BrowserNavigationCommand::PrevPage,
+                )));
+            }
+            LayoutAction::Forward => {
+                app_commands.write(AppCommand::Browser(BrowserCommand::Navigation(
+                    BrowserNavigationCommand::NextPage,
+                )));
+            }
+            LayoutAction::Reload => {
+                app_commands.write(AppCommand::Browser(BrowserCommand::Navigation(
+                    BrowserNavigationCommand::Reload,
+                )));
+            }
+            LayoutAction::NewStack => {
+                app_commands.write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InNewStack { url: None },
+                )));
+            }
+        }
     }
+}
+
+fn trigger_tabs(commands: &mut Commands, command: &str, tab_id: Option<String>) {
+    commands.trigger(bevy_cef::prelude::BinReceive::<TabsCommandEvent> {
+        webview: Entity::PLACEHOLDER,
+        payload: TabsCommandEvent {
+            command: command.to_string(),
+            tab_id,
+        },
+    });
 }
