@@ -526,6 +526,22 @@ fn rebuild(
         state.glass.push(card);
         cy += card_h + card_gap;
     }
+
+    info!(
+        "layout_native DIAG: panes={} glass_views={} buttons={} fills={}",
+        current.0.panes.len(),
+        state.glass.len(),
+        state.buttons.len(),
+        state.fills.len()
+    );
+    for (i, g) in state.glass.iter().enumerate() {
+        let v: &NSView = g;
+        let f = v.frame();
+        info!(
+            "layout_native DIAG glass[{i}]: x={:.0} y={:.0} w={:.0} h={:.0}",
+            f.origin.x, f.origin.y, f.size.width, f.size.height
+        );
+    }
 }
 
 fn drain_tab_clicks(
