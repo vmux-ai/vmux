@@ -177,7 +177,7 @@ pub fn diff_lines(file: &Path) -> Result<Vec<DiffLine>, GitError> {
     if unstaged.trim().is_empty() {
         return staged_only_lines(file, &root, &target, &staged);
     }
-    let ranges = parse::hunk_ranges(&diff_text(&root, &target, false, 3)?);
+    let ranges = parse::hunk_ranges(&diff_text(&root, &target, false, 0)?);
 
     let new_spans = std::fs::read_to_string(file)
         .map(|c| crate::highlight::highlight_file(&c, file))
@@ -216,6 +216,7 @@ fn git_apply(root: &Path, patch: &str, reverse: bool) -> Result<(), GitError> {
     } else {
         args.push("--cached");
     }
+    args.push("--unidiff-zero");
     let mut child = Command::new("git")
         .current_dir(root)
         .args(&args)
@@ -247,7 +248,7 @@ fn git_apply(root: &Path, patch: &str, reverse: bool) -> Result<(), GitError> {
 pub fn apply_hunk(file: &Path, index: u32, accept: bool) -> Result<(), GitError> {
     let root = repo_root(file)?;
     let target = rel(&root, file);
-    let diff = diff_text(&root, &target, false, 3)?;
+    let diff = diff_text(&root, &target, false, 0)?;
     if diff.trim().is_empty() {
         return Err(GitError("no unstaged changes for this file".into()));
     }
@@ -508,6 +509,33 @@ mod tests {
                 .iter()
                 .any(|l| matches!(l.kind, DiffKind::Add | DiffKind::Remove))
         );
+    }
+
+    #[test]
+    fn close_changes_are_independent_hunks() {
+        let repo = test_repo::init();
+        let file = test_repo::write(repo.path(), "a.txt", "l1\nl2\nl3\nl4\nl5\n");
+        test_repo::run(repo.path(), &["add", "a.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "init"]);
+        // change line 1 and line 3 — only 2 lines apart (would merge under -U3)
+        test_repo::write(repo.path(), "a.txt", "X1\nl2\nX3\nl4\nl5\n");
+
+        let hunks: std::collections::HashSet<u32> = diff_lines(&file)
+            .unwrap()
+            .iter()
+            .filter_map(|l| l.hunk)
+            .collect();
+        assert_eq!(hunks.len(), 2, "expected 2 separate hunks, got {hunks:?}");
+
+        // accepting hunk 0 (line 1) must not touch line 3
+        apply_hunk(&file, 0, true).unwrap();
+        let removes: Vec<_> = diff_lines(&file)
+            .unwrap()
+            .into_iter()
+            .filter(|l| matches!(l.kind, DiffKind::Remove))
+            .collect();
+        assert_eq!(removes.len(), 1);
+        assert_eq!(removes[0].old_no, Some(3));
     }
 
     #[test]

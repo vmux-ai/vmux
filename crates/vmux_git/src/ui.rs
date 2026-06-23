@@ -168,11 +168,11 @@ pub fn GitBar(
 
             if can_stage {
                 button {
-                    class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
+                    class: "shrink-0 rounded px-2 py-0.5 text-ansi-2 hover:bg-ansi-2/15",
                     onclick: move |_| {
                         let _ = try_cef_bin_emit_rkyv(&GitStageRequest { path: path() });
                     },
-                    "Stage"
+                    "\u{2713} accept all"
                 }
             }
             if can_unstage {
@@ -192,7 +192,7 @@ pub fn GitBar(
                             let _ = try_cef_bin_emit_rkyv(&GitDiscardRequest { path: path() });
                             confirming.set(false);
                         },
-                        "Confirm discard"
+                        "Confirm deny all"
                     }
                     button {
                         class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
@@ -201,9 +201,9 @@ pub fn GitBar(
                     }
                 } else {
                     button {
-                        class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
+                        class: "shrink-0 rounded px-2 py-0.5 text-ansi-1 hover:bg-ansi-1/15",
                         onclick: move |_| confirming.set(true),
-                        "Discard"
+                        "\u{2717} deny all"
                     }
                 }
             }
