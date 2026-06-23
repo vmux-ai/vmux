@@ -78,30 +78,36 @@ struct LayoutGlassState {
     last_size: (f64, f64),
 }
 
-/// A Regular Liquid Glass element (active tab / stack card). `active` adds a subtle accent tint.
+/// A Regular Liquid Glass element. Children go on the returned **content view**, never on the glass
+/// view itself: AppKit sizes the glass to its `contentView` and applies legibility treatments there;
+/// adding siblings makes the glass material render larger than the content (a phantom outer panel).
+/// `active` applies a subtle accent tint to convey focus (HIG: tint conveys state, not a border).
 fn glass_pill(
     mtm: MainThreadMarker,
     content: &NSView,
     frame: NSRect,
     radius: f64,
     active: bool,
-) -> Retained<NSGlassEffectView> {
+) -> (Retained<NSGlassEffectView>, Retained<NSView>) {
     let g: Retained<NSGlassEffectView> = NSGlassEffectView::new(mtm);
     g.setStyle(NSGlassEffectViewStyle::Regular);
     if active {
         g.setTintColor(Some(
-            &NSColor::controlAccentColor().colorWithAlphaComponent(0.5),
+            &NSColor::controlAccentColor().colorWithAlphaComponent(0.28),
         ));
     }
     g.setCornerRadius(radius);
     let v: &NSView = &g;
     v.setFrame(frame);
-    v.setWantsLayer(true);
+    let container: Retained<NSView> = NSView::new(mtm);
+    container.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), frame.size));
+    g.setContentView(Some(&container));
     content.addSubview(v);
+    v.setWantsLayer(true);
     if let Some(layer) = v.layer() {
         layer.setZPosition(GLASS_Z);
     }
-    g
+    (g, container)
 }
 
 fn rounded_bg(view: &NSView, radius: f64, bg: Option<&NSColor>) {
@@ -112,15 +118,6 @@ fn rounded_bg(view: &NSView, radius: f64, bg: Option<&NSColor>) {
         if let Some(c) = bg {
             layer.setBackgroundColor(Some(&c.CGColor()));
         }
-    }
-}
-
-/// Thin accent outline marking the focused pane (mirrors OSR `ring-2 ring-ring`).
-fn accent_ring(view: &NSView) {
-    view.setWantsLayer(true);
-    if let Some(layer) = view.layer() {
-        layer.setBorderWidth(2.0);
-        layer.setBorderColor(Some(&NSColor::controlAccentColor().CGColor()));
     }
 }
 
@@ -292,7 +289,7 @@ fn rebuild(
     } else {
         band_top
     };
-    let url_glass = glass_pill(
+    let (url_glass, url_c) = glass_pill(
         mtm,
         content,
         NSRect::new(
@@ -309,7 +306,7 @@ fn rebuild(
         (b.size.width, b.size.height)
     };
     {
-        let uv: &NSView = &url_glass;
+        let uv: &NSView = &url_c;
         // nav (h-7 w-7 = 28)
         let nav_y = (uh - 28.0) / 2.0;
         let mut nx = 8.0;
@@ -383,10 +380,10 @@ fn rebuild(
         let tag = state.actions.len();
         let frame = NSRect::new(NSPoint::new(x, tab_top), NSSize::new(tab_w, tab_h));
         if tab.is_active {
-            let g = glass_pill(mtm, content, frame, 6.0, false);
+            let (g, gc) = glass_pill(mtm, content, frame, 6.0, false);
             round_top(&g, 6.0);
             {
-                let gv: &NSView = &g;
+                let gv: &NSView = &gc;
                 let b = fill_button(
                     gv,
                     mtm,
@@ -455,17 +452,14 @@ fn rebuild(
         let inner = header_h + 4.0 + n_rows * row_h + (n_rows - 1.0) * row_gap;
         let card_h = pad * 2.0 + inner;
         let card_top = if flipped { cy } else { height - cy - card_h };
-        let card = glass_pill(
+        let (card, card_c) = glass_pill(
             mtm,
             content,
             NSRect::new(NSPoint::new(card_x, card_top), NSSize::new(card_w, card_h)),
             12.0,
-            false,
+            pane.is_active,
         );
-        let cv: &NSView = &card;
-        if pane.is_active {
-            accent_ring(cv);
-        }
+        let cv: &NSView = &card_c;
         add_label(
             cv,
             mtm,
@@ -525,22 +519,6 @@ fn rebuild(
         }
         state.glass.push(card);
         cy += card_h + card_gap;
-    }
-
-    info!(
-        "layout_native DIAG: panes={} glass_views={} buttons={} fills={}",
-        current.0.panes.len(),
-        state.glass.len(),
-        state.buttons.len(),
-        state.fills.len()
-    );
-    for (i, g) in state.glass.iter().enumerate() {
-        let v: &NSView = g;
-        let f = v.frame();
-        info!(
-            "layout_native DIAG glass[{i}]: x={:.0} y={:.0} w={:.0} h={:.0}",
-            f.origin.x, f.origin.y, f.size.width, f.size.height
-        );
     }
 }
 
