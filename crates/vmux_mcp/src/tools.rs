@@ -404,9 +404,11 @@ fn record_start_definition() -> ToolDefinition {
         name: "vmux_record_start".into(),
         description: "Start recording the vmux window to an mp4 video (optionally also a GIF). \
 Returns immediately so you can drive the UI with other tools to demonstrate a feature, then call \
-vmux_record_stop. Auto-stops after `max_secs` (default 120) as a safety cap. Only one recording at a \
-time. macOS only; the first call may prompt for Screen Recording permission - grant it in System \
-Settings > Privacy & Security > Screen Recording, then call again."
+vmux_record_stop. Record in ONE live take: start, perform the few actions you want to show, then \
+stop. Do NOT rehearse, build elaborate layouts, or take screenshots to verify - just capture the \
+live interaction in a single pass. Auto-stops after `max_secs` (default 120) as a safety cap. Only \
+one recording at a time. macOS only; the first call may prompt for Screen Recording permission - \
+grant it in System Settings > Privacy & Security > Screen Recording, then call again."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -425,7 +427,7 @@ fn record_stop_definition() -> ToolDefinition {
         name: "vmux_record_stop".into(),
         description: "Stop the active recording and write the file(s). Returns the mp4 path, duration, \
 and size (plus the GIF path if one was requested). By default saves to ~/.vmux/recording/; pass `dir` \
-(absolute) and `name` (basename, no extension) to save elsewhere - e.g. dir=<repo>/docs/features, \
+(absolute) and `name` (basename, no extension) to save elsewhere - e.g. dir=<repo>/docs/recording, \
 name=<feature> to drop a demo straight into the repo."
             .into(),
         input_schema: serde_json::json!({
