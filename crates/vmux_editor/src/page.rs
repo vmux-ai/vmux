@@ -149,14 +149,6 @@ fn image_glyph(class: &str) -> Element {
     }
 }
 
-fn markdown_glyph(class: &str) -> Element {
-    rsx! {
-        Icon { class: "{class}", fill: "currentColor", stroke: "none",
-            path { d: "M22.27 19.385H1.73A1.73 1.73 0 0 1 0 17.655V6.345a1.73 1.73 0 0 1 1.73-1.73h20.54A1.73 1.73 0 0 1 24 6.345v11.31a1.73 1.73 0 0 1-1.73 1.73zM5.769 15.923v-4.5l2.308 2.885 2.307-2.885v4.5h2.308V8.078h-2.308l-2.307 2.885-2.308-2.885H3.46v7.847zM21.232 12h-2.309V8.077h-2.307V12h-2.308l3.461 4.039z" }
-        }
-    }
-}
-
 fn logo_icon(d: &str, class: &str) -> Element {
     rsx! {
         Icon { class: "{class}", fill: "currentColor", stroke: "none",
@@ -178,21 +170,29 @@ fn type_icon(path: &str, is_dir: bool, class: &str) -> Element {
     if is_dir {
         return folder_glyph(class);
     }
+    let name = path.rsplit('/').next().unwrap_or("");
     let ext = ext_of(path);
-    match ext.as_str() {
-        "md" | "markdown" | "mdx" => return markdown_glyph(class),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico" => {
-            return image_glyph(class);
-        }
-        _ => {}
+    if matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico"
+    ) {
+        return image_glyph(class);
     }
-    if let Some(d) = crate::lang_icon::lang_logo(&ext) {
+    let key = match name {
+        "Dockerfile" => "dockerfile",
+        "CMakeLists.txt" => "cmake",
+        _ => ext.as_str(),
+    };
+    if let Some(d) = crate::lang_icon::lang_logo(key) {
         return logo_icon(d, class);
     }
     match ext.as_str() {
-        "vue" | "svelte" | "java" | "scala" | "zig" | "ron" => code_glyph(class),
-        "ini" | "cfg" | "conf" | "lock" | "env" | "properties" => config_glyph(class),
+        "ini" | "cfg" | "conf" | "lock" | "env" | "properties" | "editorconfig" => {
+            config_glyph(class)
+        }
         "txt" | "log" | "csv" | "text" => text_glyph(class),
+        "java" | "vala" | "d" | "ron" => code_glyph(class),
+        _ if matches!(name, "Makefile" | "makefile" | "GNUmakefile") => config_glyph(class),
         _ => file_glyph(class),
     }
 }
