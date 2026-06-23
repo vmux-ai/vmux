@@ -32,8 +32,8 @@ fn mcp_tools_list_includes_layout_tools() {
         .write_stdin(stdin)
         .assert()
         .success()
-        .stdout(contains("\"vmux_read_layout\""))
-        .stdout(contains("\"vmux_update_layout\""));
+        .stdout(contains("\"read_layout\""))
+        .stdout(contains("\"update_layout\""));
 }
 
 #[test]
@@ -44,8 +44,8 @@ fn mcp_tools_list_includes_self_anchor_tools() {
         .write_stdin(stdin)
         .assert()
         .success()
-        .stdout(contains("\"vmux_open_page\""))
-        .stdout(contains("\"vmux_run\""));
+        .stdout(contains("\"open_page\""))
+        .stdout(contains("\"run\""));
 }
 
 #[test]

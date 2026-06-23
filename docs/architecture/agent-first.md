@@ -26,18 +26,19 @@ and terminals in its own space and can't read or disrupt the one you're looking 
 
 ## MCP methods
 
-Agents discover the full set via `tools/list`; every tool is namespaced with a `vmux_`
-prefix. The core methods:
+Agents discover the full set via `tools/list`. The server is registered under the name
+`vmux`, so tool names are bare (no `vmux_` prefix) to avoid `vmux:vmux_*` duplication. The
+core methods:
 
-- `vmux_browser_navigate` — point the active (or a target) pane at a URL.
-- `vmux_terminal_send` — send raw text to the active terminal.
-- `vmux_select_tab` — focus a tab by index.
-- `vmux_create_space` — create a new space and switch to it.
-- `vmux_update_settings` — set a single setting by dot-path.
-- `vmux_open_page` — open a page in a new pane beside the requesting agent's own.
-- `vmux_run` — run a process in a human-visible terminal: the user watches live and can take
+- `browser_navigate` — point the active (or a target) pane at a URL.
+- `terminal_send` — send raw text to the active terminal.
+- `select_tab` — focus a tab by index.
+- `create_space` — create a new space and switch to it.
+- `update_settings` — set a single setting by dot-path.
+- `open_page` — open a page in a new pane beside the requesting agent's own.
+- `run` — run a process in a human-visible terminal: the user watches live and can take
   over the prompt, while the agent gets stdout/stderr and the exit code.
-- `vmux_read_layout` / `vmux_update_layout` — fetch the pane tree (stable ids), mutate it, and
+- `read_layout` / `update_layout` — fetch the pane tree (stable ids), mutate it, and
   commit it back; Vmux diffs against the live graph and reconciles **React-style** — add
   panes, move stacks, shift focus, in one atomic transaction.
 

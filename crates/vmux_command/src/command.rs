@@ -508,10 +508,10 @@ mod tests {
 
         for (id, _description, schema) in &entries {
             assert!(
-                id.starts_with("vmux_"),
-                "advertised MCP tool name must be vmux_-prefixed: {id}"
+                !id.starts_with("vmux_"),
+                "advertised MCP tool name must not be vmux_-prefixed (server is already named vmux): {id}"
             );
-            let bare = id.strip_prefix("vmux_").unwrap_or(id);
+            let bare = *id;
             let has_required_params = schema
                 .get("required")
                 .and_then(|v| v.as_array())

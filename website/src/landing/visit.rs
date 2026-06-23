@@ -5,10 +5,10 @@ use crate::landing::parts::{
 };
 
 const TOOLS: &[&str] = &[
-    "vmux_browser_navigate",
-    "vmux_run",
-    "vmux_read_layout",
-    "vmux_update_layout",
+    "browser_navigate",
+    "run",
+    "read_layout",
+    "update_layout",
 ];
 
 #[component]

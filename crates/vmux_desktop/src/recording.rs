@@ -21,7 +21,7 @@ pub(crate) type WakeFn = Arc<dyn Fn() + Send + Sync>;
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const PERMISSION_MSG: &str = "Screen Recording permission required - grant it in System Settings > \
-Privacy & Security > Screen Recording, then call vmux_record_start again.";
+Privacy & Security > Screen Recording, then call record_start again.";
 
 /// Carries finalize outcomes from off-thread (stop/auto-stop) back to Bevy.
 /// `request_id == None` means an auto-stop (no pending query to answer).
