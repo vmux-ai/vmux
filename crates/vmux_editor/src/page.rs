@@ -328,7 +328,6 @@ fn render_preview(preview: &Preview) -> Element {
 pub fn Page() -> Element {
     use_theme();
     let mut path = use_signal(String::new);
-    let mut language = use_signal(String::new);
     let mut total_lines = use_signal(|| 0u32);
     let mut first_line = use_signal(|| 0u32);
     let mut lines = use_signal(Vec::<FileLine>::new);
@@ -363,7 +362,6 @@ pub fn Page() -> Element {
         }
         path.set(m.path);
         git_path.set(m.abs_path);
-        language.set(m.language);
         total_lines.set(m.total_lines);
         mode.set(Mode::Text);
         git_nonce.set(git_nonce() + 1);
@@ -484,6 +482,10 @@ pub fn Page() -> Element {
         .next()
         .unwrap_or_default()
         .to_string();
+    let header_path = {
+        let g = git_display();
+        if g.is_empty() { path() } else { g }
+    };
 
     rsx! {
         div {
@@ -645,13 +647,8 @@ pub fn Page() -> Element {
 
             div {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-white/[0.07] bg-black/20 px-4 font-sans text-xs text-muted-foreground",
-                span { class: "truncate", { if git_display().is_empty() { path() } else { git_display() } } }
-                if !language().is_empty() {
-                    span {
-                        class: "ml-auto shrink-0 rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] uppercase tracking-wide opacity-80",
-                        "{language}"
-                    }
-                }
+                {type_icon(&header_path, mode() == Mode::Dir, "h-4 w-4 shrink-0 text-foreground/80")}
+                span { class: "truncate text-foreground/90", "{header_path}" }
             }
 
             GitBar {
