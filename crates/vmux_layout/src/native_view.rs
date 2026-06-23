@@ -18,7 +18,7 @@ pub struct NodeId(pub String);
 pub struct LayoutView {
     pub tabs: Vec<TabView>,
     pub address: String,
-    pub stacks: Vec<StackView>,
+    pub panes: Vec<PaneView>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +27,13 @@ pub struct TabView {
     pub name: String,
     pub title: String,
     pub is_active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PaneView {
+    pub id: NodeId,
+    pub is_active: bool,
+    pub stacks: Vec<StackView>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,45 +58,64 @@ impl LayoutView {
                 })
             })
             .collect();
+        let active_pane = snapshot.focused.pane.as_deref();
         let active_stack = snapshot.focused.stack.as_deref();
-        let stacks = snapshot
+        let panes = snapshot
             .tabs
             .iter()
             .find(|t| t.is_active)
-            .map(|t| collect_stacks(&t.root, active_stack))
+            .map(|t| collect_panes(&t.root, active_pane, active_stack))
             .unwrap_or_default();
         LayoutView {
             tabs,
             address: focused_stack_url(snapshot),
-            stacks,
+            panes,
         }
     }
 }
 
-fn collect_stacks(root: &LayoutNode, active_stack: Option<&str>) -> Vec<StackView> {
+fn collect_panes(
+    root: &LayoutNode,
+    active_pane: Option<&str>,
+    active_stack: Option<&str>,
+) -> Vec<PaneView> {
     let mut out = Vec::new();
-    collect_stacks_into(root, active_stack, &mut out);
+    collect_panes_into(root, active_pane, active_stack, &mut out);
     out
 }
 
-fn collect_stacks_into(node: &LayoutNode, active_stack: Option<&str>, out: &mut Vec<StackView>) {
+fn collect_panes_into(
+    node: &LayoutNode,
+    active_pane: Option<&str>,
+    active_stack: Option<&str>,
+    out: &mut Vec<PaneView>,
+) {
     match node {
-        LayoutNode::Pane { stacks, .. } => {
-            for s in stacks {
-                let Some(id) = s.id.clone() else {
-                    continue;
-                };
-                let is_active = active_stack == Some(id.as_str());
-                out.push(StackView {
-                    id: NodeId(id),
-                    title: stack_display_title(s),
-                    is_active,
-                });
-            }
+        LayoutNode::Pane { id, stacks, .. } => {
+            let Some(pane_id) = id.clone() else {
+                return;
+            };
+            let pages = stacks
+                .iter()
+                .filter(|s| !(s.url.trim().is_empty() && s.title.trim() == "New Stack"))
+                .filter_map(|s| {
+                    let sid = s.id.clone()?;
+                    Some(StackView {
+                        id: NodeId(sid.clone()),
+                        title: stack_display_title(s),
+                        is_active: active_stack == Some(sid.as_str()),
+                    })
+                })
+                .collect();
+            out.push(PaneView {
+                is_active: active_pane == Some(pane_id.as_str()),
+                id: NodeId(pane_id),
+                stacks: pages,
+            });
         }
         LayoutNode::Split { children, .. } => {
             for c in children {
-                collect_stacks_into(c, active_stack, out);
+                collect_panes_into(c, active_pane, active_stack, out);
             }
         }
     }
@@ -443,11 +469,88 @@ mod tests {
             },
         };
         let view = LayoutView::from_snapshot(&snapshot);
-        assert_eq!(view.stacks.len(), 2);
-        assert_eq!(view.stacks[0].title, "One");
-        assert!(!view.stacks[0].is_active);
-        assert_eq!(view.stacks[1].title, "Two");
-        assert!(view.stacks[1].is_active);
+        assert_eq!(view.panes.len(), 1);
+        let pane = &view.panes[0];
+        assert!(pane.is_active);
+        assert_eq!(pane.stacks.len(), 2);
+        assert_eq!(pane.stacks[0].title, "One");
+        assert!(!pane.stacks[0].is_active);
+        assert_eq!(pane.stacks[1].title, "Two");
+        assert!(pane.stacks[1].is_active);
+    }
+
+    #[test]
+    fn from_snapshot_groups_stacks_per_pane_in_split() {
+        let pane = |pid: &str, sid: &str, title: &str| LayoutNode::Pane {
+            id: Some(pid.into()),
+            is_zoomed: false,
+            stacks: vec![crate::protocol::Stack {
+                id: Some(sid.into()),
+                title: title.into(),
+                ..Default::default()
+            }],
+        };
+        let snapshot = LayoutSnapshot {
+            tabs: vec![Tab {
+                id: Some("tab:1".into()),
+                name: "T".into(),
+                is_active: true,
+                root: LayoutNode::Split {
+                    id: Some("split:1".into()),
+                    direction: crate::protocol::SplitDirection::Row,
+                    flex_weights: vec![],
+                    children: vec![
+                        pane("pane:1", "stack:1", "Left"),
+                        pane("pane:2", "stack:2", "Right"),
+                    ],
+                },
+            }],
+            focused: Focus {
+                tab: Some("tab:1".into()),
+                pane: Some("pane:2".into()),
+                stack: Some("stack:2".into()),
+            },
+        };
+        let view = LayoutView::from_snapshot(&snapshot);
+        assert_eq!(view.panes.len(), 2);
+        assert_eq!(view.panes[0].id, NodeId("pane:1".into()));
+        assert!(!view.panes[0].is_active);
+        assert_eq!(view.panes[0].stacks[0].title, "Left");
+        assert_eq!(view.panes[1].id, NodeId("pane:2".into()));
+        assert!(view.panes[1].is_active);
+        assert_eq!(view.panes[1].stacks[0].title, "Right");
+    }
+
+    #[test]
+    fn from_snapshot_filters_empty_new_stack_placeholder() {
+        let snapshot = LayoutSnapshot {
+            tabs: vec![Tab {
+                id: Some("tab:1".into()),
+                name: "T".into(),
+                is_active: true,
+                root: LayoutNode::Pane {
+                    id: Some("pane:1".into()),
+                    is_zoomed: false,
+                    stacks: vec![
+                        crate::protocol::Stack {
+                            id: Some("stack:1".into()),
+                            title: "Real".into(),
+                            url: "https://example.com/".into(),
+                            ..Default::default()
+                        },
+                        crate::protocol::Stack {
+                            id: Some("stack:2".into()),
+                            title: "New Stack".into(),
+                            ..Default::default()
+                        },
+                    ],
+                },
+            }],
+            focused: Focus::default(),
+        };
+        let view = LayoutView::from_snapshot(&snapshot);
+        assert_eq!(view.panes[0].stacks.len(), 1);
+        assert_eq!(view.panes[0].stacks[0].title, "Real");
     }
 
     fn view(tabs: &[(&str, &str, bool)]) -> LayoutView {
@@ -462,7 +565,7 @@ mod tests {
                 })
                 .collect(),
             address: String::new(),
-            stacks: Vec::new(),
+            panes: Vec::new(),
         }
     }
 

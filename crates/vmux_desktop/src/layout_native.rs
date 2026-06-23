@@ -10,9 +10,11 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use objc2_quartz_core::CACornerMask;
-use vmux_command::{AppCommand, BrowserCommand, BrowserNavigationCommand, OpenCommand};
+use vmux_command::{AppCommand, BrowserCommand, BrowserNavigationCommand};
 use vmux_core::profile::active_profile_name;
-use vmux_layout::event::{CEF_RESERVED_HEIGHT_PX, SIDE_SHEET_WIDTH_PX, TabsCommandEvent};
+use vmux_layout::event::{
+    CEF_RESERVED_HEIGHT_PX, SIDE_SHEET_WIDTH_PX, SideSheetCommandEvent, TabsCommandEvent,
+};
 use vmux_layout::native_view::{CurrentLayoutView, LayoutRenderer, NodeId};
 use vmux_layout::protocol::parse_id;
 use vmux_layout::scene::InteractionMode;
@@ -26,7 +28,8 @@ enum LayoutAction {
     Back,
     Forward,
     Reload,
-    NewStack,
+    ActivateStack { pane: NodeId, index: u32 },
+    NewStackIn { pane: NodeId },
 }
 
 pub(crate) struct LayoutNativePlugin;
@@ -427,52 +430,89 @@ fn rebuild(
         state.actions.push(LayoutAction::NewTab);
     }
 
-    // Side sheet: one glass card per stack (h-9) + new-stack
-    let top_inset = 40.0;
+    // Side sheet: one glass card per pane; pages are rows inside (active = brighter fill).
+    let card_x = 12.0;
     let card_w = (sheet_w - 24.0).max(40.0);
-    let row_h = 36.0; // h-9
-    let card_y = |row: usize| {
-        let off = top_inset + row as f64 * (row_h + 6.0);
-        if flipped { off } else { height - off - row_h }
-    };
-    for (i, st) in current.0.stacks.iter().enumerate() {
+    let pad = 6.0; // p-1.5
+    let header_h = 18.0;
+    let row_h = 32.0;
+    let row_gap = 4.0;
+    let card_gap = 8.0; // mb-2
+    let row_x = pad;
+    let row_w = card_w - 2.0 * pad;
+    let mut cy = 40.0; // top inset
+    for (pi, pane) in current.0.panes.iter().enumerate() {
+        let n_rows = (pane.stacks.len() + 1) as f64; // pages + New Stack
+        let inner = header_h + 4.0 + n_rows * row_h + (n_rows - 1.0) * row_gap;
+        let card_h = pad * 2.0 + inner;
+        let card_top = if flipped { cy } else { height - cy - card_h };
         let card = glass_pill(
             mtm,
             content,
-            NSRect::new(NSPoint::new(12.0, card_y(i)), NSSize::new(card_w, row_h)),
-            8.0,
-            st.is_active,
+            NSRect::new(NSPoint::new(card_x, card_top), NSSize::new(card_w, card_h)),
+            12.0,
+            pane.is_active,
         );
         let cv: &NSView = &card;
         add_label(
             cv,
             mtm,
-            &st.title,
+            &format!("Stack {}", pi + 1),
             NSRect::new(
-                NSPoint::new(12.0, (row_h - 16.0) / 2.0),
-                NSSize::new(card_w - 24.0, 16.0),
+                NSPoint::new(row_x + 4.0, card_h - pad - header_h),
+                NSSize::new(row_w - 8.0, header_h),
             ),
             &NSColor::labelColor(),
         );
+        let row_top = |i: f64| card_h - (pad + header_h + 4.0 + i * (row_h + row_gap)) - row_h;
+        for (si, st) in pane.stacks.iter().enumerate() {
+            let tag = state.actions.len();
+            let bg = if st.is_active {
+                Some(white(0.16))
+            } else {
+                None
+            };
+            let b = fill_button(
+                cv,
+                mtm,
+                target_ref,
+                &st.title,
+                tag,
+                NSRect::new(
+                    NSPoint::new(row_x, row_top(si as f64)),
+                    NSSize::new(row_w, row_h),
+                ),
+                6.0,
+                bg.as_deref(),
+            );
+            state.buttons.push(b);
+            state.actions.push(LayoutAction::ActivateStack {
+                pane: pane.id.clone(),
+                index: si as u32,
+            });
+        }
+        {
+            let tag = state.actions.len();
+            let b = fill_button(
+                cv,
+                mtm,
+                target_ref,
+                "+ New Stack",
+                tag,
+                NSRect::new(
+                    NSPoint::new(row_x, row_top(pane.stacks.len() as f64)),
+                    NSSize::new(row_w, row_h),
+                ),
+                6.0,
+                None,
+            );
+            state.buttons.push(b);
+            state.actions.push(LayoutAction::NewStackIn {
+                pane: pane.id.clone(),
+            });
+        }
         state.glass.push(card);
-    }
-    {
-        let tag = state.actions.len();
-        let b = fill_button(
-            content,
-            mtm,
-            target_ref,
-            "+ New Stack",
-            tag,
-            NSRect::new(
-                NSPoint::new(12.0, card_y(current.0.stacks.len())),
-                NSSize::new(card_w, row_h),
-            ),
-            8.0,
-            Some(&white(0.04)),
-        );
-        state.buttons.push(b);
-        state.actions.push(LayoutAction::NewStack);
+        cy += card_h + card_gap;
     }
 }
 
@@ -513,10 +553,15 @@ fn drain_tab_clicks(
                     BrowserNavigationCommand::Reload,
                 )));
             }
-            LayoutAction::NewStack => {
-                app_commands.write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InNewStack { url: None },
-                )));
+            LayoutAction::ActivateStack { pane, index } => {
+                if let Ok((_, bits)) = parse_id(&pane.0) {
+                    trigger_side_sheet(&mut commands, "activate_stack", bits.to_string(), index);
+                }
+            }
+            LayoutAction::NewStackIn { pane } => {
+                if let Ok((_, bits)) = parse_id(&pane.0) {
+                    trigger_side_sheet(&mut commands, "new_stack", bits.to_string(), 0);
+                }
             }
         }
     }
@@ -528,6 +573,17 @@ fn trigger_tabs(commands: &mut Commands, command: &str, tab_id: Option<String>) 
         payload: TabsCommandEvent {
             command: command.to_string(),
             tab_id,
+        },
+    });
+}
+
+fn trigger_side_sheet(commands: &mut Commands, command: &str, pane_id: String, stack_index: u32) {
+    commands.trigger(bevy_cef::prelude::BinReceive::<SideSheetCommandEvent> {
+        webview: Entity::PLACEHOLDER,
+        payload: SideSheetCommandEvent {
+            command: command.to_string(),
+            pane_id,
+            stack_index,
         },
     });
 }
