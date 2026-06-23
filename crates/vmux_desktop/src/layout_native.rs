@@ -53,8 +53,13 @@ fn sync_layout_glass(
     let content: &NSView = unsafe { &*ns_view.cast::<NSView>() };
     let bounds = content.bounds();
     let header_h = CEF_RESERVED_HEIGHT_PX as f64;
+    let top_y = if content.isFlipped() {
+        0.0
+    } else {
+        bounds.size.height - header_h
+    };
     let frame = NSRect::new(
-        NSPoint::new(0.0, bounds.size.height - header_h),
+        NSPoint::new(0.0, top_y),
         NSSize::new(bounds.size.width, header_h),
     );
 
@@ -63,7 +68,11 @@ fn sync_layout_glass(
         glass.setStyle(NSGlassEffectViewStyle::Clear);
         glass.setTintColor(Some(&NSColor::clearColor()));
         let view: &NSView = &glass;
+        view.setWantsLayer(true);
         content.addSubview(view);
+        if let Some(layer) = view.layer() {
+            layer.setZPosition(200.0);
+        }
         state.header = Some(glass);
     }
 
