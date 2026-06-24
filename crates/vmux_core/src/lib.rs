@@ -1,6 +1,8 @@
 pub mod dom_snapshot;
+pub mod editor;
 pub mod event;
 pub mod process_id;
+pub use editor::{CursorPos, EditMode, KeymapKind, SelSpan};
 pub use process_id::ProcessId;
 
 #[cfg(not(target_arch = "wasm32"))]
