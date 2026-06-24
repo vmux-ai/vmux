@@ -13,6 +13,7 @@ pub struct ArchivedPage {
     pub space_id: String,
     pub closed_at: i64,
     pub launch: Option<TerminalLaunch>,
+    pub tab_index: Option<usize>,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -21,6 +22,7 @@ pub struct PageArchiveRequest {
     pub title: String,
     pub space_id: String,
     pub launch: Option<TerminalLaunch>,
+    pub tab_index: Option<usize>,
 }
 
 #[cfg(test)]

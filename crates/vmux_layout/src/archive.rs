@@ -13,6 +13,7 @@ use crate::event::TERMINAL_PAGE_URL;
 use crate::settings::LayoutSettings;
 use crate::space::{ActiveSpaceEntity, Space, SpaceId, space_of};
 use crate::stack::{FocusedStack, Stack, StackCommandSet};
+use crate::tab::Tab;
 use crate::window::spawn_tab_scaffold_in_space;
 
 const MAX_ARCHIVE_ENTRIES: usize = 25;
@@ -40,8 +41,10 @@ fn archive_on_stack_close(
     focused: Res<FocusedStack>,
     stack_pages: Query<(&PageMetadata, Option<&TerminalLaunch>), With<Stack>>,
     child_of: Query<&ChildOf>,
+    children_q: Query<&Children>,
     spaces: Query<(), With<Space>>,
     space_ids: Query<&SpaceId>,
+    tabs: Query<(), With<Tab>>,
     mut writer: MessageWriter<PageArchiveRequest>,
 ) {
     let mut closing = false;
@@ -65,16 +68,41 @@ fn archive_on_stack_close(
     if meta.url.is_empty() {
         return;
     }
-    let space_id = space_of(stack, &child_of, &spaces)
+    let space = space_of(stack, &child_of, &spaces);
+    let space_id = space
         .and_then(|s| space_ids.get(s).ok())
         .map(|id| id.0.clone())
         .unwrap_or_default();
+    let tab_index = space.and_then(|s| tab_index_of(stack, s, &child_of, &children_q, &tabs));
     writer.write(PageArchiveRequest {
         url: meta.url.clone(),
         title: meta.title.clone(),
         space_id,
         launch: launch.cloned(),
+        tab_index,
     });
+}
+
+fn tab_index_of(
+    stack: Entity,
+    space: Entity,
+    child_of: &Query<&ChildOf>,
+    children_q: &Query<&Children>,
+    tabs: &Query<(), With<Tab>>,
+) -> Option<usize> {
+    let mut cur = stack;
+    let tab = loop {
+        if tabs.get(cur).is_ok() {
+            break cur;
+        }
+        cur = child_of.get(cur).ok()?.parent();
+    };
+    children_q
+        .get(space)
+        .ok()?
+        .iter()
+        .filter(|e| tabs.get(*e).is_ok())
+        .position(|e| e == tab)
 }
 
 fn capture_archived_pages(mut reader: MessageReader<PageArchiveRequest>, mut commands: Commands) {
@@ -88,6 +116,7 @@ fn capture_archived_pages(mut reader: MessageReader<PageArchiveRequest>, mut com
             space_id: req.space_id.clone(),
             closed_at: now_millis(),
             launch: req.launch.clone(),
+            tab_index: req.tab_index,
         });
     }
 }
@@ -145,10 +174,11 @@ fn handle_reopen_closed_page(
         return;
     };
 
-    let target_space = spaces
+    let origin_space = spaces
         .iter()
         .find(|(_, id)| id.0 == page.space_id)
-        .map(|(e, _)| e)
+        .map(|(e, _)| e);
+    let target_space = origin_space
         .or_else(|| active_space.0.filter(|e| any_space.get(*e).is_ok()))
         .or_else(|| any_space.iter().next());
     let Some(space) = target_space else {
@@ -162,6 +192,11 @@ fn handle_reopen_closed_page(
         title: page.title.clone(),
         ..default()
     });
+    if origin_space == Some(space)
+        && let Some(idx) = page.tab_index
+    {
+        commands.entity(space).insert_children(idx, &[scaffold.tab]);
+    }
     commands
         .entity(space)
         .insert(vmux_history::LastActivatedAt::now());
@@ -218,6 +253,7 @@ mod tests {
             space_id: "s".to_string(),
             closed_at,
             launch: None,
+            tab_index: None,
         }
     }
 
@@ -233,6 +269,7 @@ mod tests {
                 title: "A".to_string(),
                 space_id: "s".to_string(),
                 launch: None,
+                tab_index: None,
             });
         app.update();
         let mut q = app.world_mut().query::<&ArchivedPage>();
@@ -253,6 +290,7 @@ mod tests {
                 title: String::new(),
                 space_id: "s".to_string(),
                 launch: None,
+                tab_index: None,
             });
         app.update();
         let mut q = app.world_mut().query::<&ArchivedPage>();
@@ -353,6 +391,43 @@ mod tests {
         assert!(drain_archive_reqs(&mut app).is_empty());
     }
 
+    #[test]
+    fn close_records_tab_index_of_closing_stack() {
+        let mut app = App::new();
+        app.add_message::<AppCommand>()
+            .add_message::<PageArchiveRequest>()
+            .init_resource::<FocusedStack>()
+            .add_systems(Update, super::archive_on_stack_close);
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        app.world_mut().spawn((Tab::default(), ChildOf(space)));
+        let tab1 = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let pane = app.world_mut().spawn(ChildOf(tab1)).id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "https://gone.example".to_string(),
+                    ..default()
+                },
+                ChildOf(pane),
+            ))
+            .id();
+        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
+        app.update();
+        let reqs = drain_archive_reqs(&mut app);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].tab_index, Some(1));
+    }
+
     fn reopen_app() -> App {
         let mut app = App::new();
         app.add_message::<AppCommand>()
@@ -394,6 +469,7 @@ mod tests {
             space_id: "s1".to_string(),
             closed_at: 5,
             launch: None,
+            tab_index: None,
         });
         dispatch_reopen(&mut app);
 
@@ -424,6 +500,7 @@ mod tests {
             space_id: "s1".to_string(),
             closed_at: 1,
             launch: None,
+            tab_index: None,
         });
         app.world_mut().spawn(ArchivedPage {
             url: "https://new.example".to_string(),
@@ -431,6 +508,7 @@ mod tests {
             space_id: "s1".to_string(),
             closed_at: 2,
             launch: None,
+            tab_index: None,
         });
         dispatch_reopen(&mut app);
         let opens = drain_opens(&mut app);
@@ -455,6 +533,7 @@ mod tests {
                 env: vec![],
                 kind: TerminalKind::Plain,
             }),
+            tab_index: None,
         });
         dispatch_reopen(&mut app);
         assert!(drain_opens(&mut app).is_empty());
@@ -492,6 +571,7 @@ mod tests {
                 env: vec![],
                 kind: TerminalKind::Claude,
             }),
+            tab_index: None,
         });
         dispatch_reopen(&mut app);
         assert!(drain_opens(&mut app).is_empty());
@@ -519,6 +599,7 @@ mod tests {
                 env: vec![],
                 kind: TerminalKind::Claude,
             }),
+            tab_index: None,
         });
         dispatch_reopen(&mut app);
         assert!(drain_opens(&mut app).is_empty());
@@ -555,11 +636,76 @@ mod tests {
             space_id: "ghost".to_string(),
             closed_at: 5,
             launch: None,
+            tab_index: None,
         });
         dispatch_reopen(&mut app);
         let opens = drain_opens(&mut app);
         assert_eq!(opens.len(), 1);
         let mut tabs = app.world_mut().query::<(&crate::tab::Tab, &ChildOf)>();
         assert!(tabs.iter(app.world()).any(|(_, co)| co.get() == active));
+    }
+
+    #[test]
+    fn reopen_restores_tab_at_original_index() {
+        let mut app = reopen_app();
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        let t0 = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let t1 = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        app.world_mut().spawn(ArchivedPage {
+            url: "https://z.example".to_string(),
+            title: String::new(),
+            space_id: "s1".to_string(),
+            closed_at: 5,
+            launch: None,
+            tab_index: Some(0),
+        });
+        dispatch_reopen(&mut app);
+
+        let tabs_q = app.world().entity(space).get::<Children>().unwrap();
+        let tab_order: Vec<Entity> = tabs_q.iter().collect();
+        assert_eq!(tab_order.len(), 3);
+        assert_ne!(tab_order[0], t0);
+        assert_ne!(tab_order[0], t1);
+        assert_eq!(tab_order[1], t0);
+        assert_eq!(tab_order[2], t1);
+    }
+
+    #[test]
+    fn reopen_appends_when_origin_space_gone() {
+        let mut app = reopen_app();
+        let active = app
+            .world_mut()
+            .spawn((Space, SpaceId("active".to_string())))
+            .id();
+        app.world_mut()
+            .insert_resource(crate::space::ActiveSpaceEntity(Some(active)));
+        let t0 = app
+            .world_mut()
+            .spawn((Tab::default(), ChildOf(active)))
+            .id();
+        let t1 = app
+            .world_mut()
+            .spawn((Tab::default(), ChildOf(active)))
+            .id();
+        app.world_mut().spawn(ArchivedPage {
+            url: "https://z.example".to_string(),
+            title: String::new(),
+            space_id: "ghost".to_string(),
+            closed_at: 5,
+            launch: None,
+            tab_index: Some(0),
+        });
+        dispatch_reopen(&mut app);
+
+        let tabs_q = app.world().entity(active).get::<Children>().unwrap();
+        let tab_order: Vec<Entity> = tabs_q.iter().collect();
+        assert_eq!(tab_order.len(), 3);
+        assert_eq!(tab_order[0], t0);
+        assert_eq!(tab_order[1], t1);
+        assert_ne!(tab_order[2], t0);
+        assert_ne!(tab_order[2], t1);
     }
 }
