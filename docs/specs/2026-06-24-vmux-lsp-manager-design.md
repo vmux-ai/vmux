@@ -1,8 +1,8 @@
 # `vmux://lsp` — Mason-style language-tool manager
 
 Date: 2026-06-24
-Branch: `editor-lsp` (design only; implementation is a follow-on — see "Relationship to M1")
-Status: design (umbrella)
+Branch: `editor-lsp` (single PR — M1 + the full manager ship together; do NOT split)
+Status: design (umbrella) — approved for single-PR implementation, scope A (editor stays read-only)
 
 ## Motivation
 
@@ -64,13 +64,19 @@ Two consequences shape the design:
   user's `mason/bin`), show it as "on PATH" and do not double-install.
 - **Login-shell `PATH`** when spawning servers, so the packaged `.app` finds tools,
   not just `make dev`.
+- **Lint-on-open runner**: installed linters run against the opened file (read-only)
+  and surface their output as diagnostics, merged with LSP diagnostics.
 
-## Non-goals (deferred)
+## Non-goals (this PR)
 
-- **Running** linters/formatters: no lint-runner; format-on-save needs the editing
-  surface. Installable in v1, executed in a later phase (P4) with its own design.
-- DAP/debuggers, and managing language *runtimes* themselves (node/python/cargo/go)
-  — for toolchain-dependent sources we **detect and guide**, we do not install the
+- **Running formatters / format-on-save**: needs a save (editing) surface, which the
+  read-only editor lacks. Formatters are **install-only** for now. (Linters *do* run
+  — see Goals / lint-on-open runner.)
+- **An editing surface** (cursor / edits / save / document-version sync): out of scope
+  for this PR — the editor stays read-only. Format-on-save and read-write LSP arrive
+  when an editing surface is added later.
+- DAP/debuggers, and managing language *runtimes* themselves (node/python/cargo/go) —
+  for toolchain-dependent sources we **detect and guide**, we do not install the
   runtime.
 - A bespoke catalog (we reuse mason-registry).
 
@@ -200,27 +206,29 @@ client on a worker thread.
   stack if suitable. Likely additions: `sha2`, and an archive crate set
   (`zip`, `flate2`, `tar`). Justify each against CEF build weight in the plan.
 
-## Phasing (each phase = its own implementation plan)
+## Build order (ALL in this one PR — do not split)
 
-- **P1 — servers, self-installable, page**: catalog (reuse mason-registry) + `github`
-  install engine + managed store + resolution + login-shell PATH + the `vmux://lsp`
-  page (browse/search/filter, install/uninstall, streamed progress) for LSP servers.
-  **~20-24 tasks.** Outcome: one-click rust-analyzer (no brew/rustup), diagnostics
-  light up; servers visible and manageable.
-- **P2 — more sources**: `npm`/`pypi`/`cargo`/`golang` handlers + toolchain
-  detection. ~10-12 tasks.
-- **P3 — updates/versions**: registry refresh, outdated detection, update/pin. ~6-8
-  tasks.
-- **P4 — linter/formatter consumers**: a lint-on-open runner; format-on-save once an
-  editing surface exists. Separate brainstorm (the manager already installs these;
-  this phase makes them *run*).
+The user wants M1 + the entire manager in a single PR on `editor-lsp`, tested once at
+the end. The phases below are a build *sequence*, not separate PRs. Because there is
+no incremental runtime testing, every phase leans hard on automated tests (unit +
+fixture-backed integration).
+
+- **B1 — catalog + github installs + page + resolution**: reuse mason-registry +
+  `github` install engine + managed store (`~/.vmux/lsp/`) + resolution + login-shell
+  PATH + the `vmux://lsp` page (browse/search/filter, install/uninstall, streamed
+  progress). Outcome: one-click rust-analyzer (no brew/rustup), diagnostics light up.
+- **B2 — more sources**: `npm`/`pypi`/`cargo`/`golang` handlers + toolchain detection.
+- **B3 — updates/versions**: registry refresh, outdated detection, update/uninstall.
+- **B4 — lint-on-open runner**: run installed linters against the open file and merge
+  their output into diagnostics (read-only compatible). **Format-on-save is excluded**
+  — it needs the (out-of-scope) editing surface; formatters remain install-only.
 
 ## Relationship to M1
 
-This builds on Milestone 1 (`editor-lsp` branch: client core + diagnostics). M1 should
-be runtime-verified and merged first; the manager is a follow-on that **extends**
-M1's `resolve_spec`/spawn. Implementation should start on its own worktree/branch off
-`origin/main` after M1 lands, not pile onto the M1 PR.
+This builds on Milestone 1 (client core + diagnostics, already implemented on
+`editor-lsp`) and **ships in the same PR** — M1 + B1-B4 together, one branch, one PR,
+tested once at the end. The manager **extends** M1's `resolve_spec`/spawn rather than
+replacing it. (Per user instruction: do NOT split into multiple PRs.)
 
 ## Open items for the P1 plan
 
