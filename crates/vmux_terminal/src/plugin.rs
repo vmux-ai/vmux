@@ -341,7 +341,7 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
         .add_message::<vmux_core::notify::BellReceived>()
         .add_systems(Update, apply_osc_title.after(poll_service_messages))
         .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
-        .add_systems(Update, blur_focus_aware_agents.after(poll_service_messages))
+        .add_systems(Update, sync_agent_focus.after(poll_service_messages))
         .add_systems(
             Update,
             handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
@@ -1031,30 +1031,65 @@ fn line_has_content(line: &vmux_core::event::TermLine) -> bool {
     line.spans.iter().any(|s| !s.text.trim().is_empty())
 }
 
-fn blur_focus_aware_agents(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentFocusTransition {
+    FocusIn,
+    FocusOut,
+}
+
+fn agent_focus_transition(
+    focus_reporting: bool,
+    active: bool,
+    blurred: bool,
+) -> Option<AgentFocusTransition> {
+    if !focus_reporting {
+        None
+    } else if active && blurred {
+        Some(AgentFocusTransition::FocusIn)
+    } else if !active && !blurred {
+        Some(AgentFocusTransition::FocusOut)
+    } else {
+        None
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn sync_agent_focus(
     agents: Query<
-        (Entity, &ProcessId),
-        (
-            With<vmux_core::agent::AgentSession>,
-            Without<AgentFocusBlurred>,
-        ),
+        (Entity, &ProcessId, Has<AgentFocusBlurred>),
+        With<vmux_core::agent::AgentSession>,
     >,
+    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
     mode_map: Res<TerminalModeMap>,
     service: Option<Res<ServiceClient>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };
-    for (entity, process_id) in &agents {
-        if mode_map
+    let active_pid = crate::target::active_terminal_for_tab(focus.stack, &terminals)
+        .and_then(|entity| agents.get(entity).ok().map(|(_, pid, _)| *pid));
+    for (entity, process_id, blurred) in &agents {
+        let focus_reporting = mode_map
             .modes
             .get(process_id)
-            .is_some_and(|m| m.focus_reporting)
-        {
-            service.0.send(ClientMessage::ProcessInput {
-                process_id: *process_id,
-                data: b"\x1b[O".to_vec(),
-            });
-            commands.entity(entity).insert(AgentFocusBlurred);
+            .is_some_and(|m| m.focus_reporting);
+        let active = Some(*process_id) == active_pid;
+        match agent_focus_transition(focus_reporting, active, blurred) {
+            Some(AgentFocusTransition::FocusIn) => {
+                service.0.send(ClientMessage::ProcessInput {
+                    process_id: *process_id,
+                    data: b"\x1b[I".to_vec(),
+                });
+                commands.entity(entity).remove::<AgentFocusBlurred>();
+            }
+            Some(AgentFocusTransition::FocusOut) => {
+                service.0.send(ClientMessage::ProcessInput {
+                    process_id: *process_id,
+                    data: b"\x1b[O".to_vec(),
+                });
+                commands.entity(entity).insert(AgentFocusBlurred);
+            }
+            None => {}
         }
     }
 }
@@ -1508,16 +1543,16 @@ fn is_non_character_key(key: KeyCode) -> bool {
     )
 }
 
-/// Handle keyboard input directly from Bevy, bypassing CEF round-trip.
-///
-/// Only routes input to the single focused terminal (CefKeyboardTarget is
-/// expected to mark exactly one entity). If multiple terminals are
-/// keyboard-targeted simultaneously, only the first is used and the rest
-/// are ignored — copy-mode and Cmd+C decisions are per-terminal so we
-/// must not broadcast them.
 fn handle_terminal_keyboard(
     mut er: MessageReader<KeyboardInput>,
-    targeted_terminals: Query<&ProcessId, (With<Terminal>, With<CefKeyboardTarget>)>,
+    targeted_terminals: Query<
+        (&ProcessId, &ChildOf),
+        (
+            With<Terminal>,
+            With<CefKeyboardTarget>,
+            Without<ProcessExited>,
+        ),
+    >,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -1529,7 +1564,9 @@ fn handle_terminal_keyboard(
     mut local_copy_mode: ResMut<LocalCopyModeState>,
 ) {
     let target_processes = resolve_terminal_input_targets(
-        targeted_terminals.iter().copied(),
+        targeted_terminals
+            .iter()
+            .map(|(pid, child_of)| (child_of.get(), *pid)),
         !keyboard_targets.is_empty(),
         focus.stack,
         terminals
@@ -1880,26 +1917,47 @@ fn key_char_eq(input: CopyModeKeyInput<'_>, expected: char) -> bool {
 }
 
 fn resolve_terminal_input_targets(
-    targeted_terminal_ids: impl IntoIterator<Item = ProcessId>,
+    targeted_terminal_ids_by_stack: impl IntoIterator<Item = (Entity, ProcessId)>,
     any_keyboard_target_active: bool,
-    focused_tab: Option<Entity>,
-    terminal_ids_by_tab: impl IntoIterator<Item = (Entity, ProcessId)>,
+    focused_stack: Option<Entity>,
+    terminal_ids_by_stack: impl IntoIterator<Item = (Entity, ProcessId)>,
     mode: vmux_layout::scene::InteractionMode,
 ) -> Vec<ProcessId> {
-    let targeted: Vec<ProcessId> = targeted_terminal_ids.into_iter().collect();
+    let targeted: Vec<(Entity, ProcessId)> = targeted_terminal_ids_by_stack.into_iter().collect();
+    let focused = focused_stack.and_then(|focused_stack| {
+        let focused: Vec<ProcessId> = terminal_ids_by_stack
+            .into_iter()
+            .filter_map(|(stack, process_id)| (stack == focused_stack).then_some(process_id))
+            .collect();
+        (!focused.is_empty()).then_some(focused)
+    });
     if !targeted.is_empty() {
-        return targeted;
+        if let Some(focused_stack) = focused_stack {
+            let focused: Vec<ProcessId> = targeted
+                .iter()
+                .filter_map(|(stack, process_id)| (*stack == focused_stack).then_some(*process_id))
+                .collect();
+            if !focused.is_empty() {
+                return focused;
+            }
+        }
+        if mode == vmux_layout::scene::InteractionMode::User
+            && let Some(focused) = focused
+        {
+            return focused;
+        }
+        if mode == vmux_layout::scene::InteractionMode::User && focused_stack.is_some() {
+            return Vec::new();
+        }
+        return targeted
+            .into_iter()
+            .map(|(_, process_id)| process_id)
+            .collect();
     }
     if any_keyboard_target_active || mode != vmux_layout::scene::InteractionMode::User {
         return Vec::new();
     }
-    let Some(focused_tab) = focused_tab else {
-        return Vec::new();
-    };
-    terminal_ids_by_tab
-        .into_iter()
-        .filter_map(|(tab, process_id)| (tab == focused_tab).then_some(process_id))
-        .collect()
+    focused.unwrap_or_default()
 }
 
 fn logical_key_to_bytes(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
@@ -2926,7 +2984,14 @@ fn on_restart_pty(
 /// visual/copy mode for the currently focused terminal process.
 fn handle_terminal_copy_mode_command(
     mut er: MessageReader<AppCommand>,
-    targeted_terminals: Query<&ProcessId, (With<Terminal>, With<CefKeyboardTarget>)>,
+    targeted_terminals: Query<
+        (&ProcessId, &ChildOf),
+        (
+            With<Terminal>,
+            With<CefKeyboardTarget>,
+            Without<ProcessExited>,
+        ),
+    >,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -2939,7 +3004,9 @@ fn handle_terminal_copy_mode_command(
         return;
     };
     let target_processes = resolve_terminal_input_targets(
-        targeted_terminals.iter().copied(),
+        targeted_terminals
+            .iter()
+            .map(|(pid, child_of)| (child_of.get(), *pid)),
         !keyboard_targets.is_empty(),
         focus.stack,
         terminals
@@ -3324,14 +3391,14 @@ mod tests {
 
     #[test]
     fn terminal_input_targets_fallback_to_focused_terminal_in_user_mode() {
-        let tab = Entity::from_bits(1);
+        let stack = Entity::from_bits(1);
         let process_id = process_id(7);
 
         let targets = resolve_terminal_input_targets(
             [],
             false,
-            Some(tab),
-            [(tab, process_id)],
+            Some(stack),
+            [(stack, process_id)],
             vmux_layout::scene::InteractionMode::User,
         );
 
@@ -3340,17 +3407,78 @@ mod tests {
 
     #[test]
     fn terminal_input_targets_do_not_steal_input_from_non_terminal_target() {
-        let tab = Entity::from_bits(1);
+        let stack = Entity::from_bits(1);
 
         let targets = resolve_terminal_input_targets(
             [],
             true,
-            Some(tab),
-            [(tab, process_id(7))],
+            Some(stack),
+            [(stack, process_id(7))],
             vmux_layout::scene::InteractionMode::User,
         );
 
         assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn terminal_input_targets_choose_focused_terminal_when_multiple_targets_exist() {
+        let stale_stack = Entity::from_bits(1);
+        let focused_stack = Entity::from_bits(2);
+        let stale_pid = process_id(7);
+        let focused_pid = process_id(8);
+
+        let targets = resolve_terminal_input_targets(
+            [(stale_stack, stale_pid), (focused_stack, focused_pid)],
+            true,
+            Some(focused_stack),
+            [(stale_stack, stale_pid), (focused_stack, focused_pid)],
+            vmux_layout::scene::InteractionMode::User,
+        );
+
+        assert_eq!(targets, vec![focused_pid]);
+    }
+
+    #[test]
+    fn terminal_input_targets_choose_focused_terminal_when_targets_are_stale() {
+        let stale_stack = Entity::from_bits(1);
+        let focused_stack = Entity::from_bits(2);
+        let stale_pid = process_id(7);
+        let focused_pid = process_id(8);
+
+        let targets = resolve_terminal_input_targets(
+            [(stale_stack, stale_pid)],
+            true,
+            Some(focused_stack),
+            [(stale_stack, stale_pid), (focused_stack, focused_pid)],
+            vmux_layout::scene::InteractionMode::User,
+        );
+
+        assert_eq!(targets, vec![focused_pid]);
+    }
+
+    #[test]
+    fn terminal_input_targets_ignore_stale_targets_when_focus_is_not_terminal() {
+        let stale_stack = Entity::from_bits(1);
+        let focused_stack = Entity::from_bits(2);
+        let stale_pid = process_id(7);
+
+        let targets = resolve_terminal_input_targets(
+            [(stale_stack, stale_pid)],
+            true,
+            Some(focused_stack),
+            [(stale_stack, stale_pid)],
+            vmux_layout::scene::InteractionMode::User,
+        );
+
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn agent_focus_transition_restores_focus_to_active_blurred_agent() {
+        assert_eq!(
+            agent_focus_transition(true, true, true),
+            Some(AgentFocusTransition::FocusIn)
+        );
     }
 
     #[test]

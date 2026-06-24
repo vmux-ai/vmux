@@ -26,12 +26,14 @@ pub use snapshot_result_handler::{SnapshotResultHandler, SnapshotResultRaw};
 // `CefKeyboardTarget` forwarding path (keyboard.rs), exactly as in OSR mode.
 pub struct FocusCanceler {
     object: *mut RcImpl<sys::cef_focus_handler_t, Self>,
+    wake: Option<TextureWake>,
 }
 
 impl FocusCanceler {
-    pub fn build() -> FocusHandler {
+    pub fn build(wake: Option<TextureWake>) -> FocusHandler {
         FocusHandler::new(Self {
             object: core::ptr::null_mut(),
+            wake,
         })
     }
 }
@@ -52,7 +54,10 @@ impl Clone for FocusCanceler {
             rc_impl.interface.add_ref();
             rc_impl
         };
-        Self { object }
+        Self {
+            object,
+            wake: self.wake.clone(),
+        }
     }
 }
 
@@ -65,6 +70,12 @@ impl WrapFocusHandler for FocusCanceler {
 impl ImplFocusHandler for FocusCanceler {
     fn on_set_focus(&self, _browser: Option<&mut Browser>, _source: FocusSource) -> c_int {
         1
+    }
+
+    fn on_got_focus(&self, _browser: Option<&mut Browser>) {
+        if let Some(wake) = &self.wake {
+            wake();
+        }
     }
 
     #[inline]
