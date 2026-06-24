@@ -3,4 +3,4 @@ name = "vmux_website"
 default_platform = "web"
 
 [web.app]
-title = "Vmux — agent-first workspace"
+title = "Vmux — The browser that ships code"

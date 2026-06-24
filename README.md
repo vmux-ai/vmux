@@ -1,5 +1,5 @@
 <h1 align="center">Vmux</h1>
-<p align="center">Vibe Multiplexer — an agent-first workspace with a browser and IDE built in. Co-work with agents in one shared space.</p>
+<p align="center"><b>The browser that ships code.</b> Browse, prompt, and build with agents — in one space.</p>
 
 <p align="center">
   <img src="icon.png" alt="Vmux icon" width="256" />
