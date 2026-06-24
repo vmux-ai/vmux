@@ -4,10 +4,18 @@ use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 
+pub mod archive;
+pub mod catalog;
 pub mod client;
+pub mod download;
 pub mod framing;
+pub mod install;
+pub mod lint;
 pub mod manager;
+pub mod purl;
 pub mod registry;
+pub mod store;
+pub mod target;
 
 /// Diagnostics for one file: its path plus the server's latest diagnostic set.
 pub type PathDiagnostics = (PathBuf, Vec<lsp_types::Diagnostic>);
