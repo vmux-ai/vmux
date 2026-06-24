@@ -44,7 +44,6 @@ pub fn sha256_file(path: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read as _, Write as _};
     use std::net::TcpListener;
 
     /// Minimal one-shot HTTP server returning `body`; returns its base URL.
