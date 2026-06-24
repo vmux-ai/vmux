@@ -1033,7 +1033,10 @@ fn line_has_content(line: &vmux_core::event::TermLine) -> bool {
 
 #[allow(clippy::type_complexity)]
 fn sync_agent_focus(
-    agents: Query<(Entity, &ProcessId, Has<AgentFocusBlurred>), With<vmux_core::agent::AgentSession>>,
+    agents: Query<
+        (Entity, &ProcessId, Has<AgentFocusBlurred>),
+        With<vmux_core::agent::AgentSession>,
+    >,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     mode_map: Res<TerminalModeMap>,
