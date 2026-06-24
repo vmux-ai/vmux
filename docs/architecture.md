@@ -32,9 +32,12 @@ both humans and agents tile, persist, and reconcile in real time.
   from the ground up, mapped onto the React model you already know.
 - **[Plugins](architecture/plugins.md)** — the `build()` contract, one capability per crate,
   and how the whole app is assembled from the plugin stack.
-- **[Co-working with agents](architecture/agent-first.md)** — the MCP surface,
-  the persistence daemon, and the scheme-gated security bridge.
+- **[Co-working with agents](architecture/agent-first.md)** — the MCP surface, anchored
+  agent spaces, and the workspace-as-an-API tool set.
+- **[Background Service](architecture/background-service.md)** — the launchd-supervised daemon
+  that owns PTYs and agent sessions so work outlives the window.
 - **[The layout model](architecture/layout-model.md)** — Space → Tab → Pane → Stack, the
   selection invariant, and structural persistence.
 - **[The render stack](architecture/render-stack.md)** — many CEF surfaces in one window,
-  zero-copy interop, Rust-all-the-way-down UI, and the 3D mode.
+  zero-copy interop, Rust-all-the-way-down UI, the `vmux://` scheme and its security gate,
+  and the 3D mode.

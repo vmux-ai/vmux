@@ -11,6 +11,13 @@ pub fn use_clipboard_copy() -> Callback<String> {
     })
 }
 
+pub fn use_copy_link() -> Callback<String> {
+    use_callback(|_id: String| {
+        #[cfg(target_arch = "wasm32")]
+        wasm::copy_link(_id);
+    })
+}
+
 pub fn use_dmg_download() -> Callback<()> {
     use_callback(|()| {
         #[cfg(target_arch = "wasm32")]
@@ -71,6 +78,18 @@ mod wasm {
         spawn(async move {
             if let Some(window) = web_sys::window() {
                 let _ = JsFuture::from(window.navigator().clipboard().write_text(&text)).await;
+            }
+        });
+    }
+
+    pub fn copy_link(id: String) {
+        spawn(async move {
+            if let Some(window) = web_sys::window() {
+                let loc = window.location();
+                let origin = loc.origin().unwrap_or_default();
+                let path = loc.pathname().unwrap_or_default();
+                let url = format!("{origin}{path}#{id}");
+                let _ = JsFuture::from(window.navigator().clipboard().write_text(&url)).await;
             }
         });
     }

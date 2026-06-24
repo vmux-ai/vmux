@@ -49,6 +49,12 @@ pub const DOCS: &[Doc] = &[
         content: include_str!("../../docs/architecture/agent-first.md"),
     },
     Doc {
+        slug: "background-service",
+        title: "Background Service",
+        group: "Architecture",
+        content: include_str!("../../docs/architecture/background-service.md"),
+    },
+    Doc {
         slug: "layout-model",
         title: "Layout",
         group: "Architecture",

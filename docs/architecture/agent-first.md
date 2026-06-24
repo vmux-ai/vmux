@@ -18,7 +18,8 @@ it gets the full tool surface; that's all the vibe CLI is wired to under the hoo
 The server is a thin front end: it connects to the `vmux_service` daemon over its
 Unix socket and forwards each call as a typed protocol message. The daemon — not
 the agent — owns the PTYs, terminals, and sessions, so work keeps running even if
-the agent process exits.
+the agent process exits. See **[Background Service](background-service.md)** for how that
+daemon is supervised and how the work it owns persists.
 
 Every agent is launched **anchored to its own Space** (`vmux mcp --anchor <id>`).
 Tool calls resolve relative to that anchor, so a background agent spawns its pages
@@ -41,29 +42,3 @@ core methods:
 - `read_layout` / `update_layout` — fetch the pane tree (stable ids), mutate it, and
   commit it back; Vmux diffs against the live graph and reconciles **React-style** — add
   panes, move stacks, shift focus, in one atomic transaction.
-
-## Persistence via a daemon
-
-Commands route through a `launchd`-supervised background daemon (`crates/vmux_service`)
-that owns the PTYs and agent sessions. Because it outlives the window, shells, long
-builds, and agent routines persist across app restarts — an agent can kick off a build,
-the app can close, and the output is still waiting when it reopens.
-
-## A privileged bridge behind a scheme gate
-
-Agents reach Vmux over MCP. Web pages reach it over a second, tightly gated path — and
-"the workspace is an API" invites the obvious question: can a random website drive it? No.
-
-The host bridge (`window.cef` — the messaging that lets a page read or command the
-workspace) only works for **trusted frames**: a page is trusted *iff* its URL is
-`vmux://<known-host>/`. `vmux://` is a registered scheme served only from bundled assets, so
-no web page can ever *be* at a `vmux://` URL — an unforgeable boundary, checked **per frame**
-(an `evil.com` iframe inside a trusted page is still rejected). Anything you browse over
-`https://` gets zero bridge access; calls are dropped before they reach the ECS, enforced in
-the browser process with a defense-in-depth check in the renderer.
-
-A second layer adds **least privilege** among trusted pages: each message type is bound to
-the page that may emit it (`for_hosts(&["history"])`, …), so a compromised Vmux page can't
-pivot to another's handlers — and the full Bevy Remote Protocol is locked to the `debug`
-page alone. The predicate lives in the patched `bevy_cef_core` (`url_is_trusted_embedded_page`),
-unit-tested against `https://evil.com`, `about:blank`, and bare `vmux://`.
