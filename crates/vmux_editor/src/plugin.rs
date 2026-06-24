@@ -13,6 +13,7 @@ use vmux_layout::Browser;
 
 use crate::dir::{list_dir, parent_listing};
 use crate::highlight::Highlighter;
+use crate::minimap::{MINIMAP_MAX_LINES, build_overview};
 use crate::preview;
 use crate::viewport::{clamp_top_line, rows_from_viewport, visible_slice};
 
@@ -276,6 +277,7 @@ fn send_initial_meta(
             if vp.rows > 0 {
                 emit_window(entity, buf, vp, &browsers, &mut commands);
             }
+            emit_overview(entity, buf, &browsers, &mut commands);
         }
         commands.entity(entity).insert(FileInitialMetaSent);
     }
@@ -358,6 +360,24 @@ fn emit_window(
             first_line: first,
             total_lines: total,
             lines,
+        },
+    ));
+}
+
+fn emit_overview(entity: Entity, buf: &FileBuffer, browsers: &Browsers, commands: &mut Commands) {
+    if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        return;
+    }
+    let total = buf.lines.len() as u32;
+    if total > MINIMAP_MAX_LINES {
+        return;
+    }
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        entity,
+        FILE_OVERVIEW_EVENT,
+        &FileOverviewPatch {
+            total_lines: total,
+            lines: build_overview(&buf.lines),
         },
     ));
 }
@@ -684,6 +704,7 @@ fn reload_changed_files(
             ));
             let vpc = *vp;
             emit_window(entity, &buf, &vpc, &browsers, &mut commands);
+            emit_overview(entity, &buf, &browsers, &mut commands);
         }
         commands.entity(entity).insert(buf);
     }

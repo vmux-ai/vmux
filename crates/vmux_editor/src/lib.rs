@@ -1,3 +1,4 @@
+pub mod minimap;
 pub mod viewport;
 
 #[cfg(not(target_arch = "wasm32"))]

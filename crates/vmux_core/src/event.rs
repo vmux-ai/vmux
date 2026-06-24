@@ -14,6 +14,7 @@ pub const TERM_LOADING_EVENT: &str = "term_loading";
 pub const SERVICE_UNAVAILABLE_EVENT: &str = "service_unavailable";
 pub const FILE_META_EVENT: &str = "file_meta";
 pub const FILE_VIEWPORT_EVENT: &str = "file_viewport";
+pub const FILE_OVERVIEW_EVENT: &str = "file_overview";
 pub const FILE_ERROR_EVENT: &str = "file_error";
 pub const FILE_RESIZE_EVENT: &str = "file_resize";
 pub const FILE_SCROLL_EVENT: &str = "file_scroll";
@@ -88,6 +89,55 @@ pub struct FileViewportPatch {
     pub first_line: u32,
     pub total_lines: u32,
     pub lines: Vec<FileLine>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct MinimapRun {
+    pub fg: [u8; 3],
+    pub start: u16,
+    pub len: u16,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct MinimapLine {
+    pub runs: Vec<MinimapRun>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileOverviewPatch {
+    pub total_lines: u32,
+    pub lines: Vec<MinimapLine>,
 }
 
 #[derive(
@@ -347,6 +397,35 @@ mod file_event_tests {
             parent_entries: vec![],
         };
         assert_eq!(e.parent_path, "/a");
+    }
+
+    #[test]
+    fn file_overview_patch_rkyv_roundtrip() {
+        let patch = FileOverviewPatch {
+            total_lines: 5000,
+            lines: vec![MinimapLine {
+                runs: vec![
+                    MinimapRun {
+                        fg: [220, 220, 170],
+                        start: 0,
+                        len: 2,
+                    },
+                    MinimapRun {
+                        fg: [86, 156, 214],
+                        start: 4,
+                        len: 6,
+                    },
+                ],
+            }],
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&patch).expect("ser");
+        let decoded =
+            rkyv::from_bytes::<FileOverviewPatch, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(decoded, patch);
+        assert_eq!(decoded.total_lines, 5000);
+        assert_eq!(decoded.lines[0].runs[1].fg, [86, 156, 214]);
+        assert_eq!(decoded.lines[0].runs[1].start, 4);
+        assert_eq!(decoded.lines[0].runs[1].len, 6);
     }
 }
 

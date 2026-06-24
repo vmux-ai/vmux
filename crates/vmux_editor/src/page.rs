@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::minimap::{line_to_y, sample_step, viewport_box, y_to_top_line};
 use crate::page_model::{clamp_selection, gutter_width, image_mime, span_style};
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -13,6 +14,7 @@ use wasm_bindgen::prelude::*;
 
 const CONTAINER_ID: &str = "file-container";
 const MEASURE_ID: &str = "file-measure";
+const MINIMAP_CANVAS_ID: &str = "file-minimap-canvas";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -331,6 +333,8 @@ pub fn Page() -> Element {
     let mut total_lines = use_signal(|| 0u32);
     let mut first_line = use_signal(|| 0u32);
     let mut lines = use_signal(Vec::<FileLine>::new);
+    let mut overview = use_signal(|| Option::<FileOverviewPatch>::None);
+    let mut dragging = use_signal(|| false);
     let mut error = use_signal(String::new);
     let dir_entries = use_signal(Vec::<FileDirEntry>::new);
     let parent_entries = use_signal(Vec::<FileDirEntry>::new);
@@ -363,6 +367,7 @@ pub fn Page() -> Element {
         path.set(m.path);
         git_path.set(m.abs_path);
         total_lines.set(m.total_lines);
+        overview.set(None);
         mode.set(Mode::Text);
         git_nonce.set(git_nonce() + 1);
     });
@@ -371,6 +376,10 @@ pub fn Page() -> Element {
         first_line.set(p.first_line);
         total_lines.set(p.total_lines);
         lines.set(p.lines);
+    });
+
+    let _ov = use_bin_event_listener::<FileOverviewPatch, _>(FILE_OVERVIEW_EVENT, move |p| {
+        overview.set(Some(p));
     });
 
     let _err = use_bin_event_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
@@ -473,6 +482,11 @@ pub fn Page() -> Element {
     use_effect(move || {
         setup_measurement(cell_dims);
         focus_container();
+    });
+
+    use_effect(move || {
+        let _ = cell_dims();
+        paint_minimap(&overview.read());
     });
 
     let gw = gutter_width(total_lines());
@@ -740,18 +754,51 @@ pub fn Page() -> Element {
                     if show_diff() {
                         DiffView { path: git_path, nonce: git_nonce }
                     } else {
-                        div { class: "min-h-0 flex-1 overflow-auto",
-                            div { class: "min-w-max py-2",
-                                for line in lines().iter() {
-                                    div { key: "{line.line_no}", class: "group flex hover:bg-white/[0.035]",
-                                        span {
-                                            class: "sticky left-0 z-[1] shrink-0 select-none bg-background pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
-                                            style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
-                                            "{line.line_no + 1}"
+                        div { class: "relative flex min-h-0 flex-1",
+                            div { class: "min-h-0 flex-1 overflow-auto",
+                                div { class: "min-w-max py-2",
+                                    for line in lines().iter() {
+                                        div { key: "{line.line_no}", class: "group flex hover:bg-white/[0.035]",
+                                            span {
+                                                class: "sticky left-0 z-[1] shrink-0 select-none bg-background pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
+                                                style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
+                                                "{line.line_no + 1}"
+                                            }
+                                            span { class: "whitespace-pre pr-8",
+                                                for (i, s) in line.spans.iter().enumerate() {
+                                                    span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                                                }
+                                            }
                                         }
-                                        span { class: "whitespace-pre pr-8",
-                                            for (i, s) in line.spans.iter().enumerate() {
-                                                span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                                    }
+                                }
+                            }
+                            if overview().is_some() {
+                                {
+                                    let (box_top, box_h) = viewport_box(
+                                        first_line(),
+                                        lines().len() as u16,
+                                        total_lines(),
+                                        100.0,
+                                    );
+                                    rsx! {
+                                        div {
+                                            class: "relative w-[120px] shrink-0 cursor-pointer border-l border-white/[0.06] bg-black/20",
+                                            onmousedown: move |e: Event<MouseData>| {
+                                                dragging.set(true);
+                                                minimap_scroll_to(&e, total_lines(), lines().len() as u16);
+                                            },
+                                            onmousemove: move |e: Event<MouseData>| {
+                                                if dragging() {
+                                                    minimap_scroll_to(&e, total_lines(), lines().len() as u16);
+                                                }
+                                            },
+                                            onmouseup: move |_| dragging.set(false),
+                                            onmouseleave: move |_| dragging.set(false),
+                                            canvas { id: MINIMAP_CANVAS_ID, class: "block h-full w-full" }
+                                            div {
+                                                class: "pointer-events-none absolute inset-x-0 rounded-sm bg-cyan-400/15 ring-1 ring-inset ring-cyan-400/40",
+                                                style: "top:{box_top}%;height:{box_h}%;",
                                             }
                                         }
                                     }
@@ -771,6 +818,80 @@ pub fn Page() -> Element {
                 message: git_message,
             }
         }
+    }
+}
+
+fn minimap_scroll_to(e: &Event<MouseData>, total: u32, rows: u16) {
+    let data = e.data();
+    let Some(raw) = data.downcast::<web_sys::MouseEvent>() else {
+        return;
+    };
+    let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(MINIMAP_CANVAS_ID))
+    else {
+        return;
+    };
+    let rect = el.get_bounding_client_rect();
+    if rect.height() <= 0.0 {
+        return;
+    }
+    let y = raw.client_y() as f64 - rect.top();
+    let top = y_to_top_line(y as f32, rect.height() as f32, total, rows);
+    let _ = try_cef_bin_emit_rkyv(&FileScrollEvent { top_line: top });
+}
+
+fn paint_minimap(ov: &Option<FileOverviewPatch>) {
+    let Some(ov) = ov.as_ref() else {
+        return;
+    };
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(canvas) = window
+        .document()
+        .and_then(|d| d.get_element_by_id(MINIMAP_CANVAS_ID))
+        .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+    else {
+        return;
+    };
+    let dpr = window.device_pixel_ratio().max(1.0);
+    let css_w = canvas.client_width() as f64;
+    let css_h = canvas.client_height() as f64;
+    if css_w <= 0.0 || css_h <= 0.0 {
+        return;
+    }
+    let bw = (css_w * dpr).round();
+    let bh = (css_h * dpr).round();
+    canvas.set_width(bw as u32);
+    canvas.set_height(bh as u32);
+    let Ok(Some(obj)) = canvas.get_context("2d") else {
+        return;
+    };
+    let Ok(ctx) = obj.dyn_into::<web_sys::CanvasRenderingContext2d>() else {
+        return;
+    };
+    ctx.clear_rect(0.0, 0.0, bw, bh);
+    let total = ov.total_lines;
+    if total == 0 {
+        return;
+    }
+    let height = bh as f32;
+    let step = sample_step(total, height);
+    let scale_x = dpr as f32;
+    let row_h = ((height / total as f32) * step as f32).max(1.0) as f64;
+    let n = ov.lines.len();
+    let mut li = 0usize;
+    while li < n {
+        let y = line_to_y(li as u32, total, height) as f64;
+        for run in &ov.lines[li].runs {
+            let [r, g, b] = run.fg;
+            ctx.set_fill_style_str(&format!("rgba({r},{g},{b},0.55)"));
+            let x = (run.start as f32 * scale_x) as f64;
+            let w = (run.len as f32 * scale_x) as f64;
+            ctx.fill_rect(x, y, w, row_h);
+        }
+        li += step;
     }
 }
 

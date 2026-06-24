@@ -48,6 +48,7 @@ web-sys = { version = "0.3", features = [
     "Window", "Document", "Element", "HtmlElement", "Node",
     "DomRect", "CssStyleDeclaration",
     "ResizeObserver", "ResizeObserverEntry",
-    "WheelEvent", "KeyboardEvent", "Location",
+    "WheelEvent", "KeyboardEvent", "MouseEvent", "Location",
+    "HtmlCanvasElement", "CanvasRenderingContext2d",
     "Blob", "Url",
 ] }
