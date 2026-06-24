@@ -3,15 +3,6 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use vmux_browser::HostFocusIntent;
 
-/// In [`HostFocusIntent::WinitHost`] (a terminal/OSR page is active) the winit content view must own
-/// macOS first-responder so Bevy delivers keys to the focused terminal. A windowed CEF page in the
-/// stack — e.g. a terminal webview that autofocuses on load, or the command bar modal — can steal it
-/// a frame or more later, so re-assert every frame. [`reclaim_first_responder`] is a no-op once the
-/// winit view already holds first-responder, so this only acts when it was stolen.
-///
-/// On the frame first-responder is reclaimed *from* a CEF subview, release all tracked keys: while a
-/// CEF subview held first-responder it consumed key-up events winit never saw, so modifiers (Cmd in
-/// particular) can be stuck "pressed" in [`ButtonInput`] and would swallow subsequent typing.
 pub(crate) fn apply_winit_host_focus(
     _non_send: NonSendMarker,
     intent: Res<HostFocusIntent>,
