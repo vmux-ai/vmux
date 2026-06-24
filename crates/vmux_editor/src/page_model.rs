@@ -1,4 +1,4 @@
-use vmux_core::event::{FileDirEntry, StyledSpan};
+use vmux_core::event::{DiagSeverity, FileDiagnostic, FileDirEntry, StyledSpan};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContentClass {
@@ -68,6 +68,46 @@ pub fn span_style(span: &StyledSpan) -> String {
     s
 }
 
+/// Highest-precedence severity among diagnostics on a given absolute line.
+pub fn line_severity(diags: &[FileDiagnostic], line: u32) -> Option<DiagSeverity> {
+    diags
+        .iter()
+        .filter(|d| d.line == line)
+        .map(|d| d.severity)
+        .min_by_key(|s| match s {
+            DiagSeverity::Error => 0,
+            DiagSeverity::Warning => 1,
+            DiagSeverity::Info => 2,
+            DiagSeverity::Hint => 3,
+        })
+}
+
+/// CSS class for a severity's color (Tailwind ansi palette).
+pub fn severity_color_class(sev: DiagSeverity) -> &'static str {
+    match sev {
+        DiagSeverity::Error => "text-ansi-1",
+        DiagSeverity::Warning => "text-ansi-3",
+        DiagSeverity::Info => "text-ansi-4",
+        DiagSeverity::Hint => "text-ansi-6",
+    }
+}
+
+/// Inline style for a diagnostic underline overlay positioned by char columns
+/// over a monospace line. `--cw` is the measured cell width (falls back to
+/// `1ch`). The box spans the line height (transparent) so it is an easy hover
+/// target; only its colored bottom border is visible, reading as an underline.
+pub fn squiggle_style(start_col: u32, end_col: u32, color_rgb: &str) -> String {
+    let width = end_col.saturating_sub(start_col).max(1);
+    format!(
+        "position:absolute;left:calc(var(--cw,1ch) * {start});\
+         width:calc(var(--cw,1ch) * {width});bottom:0;height:1.1em;\
+         border-bottom:2px solid {color};pointer-events:auto;",
+        start = start_col,
+        width = width,
+        color = color_rgb,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,6 +131,28 @@ mod tests {
         assert!(s.contains("color:rgb(10,20,30)"));
         assert!(s.contains("font-weight:700"));
         assert!(s.contains("font-style:italic"));
+    }
+
+    #[test]
+    fn line_severity_takes_most_severe() {
+        let mk = |line, sev| FileDiagnostic {
+            line,
+            start_col: 0,
+            end_col: 1,
+            severity: sev,
+            message: String::new(),
+            source: None,
+        };
+        let v = vec![mk(3, DiagSeverity::Warning), mk(3, DiagSeverity::Error)];
+        assert_eq!(line_severity(&v, 3), Some(DiagSeverity::Error));
+        assert_eq!(line_severity(&v, 4), None);
+    }
+
+    #[test]
+    fn squiggle_style_positions_by_columns() {
+        let s = squiggle_style(2, 6, "rgb(255,0,0)");
+        assert!(s.contains("left:calc(var(--cw,1ch) * 2)"));
+        assert!(s.contains("width:calc(var(--cw,1ch) * 4)"));
     }
 }
 
