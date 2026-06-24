@@ -59,21 +59,21 @@ impl Plugin for ManagerPlugin {
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
-/// Claim `vmux://lsp` page-open tasks and attach the embedded manager page.
-/// Without this, `Browser(Open)` falls through to the "Page not found" fallback
-/// (the manifest alone only covers embedded-host serving + restore, not page-open).
+/// Claim `vmux://lsp/` page-open tasks and attach the embedded manager page.
+/// Bare `vmux://lsp` is normalized to the canonical slash form upstream
+/// (`handle_page_open_requests`), so we only match the canonical form here.
 fn handle_lsp_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     mut attach_writer: MessageWriter<CefPageAttachRequest>,
     mut commands: Commands,
 ) {
     for (entity, task) in &tasks {
-        if task.url != "vmux://lsp" && task.url != "vmux://lsp/" {
+        if task.url != "vmux://lsp/" {
             continue;
         }
         attach_writer.write(CefPageAttachRequest {
             stack: task.stack,
-            url: "vmux://lsp/".to_string(),
+            url: task.url.clone(),
             title: "Language Servers".to_string(),
             bg_color: None,
         });
@@ -394,7 +394,7 @@ mod tests {
             .spawn(PageOpenTask {
                 id: vmux_core::PageOpenId::new(),
                 stack,
-                url: "vmux://lsp".to_string(),
+                url: "vmux://lsp/".to_string(),
                 request_id: None,
             })
             .id();

@@ -55,6 +55,9 @@ pub fn Page() -> Element {
     });
 
     use_effect(move || {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            doc.set_title("Language Servers");
+        }
         request_catalog(String::new(), false);
     });
 
