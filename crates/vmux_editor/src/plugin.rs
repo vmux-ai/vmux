@@ -511,6 +511,7 @@ fn drain_thumb_tasks(
 fn on_file_open(
     trigger: On<BinReceive<FileOpenEvent>>,
     mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -518,6 +519,7 @@ fn on_file_open(
     let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
         return;
     };
+    manager.close(&fv.path);
     let url = url::Url::from_file_path(&path)
         .map(|u| u.to_string())
         .unwrap_or_else(|_| format!("file://{}", path.to_string_lossy()));
@@ -533,7 +535,8 @@ fn on_file_open(
         .remove::<FileDir>()
         .remove::<FileBuffer>()
         .remove::<FileImage>()
-        .remove::<FileInitialMetaSent>();
+        .remove::<FileInitialMetaSent>()
+        .remove::<crate::lsp::manager::LspOpened>();
 }
 
 #[derive(Component)]
@@ -600,6 +603,7 @@ fn drain_file_changes(
 fn reload_changed_files(
     mut q: Query<(Entity, &FileView, &mut FileViewport), With<FileReloadRequested>>,
     browsers: NonSend<Browsers>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     for (entity, fv, mut vp) in &mut q {
@@ -686,6 +690,7 @@ fn reload_changed_files(
             emit_window(entity, &buf, &vpc, &browsers, &mut commands);
         }
         commands.entity(entity).insert(buf);
+        manager.change(&fv.path);
     }
 }
 

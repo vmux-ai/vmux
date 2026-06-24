@@ -28,7 +28,9 @@ pub type PendingMap = Arc<Mutex<HashMap<i64, std::sync::mpsc::Sender<serde_json:
 pub struct LspPlugin;
 
 impl Plugin for LspPlugin {
-    // Wired up in Task 10 once `manager::build` exists. Empty until then so the
-    // crate compiles through Tasks 5-9.
-    fn build(&self, _app: &mut App) {}
+    fn build(&self, app: &mut App) {
+        let outbox = LspOutbox::default();
+        app.insert_resource(outbox.clone());
+        manager::build(app, outbox);
+    }
 }

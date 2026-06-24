@@ -59,6 +59,154 @@ pub fn to_file_diagnostics(
         .collect()
 }
 
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+
+use bevy::prelude::*;
+
+use crate::lsp::client::{server_key, ServerClient};
+use crate::lsp::registry::{builtin_spec, executable_on_path, workspace_root};
+use crate::lsp::{LspOutbox, OpenDoc, ServerKey};
+
+const LSP_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Owns running servers + open documents. NonSend because `ServerClient` holds an
+/// `mpsc::Sender` (not `Sync`); mirrors how `FileWatch` is a NonSend resource.
+#[derive(Default)]
+pub struct LspManager {
+    servers: HashMap<ServerKey, ServerClient>,
+    open_docs: HashMap<PathBuf, OpenDoc>,
+    failed: HashSet<ServerKey>,
+    outbox: LspOutbox,
+}
+
+fn uri_for(path: &Path) -> Option<String> {
+    url::Url::from_file_path(path).ok().map(|u| u.to_string())
+}
+
+fn read_text(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > LSP_MAX_BYTES {
+        return None;
+    }
+    std::fs::read_to_string(path).ok()
+}
+
+impl LspManager {
+    fn ensure_server(
+        &mut self,
+        root: &Path,
+        spec: &crate::lsp::registry::ServerSpec,
+    ) -> Option<ServerKey> {
+        let key = server_key(root, spec);
+        if self.servers.contains_key(&key) {
+            return Some(key);
+        }
+        if self.failed.contains(&key) {
+            return None;
+        }
+        match ServerClient::spawn(spec, root, self.outbox.clone()) {
+            Ok(client) => {
+                self.servers.insert(key.clone(), client);
+                Some(key)
+            }
+            Err(e) => {
+                tracing::warn!(server = %spec.command, "lsp spawn/init failed: {e}");
+                self.failed.insert(key);
+                None
+            }
+        }
+    }
+
+    /// Open `path` (already known to be a text file) against its language server.
+    pub fn open(&mut self, path: &Path) {
+        if self.open_docs.contains_key(path) {
+            return;
+        }
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            return;
+        };
+        let Some(spec) = builtin_spec(ext) else {
+            return;
+        };
+        if !executable_on_path(&spec.command) {
+            tracing::info!(server = %spec.command, "lsp server not on PATH; skipping {ext}");
+            return;
+        }
+        let dir = path.parent().unwrap_or(path);
+        let root = workspace_root(dir, &spec.root_markers);
+        let Some(key) = self.ensure_server(&root, &spec) else {
+            return;
+        };
+        let (Some(uri), Some(text)) = (uri_for(path), read_text(path)) else {
+            return;
+        };
+        if let Some(client) = self.servers.get(&key) {
+            client.did_open(&uri, &spec.language_id, 1, &text);
+            self.open_docs
+                .insert(path.to_path_buf(), OpenDoc { key, version: 1 });
+        }
+    }
+
+    /// Notify the server that `path` changed on disk (watcher reload).
+    pub fn change(&mut self, path: &Path) {
+        let Some(doc) = self.open_docs.get_mut(path) else {
+            return;
+        };
+        let (Some(uri), Some(text)) = (uri_for(path), read_text(path)) else {
+            return;
+        };
+        doc.version += 1;
+        let version = doc.version;
+        let key = doc.key.clone();
+        if let Some(client) = self.servers.get(&key) {
+            client.did_change(&uri, version, &text);
+        }
+    }
+
+    /// Notify the server that `path` is no longer open.
+    pub fn close(&mut self, path: &Path) {
+        let Some(doc) = self.open_docs.remove(path) else {
+            return;
+        };
+        if let (Some(uri), Some(client)) = (uri_for(path), self.servers.get(&doc.key)) {
+            client.did_close(&uri);
+        }
+    }
+}
+
+/// Marker: this `FileView` has been opened in LSP.
+#[derive(Component)]
+pub struct LspOpened;
+
+use crate::plugin::{FileBuffer, FileView};
+
+/// Open freshly-loaded text buffers (skip error/dir/image buffers).
+fn lsp_open_documents(
+    q: Query<(Entity, &FileView, &FileBuffer), Without<LspOpened>>,
+    mut manager: NonSendMut<LspManager>,
+    mut commands: Commands,
+) {
+    for (entity, fv, buf) in &q {
+        if buf.language.starts_with("__error__:") {
+            continue;
+        }
+        manager.open(&fv.path);
+        commands.entity(entity).insert(LspOpened);
+    }
+}
+
+/// Called from `LspPlugin::build`. The manager shares the resource's `LspOutbox`
+/// Arc so server threads push into the same queue the drain system reads.
+/// `drain_lsp_diagnostics` is added to this tuple in Task 11.
+pub fn build(app: &mut App, outbox: LspOutbox) {
+    app.insert_non_send(LspManager {
+        outbox,
+        ..Default::default()
+    })
+    .add_systems(Update, lsp_open_documents);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
