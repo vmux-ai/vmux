@@ -106,6 +106,7 @@ impl Plugin for AgentPlugin {
             .init_resource::<AgentSessionDirty>()
             .add_message::<AgentCommandRequest>()
             .add_message::<FocusPaneRequest>()
+            .add_message::<RenameProfileRequest>()
             .add_message::<AgentQueryRequest>()
             .add_message::<ScreenshotRequest>()
             .add_message::<ScreenshotResponse>()
@@ -197,6 +198,7 @@ impl Plugin for AgentPlugin {
                 (
                     handle_spawn_agent_requests,
                     handle_focus_pane_requests.after(handle_agent_commands),
+                    handle_rename_profile_requests.after(handle_agent_commands),
                     respond_process_stack_spawn.after(handle_agent_commands),
                     handle_agent_page_open.in_set(PageOpenSet::HandleKnownPages),
                     handle_restart_agent_pty,
@@ -321,6 +323,28 @@ fn handle_focus_pane_requests(
     }
 }
 
+#[derive(Message, Clone)]
+struct RenameProfileRequest {
+    name: String,
+}
+
+fn handle_rename_profile_requests(
+    mut reader: MessageReader<RenameProfileRequest>,
+    active_space: Option<ResMut<ActiveSpace>>,
+) {
+    let Some(mut active) = active_space else {
+        return;
+    };
+    for req in reader.read() {
+        let name = req.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let _ = vmux_core::profile::set_display_name(name);
+        active.record.profile = name.to_string();
+    }
+}
+
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct AgentLookups<'w> {
     pub pid_to_entity: Option<Res<'w, vmux_terminal::pid::PidToEntity>>,
@@ -333,6 +357,7 @@ struct AgentSpaceWriters<'w, 's> {
     layout_apply: MessageWriter<'w, vmux_layout::reconcile::LayoutApplyRequest>,
     space_command: MessageWriter<'w, vmux_space::SpaceCommandRequest>,
     focus_pane: MessageWriter<'w, FocusPaneRequest>,
+    rename_profile: MessageWriter<'w, RenameProfileRequest>,
     issued: MessageWriter<'w, vmux_command::CommandIssued>,
     attention: MessageWriter<'w, vmux_core::notify::AgentAttention>,
     agents: Query<
@@ -668,6 +693,12 @@ fn handle_agent_commands(
                 writers
                     .focus_pane
                     .write(FocusPaneRequest { pane: pane.clone() });
+                AgentCommandResult::Ok
+            }
+            ServiceAgentCommand::RenameProfile { name } => {
+                writers
+                    .rename_profile
+                    .write(RenameProfileRequest { name: name.clone() });
                 AgentCommandResult::Ok
             }
             ServiceAgentCommand::UpdateSettings { path, value_json } => {

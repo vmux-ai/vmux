@@ -35,6 +35,10 @@ pub enum McpParamTool {
         description = "Focus a pane by id (from vmux_read_layout, e.g. \"pane:123\"), making it the active pane/stack so subsequent terminal_send and input target it."
     )]
     FocusPane { pane: String },
+    #[mcp(
+        description = "Rename the active profile's display name (the top-right identity pill / facepile). Updates the name only; the profile's storage is untouched."
+    )]
+    RenameProfile { name: String },
     #[mcp(description = "Select a tab by index (1-8).")]
     SelectTab { index: u8 },
     #[mcp(description = "Update a single vmux setting by dot-path. \
@@ -115,6 +119,12 @@ impl McpParamTool {
                     return Err("focus_pane.pane is empty".to_string());
                 }
                 Ok(AgentCommand::FocusPane { pane })
+            }
+            McpParamTool::RenameProfile { name } => {
+                if name.trim().is_empty() {
+                    return Err("rename_profile.name is empty".to_string());
+                }
+                Ok(AgentCommand::RenameProfile { name })
             }
             McpParamTool::SelectTab { index } => {
                 if !(1..=8).contains(&index) {
@@ -1066,6 +1076,25 @@ mod tests {
     #[test]
     fn terminal_send_missing_text_returns_error() {
         assert!(dispatch_from_tool_call("terminal_send", serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn rename_profile_dispatches_with_name() {
+        let command =
+            dispatch_command("rename_profile", serde_json::json!({"name": "Junichi"})).unwrap();
+        assert_eq!(
+            command,
+            AgentCommand::RenameProfile {
+                name: "Junichi".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn rename_profile_empty_name_returns_error() {
+        assert!(
+            dispatch_from_tool_call("rename_profile", serde_json::json!({"name": "  "})).is_err()
+        );
     }
 
     #[test]

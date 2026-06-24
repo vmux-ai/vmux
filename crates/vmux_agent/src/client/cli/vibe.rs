@@ -187,29 +187,19 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn build_args_trusts_workdir_and_resumes_when_given() {
-        let mcp = McpServerConfig {
-            command: "vmux".to_string(),
-            args: vec![],
-            cwd: None,
-        };
-        // Non-interactive launches must pass --trust so vibe loads the user
-        // config instead of falling back to default models.
-        assert_eq!(VibeStrategy.build_args(&mcp, None), vec!["--trust"]);
-        assert_eq!(
-            VibeStrategy.build_args(&mcp, Some("sid-1")),
-            vec!["--trust", "--resume", "sid-1"]
-        );
-    }
-
-    #[test]
-    fn auto_approve_follows_test_session() {
+    fn build_args_trust_resume_and_test_session_auto_approve() {
         let mcp = McpServerConfig {
             command: "vmux".to_string(),
             args: vec![],
             cwd: None,
         };
         let prev = std::env::var("VMUX_TEST").ok();
+        unsafe { std::env::remove_var("VMUX_TEST") };
+        assert_eq!(VibeStrategy.build_args(&mcp, None), vec!["--trust"]);
+        assert_eq!(
+            VibeStrategy.build_args(&mcp, Some("sid-1")),
+            vec!["--trust", "--resume", "sid-1"]
+        );
         unsafe { std::env::set_var("VMUX_TEST", "1") };
         assert!(
             VibeStrategy
@@ -218,12 +208,6 @@ mod tests {
                 .any(|a| a == "--auto-approve")
         );
         unsafe { std::env::remove_var("VMUX_TEST") };
-        assert!(
-            !VibeStrategy
-                .build_args(&mcp, None)
-                .iter()
-                .any(|a| a == "--auto-approve")
-        );
         if let Some(p) = prev {
             unsafe { std::env::set_var("VMUX_TEST", p) };
         }
