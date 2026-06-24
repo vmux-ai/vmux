@@ -1169,7 +1169,11 @@ mod tests {
             mode: EditMode::Insert,
             mode_label: "INSERT".into(),
             primary: CursorPos { line: 3, col: 5 },
-            selections: vec![SelSpan { line: 3, start: 0, end: 5 }],
+            selections: vec![SelSpan {
+                line: 3,
+                start: 0,
+                end: 5,
+            }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&e).unwrap();
         let back = rkyv::from_bytes::<FileCursorEvent, rkyv::rancor::Error>(&bytes).unwrap();

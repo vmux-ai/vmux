@@ -11,7 +11,7 @@ pub struct VimKeymap {
 }
 
 fn rep(cmd: EditCommand, n: usize) -> Vec<EditCommand> {
-    std::iter::repeat(cmd).take(n.max(1)).collect()
+    std::iter::repeat_n(cmd, n.max(1)).collect()
 }
 
 fn motion_for(key: &str) -> Option<Motion> {
@@ -56,13 +56,17 @@ impl VimKeymap {
         if let Some(op) = self.pending_op {
             self.pending_op = None;
             let _n = self.take_count();
-            if key.len() == 1 && key.chars().next() == Some(op) {
+            if key.len() == 1 && key.starts_with(op) {
                 return match op {
                     'd' => vec![DeleteLine],
                     'y' => vec![Move(Motion::LineStart), Select(Motion::LineEnd), Yank],
                     'c' => {
                         self.mode = EditMode::Insert;
-                        vec![Move(Motion::LineStart), DeleteToLineEnd, SetMode(EditMode::Insert)]
+                        vec![
+                            Move(Motion::LineStart),
+                            DeleteToLineEnd,
+                            SetMode(EditMode::Insert),
+                        ]
                     }
                     _ => vec![],
                 };
@@ -130,7 +134,11 @@ impl VimKeymap {
             }
             "o" => {
                 self.mode = EditMode::Insert;
-                vec![Move(Motion::LineEnd), InsertNewline, SetMode(EditMode::Insert)]
+                vec![
+                    Move(Motion::LineEnd),
+                    InsertNewline,
+                    SetMode(EditMode::Insert),
+                ]
             }
             "O" => {
                 self.mode = EditMode::Insert;
@@ -324,7 +332,10 @@ mod tests {
     #[test]
     fn i_enters_insert() {
         let mut km = VimKeymap::default();
-        assert_eq!(km.handle(&k("i")), vec![EditCommand::SetMode(EditMode::Insert)]);
+        assert_eq!(
+            km.handle(&k("i")),
+            vec![EditCommand::SetMode(EditMode::Insert)]
+        );
         assert_eq!(km.mode(), EditMode::Insert);
     }
 
@@ -334,7 +345,10 @@ mod tests {
         km.handle(&k("i"));
         assert_eq!(
             km.handle(&k("Escape")),
-            vec![EditCommand::Move(Motion::Left), EditCommand::SetMode(EditMode::Normal)]
+            vec![
+                EditCommand::Move(Motion::Left),
+                EditCommand::SetMode(EditMode::Normal)
+            ]
         );
         assert_eq!(km.mode(), EditMode::Normal);
     }
@@ -342,7 +356,10 @@ mod tests {
     #[test]
     fn visual_select_and_yank() {
         let mut km = VimKeymap::default();
-        assert_eq!(km.handle(&k("v")), vec![EditCommand::SetMode(EditMode::Visual)]);
+        assert_eq!(
+            km.handle(&k("v")),
+            vec![EditCommand::SetMode(EditMode::Visual)]
+        );
         assert_eq!(km.handle(&k("l")), vec![EditCommand::Select(Motion::Right)]);
         assert_eq!(km.handle(&k("y")), vec![EditCommand::Yank]);
         assert_eq!(km.mode(), EditMode::Normal);

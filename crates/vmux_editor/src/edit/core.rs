@@ -61,7 +61,12 @@ impl EditCore {
     }
 
     fn vis_col(&self, line_start: usize, col: usize) -> u32 {
-        let s: String = self.buffer.rope.slice(line_start..line_start + col).chars().collect();
+        let s: String = self
+            .buffer
+            .rope
+            .slice(line_start..line_start + col)
+            .chars()
+            .collect();
         UnicodeWidthStr::width(s.as_str()) as u32
     }
 
@@ -90,7 +95,11 @@ impl EditCore {
             let llen = self.buffer.line_len_chars(line);
             let sc = if line == l0 { r.start - ls } else { 0 };
             let ec = if line == l1 { r.end - ls } else { llen };
-            let end = if line < l1 { u32::MAX } else { self.vis_col(ls, ec) };
+            let end = if line < l1 {
+                u32::MAX
+            } else {
+                self.vis_col(ls, ec)
+            };
             out.push(SelSpan {
                 line: line as u32,
                 start: self.vis_col(ls, sc),
@@ -104,7 +113,8 @@ impl EditCore {
         self.last_group = None;
     }
     fn snapshot(&mut self) {
-        self.undo.push((self.buffer.rope.clone(), self.selections.clone()));
+        self.undo
+            .push((self.buffer.rope.clone(), self.selections.clone()));
         self.redo.clear();
     }
     fn checkpoint(&mut self, group: Group) {
@@ -351,7 +361,8 @@ impl EditCore {
             }
             EditCommand::Undo => {
                 if let Some((rope, sel)) = self.undo.pop() {
-                    self.redo.push((self.buffer.rope.clone(), self.selections.clone()));
+                    self.redo
+                        .push((self.buffer.rope.clone(), self.selections.clone()));
                     self.buffer.rope = rope;
                     self.selections = sel;
                     self.break_group();
@@ -361,7 +372,8 @@ impl EditCore {
             }
             EditCommand::Redo => {
                 if let Some((rope, sel)) = self.redo.pop() {
-                    self.undo.push((self.buffer.rope.clone(), self.selections.clone()));
+                    self.undo
+                        .push((self.buffer.rope.clone(), self.selections.clone()));
                     self.buffer.rope = rope;
                     self.selections = sel;
                     self.break_group();
@@ -447,10 +459,15 @@ mod tests {
     use super::*;
 
     fn core(text: &str) -> EditCore {
-        EditCore::new(PathBuf::from("a.txt"), "Plain Text".into(), text, EditMode::Insert)
+        EditCore::new(
+            PathBuf::from("a.txt"),
+            "Plain Text".into(),
+            text,
+            EditMode::Insert,
+        )
     }
     fn text_of(c: &EditCore) -> String {
-        c.buffer.to_string()
+        c.buffer.text()
     }
 
     #[test]

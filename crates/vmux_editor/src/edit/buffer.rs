@@ -74,7 +74,7 @@ impl TextBuffer {
         self.rope.remove(start..end);
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn text(&self) -> String {
         self.rope.to_string()
     }
 
@@ -132,9 +132,9 @@ mod tests {
     fn insert_remove() {
         let mut b = buf("ac");
         b.insert(1, "b");
-        assert_eq!(b.to_string(), "abc");
+        assert_eq!(b.text(), "abc");
         b.remove(1..2);
-        assert_eq!(b.to_string(), "ac");
+        assert_eq!(b.text(), "ac");
     }
 
     #[test]

@@ -12,9 +12,11 @@ use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpen
 use vmux_layout::Browser;
 
 use crate::dir::{list_dir, parent_listing};
-use crate::highlight::Highlighter;
+use crate::edit::highlight_cache::HighlightCache;
+use crate::edit::{EditCommand, EditCore, Selection};
+use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::preview;
-use crate::viewport::{clamp_top_line, rows_from_viewport, visible_slice};
+use crate::viewport::{clamp_top_line, rows_from_viewport, window_range};
 
 #[derive(Component, Clone, Debug)]
 pub struct FileView {
@@ -51,13 +53,35 @@ struct ThumbTask {
 }
 
 #[derive(Component)]
+pub struct EditState {
+    pub core: EditCore,
+    pub hl: HighlightCache,
+}
+
+#[derive(Component)]
+pub struct EditorKeymap(pub Box<dyn Keymap>);
+
+#[derive(Component)]
+struct LspEditDirty;
+
+struct ClipboardHandle(Option<arboard::Clipboard>);
+
+#[derive(Default)]
+struct SelfWrites(std::collections::HashMap<PathBuf, std::time::Instant>);
+
+#[derive(Component)]
 pub struct FileInitialMetaSent;
 
 #[derive(Component)]
 pub struct FileThemeSent;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
-type UnloadedFileView = (Without<FileBuffer>, Without<FileDir>, Without<FileImage>);
+type UnloadedFileView = (
+    Without<FileBuffer>,
+    Without<FileDir>,
+    Without<FileImage>,
+    Without<EditState>,
+);
 type ReadyUnsentMeta = (
     Without<FileInitialMetaSent>,
     With<vmux_core::page::PageReady>,
@@ -180,7 +204,18 @@ pub fn handle_file_page_open(
     }
 }
 
-fn load_file_buffers(q: Query<(Entity, &FileView), UnloadedFileView>, mut commands: Commands) {
+fn settings_keymap(settings: &Option<Res<vmux_setting::AppSettings>>) -> vmux_core::KeymapKind {
+    settings
+        .as_ref()
+        .map(|s| s.editor.keymap)
+        .unwrap_or_default()
+}
+
+fn load_file_buffers(
+    q: Query<(Entity, &FileView), UnloadedFileView>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    mut commands: Commands,
+) {
     for (entity, fv) in &q {
         if fv.path.is_dir() {
             let entries = list_dir(&fv.path);
@@ -213,21 +248,56 @@ fn load_file_buffers(q: Query<(Entity, &FileView), UnloadedFileView>, mut comman
             }
             continue;
         }
-        let hl = Highlighter::new();
-        match hl.load_file(&fv.path) {
-            Ok(out) => {
+        match std::fs::metadata(&fv.path).map(|m| m.len()) {
+            Ok(len) if len > crate::highlight::FILE_VIEW_MAX_BYTES => {
                 commands.entity(entity).insert(FileBuffer {
-                    language: out.language,
-                    lines: out.lines,
-                });
-            }
-            Err(message) => {
-                commands.entity(entity).insert(FileBuffer {
-                    language: format!("__error__:{message}"),
+                    language: format!(
+                        "__error__:file too large ({len} bytes, max {})",
+                        crate::highlight::FILE_VIEW_MAX_BYTES
+                    ),
                     lines: Vec::new(),
                 });
+                continue;
             }
+            Err(e) => {
+                commands.entity(entity).insert(FileBuffer {
+                    language: format!("__error__:cannot open {}: {e}", fv.path.display()),
+                    lines: Vec::new(),
+                });
+                continue;
+            }
+            _ => {}
         }
+        let text = match std::fs::read(&fv.path) {
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Ok(t) => t,
+                Err(_) => {
+                    commands.entity(entity).insert(FileBuffer {
+                        language: format!("__error__:not a UTF-8 text file: {}", fv.path.display()),
+                        lines: Vec::new(),
+                    });
+                    continue;
+                }
+            },
+            Err(e) => {
+                commands.entity(entity).insert(FileBuffer {
+                    language: format!("__error__:cannot read {}: {e}", fv.path.display()),
+                    lines: Vec::new(),
+                });
+                continue;
+            }
+        };
+        let hl = HighlightCache::new(&fv.path);
+        let kind = settings_keymap(&settings);
+        let core = EditCore::new(
+            fv.path.clone(),
+            hl.language.clone(),
+            &text,
+            kind.initial_mode(),
+        );
+        commands
+            .entity(entity)
+            .insert((EditState { core, hl }, EditorKeymap(kind.make())));
     }
 }
 
@@ -246,11 +316,11 @@ fn display_path(path: &std::path::Path) -> String {
 }
 
 fn send_initial_meta(
-    q: Query<(Entity, &FileView, &FileBuffer, &FileViewport), ReadyUnsentMeta>,
+    q: Query<(Entity, &FileBuffer), ReadyUnsentMeta>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, fv, buf, vp) in &q {
+    for (entity, buf) in &q {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
@@ -262,21 +332,50 @@ fn send_initial_meta(
                     message: message.to_string(),
                 },
             ));
-        } else {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                FILE_META_EVENT,
-                &FileMetaEvent {
-                    path: display_path(&fv.path),
-                    abs_path: fv.path.to_string_lossy().into_owned(),
-                    language: buf.language.clone(),
-                    total_lines: buf.lines.len() as u32,
-                },
-            ));
-            if vp.rows > 0 {
-                emit_window(entity, buf, vp, &browsers, &mut commands);
-            }
         }
+        commands.entity(entity).insert(FileInitialMetaSent);
+    }
+}
+
+fn send_initial_text_meta(
+    mut q: Query<
+        (
+            Entity,
+            &FileView,
+            &mut EditState,
+            &EditorKeymap,
+            &FileViewport,
+        ),
+        ReadyUnsentMeta,
+    >,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, fv, mut edit, keymap, vp) in &mut q {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            FILE_META_EVENT,
+            &FileMetaEvent {
+                path: display_path(&fv.path),
+                abs_path: fv.path.to_string_lossy().into_owned(),
+                language: edit.core.buffer.language.clone(),
+                total_lines: edit.core.buffer.len_lines() as u32,
+            },
+        ));
+        if vp.rows > 0 {
+            emit_window(entity, &mut edit, vp, &browsers, &mut commands);
+        }
+        emit_cursor(
+            entity,
+            &edit.core,
+            keymap.0.as_ref(),
+            vp,
+            &browsers,
+            &mut commands,
+        );
         commands.entity(entity).insert(FileInitialMetaSent);
     }
 }
@@ -339,7 +438,7 @@ fn send_initial_dir(
 
 fn emit_window(
     entity: Entity,
-    buf: &FileBuffer,
+    edit: &mut EditState,
     vp: &FileViewport,
     browsers: &Browsers,
     commands: &mut Commands,
@@ -347,10 +446,11 @@ fn emit_window(
     if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
         return;
     }
-    let total = buf.lines.len() as u32;
-    let slice = visible_slice(total, vp.top_line, vp.rows);
-    let first = slice.start as u32;
-    let lines = buf.lines[slice].to_vec();
+    let total = edit.core.buffer.len_lines() as u32;
+    let (first, end) = window_range(total, vp.top_line, vp.rows);
+    let lines = edit
+        .hl
+        .line_window(&edit.core.buffer.rope, first as usize, end as usize);
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_VIEWPORT_EVENT,
@@ -358,6 +458,29 @@ fn emit_window(
             first_line: first,
             total_lines: total,
             lines,
+        },
+    ));
+}
+
+fn emit_cursor(
+    entity: Entity,
+    core: &EditCore,
+    keymap: &dyn Keymap,
+    vp: &FileViewport,
+    browsers: &Browsers,
+    commands: &mut Commands,
+) {
+    if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        return;
+    }
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        entity,
+        FILE_CURSOR_EVENT,
+        &FileCursorEvent {
+            mode: keymap.mode(),
+            mode_label: keymap.mode_label(),
+            primary: core.cursor_pos(),
+            selections: core.sel_spans(vp.top_line, vp.rows),
         },
     ));
 }
@@ -381,34 +504,38 @@ fn reset_file_sent_markers_on_page_ready(
 
 fn on_file_resize(
     trigger: On<BinReceive<FileResizeEvent>>,
-    mut q: Query<(&mut FileViewport, Option<&FileBuffer>)>,
+    mut q: Query<(&mut FileViewport, Option<&mut EditState>)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let Ok((mut vp, buf)) = q.get_mut(entity) else {
+    let Ok((mut vp, edit)) = q.get_mut(entity) else {
         return;
     };
     vp.rows = rows_from_viewport(evt.char_height, evt.viewport_height);
-    if let Some(buf) = buf {
-        emit_window(entity, buf, &vp, &browsers, &mut commands);
+    if let Some(mut edit) = edit {
+        edit.core.rows = vp.rows;
+        let vpc = *vp;
+        emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
     }
 }
 
 fn on_file_scroll(
     trigger: On<BinReceive<FileScrollEvent>>,
-    mut q: Query<(&FileBuffer, &mut FileViewport)>,
+    mut q: Query<(&mut EditState, &mut FileViewport)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let Ok((buf, mut vp)) = q.get_mut(entity) else {
+    let Ok((mut edit, mut vp)) = q.get_mut(entity) else {
         return;
     };
-    vp.top_line = clamp_top_line(evt.top_line, buf.lines.len() as u32, vp.rows);
-    emit_window(entity, buf, &vp, &browsers, &mut commands);
+    let total = edit.core.buffer.len_lines() as u32;
+    vp.top_line = clamp_top_line(evt.top_line, total, vp.rows);
+    let vpc = *vp;
+    emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
 }
 
 fn send_initial_image(
@@ -537,6 +664,9 @@ fn on_file_open(
         .remove::<FileDir>()
         .remove::<FileBuffer>()
         .remove::<FileImage>()
+        .remove::<EditState>()
+        .remove::<EditorKeymap>()
+        .remove::<LspEditDirty>()
         .remove::<FileInitialMetaSent>()
         .remove::<crate::lsp::manager::LspOpened>()
         .remove::<crate::lsp::manager::LintRan>();
@@ -579,6 +709,7 @@ fn reconcile_file_watches(q: Query<&FileView>, watch: Option<NonSendMut<FileWatc
 
 fn drain_file_changes(
     watch: Option<NonSend<FileWatch>>,
+    self_writes: Option<NonSendMut<SelfWrites>>,
     q: Query<(Entity, &FileView)>,
     mut commands: Commands,
 ) {
@@ -596,20 +727,31 @@ fn drain_file_changes(
     if changed.is_empty() {
         return;
     }
+    let mut sw = self_writes;
+    if let Some(sw) = sw.as_mut() {
+        sw.0.retain(|_, t| t.elapsed() < std::time::Duration::from_secs(2));
+    }
     for (entity, fv) in &q {
-        if changed.contains(&canon(&fv.path)) {
-            commands.entity(entity).insert(FileReloadRequested);
+        let cp = canon(&fv.path);
+        if !changed.contains(&cp) {
+            continue;
         }
+        if let Some(sw) = sw.as_ref()
+            && sw.0.contains_key(&cp)
+        {
+            continue;
+        }
+        commands.entity(entity).insert(FileReloadRequested);
     }
 }
 
 fn reload_changed_files(
-    mut q: Query<(Entity, &FileView, &mut FileViewport), With<FileReloadRequested>>,
+    q: Query<(Entity, &FileView, Option<&EditState>), With<FileReloadRequested>>,
     browsers: NonSend<Browsers>,
     mut manager: NonSendMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
-    for (entity, fv, mut vp) in &mut q {
+    for (entity, fv, edit) in &q {
         commands.entity(entity).remove::<FileReloadRequested>();
         let ready = browsers.has_browser(entity) && browsers.host_emit_ready(&entity);
 
@@ -659,44 +801,229 @@ fn reload_changed_files(
             continue;
         }
 
-        let hl = Highlighter::new();
-        let buf = match hl.load_file(&fv.path) {
-            Ok(out) => FileBuffer {
-                language: out.language,
-                lines: out.lines,
-            },
-            Err(message) => {
-                if ready {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(
-                        entity,
-                        FILE_ERROR_EVENT,
-                        &FileErrorEvent { message },
-                    ));
-                }
-                continue;
+        // Text file: keep unsaved edits, surface a conflict banner instead of clobbering.
+        if let Some(edit) = edit
+            && edit.core.dirty
+        {
+            if ready {
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    entity,
+                    FILE_EXTERNAL_CHANGE_EVENT,
+                    &FileExternalChange {
+                        path: display_path(&fv.path),
+                    },
+                ));
             }
-        };
-        let total = buf.lines.len() as u32;
-        vp.top_line = clamp_top_line(vp.top_line, total, vp.rows);
-        if ready {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                FILE_META_EVENT,
-                &FileMetaEvent {
-                    path: display_path(&fv.path),
-                    abs_path: fv.path.to_string_lossy().into_owned(),
-                    language: buf.language.clone(),
-                    total_lines: total,
-                },
-            ));
-            let vpc = *vp;
-            emit_window(entity, &buf, &vpc, &browsers, &mut commands);
+            continue;
         }
+        // Not dirty: drop state and let load_file_buffers rebuild from disk.
         commands
             .entity(entity)
-            .insert(buf)
+            .remove::<EditState>()
+            .remove::<FileBuffer>()
+            .remove::<FileInitialMetaSent>()
             .remove::<crate::lsp::manager::LintRan>();
         manager.change(&fv.path);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_commands(
+    entity: Entity,
+    cmds: Vec<EditCommand>,
+    edit: &mut EditState,
+    keymap: &dyn Keymap,
+    vp: &mut FileViewport,
+    clipboard: &mut ClipboardHandle,
+    self_writes: &mut SelfWrites,
+    browsers: &Browsers,
+    commands: &mut Commands,
+) -> bool {
+    let mut text_changed = false;
+    let mut sel_or_mode = false;
+    let mut dirty_changed = false;
+    for cmd in cmds {
+        if matches!(cmd, EditCommand::Save) {
+            let body = edit.core.buffer.text();
+            if std::fs::write(&edit.core.buffer.path, body).is_ok() {
+                self_writes
+                    .0
+                    .insert(canon(&edit.core.buffer.path), std::time::Instant::now());
+                if edit.core.dirty {
+                    edit.core.dirty = false;
+                    dirty_changed = true;
+                }
+                commands
+                    .entity(entity)
+                    .insert(LspEditDirty)
+                    .remove::<crate::lsp::manager::LintRan>();
+            }
+            continue;
+        }
+        if matches!(cmd, EditCommand::Paste | EditCommand::PasteBefore)
+            && let Some(cb) = clipboard.0.as_mut()
+            && let Ok(s) = cb.get_text()
+        {
+            edit.core.register = Some((s, false));
+        }
+        let out = edit.core.apply(cmd);
+        if out.text_changed {
+            text_changed = true;
+            let (l, _) = edit.core.buffer.char_to_coords(edit.core.primary().head);
+            edit.hl.invalidate_from(l.saturating_sub(1));
+        }
+        sel_or_mode |= out.sel_changed || out.mode_changed;
+        dirty_changed |= out.dirty_changed;
+        if let Some((s, _)) = out.yank
+            && let Some(cb) = clipboard.0.as_mut()
+        {
+            let _ = cb.set_text(s);
+        }
+    }
+    if let Some(top) = edit.core.autoscroll(vp.top_line, vp.rows) {
+        vp.top_line = top;
+        text_changed = true;
+    }
+    let vpc = *vp;
+    if text_changed {
+        emit_window(entity, edit, &vpc, browsers, commands);
+    }
+    if text_changed || sel_or_mode {
+        emit_cursor(entity, &edit.core, keymap, &vpc, browsers, commands);
+    }
+    if dirty_changed {
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            FILE_DIRTY_EVENT,
+            &FileDirtyEvent {
+                dirty: edit.core.dirty,
+            },
+        ));
+    }
+    text_changed
+}
+
+fn on_file_key(
+    trigger: On<BinReceive<FileKeyEvent>>,
+    mut q: Query<(&mut EditState, &mut EditorKeymap, &mut FileViewport)>,
+    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let evt = &trigger.event().payload;
+    let Ok((mut edit, mut keymap, mut vp)) = q.get_mut(entity) else {
+        return;
+    };
+    let input = KeyInput {
+        key: evt.key.clone(),
+        mods: Mods {
+            ctrl: evt.mods.ctrl,
+            alt: evt.mods.alt,
+            shift: evt.mods.shift,
+            meta: evt.mods.meta,
+        },
+        repeat: evt.repeat,
+    };
+    let cmds = keymap.0.handle(&input);
+    if cmds.is_empty() {
+        return;
+    }
+    run_commands(
+        entity,
+        cmds,
+        &mut edit,
+        keymap.0.as_ref(),
+        &mut vp,
+        &mut clipboard,
+        &mut self_writes,
+        &browsers,
+        &mut commands,
+    );
+}
+
+fn on_file_text_input(
+    trigger: On<BinReceive<FileTextInput>>,
+    mut q: Query<(&mut EditState, &EditorKeymap, &mut FileViewport)>,
+    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let text = trigger.event().payload.text.clone();
+    if text.is_empty() {
+        return;
+    }
+    let Ok((mut edit, keymap, mut vp)) = q.get_mut(entity) else {
+        return;
+    };
+    if !keymap.0.mode().accepts_text() {
+        return;
+    }
+    run_commands(
+        entity,
+        vec![EditCommand::InsertText(text)],
+        &mut edit,
+        keymap.0.as_ref(),
+        &mut vp,
+        &mut clipboard,
+        &mut self_writes,
+        &browsers,
+        &mut commands,
+    );
+}
+
+fn on_file_pointer(
+    trigger: On<BinReceive<FilePointerEvent>>,
+    mut q: Query<(&mut EditState, &EditorKeymap, &FileViewport)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let p = trigger.event().payload;
+    let Ok((mut edit, keymap, vp)) = q.get_mut(entity) else {
+        return;
+    };
+    let at = edit
+        .core
+        .buffer
+        .coords_to_char(p.line as usize, p.col as usize);
+    if p.extend {
+        let anchor = edit.core.primary().anchor;
+        edit.core.selections = vec![Selection { anchor, head: at }];
+    } else {
+        edit.core.set_caret(at);
+    }
+    emit_cursor(
+        entity,
+        &edit.core,
+        keymap.0.as_ref(),
+        vp,
+        &browsers,
+        &mut commands,
+    );
+}
+
+fn flush_lsp_changes(
+    time: Res<Time>,
+    mut acc: Local<f32>,
+    q: Query<(Entity, &FileView), With<LspEditDirty>>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
+) {
+    if q.is_empty() {
+        return;
+    }
+    *acc += time.delta_secs();
+    if *acc < 0.15 {
+        return;
+    }
+    *acc = 0.0;
+    for (entity, fv) in &q {
+        manager.change(&fv.path);
+        commands.entity(entity).remove::<LspEditDirty>();
     }
 }
 
@@ -726,12 +1053,17 @@ impl Plugin for EditorPlugin {
             }
             Err(e) => tracing::warn!("file watcher init failed: {e}"),
         }
-        app.add_plugins(crate::lsp::LspPlugin)
+        app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
+            .insert_non_send(SelfWrites::default())
+            .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
                 FileScrollEvent,
                 FilePreviewRequest,
                 FileOpenEvent,
+                FileTextInput,
+                FileKeyEvent,
+                FilePointerEvent,
             )>::default())
             .add_systems(
                 Update,
@@ -742,11 +1074,13 @@ impl Plugin for EditorPlugin {
                 (
                     load_file_buffers,
                     send_initial_meta,
+                    send_initial_text_meta,
                     send_initial_dir,
                     send_initial_image,
                     send_file_theme,
                     drain_thumb_tasks,
                     reconcile_file_watches,
+                    flush_lsp_changes,
                     (drain_file_changes, reload_changed_files).chain(),
                 ),
             )
@@ -754,7 +1088,50 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_resize)
             .add_observer(on_file_scroll)
             .add_observer(on_file_preview_request)
-            .add_observer(on_file_open);
+            .add_observer(on_file_open)
+            .add_observer(on_file_key)
+            .add_observer(on_file_text_input)
+            .add_observer(on_file_pointer);
+    }
+}
+
+#[cfg(test)]
+mod edit_flow_tests {
+    use super::*;
+    use crate::keymap::{KeyInput, KeymapKindExt, Mods};
+
+    #[test]
+    fn vim_dd_deletes_line_via_keymap_and_core() {
+        let mut km = vmux_core::KeymapKind::Vim.make();
+        let mut core = EditCore::new(
+            std::path::PathBuf::from("a.txt"),
+            "Plain Text".into(),
+            "one\ntwo\nthree\n",
+            crate::edit::EditMode::Normal,
+        );
+        for key in ["d", "d"] {
+            for cmd in km.handle(&KeyInput {
+                key: key.into(),
+                mods: Mods::default(),
+                repeat: false,
+            }) {
+                core.apply(cmd);
+            }
+        }
+        assert_eq!(core.buffer.text(), "two\nthree\n");
+    }
+
+    #[test]
+    fn vscode_typing_inserts_and_marks_dirty() {
+        let mut core = EditCore::new(
+            std::path::PathBuf::from("a.txt"),
+            "Plain Text".into(),
+            "",
+            crate::edit::EditMode::Insert,
+        );
+        core.apply(EditCommand::InsertText("hello".into()));
+        assert_eq!(core.buffer.text(), "hello");
+        assert!(core.dirty);
     }
 }
 

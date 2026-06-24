@@ -52,7 +52,10 @@ pub struct Selection {
 
 impl Selection {
     pub fn caret(at: usize) -> Self {
-        Self { anchor: at, head: at }
+        Self {
+            anchor: at,
+            head: at,
+        }
     }
     pub fn is_empty(&self) -> bool {
         self.anchor == self.head
