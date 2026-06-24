@@ -12,6 +12,7 @@ pub mod framing;
 pub mod install;
 pub mod lint;
 pub mod manager;
+pub mod manager_page;
 pub mod purl;
 pub mod registry;
 pub mod store;
@@ -43,5 +44,6 @@ impl Plugin for LspPlugin {
         let outbox = LspOutbox::default();
         app.insert_resource(outbox.clone());
         manager::build(app, outbox);
+        app.add_plugins(manager_page::ManagerPlugin);
     }
 }
