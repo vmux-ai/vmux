@@ -48,7 +48,6 @@ vmux_team = { path = "../vmux_team" }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_server = { path = "../vmux_server" }
-vmux_vibe_setup = { path = "../vmux_vibe_setup" }
 url = { workspace = true }
 
 rfd = { workspace = true }

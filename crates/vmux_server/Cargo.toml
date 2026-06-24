@@ -11,6 +11,7 @@ default = []
 build = ["dep:regex"]
 web = [
     "dep:dioxus",
+    "dep:vmux_agent",
     "dep:vmux_editor",
     "dep:vmux_history",
     "dep:vmux_layout",
@@ -19,7 +20,6 @@ web = [
     "dep:vmux_space",
     "dep:vmux_team",
     "dep:vmux_terminal",
-    "dep:vmux_vibe_setup",
     "dep:web-sys",
 ]
 
@@ -39,6 +39,7 @@ required-features = ["web"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true, optional = true }
+vmux_agent = { path = "../vmux_agent", optional = true }
 vmux_editor = { path = "../vmux_editor", optional = true }
 vmux_history = { path = "../vmux_history", optional = true }
 vmux_layout = { path = "../vmux_layout", optional = true }
@@ -47,5 +48,4 @@ vmux_setting = { path = "../vmux_setting", optional = true }
 vmux_space = { path = "../vmux_space", optional = true }
 vmux_team = { path = "../vmux_team", optional = true }
 vmux_terminal = { path = "../vmux_terminal", optional = true }
-vmux_vibe_setup = { path = "../vmux_vibe_setup", optional = true }
 web-sys = { version = "0.3", features = ["Location", "Window"], optional = true }

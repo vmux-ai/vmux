@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::event::VibeInstallRunRequest;
+use crate::vibe_setup::event::VibeInstallRunRequest;
 use dioxus::prelude::*;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_theme};
 

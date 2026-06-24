@@ -9634,8 +9634,11 @@ version = "0.0.17"
 dependencies = [
  "bevy",
  "bevy_cef",
+ "bevy_ecs",
+ "bevy_reflect",
  "chrono",
  "crossbeam-channel",
+ "dioxus",
  "futures-lite",
  "futures-util",
  "mockito",
@@ -9657,6 +9660,7 @@ dependencies = [
  "vmux_setting",
  "vmux_space",
  "vmux_terminal",
+ "vmux_ui",
 ]
 
 [[package]]
@@ -9786,7 +9790,6 @@ dependencies = [
  "vmux_team",
  "vmux_terminal",
  "vmux_ui",
- "vmux_vibe_setup",
 ]
 
 [[package]]
@@ -9924,6 +9927,7 @@ dependencies = [
  "regex",
  "rkyv",
  "serde",
+ "vmux_agent",
  "vmux_core",
  "vmux_editor",
  "vmux_history",
@@ -9933,7 +9937,6 @@ dependencies = [
  "vmux_space",
  "vmux_team",
  "vmux_terminal",
- "vmux_vibe_setup",
  "web-sys",
 ]
 
@@ -10088,20 +10091,6 @@ dependencies = [
  "time",
  "wasm-bindgen",
  "web-sys",
-]
-
-[[package]]
-name = "vmux_vibe_setup"
-version = "0.0.17"
-dependencies = [
- "bevy",
- "bevy_cef",
- "dioxus",
- "rkyv",
- "serde",
- "vmux_core",
- "vmux_terminal",
- "vmux_ui",
 ]
 
 [[package]]

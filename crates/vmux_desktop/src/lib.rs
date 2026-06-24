@@ -123,7 +123,7 @@ impl Plugin for VmuxPlugin {
             .add_plugins((
                 vmux_team::TeamPlugin,
                 vmux_history::HistoryPlugin,
-                vmux_vibe_setup::VibeSetupPlugin,
+                vmux_agent::vibe_setup::VibeSetupPlugin,
                 LayoutCefPlugin,
                 BrowserPlugin,
                 lechat_bridge::LeChatBridgePlugin,

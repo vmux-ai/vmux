@@ -23,7 +23,7 @@ fn main() {
             "../vmux_space/src",
             "../vmux_terminal/src",
             "../vmux_terminal/assets/fonts",
-            "../vmux_vibe_setup/src",
+            "../vmux_agent/src/vibe_setup",
         ])
         .dx_extra_args(&["--bin", "vmux_server", "--features", "web"])
         .cef_finalize(CefEmbeddedPageFinalize {
