@@ -41,7 +41,10 @@ fn capitalize_first(s: &str) -> String {
 }
 
 fn display_name_path() -> PathBuf {
-    config_dir().join("profile_display_name")
+    config_dir()
+        .join("profiles")
+        .join(active_profile_name())
+        .join("display_name")
 }
 
 fn display_name_from(configured: Option<&str>, id: &str, is_test: bool) -> String {

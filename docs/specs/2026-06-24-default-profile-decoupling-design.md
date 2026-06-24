@@ -29,7 +29,7 @@ Two distinct concepts get conflated under "profile":
 ## Design
 
 ### 1. Layout is space-owned and profile-agnostic
-The layout store (`store.ron`) and per-space working dirs live in **one** profile-agnostic location under the shared data dir (e.g. `…/Vmux/<build>/store.ron` and `…/Vmux/<build>/spaces/`), **not** under `profiles/<p>/`. Spaces with any team attribution coexist in this single store. (This relocates the layout that #145 nested per-profile; recordings stay per-profile — see §5.)
+The layout is **one** profile-agnostic store, **not** under `profiles/<p>/`: `store.ron` at the shared-data-dir base (`…/Vmux/<build>/store.ron`) and the per-space working dirs at `~/.vmux/spaces/` (config dir, matching the pre-#145 location). Spaces with any team attribution coexist in this single store. (This relocates the spaces that #145 nested per-profile; recordings stay per-profile — see §5.)
 
 ### 2. Test identity is a bot (`Tester`), not a `User`
 A normal instance bootstraps a `User` (the human). A **test session bootstraps its identity with `vmux_core::team::Tester` instead of `User`** — an automated QA persona ("Gregor"), not a human — so the facepile renders it as a bot, not the human "You". The pane-agent type `Agent { sid, kind: AgentKind }` stays reserved for vibe/claude/codex and is unchanged.
@@ -53,7 +53,7 @@ CEF cache (cookies/login), service socket/pid/identity/log, and recordings remai
 
 ### 6. Rename via MCP (display-name only)
 `vmux_rename_profile { name }` tool:
-- Update the stored display name in config and the live `team::Profile { name, avatar }` on the user entity (avatar initials recomputed).
+- Update the stored display name (config) and the active space record's profile name; `sync_user_profile_name` then re-syncs the live `team::Profile { name, avatar }` on the `User` identity (avatar initials recomputed). Rename targets the default (non-test) session — test sessions render the capitalized id and don't rename.
 - **No directory moves** — the storage id and all `profiles/<id>/` data are untouched, so there is no live-file/CEF-lock risk and rename is instant.
 
 Rationale: the user asked for a name that "can change at any moment." Decoupling the display name from the storage id makes rename a cheap, safe metadata update.
@@ -75,5 +75,5 @@ Replace all `== "personal"` / `!= "personal"` behavioral branches with `is_test_
 ## Decisions locked (call out at review)
 - **Test identity = `Tester` (bot), not `User`** — `Agent { kind }` stays reserved for pane agents (vibe/claude/codex).
 - **Rename = display-name only** (storage id stable). If full storage rename is wanted, that's a larger follow-up.
-- **Layout location = shared data dir base** (profile-agnostic), not `profiles/<p>/`, not top-level `~/.vmux`.
+- **Layout location** — `store.ron` at the shared-data-dir base, spaces at `~/.vmux/spaces` (config dir); neither under `profiles/<p>/`.
 - **Test signal = `VMUX_TEST=1` env** driving the `Tester` identity + fresh-layout behavior (not a name check).

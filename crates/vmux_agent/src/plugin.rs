@@ -340,8 +340,10 @@ fn handle_rename_profile_requests(
         if name.is_empty() {
             continue;
         }
-        let _ = vmux_core::profile::set_display_name(name);
-        active.record.profile = name.to_string();
+        match vmux_core::profile::set_display_name(name) {
+            Ok(()) => active.record.profile = name.to_string(),
+            Err(error) => warn!("rename_profile: failed to persist display name: {error}"),
+        }
     }
 }
 

@@ -110,7 +110,7 @@ cleanup:
 	rm -f "$$dev/store.ron" "$$dev/store.version"; \
 	rm -f "$$dev"/store.ron.*.bak "$$dev"/store.version.bak-*; \
 	rm -f "$$dev/profiles/"*/session.ron; \
-	rm -f "$$cfg/profile_display_name"; \
+	rm -f "$$cfg/profiles/"*/display_name; \
 	rm -rf "$$dev/logs"; \
 	rm -f "$$base/services/"vmux-dev.* "$$base/services/"vmux-dev-*; \
 	echo "cleanup: reset vmux dev storage (kept ~/.vmux settings + spaces + dev browser profiles)"
