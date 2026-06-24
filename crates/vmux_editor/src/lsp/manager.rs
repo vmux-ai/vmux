@@ -390,7 +390,7 @@ fn lsp_status_system(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    use vmux_core::event::{FileLspStatusEvent, LspServerState, FILE_LSP_STATUS_EVENT};
+    use vmux_core::event::{FILE_LSP_STATUS_EVENT, FileLspStatusEvent, LspServerState};
     let overrides = server_overrides(&settings);
     for (entity, fv, sent) in &q {
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {

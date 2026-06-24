@@ -3385,8 +3385,14 @@ mod tests {
         assert_eq!(normalize_vmux_url("vmux://terminal"), "vmux://terminal/");
         // already canonical / has a path / query / other scheme: unchanged
         assert_eq!(normalize_vmux_url("vmux://lsp/"), "vmux://lsp/");
-        assert_eq!(normalize_vmux_url("vmux://agent/vibe/"), "vmux://agent/vibe/");
-        assert_eq!(normalize_vmux_url("vmux://error/?title=x"), "vmux://error/?title=x");
+        assert_eq!(
+            normalize_vmux_url("vmux://agent/vibe/"),
+            "vmux://agent/vibe/"
+        );
+        assert_eq!(
+            normalize_vmux_url("vmux://error/?title=x"),
+            "vmux://error/?title=x"
+        );
         assert_eq!(
             normalize_vmux_url("file:///tmp/main.rs"),
             "file:///tmp/main.rs"
