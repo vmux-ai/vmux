@@ -1,8 +1,3 @@
-/// Display name of the bootstrap space's identity profile (the top-right pill /
-/// command attribution), derived from the active `VMUX_PROFILE` the same way the
-/// profile store/spaces/recording dirs are: the profile name, capitalized
-/// (`personal` -> "Personal", `gregor` -> "Gregor"). Keeps a test instance's
-/// identity tied to its storage profile instead of impersonating "Personal".
 pub fn bootstrap_profile_name() -> String {
     #[cfg(not(target_arch = "wasm32"))]
     {
