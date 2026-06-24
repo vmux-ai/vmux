@@ -353,6 +353,21 @@ fn setup(
         ChildOf(main_column),
     ));
 
+    commands.spawn((
+        crate::Footer,
+        ZIndex(1),
+        Visibility::Hidden,
+        Transform::default(),
+        GlobalTransform::default(),
+        Node {
+            height: Val::Px(0.0),
+            display: Display::None,
+            flex_shrink: 0.0,
+            ..default()
+        },
+        ChildOf(main_column),
+    ));
+
     // Right & Bottom side sheets remain absolute overlays (slide-in semantics);
     // they're not part of the natural flex layout.
     commands.spawn((
@@ -800,6 +815,19 @@ mod tests {
     use bevy::ecs::relationship::Relationship;
     use bevy::window::Monitor;
     use bevy_cef::prelude::WebviewExtendStandardMaterial;
+
+    #[test]
+    fn window_reserves_collapsed_footer_after_main() {
+        let src = include_str!("window.rs");
+        assert!(src.contains("crate::Footer"), "Footer node must be spawned");
+        let footer_pos = src.find("crate::Footer").unwrap();
+        let main_pos = src.find("        Main,\n").expect("Main spawn present");
+        assert!(footer_pos > main_pos, "Footer must be spawned after Main");
+        assert!(
+            src[footer_pos..].contains("Display::None"),
+            "Footer must start collapsed"
+        );
+    }
 
     #[test]
     fn scaffold_builds_tab_pane_stack_under_space() {

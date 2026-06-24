@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::page_model::{clamp_selection, gutter_width, image_mime, span_style};
 use dioxus::prelude::*;
 use vmux_core::event::*;
-use vmux_git::ui::{DiffView, GitBar, GitFooter};
+use vmux_git::ui::{DiffView, GitBar};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
@@ -760,15 +760,6 @@ pub fn Page() -> Element {
                         }
                     }
                 },
-            }
-
-            GitFooter {
-                path: git_path,
-                branch: git_branch,
-                ahead: git_ahead,
-                behind: git_behind,
-                staged_count: git_staged,
-                message: git_message,
             }
         }
     }

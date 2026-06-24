@@ -122,6 +122,7 @@ fn default_window_pad() -> f32 {
 }
 
 pub const HEADER_HEIGHT_PX: f32 = 84.0;
+pub const FOOTER_HEIGHT_PX: f32 = 28.0;
 pub const SPACES_ROW_HEIGHT_PX: f32 = 28.0;
 
 /// Left padding (px) reserved on the tab row for the macOS traffic
@@ -266,6 +267,44 @@ mod tests {
         assert_eq!(recovered.command, "switch-tab");
         assert_eq!(recovered.tab_id.as_deref(), Some("work"));
     }
+
+    #[test]
+    fn file_url_to_path_decodes_file_scheme() {
+        assert_eq!(
+            file_url_to_path("file:///Users/x/a.rs").as_deref(),
+            Some("/Users/x/a.rs")
+        );
+        assert_eq!(
+            file_url_to_path("file:///Users/x/a%20b.rs").as_deref(),
+            Some("/Users/x/a b.rs")
+        );
+    }
+
+    #[test]
+    fn file_url_to_path_rejects_non_file() {
+        assert_eq!(file_url_to_path("https://example.com"), None);
+        assert_eq!(file_url_to_path("vmux://terminal/1"), None);
+        assert_eq!(file_url_to_path(""), None);
+    }
+
+    #[test]
+    fn should_show_footer_truth_table() {
+        assert!(!should_show_footer(0, 0, 0, false));
+        assert!(should_show_footer(1, 0, 0, false));
+        assert!(should_show_footer(0, 1, 0, false));
+        assert!(should_show_footer(0, 0, 1, false));
+        assert!(should_show_footer(0, 1, 1, false));
+        assert!(should_show_footer(0, 0, 0, true));
+    }
+
+    #[test]
+    fn footer_state_request_rkyv_roundtrip() {
+        let original = FooterStateRequest { open: true };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
+        let recovered =
+            rkyv::from_bytes::<FooterStateRequest, rkyv::rancor::Error>(&bytes).expect("de");
+        assert!(recovered.open);
+    }
 }
 
 #[derive(
@@ -279,6 +318,48 @@ mod tests {
 )]
 pub struct HeaderCommandEvent {
     pub header_command: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FooterStateRequest {
+    pub open: bool,
+}
+
+pub fn file_url_to_path(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("file://")?;
+    Some(percent_decode_path(rest))
+}
+
+fn percent_decode_path(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+pub fn should_show_footer(staged_count: u32, ahead: u32, behind: u32, has_error: bool) -> bool {
+    staged_count > 0 || ahead > 0 || behind > 0 || has_error
 }
 
 #[derive(
