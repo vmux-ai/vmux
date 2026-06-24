@@ -116,6 +116,16 @@ pub enum Resolution {
     Missing,
 }
 
+/// `PATH` for spawned servers: the managed `bin/` first (so managed sub-tools and
+/// sibling servers resolve), then the current process `PATH`.
+pub fn server_path_env(root: &Path) -> std::ffi::OsString {
+    let mut parts: Vec<PathBuf> = vec![bin_dir(root)];
+    if let Some(cur) = std::env::var_os("PATH") {
+        parts.extend(std::env::split_paths(&cur));
+    }
+    std::env::join_paths(parts).unwrap_or_default()
+}
+
 pub fn resolved_command(root: &Path, cmd: &str) -> Resolution {
     let managed = bin_dir(root).join(cmd);
     if managed.is_file() || managed.is_symlink() {

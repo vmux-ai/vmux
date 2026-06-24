@@ -81,9 +81,11 @@ impl ServerClient {
         root: &std::path::Path,
         outbox: LspOutbox,
     ) -> std::io::Result<Self> {
+        let store_root = crate::lsp::store::default_root();
         let mut child = Command::new(&spec.command)
             .args(&spec.args)
             .current_dir(root)
+            .env("PATH", crate::lsp::store::server_path_env(&store_root))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

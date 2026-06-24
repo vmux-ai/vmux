@@ -65,8 +65,8 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 
 use crate::lsp::client::{ServerClient, server_key};
-use crate::lsp::registry::{ServerSpec, executable_on_path, resolve_spec, workspace_root};
-use crate::lsp::{LspOutbox, OpenDoc, ServerKey};
+use crate::lsp::registry::{ServerSpec, resolve_spec, workspace_root};
+use crate::lsp::{LspOutbox, OpenDoc, ServerKey, store};
 
 type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
 
@@ -128,12 +128,18 @@ impl LspManager {
         let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
             return;
         };
-        let Some(spec) = resolve_spec(ext, overrides) else {
+        let Some(mut spec) = resolve_spec(ext, overrides) else {
             return;
         };
-        if !executable_on_path(&spec.command) {
-            tracing::info!(server = %spec.command, "lsp server not on PATH; skipping {ext}");
-            return;
+        // Resolve the command: a vmux-managed install (absolute path) wins over a
+        // server already on PATH; if neither, skip (the vmux://lsp page can install).
+        match store::resolved_command(&store::default_root(), &spec.command) {
+            store::Resolution::Managed(p) => spec.command = p.to_string_lossy().into_owned(),
+            store::Resolution::OnPath => {}
+            store::Resolution::Missing => {
+                tracing::info!(server = %spec.command, "lsp server not installed/on PATH; skipping {ext}");
+                return;
+            }
         }
         let dir = path.parent().unwrap_or(path);
         let root = workspace_root(dir, &spec.root_markers);
