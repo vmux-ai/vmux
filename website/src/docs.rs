@@ -66,6 +66,30 @@ pub const DOCS: &[Doc] = &[
         group: "Architecture",
         content: include_str!("../../docs/architecture/render-stack.md"),
     },
+    Doc {
+        slug: "pages",
+        title: "Pages",
+        group: "Pages",
+        content: include_str!("../../docs/architecture/pages.md"),
+    },
+    Doc {
+        slug: "browser",
+        title: "Browser",
+        group: "Pages",
+        content: include_str!("../../docs/architecture/browser.md"),
+    },
+    Doc {
+        slug: "terminal",
+        title: "Terminal",
+        group: "Pages",
+        content: include_str!("../../docs/architecture/terminal.md"),
+    },
+    Doc {
+        slug: "editor",
+        title: "Editor",
+        group: "Pages",
+        content: include_str!("../../docs/architecture/editor.md"),
+    },
 ];
 
 pub fn find(slug: &str) -> Option<&'static Doc> {

@@ -39,5 +39,17 @@ both humans and agents tile, persist, and reconcile in real time.
 - **[The layout model](architecture/layout-model.md)** — Space → Tab → Pane → Stack, the
   selection invariant, and structural persistence.
 - **[The render stack](architecture/render-stack.md)** — many CEF surfaces in one window,
-  zero-copy interop, Rust-all-the-way-down UI, the `vmux://` scheme and its security gate,
-  and the 3D mode.
+  zero-copy interop, Rust-all-the-way-down UI, and the 3D mode.
+
+## The pages
+
+The surfaces you actually work in — each a [webview app](architecture/pages.md) on the `vmux://`
+scheme:
+
+- **[Pages](architecture/pages.md)** — the page abstraction, the `vmux://` scheme, and the
+  scheme-gated security bridge.
+- **[Browser](architecture/browser.md)** — Chromium embedded via CEF; windowed-native vs
+  GPU-texture rendering.
+- **[Terminal](architecture/terminal.md)** — a real PTY parsed in the daemon, streamed to a
+  Dioxus grid as incremental patches.
+- **[Editor](architecture/editor.md)** — a syntect + two-face highlighted files surface.
