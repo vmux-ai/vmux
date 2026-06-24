@@ -32,6 +32,45 @@ pub fn sanitize_profile(raw: &str) -> String {
     }
 }
 
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => "Personal".to_string(),
+    }
+}
+
+fn display_name_path() -> PathBuf {
+    config_dir().join("profile_display_name")
+}
+
+fn display_name_from(configured: Option<&str>, id: &str, is_test: bool) -> String {
+    if !is_test && let Some(name) = configured {
+        let trimmed = name.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    capitalize_first(id)
+}
+
+pub fn display_name() -> String {
+    let configured = std::fs::read_to_string(display_name_path()).ok();
+    display_name_from(
+        configured.as_deref(),
+        &active_profile_name(),
+        is_test_session(),
+    )
+}
+
+pub fn set_display_name(name: &str) -> std::io::Result<()> {
+    let path = display_name_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, name.trim())
+}
+
 fn data_dir_suffix_for(profile: &str) -> PathBuf {
     match profile {
         "release" | "local" => PathBuf::from("Vmux"),
@@ -340,6 +379,20 @@ mod tests {
         if let Some(p) = prev {
             unsafe { std::env::set_var("VMUX_TEST", p) };
         }
+    }
+
+    #[test]
+    fn display_name_uses_config_or_capitalized_id() {
+        assert_eq!(display_name_from(None, "personal", false), "Personal");
+        assert_eq!(
+            display_name_from(Some("Junichi"), "personal", false),
+            "Junichi"
+        );
+        assert_eq!(
+            display_name_from(Some("Junichi"), "personal", true),
+            "Personal"
+        );
+        assert_eq!(display_name_from(Some("  "), "gregor", false), "Gregor");
     }
 
     #[test]

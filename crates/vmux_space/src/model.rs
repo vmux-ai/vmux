@@ -1,20 +1,11 @@
 pub fn bootstrap_profile_name() -> String {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        capitalize_first(&vmux_core::profile::active_profile_name())
+        vmux_core::profile::display_name()
     }
     #[cfg(target_arch = "wasm32")]
     {
         "Personal".to_string()
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn capitalize_first(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => "Personal".to_string(),
     }
 }
 
