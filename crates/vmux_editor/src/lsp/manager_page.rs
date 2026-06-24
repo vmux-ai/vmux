@@ -56,7 +56,18 @@ pub fn to_lsp_package(root: &Path, p: &Package) -> LspPackage {
     let installed = store::is_installed(root, &p.name);
     let on_path =
         !installed && matches!(store::resolved_command(root, &p.name), store::Resolution::OnPath);
-    let status = if installed {
+    let catalog_version = purl::parse(&p.source_id).and_then(|x| x.version);
+    let installed_version = installed
+        .then(|| store::read_receipt(root, &p.name).and_then(|r| r.version))
+        .flatten();
+    // Outdated when the installed version differs from the catalog's pinned version.
+    let outdated = installed
+        && installed_version.is_some()
+        && catalog_version.is_some()
+        && installed_version != catalog_version;
+    let status = if outdated {
+        LspPkgStatus::Outdated
+    } else if installed {
         LspPkgStatus::Installed
     } else if on_path {
         LspPkgStatus::OnPath
@@ -71,11 +82,7 @@ pub fn to_lsp_package(root: &Path, p: &Package) -> LspPackage {
     } else {
         install::toolchain_for(&kind).map(String::from)
     };
-    let version = if installed {
-        store::read_receipt(root, &p.name).and_then(|r| r.version)
-    } else {
-        purl::parse(&p.source_id).and_then(|x| x.version)
-    };
+    let version = if installed { installed_version } else { catalog_version };
     LspPackage {
         name: p.name.clone(),
         description: p.description.clone(),
@@ -272,6 +279,28 @@ mod tests {
         let uk = to_lsp_package(root, &pkg("weird", "pkg:weirdsrc/weird@1"));
         assert!(!uk.installable);
         assert_eq!(uk.requires, None);
+    }
+
+    #[test]
+    fn installed_with_newer_catalog_is_outdated() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(store::packages_dir(root).join("foo")).unwrap();
+        let mut bin = std::collections::BTreeMap::new();
+        bin.insert("foo".to_string(), "foo-bin".to_string());
+        store::write_receipt(
+            root,
+            &store::Receipt {
+                name: "foo".into(),
+                version: Some("1.0".into()),
+                source_id: "pkg:github/x/foo@1.0".into(),
+                bin,
+            },
+        )
+        .unwrap();
+        let lp = to_lsp_package(root, &pkg("foo", "pkg:github/x/foo@2.0"));
+        assert_eq!(lp.status, LspPkgStatus::Outdated);
+        assert_eq!(lp.version.as_deref(), Some("1.0"));
     }
 
     #[test]
