@@ -3,6 +3,7 @@
 .DEFAULT_GOAL := dev
 
 VMUX_PROFILE ?= personal
+VMUX_TEST ?=
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 RUSTUP_BIN := $(or $(shell command -v rustup 2>/dev/null),$(HOME)/.cargo/bin/rustup)
@@ -38,10 +39,10 @@ dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process
 	if [ -n "$${DYLD_LIBRARY_PATH:-}" ]; then \
 		dylib_path="$$dylib_path:$$DYLD_LIBRARY_PATH"; \
 	fi; \
-	exec env -u CEF_PATH DYLD_LIBRARY_PATH="$$dylib_path" VMUX_PROFILE="$(VMUX_PROFILE)" ./target/debug/vmux_desktop
+	exec env -u CEF_PATH DYLD_LIBRARY_PATH="$$dylib_path" VMUX_PROFILE="$(VMUX_PROFILE)" VMUX_TEST="$(VMUX_TEST)" ./target/debug/vmux_desktop
 
 test-app:
-	$(MAKE) dev VMUX_PROFILE=gregor
+	$(MAKE) dev VMUX_PROFILE=gregor VMUX_TEST=1
 
 build: ensure-mac-deps
 	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop -p vmux_cli -p vmux_service --release
@@ -97,21 +98,25 @@ lint-fix:
 test:
 	env -u CEF_PATH "$(CARGO_BIN)" test --workspace --exclude bevy_cef_core
 
-# Reset vmux *dev* storage for a clean test. Removes the layout store, per-space
-# layout snapshots, session, logs and stale dev service sockets. KEEPS ~/.vmux
-# (settings + space working dirs) and the dev browser profile (logins/cache).
+# Reset vmux *dev* storage for a clean test. Removes the layout store, session,
+# logs, the saved profile display name, and stale dev service sockets (all
+# profiles). KEEPS ~/.vmux (settings + space working dirs) and the dev browser
+# profiles (logins/cache).
 cleanup:
 	@pkill -f "target/debug/vmux_desktop" 2>/dev/null || true
 	@pkill -f "target/debug/vmux_service" 2>/dev/null || true
 	@pkill -f "bevy_cef_debug_render_process" 2>/dev/null || true
-	@base="$$HOME/Library/Application Support/Vmux"; dev="$$base/dev"; \
+	@case "$$(uname -s)" in \
+		Darwin) base="$$HOME/Library/Application Support/Vmux" ;; \
+		*) base="$${TMPDIR:-/tmp}/Vmux" ;; \
+	esac; dev="$$base/dev"; cfg="$$HOME/.vmux"; \
 	rm -f "$$dev/store.ron" "$$dev/store.version"; \
 	rm -f "$$dev"/store.ron.*.bak "$$dev"/store.version.bak-*; \
 	rm -f "$$dev/profiles/"*/session.ron; \
-	rm -rf "$$dev/profiles/"*/spaces; \
+	rm -f "$$cfg/profiles/"*/display_name; \
 	rm -rf "$$dev/logs"; \
-	rm -f "$$base/services/"vmux-dev.*; \
-	echo "cleanup: reset vmux dev storage (kept ~/.vmux settings + dev browser profile)"
+	rm -f "$$base/services/"vmux-dev.* "$$base/services/"vmux-dev-*; \
+	echo "cleanup: reset vmux dev storage (kept ~/.vmux settings + spaces + dev browser profiles)"
 
 # Website
 build-website-css:

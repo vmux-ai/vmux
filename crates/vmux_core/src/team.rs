@@ -17,6 +17,9 @@ pub struct Profile {
 #[derive(Component, Clone, Copy, Debug)]
 pub struct User;
 
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Tester;
+
 #[derive(Component, Clone, Debug)]
 pub struct Agent {
     pub sid: String,

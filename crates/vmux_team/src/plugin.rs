@@ -42,7 +42,10 @@ impl Plugin for TeamPlugin {
 }
 
 fn spawn_user_profile(mut commands: Commands) {
-    commands.spawn((Profile::user(), User, Name::new("Profile: User")));
+    let mut identity = commands.spawn((Profile::user(), User, Name::new("Profile: User")));
+    if vmux_core::profile::is_test_session() {
+        identity.insert(vmux_core::team::Tester);
+    }
 }
 
 /// Keep the user profile's name in sync with the active space's profile name

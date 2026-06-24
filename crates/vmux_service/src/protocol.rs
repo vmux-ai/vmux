@@ -80,6 +80,9 @@ pub enum AgentCommand {
     FocusPane {
         pane: String,
     },
+    RenameProfile {
+        name: String,
+    },
     UpdateSettings {
         path: String,
         value_json: String,
@@ -248,6 +251,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::FocusPane { pane } if pane.trim().is_empty() => {
             Err("focus_pane.pane is empty")
+        }
+        AgentCommand::RenameProfile { name } if name.trim().is_empty() => {
+            Err("rename_profile.name is empty")
         }
         AgentCommand::UpdateSettings { path, .. } if path.trim().is_empty() => {
             Err("update_settings.path is empty")
@@ -652,6 +658,16 @@ mod tests {
                 terminal: None,
             }),
             Err("terminal_send.text is empty")
+        );
+    }
+
+    #[test]
+    fn empty_rename_profile_name_is_invalid() {
+        assert_eq!(
+            validate_agent_command(&AgentCommand::RenameProfile {
+                name: "  ".to_string(),
+            }),
+            Err("rename_profile.name is empty")
         );
     }
 

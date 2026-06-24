@@ -4,6 +4,13 @@ pub fn active_profile_name() -> String {
     sanitize_profile(&std::env::var("VMUX_PROFILE").unwrap_or_default())
 }
 
+pub fn is_test_session() -> bool {
+    matches!(
+        std::env::var("VMUX_TEST").ok().as_deref(),
+        Some("1") | Some("true") | Some("yes")
+    )
+}
+
 pub fn sanitize_profile(raw: &str) -> String {
     let cleaned: String = raw
         .trim()
@@ -23,6 +30,48 @@ pub fn sanitize_profile(raw: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => "Personal".to_string(),
+    }
+}
+
+fn display_name_path() -> PathBuf {
+    config_dir()
+        .join("profiles")
+        .join(active_profile_name())
+        .join("display_name")
+}
+
+fn display_name_from(configured: Option<&str>, id: &str, is_test: bool) -> String {
+    if !is_test && let Some(name) = configured {
+        let trimmed = name.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    capitalize_first(id)
+}
+
+pub fn display_name() -> String {
+    let configured = std::fs::read_to_string(display_name_path()).ok();
+    display_name_from(
+        configured.as_deref(),
+        &active_profile_name(),
+        is_test_session(),
+    )
+}
+
+pub fn set_display_name(name: &str) -> std::io::Result<()> {
+    let path = display_name_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, name.trim())
 }
 
 fn data_dir_suffix_for(profile: &str) -> PathBuf {
@@ -123,12 +172,8 @@ pub fn cef_cache_path() -> Option<String> {
     profile_dir().to_str().map(|s| s.to_owned())
 }
 
-fn store_dir_for(base: &std::path::Path, profile: &str) -> PathBuf {
-    if profile == "personal" {
-        base.to_path_buf()
-    } else {
-        base.join("profiles").join(profile)
-    }
+fn store_dir_for(base: &std::path::Path, _profile: &str) -> PathBuf {
+    base.to_path_buf()
 }
 
 pub fn store_dir() -> PathBuf {
@@ -141,11 +186,8 @@ pub fn default_space_dir() -> PathBuf {
     space_dir("space-1")
 }
 
-fn spaces_root_for(home: &std::path::Path, profile: &str) -> PathBuf {
-    home.join(".vmux")
-        .join("profiles")
-        .join(profile)
-        .join("spaces")
+fn spaces_root_for(home: &std::path::Path, _profile: &str) -> PathBuf {
+    home.join(".vmux").join("spaces")
 }
 
 fn space_dir_path(home: &std::path::Path, profile: &str, space_id: &str) -> PathBuf {
@@ -268,18 +310,20 @@ fn migrate_dir(legacy: &std::path::Path, target: &std::path::Path) {
 
 fn migrate_legacy_personal_layout_in(home: &std::path::Path) {
     let config = home.join(".vmux");
-    migrate_dir(&config.join("spaces"), &spaces_root_for(home, "personal"));
+    migrate_dir(
+        &config.join("profiles").join("personal").join("spaces"),
+        &spaces_root_for(home, "personal"),
+    );
     migrate_dir(
         &config.join("recording"),
         &recording_dir_for(&config, "personal"),
     );
 }
 
-/// Relocate the pre-profiles personal layout (`~/.vmux/spaces`,
-/// `~/.vmux/recording`) under `~/.vmux/profiles/personal/`. No-op unless the
-/// personal profile is active and a legacy dir exists without its new target.
+/// Relocate the default profile's layout to the profile-agnostic dirs and undo
+/// #145's per-profile spaces nesting. Skipped for test sessions.
 pub fn migrate_legacy_personal_layout() {
-    if active_profile_name() != "personal" {
+    if is_test_session() {
         return;
     }
     migrate_legacy_personal_layout_in(&home_dir());
@@ -316,28 +360,54 @@ mod tests {
     }
 
     #[test]
-    fn store_dir_personal_is_base_and_test_is_nested() {
+    fn store_dir_is_profile_agnostic_base() {
         let base = std::path::Path::new("/data/Vmux/dev");
         assert_eq!(
             store_dir_for(base, "personal"),
             PathBuf::from("/data/Vmux/dev")
         );
         assert_eq!(
-            store_dir_for(base, "test"),
-            PathBuf::from("/data/Vmux/dev/profiles/test")
+            store_dir_for(base, "gregor"),
+            PathBuf::from("/data/Vmux/dev")
         );
     }
 
     #[test]
-    fn spaces_root_is_nested_for_personal_and_test() {
+    fn is_test_session_reads_env() {
+        let prev = std::env::var("VMUX_TEST").ok();
+        unsafe { std::env::set_var("VMUX_TEST", "1") };
+        assert!(is_test_session());
+        unsafe { std::env::remove_var("VMUX_TEST") };
+        assert!(!is_test_session());
+        if let Some(p) = prev {
+            unsafe { std::env::set_var("VMUX_TEST", p) };
+        }
+    }
+
+    #[test]
+    fn display_name_uses_config_or_capitalized_id() {
+        assert_eq!(display_name_from(None, "personal", false), "Personal");
+        assert_eq!(
+            display_name_from(Some("Junichi"), "personal", false),
+            "Junichi"
+        );
+        assert_eq!(
+            display_name_from(Some("Junichi"), "personal", true),
+            "Personal"
+        );
+        assert_eq!(display_name_from(Some("  "), "gregor", false), "Gregor");
+    }
+
+    #[test]
+    fn spaces_root_is_profile_agnostic() {
         let home = std::path::Path::new("/home/u");
         assert_eq!(
             spaces_root_for(home, "personal"),
-            PathBuf::from("/home/u/.vmux/profiles/personal/spaces")
+            PathBuf::from("/home/u/.vmux/spaces")
         );
         assert_eq!(
-            spaces_root_for(home, "test"),
-            PathBuf::from("/home/u/.vmux/profiles/test/spaces")
+            spaces_root_for(home, "gregor"),
+            PathBuf::from("/home/u/.vmux/spaces")
         );
     }
 
@@ -387,30 +457,42 @@ mod tests {
     }
 
     #[test]
-    fn space_dir_is_nested_under_profile() {
+    fn space_dir_is_under_vmux_spaces() {
         assert_eq!(
             space_dir_path(std::path::Path::new("/home/u"), "personal", "work"),
-            PathBuf::from("/home/u/.vmux/profiles/personal/spaces/work")
+            PathBuf::from("/home/u/.vmux/spaces/work")
         );
     }
 
     #[test]
-    fn migrate_moves_legacy_personal_dirs_into_profile() {
+    fn migrate_relocates_nested_spaces_and_recording() {
         let home = std::env::temp_dir().join(format!("vmux-migrate-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        let legacy_space = home.join(".vmux").join("spaces").join("space-1");
-        std::fs::create_dir_all(&legacy_space).unwrap();
-        std::fs::write(legacy_space.join("space.ron"), b"x").unwrap();
+        let nested_space = home
+            .join(".vmux")
+            .join("profiles")
+            .join("personal")
+            .join("spaces")
+            .join("space-1");
+        std::fs::create_dir_all(&nested_space).unwrap();
+        std::fs::write(nested_space.join("space.ron"), b"x").unwrap();
         let legacy_rec = home.join(".vmux").join("recording");
         std::fs::create_dir_all(&legacy_rec).unwrap();
         std::fs::write(legacy_rec.join("a.mp4"), b"y").unwrap();
 
         migrate_legacy_personal_layout_in(&home);
 
-        assert!(!home.join(".vmux").join("spaces").exists());
         assert!(
             space_dir_path(&home, "personal", "space-1")
                 .join("space.ron")
+                .exists()
+        );
+        assert!(
+            !home
+                .join(".vmux")
+                .join("profiles")
+                .join("personal")
+                .join("spaces")
                 .exists()
         );
         assert!(!legacy_rec.exists());
@@ -423,17 +505,22 @@ mod tests {
     }
 
     #[test]
-    fn migrate_keeps_existing_target_and_leaves_legacy() {
+    fn migrate_keeps_existing_agnostic_spaces() {
         let home = std::env::temp_dir().join(format!("vmux-migrate-noop-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(home.join(".vmux").join("spaces")).unwrap();
+        std::fs::create_dir_all(
+            home.join(".vmux")
+                .join("profiles")
+                .join("personal")
+                .join("spaces"),
+        )
+        .unwrap();
         let target = spaces_root_for(&home, "personal");
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join("keep.txt"), b"keep").unwrap();
 
         migrate_legacy_personal_layout_in(&home);
 
-        assert!(home.join(".vmux").join("spaces").exists());
         assert!(target.join("keep.txt").exists());
         let _ = std::fs::remove_dir_all(&home);
     }

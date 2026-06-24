@@ -21,7 +21,7 @@ fn dev_target_signs_then_runs_debug_binary() {
     );
     assert!(makefile.contains("./scripts/sign-dev-mac.sh"));
     assert!(makefile.contains(
-        "DYLD_LIBRARY_PATH=\"$$dylib_path\" VMUX_PROFILE=\"$(VMUX_PROFILE)\" ./target/debug/vmux_desktop"
+        "DYLD_LIBRARY_PATH=\"$$dylib_path\" VMUX_PROFILE=\"$(VMUX_PROFILE)\" VMUX_TEST=\"$(VMUX_TEST)\" ./target/debug/vmux_desktop"
     ));
     assert!(makefile.contains("identity=\"$$(./scripts/ensure-local-codesign-identity.sh)\" &&"));
     assert!(!makefile.contains("run-mac:"));
@@ -29,6 +29,13 @@ fn dev_target_signs_then_runs_debug_binary() {
     assert!(!makefile.contains("sign-mac-debug"));
     assert!(!makefile.contains("package-local-mac"));
     assert!(!makefile.contains("package-release-mac"));
+}
+
+#[test]
+fn test_app_marks_test_session() {
+    let makefile = include_str!("../../../Makefile");
+    assert!(makefile.contains("test-app:"));
+    assert!(makefile.contains("$(MAKE) dev VMUX_PROFILE=gregor VMUX_TEST=1"));
 }
 
 #[test]
