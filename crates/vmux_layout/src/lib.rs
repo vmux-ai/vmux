@@ -24,6 +24,8 @@ pub mod debug;
 #[cfg(not(target_arch = "wasm32"))]
 mod focus_ring;
 #[cfg(not(target_arch = "wasm32"))]
+mod footer;
+#[cfg(not(target_arch = "wasm32"))]
 mod header;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;
@@ -72,6 +74,8 @@ pub use cef::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use command_bar::handler::PendingCommandBarReveal;
+#[cfg(not(target_arch = "wasm32"))]
+pub use footer::Footer;
 #[cfg(not(target_arch = "wasm32"))]
 pub use header::Header;
 #[cfg(not(target_arch = "wasm32"))]
