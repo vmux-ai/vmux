@@ -32,6 +32,32 @@ pub struct AppSettings {
     pub spaces: std::collections::BTreeMap<String, SpaceOverrides>,
     #[serde(default)]
     pub recording: RecordingSettings,
+    #[serde(default)]
+    pub editor: EditorSettings,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct EditorSettings {
+    #[serde(default)]
+    pub lsp: LspSettings,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct LspSettings {
+    /// Extension -> server override. Absent extension falls back to the built-in
+    /// registry; this map is never auto-seeded.
+    #[serde(default)]
+    pub servers: std::collections::BTreeMap<String, LspServerOverride>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct LspServerOverride {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    pub language_id: String,
+    #[serde(default)]
+    pub root_markers: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -408,6 +434,8 @@ struct PartialAppSettings {
     spaces: Option<std::collections::BTreeMap<String, SpaceOverrides>>,
     #[serde(default)]
     recording: Option<RecordingSettings>,
+    #[serde(default)]
+    editor: Option<EditorSettings>,
 }
 
 fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
@@ -435,6 +463,9 @@ fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
     }
     if let Some(recording) = partial.recording {
         settings.recording = recording;
+    }
+    if let Some(editor) = partial.editor {
+        settings.editor = editor;
     }
     settings
 }
@@ -998,6 +1029,7 @@ mod tests {
             agent: crate::plugin::runtime::AgentSettings::default(),
             spaces: Default::default(),
             recording: Default::default(),
+            editor: Default::default(),
         }
     }
 

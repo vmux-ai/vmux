@@ -336,6 +336,7 @@ mod tests {
             agent: AgentSettings::default(),
             spaces: Default::default(),
             recording: Default::default(),
+            editor: Default::default(),
         }
     }
 

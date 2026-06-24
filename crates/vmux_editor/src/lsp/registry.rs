@@ -73,6 +73,15 @@ pub fn builtin_spec(ext: &str) -> Option<ServerSpec> {
     })
 }
 
+/// Resolve a server spec for `ext`, preferring `overrides` over the built-in
+/// registry. `overrides` maps extension -> spec.
+pub fn resolve_spec(
+    ext: &str,
+    overrides: &std::collections::BTreeMap<String, ServerSpec>,
+) -> Option<ServerSpec> {
+    overrides.get(ext).cloned().or_else(|| builtin_spec(ext))
+}
+
 /// True if `command` resolves to an executable on `PATH` (or is an absolute path
 /// that exists). Mirrors a `which`-style lookup without adding a dependency.
 pub fn executable_on_path(command: &str) -> bool {
@@ -140,5 +149,22 @@ mod tests {
         let start = tmp.path().join("no").join("markers");
         std::fs::create_dir_all(&start).unwrap();
         assert_eq!(workspace_root(&start, &["Cargo.toml".into()]), start);
+    }
+
+    #[test]
+    fn override_takes_precedence_over_builtin() {
+        let mut ov = std::collections::BTreeMap::new();
+        ov.insert(
+            "rs".to_string(),
+            ServerSpec {
+                command: "my-ra".into(),
+                args: vec![],
+                language_id: "rust".into(),
+                root_markers: vec![".git".into()],
+            },
+        );
+        assert_eq!(resolve_spec("rs", &ov).unwrap().command, "my-ra");
+        assert_eq!(resolve_spec("go", &ov).unwrap().command, "gopls");
+        assert!(resolve_spec("zzz", &ov).is_none());
     }
 }

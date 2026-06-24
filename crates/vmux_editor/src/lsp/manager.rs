@@ -65,8 +65,10 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 
 use crate::lsp::client::{server_key, ServerClient};
-use crate::lsp::registry::{builtin_spec, executable_on_path, workspace_root};
+use crate::lsp::registry::{executable_on_path, resolve_spec, workspace_root, ServerSpec};
 use crate::lsp::{LspOutbox, OpenDoc, ServerKey};
+
+type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
 
 const LSP_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
@@ -119,14 +121,14 @@ impl LspManager {
     }
 
     /// Open `path` (already known to be a text file) against its language server.
-    pub fn open(&mut self, path: &Path) {
+    pub fn open(&mut self, path: &Path, overrides: &ServerOverrides) {
         if self.open_docs.contains_key(path) {
             return;
         }
         let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
             return;
         };
-        let Some(spec) = builtin_spec(ext) else {
+        let Some(spec) = resolve_spec(ext, overrides) else {
             return;
         };
         if !executable_on_path(&spec.command) {
@@ -184,14 +186,32 @@ use crate::plugin::{FileBuffer, FileView};
 /// Open freshly-loaded text buffers (skip error/dir/image buffers).
 fn lsp_open_documents(
     q: Query<(Entity, &FileView, &FileBuffer), Without<LspOpened>>,
+    settings: Res<vmux_setting::AppSettings>,
     mut manager: NonSendMut<LspManager>,
     mut commands: Commands,
 ) {
+    let overrides: ServerOverrides = settings
+        .editor
+        .lsp
+        .servers
+        .iter()
+        .map(|(ext, o)| {
+            (
+                ext.clone(),
+                ServerSpec {
+                    command: o.command.clone(),
+                    args: o.args.clone(),
+                    language_id: o.language_id.clone(),
+                    root_markers: o.root_markers.clone(),
+                },
+            )
+        })
+        .collect();
     for (entity, fv, buf) in &q {
         if buf.language.starts_with("__error__:") {
             continue;
         }
-        manager.open(&fv.path);
+        manager.open(&fv.path, &overrides);
         commands.entity(entity).insert(LspOpened);
     }
 }
