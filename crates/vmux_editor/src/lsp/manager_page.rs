@@ -63,9 +63,14 @@ pub fn to_lsp_package(root: &Path, p: &Package) -> LspPackage {
     } else {
         LspPkgStatus::Available
     };
-    // B1 installs github-sourced prebuilt binaries only; B2 adds the rest.
-    let installable = kind == "github";
-    let requires = (!installable && !kind.is_empty()).then_some(kind);
+    // github = always installable (prebuilt); toolchain sources need their tool on PATH.
+    let installable = kind == "github"
+        || install::toolchain_for(&kind).is_some_and(|t| crate::lsp::registry::executable_on_path(t));
+    let requires = if installable {
+        None
+    } else {
+        install::toolchain_for(&kind).map(String::from)
+    };
     let version = if installed {
         store::read_receipt(root, &p.name).and_then(|r| r.version)
     } else {
@@ -248,16 +253,25 @@ mod tests {
     }
 
     #[test]
-    fn github_pkg_is_installable_others_require_toolchain() {
+    fn installability_by_source() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        // use a name guaranteed not on PATH so status is Available
+        // github: always installable; name not on PATH so status is Available
         let gh = to_lsp_package(root, &pkg("zzz-fake-lsp", "pkg:github/x/zzz-fake-lsp@1"));
         assert!(gh.installable);
+        assert_eq!(gh.requires, None);
         assert_eq!(gh.status, LspPkgStatus::Available);
+
+        // npm: installable iff npm is on PATH; requires set iff not installable
         let np = to_lsp_package(root, &pkg("zzz-fake-ts", "pkg:npm/zzz-fake-ts@1"));
-        assert!(!np.installable);
-        assert_eq!(np.requires.as_deref(), Some("npm"));
+        let npm_present = crate::lsp::registry::executable_on_path("npm");
+        assert_eq!(np.installable, npm_present);
+        assert_eq!(np.requires.is_some(), !npm_present);
+
+        // unknown source: not installable, no toolchain hint
+        let uk = to_lsp_package(root, &pkg("weird", "pkg:weirdsrc/weird@1"));
+        assert!(!uk.installable);
+        assert_eq!(uk.requires, None);
     }
 
     #[test]
