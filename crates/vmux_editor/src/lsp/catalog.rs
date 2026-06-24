@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::lsp::archive::{self, ArchiveKind};
 use crate::lsp::target::Asset;
+use crate::lsp::{download, store};
 
 /// A catalog package (normalized from mason-registry's heterogeneous JSON).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +123,35 @@ pub fn search<'a>(
         .collect()
 }
 
+/// Latest mason-registry catalog (a zip containing `registry.json`).
+pub fn registry_url() -> String {
+    "https://github.com/mason-org/mason-registry/releases/latest/download/registry.json.zip".into()
+}
+
+pub fn cached_path(store_root: &Path) -> PathBuf {
+    store::registries_dir(store_root).join("registry.json")
+}
+
+/// Download + unzip + cache + parse the catalog from `url`.
+pub fn fetch_catalog(url: &str, store_root: &Path) -> Result<Vec<Package>, String> {
+    let regdir = store::registries_dir(store_root);
+    std::fs::create_dir_all(&regdir).map_err(|e| e.to_string())?;
+    let zip = regdir.join("registry.json.zip");
+    download::download_to(url, &zip, |_, _| {})?;
+    archive::extract(&zip, ArchiveKind::Zip, &regdir, "registry.json")?;
+    let json = std::fs::read_to_string(cached_path(store_root)).map_err(|e| e.to_string())?;
+    parse_registry(&json)
+}
+
+/// Parse the cached catalog; (re)download it when missing or `refresh`.
+pub fn ensure_catalog(store_root: &Path, refresh: bool) -> Result<Vec<Package>, String> {
+    if !refresh && cached_path(store_root).is_file() {
+        let json = std::fs::read_to_string(cached_path(store_root)).map_err(|e| e.to_string())?;
+        return parse_registry(&json);
+    }
+    fetch_catalog(&registry_url(), store_root)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,5 +219,47 @@ mod tests {
         assert_eq!(search(&pkgs, "lsp", "", "").len(), 2); // "LSP" appears in two descriptions
         assert_eq!(search(&pkgs, "linter", "", "").len(), 1); // ruff's description
         assert_eq!(search(&pkgs, "zzz", "", "").len(), 0); // genuinely absent
+    }
+
+    #[test]
+    fn ensure_catalog_reads_cache_without_network() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(store::registries_dir(root)).unwrap();
+        std::fs::write(cached_path(root), SAMPLE).unwrap();
+        let pkgs = ensure_catalog(root, false).unwrap();
+        assert_eq!(pkgs.len(), 3);
+    }
+
+    #[test]
+    fn fetch_catalog_downloads_unzips_parses() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        // zip the SAMPLE as registry.json
+        let mut zbuf = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut zbuf));
+            let opts: zip::write::FileOptions<()> = zip::write::FileOptions::default();
+            w.start_file("registry.json", opts).unwrap();
+            w.write_all(SAMPLE.as_bytes()).unwrap();
+            w.finish().unwrap();
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            if let Ok((mut s, _)) = listener.accept() {
+                let mut req = [0u8; 1024];
+                let _ = s.read(&mut req);
+                let header = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", zbuf.len());
+                let _ = s.write_all(header.as_bytes());
+                let _ = s.write_all(&zbuf);
+            }
+        });
+        let tmp = tempfile::tempdir().unwrap();
+        let url = format!("http://{addr}/registry.json.zip");
+        let pkgs = fetch_catalog(&url, tmp.path()).unwrap();
+        assert_eq!(pkgs.len(), 3);
+        assert!(cached_path(tmp.path()).is_file());
     }
 }
