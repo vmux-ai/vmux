@@ -9,6 +9,8 @@ use vmux_core::event::{
     LspPkgStatus, LspPkgStatusEvent, LspUninstallRequest, LspUpdateRequest,
 };
 
+use vmux_core::{CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
+
 use crate::lsp::catalog::{self, Package};
 use crate::lsp::{install, purl, store, target};
 
@@ -36,6 +38,7 @@ impl Plugin for ManagerPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
         app.init_resource::<ManagerOutbox>()
+            .add_message::<CefPageAttachRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
                 LspCatalogRequest,
                 LspInstallRequest,
@@ -46,7 +49,35 @@ impl Plugin for ManagerPlugin {
             .add_observer(on_install_request)
             .add_observer(on_uninstall_request)
             .add_observer(on_update_request)
+            .add_systems(
+                Update,
+                handle_lsp_page_open.in_set(PageOpenSet::HandleKnownPages),
+            )
             .add_systems(Update, drain_manager_outbox);
+    }
+}
+
+type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
+
+/// Claim `vmux://lsp` page-open tasks and attach the embedded manager page.
+/// Without this, `Browser(Open)` falls through to the "Page not found" fallback
+/// (the manifest alone only covers embedded-host serving + restore, not page-open).
+fn handle_lsp_page_open(
+    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
+    mut attach_writer: MessageWriter<CefPageAttachRequest>,
+    mut commands: Commands,
+) {
+    for (entity, task) in &tasks {
+        if task.url != "vmux://lsp" && task.url != "vmux://lsp/" {
+            continue;
+        }
+        attach_writer.write(CefPageAttachRequest {
+            stack: task.stack,
+            url: "vmux://lsp/".to_string(),
+            title: "Language Servers".to_string(),
+            bg_color: None,
+        });
+        commands.entity(entity).insert(PageOpenHandled);
     }
 }
 
@@ -349,5 +380,35 @@ mod tests {
         });
         app.update();
         assert!(outbox.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn page_open_claims_lsp_url() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<CefPageAttachRequest>()
+            .add_systems(Update, handle_lsp_page_open);
+        let stack = app.world_mut().spawn_empty().id();
+        let claimed = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: vmux_core::PageOpenId::new(),
+                stack,
+                url: "vmux://lsp".to_string(),
+                request_id: None,
+            })
+            .id();
+        let other = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: vmux_core::PageOpenId::new(),
+                stack,
+                url: "vmux://history/".to_string(),
+                request_id: None,
+            })
+            .id();
+        app.update();
+        assert!(app.world().get::<PageOpenHandled>(claimed).is_some());
+        assert!(app.world().get::<PageOpenHandled>(other).is_none());
     }
 }
