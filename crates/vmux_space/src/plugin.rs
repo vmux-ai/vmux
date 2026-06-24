@@ -809,6 +809,11 @@ mod tests {
                 .as_deref(),
             Some("vmux-ai/vmux")
         );
-        assert!(home.home.join(".vmux/spaces/vmux-ai/vmux").is_dir());
+        let profile = vmux_core::profile::active_profile_name();
+        assert!(
+            home.home
+                .join(format!(".vmux/profiles/{profile}/spaces/vmux-ai/vmux"))
+                .is_dir()
+        );
     }
 }
