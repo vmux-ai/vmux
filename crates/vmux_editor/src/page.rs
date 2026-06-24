@@ -16,6 +16,7 @@ use wasm_bindgen::prelude::*;
 
 const CONTAINER_ID: &str = "file-container";
 const MEASURE_ID: &str = "file-measure";
+const INPUT_ID: &str = "file-input";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -365,6 +366,12 @@ pub fn Page() -> Element {
     let git_behind = use_signal(|| 0u32);
     let git_staged = use_signal(|| 0u32);
     let git_message = use_signal(String::new);
+    let mut ed_mode = use_signal(|| vmux_core::editor::EditMode::Insert);
+    let mut ed_label = use_signal(String::new);
+    let mut cursor = use_signal(vmux_core::editor::CursorPos::default);
+    let mut sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
+    let mut dirty = use_signal(|| false);
+    let mut composing = use_signal(|| false);
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
         clear_blob_state(image_url, preview, thumbs);
@@ -386,6 +393,17 @@ pub fn Page() -> Element {
         first_line.set(p.first_line);
         total_lines.set(p.total_lines);
         lines.set(p.lines);
+    });
+
+    let _cur = use_bin_event_listener::<FileCursorEvent, _>(FILE_CURSOR_EVENT, move |c| {
+        ed_mode.set(c.mode);
+        ed_label.set(c.mode_label);
+        cursor.set(c.primary);
+        sel.set(c.selections);
+    });
+
+    let _dirty = use_bin_event_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
+        dirty.set(d.dirty);
     });
 
     let _diag =
@@ -512,7 +530,11 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         setup_measurement(cell_dims);
-        focus_container();
+        if mode() == Mode::Text {
+            focus_file_input();
+        } else {
+            focus_container();
+        }
     });
 
     let gw = gutter_width(total_lines());
@@ -534,7 +556,13 @@ pub fn Page() -> Element {
             class: "relative flex h-full w-full flex-col overflow-hidden bg-background text-foreground font-mono text-sm leading-normal",
             style: "outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);{theme_style}",
 
-            onmousedown: move |_| focus_container(),
+            onmousedown: move |_| {
+                if mode() == Mode::Text {
+                    focus_file_input();
+                } else {
+                    focus_container();
+                }
+            },
 
             onwheel: move |e: Event<WheelData>| {
                 if mode() != Mode::Text || show_diff() {
@@ -667,24 +695,7 @@ pub fn Page() -> Element {
                         {
                             e.prevent_default();
                             open_path(d);
-                            return;
                         }
-                        if mode() != Mode::Text || show_diff() {
-                            return;
-                        }
-                        let cur = first_line() as i64;
-                        let next = match key.as_str() {
-                            "ArrowDown" => cur + 1,
-                            "ArrowUp" => cur - 1,
-                            "PageDown" => cur + 20,
-                            "PageUp" => cur - 20,
-                            "Home" => 0,
-                            _ => return,
-                        };
-                        e.prevent_default();
-                        let _ = try_cef_bin_emit_rkyv(&FileScrollEvent {
-                            top_line: next.max(0) as u32,
-                        });
                     }
                 }
             },
@@ -693,7 +704,19 @@ pub fn Page() -> Element {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-white/[0.07] bg-black/20 px-4 font-sans text-xs text-muted-foreground",
                 {type_icon(&header_path, mode() == Mode::Dir, "h-4 w-4 shrink-0 text-foreground/80")}
                 span { class: "truncate text-foreground/90", "{header_path}" }
+                if dirty() {
+                    span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300", title: "unsaved" }
+                }
                 div { class: "flex-1" }
+                {
+                    let lbl = ed_label();
+                    (!lbl.is_empty() && mode() == Mode::Text).then(|| rsx! {
+                        span {
+                            class: "shrink-0 rounded bg-cyan-400/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-cyan-200",
+                            "{lbl}"
+                        }
+                    })
+                }
                 {
                     lsp_status().map(|s| {
                         let (dot, label) = match s.state {
@@ -802,53 +825,157 @@ pub fn Page() -> Element {
                     if show_diff() {
                         DiffView { path: git_path, nonce: git_nonce }
                     } else {
-                        div { class: "min-h-0 flex-1 overflow-auto",
-                            div { class: "min-w-max py-2",
-                                for line in lines().iter() {
-                                    {
-                                        let ln = line.line_no;
-                                        let diags = diagnostics();
-                                        let sev = line_severity(&diags, ln);
-                                        let line_diags: Vec<FileDiagnostic> = diags
-                                            .iter()
-                                            .filter(|d| d.line == ln)
-                                            .cloned()
-                                            .collect();
-                                        rsx! {
-                                            div { key: "{ln}", class: "group flex hover:bg-white/[0.035]",
-                                                span {
-                                                    class: "sticky left-0 z-[1] flex shrink-0 select-none items-center justify-end gap-1 bg-background pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
-                                                    style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
-                                                    if let Some(s) = sev {
-                                                        span { class: "{severity_color_class(s)}", "●" }
-                                                    }
-                                                    "{ln + 1}"
-                                                }
-                                                span { class: "relative whitespace-pre pr-8",
-                                                    for (i, s) in line.spans.iter().enumerate() {
-                                                        span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
-                                                    }
-                                                    for (di, d) in line_diags.iter().enumerate() {
-                                                        {
-                                                            let color = match d.severity {
-                                                                DiagSeverity::Error => "rgb(239,68,68)",
-                                                                DiagSeverity::Warning => "rgb(245,158,11)",
-                                                                DiagSeverity::Info => "rgb(56,189,248)",
-                                                                DiagSeverity::Hint => "rgb(34,211,238)",
-                                                            };
-                                                            let dc = d.clone();
-                                                            rsx! {
-                                                                span {
-                                                                    key: "d{di}",
-                                                                    style: squiggle_style(d.start_col, d.end_col, color),
-                                                                    onmouseenter: move |_| hover_diag.set(Some(dc.clone())),
-                                                                    onmouseleave: move |_| hover_diag.set(None),
+                        {
+                            let (cw, ch) = cell_dims();
+                            let fl = first_line();
+                            let gutter = gw as f64 * cw + 36.0;
+                            let crow = cursor().line.saturating_sub(fl) as f64;
+                            let cx = gutter + cursor().col as f64 * cw;
+                            let cy = 8.0 + crow * ch;
+                            let txtcol = if composing() { "inherit" } else { "transparent" };
+                            rsx! {
+                                div { class: "relative min-h-0 flex-1 overflow-auto",
+                                    div { class: "relative min-w-max py-2",
+                                        for line in lines().iter() {
+                                            {
+                                                let ln = line.line_no;
+                                                let diags = diagnostics();
+                                                let sev = line_severity(&diags, ln);
+                                                let line_diags: Vec<FileDiagnostic> = diags
+                                                    .iter()
+                                                    .filter(|d| d.line == ln)
+                                                    .cloned()
+                                                    .collect();
+                                                rsx! {
+                                                    div {
+                                                        key: "{ln}",
+                                                        class: "group flex hover:bg-white/[0.035]",
+                                                        onmousedown: move |e: Event<MouseData>| {
+                                                            let (cw, _) = cell_dims();
+                                                            let g = gw as f64 * cw + 36.0;
+                                                            let dd = e.data();
+                                                            if let Some(raw) = dd.downcast::<web_sys::MouseEvent>()
+                                                                && let Some(t) = raw
+                                                                    .current_target()
+                                                                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                                                            {
+                                                                let rect = t.get_bounding_client_rect();
+                                                                let x = raw.client_x() as f64 - rect.left() - g;
+                                                                let col = if cw > 0.0 {
+                                                                    (x / cw).round().max(0.0) as u32
+                                                                } else {
+                                                                    0
+                                                                };
+                                                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                                    line: ln,
+                                                                    col,
+                                                                    extend: raw.shift_key(),
+                                                                });
+                                                            }
+                                                            focus_file_input();
+                                                        },
+                                                        span {
+                                                            class: "sticky left-0 z-[1] flex shrink-0 select-none items-center justify-end gap-1 bg-background pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
+                                                            style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
+                                                            if let Some(s) = sev {
+                                                                span { class: "{severity_color_class(s)}", "●" }
+                                                            }
+                                                            "{ln + 1}"
+                                                        }
+                                                        span { class: "relative whitespace-pre pr-8",
+                                                            for (i, s) in line.spans.iter().enumerate() {
+                                                                span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                                                            }
+                                                            for (di, d) in line_diags.iter().enumerate() {
+                                                                {
+                                                                    let color = match d.severity {
+                                                                        DiagSeverity::Error => "rgb(239,68,68)",
+                                                                        DiagSeverity::Warning => "rgb(245,158,11)",
+                                                                        DiagSeverity::Info => "rgb(56,189,248)",
+                                                                        DiagSeverity::Hint => "rgb(34,211,238)",
+                                                                    };
+                                                                    let dc = d.clone();
+                                                                    rsx! {
+                                                                        span {
+                                                                            key: "d{di}",
+                                                                            style: squiggle_style(d.start_col, d.end_col, color),
+                                                                            onmouseenter: move |_| hover_diag.set(Some(dc.clone())),
+                                                                            onmouseleave: move |_| hover_diag.set(None),
+                                                                        }
+                                                                    }
                                                                 }
                                                             }
                                                         }
                                                     }
                                                 }
                                             }
+                                        }
+
+                                        for s in sel().iter() {
+                                            {
+                                                let top = 8.0 + (s.line.saturating_sub(fl)) as f64 * ch;
+                                                let left = gutter + s.start as f64 * cw;
+                                                let style = if s.end == u32::MAX {
+                                                    format!("left:{left}px;top:{top}px;height:{ch}px;right:0;")
+                                                } else {
+                                                    let w = (s.end.saturating_sub(s.start)) as f64 * cw;
+                                                    format!("left:{left}px;top:{top}px;height:{ch}px;width:{w}px;")
+                                                };
+                                                rsx! {
+                                                    div {
+                                                        key: "sel{s.line}",
+                                                        class: "pointer-events-none absolute z-0 bg-cyan-400/20",
+                                                        style: "{style}",
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        div {
+                                            class: "pointer-events-none absolute z-20 w-[2px] bg-cyan-300",
+                                            style: "left:{cx}px;top:{cy}px;height:{ch}px;",
+                                        }
+
+                                        textarea {
+                                            id: "file-input",
+                                            class: "absolute z-10 resize-none overflow-hidden whitespace-pre border-0 bg-transparent p-0 caret-transparent outline-none",
+                                            style: "left:{cx}px;top:{cy}px;min-width:2ch;height:{ch}px;color:{txtcol};",
+                                            autocomplete: "off",
+                                            autocapitalize: "off",
+                                            spellcheck: "false",
+                                            oncompositionstart: move |_| composing.set(true),
+                                            oncompositionend: move |_| {
+                                                composing.set(false);
+                                                send_committed_text();
+                                            },
+                                            oninput: move |_| {
+                                                if composing() {
+                                                    return;
+                                                }
+                                                send_committed_text();
+                                            },
+                                            onkeydown: move |e: Event<KeyboardData>| {
+                                                let dd = e.data();
+                                                let Some(raw) = dd.downcast::<web_sys::KeyboardEvent>() else {
+                                                    return;
+                                                };
+                                                if raw.is_composing() {
+                                                    return;
+                                                }
+                                                let key = raw.key();
+                                                let mods = key_mods(raw);
+                                                let chord = mods.ctrl || mods.alt || mods.meta;
+                                                if ed_mode().accepts_text() && !chord && is_text_key(&key) {
+                                                    return;
+                                                }
+                                                e.prevent_default();
+                                                let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
+                                                    key,
+                                                    code: raw.code(),
+                                                    mods,
+                                                    repeat: raw.repeat(),
+                                                });
+                                            },
                                         }
                                     }
                                 }
@@ -893,6 +1020,43 @@ fn focus_container() {
     {
         let _ = html.focus();
     }
+}
+
+fn focus_file_input() {
+    if let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(INPUT_ID))
+        && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
+    {
+        let _ = html.focus();
+    }
+}
+
+fn send_committed_text() {
+    if let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(INPUT_ID))
+        .and_then(|e| e.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
+    {
+        let v = el.value();
+        if !v.is_empty() {
+            let _ = try_cef_bin_emit_rkyv(&FileTextInput { text: v });
+            el.set_value("");
+        }
+    }
+}
+
+fn key_mods(raw: &web_sys::KeyboardEvent) -> KeyMods {
+    KeyMods {
+        ctrl: raw.ctrl_key(),
+        alt: raw.alt_key(),
+        shift: raw.shift_key(),
+        meta: raw.meta_key(),
+    }
+}
+
+fn is_text_key(key: &str) -> bool {
+    key.chars().count() == 1
 }
 
 fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
