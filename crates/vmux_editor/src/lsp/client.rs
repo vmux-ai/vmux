@@ -4,19 +4,11 @@ use serde_json::Value;
 
 use crate::lsp::{LspOutbox, PendingMap};
 
-/// Convert a `file://` URI string to a filesystem path (via the `url` crate;
-/// `lsp_types::Uri` has no path conversion).
 pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
     url::Url::parse(uri).ok()?.to_file_path().ok()
 }
 
-/// Route one incoming JSON-RPC message.
-/// - Responses (have `id` + `result`/`error`) go to the matching pending sender.
-/// - `textDocument/publishDiagnostics` notifications go to the outbox.
-/// - Everything else is ignored.
 pub fn dispatch_message(msg: Value, pending: &PendingMap, outbox: &LspOutbox) {
-    // A response to a request we sent has an `id` and no `method`. A message with
-    // both (a server->client request) falls through and is ignored in milestone 1.
     if let Some(id) = msg.get("id").and_then(|v| v.as_i64())
         && msg.get("method").is_none()
     {
@@ -62,7 +54,6 @@ use std::collections::HashMap;
 use crate::lsp::registry::ServerSpec;
 use crate::lsp::{ServerKey, framing};
 
-/// A running language-server process plus its I/O threads.
 pub struct ServerClient {
     child: Child,
     outgoing: mpsc::Sender<serde_json::Value>,
@@ -74,8 +65,6 @@ pub struct ServerClient {
 }
 
 impl ServerClient {
-    /// Spawn `spec.command` rooted at `root`, run the `initialize`/`initialized`
-    /// handshake, and start the I/O threads. Diagnostics flow into `outbox`.
     pub fn spawn(
         spec: &ServerSpec,
         root: &std::path::Path,
@@ -97,7 +86,6 @@ impl ServerClient {
 
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
 
-        // Writer thread: serialize outgoing messages and frame them.
         let (outgoing, out_rx) = mpsc::channel::<serde_json::Value>();
         let writer = std::thread::spawn(move || {
             let mut w = stdin;
@@ -108,18 +96,15 @@ impl ServerClient {
             }
         });
 
-        // Reader thread: parse frames and dispatch.
         let r_pending = pending.clone();
         let r_outbox = outbox.clone();
         let reader = std::thread::spawn(move || {
             let mut r = BufReader::new(stdout);
-            // Ends on EOF (`Ok(None)`) or a fatal read/parse error (`Err`).
             while let Ok(Some(msg)) = framing::read_message(&mut r) {
                 dispatch_message(msg, &r_pending, &r_outbox);
             }
         });
 
-        // stderr thread: drain to the log.
         let cmd_name = spec.command.clone();
         let stderr_thread = std::thread::spawn(move || {
             use std::io::BufRead;
@@ -151,7 +136,6 @@ impl ServerClient {
         }));
     }
 
-    /// Send a request and block up to `timeout` for the matching response.
     fn request(
         &self,
         method: &str,
@@ -213,7 +197,6 @@ impl ServerClient {
     }
 
     pub fn did_change(&self, uri: &str, version: i32, text: &str) {
-        // Full-document sync (no editing surface yet).
         self.notify(
             "textDocument/didChange",
             serde_json::json!({
@@ -245,7 +228,6 @@ impl Drop for ServerClient {
     }
 }
 
-/// Helper used by the manager to key a spawned server.
 pub fn server_key(root: &std::path::Path, spec: &ServerSpec) -> ServerKey {
     (root.to_path_buf(), spec.command.clone())
 }

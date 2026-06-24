@@ -44,8 +44,6 @@ pub struct EditorSettings {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct LspSettings {
-    /// Extension -> server override. Absent extension falls back to the built-in
-    /// registry; this map is never auto-seeded.
     #[serde(default)]
     pub servers: std::collections::BTreeMap<String, LspServerOverride>,
 }

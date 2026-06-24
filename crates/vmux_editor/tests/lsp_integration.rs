@@ -19,14 +19,12 @@ fn mock_server_handshake_and_diagnostics() {
     };
 
     let outbox = LspOutbox::default();
-    // spawn() runs the initialize/initialized handshake; Ok means it completed.
     let client = ServerClient::spawn(&spec, tmp.path(), outbox.clone())
         .expect("mock server spawns and initializes");
 
     let uri = url::Url::from_file_path(&file).unwrap().to_string();
     client.did_open(&uri, "rust", 1, "fn x() {}\n");
 
-    // Poll the outbox until the mock's publishDiagnostics arrives.
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Some((path, diags)) = outbox.0.lock().unwrap().first().cloned() {

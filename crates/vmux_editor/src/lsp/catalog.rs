@@ -7,18 +7,14 @@ use crate::lsp::archive::{self, ArchiveKind};
 use crate::lsp::target::Asset;
 use crate::lsp::{download, store};
 
-/// A catalog package (normalized from mason-registry's heterogeneous JSON).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Package {
     pub name: String,
     pub description: String,
     pub languages: Vec<String>,
     pub categories: Vec<String>,
-    /// PURL, e.g. `pkg:github/rust-lang/rust-analyzer@2026-05-25`.
     pub source_id: String,
-    /// github assets (empty for npm/pypi/cargo/golang sources).
     pub assets: Vec<Asset>,
-    /// link name -> file template (e.g. `{{source.asset.bin}}`).
     pub bin: BTreeMap<String, String>,
 }
 
@@ -68,7 +64,6 @@ fn parse_bin(v: Option<&Value>) -> BTreeMap<String, String> {
             }
         }
         Some(Value::String(s)) => {
-            // "name:file" or just "name"
             let (k, f) = s.split_once(':').unwrap_or((s.as_str(), s.as_str()));
             out.insert(k.to_string(), f.to_string());
         }
@@ -97,14 +92,11 @@ fn parse_one(v: &Value) -> Option<Package> {
     })
 }
 
-/// Parse a mason-registry `registry.json` (top-level array). Entries that don't
-/// match the supported shape are skipped (not fatal).
 pub fn parse_registry(json: &str) -> Result<Vec<Package>, String> {
     let arr: Vec<Value> = serde_json::from_str(json).map_err(|e| e.to_string())?;
     Ok(arr.iter().filter_map(parse_one).collect())
 }
 
-/// Case-insensitive search/filter over the catalog.
 pub fn search<'a>(
     pkgs: &'a [Package],
     query: &str,
@@ -125,7 +117,6 @@ pub fn search<'a>(
         .collect()
 }
 
-/// Latest mason-registry catalog (a zip containing `registry.json`).
 pub fn registry_url() -> String {
     "https://github.com/mason-org/mason-registry/releases/latest/download/registry.json.zip".into()
 }
@@ -134,7 +125,6 @@ pub fn cached_path(store_root: &Path) -> PathBuf {
     store::registries_dir(store_root).join("registry.json")
 }
 
-/// Download + unzip + cache + parse the catalog from `url`.
 pub fn fetch_catalog(url: &str, store_root: &Path) -> Result<Vec<Package>, String> {
     let regdir = store::registries_dir(store_root);
     std::fs::create_dir_all(&regdir).map_err(|e| e.to_string())?;
@@ -145,7 +135,6 @@ pub fn fetch_catalog(url: &str, store_root: &Path) -> Result<Vec<Package>, Strin
     parse_registry(&json)
 }
 
-/// Parse the cached catalog; (re)download it when missing or `refresh`.
 pub fn ensure_catalog(store_root: &Path, refresh: bool) -> Result<Vec<Package>, String> {
     if !refresh && cached_path(store_root).is_file() {
         let json = std::fs::read_to_string(cached_path(store_root)).map_err(|e| e.to_string())?;
@@ -195,11 +184,11 @@ mod tests {
         let pkgs = parse_registry(SAMPLE).unwrap();
         assert_eq!(pkgs.len(), 3);
         let ra = pkgs.iter().find(|p| p.name == "rust-analyzer").unwrap();
-        assert_eq!(ra.description, "Rust LSP"); // trimmed
+        assert_eq!(ra.description, "Rust LSP");
         assert!(ra.categories.contains(&"LSP".to_string()));
         assert_eq!(ra.assets.len(), 2);
         assert_eq!(ra.assets[0].target, "darwin_arm64");
-        assert_eq!(ra.assets[1].target, "linux_x64_gnu"); // first of array
+        assert_eq!(ra.assets[1].target, "linux_x64_gnu");
         assert_eq!(ra.bin.get("rust-analyzer").unwrap(), "{{source.asset.bin}}");
     }
 
@@ -221,9 +210,9 @@ mod tests {
         assert_eq!(search(&pkgs, "", "python", "").len(), 1);
         assert_eq!(search(&pkgs, "", "", "lsp").len(), 2);
         assert_eq!(search(&pkgs, "", "", "formatter").len(), 1);
-        assert_eq!(search(&pkgs, "lsp", "", "").len(), 2); // "LSP" appears in two descriptions
-        assert_eq!(search(&pkgs, "linter", "", "").len(), 1); // ruff's description
-        assert_eq!(search(&pkgs, "zzz", "", "").len(), 0); // genuinely absent
+        assert_eq!(search(&pkgs, "lsp", "", "").len(), 2);
+        assert_eq!(search(&pkgs, "linter", "", "").len(), 1);
+        assert_eq!(search(&pkgs, "zzz", "", "").len(), 0);
     }
 
     #[test]
@@ -241,7 +230,6 @@ mod tests {
         use std::io::{Read, Write};
         use std::net::TcpListener;
 
-        // zip the SAMPLE as registry.json
         let mut zbuf = Vec::new();
         {
             let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut zbuf));

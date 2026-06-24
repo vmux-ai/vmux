@@ -1,13 +1,10 @@
 use std::path::{Path, PathBuf};
 
-/// How to launch a language server for a given file extension.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerSpec {
     pub command: String,
     pub args: Vec<String>,
-    /// LSP `languageId` to send in `didOpen`.
     pub language_id: String,
-    /// Ancestor files/dirs that mark the workspace root, most-specific first.
     pub root_markers: Vec<String>,
 }
 
@@ -20,8 +17,6 @@ fn spec(command: &str, args: &[&str], language_id: &str, markers: &[&str]) -> Se
     }
 }
 
-/// Built-in registry: file extension -> server spec. Helix/Neovim model.
-/// The user installs the server; we only spawn it if found on PATH.
 pub fn builtin_spec(ext: &str) -> Option<ServerSpec> {
     Some(match ext {
         "rs" => spec("rust-analyzer", &[], "rust", &["Cargo.toml", ".git"]),
@@ -78,8 +73,6 @@ pub fn builtin_spec(ext: &str) -> Option<ServerSpec> {
     })
 }
 
-/// Resolve a server spec for `ext`, preferring `overrides` over the built-in
-/// registry. `overrides` maps extension -> spec.
 pub fn resolve_spec(
     ext: &str,
     overrides: &std::collections::BTreeMap<String, ServerSpec>,
@@ -87,7 +80,6 @@ pub fn resolve_spec(
     overrides.get(ext).cloned().or_else(|| builtin_spec(ext))
 }
 
-/// Output format of a linter's stdout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LintFormat {
     Ruff,
@@ -95,8 +87,6 @@ pub enum LintFormat {
     Shellcheck,
 }
 
-/// How to run a standalone linter for a file extension. The file path is appended
-/// after `args`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinterSpec {
     pub command: String,
@@ -112,7 +102,6 @@ fn linter(command: &str, args: &[&str], format: LintFormat) -> LinterSpec {
     }
 }
 
-/// Standalone linter for a file extension (run only if installed/on PATH).
 pub fn linter_for(ext: &str) -> Option<LinterSpec> {
     Some(match ext {
         "py" | "pyi" => linter(
@@ -126,8 +115,6 @@ pub fn linter_for(ext: &str) -> Option<LinterSpec> {
     })
 }
 
-/// True if `command` resolves to an executable on `PATH` (or is an absolute path
-/// that exists). Mirrors a `which`-style lookup without adding a dependency.
 pub fn executable_on_path(command: &str) -> bool {
     let p = Path::new(command);
     if p.is_absolute() {
@@ -139,8 +126,6 @@ pub fn executable_on_path(command: &str) -> bool {
     std::env::split_paths(&paths).any(|dir| dir.join(command).is_file())
 }
 
-/// Walk up from `start` (a file's directory) looking for any `markers` entry.
-/// Falls back to `start` itself when no marker is found.
 pub fn workspace_root(start: &Path, markers: &[String]) -> PathBuf {
     let mut dir = Some(start);
     while let Some(d) = dir {
@@ -169,7 +154,6 @@ mod tests {
 
     #[test]
     fn executable_lookup_finds_a_real_binary() {
-        // `cargo` is on PATH in any build environment running this test.
         assert!(executable_on_path("cargo"));
         assert!(!executable_on_path("definitely-not-a-real-binary-zzz"));
     }
@@ -181,8 +165,6 @@ mod tests {
         std::fs::write(root.join("Cargo.toml"), "").unwrap();
         let nested = root.join("crates").join("a").join("src");
         std::fs::create_dir_all(&nested).unwrap();
-        // workspace_root does not canonicalize; it returns the ancestor as walked
-        // from `nested`, which equals `root` exactly.
         let found = workspace_root(&nested, &["Cargo.toml".into(), ".git".into()]);
         assert_eq!(found, root);
     }

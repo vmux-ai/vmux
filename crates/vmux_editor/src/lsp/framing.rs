@@ -2,7 +2,6 @@ use std::io::{self, BufRead, Write};
 
 use serde_json::Value;
 
-/// Write a single JSON-RPC message with a `Content-Length` header.
 pub fn write_message<W: Write>(w: &mut W, msg: &Value) -> io::Result<()> {
     let body = serde_json::to_vec(msg)?;
     write!(w, "Content-Length: {}\r\n\r\n", body.len())?;
@@ -10,18 +9,17 @@ pub fn write_message<W: Write>(w: &mut W, msg: &Value) -> io::Result<()> {
     w.flush()
 }
 
-/// Read a single JSON-RPC message. Returns `Ok(None)` on clean EOF.
 pub fn read_message<R: BufRead>(r: &mut R) -> io::Result<Option<Value>> {
     let mut content_len: Option<usize> = None;
     loop {
         let mut line = String::new();
         let n = r.read_line(&mut line)?;
         if n == 0 {
-            return Ok(None); // EOF
+            return Ok(None);
         }
         let trimmed = line.trim_end_matches(['\r', '\n']);
         if trimmed.is_empty() {
-            break; // end of headers
+            break;
         }
         if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
             content_len = rest.trim().parse::<usize>().ok();
@@ -62,12 +60,11 @@ mod tests {
         let mut cur = Cursor::new(buf);
         assert_eq!(read_message(&mut cur).unwrap().unwrap(), json!({"id": 1}));
         assert_eq!(read_message(&mut cur).unwrap().unwrap(), json!({"id": 2}));
-        assert!(read_message(&mut cur).unwrap().is_none()); // EOF
+        assert!(read_message(&mut cur).unwrap().is_none());
     }
 
     #[test]
     fn body_split_across_reads_is_reassembled() {
-        // BufReader with a tiny capacity forces read_exact to loop.
         let mut raw = Vec::new();
         write_message(&mut raw, &json!({"hello": "world", "n": 42})).unwrap();
         let mut cur = std::io::BufReader::with_capacity(4, Cursor::new(raw));

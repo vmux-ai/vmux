@@ -21,8 +21,6 @@ pub fn kind_for(file: &str) -> ArchiveKind {
     }
 }
 
-/// Extract `file` into `dest_dir`. For single-file kinds (`Gz`, `Raw`) the output
-/// is written as `dest_dir/single_name`.
 pub fn extract(
     file: &Path,
     kind: ArchiveKind,

@@ -1,12 +1,9 @@
 use vmux_core::event::{DiagSeverity, FileDiagnostic, FileLine};
 
-/// Concatenated text of a highlighted line (newlines already stripped upstream).
 pub fn line_text(line: &FileLine) -> String {
     line.spans.iter().map(|s| s.text.as_str()).collect()
 }
 
-/// Convert a UTF-16 code-unit column to a char index within `text`, clamped to
-/// the text's char length.
 pub fn utf16_to_char_col(text: &str, utf16_col: u32) -> u32 {
     let mut utf16 = 0u32;
     let mut chars = 0u32;
@@ -29,9 +26,6 @@ fn map_severity(sev: Option<lsp_types::DiagnosticSeverity>) -> DiagSeverity {
     }
 }
 
-/// Map LSP diagnostics to `FileDiagnostic`s, converting columns against the file
-/// buffer's per-line text. Diagnostics are clamped to single-line ranges keyed by
-/// the start line (multi-line ranges underline only their first line in v1).
 pub fn to_file_diagnostics(
     lines: &[FileLine],
     diags: &[lsp_types::Diagnostic],
@@ -72,8 +66,6 @@ type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
 
 const LSP_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
-/// Owns running servers + open documents. NonSend because `ServerClient` holds an
-/// `mpsc::Sender` (not `Sync`); mirrors how `FileWatch` is a NonSend resource.
 #[derive(Default)]
 pub struct LspManager {
     servers: HashMap<ServerKey, ServerClient>,
@@ -120,7 +112,6 @@ impl LspManager {
         }
     }
 
-    /// Open `path` (already known to be a text file) against its language server.
     pub fn open(&mut self, path: &Path, overrides: &ServerOverrides) {
         if self.open_docs.contains_key(path) {
             return;
@@ -131,8 +122,6 @@ impl LspManager {
         let Some(mut spec) = resolve_spec(ext, overrides) else {
             return;
         };
-        // Resolve the command: a vmux-managed install (absolute path) wins over a
-        // server already on PATH; if neither, skip (the vmux://lsp page can install).
         match store::resolved_command(&store::default_root(), &spec.command) {
             store::Resolution::Managed(p) => spec.command = p.to_string_lossy().into_owned(),
             store::Resolution::OnPath => {}
@@ -156,7 +145,6 @@ impl LspManager {
         }
     }
 
-    /// Notify the server that `path` changed on disk (watcher reload).
     pub fn change(&mut self, path: &Path) {
         let Some(doc) = self.open_docs.get_mut(path) else {
             return;
@@ -172,7 +160,6 @@ impl LspManager {
         }
     }
 
-    /// Notify the server that `path` is no longer open.
     pub fn close(&mut self, path: &Path) {
         let Some(doc) = self.open_docs.remove(path) else {
             return;
@@ -183,14 +170,11 @@ impl LspManager {
     }
 }
 
-/// Marker: this `FileView` has been opened in LSP.
 #[derive(Component)]
 pub struct LspOpened;
 
 use crate::plugin::{FileBuffer, FileView};
 
-/// Open freshly-loaded text buffers (skip error/dir/image buffers).
-/// Build the extension→ServerSpec override map from settings.
 fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
     settings
         .editor
@@ -227,8 +211,6 @@ fn lsp_open_documents(
     }
 }
 
-/// Called from `LspPlugin::build`. The manager shares the resource's `LspOutbox`
-/// Arc so server threads push into the same queue the drain system reads.
 pub fn build(app: &mut App, outbox: LspOutbox) {
     app.insert_non_send(LspManager {
         outbox,
@@ -243,8 +225,10 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
             lint_on_open,
             drain_lsp_diagnostics,
             drain_lint,
+            emit_diagnostics_system,
             lsp_status_system,
-        ),
+        )
+            .chain(),
     );
 }
 
@@ -257,34 +241,37 @@ fn canon(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
 }
 
-/// Latest diagnostics per file path, split by origin so LSP and linter results
-/// merge on emit instead of clobbering one another.
 #[derive(Resource, Default)]
 struct DiagState {
     lsp: HashMap<PathBuf, Vec<FileDiagnostic>>,
     lint: HashMap<PathBuf, Vec<FileDiagnostic>>,
 }
 
-fn emit_for_path(
-    target: &Path,
-    state: &DiagState,
-    views: &Query<(Entity, &FileView, &FileBuffer)>,
-    browsers: &Browsers,
-    commands: &mut Commands,
+#[derive(Component, Default)]
+pub struct DiagSent(Vec<FileDiagnostic>);
+
+fn emit_diagnostics_system(
+    q: Query<(Entity, &FileView, Option<&DiagSent>), With<vmux_core::page::PageReady>>,
+    state: Res<DiagState>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
 ) {
-    let mut merged: Vec<FileDiagnostic> = Vec::new();
-    if let Some(d) = state.lsp.get(target) {
-        merged.extend(d.iter().cloned());
-    }
-    if let Some(d) = state.lint.get(target) {
-        merged.extend(d.iter().cloned());
-    }
-    for (entity, fv, _) in views.iter() {
-        if canon(&fv.path) != target {
-            continue;
-        }
+    for (entity, fv, sent) in &q {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
+        }
+        let target = canon(&fv.path);
+        let mut merged: Vec<FileDiagnostic> = Vec::new();
+        if let Some(d) = state.lsp.get(&target) {
+            merged.extend(d.iter().cloned());
+        }
+        if let Some(d) = state.lint.get(&target) {
+            merged.extend(d.iter().cloned());
+        }
+        match sent {
+            Some(s) if s.0 == merged => continue,
+            None if merged.is_empty() => continue,
+            _ => {}
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
@@ -294,6 +281,7 @@ fn emit_for_path(
                 diagnostics: merged.clone(),
             },
         ));
+        commands.entity(entity).insert(DiagSent(merged));
     }
 }
 
@@ -301,8 +289,6 @@ fn drain_lsp_diagnostics(
     outbox: Res<LspOutbox>,
     mut state: ResMut<DiagState>,
     views: Query<(Entity, &FileView, &FileBuffer)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
 ) {
     let drained: Vec<(PathBuf, Vec<lsp_types::Diagnostic>)> = {
         let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
@@ -315,30 +301,20 @@ fn drain_lsp_diagnostics(
             .find(|(_, fv, _)| canon(&fv.path) == target)
             .map(|(_, _, buf)| to_file_diagnostics(&buf.lines, &diags))
             .unwrap_or_default();
-        state.lsp.insert(target.clone(), mapped);
-        emit_for_path(&target, &state, &views, &browsers, &mut commands);
+        state.lsp.insert(target, mapped);
     }
 }
 
-fn drain_lint(
-    outbox: Res<LintOutbox>,
-    mut state: ResMut<DiagState>,
-    views: Query<(Entity, &FileView, &FileBuffer)>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
+fn drain_lint(outbox: Res<LintOutbox>, mut state: ResMut<DiagState>) {
     let drained: Vec<(PathBuf, Vec<FileDiagnostic>)> = {
         let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
         q.drain(..).collect()
     };
     for (path, diags) in drained {
-        let target = canon(&path);
-        state.lint.insert(target.clone(), diags);
-        emit_for_path(&target, &state, &views, &browsers, &mut commands);
+        state.lint.insert(canon(&path), diags);
     }
 }
 
-/// Marker: linters have been run for this `FileView`.
 #[derive(Component)]
 pub struct LintRan;
 
@@ -376,13 +352,12 @@ fn lint_on_open(
     }
 }
 
-/// Last LSP status emitted to a file's page (dedupes unchanged re-emits).
 #[derive(Component)]
-pub struct LspStatusSent(pub vmux_core::event::LspServerState);
+pub struct LspStatusSent {
+    state: vmux_core::event::LspServerState,
+    path: PathBuf,
+}
 
-/// Emit per-file LSP server status (Missing / Starting / Ready) so the editor can
-/// show whether a server is live, independent of whether there are diagnostics.
-/// Runs each frame; emits only on change.
 fn lsp_status_system(
     q: Query<(Entity, &FileView, Option<&LspStatusSent>), With<vmux_core::page::PageReady>>,
     settings: Res<vmux_setting::AppSettings>,
@@ -404,7 +379,7 @@ fn lsp_status_system(
             _ if state.lsp.contains_key(&canon(&fv.path)) => LspServerState::Ready,
             _ => LspServerState::Starting,
         };
-        if sent.map(|s| s.0) == Some(desired) {
+        if sent.is_some_and(|s| s.state == desired && s.path == fv.path) {
             continue;
         }
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
@@ -414,11 +389,15 @@ fn lsp_status_system(
             entity,
             FILE_LSP_STATUS_EVENT,
             &FileLspStatusEvent {
+                path: fv.path.to_string_lossy().into_owned(),
                 server: spec.command.clone(),
                 state: desired,
             },
         ));
-        commands.entity(entity).insert(LspStatusSent(desired));
+        commands.entity(entity).insert(LspStatusSent {
+            state: desired,
+            path: fv.path.clone(),
+        });
     }
 }
 
@@ -440,7 +419,6 @@ mod tests {
     }
 
     fn diag(l0: u32, c0: u32, l1: u32, c1: u32, sev: i32, msg: &str) -> lsp_types::Diagnostic {
-        // DiagnosticSeverity's inner field is private; build from the named consts.
         let severity = match sev {
             1 => lsp_types::DiagnosticSeverity::ERROR,
             2 => lsp_types::DiagnosticSeverity::WARNING,
@@ -476,7 +454,6 @@ mod tests {
 
     #[test]
     fn utf16_emoji_maps_to_char_index() {
-        // "😀" is 2 UTF-16 units, 1 char. Column after it: utf16 2 -> char 1.
         let lines = vec![fline(0, "😀ab")];
         assert_eq!(utf16_to_char_col("😀ab", 2), 1);
         assert_eq!(utf16_to_char_col("😀ab", 3), 2);
@@ -512,7 +489,6 @@ mod tests {
         let outbox = LspOutbox::default();
         app.add_plugins(MinimalPlugins)
             .insert_resource(outbox.clone());
-        // Drain logic isolated: push one entry, run a minimal drain that mirrors prod.
         outbox
             .0
             .lock()

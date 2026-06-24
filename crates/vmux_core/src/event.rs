@@ -317,11 +317,8 @@ pub enum DiagSeverity {
     rkyv::Deserialize,
 )]
 pub struct FileDiagnostic {
-    /// 0-based absolute line number.
     pub line: u32,
-    /// Char index within the line (NOT UTF-16, NOT byte).
     pub start_col: u32,
-    /// Char index within the line, exclusive.
     pub end_col: u32,
     pub severity: DiagSeverity,
     pub message: String,
@@ -357,11 +354,8 @@ pub struct FileDiagnosticsEvent {
     rkyv::Deserialize,
 )]
 pub enum LspServerState {
-    /// A server is registered for this file's language but isn't installed/on PATH.
     Missing,
-    /// Server spawned; awaiting its first response.
     Starting,
-    /// Server has sent diagnostics for this file (it's live).
     Ready,
 }
 
@@ -377,6 +371,7 @@ pub enum LspServerState {
     rkyv::Deserialize,
 )]
 pub struct FileLspStatusEvent {
+    pub path: String,
     pub server: String,
     pub state: LspServerState,
 }
@@ -422,7 +417,6 @@ pub struct LspPackage {
     pub status: LspPkgStatus,
     pub version: Option<String>,
     pub installable: bool,
-    /// Toolchain required when not installable directly, e.g. "node".
     pub requires: Option<String>,
 }
 
@@ -683,11 +677,13 @@ mod file_event_tests {
     #[test]
     fn lsp_status_event_rkyv_roundtrip() {
         let ev = FileLspStatusEvent {
+            path: "/x.rs".into(),
             server: "rust-analyzer".into(),
             state: LspServerState::Ready,
         };
         let b = rkyv::to_bytes::<rkyv::rancor::Error>(&ev).unwrap();
         let d = rkyv::from_bytes::<FileLspStatusEvent, rkyv::rancor::Error>(&b).unwrap();
+        assert_eq!(d.path, "/x.rs");
         assert_eq!(d.server, "rust-analyzer");
         assert_eq!(d.state, LspServerState::Ready);
     }

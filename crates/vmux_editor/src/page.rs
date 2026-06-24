@@ -390,11 +390,17 @@ pub fn Page() -> Element {
 
     let _diag =
         use_bin_event_listener::<FileDiagnosticsEvent, _>(FILE_DIAGNOSTICS_EVENT, move |d| {
+            if d.path != git_path() {
+                return;
+            }
             diagnostics.set(d.diagnostics);
         });
 
     let _lsp_status =
         use_bin_event_listener::<FileLspStatusEvent, _>(FILE_LSP_STATUS_EVENT, move |s| {
+            if s.path != git_path() {
+                return;
+            }
             lsp_status.set(Some(s));
         });
 
@@ -417,6 +423,9 @@ pub fn Page() -> Element {
         git_path.set(d.abs_path);
         git_nonce.set(git_nonce() + 1);
         mode.set(Mode::Dir);
+        diagnostics.set(Vec::new());
+        hover_diag.set(None);
+        lsp_status.set(None);
         let came = came_from();
         came_from.set(String::new());
         apply_dir(
@@ -438,6 +447,9 @@ pub fn Page() -> Element {
         clear_blob_state(image_url, preview, thumbs);
         image_url.set(blob_url(&e.bytes));
         mode.set(Mode::Image);
+        diagnostics.set(Vec::new());
+        hover_diag.set(None);
+        lsp_status.set(None);
     });
 
     let _prev = use_bin_event_listener::<FilePreviewEvent, _>(FILE_PREVIEW_EVENT, move |ev| {

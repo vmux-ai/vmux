@@ -2995,9 +2995,6 @@ fn handle_page_open_requests(
     }
 }
 
-/// Normalize a bare `vmux://<host>` (no path/query) to `vmux://<host>/` so page
-/// hosts match their canonical slash form. Leaves URLs that already have a path
-/// (`vmux://agent/vibe/`), a query (`vmux://error/?...`), or other schemes alone.
 fn normalize_vmux_url(url: &str) -> String {
     if let Some(rest) = url.strip_prefix("vmux://")
         && !rest.is_empty()
@@ -3383,7 +3380,6 @@ mod tests {
     fn normalize_vmux_url_adds_trailing_slash_to_bare_host() {
         assert_eq!(normalize_vmux_url("vmux://lsp"), "vmux://lsp/");
         assert_eq!(normalize_vmux_url("vmux://terminal"), "vmux://terminal/");
-        // already canonical / has a path / query / other scheme: unchanged
         assert_eq!(normalize_vmux_url("vmux://lsp/"), "vmux://lsp/");
         assert_eq!(
             normalize_vmux_url("vmux://agent/vibe/"),

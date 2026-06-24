@@ -129,15 +129,27 @@ fn parse(format: LintFormat, stdout: &str) -> Vec<FileDiagnostic> {
     }
 }
 
-/// Run `spec` against `path` (blocking; call off the main thread). Linters exit
-/// non-zero when they find issues — that's expected, not an error.
 pub fn run_linter(spec: &LinterSpec, path: &Path) -> Vec<FileDiagnostic> {
     let output = std::process::Command::new(&spec.command)
         .args(&spec.args)
         .arg(path)
         .output();
     match output {
-        Ok(o) => parse(spec.format, &String::from_utf8_lossy(&o.stdout)),
+        Ok(o) => {
+            let diags = parse(spec.format, &String::from_utf8_lossy(&o.stdout));
+            if diags.is_empty() && !o.status.success() {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                if !stderr.trim().is_empty() {
+                    tracing::debug!(
+                        linter = %spec.command,
+                        code = ?o.status.code(),
+                        "lint produced no diagnostics: {}",
+                        stderr.trim()
+                    );
+                }
+            }
+            diags
+        }
         Err(e) => {
             tracing::debug!(linter = %spec.command, "lint run failed: {e}");
             vec![]

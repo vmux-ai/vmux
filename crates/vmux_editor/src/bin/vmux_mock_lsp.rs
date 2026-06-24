@@ -1,8 +1,3 @@
-//! Minimal mock LSP server for integration tests (host-only).
-//! - Responds to `initialize` with empty capabilities.
-//! - On `textDocument/didOpen`, emits one diagnostic for the opened uri.
-//! - Responds to `shutdown`; exits on `exit`.
-
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     use std::io::{self, BufReader, Write};

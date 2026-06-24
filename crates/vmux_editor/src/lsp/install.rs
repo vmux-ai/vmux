@@ -10,7 +10,6 @@ fn resolve_bin_template(tmpl: &str, asset_bin: &str) -> String {
     tmpl.replace("{{source.asset.bin}}", asset_bin)
 }
 
-/// GitHub release download URL for `asset` given the package's PURL.
 pub fn asset_url(pkg: &Package, asset: &Asset) -> Result<String, String> {
     let p = purl::parse(&pkg.source_id).ok_or("bad purl")?;
     if p.kind != "github" {
@@ -24,9 +23,6 @@ pub fn asset_url(pkg: &Package, asset: &Asset) -> Result<String, String> {
     ))
 }
 
-/// Download `url` (the `asset`), extract into the package dir, link bins, write a
-/// receipt. Split out from `install_github` so it can be tested against a local
-/// HTTP fixture without hitting github.com.
 pub fn install_from_url(
     pkg: &Package,
     asset: &Asset,
@@ -103,7 +99,6 @@ pub fn install_github(
     install_from_url(pkg, &asset, &url, store_root, emit)
 }
 
-/// The toolchain a non-github source needs on PATH (None for github).
 pub fn toolchain_for(kind: &str) -> Option<&'static str> {
     match kind {
         "npm" => Some("npm"),
@@ -175,7 +170,6 @@ pub fn pip_spec(p: &purl::Purl) -> String {
     }
 }
 
-/// Where each source places its linkable binaries, keyed by bin link name.
 pub fn source_links(kind: &str, pkg: &Package) -> BTreeMap<String, String> {
     let keys: Vec<String> = if pkg.bin.is_empty() {
         vec![pkg.name.clone()]
@@ -294,7 +288,6 @@ fn install_toolchain(
     finalize_links(pkg, store_root, &p.kind, p, &mut emit)
 }
 
-/// Dispatch install by PURL source kind.
 pub fn install(
     pkg: &Package,
     store_root: &Path,
@@ -316,7 +309,6 @@ mod tests {
     use std::net::TcpListener;
 
     fn serve_gz_once(payload: &'static [u8]) -> (String, String) {
-        // gzip the payload, serve it, return (url, file_name)
         let mut gz = Vec::new();
         {
             let mut enc = flate2::write::GzEncoder::new(&mut gz, flate2::Compression::default());
@@ -384,7 +376,6 @@ mod tests {
         let receipt =
             install_from_url(&pkg, &asset, &url, root, |ph, _, _| phases.push(ph)).unwrap();
 
-        // receipt + payload extracted + bin symlink present and executable-ish
         assert_eq!(receipt.name, "myserver");
         assert_eq!(receipt.version.as_deref(), Some("1.2.3"));
         assert!(store::is_installed(root, "myserver"));

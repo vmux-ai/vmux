@@ -22,7 +22,6 @@ const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManife
     command_bar: true,
 };
 
-/// A backend → page message destined for the requesting webview.
 pub enum ManagerMsg {
     Catalog(LspCatalogEvent),
     Progress(LspInstallProgress),
@@ -59,9 +58,6 @@ impl Plugin for ManagerPlugin {
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
-/// Claim `vmux://lsp/` page-open tasks and attach the embedded manager page.
-/// Bare `vmux://lsp` is normalized to the canonical slash form upstream
-/// (`handle_page_open_requests`), so we only match the canonical form here.
 fn handle_lsp_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     mut attach_writer: MessageWriter<CefPageAttachRequest>,
@@ -81,7 +77,6 @@ fn handle_lsp_page_open(
     }
 }
 
-/// Compute the page-facing status/installability for a catalog package.
 pub fn to_lsp_package(root: &Path, p: &Package) -> LspPackage {
     let kind = purl::parse(&p.source_id)
         .map(|x| x.kind)
@@ -96,7 +91,6 @@ pub fn to_lsp_package(root: &Path, p: &Package) -> LspPackage {
     let installed_version = installed
         .then(|| store::read_receipt(root, &p.name).and_then(|r| r.version))
         .flatten();
-    // Outdated when the installed version differs from the catalog's pinned version.
     let outdated = installed
         && installed_version.is_some()
         && catalog_version.is_some()
@@ -110,7 +104,6 @@ pub fn to_lsp_package(root: &Path, p: &Package) -> LspPackage {
     } else {
         LspPkgStatus::Available
     };
-    // github = always installable (prebuilt); toolchain sources need their tool on PATH.
     let installable = kind == "github"
         || install::toolchain_for(&kind).is_some_and(crate::lsp::registry::executable_on_path);
     let requires = if installable {
@@ -232,7 +225,6 @@ fn on_install_request(trigger: On<BinReceive<LspInstallRequest>>, outbox: Res<Ma
 }
 
 fn on_update_request(trigger: On<BinReceive<LspUpdateRequest>>, outbox: Res<ManagerOutbox>) {
-    // Update = reinstall latest.
     install_named(
         &outbox,
         trigger.event().webview,
@@ -246,7 +238,19 @@ fn on_uninstall_request(trigger: On<BinReceive<LspUninstallRequest>>, outbox: Re
     let sink = outbox.clone();
     std::thread::spawn(move || {
         let root = store::default_root();
-        let _ = store::remove(&root, &name);
+        if let Err(e) = store::remove(&root, &name) {
+            push(
+                &sink,
+                entity,
+                ManagerMsg::Progress(LspInstallProgress {
+                    name,
+                    phase: InstallPhase::Failed,
+                    pct: None,
+                    message: format!("uninstall failed: {e}"),
+                }),
+            );
+            return;
+        }
         let on_path = matches!(
             store::resolved_command(&root, &name),
             store::Resolution::OnPath
@@ -320,19 +324,16 @@ mod tests {
     fn installability_by_source() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
-        // github: always installable; name not on PATH so status is Available
         let gh = to_lsp_package(root, &pkg("zzz-fake-lsp", "pkg:github/x/zzz-fake-lsp@1"));
         assert!(gh.installable);
         assert_eq!(gh.requires, None);
         assert_eq!(gh.status, LspPkgStatus::Available);
 
-        // npm: installable iff npm is on PATH; requires set iff not installable
         let np = to_lsp_package(root, &pkg("zzz-fake-ts", "pkg:npm/zzz-fake-ts@1"));
         let npm_present = crate::lsp::registry::executable_on_path("npm");
         assert_eq!(np.installable, npm_present);
         assert_eq!(np.requires.is_some(), !npm_present);
 
-        // unknown source: not installable, no toolchain hint
         let uk = to_lsp_package(root, &pkg("weird", "pkg:weirdsrc/weird@1"));
         assert!(!uk.installable);
         assert_eq!(uk.requires, None);
@@ -374,7 +375,6 @@ mod tests {
                 version: None,
             }),
         ));
-        // mirror the drain contract (real drain needs Browsers NonSend).
         app.add_systems(Update, |ob: Res<ManagerOutbox>| {
             ob.0.lock().unwrap().drain(..).for_each(drop);
         });

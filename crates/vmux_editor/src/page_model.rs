@@ -1,6 +1,5 @@
 use vmux_core::event::{DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, StyledSpan};
 
-/// Which action button the manager page shows for a package.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PkgAction {
     Install,
@@ -32,7 +31,6 @@ pub fn pkg_status_class(status: LspPkgStatus) -> &'static str {
     }
 }
 
-/// The action available for a package given its status and installability.
 pub fn pkg_action(status: LspPkgStatus, installable: bool) -> PkgAction {
     match status {
         LspPkgStatus::Installed | LspPkgStatus::Running => PkgAction::Uninstall,
@@ -117,7 +115,6 @@ pub fn span_style(span: &StyledSpan) -> String {
     s
 }
 
-/// Highest-precedence severity among diagnostics on a given absolute line.
 pub fn line_severity(diags: &[FileDiagnostic], line: u32) -> Option<DiagSeverity> {
     diags
         .iter()
@@ -131,7 +128,6 @@ pub fn line_severity(diags: &[FileDiagnostic], line: u32) -> Option<DiagSeverity
         })
 }
 
-/// CSS class for a severity's color (Tailwind ansi palette).
 pub fn severity_color_class(sev: DiagSeverity) -> &'static str {
     match sev {
         DiagSeverity::Error => "text-ansi-1",
@@ -141,10 +137,6 @@ pub fn severity_color_class(sev: DiagSeverity) -> &'static str {
     }
 }
 
-/// Inline style for a diagnostic underline overlay positioned by char columns
-/// over a monospace line. `--cw` is the measured cell width (falls back to
-/// `1ch`). The box spans the line height (transparent) so it is an easy hover
-/// target; only its colored bottom border is visible, reading as an underline.
 pub fn squiggle_style(start_col: u32, end_col: u32, color_rgb: &str) -> String {
     let width = end_col.saturating_sub(start_col).max(1);
     format!(

@@ -3,8 +3,6 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-/// Stream `url` to `dest`, calling `progress(downloaded, total)` as bytes arrive.
-/// Blocking — run on a worker thread.
 pub fn download_to(
     url: &str,
     dest: &Path,
@@ -33,7 +31,6 @@ pub fn download_to(
     Ok(())
 }
 
-/// Lowercase hex sha256 of a file's contents.
 pub fn sha256_file(path: &Path) -> Result<String, String> {
     let mut f = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
@@ -50,7 +47,6 @@ mod tests {
     use super::*;
     use std::net::TcpListener;
 
-    /// Minimal one-shot HTTP server returning `body`; returns its base URL.
     fn serve_once(body: &'static [u8]) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -75,7 +71,6 @@ mod tests {
         download_to(&url, &dest, |d, _| last = d).unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), b"hello vmux lsp");
         assert_eq!(last, 14);
-        // sha256("hello vmux lsp")
         let sum = sha256_file(&dest).unwrap();
         assert_eq!(sum.len(), 64);
     }

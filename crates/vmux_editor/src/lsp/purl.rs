@@ -1,5 +1,3 @@
-/// A parsed Package URL (subset of the spec) as used by mason-registry, e.g.
-/// `pkg:github/rust-lang/rust-analyzer@2026-05-25` or `pkg:npm/typescript-language-server`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Purl {
     pub kind: String,

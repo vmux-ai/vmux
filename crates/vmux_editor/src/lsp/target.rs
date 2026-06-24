@@ -1,4 +1,3 @@
-/// One downloadable asset for a github-sourced package (mason-registry shape).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 pub struct Asset {
     pub target: String,
@@ -7,7 +6,6 @@ pub struct Asset {
     pub bin: Option<String>,
 }
 
-/// The current host's Mason target id (e.g. `darwin_arm64`).
 pub fn host_target() -> &'static str {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => "darwin_arm64",
@@ -20,7 +18,6 @@ pub fn host_target() -> &'static str {
     }
 }
 
-/// Pick the asset matching `target`, with a gnu→musl fallback on linux x64.
 pub fn pick_asset<'a>(assets: &'a [Asset], target: &str) -> Option<&'a Asset> {
     if let Some(a) = assets.iter().find(|a| a.target == target) {
         return Some(a);
