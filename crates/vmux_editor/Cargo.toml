@@ -54,3 +54,7 @@ web-sys = { version = "0.3", features = [
     "WheelEvent", "KeyboardEvent", "Location",
     "Blob", "Url",
 ] }
+
+[[bin]]
+name = "vmux_mock_lsp"
+path = "src/bin/vmux_mock_lsp.rs"

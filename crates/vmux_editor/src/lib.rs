@@ -14,7 +14,7 @@ mod plugin;
 pub use plugin::{EditorPlugin, FileView, restore_file_view_bundle};
 
 #[cfg(not(target_arch = "wasm32"))]
-mod lsp;
+pub mod lsp;
 #[cfg(not(target_arch = "wasm32"))]
 pub use lsp::LspPlugin;
 
