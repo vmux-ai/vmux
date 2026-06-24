@@ -9,9 +9,14 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
+serde = { workspace = true }
+rkyv = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
-serde = { workspace = true }
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 notify = { workspace = true }
@@ -19,7 +24,6 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 crossbeam-channel = "0.5"
 futures-lite = "2"
 futures-util = "0.3"
-rkyv = { workspace = true }
 tokio = { workspace = true, features = ["rt"] }
 uuid = { workspace = true }
 url = { workspace = true }
@@ -32,6 +36,10 @@ vmux_service = { path = "../vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dioxus = { workspace = true }
+vmux_ui = { path = "../vmux_ui", default-features = false }
 
 [dev-dependencies]
 mockito = "1"
