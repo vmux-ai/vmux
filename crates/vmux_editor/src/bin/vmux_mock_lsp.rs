@@ -7,7 +7,7 @@
 fn main() {
     use std::io::{self, BufReader, Write};
 
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
     use vmux_editor::lsp::framing::{read_message, write_message};
 
     let stdin = io::stdin();

@@ -386,12 +386,10 @@ pub fn Page() -> Element {
         lines.set(p.lines);
     });
 
-    let _diag = use_bin_event_listener::<FileDiagnosticsEvent, _>(
-        FILE_DIAGNOSTICS_EVENT,
-        move |d| {
+    let _diag =
+        use_bin_event_listener::<FileDiagnosticsEvent, _>(FILE_DIAGNOSTICS_EVENT, move |d| {
             diagnostics.set(d.diagnostics);
-        },
-    );
+        });
 
     let _err = use_bin_event_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
         error.set(e.message);

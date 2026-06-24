@@ -31,8 +31,8 @@ pub fn read_message<R: BufRead>(r: &mut R) -> io::Result<Option<Value>> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing Content-Length"))?;
     let mut buf = vec![0u8; len];
     r.read_exact(&mut buf)?;
-    let value = serde_json::from_slice(&buf)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let value =
+        serde_json::from_slice(&buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     Ok(Some(value))
 }
 

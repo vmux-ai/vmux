@@ -64,8 +64,8 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 
-use crate::lsp::client::{server_key, ServerClient};
-use crate::lsp::registry::{executable_on_path, resolve_spec, workspace_root, ServerSpec};
+use crate::lsp::client::{ServerClient, server_key};
+use crate::lsp::registry::{ServerSpec, executable_on_path, resolve_spec, workspace_root};
 use crate::lsp::{LspOutbox, OpenDoc, ServerKey};
 
 type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
@@ -228,7 +228,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
 }
 
 use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
-use vmux_core::event::{FileDiagnosticsEvent, FILE_DIAGNOSTICS_EVENT};
+use vmux_core::event::{FILE_DIAGNOSTICS_EVENT, FileDiagnosticsEvent};
 
 fn canon(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
@@ -293,8 +293,14 @@ mod tests {
         };
         lsp_types::Diagnostic {
             range: lsp_types::Range {
-                start: lsp_types::Position { line: l0, character: c0 },
-                end: lsp_types::Position { line: l1, character: c1 },
+                start: lsp_types::Position {
+                    line: l0,
+                    character: c0,
+                },
+                end: lsp_types::Position {
+                    line: l1,
+                    character: c1,
+                },
             },
             severity: Some(severity),
             message: msg.into(),
@@ -348,9 +354,14 @@ mod tests {
 
         let mut app = App::new();
         let outbox = LspOutbox::default();
-        app.add_plugins(MinimalPlugins).insert_resource(outbox.clone());
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(outbox.clone());
         // Drain logic isolated: push one entry, run a minimal drain that mirrors prod.
-        outbox.0.lock().unwrap().push((PathBuf::from("/x.rs"), vec![]));
+        outbox
+            .0
+            .lock()
+            .unwrap()
+            .push((PathBuf::from("/x.rs"), vec![]));
         app.add_systems(Update, |ob: Res<LspOutbox>| {
             ob.0.lock().unwrap().drain(..).for_each(drop);
         });

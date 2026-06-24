@@ -15,19 +15,19 @@ pub fn path_from_uri(uri: &str) -> Option<PathBuf> {
 /// - `textDocument/publishDiagnostics` notifications go to the outbox.
 /// - Everything else is ignored.
 pub fn dispatch_message(msg: Value, pending: &PendingMap, outbox: &LspOutbox) {
-    if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
-        if msg.get("method").is_none() {
-            // Response to a request we sent.
-            if let Some(tx) = pending
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .remove(&id)
-            {
-                let _ = tx.send(msg);
-            }
-            return;
+    // A response to a request we sent has an `id` and no `method`. A message with
+    // both (a server->client request) falls through and is ignored in milestone 1.
+    if let Some(id) = msg.get("id").and_then(|v| v.as_i64())
+        && msg.get("method").is_none()
+    {
+        if let Some(tx) = pending
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&id)
+        {
+            let _ = tx.send(msg);
         }
-        // else: a server->client request; ignored in milestone 1.
+        return;
     }
     let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("");
     if method == "textDocument/publishDiagnostics" {
@@ -60,7 +60,7 @@ use std::time::Duration;
 use std::collections::HashMap;
 
 use crate::lsp::registry::ServerSpec;
-use crate::lsp::{framing, ServerKey};
+use crate::lsp::{ServerKey, framing};
 
 /// A running language-server process plus its I/O threads.
 pub struct ServerClient {
@@ -111,11 +111,9 @@ impl ServerClient {
         let r_outbox = outbox.clone();
         let reader = std::thread::spawn(move || {
             let mut r = BufReader::new(stdout);
-            loop {
-                match framing::read_message(&mut r) {
-                    Ok(Some(msg)) => dispatch_message(msg, &r_pending, &r_outbox),
-                    Ok(None) | Err(_) => break, // EOF or fatal parse error
-                }
+            // Ends on EOF (`Ok(None)`) or a fatal read/parse error (`Err`).
+            while let Ok(Some(msg)) = framing::read_message(&mut r) {
+                dispatch_message(msg, &r_pending, &r_outbox);
             }
         });
 
@@ -305,7 +303,11 @@ mod tests {
     fn unknown_notification_is_ignored() {
         let ob = outbox();
         let pd = pending();
-        dispatch_message(json!({"method": "window/logMessage", "params": {}}), &pd, &ob);
+        dispatch_message(
+            json!({"method": "window/logMessage", "params": {}}),
+            &pd,
+            &ob,
+        );
         assert!(ob.0.lock().unwrap().is_empty());
     }
 }

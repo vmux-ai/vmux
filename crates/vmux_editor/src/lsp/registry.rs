@@ -64,7 +64,12 @@ pub fn builtin_spec(ext: &str) -> Option<ServerSpec> {
         "rb" => spec("solargraph", &["stdio"], "ruby", &["Gemfile", ".git"]),
         "zig" => spec("zls", &[], "zig", &["build.zig", ".git"]),
         "sh" | "bash" => spec("bash-language-server", &["start"], "shellscript", &[".git"]),
-        "json" => spec("vscode-json-language-server", &["--stdio"], "json", &[".git"]),
+        "json" => spec(
+            "vscode-json-language-server",
+            &["--stdio"],
+            "json",
+            &[".git"],
+        ),
         "yaml" | "yml" => spec("yaml-language-server", &["--stdio"], "yaml", &[".git"]),
         "toml" => spec("taplo", &["lsp", "stdio"], "toml", &[".git"]),
         "md" | "markdown" => spec("marksman", &["server"], "markdown", &[".git"]),

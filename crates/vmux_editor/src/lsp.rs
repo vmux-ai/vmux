@@ -9,10 +9,13 @@ pub mod framing;
 pub mod manager;
 pub mod registry;
 
+/// Diagnostics for one file: its path plus the server's latest diagnostic set.
+pub type PathDiagnostics = (PathBuf, Vec<lsp_types::Diagnostic>);
+
 /// Diagnostics produced by any server, keyed by absolute file path. Drained once
 /// per frame by `manager::drain_lsp_diagnostics`. Mirrors `vmux_git::GitOutbox`.
 #[derive(Resource, Clone, Default)]
-pub struct LspOutbox(pub Arc<Mutex<Vec<(PathBuf, Vec<lsp_types::Diagnostic>)>>>);
+pub struct LspOutbox(pub Arc<Mutex<Vec<PathDiagnostics>>>);
 
 /// Identifies a running server: workspace root + server command.
 pub type ServerKey = (PathBuf, String);

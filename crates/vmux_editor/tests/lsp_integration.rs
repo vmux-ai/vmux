@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
+use vmux_editor::lsp::LspOutbox;
 use vmux_editor::lsp::client::ServerClient;
 use vmux_editor::lsp::registry::ServerSpec;
-use vmux_editor::lsp::LspOutbox;
 
 #[test]
 fn mock_server_handshake_and_diagnostics() {
