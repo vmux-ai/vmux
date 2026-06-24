@@ -2,7 +2,10 @@
 
 use std::collections::HashMap;
 
-use crate::page_model::{clamp_selection, dir_select_index, gutter_width, image_mime, span_style};
+use crate::page_model::{
+    clamp_selection, dir_select_index, gutter_width, image_mime, line_severity,
+    severity_color_class, span_style, squiggle_style,
+};
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_git::ui::{DiffView, GitBar, GitFooter};
@@ -336,6 +339,8 @@ pub fn Page() -> Element {
     let mut total_lines = use_signal(|| 0u32);
     let mut first_line = use_signal(|| 0u32);
     let mut lines = use_signal(Vec::<FileLine>::new);
+    let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
+    let mut hover_diag = use_signal(|| Option::<FileDiagnostic>::None);
     let mut error = use_signal(String::new);
     let dir_entries = use_signal(Vec::<FileDirEntry>::new);
     let parent_entries = use_signal(Vec::<FileDirEntry>::new);
@@ -367,6 +372,8 @@ pub fn Page() -> Element {
             doc.set_title(&name);
         }
         path.set(m.path);
+        diagnostics.set(Vec::new());
+        hover_diag.set(None);
         git_path.set(m.abs_path);
         total_lines.set(m.total_lines);
         mode.set(Mode::Text);
@@ -378,6 +385,13 @@ pub fn Page() -> Element {
         total_lines.set(p.total_lines);
         lines.set(p.lines);
     });
+
+    let _diag = use_bin_event_listener::<FileDiagnosticsEvent, _>(
+        FILE_DIAGNOSTICS_EVENT,
+        move |d| {
+            diagnostics.set(d.diagnostics);
+        },
+    );
 
     let _err = use_bin_event_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
         error.set(e.message);
@@ -756,15 +770,49 @@ pub fn Page() -> Element {
                         div { class: "min-h-0 flex-1 overflow-auto",
                             div { class: "min-w-max py-2",
                                 for line in lines().iter() {
-                                    div { key: "{line.line_no}", class: "group flex hover:bg-white/[0.035]",
-                                        span {
-                                            class: "sticky left-0 z-[1] shrink-0 select-none bg-background pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
-                                            style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
-                                            "{line.line_no + 1}"
-                                        }
-                                        span { class: "whitespace-pre pr-8",
-                                            for (i, s) in line.spans.iter().enumerate() {
-                                                span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                                    {
+                                        let ln = line.line_no;
+                                        let diags = diagnostics();
+                                        let sev = line_severity(&diags, ln);
+                                        let line_diags: Vec<FileDiagnostic> = diags
+                                            .iter()
+                                            .filter(|d| d.line == ln)
+                                            .cloned()
+                                            .collect();
+                                        rsx! {
+                                            div { key: "{ln}", class: "group flex hover:bg-white/[0.035]",
+                                                span {
+                                                    class: "sticky left-0 z-[1] flex shrink-0 select-none items-center justify-end gap-1 bg-background pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
+                                                    style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
+                                                    if let Some(s) = sev {
+                                                        span { class: "{severity_color_class(s)}", "●" }
+                                                    }
+                                                    "{ln + 1}"
+                                                }
+                                                span { class: "relative whitespace-pre pr-8",
+                                                    for (i, s) in line.spans.iter().enumerate() {
+                                                        span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                                                    }
+                                                    for (di, d) in line_diags.iter().enumerate() {
+                                                        {
+                                                            let color = match d.severity {
+                                                                DiagSeverity::Error => "rgb(239,68,68)",
+                                                                DiagSeverity::Warning => "rgb(245,158,11)",
+                                                                DiagSeverity::Info => "rgb(56,189,248)",
+                                                                DiagSeverity::Hint => "rgb(34,211,238)",
+                                                            };
+                                                            let dc = d.clone();
+                                                            rsx! {
+                                                                span {
+                                                                    key: "d{di}",
+                                                                    style: squiggle_style(d.start_col, d.end_col, color),
+                                                                    onmouseenter: move |_| hover_diag.set(Some(dc.clone())),
+                                                                    onmouseleave: move |_| hover_diag.set(None),
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -773,6 +821,21 @@ pub fn Page() -> Element {
                         }
                     }
                 },
+            }
+
+            {
+                hover_diag().map(|d| rsx! {
+                    div {
+                        class: "pointer-events-none absolute right-4 bottom-12 z-50 max-w-md rounded-xl bg-white/[0.04] px-3 py-2 text-xs text-foreground/90 ring-1 ring-inset ring-white/10 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                        div { class: "flex items-center gap-2",
+                            span { class: "{severity_color_class(d.severity)}", "●" }
+                            span { class: "whitespace-pre-wrap", "{d.message}" }
+                        }
+                        if let Some(src) = d.source.as_ref() {
+                            div { class: "mt-1 opacity-50", "{src}" }
+                        }
+                    }
+                })
             }
 
             GitFooter {
