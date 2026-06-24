@@ -1528,9 +1528,9 @@ impl Browsers {
             size.clone(),
             device_scale.clone(),
         ))
-        .with_wake(texture_wake);
+        .with_wake(texture_wake.clone());
         let client = if cancel_native_focus {
-            client.with_focus_handler(FocusCanceler::build())
+            client.with_focus_handler(FocusCanceler::build(texture_wake))
         } else {
             client
         };
@@ -1997,7 +1997,7 @@ mod tests {
 
         assert!(implementation.contains("allow_native_focus"));
         assert!(implementation.contains("if cancel_native_focus"));
-        assert!(implementation.contains(".with_focus_handler(FocusCanceler::build())"));
+        assert!(implementation.contains(".with_focus_handler(FocusCanceler::build(texture_wake))"));
         assert!(implementation.contains("pub fn set_windowed_focus"));
     }
 

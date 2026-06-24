@@ -341,7 +341,7 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
         .add_message::<vmux_core::notify::BellReceived>()
         .add_systems(Update, apply_osc_title.after(poll_service_messages))
         .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
-        .add_systems(Update, blur_focus_aware_agents.after(poll_service_messages))
+        .add_systems(Update, sync_agent_focus.after(poll_service_messages))
         .add_systems(
             Update,
             handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
@@ -1031,25 +1031,34 @@ fn line_has_content(line: &vmux_core::event::TermLine) -> bool {
     line.spans.iter().any(|s| !s.text.trim().is_empty())
 }
 
-fn blur_focus_aware_agents(
-    agents: Query<
-        (Entity, &ProcessId),
-        (
-            With<vmux_core::agent::AgentSession>,
-            Without<AgentFocusBlurred>,
-        ),
-    >,
+#[allow(clippy::type_complexity)]
+fn sync_agent_focus(
+    agents: Query<(Entity, &ProcessId, Has<AgentFocusBlurred>), With<vmux_core::agent::AgentSession>>,
+    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
     mode_map: Res<TerminalModeMap>,
     service: Option<Res<ServiceClient>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };
-    for (entity, process_id) in &agents {
-        if mode_map
+    let active_pid = crate::target::active_terminal_for_tab(focus.stack, &terminals)
+        .and_then(|entity| agents.get(entity).ok().map(|(_, pid, _)| *pid));
+    for (entity, process_id, blurred) in &agents {
+        if !mode_map
             .modes
             .get(process_id)
             .is_some_and(|m| m.focus_reporting)
         {
+            continue;
+        }
+        let active = Some(*process_id) == active_pid;
+        if active && blurred {
+            service.0.send(ClientMessage::ProcessInput {
+                process_id: *process_id,
+                data: b"\x1b[I".to_vec(),
+            });
+            commands.entity(entity).remove::<AgentFocusBlurred>();
+        } else if !active && !blurred {
             service.0.send(ClientMessage::ProcessInput {
                 process_id: *process_id,
                 data: b"\x1b[O".to_vec(),
