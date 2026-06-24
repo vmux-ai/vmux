@@ -4,6 +4,11 @@ pub mod viewport;
 pub mod highlight;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod edit;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod keymap;
+
+#[cfg(not(target_arch = "wasm32"))]
 mod dir;
 #[cfg(not(target_arch = "wasm32"))]
 mod preview;

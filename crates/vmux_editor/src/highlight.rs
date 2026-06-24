@@ -15,6 +15,26 @@ fn syntaxes() -> &'static SyntaxSet {
     SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
+pub fn syntax_set() -> &'static SyntaxSet {
+    syntaxes()
+}
+
+pub fn select_syntax(path: &Path) -> &'static syntect::parsing::SyntaxReference {
+    let ss = syntaxes();
+    path.extension()
+        .and_then(|e| e.to_str())
+        .and_then(|ext| ss.find_syntax_by_extension(ext))
+        .unwrap_or_else(|| ss.find_syntax_plain_text())
+}
+
+pub fn default_theme() -> syntect::highlighting::Theme {
+    ThemeSet::load_defaults().themes["base16-ocean.dark"].clone()
+}
+
+pub(crate) fn styled_span(style: Style, text: &str) -> StyledSpan {
+    to_styled_span(style, text)
+}
+
 #[derive(Debug)]
 pub struct HighlightedFile {
     pub language: String,
