@@ -174,10 +174,11 @@ fn handle_reopen_closed_page(
         return;
     };
 
-    let target_space = spaces
+    let origin_space = spaces
         .iter()
         .find(|(_, id)| id.0 == page.space_id)
-        .map(|(e, _)| e)
+        .map(|(e, _)| e);
+    let target_space = origin_space
         .or_else(|| active_space.0.filter(|e| any_space.get(*e).is_ok()))
         .or_else(|| any_space.iter().next());
     let Some(space) = target_space else {
@@ -191,7 +192,9 @@ fn handle_reopen_closed_page(
         title: page.title.clone(),
         ..default()
     });
-    if let Some(idx) = page.tab_index {
+    if origin_space == Some(space)
+        && let Some(idx) = page.tab_index
+    {
         commands.entity(space).insert_children(idx, &[scaffold.tab]);
     }
     commands
@@ -668,5 +671,41 @@ mod tests {
         assert_ne!(tab_order[0], t1);
         assert_eq!(tab_order[1], t0);
         assert_eq!(tab_order[2], t1);
+    }
+
+    #[test]
+    fn reopen_appends_when_origin_space_gone() {
+        let mut app = reopen_app();
+        let active = app
+            .world_mut()
+            .spawn((Space, SpaceId("active".to_string())))
+            .id();
+        app.world_mut()
+            .insert_resource(crate::space::ActiveSpaceEntity(Some(active)));
+        let t0 = app
+            .world_mut()
+            .spawn((Tab::default(), ChildOf(active)))
+            .id();
+        let t1 = app
+            .world_mut()
+            .spawn((Tab::default(), ChildOf(active)))
+            .id();
+        app.world_mut().spawn(ArchivedPage {
+            url: "https://z.example".to_string(),
+            title: String::new(),
+            space_id: "ghost".to_string(),
+            closed_at: 5,
+            launch: None,
+            tab_index: Some(0),
+        });
+        dispatch_reopen(&mut app);
+
+        let tabs_q = app.world().entity(active).get::<Children>().unwrap();
+        let tab_order: Vec<Entity> = tabs_q.iter().collect();
+        assert_eq!(tab_order.len(), 3);
+        assert_eq!(tab_order[0], t0);
+        assert_eq!(tab_order[1], t1);
+        assert_ne!(tab_order[2], t0);
+        assert_ne!(tab_order[2], t1);
     }
 }
