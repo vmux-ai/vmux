@@ -1,4 +1,53 @@
-use vmux_core::event::{DiagSeverity, FileDiagnostic, FileDirEntry, StyledSpan};
+use vmux_core::event::{DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, StyledSpan};
+
+/// Which action button the manager page shows for a package.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PkgAction {
+    Install,
+    Update,
+    Uninstall,
+    None,
+}
+
+pub fn pkg_status_label(status: LspPkgStatus) -> &'static str {
+    match status {
+        LspPkgStatus::Available => "Available",
+        LspPkgStatus::OnPath => "On PATH",
+        LspPkgStatus::Installing => "Installing…",
+        LspPkgStatus::Installed => "Installed",
+        LspPkgStatus::Outdated => "Update available",
+        LspPkgStatus::Running => "Running",
+        LspPkgStatus::Failed => "Failed",
+    }
+}
+
+pub fn pkg_status_class(status: LspPkgStatus) -> &'static str {
+    match status {
+        LspPkgStatus::Installed | LspPkgStatus::Running => "text-ansi-2",
+        LspPkgStatus::OnPath => "text-ansi-6",
+        LspPkgStatus::Installing => "text-ansi-4",
+        LspPkgStatus::Outdated => "text-ansi-3",
+        LspPkgStatus::Failed => "text-ansi-1",
+        LspPkgStatus::Available => "text-muted-foreground",
+    }
+}
+
+/// The action available for a package given its status and installability.
+pub fn pkg_action(status: LspPkgStatus, installable: bool) -> PkgAction {
+    match status {
+        LspPkgStatus::Installed | LspPkgStatus::Running => PkgAction::Uninstall,
+        LspPkgStatus::Outdated => PkgAction::Update,
+        LspPkgStatus::Installing => PkgAction::None,
+        LspPkgStatus::OnPath => PkgAction::None,
+        LspPkgStatus::Available | LspPkgStatus::Failed => {
+            if installable {
+                PkgAction::Install
+            } else {
+                PkgAction::None
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContentClass {
@@ -153,6 +202,23 @@ mod tests {
         let s = squiggle_style(2, 6, "rgb(255,0,0)");
         assert!(s.contains("left:calc(var(--cw,1ch) * 2)"));
         assert!(s.contains("width:calc(var(--cw,1ch) * 4)"));
+    }
+
+    #[test]
+    fn pkg_action_by_status() {
+        assert_eq!(pkg_action(LspPkgStatus::Available, true), PkgAction::Install);
+        assert_eq!(pkg_action(LspPkgStatus::Available, false), PkgAction::None);
+        assert_eq!(pkg_action(LspPkgStatus::Installed, true), PkgAction::Uninstall);
+        assert_eq!(pkg_action(LspPkgStatus::Outdated, true), PkgAction::Update);
+        assert_eq!(pkg_action(LspPkgStatus::Installing, true), PkgAction::None);
+        assert_eq!(pkg_action(LspPkgStatus::OnPath, true), PkgAction::None);
+    }
+
+    #[test]
+    fn pkg_status_label_covers_states() {
+        assert_eq!(pkg_status_label(LspPkgStatus::OnPath), "On PATH");
+        assert_eq!(pkg_status_label(LspPkgStatus::Installed), "Installed");
+        assert_eq!(pkg_status_label(LspPkgStatus::Available), "Available");
     }
 }
 
