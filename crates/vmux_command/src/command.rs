@@ -311,12 +311,12 @@ pub enum TabCommand {
     Close,
     #[menu(id = "next_tab", label = "Next Tab", accel = "super+shift+]")]
     #[shortcut(direct = "Super+Shift+L")]
-    #[shortcut(direct = "Super+Shift+ArrowRight")]
+    #[shortcut(direct = "Super+Alt+ArrowRight")]
     #[shortcut(direct = "Super+Shift+BracketRight")]
     Next,
     #[menu(id = "prev_tab", label = "Previous Tab", accel = "super+shift+[")]
     #[shortcut(direct = "Super+Shift+H")]
-    #[shortcut(direct = "Super+Shift+ArrowLeft")]
+    #[shortcut(direct = "Super+Alt+ArrowLeft")]
     #[shortcut(direct = "Super+Shift+BracketLeft")]
     Previous,
     #[menu(id = "rename_tab", label = "Rename Tab")]
