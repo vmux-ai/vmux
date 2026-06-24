@@ -1,14 +1,15 @@
-//! Minimal mock LSP server for integration tests.
+//! Minimal mock LSP server for integration tests (host-only).
 //! - Responds to `initialize` with empty capabilities.
 //! - On `textDocument/didOpen`, emits one diagnostic for the opened uri.
 //! - Responds to `shutdown`; exits on `exit`.
 
-use std::io::{self, BufReader, Write};
-
-use serde_json::{json, Value};
-use vmux_editor::lsp::framing::{read_message, write_message};
-
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
+    use std::io::{self, BufReader, Write};
+
+    use serde_json::{json, Value};
+    use vmux_editor::lsp::framing::{read_message, write_message};
+
     let stdin = io::stdin();
     let mut reader = BufReader::new(stdin.lock());
     let mut stdout = io::stdout();
@@ -53,3 +54,6 @@ fn main() {
         let _ = stdout.flush();
     }
 }
+
+#[cfg(target_arch = "wasm32")]
+fn main() {}
