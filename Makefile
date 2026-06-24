@@ -3,6 +3,7 @@
 .DEFAULT_GOAL := dev
 
 VMUX_PROFILE ?= personal
+VMUX_TEST ?=
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 RUSTUP_BIN := $(or $(shell command -v rustup 2>/dev/null),$(HOME)/.cargo/bin/rustup)
@@ -38,10 +39,10 @@ dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process
 	if [ -n "$${DYLD_LIBRARY_PATH:-}" ]; then \
 		dylib_path="$$dylib_path:$$DYLD_LIBRARY_PATH"; \
 	fi; \
-	exec env -u CEF_PATH DYLD_LIBRARY_PATH="$$dylib_path" VMUX_PROFILE="$(VMUX_PROFILE)" ./target/debug/vmux_desktop
+	exec env -u CEF_PATH DYLD_LIBRARY_PATH="$$dylib_path" VMUX_PROFILE="$(VMUX_PROFILE)" VMUX_TEST="$(VMUX_TEST)" ./target/debug/vmux_desktop
 
 test-app:
-	$(MAKE) dev VMUX_PROFILE=gregor
+	$(MAKE) dev VMUX_PROFILE=gregor VMUX_TEST=1
 
 build: ensure-mac-deps
 	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop -p vmux_cli -p vmux_service --release

@@ -38,8 +38,8 @@ impl CliAgentStrategy for VibeStrategy {
         // config (falling back to default models). `--trust` trusts the working
         // directory for this invocation (vibe's documented automation flag).
         let mut args = vec!["--trust".to_string()];
-        if let Some(flag) = vibe_auto_approve_flag(&vmux_core::profile::active_profile_name()) {
-            args.push(flag.to_string());
+        if vmux_core::profile::is_test_session() {
+            args.push("--auto-approve".to_string());
         }
         if let Some(sid) = session_id {
             args.push("--resume".to_string());
@@ -85,10 +85,6 @@ impl CliAgentStrategy for VibeStrategy {
         }
         false
     }
-}
-
-fn vibe_auto_approve_flag(profile: &str) -> Option<&'static str> {
-    (profile != "personal").then_some("--auto-approve")
 }
 
 #[derive(Serialize)]
@@ -207,9 +203,30 @@ mod tests {
     }
 
     #[test]
-    fn auto_approve_flag_only_for_non_personal_profile() {
-        assert_eq!(vibe_auto_approve_flag("personal"), None);
-        assert_eq!(vibe_auto_approve_flag("gregor"), Some("--auto-approve"));
+    fn auto_approve_follows_test_session() {
+        let mcp = McpServerConfig {
+            command: "vmux".to_string(),
+            args: vec![],
+            cwd: None,
+        };
+        let prev = std::env::var("VMUX_TEST").ok();
+        unsafe { std::env::set_var("VMUX_TEST", "1") };
+        assert!(
+            VibeStrategy
+                .build_args(&mcp, None)
+                .iter()
+                .any(|a| a == "--auto-approve")
+        );
+        unsafe { std::env::remove_var("VMUX_TEST") };
+        assert!(
+            !VibeStrategy
+                .build_args(&mcp, None)
+                .iter()
+                .any(|a| a == "--auto-approve")
+        );
+        if let Some(p) = prev {
+            unsafe { std::env::set_var("VMUX_TEST", p) };
+        }
     }
 
     fn write_meta(

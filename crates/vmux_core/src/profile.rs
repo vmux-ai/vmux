@@ -278,11 +278,10 @@ fn migrate_legacy_personal_layout_in(home: &std::path::Path) {
     );
 }
 
-/// Relocate the pre-profiles personal layout (`~/.vmux/spaces`,
-/// `~/.vmux/recording`) under `~/.vmux/profiles/personal/`. No-op unless the
-/// personal profile is active and a legacy dir exists without its new target.
+/// Relocate the default profile's layout to the profile-agnostic dirs and undo
+/// #145's per-profile spaces nesting. Skipped for test sessions.
 pub fn migrate_legacy_personal_layout() {
-    if active_profile_name() != "personal" {
+    if is_test_session() {
         return;
     }
     migrate_legacy_personal_layout_in(&home_dir());

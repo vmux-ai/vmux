@@ -39,16 +39,13 @@ fn resolve_with_sidecar(
 }
 
 fn mcp_subcommand_args(anchor: ProcessId, profile: &str) -> Vec<String> {
-    let mut args = vec![
+    vec![
         "mcp".to_string(),
         "--anchor".to_string(),
         anchor.to_string(),
-    ];
-    if profile != "personal" {
-        args.push("--profile".to_string());
-        args.push(profile.to_string());
-    }
-    args
+        "--profile".to_string(),
+        profile.to_string(),
+    ]
 }
 
 fn find_workspace_dir(cwd: &Path) -> Option<PathBuf> {
@@ -75,21 +72,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mcp_args_append_profile_only_for_non_personal() {
+    fn mcp_args_always_append_profile() {
         let anchor = ProcessId::new();
-        assert_eq!(
-            mcp_subcommand_args(anchor, "personal"),
-            vec![
-                "mcp".to_string(),
-                "--anchor".to_string(),
-                anchor.to_string()
-            ]
-        );
-        let with = mcp_subcommand_args(anchor, "test");
-        assert!(
-            with.windows(2)
-                .any(|w| w[0] == "--profile" && w[1] == "test")
-        );
+        for profile in ["personal", "gregor"] {
+            let args = mcp_subcommand_args(anchor, profile);
+            assert!(
+                args.windows(2)
+                    .any(|w| w[0] == "--profile" && w[1] == profile)
+            );
+        }
     }
 
     #[test]
@@ -118,7 +109,9 @@ mod tests {
                 "--",
                 "mcp",
                 "--anchor",
-                &anchor.to_string()
+                &anchor.to_string(),
+                "--profile",
+                "personal"
             ]
         );
         assert_eq!(config.cwd, Some(workspace));
