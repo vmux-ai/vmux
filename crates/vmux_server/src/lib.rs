@@ -51,6 +51,7 @@ web_pages! {
     render_settings: "settings" => vmux_setting::page::Page,
     render_agent: "agent" => vmux_agent::vibe::setup::page::Page,
     render_files: "files" => vmux_editor::page::Page,
+    render_lsp: "lsp" => vmux_editor::lsp_page::Page,
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]

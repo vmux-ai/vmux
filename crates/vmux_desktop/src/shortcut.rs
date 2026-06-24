@@ -316,6 +316,7 @@ mod tests {
             agent: vmux_setting::AgentSettings::default(),
             spaces: Default::default(),
             recording: Default::default(),
+            editor: Default::default(),
         }
     }
 

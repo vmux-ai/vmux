@@ -374,7 +374,9 @@ fn reset_file_sent_markers_on_page_ready(
     commands
         .entity(entity)
         .remove::<FileInitialMetaSent>()
-        .remove::<FileThemeSent>();
+        .remove::<FileThemeSent>()
+        .remove::<crate::lsp::manager::LspStatusSent>()
+        .remove::<crate::lsp::manager::DiagSent>();
 }
 
 fn on_file_resize(
@@ -511,6 +513,7 @@ fn drain_thumb_tasks(
 fn on_file_open(
     trigger: On<BinReceive<FileOpenEvent>>,
     mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -518,6 +521,7 @@ fn on_file_open(
     let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
         return;
     };
+    manager.close(&fv.path);
     let url = url::Url::from_file_path(&path)
         .map(|u| u.to_string())
         .unwrap_or_else(|_| format!("file://{}", path.to_string_lossy()));
@@ -533,7 +537,9 @@ fn on_file_open(
         .remove::<FileDir>()
         .remove::<FileBuffer>()
         .remove::<FileImage>()
-        .remove::<FileInitialMetaSent>();
+        .remove::<FileInitialMetaSent>()
+        .remove::<crate::lsp::manager::LspOpened>()
+        .remove::<crate::lsp::manager::LintRan>();
 }
 
 #[derive(Component)]
@@ -600,6 +606,7 @@ fn drain_file_changes(
 fn reload_changed_files(
     mut q: Query<(Entity, &FileView, &mut FileViewport), With<FileReloadRequested>>,
     browsers: NonSend<Browsers>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
     for (entity, fv, mut vp) in &mut q {
@@ -685,7 +692,11 @@ fn reload_changed_files(
             let vpc = *vp;
             emit_window(entity, &buf, &vpc, &browsers, &mut commands);
         }
-        commands.entity(entity).insert(buf);
+        commands
+            .entity(entity)
+            .insert(buf)
+            .remove::<crate::lsp::manager::LintRan>();
+        manager.change(&fv.path);
     }
 }
 
@@ -715,12 +726,13 @@ impl Plugin for EditorPlugin {
             }
             Err(e) => tracing::warn!("file watcher init failed: {e}"),
         }
-        app.add_plugins(BinEventEmitterPlugin::<(
-            FileResizeEvent,
-            FileScrollEvent,
-            FilePreviewRequest,
-            FileOpenEvent,
-        )>::default())
+        app.add_plugins(crate::lsp::LspPlugin)
+            .add_plugins(BinEventEmitterPlugin::<(
+                FileResizeEvent,
+                FileScrollEvent,
+                FilePreviewRequest,
+                FileOpenEvent,
+            )>::default())
             .add_systems(
                 Update,
                 handle_file_page_open.in_set(PageOpenSet::HandleKnownPages),
