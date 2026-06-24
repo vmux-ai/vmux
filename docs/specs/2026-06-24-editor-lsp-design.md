@@ -6,7 +6,7 @@ Status: design
 
 ## Motivation
 
-The `files://` editor (`crates/vmux_editor`) follows the VS Code stack: syntect
+The `file://` editor (`crates/vmux_editor`) follows the VS Code stack: syntect
 highlighting (via `two-face`) for color, LSP for intelligence. Highlighting shipped;
 LSP is the next milestone. The north star is an editor that can replace VS Code /
 Cursor, which means broad language coverage and the full IDE feature set
@@ -199,7 +199,7 @@ Out-of-range columns are clamped to the line's char length; never index-panic.
 
 ## Data flow (end to end)
 
-1. User opens a `files://` text file. The host loads `FileBuffer` (existing path).
+1. User opens a `file://` text file. The host loads `FileBuffer` (existing path).
 2. The manager's load system resolves language→spec→root, get-or-spawns the server
    (initialize handshake on first spawn), and sends `didOpen` (full text, version 0).
 3. The server analyzes and pushes `publishDiagnostics` → reader thread → outbox.
