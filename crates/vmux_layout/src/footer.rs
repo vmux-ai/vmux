@@ -11,9 +11,9 @@ pub(crate) struct FooterLayoutPlugin;
 
 impl Plugin for FooterLayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(FooterStateRequest,)>::for_hosts(&[
-            "layout",
-        ]))
+        app.add_plugins(BinEventEmitterPlugin::<(FooterStateRequest,)>::for_hosts(
+            &["layout"],
+        ))
         .add_observer(on_footer_state_emit)
         .add_systems(PostUpdate, sync_footer_visibility.before(UiSystems::Layout));
     }
@@ -87,7 +87,10 @@ mod tests {
 
         app.world_mut().entity_mut(footer).remove::<Open>();
         app.update();
-        assert_eq!(app.world().get::<Node>(footer).unwrap().height, Val::Px(0.0));
+        assert_eq!(
+            app.world().get::<Node>(footer).unwrap().height,
+            Val::Px(0.0)
+        );
     }
 
     #[test]
