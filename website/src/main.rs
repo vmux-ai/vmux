@@ -6,6 +6,13 @@ mod markdown;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::ToastProvider;
 
+const SEO_TITLE: &str = "Vmux — The browser that ships code with agents";
+const SEO_DESCRIPTION: &str =
+    "The browser that ships code with agents. Browse, prompt, and build — in one space.";
+const SITE_URL: &str = "https://vmux.ai/";
+const OG_IMAGE: &str = "https://vmux.ai/og.png";
+const OG_IMAGE_ALT: &str = "Vmux — the browser that ships code with agents";
+
 #[derive(Routable, Clone, PartialEq)]
 #[rustfmt::skip]
 enum Route {
@@ -52,11 +59,25 @@ fn App() -> Element {
     rsx! {
         document::Meta { charset: "UTF-8" }
         document::Meta { name: "viewport", content: "width=device-width, initial-scale=1" }
+        document::Meta { name: "description", content: SEO_DESCRIPTION }
         document::Meta {
-            name: "description",
-            content: "An agent co-working space with a browser and IDE built in — people and agents, side by side.",
+            name: "keywords",
+            content: "vmux, agentic browser, AI coding agents, agent workspace, browser IDE, coding agents, MCP, tmux, vibe coding",
         }
-        document::Title { "Vmux — agent co-working space" }
+        document::Meta { property: "og:type", content: "website" }
+        document::Meta { property: "og:site_name", content: "Vmux" }
+        document::Meta { property: "og:title", content: SEO_TITLE }
+        document::Meta { property: "og:description", content: SEO_DESCRIPTION }
+        document::Meta { property: "og:image", content: OG_IMAGE }
+        document::Meta { property: "og:image:width", content: "1200" }
+        document::Meta { property: "og:image:height", content: "630" }
+        document::Meta { property: "og:image:alt", content: OG_IMAGE_ALT }
+        document::Meta { name: "twitter:card", content: "summary_large_image" }
+        document::Meta { name: "twitter:title", content: SEO_TITLE }
+        document::Meta { name: "twitter:description", content: SEO_DESCRIPTION }
+        document::Meta { name: "twitter:image", content: OG_IMAGE }
+        document::Meta { name: "twitter:image:alt", content: OG_IMAGE_ALT }
+        document::Title { "{SEO_TITLE}" }
         document::Stylesheet { href: "/style.css" }
         ToastProvider {
             Router::<Route> {}
@@ -67,6 +88,8 @@ fn App() -> Element {
 #[component]
 fn Home() -> Element {
     rsx! {
+        document::Link { rel: "canonical", href: SITE_URL }
+        document::Meta { property: "og:url", content: SITE_URL }
         landing::Landing {}
     }
 }
@@ -74,6 +97,8 @@ fn Home() -> Element {
 #[component]
 fn HomeStatic() -> Element {
     rsx! {
+        document::Link { rel: "canonical", href: SITE_URL }
+        document::Meta { property: "og:url", content: SITE_URL }
         landing::Landing {}
     }
 }
@@ -223,8 +248,11 @@ mod spy {
             }
             active.set(current.clone());
             if let Ok(history) = win.history() {
-                let _ =
-                    history.replace_state_with_url(&JsValue::NULL, "", Some(&format!("#{current}")));
+                let _ = history.replace_state_with_url(
+                    &JsValue::NULL,
+                    "",
+                    Some(&format!("#{current}")),
+                );
             }
         };
         update();
