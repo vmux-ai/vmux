@@ -1,5 +1,5 @@
 <h1 align="center">Vmux</h1>
-<p align="center"><b>The browser that ships code.</b> Browse, prompt, and build with agents — in one space.</p>
+<p align="center"><b>The browser that ships code with agents.</b> Browse, prompt, and build — in one space.</p>
 
 <p align="center">
   <img src="icon.png" alt="Vmux icon" width="256" />
