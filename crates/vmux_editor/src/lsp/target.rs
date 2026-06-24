@@ -51,13 +51,19 @@ mod tests {
     #[test]
     fn picks_exact_target() {
         let assets = vec![asset("darwin_arm64"), asset("linux_x64_gnu")];
-        assert_eq!(pick_asset(&assets, "darwin_arm64").unwrap().target, "darwin_arm64");
+        assert_eq!(
+            pick_asset(&assets, "darwin_arm64").unwrap().target,
+            "darwin_arm64"
+        );
     }
 
     #[test]
     fn linux_x64_falls_back_to_musl() {
         let assets = vec![asset("linux_x64_musl"), asset("darwin_arm64")];
-        assert_eq!(pick_asset(&assets, "linux_x64_gnu").unwrap().target, "linux_x64_musl");
+        assert_eq!(
+            pick_asset(&assets, "linux_x64_gnu").unwrap().target,
+            "linux_x64_musl"
+        );
     }
 
     #[test]

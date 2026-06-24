@@ -66,7 +66,10 @@ mod tests {
     fn kind_detection() {
         assert_eq!(kind_for("x.tar.gz"), ArchiveKind::TarGz);
         assert_eq!(kind_for("x.tgz"), ArchiveKind::TarGz);
-        assert_eq!(kind_for("rust-analyzer-aarch64-apple-darwin.gz"), ArchiveKind::Gz);
+        assert_eq!(
+            kind_for("rust-analyzer-aarch64-apple-darwin.gz"),
+            ArchiveKind::Gz
+        );
         assert_eq!(kind_for("x.zip"), ArchiveKind::Zip);
         assert_eq!(kind_for("plain-binary"), ArchiveKind::Raw);
     }
@@ -83,7 +86,10 @@ mod tests {
         }
         let dest = tmp.path().join("out");
         extract(&gz, ArchiveKind::Gz, &dest, "server").unwrap();
-        assert_eq!(std::fs::read(dest.join("server")).unwrap(), b"binary-contents");
+        assert_eq!(
+            std::fs::read(dest.join("server")).unwrap(),
+            b"binary-contents"
+        );
     }
 
     #[test]

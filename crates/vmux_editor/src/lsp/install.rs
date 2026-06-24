@@ -188,7 +188,9 @@ pub fn source_links(kind: &str, pkg: &Package) -> BTreeMap<String, String> {
         "cargo" | "golang" => "bin/",
         _ => "",
     };
-    keys.into_iter().map(|k| (k.clone(), format!("{prefix}{k}"))).collect()
+    keys.into_iter()
+        .map(|k| (k.clone(), format!("{prefix}{k}")))
+        .collect()
 }
 
 fn run(program: &str, args: &[String], envs: &[(&str, String)]) -> Result<(), String> {
@@ -263,13 +265,29 @@ fn install_toolchain(
         }
         "golang" => {
             let (prog, args) = golang_argv(p);
-            run(&prog, &args, &[("GOBIN", pkgdir.join("bin").to_string_lossy().into_owned())])?;
+            run(
+                &prog,
+                &args,
+                &[("GOBIN", pkgdir.join("bin").to_string_lossy().into_owned())],
+            )?;
         }
         "pypi" => {
             let venv = pkgdir.join("venv");
-            run("python3", &["-m".into(), "venv".into(), venv.to_string_lossy().into_owned()], &[])?;
+            run(
+                "python3",
+                &[
+                    "-m".into(),
+                    "venv".into(),
+                    venv.to_string_lossy().into_owned(),
+                ],
+                &[],
+            )?;
             let pip = venv.join("bin").join("pip");
-            run(&pip.to_string_lossy(), &["install".into(), pip_spec(p)], &[])?;
+            run(
+                &pip.to_string_lossy(),
+                &["install".into(), pip_spec(p)],
+                &[],
+            )?;
         }
         other => return Err(format!("source '{other}' not supported")),
     }
@@ -311,8 +329,7 @@ mod tests {
             if let Ok((mut s, _)) = listener.accept() {
                 let mut req = [0u8; 1024];
                 let _ = s.read(&mut req);
-                let header =
-                    format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", gz.len());
+                let header = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", gz.len());
                 let _ = s.write_all(header.as_bytes());
                 let _ = s.write_all(&gz);
             }
@@ -331,7 +348,11 @@ mod tests {
             assets: vec![],
             bin: Default::default(),
         };
-        let asset = Asset { target: "darwin_arm64".into(), file: "ra.gz".into(), bin: Some("ra".into()) };
+        let asset = Asset {
+            target: "darwin_arm64".into(),
+            file: "ra.gz".into(),
+            bin: Some("ra".into()),
+        };
         assert_eq!(
             asset_url(&pkg, &asset).unwrap(),
             "https://github.com/rust-lang/rust-analyzer/releases/download/2026-05-25/ra.gz"
@@ -354,9 +375,14 @@ mod tests {
             assets: vec![],
             bin,
         };
-        let asset = Asset { target: "darwin_arm64".into(), file, bin: Some("myserver-bin".into()) };
+        let asset = Asset {
+            target: "darwin_arm64".into(),
+            file,
+            bin: Some("myserver-bin".into()),
+        };
         let mut phases = Vec::new();
-        let receipt = install_from_url(&pkg, &asset, &url, root, |ph, _, _| phases.push(ph)).unwrap();
+        let receipt =
+            install_from_url(&pkg, &asset, &url, root, |ph, _, _| phases.push(ph)).unwrap();
 
         // receipt + payload extracted + bin symlink present and executable-ish
         assert_eq!(receipt.name, "myserver");
@@ -415,7 +441,10 @@ mod tests {
             assets: vec![],
             bin,
         };
-        assert_eq!(source_links("npm", &pkg).get("ts").unwrap(), "node_modules/.bin/ts");
+        assert_eq!(
+            source_links("npm", &pkg).get("ts").unwrap(),
+            "node_modules/.bin/ts"
+        );
         assert_eq!(source_links("pypi", &pkg).get("ts").unwrap(), "venv/bin/ts");
         assert_eq!(source_links("cargo", &pkg).get("ts").unwrap(), "bin/ts");
         assert_eq!(source_links("golang", &pkg).get("ts").unwrap(), "bin/ts");

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use dioxus::prelude::*;
 use vmux_core::event::*;
 
-use crate::page_model::{pkg_action, pkg_status_class, pkg_status_label, PkgAction};
+use crate::page_model::{PkgAction, pkg_action, pkg_status_class, pkg_status_label};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 
 fn request_catalog(query: String, refresh: bool) {

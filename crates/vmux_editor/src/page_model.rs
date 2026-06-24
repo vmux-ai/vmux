@@ -206,9 +206,15 @@ mod tests {
 
     #[test]
     fn pkg_action_by_status() {
-        assert_eq!(pkg_action(LspPkgStatus::Available, true), PkgAction::Install);
+        assert_eq!(
+            pkg_action(LspPkgStatus::Available, true),
+            PkgAction::Install
+        );
         assert_eq!(pkg_action(LspPkgStatus::Available, false), PkgAction::None);
-        assert_eq!(pkg_action(LspPkgStatus::Installed, true), PkgAction::Uninstall);
+        assert_eq!(
+            pkg_action(LspPkgStatus::Installed, true),
+            PkgAction::Uninstall
+        );
         assert_eq!(pkg_action(LspPkgStatus::Outdated, true), PkgAction::Update);
         assert_eq!(pkg_action(LspPkgStatus::Installing, true), PkgAction::None);
         assert_eq!(pkg_action(LspPkgStatus::OnPath, true), PkgAction::None);

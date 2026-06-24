@@ -38,7 +38,11 @@ pub fn sha256_file(path: &Path) -> Result<String, String> {
     let mut f = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
     std::io::copy(&mut f, &mut hasher).map_err(|e| e.to_string())?;
-    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 #[cfg(test)]
@@ -54,10 +58,7 @@ mod tests {
             if let Ok((mut stream, _)) = listener.accept() {
                 let mut req = [0u8; 1024];
                 let _ = stream.read(&mut req);
-                let header = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
-                    body.len()
-                );
+                let header = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
                 let _ = stream.write_all(header.as_bytes());
                 let _ = stream.write_all(body);
             }

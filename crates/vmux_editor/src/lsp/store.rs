@@ -164,7 +164,10 @@ mod tests {
 
         assert!(is_installed(root, "foo"));
         assert_eq!(installed(root).len(), 1);
-        assert_eq!(read_receipt(root, "foo").unwrap().version.as_deref(), Some("1.0"));
+        assert_eq!(
+            read_receipt(root, "foo").unwrap().version.as_deref(),
+            Some("1.0")
+        );
     }
 
     #[test]
@@ -193,7 +196,10 @@ mod tests {
         std::fs::write(pkgdir.join("foo-bin"), b"x").unwrap();
         write_receipt(root, &receipt("foo")).unwrap();
         link_bin(root, "foo", "foo-bin", "foo").unwrap();
-        assert!(matches!(resolved_command(root, "foo"), Resolution::Managed(_)));
+        assert!(matches!(
+            resolved_command(root, "foo"),
+            Resolution::Managed(_)
+        ));
         // on PATH (cargo exists everywhere this runs)
         assert_eq!(resolved_command(root, "cargo"), Resolution::OnPath);
         // missing

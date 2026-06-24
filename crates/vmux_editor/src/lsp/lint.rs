@@ -5,7 +5,14 @@ use vmux_core::event::{DiagSeverity, FileDiagnostic};
 
 use crate::lsp::registry::{LintFormat, LinterSpec};
 
-fn diag(line: u32, col: u32, end_col: u32, sev: DiagSeverity, msg: String, src: &str) -> FileDiagnostic {
+fn diag(
+    line: u32,
+    col: u32,
+    end_col: u32,
+    sev: DiagSeverity,
+    msg: String,
+    src: &str,
+) -> FileDiagnostic {
     let start = col.saturating_sub(1);
     FileDiagnostic {
         line: line.saturating_sub(1),
@@ -39,7 +46,14 @@ pub fn parse_ruff(stdout: &str) -> Vec<FileDiagnostic> {
             } else {
                 format!("{code}: {msg}")
             };
-            Some(diag(row, col, end_col, DiagSeverity::Warning, message, "ruff"))
+            Some(diag(
+                row,
+                col,
+                end_col,
+                DiagSeverity::Warning,
+                message,
+                "ruff",
+            ))
         })
         .collect()
 }

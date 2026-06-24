@@ -24,7 +24,10 @@ pub struct Package {
 
 fn str_array(v: Option<&Value>) -> Vec<String> {
     match v {
-        Some(Value::Array(a)) => a.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+        Some(Value::Array(a)) => a
+            .iter()
+            .filter_map(|x| x.as_str().map(String::from))
+            .collect(),
         Some(Value::String(s)) => vec![s.clone()],
         _ => Vec::new(),
     }
@@ -116,8 +119,7 @@ pub fn search<'a>(
             (q.is_empty()
                 || p.name.to_ascii_lowercase().contains(&q)
                 || p.description.to_ascii_lowercase().contains(&q))
-                && (lang.is_empty()
-                    || p.languages.iter().any(|l| l.to_ascii_lowercase() == lang))
+                && (lang.is_empty() || p.languages.iter().any(|l| l.to_ascii_lowercase() == lang))
                 && (cat.is_empty() || p.categories.iter().any(|c| c.to_ascii_lowercase() == cat))
         })
         .collect()
@@ -204,7 +206,10 @@ mod tests {
     #[test]
     fn npm_and_pypi_have_no_github_assets() {
         let pkgs = parse_registry(SAMPLE).unwrap();
-        let ts = pkgs.iter().find(|p| p.name == "typescript-language-server").unwrap();
+        let ts = pkgs
+            .iter()
+            .find(|p| p.name == "typescript-language-server")
+            .unwrap();
         assert!(ts.assets.is_empty());
         assert!(ts.source_id.starts_with("pkg:npm/"));
     }

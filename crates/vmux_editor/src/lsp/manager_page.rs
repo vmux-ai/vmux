@@ -2,11 +2,11 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, Browsers, BinReceive};
+use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 use vmux_core::event::{
-    InstallPhase, LspCatalogEvent, LspCatalogRequest, LspInstallProgress, LspInstallRequest,
-    LspPackage, LspPkgStatus, LspPkgStatusEvent, LspUninstallRequest, LspUpdateRequest,
-    LSP_CATALOG_EVENT, LSP_INSTALL_PROGRESS_EVENT, LSP_PKG_STATUS_EVENT,
+    InstallPhase, LSP_CATALOG_EVENT, LSP_INSTALL_PROGRESS_EVENT, LSP_PKG_STATUS_EVENT,
+    LspCatalogEvent, LspCatalogRequest, LspInstallProgress, LspInstallRequest, LspPackage,
+    LspPkgStatus, LspPkgStatusEvent, LspUninstallRequest, LspUpdateRequest,
 };
 
 use crate::lsp::catalog::{self, Package};
@@ -52,10 +52,15 @@ impl Plugin for ManagerPlugin {
 
 /// Compute the page-facing status/installability for a catalog package.
 pub fn to_lsp_package(root: &Path, p: &Package) -> LspPackage {
-    let kind = purl::parse(&p.source_id).map(|x| x.kind).unwrap_or_default();
+    let kind = purl::parse(&p.source_id)
+        .map(|x| x.kind)
+        .unwrap_or_default();
     let installed = store::is_installed(root, &p.name);
-    let on_path =
-        !installed && matches!(store::resolved_command(root, &p.name), store::Resolution::OnPath);
+    let on_path = !installed
+        && matches!(
+            store::resolved_command(root, &p.name),
+            store::Resolution::OnPath
+        );
     let catalog_version = purl::parse(&p.source_id).and_then(|x| x.version);
     let installed_version = installed
         .then(|| store::read_receipt(root, &p.name).and_then(|r| r.version))
@@ -76,13 +81,17 @@ pub fn to_lsp_package(root: &Path, p: &Package) -> LspPackage {
     };
     // github = always installable (prebuilt); toolchain sources need their tool on PATH.
     let installable = kind == "github"
-        || install::toolchain_for(&kind).is_some_and(|t| crate::lsp::registry::executable_on_path(t));
+        || install::toolchain_for(&kind).is_some_and(crate::lsp::registry::executable_on_path);
     let requires = if installable {
         None
     } else {
         install::toolchain_for(&kind).map(String::from)
     };
-    let version = if installed { installed_version } else { catalog_version };
+    let version = if installed {
+        installed_version
+    } else {
+        catalog_version
+    };
     LspPackage {
         name: p.name.clone(),
         description: p.description.clone(),
@@ -110,14 +119,19 @@ fn on_catalog_request(trigger: On<BinReceive<LspCatalogRequest>>, outbox: Res<Ma
     std::thread::spawn(move || {
         let root = store::default_root();
         let pkgs = catalog::ensure_catalog(&root, req.refresh).unwrap_or_default();
-        let mut out: Vec<LspPackage> = catalog::search(&pkgs, &req.query, &req.language, &req.category)
-            .iter()
-            .map(|p| to_lsp_package(&root, p))
-            .collect();
+        let mut out: Vec<LspPackage> =
+            catalog::search(&pkgs, &req.query, &req.language, &req.category)
+                .iter()
+                .map(|p| to_lsp_package(&root, p))
+                .collect();
         if req.installed_only {
             out.retain(|p| matches!(p.status, LspPkgStatus::Installed | LspPkgStatus::Outdated));
         }
-        push(&sink, entity, ManagerMsg::Catalog(LspCatalogEvent { packages: out }));
+        push(
+            &sink,
+            entity,
+            ManagerMsg::Catalog(LspCatalogEvent { packages: out }),
+        );
     });
 }
 
@@ -179,12 +193,20 @@ fn install_named(outbox: &ManagerOutbox, entity: Entity, name: String) {
 }
 
 fn on_install_request(trigger: On<BinReceive<LspInstallRequest>>, outbox: Res<ManagerOutbox>) {
-    install_named(&outbox, trigger.event().webview, trigger.event().payload.name.clone());
+    install_named(
+        &outbox,
+        trigger.event().webview,
+        trigger.event().payload.name.clone(),
+    );
 }
 
 fn on_update_request(trigger: On<BinReceive<LspUpdateRequest>>, outbox: Res<ManagerOutbox>) {
     // Update = reinstall latest.
-    install_named(&outbox, trigger.event().webview, trigger.event().payload.name.clone());
+    install_named(
+        &outbox,
+        trigger.event().webview,
+        trigger.event().payload.name.clone(),
+    );
 }
 
 fn on_uninstall_request(trigger: On<BinReceive<LspUninstallRequest>>, outbox: Res<ManagerOutbox>) {
@@ -194,8 +216,10 @@ fn on_uninstall_request(trigger: On<BinReceive<LspUninstallRequest>>, outbox: Re
     std::thread::spawn(move || {
         let root = store::default_root();
         let _ = store::remove(&root, &name);
-        let on_path =
-            matches!(store::resolved_command(&root, &name), store::Resolution::OnPath);
+        let on_path = matches!(
+            store::resolved_command(&root, &name),
+            store::Resolution::OnPath
+        );
         let status = if on_path {
             LspPkgStatus::OnPath
         } else {
@@ -235,9 +259,11 @@ fn drain_manager_outbox(
                 LSP_INSTALL_PROGRESS_EVENT,
                 &ev,
             )),
-            ManagerMsg::Status(ev) => {
-                commands.trigger(BinHostEmitEvent::from_rkyv(entity, LSP_PKG_STATUS_EVENT, &ev))
-            }
+            ManagerMsg::Status(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                LSP_PKG_STATUS_EVENT,
+                &ev,
+            )),
         }
     }
 }
@@ -307,7 +333,8 @@ mod tests {
     fn drain_empties_outbox() {
         let mut app = App::new();
         let outbox = ManagerOutbox::default();
-        app.add_plugins(MinimalPlugins).insert_resource(outbox.clone());
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(outbox.clone());
         outbox.0.lock().unwrap().push((
             Entity::PLACEHOLDER,
             ManagerMsg::Status(LspPkgStatusEvent {
