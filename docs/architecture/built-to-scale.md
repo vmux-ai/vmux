@@ -1,42 +1,101 @@
-# ECS: Design to scale
+# ECS, explained
 
 > Part of the [Vmux Architecture](../architecture.md) overview.
 
-The same property that makes Vmux pleasant to write makes it compound as it grows:
-**composition over inheritance**. An entity is just an id, defined entirely by the
-components attached to it — no base classes, no inheritance trees:
+Vmux's host runs on **Bevy**, an **Entity-Component-System (ECS)**. If you've never touched
+one, the name sounds exotic — but the whole model is three nouns, and each maps cleanly onto
+something you already use in React. Here it is from the ground up.
 
-- A web view *becomes* a shell by adding a `Terminal` component.
-- A web view switches to a native surface via `WebviewWindowed`.
-- Systems query for component sets (e.g. the `Active` tag), so behavior is opt-in — you
-  add a capability, you don't inherit one.
+The one move that feels new: ECS **splits the atom of a React component** into *data* and
+*behavior*. State lives in one place, the functions that act on it live in another, and an id
+ties them together.
 
-## State in components, behavior in systems
+## Entity — just an id
 
-Vmux holds no object graph. Every pane, stack, space, and surface is an **entity**; its
-state lives in **components** (plain data), and every behavior is a **system** — a function
-that queries for a set of components and runs over each matching entity. The `World` ties
-them together as the one source of truth: an in-memory database the systems read and write.
+An entity is **not** an object. No methods, no fields, no class to extend — it's a bare id,
+like a primary key in a table or the `key` prop on a list item. A pane, a tab, a space, a
+browser surface: each *is* one entity, and on its own that entity is nothing but a number.
 
-Because table-backed components are stored contiguously by type, a system touches only the
-data it asks for — cache-friendly by construction. Bevy then schedules systems with non-overlapping
-queries across cores in **parallel** on its own: you declare *what* data you need, the
-engine decides *when* it runs.
+What an entity actually *is* comes entirely from the components you attach to it. Spawn one
+and you get back its id:
 
-## What compounds as you grow
+```rust
+let pane = commands.spawn(Pane).id();
+```
 
-- **More behavior → more systems.** A capability is a system over a query; independent
-  systems run in parallel, so adding one rarely costs the others.
-- **More surfaces → more entities.** Panes, stacks, and spaces are just entities; their
-  components are stored contiguously and iterated at speed.
-- **More agents → more spaces.** Each agent is anchored to its own Space subtree, so many
-  can work concurrently without touching the space you're in.
-- **Heavier pages → the GPU.** Web surfaces composite on the GPU while the host loop stays
-  reactive — load goes up, idle cost doesn't.
+## Component — your state
 
-## Built to sit idle
+A component is **plain data** attached to an entity: a struct with no behavior. Think of the
+typed columns of a database row, or a single `useState` slice lifted out of the component and
+stored on its own.
 
-Most game engines pump the render loop continuously, pinning a core even on a static
-scene. Vmux forces `winit` into a strictly **reactive** update mode and uses a CEF wake
-throttler to tick the loop at the monitor's refresh rate *only* when there's work — render
-changes, scroll, cursor animation, terminal output. Static workspace, quiet machine.
+```rust
+#[derive(Component)]
+pub struct Terminal;
+
+#[derive(Component)]
+pub struct Active;
+```
+
+Both are *tag* components — empty structs whose mere presence on an entity is the data
+("this entity is a terminal", "this one is focused"). Components carry fields when there's
+something to store, but they never carry logic.
+
+Because state is just components you bolt on, **capabilities compose** instead of being
+inherited. A plain web-view entity *becomes* a shell the moment you add a `Terminal`
+component — no subclass, no base class, no `extends`. You add a capability; you don't inherit
+one.
+
+## System — your behavior
+
+A system is an ordinary function that runs over **every entity matching a query**. It's your
+`useEffect` or your reducer — except instead of being bound to one component instance, it runs
+across the whole world at once.
+
+```rust
+fn focus_active(panes: Query<&Terminal, With<Active>>) {
+    for terminal in &panes {
+        // …
+    }
+}
+```
+
+Read the query out loud and it's obvious: *"for each entity that has a `Terminal` and is
+`Active`, do this."* It's an `array.filter(…).forEach(…)` — and the engine calls it for you on
+a schedule, tick after tick, so you never wire up the *when*.
+
+## The world — your single store
+
+Every entity and component lives in one **`World`**: a single Redux store, an in-memory
+database. It is the one source of truth. Systems read from it and write to it; nothing else
+holds state on the side. A query is your `array.filter(…)`; the world is the array.
+
+## Messages — your actions
+
+Systems don't call each other directly. To make something happen elsewhere, a system **sends
+a message**, and another system reads it on a later tick:
+
+```rust
+#[derive(Message)]
+pub struct TerminalSpawnRequest {
+    pub target_stack: Option<Entity>,
+}
+```
+
+That's `dispatch(action)` and the reducer that handles it — sender and receiver stay
+decoupled, exactly like a Redux action and the slice that reacts to it.
+
+## Why split data from behavior
+
+Pulling state (components) apart from behavior (systems) buys two things for free:
+
+- **Composition over inheritance** — every capability is a component you add, never a class
+  you extend, so features stack instead of tangling.
+- **Real parallelism, scheduled for you** — because each system declares the data it touches,
+  Bevy runs every non-conflicting system across CPU cores at once. You describe *what* you
+  need; the engine decides *when* it runs.
+
+That's the whole model. For the side-by-side React / Redux → Rust mapping in real code, see
+**[Rust for React JS developers](rust-without-the-headaches.md)**. To go deeper, the official
+[Bevy guides](https://bevyengine.org/learn/) and the
+[Bevy Cheat Book](https://bevy-cheatbook.github.io) cover it in an afternoon.

@@ -32,7 +32,7 @@ pub const DOCS: &[Doc] = &[
     },
     Doc {
         slug: "built-to-scale",
-        title: "ECS: Design to scale",
+        title: "ECS, explained",
         group: "Architecture",
         content: include_str!("../../docs/architecture/built-to-scale.md"),
     },

@@ -28,8 +28,8 @@ both humans and agents tile, persist, and reconcile in real time.
   why a web sandbox is the wrong ceiling for an OS-level workspace.
 - **[Rust for React JS developers](architecture/rust-without-the-headaches.md)** — Bevy ECS as an
   in-memory database, lock-free concurrency, and Rust as the universal FFI glue.
-- **[ECS: Design to scale](architecture/built-to-scale.md)** — composition over inheritance,
-  and what compounds as features, surfaces, and agents grow.
+- **[ECS, explained](architecture/built-to-scale.md)** — entities, components, and systems
+  from the ground up, mapped onto the React model you already know.
 - **[Plugins](architecture/plugins.md)** — the `build()` contract, one capability per crate,
   and how the whole app is assembled from the plugin stack.
 - **[Co-working with agents](architecture/agent-first.md)** — the MCP surface,
