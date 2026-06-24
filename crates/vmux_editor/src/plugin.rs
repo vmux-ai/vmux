@@ -715,12 +715,13 @@ impl Plugin for EditorPlugin {
             }
             Err(e) => tracing::warn!("file watcher init failed: {e}"),
         }
-        app.add_plugins(BinEventEmitterPlugin::<(
-            FileResizeEvent,
-            FileScrollEvent,
-            FilePreviewRequest,
-            FileOpenEvent,
-        )>::default())
+        app.add_plugins(crate::lsp::LspPlugin)
+            .add_plugins(BinEventEmitterPlugin::<(
+                FileResizeEvent,
+                FileScrollEvent,
+                FilePreviewRequest,
+                FileOpenEvent,
+            )>::default())
             .add_systems(
                 Update,
                 handle_file_page_open.in_set(PageOpenSet::HandleKnownPages),

@@ -26,6 +26,8 @@ tracing = "0.1"
 url = { workspace = true }
 percent-encoding = "2"
 notify = { workspace = true }
+serde_json = { workspace = true }
+lsp-types = "0.97"
 syntect = { workspace = true }
 two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
@@ -36,6 +38,7 @@ vmux_space = { path = "../vmux_space" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tempfile = "3"
+url = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }

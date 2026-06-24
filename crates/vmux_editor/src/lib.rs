@@ -13,6 +13,11 @@ mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::{EditorPlugin, FileView, restore_file_view_bundle};
 
+#[cfg(not(target_arch = "wasm32"))]
+mod lsp;
+#[cfg(not(target_arch = "wasm32"))]
+pub use lsp::LspPlugin;
+
 #[cfg(any(target_arch = "wasm32", test))]
 pub mod page_model;
 
