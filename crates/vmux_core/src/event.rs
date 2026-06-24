@@ -24,6 +24,7 @@ pub const FILE_PREVIEW_EVENT: &str = "file_preview";
 pub const FILE_OPEN_EVENT: &str = "file_open";
 pub const FILE_IMAGE_EVENT: &str = "file_image";
 pub const FILE_DIAGNOSTICS_EVENT: &str = "file_diagnostics";
+pub const FILE_LSP_STATUS_EVENT: &str = "file_lsp_status";
 pub const LSP_CATALOG_REQUEST: &str = "lsp_catalog_request";
 pub const LSP_CATALOG_EVENT: &str = "lsp_catalog";
 pub const LSP_INSTALL_REQUEST: &str = "lsp_install_request";
@@ -355,6 +356,43 @@ pub struct FileDiagnosticsEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+pub enum LspServerState {
+    /// A server is registered for this file's language but isn't installed/on PATH.
+    Missing,
+    /// Server spawned; awaiting its first response.
+    Starting,
+    /// Server has sent diagnostics for this file (it's live).
+    Ready,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileLspStatusEvent {
+    pub server: String,
+    pub state: LspServerState,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub enum LspPkgStatus {
     Available,
     OnPath,
@@ -640,6 +678,18 @@ mod file_event_tests {
         assert_eq!(d.packages[0].name, "rust-analyzer");
         assert_eq!(d.packages[0].status, LspPkgStatus::Available);
         assert!(d.packages[0].installable);
+    }
+
+    #[test]
+    fn lsp_status_event_rkyv_roundtrip() {
+        let ev = FileLspStatusEvent {
+            server: "rust-analyzer".into(),
+            state: LspServerState::Ready,
+        };
+        let b = rkyv::to_bytes::<rkyv::rancor::Error>(&ev).unwrap();
+        let d = rkyv::from_bytes::<FileLspStatusEvent, rkyv::rancor::Error>(&b).unwrap();
+        assert_eq!(d.server, "rust-analyzer");
+        assert_eq!(d.state, LspServerState::Ready);
     }
 
     #[test]

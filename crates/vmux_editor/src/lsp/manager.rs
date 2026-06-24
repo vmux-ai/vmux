@@ -190,13 +190,9 @@ pub struct LspOpened;
 use crate::plugin::{FileBuffer, FileView};
 
 /// Open freshly-loaded text buffers (skip error/dir/image buffers).
-fn lsp_open_documents(
-    q: Query<(Entity, &FileView, &FileBuffer), Without<LspOpened>>,
-    settings: Res<vmux_setting::AppSettings>,
-    mut manager: NonSendMut<LspManager>,
-    mut commands: Commands,
-) {
-    let overrides: ServerOverrides = settings
+/// Build the extension→ServerSpec override map from settings.
+fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
+    settings
         .editor
         .lsp
         .servers
@@ -212,7 +208,16 @@ fn lsp_open_documents(
                 },
             )
         })
-        .collect();
+        .collect()
+}
+
+fn lsp_open_documents(
+    q: Query<(Entity, &FileView, &FileBuffer), Without<LspOpened>>,
+    settings: Res<vmux_setting::AppSettings>,
+    mut manager: NonSendMut<LspManager>,
+    mut commands: Commands,
+) {
+    let overrides = server_overrides(&settings);
     for (entity, fv, buf) in &q {
         if buf.language.starts_with("__error__:") {
             continue;
@@ -238,6 +243,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
             lint_on_open,
             drain_lsp_diagnostics,
             drain_lint,
+            lsp_status_system,
         ),
     );
 }
@@ -367,6 +373,52 @@ fn lint_on_open(
                 .unwrap_or_else(|e| e.into_inner())
                 .push((path, diags));
         });
+    }
+}
+
+/// Last LSP status emitted to a file's page (dedupes unchanged re-emits).
+#[derive(Component)]
+pub struct LspStatusSent(pub vmux_core::event::LspServerState);
+
+/// Emit per-file LSP server status (Missing / Starting / Ready) so the editor can
+/// show whether a server is live, independent of whether there are diagnostics.
+/// Runs each frame; emits only on change.
+fn lsp_status_system(
+    q: Query<(Entity, &FileView, Option<&LspStatusSent>), With<vmux_core::page::PageReady>>,
+    settings: Res<vmux_setting::AppSettings>,
+    state: Res<DiagState>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    use vmux_core::event::{FileLspStatusEvent, LspServerState, FILE_LSP_STATUS_EVENT};
+    let overrides = server_overrides(&settings);
+    for (entity, fv, sent) in &q {
+        let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        let Some(spec) = resolve_spec(ext, &overrides) else {
+            continue;
+        };
+        let desired = match store::resolved_command(&store::default_root(), &spec.command) {
+            store::Resolution::Missing => LspServerState::Missing,
+            _ if state.lsp.contains_key(&canon(&fv.path)) => LspServerState::Ready,
+            _ => LspServerState::Starting,
+        };
+        if sent.map(|s| s.0) == Some(desired) {
+            continue;
+        }
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            FILE_LSP_STATUS_EVENT,
+            &FileLspStatusEvent {
+                server: spec.command.clone(),
+                state: desired,
+            },
+        ));
+        commands.entity(entity).insert(LspStatusSent(desired));
     }
 }
 

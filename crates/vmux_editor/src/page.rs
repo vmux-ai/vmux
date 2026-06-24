@@ -341,6 +341,7 @@ pub fn Page() -> Element {
     let mut lines = use_signal(Vec::<FileLine>::new);
     let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
     let mut hover_diag = use_signal(|| Option::<FileDiagnostic>::None);
+    let mut lsp_status = use_signal(|| Option::<FileLspStatusEvent>::None);
     let mut error = use_signal(String::new);
     let dir_entries = use_signal(Vec::<FileDirEntry>::new);
     let parent_entries = use_signal(Vec::<FileDirEntry>::new);
@@ -374,6 +375,7 @@ pub fn Page() -> Element {
         path.set(m.path);
         diagnostics.set(Vec::new());
         hover_diag.set(None);
+        lsp_status.set(None);
         git_path.set(m.abs_path);
         total_lines.set(m.total_lines);
         mode.set(Mode::Text);
@@ -389,6 +391,11 @@ pub fn Page() -> Element {
     let _diag =
         use_bin_event_listener::<FileDiagnosticsEvent, _>(FILE_DIAGNOSTICS_EVENT, move |d| {
             diagnostics.set(d.diagnostics);
+        });
+
+    let _lsp_status =
+        use_bin_event_listener::<FileLspStatusEvent, _>(FILE_LSP_STATUS_EVENT, move |s| {
+            lsp_status.set(Some(s));
         });
 
     let _err = use_bin_event_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
@@ -674,6 +681,24 @@ pub fn Page() -> Element {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-white/[0.07] bg-black/20 px-4 font-sans text-xs text-muted-foreground",
                 {type_icon(&header_path, mode() == Mode::Dir, "h-4 w-4 shrink-0 text-foreground/80")}
                 span { class: "truncate text-foreground/90", "{header_path}" }
+                div { class: "flex-1" }
+                {
+                    lsp_status().map(|s| {
+                        let (dot, label) = match s.state {
+                            LspServerState::Ready => ("text-ansi-2", s.server.clone()),
+                            LspServerState::Starting => ("text-ansi-3", format!("{} starting\u{2026}", s.server)),
+                            LspServerState::Missing => ("text-ansi-1", format!("{} \u{2014} not installed", s.server)),
+                        };
+                        rsx! {
+                            div {
+                                class: "flex shrink-0 items-center gap-1.5 text-[11px]",
+                                title: "LSP",
+                                span { class: "{dot}", "\u{25CF}" }
+                                span { class: "text-foreground/70", "{label}" }
+                            }
+                        }
+                    })
+                }
             }
 
             GitBar {

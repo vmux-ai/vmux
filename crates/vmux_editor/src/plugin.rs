@@ -374,7 +374,8 @@ fn reset_file_sent_markers_on_page_ready(
     commands
         .entity(entity)
         .remove::<FileInitialMetaSent>()
-        .remove::<FileThemeSent>();
+        .remove::<FileThemeSent>()
+        .remove::<crate::lsp::manager::LspStatusSent>();
 }
 
 fn on_file_resize(
