@@ -23,6 +23,7 @@ pub const FILE_PREVIEW_REQUEST_EVENT: &str = "file_preview_request";
 pub const FILE_PREVIEW_EVENT: &str = "file_preview";
 pub const FILE_OPEN_EVENT: &str = "file_open";
 pub const FILE_IMAGE_EVENT: &str = "file_image";
+pub const FILE_DIAGNOSTICS_EVENT: &str = "file_diagnostics";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
 #[derive(
@@ -277,6 +278,64 @@ pub struct FileImageEvent {
     pub bytes: Vec<u8>,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum DiagSeverity {
+    Error,
+    Warning,
+    Info,
+    Hint,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileDiagnostic {
+    /// 0-based absolute line number.
+    pub line: u32,
+    /// Char index within the line (NOT UTF-16, NOT byte).
+    pub start_col: u32,
+    /// Char index within the line, exclusive.
+    pub end_col: u32,
+    pub severity: DiagSeverity,
+    pub message: String,
+    pub source: Option<String>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileDiagnosticsEvent {
+    pub path: String,
+    pub diagnostics: Vec<FileDiagnostic>,
+}
+
 #[cfg(test)]
 mod file_event_tests {
     use super::*;
@@ -347,6 +406,30 @@ mod file_event_tests {
             parent_entries: vec![],
         };
         assert_eq!(e.parent_path, "/a");
+    }
+
+    #[test]
+    fn file_diagnostics_event_rkyv_roundtrip() {
+        let ev = FileDiagnosticsEvent {
+            path: "/src/main.rs".into(),
+            diagnostics: vec![FileDiagnostic {
+                line: 3,
+                start_col: 4,
+                end_col: 9,
+                severity: DiagSeverity::Error,
+                message: "cannot find value `x`".into(),
+                source: Some("rustc".into()),
+            }],
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&ev).expect("ser");
+        let back =
+            rkyv::from_bytes::<FileDiagnosticsEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(back.path, "/src/main.rs");
+        assert_eq!(back.diagnostics.len(), 1);
+        assert_eq!(back.diagnostics[0].line, 3);
+        assert_eq!(back.diagnostics[0].end_col, 9);
+        assert_eq!(back.diagnostics[0].severity, DiagSeverity::Error);
+        assert_eq!(back.diagnostics[0].source.as_deref(), Some("rustc"));
     }
 }
 
