@@ -2989,10 +2989,24 @@ fn handle_page_open_requests(
         commands.spawn(PageOpenTask {
             id: PageOpenId::new(),
             stack,
-            url: request.url.clone(),
+            url: normalize_vmux_url(&request.url),
             request_id: request.request_id,
         });
     }
+}
+
+/// Normalize a bare `vmux://<host>` (no path/query) to `vmux://<host>/` so page
+/// hosts match their canonical slash form. Leaves URLs that already have a path
+/// (`vmux://agent/vibe/`), a query (`vmux://error/?...`), or other schemes alone.
+fn normalize_vmux_url(url: &str) -> String {
+    if let Some(rest) = url.strip_prefix("vmux://")
+        && !rest.is_empty()
+        && !rest.contains('/')
+        && !rest.contains('?')
+    {
+        return format!("vmux://{rest}/");
+    }
+    url.to_string()
 }
 
 fn resolve_page_open_target(
@@ -3364,6 +3378,20 @@ fn cef_root_cache_path() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_vmux_url_adds_trailing_slash_to_bare_host() {
+        assert_eq!(normalize_vmux_url("vmux://lsp"), "vmux://lsp/");
+        assert_eq!(normalize_vmux_url("vmux://terminal"), "vmux://terminal/");
+        // already canonical / has a path / query / other scheme: unchanged
+        assert_eq!(normalize_vmux_url("vmux://lsp/"), "vmux://lsp/");
+        assert_eq!(normalize_vmux_url("vmux://agent/vibe/"), "vmux://agent/vibe/");
+        assert_eq!(normalize_vmux_url("vmux://error/?title=x"), "vmux://error/?title=x");
+        assert_eq!(
+            normalize_vmux_url("file:///tmp/main.rs"),
+            "file:///tmp/main.rs"
+        );
+    }
 
     #[test]
     fn effective_title_prefers_nonempty_osc() {
