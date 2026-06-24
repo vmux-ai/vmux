@@ -20,7 +20,9 @@ fn dev_target_signs_then_runs_debug_binary() {
         makefile.contains("dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process")
     );
     assert!(makefile.contains("./scripts/sign-dev-mac.sh"));
-    assert!(makefile.contains("DYLD_LIBRARY_PATH=\"$$dylib_path\" ./target/debug/vmux_desktop"));
+    assert!(makefile.contains(
+        "DYLD_LIBRARY_PATH=\"$$dylib_path\" VMUX_PROFILE=\"$(VMUX_PROFILE)\" ./target/debug/vmux_desktop"
+    ));
     assert!(makefile.contains("identity=\"$$(./scripts/ensure-local-codesign-identity.sh)\" &&"));
     assert!(!makefile.contains("run-mac:"));
     assert!(!makefile.contains("build-mac-debug"));
@@ -52,8 +54,8 @@ fn dev_target_stops_existing_debug_desktop_before_cef_initialize() {
         .find("exec env -u CEF_PATH")
         .expect("debug desktop run");
 
-    assert!(makefile.contains("pkill -f \"target/debug/vmux_desktop\""));
-    assert!(makefile.contains("pkill -f \"bevy_cef_debug_render_process\""));
+    assert!(makefile.contains("pgrep -f \"target/debug/vmux_desktop\""));
+    assert!(makefile.contains("pgrep -f \"bevy_cef_debug_render_process\""));
     assert!(stop_idx < run_idx);
 }
 

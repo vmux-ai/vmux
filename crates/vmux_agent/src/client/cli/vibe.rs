@@ -38,6 +38,9 @@ impl CliAgentStrategy for VibeStrategy {
         // config (falling back to default models). `--trust` trusts the working
         // directory for this invocation (vibe's documented automation flag).
         let mut args = vec!["--trust".to_string()];
+        if let Some(flag) = vibe_auto_approve_flag(&vmux_core::profile::active_profile_name()) {
+            args.push(flag.to_string());
+        }
         if let Some(sid) = session_id {
             args.push("--resume".to_string());
             args.push(sid.to_string());
@@ -82,6 +85,10 @@ impl CliAgentStrategy for VibeStrategy {
         }
         false
     }
+}
+
+fn vibe_auto_approve_flag(profile: &str) -> Option<&'static str> {
+    (profile != "personal").then_some("--auto-approve")
 }
 
 #[derive(Serialize)]
@@ -197,6 +204,12 @@ mod tests {
             VibeStrategy.build_args(&mcp, Some("sid-1")),
             vec!["--trust", "--resume", "sid-1"]
         );
+    }
+
+    #[test]
+    fn auto_approve_flag_only_for_non_personal_profile() {
+        assert_eq!(vibe_auto_approve_flag("personal"), None);
+        assert_eq!(vibe_auto_approve_flag("gregor"), Some("--auto-approve"));
     }
 
     fn write_meta(

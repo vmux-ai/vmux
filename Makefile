@@ -1,6 +1,8 @@
-.PHONY: dev local release build-local build-release build setup-cef install-debug-render-process doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup
+.PHONY: dev test-app local release build-local build-release build setup-cef install-debug-render-process doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css lint lint-fix test setup-hooks cleanup
 
 .DEFAULT_GOAL := dev
+
+VMUX_PROFILE ?= personal
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 RUSTUP_BIN := $(or $(shell command -v rustup 2>/dev/null),$(HOME)/.cargo/bin/rustup)
@@ -25,14 +27,21 @@ dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process
 	APP_BINARY="target/debug/vmux_desktop" \
 	HELPER_BINARY="$(CEF_DEBUG_RENDER)" \
 	./scripts/sign-dev-mac.sh
-	@pkill -f "target/debug/vmux_desktop" 2>/dev/null || true
-	@pkill -f "bevy_cef_debug_render_process" 2>/dev/null || true
+	@for pid in $$(pgrep -f "target/debug/vmux_desktop" 2>/dev/null); do \
+		ps eww -p $$pid 2>/dev/null | grep -q "VMUX_PROFILE=$(VMUX_PROFILE)" && kill $$pid 2>/dev/null || true; \
+	done
+	@for pid in $$(pgrep -f "bevy_cef_debug_render_process" 2>/dev/null); do \
+		ps eww -p $$pid 2>/dev/null | grep -q "VMUX_PROFILE=$(VMUX_PROFILE)" && kill $$pid 2>/dev/null || true; \
+	done
 	@rust_target_libdir="$$(rustc --print target-libdir)" && \
 	dylib_path="$$rust_target_libdir:$(CURDIR)/target/debug/deps" && \
 	if [ -n "$${DYLD_LIBRARY_PATH:-}" ]; then \
 		dylib_path="$$dylib_path:$$DYLD_LIBRARY_PATH"; \
 	fi; \
-	exec env -u CEF_PATH DYLD_LIBRARY_PATH="$$dylib_path" ./target/debug/vmux_desktop
+	exec env -u CEF_PATH DYLD_LIBRARY_PATH="$$dylib_path" VMUX_PROFILE="$(VMUX_PROFILE)" ./target/debug/vmux_desktop
+
+test-app:
+	$(MAKE) dev VMUX_PROFILE=gregor
 
 build: ensure-mac-deps
 	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop -p vmux_cli -p vmux_service --release

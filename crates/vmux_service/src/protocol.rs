@@ -77,6 +77,9 @@ pub enum AgentCommand {
         text: String,
         terminal: Option<String>,
     },
+    FocusPane {
+        pane: String,
+    },
     UpdateSettings {
         path: String,
         value_json: String,
@@ -242,6 +245,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::TerminalSend { text, .. } if text.is_empty() => {
             Err("terminal_send.text is empty")
+        }
+        AgentCommand::FocusPane { pane } if pane.trim().is_empty() => {
+            Err("focus_pane.pane is empty")
         }
         AgentCommand::UpdateSettings { path, .. } if path.trim().is_empty() => {
             Err("update_settings.path is empty")

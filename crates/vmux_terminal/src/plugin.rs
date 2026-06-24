@@ -1059,7 +1059,7 @@ fn sync_agent_focus(
         (Entity, &ProcessId, Has<AgentFocusBlurred>),
         With<vmux_core::agent::AgentSession>,
     >,
-    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     mode_map: Res<TerminalModeMap>,
     service: Option<Res<ServiceClient>>,
@@ -3121,7 +3121,7 @@ fn update_local_copy_mode_for_mouse_action(
 pub fn handle_terminal_send_requests(
     mut reader: MessageReader<crate::TerminalSendRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -3163,7 +3163,7 @@ pub fn handle_run_shell_requests(
             Without<vmux_layout::pane::PaneSplit>,
         ),
     >,
-    terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    terminals: Query<(Entity, &ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     mut commands: Commands,
     mut terminal_stack_spawns: Option<MessageWriter<TerminalStackSpawnRequest>>,
 ) {
@@ -3226,6 +3226,37 @@ mod tests {
             spaces: Default::default(),
             recording: Default::default(),
         }
+    }
+
+    #[test]
+    fn terminal_send_resolves_target_by_process_id_uuid() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<crate::TerminalSendRequest>()
+            .insert_resource(vmux_layout::stack::FocusedStack::default())
+            .add_systems(Update, handle_terminal_send_requests);
+
+        let parent = app.world_mut().spawn_empty().id();
+        let pid = process_id(7);
+        let terminal = app
+            .world_mut()
+            .spawn((Terminal, pid))
+            .insert(ChildOf(parent))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::TerminalSendRequest>>()
+            .write(crate::TerminalSendRequest {
+                text: "hi".to_string(),
+                terminal: Some(pid.to_string()),
+            });
+        app.update();
+
+        let pending = app
+            .world()
+            .get::<PendingTerminalInput>(terminal)
+            .expect("input routed to terminal by process id uuid");
+        assert_eq!(pending.data, b"hi".to_vec());
     }
 
     #[test]

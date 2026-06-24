@@ -23,11 +23,18 @@ pub enum McpParamTool {
         description = "Navigate the active webview to a URL, or open a URL in a target pane. URLs starting with 'vmux://terminal/' open a terminal (use '?cwd=/path' to set working dir), 'vmux://spaces/' opens the spaces view, 'vmux://services/' opens the processes monitor; other 'vmux://' URLs are rejected; everything else opens as a browser. With 'vmux://' URLs, a new tab is always created in the target pane (defaulting to the focused pane)."
     )]
     BrowserNavigate { url: String, pane: Option<String> },
-    #[mcp(description = "Send raw text to the active terminal (no carriage return appended).")]
+    #[mcp(
+        description = "Send text to a terminal. Target by `terminal` (a process_id from vmux_read_layout) or omit to use the active terminal. Set `enter: true` to append a carriage return and submit the line (required for TUIs like the vibe agent, whose Enter is CR)."
+    )]
     TerminalSend {
         text: String,
         terminal: Option<String>,
+        enter: Option<bool>,
     },
+    #[mcp(
+        description = "Focus a pane by id (from vmux_read_layout, e.g. \"pane:123\"), making it the active pane/stack so subsequent terminal_send and input target it."
+    )]
+    FocusPane { pane: String },
     #[mcp(description = "Select a tab by index (1-8).")]
     SelectTab { index: u8 },
     #[mcp(description = "Update a single vmux setting by dot-path. \
@@ -88,11 +95,26 @@ impl McpParamTool {
                 }
                 Ok(AgentCommand::BrowserNavigate { url, pane })
             }
-            McpParamTool::TerminalSend { text, terminal } => {
+            McpParamTool::TerminalSend {
+                text,
+                terminal,
+                enter,
+            } => {
+                let text = if enter.unwrap_or(false) {
+                    format!("{text}\r")
+                } else {
+                    text
+                };
                 if text.is_empty() {
                     return Err("terminal_send.text is empty".to_string());
                 }
                 Ok(AgentCommand::TerminalSend { text, terminal })
+            }
+            McpParamTool::FocusPane { pane } => {
+                if pane.trim().is_empty() {
+                    return Err("focus_pane.pane is empty".to_string());
+                }
+                Ok(AgentCommand::FocusPane { pane })
             }
             McpParamTool::SelectTab { index } => {
                 if !(1..=8).contains(&index) {
@@ -437,7 +459,7 @@ fn record_start_definition() -> ToolDefinition {
 Returns immediately so you can drive the UI with other tools to demonstrate a feature, then call \
 record_stop. Record in ONE live take: start, perform the few actions you want to show, then \
 stop. Do NOT rehearse, build elaborate layouts, or take screenshots to verify - just capture the \
-live interaction in a single pass. Auto-stops after `max_secs` (default 120) as a safety cap. Only \
+live interaction in a single pass. Auto-stops after `max_secs` (default 600) as a safety cap. Only \
 one recording at a time. macOS only; the first call may prompt for Screen Recording permission - \
 grant it in System Settings > Privacy & Security > Screen Recording, then call again."
             .into(),
@@ -446,7 +468,7 @@ grant it in System Settings > Privacy & Security > Screen Recording, then call a
             "additionalProperties": false,
             "properties": {
                 "gif": {"type": "boolean", "description": "Also emit a GIF next to the mp4 (default false)."},
-                "max_secs": {"type": "integer", "description": "Auto-stop cap in seconds (default 120)."},
+                "max_secs": {"type": "integer", "description": "Auto-stop cap in seconds (default 600)."},
                 "pane": {"type": "string", "description": "Optional pane:<id> or stack:<id> to crop to; whole window if omitted."}
             }
         }),
@@ -457,7 +479,7 @@ fn record_stop_definition() -> ToolDefinition {
     ToolDefinition {
         name: "record_stop".into(),
         description: "Stop the active recording and write the file(s). Returns the mp4 path, duration, \
-and size (plus the GIF path if one was requested). By default saves to ~/.vmux/recording/; pass `dir` \
+and size (plus the GIF path if one was requested). By default saves to ~/.vmux/profiles/<profile>/recording/; pass `dir` \
 (absolute) and `name` (basename, no extension) to save elsewhere - e.g. dir=<repo>/docs/recording, \
 name=<feature> to drop a demo straight into the repo."
             .into(),
@@ -465,7 +487,7 @@ name=<feature> to drop a demo straight into the repo."
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "dir": {"type": "string", "description": "Absolute output directory (default ~/.vmux/recording)."},
+                "dir": {"type": "string", "description": "Absolute output directory (default ~/.vmux/profiles/<profile>/recording)."},
                 "name": {"type": "string", "description": "Output basename without extension (default vmux-<timestamp>)."}
             }
         }),
@@ -665,7 +687,7 @@ pub fn dispatch_with_anchor(
         let max_secs = arguments
             .get("max_secs")
             .and_then(Value::as_u64)
-            .unwrap_or(120) as u32;
+            .unwrap_or(600) as u32;
         let pane = match arguments.get("pane") {
             None | Some(Value::Null) => None,
             Some(Value::String(s)) => {
@@ -817,7 +839,7 @@ mod tests {
             q,
             AgentQuery::RecordStart {
                 gif: false,
-                max_secs: 120,
+                max_secs: 600,
                 pane: None
             }
         );
@@ -1004,6 +1026,38 @@ mod tests {
             command,
             AgentCommand::TerminalSend {
                 text: "ls".to_string(),
+                terminal: None,
+            }
+        );
+    }
+
+    #[test]
+    fn terminal_send_enter_appends_carriage_return() {
+        let command = dispatch_command(
+            "terminal_send",
+            serde_json::json!({"text": "ls", "enter": true}),
+        )
+        .unwrap();
+        assert_eq!(
+            command,
+            AgentCommand::TerminalSend {
+                text: "ls\r".to_string(),
+                terminal: None,
+            }
+        );
+    }
+
+    #[test]
+    fn terminal_send_enter_with_empty_text_submits_carriage_return() {
+        let command = dispatch_command(
+            "terminal_send",
+            serde_json::json!({"text": "", "enter": true}),
+        )
+        .unwrap();
+        assert_eq!(
+            command,
+            AgentCommand::TerminalSend {
+                text: "\r".to_string(),
                 terminal: None,
             }
         );

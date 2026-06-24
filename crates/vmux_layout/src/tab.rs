@@ -528,6 +528,7 @@ mod tests {
             .add_message::<crate::LayoutSpawnRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .init_resource::<crate::NewStackContext>()
             .insert_resource(test_settings())
             .init_resource::<CollectedSpawns>()

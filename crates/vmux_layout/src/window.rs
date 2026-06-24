@@ -1170,6 +1170,7 @@ mod tests {
             .init_resource::<crate::NewStackContext>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings { padding: 0.0 },
@@ -1200,6 +1201,7 @@ mod tests {
             .init_resource::<crate::NewStackContext>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings { padding: 0.0 },
@@ -1243,6 +1245,7 @@ mod tests {
             .init_resource::<crate::NewStackContext>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(LayoutSettings {
                 radius: 0.0,
                 window: crate::settings::WindowSettings { padding: 0.0 },

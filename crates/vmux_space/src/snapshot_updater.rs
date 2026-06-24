@@ -19,7 +19,7 @@ pub fn update_spaces_snapshot(
                 SpaceSummary {
                     id: id.0.clone(),
                     name: name.to_string(),
-                    profile: crate::model::BOOTSTRAP_PROFILE_NAME.to_string(),
+                    profile: crate::model::bootstrap_profile_name(),
                 },
             )
         })

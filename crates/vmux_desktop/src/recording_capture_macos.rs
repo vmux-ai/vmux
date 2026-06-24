@@ -11,7 +11,8 @@ use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_av_foundation::{
     AVAssetWriter, AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor, AVFileTypeMPEG4,
-    AVMediaTypeVideo, AVVideoCodecKey, AVVideoCodecTypeH264, AVVideoHeightKey, AVVideoWidthKey,
+    AVMediaTypeVideo, AVVideoAverageBitRateKey, AVVideoCodecKey, AVVideoCodecTypeH264,
+    AVVideoCompressionPropertiesKey, AVVideoHeightKey, AVVideoWidthKey,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_media::{CMSampleBuffer, CMTime};
@@ -279,6 +280,7 @@ fn build_writer(
     temp_mp4: &Path,
     out_w: u32,
     out_h: u32,
+    bitrate: i32,
 ) -> Result<
     (
         Retained<AVAssetWriter>,
@@ -298,14 +300,25 @@ fn build_writer(
     let codec_h264 = unsafe { AVVideoCodecTypeH264 }.ok_or("AVVideoCodecTypeH264 unavailable")?;
     let width_key = unsafe { AVVideoWidthKey }.ok_or("AVVideoWidthKey unavailable")?;
     let height_key = unsafe { AVVideoHeightKey }.ok_or("AVVideoHeightKey unavailable")?;
+    let compression_key = unsafe { AVVideoCompressionPropertiesKey }
+        .ok_or("AVVideoCompressionPropertiesKey unavailable")?;
+    let bitrate_key =
+        unsafe { AVVideoAverageBitRateKey }.ok_or("AVVideoAverageBitRateKey unavailable")?;
+
+    let bitrate_num = NSNumber::new_i32(bitrate);
+    let compression = NSDictionary::<NSString, AnyObject>::from_slices(
+        &[bitrate_key],
+        &[AsRef::<AnyObject>::as_ref(&bitrate_num)],
+    );
 
     let w_num = NSNumber::new_i32(out_w as i32);
     let h_num = NSNumber::new_i32(out_h as i32);
-    let keys: [&NSString; 3] = [codec_key, width_key, height_key];
-    let objects: [&AnyObject; 3] = [
+    let keys: [&NSString; 4] = [codec_key, width_key, height_key, compression_key];
+    let objects: [&AnyObject; 4] = [
         AsRef::<AnyObject>::as_ref(codec_h264),
         AsRef::<AnyObject>::as_ref(&w_num),
         AsRef::<AnyObject>::as_ref(&h_num),
+        AsRef::<AnyObject>::as_ref(&compression),
     ];
     let settings = NSDictionary::<NSString, AnyObject>::from_slices(&keys, &objects);
 
@@ -446,10 +459,11 @@ fn setup_stream(
     let filter = unsafe {
         SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &window)
     };
+    let (enc_w, enc_h) = super::downscale_to(out_w, out_h, super::RECORDING_MAX_EDGE);
     let config = unsafe { SCStreamConfiguration::new() };
     unsafe {
-        config.setWidth(out_w as usize);
-        config.setHeight(out_h as usize);
+        config.setWidth(enc_w as usize);
+        config.setHeight(enc_h as usize);
         config.setPixelFormat(PIXEL_FORMAT_BGRA);
         config.setMinimumFrameInterval(CMTime::new(1, 60));
         config.setShowsCursor(true);
@@ -464,13 +478,14 @@ fn setup_stream(
         }
     }
 
-    let (writer, input, adaptor) = match build_writer(temp_mp4, out_w, out_h) {
-        Ok(t) => t,
-        Err(e) => {
-            let _ = done_tx.send(Err(e));
-            return;
-        }
-    };
+    let (writer, input, adaptor) =
+        match build_writer(temp_mp4, enc_w, enc_h, super::RECORDING_BITRATE_BPS) {
+            Ok(t) => t,
+            Err(e) => {
+                let _ = done_tx.send(Err(e));
+                return;
+            }
+        };
 
     let (gif_tx, gif_join) = if let Some(path) = temp_gif.clone() {
         let (s, r) = crossbeam_channel::bounded::<GifMsg>(8);

@@ -97,11 +97,11 @@ struct AutoSave {
 const STORE_SCHEMA_VERSION: u32 = 2;
 
 pub(crate) fn store_path() -> PathBuf {
-    vmux_core::profile::shared_data_dir().join("store.ron")
+    vmux_core::profile::store_dir().join("store.ron")
 }
 
 fn store_version_path() -> PathBuf {
-    vmux_core::profile::shared_data_dir().join("store.version")
+    vmux_core::profile::store_dir().join("store.version")
 }
 
 fn store_schema_is_current() -> bool {
@@ -164,6 +164,9 @@ fn auto_save_system(time: Res<Time>, mut auto_save: ResMut<AutoSave>, mut comman
 }
 
 pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
+    if vmux_core::profile::active_profile_name() != "personal" {
+        return;
+    }
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -208,6 +211,12 @@ pub(crate) fn load_space_on_startup(
     mut restore: ResMut<crate::boot_status::RestoreComplete>,
     mut commands: Commands,
 ) {
+    if vmux_core::profile::active_profile_name() != "personal" {
+        commands.insert_resource(SpaceFilePresent(false));
+        restore.0 = true;
+        commands.spawn(vmux_space::spaces::space_profile_bundle(&active.record));
+        return;
+    }
     let path = store_path();
     let removed_stale = remove_stale_space_if_needed(&path);
     let schema_outdated = path.exists() && !store_schema_is_current();

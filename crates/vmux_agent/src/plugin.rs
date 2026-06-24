@@ -105,6 +105,7 @@ impl Plugin for AgentPlugin {
             .init_resource::<AgentTerminalRegions>()
             .init_resource::<AgentSessionDirty>()
             .add_message::<AgentCommandRequest>()
+            .add_message::<FocusPaneRequest>()
             .add_message::<AgentQueryRequest>()
             .add_message::<ScreenshotRequest>()
             .add_message::<ScreenshotResponse>()
@@ -195,6 +196,7 @@ impl Plugin for AgentPlugin {
                 Update,
                 (
                     handle_spawn_agent_requests,
+                    handle_focus_pane_requests.after(handle_agent_commands),
                     respond_process_stack_spawn.after(handle_agent_commands),
                     handle_agent_page_open.in_set(PageOpenSet::HandleKnownPages),
                     handle_restart_agent_pty,
@@ -301,6 +303,24 @@ struct ProcessStackSpawnRequest {
     env: Vec<(String, String)>,
 }
 
+#[derive(Message, Clone)]
+struct FocusPaneRequest {
+    pane: String,
+}
+
+fn handle_focus_pane_requests(
+    mut reader: MessageReader<FocusPaneRequest>,
+    child_of_q: Query<&ChildOf>,
+    mut commands: Commands,
+) {
+    for req in reader.read() {
+        let Ok((_, bits)) = vmux_layout::protocol::parse_id(&req.pane) else {
+            continue;
+        };
+        vmux_core::focus_pane_entity(Entity::from_bits(bits), &mut commands, &child_of_q);
+    }
+}
+
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct AgentLookups<'w> {
     pub pid_to_entity: Option<Res<'w, vmux_terminal::pid::PidToEntity>>,
@@ -312,6 +332,7 @@ pub struct AgentLookups<'w> {
 struct AgentSpaceWriters<'w, 's> {
     layout_apply: MessageWriter<'w, vmux_layout::reconcile::LayoutApplyRequest>,
     space_command: MessageWriter<'w, vmux_space::SpaceCommandRequest>,
+    focus_pane: MessageWriter<'w, FocusPaneRequest>,
     issued: MessageWriter<'w, vmux_command::CommandIssued>,
     attention: MessageWriter<'w, vmux_core::notify::AgentAttention>,
     agents: Query<
@@ -643,6 +664,12 @@ fn handle_agent_commands(
                 }
                 None => AgentCommandResult::Error("notify: caller not found".to_string()),
             },
+            ServiceAgentCommand::FocusPane { pane } => {
+                writers
+                    .focus_pane
+                    .write(FocusPaneRequest { pane: pane.clone() });
+                AgentCommandResult::Ok
+            }
             ServiceAgentCommand::UpdateSettings { path, value_json } => {
                 match serde_json::from_str::<serde_json::Value>(value_json) {
                     Ok(value) => {
@@ -1144,7 +1171,7 @@ fn handle_agent_queries(
                             serde_json::json!({
                                 "id": id.0,
                                 "name": name.to_string(),
-                                "profile": vmux_space::model::BOOTSTRAP_PROFILE_NAME,
+                                "profile": vmux_space::model::bootstrap_profile_name(),
                                 "is_active": is_active,
                             }),
                         )
@@ -2292,7 +2319,11 @@ mod tests {
             .spawn(vmux_layout::stack::stack_bundle())
             .insert(ChildOf(pane))
             .id();
-        let terminal = app.world_mut().spawn(Terminal).insert(ChildOf(stack)).id();
+        let terminal = app
+            .world_mut()
+            .spawn((Terminal, ProcessId::new()))
+            .insert(ChildOf(stack))
+            .id();
 
         app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
         app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
