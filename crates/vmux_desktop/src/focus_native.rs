@@ -71,21 +71,22 @@ fn reclaim_first_responder(window_entity: Entity) -> ReclaimOutcome {
     let Some(window) = view.window() else {
         return ReclaimOutcome::NoView;
     };
-    if !window.isKeyWindow() {
-        return ReclaimOutcome::Failed;
-    }
     let responder: &NSResponder = view;
-    if let Some(current) = window.firstResponder()
-        && core::ptr::eq(
+    let already_winit = window.firstResponder().is_some_and(|current| {
+        core::ptr::eq(
             (&*current) as *const NSResponder,
             responder as *const NSResponder,
         )
-    {
-        return ReclaimOutcome::AlreadyWinit;
+    });
+    if !already_winit && !window.makeFirstResponder(Some(responder)) {
+        return ReclaimOutcome::Failed;
     }
-    if window.makeFirstResponder(Some(responder)) {
-        ReclaimOutcome::Reclaimed
+    if !window.isKeyWindow() {
+        return ReclaimOutcome::Failed;
+    }
+    if already_winit {
+        ReclaimOutcome::AlreadyWinit
     } else {
-        ReclaimOutcome::Failed
+        ReclaimOutcome::Reclaimed
     }
 }
