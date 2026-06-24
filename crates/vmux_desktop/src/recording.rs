@@ -157,6 +157,17 @@ pub(crate) fn bgra_to_rgba(bgra: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Long-edge cap for encoded recordings. Keeps text legible while spreading the
+/// bitrate over far fewer pixels than a raw retina capture.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) const RECORDING_MAX_EDGE: u32 = 1280;
+
+/// Fixed average H.264 bitrate (bits/s) for recordings. Tuned for legible screen
+/// content at the downscaled resolution; file size scales with duration
+/// (~1-2 MB/min for typical low-motion screen capture).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) const RECORDING_BITRATE_BPS: i32 = 800_000;
+
 /// Cap the long edge at `max_edge`, never upscaling.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn downscale_to(w: u32, h: u32, max_edge: u32) -> (u32, u32) {

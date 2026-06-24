@@ -8,7 +8,7 @@ use commands::{Cli, Command, open::OpenAppLauncher};
 async fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Some(Command::Mcp { anchor }) => commands::mcp::run(anchor).await,
+        Some(Command::Mcp { anchor, profile }) => commands::mcp::run(anchor, profile).await,
         Some(Command::Notify {
             title,
             body,

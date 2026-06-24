@@ -17,6 +17,8 @@ pub enum Command {
     Mcp {
         #[arg(long)]
         anchor: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
     },
     Notify {
         #[arg(long)]

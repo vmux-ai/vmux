@@ -71,7 +71,7 @@ impl Spaces {
 mod tests {
     use super::*;
     use crate::model::{
-        BOOTSTRAP_PROFILE_NAME, BOOTSTRAP_SPACE_ID, BOOTSTRAP_SPACE_NAME, bootstrap_space_record,
+        BOOTSTRAP_SPACE_ID, BOOTSTRAP_SPACE_NAME, bootstrap_profile_name, bootstrap_space_record,
     };
 
     #[test]
@@ -88,7 +88,7 @@ mod tests {
         let (name, profile, space_id) = query.single(app.world()).unwrap();
 
         assert_eq!(name.as_str(), BOOTSTRAP_SPACE_NAME);
-        assert_eq!(profile.name, BOOTSTRAP_PROFILE_NAME);
+        assert_eq!(profile.name, bootstrap_profile_name());
         assert_eq!(space_id.0, BOOTSTRAP_SPACE_ID);
     }
 }

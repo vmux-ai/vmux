@@ -1,4 +1,28 @@
-pub const BOOTSTRAP_PROFILE_NAME: &str = "Personal";
+/// Display name of the bootstrap space's identity profile (the top-right pill /
+/// command attribution), derived from the active `VMUX_PROFILE` the same way the
+/// profile store/spaces/recording dirs are: the profile name, capitalized
+/// (`personal` -> "Personal", `gregor` -> "Gregor"). Keeps a test instance's
+/// identity tied to its storage profile instead of impersonating "Personal".
+pub fn bootstrap_profile_name() -> String {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        capitalize_first(&vmux_core::profile::active_profile_name())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        "Personal".to_string()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => "Personal".to_string(),
+    }
+}
+
 pub const BOOTSTRAP_SPACE_ID: &str = "space-1";
 pub const BOOTSTRAP_SPACE_NAME: &str = "space-1";
 
@@ -19,7 +43,7 @@ pub fn bootstrap_space_record() -> SpaceRecord {
     SpaceRecord {
         id: BOOTSTRAP_SPACE_ID.to_string(),
         name: BOOTSTRAP_SPACE_NAME.to_string(),
-        profile: BOOTSTRAP_PROFILE_NAME.to_string(),
+        profile: bootstrap_profile_name(),
     }
 }
 

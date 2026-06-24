@@ -7,38 +7,48 @@ use crate::exec;
 
 pub fn resolve(cwd: &Path, anchor: ProcessId) -> Result<McpServerConfig, String> {
     let sidecar = vmux_sidecar_path()?;
-    resolve_with_sidecar(&sidecar, cwd, anchor)
+    let profile = vmux_core::profile::active_profile_name();
+    resolve_with_sidecar(&sidecar, cwd, anchor, &profile)
 }
 
 fn resolve_with_sidecar(
     sidecar: &Path,
     cwd: &Path,
     anchor: ProcessId,
+    profile: &str,
 ) -> Result<McpServerConfig, String> {
     if exec::is_executable_path(sidecar) {
         return Ok(McpServerConfig {
             command: sidecar.to_string_lossy().to_string(),
-            args: vec![
-                "mcp".to_string(),
-                "--anchor".to_string(),
-                anchor.to_string(),
-            ],
+            args: mcp_subcommand_args(anchor, profile),
             cwd: None,
         });
     }
     let workspace = find_workspace_dir(cwd)
         .ok_or_else(|| format!("vmux executable not found: {}", sidecar.display()))?;
-    Ok(McpServerConfig {
-        command: "cargo".to_string(),
-        args: [
-            "run", "--quiet", "-p", "vmux_cli", "--bin", "vmux", "--", "mcp", "--anchor",
-        ]
+    let mut args: Vec<String> = ["run", "--quiet", "-p", "vmux_cli", "--bin", "vmux", "--"]
         .into_iter()
         .map(str::to_string)
-        .chain(std::iter::once(anchor.to_string()))
-        .collect(),
+        .collect();
+    args.extend(mcp_subcommand_args(anchor, profile));
+    Ok(McpServerConfig {
+        command: "cargo".to_string(),
+        args,
         cwd: Some(workspace),
     })
+}
+
+fn mcp_subcommand_args(anchor: ProcessId, profile: &str) -> Vec<String> {
+    let mut args = vec![
+        "mcp".to_string(),
+        "--anchor".to_string(),
+        anchor.to_string(),
+    ];
+    if profile != "personal" {
+        args.push("--profile".to_string());
+        args.push(profile.to_string());
+    }
+    args
 }
 
 fn find_workspace_dir(cwd: &Path) -> Option<PathBuf> {
@@ -65,6 +75,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mcp_args_append_profile_only_for_non_personal() {
+        let anchor = ProcessId::new();
+        assert_eq!(
+            mcp_subcommand_args(anchor, "personal"),
+            vec![
+                "mcp".to_string(),
+                "--anchor".to_string(),
+                anchor.to_string()
+            ]
+        );
+        let with = mcp_subcommand_args(anchor, "test");
+        assert!(
+            with.windows(2)
+                .any(|w| w[0] == "--profile" && w[1] == "test")
+        );
+    }
+
+    #[test]
     fn falls_back_to_cargo_run_when_sidecar_is_missing() {
         let temp = std::env::temp_dir().join(format!("vmux-agent-mcp-{}", std::process::id()));
         let workspace = temp.join("workspace");
@@ -72,7 +100,9 @@ mod tests {
         std::fs::write(workspace.join("Cargo.toml"), b"[workspace]\n").unwrap();
 
         let anchor = ProcessId::new();
-        let config = resolve_with_sidecar(&temp.join("missing-vmux"), &workspace, anchor).unwrap();
+        let config =
+            resolve_with_sidecar(&temp.join("missing-vmux"), &workspace, anchor, "personal")
+                .unwrap();
         let _ = std::fs::remove_dir_all(&temp);
 
         assert_eq!(config.command, "cargo");
@@ -102,7 +132,9 @@ mod tests {
         std::fs::write(workspace.join("Cargo.toml"), b"[workspace]\n").unwrap();
 
         let anchor = ProcessId::new();
-        let config = resolve_with_sidecar(&temp.join("missing-vmux"), &workspace, anchor).unwrap();
+        let config =
+            resolve_with_sidecar(&temp.join("missing-vmux"), &workspace, anchor, "personal")
+                .unwrap();
         let _ = std::fs::remove_dir_all(&temp);
 
         assert!(config.args.windows(2).any(|w| w[0] == "--anchor"));

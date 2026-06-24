@@ -13,8 +13,21 @@ pub fn service_dir() -> PathBuf {
     shared_data_dir().join("services")
 }
 
+fn profile_file_stem(build: &str, profile: &str) -> String {
+    if profile == "personal" {
+        format!("vmux-{build}")
+    } else {
+        format!("vmux-{build}-{profile}")
+    }
+}
+
+fn profile_file_name(build: &str, profile: &str, ext: &str) -> String {
+    format!("{}.{ext}", profile_file_stem(build, profile))
+}
+
 fn profile_file(ext: &str) -> PathBuf {
-    service_dir().join(format!("vmux-{}.{ext}", current_profile()))
+    let profile = vmux_core::profile::active_profile_name();
+    service_dir().join(profile_file_name(current_profile(), &profile, ext))
 }
 
 /// Path to the per-profile Unix domain socket.
@@ -35,7 +48,8 @@ pub fn identity_path() -> PathBuf {
 /// Path to the per-profile service stdout/stderr capture log. Lives alongside
 /// the rotated application logs in `log_dir`, not in `service_dir`.
 pub fn log_path() -> PathBuf {
-    log_dir().join(format!("vmux-{}.log", current_profile()))
+    let profile = vmux_core::profile::active_profile_name();
+    log_dir().join(profile_file_name(current_profile(), &profile, "log"))
 }
 
 /// Directory for application log files (separate from runtime files in
@@ -54,7 +68,11 @@ pub fn shell_integration_dir() -> PathBuf {
 /// daemon, the desktop file layer, and the panic hook all target the same file.
 pub fn current_log_file() -> PathBuf {
     let date = chrono::Utc::now().format("%Y-%m-%d");
-    log_dir().join(format!("vmux-{}.{date}.log", current_profile()))
+    let profile = vmux_core::profile::active_profile_name();
+    log_dir().join(format!(
+        "{}.{date}.log",
+        profile_file_stem(current_profile(), &profile)
+    ))
 }
 
 /// LaunchAgent label for the given profile.
@@ -233,6 +251,22 @@ mod tests {
         assert!(name.starts_with("vmux-"));
         assert!(name.ends_with(".sock"));
         assert!(name.contains(current_profile()));
+    }
+
+    #[test]
+    fn profile_file_name_suffixes_only_non_personal() {
+        assert_eq!(
+            profile_file_name("dev", "personal", "sock"),
+            "vmux-dev.sock"
+        );
+        assert_eq!(
+            profile_file_name("dev", "test", "sock"),
+            "vmux-dev-test.sock"
+        );
+        assert_eq!(
+            profile_file_name("release", "test", "log"),
+            "vmux-release-test.log"
+        );
     }
 
     #[test]
