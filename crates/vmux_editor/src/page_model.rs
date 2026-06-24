@@ -39,8 +39,16 @@ pub fn clamp_selection(idx: usize, len: usize) -> usize {
     if len == 0 { 0 } else { idx.min(len - 1) }
 }
 
-pub fn parent_highlight_index(parent: &[FileDirEntry], current_path: &str) -> Option<usize> {
-    parent.iter().position(|e| e.path == current_path)
+pub fn dir_select_index(entries: &[FileDirEntry], came_from: &str) -> usize {
+    let name = came_from
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("");
+    if name.is_empty() {
+        return 0;
+    }
+    entries.iter().position(|e| e.name == name).unwrap_or(0)
 }
 
 pub fn gutter_width(total_lines: u32) -> usize {
@@ -119,13 +127,16 @@ mod dir_browser_tests {
     }
 
     #[test]
-    fn parent_highlight_matches_current_dir() {
+    fn dir_select_index_matches_came_from_by_basename() {
         let parent = vec![
             entry("/a/x", true),
-            entry("/a/b", true),
+            entry("/a/.worktrees", true),
             entry("/a/y", false),
         ];
-        assert_eq!(parent_highlight_index(&parent, "/a/b"), Some(1));
-        assert_eq!(parent_highlight_index(&parent, "/a/zzz"), None);
+        assert_eq!(dir_select_index(&parent, "/a/.worktrees"), 1);
+        assert_eq!(dir_select_index(&parent, "a/.worktrees/"), 1);
+        assert_eq!(dir_select_index(&parent, "~/proj/a/.worktrees"), 1);
+        assert_eq!(dir_select_index(&parent, "/a/zzz"), 0);
+        assert_eq!(dir_select_index(&parent, ""), 0);
     }
 }

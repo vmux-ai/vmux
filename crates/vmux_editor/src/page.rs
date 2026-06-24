@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::page_model::{clamp_selection, gutter_width, image_mime, span_style};
+use crate::page_model::{clamp_selection, dir_select_index, gutter_width, image_mime, span_style};
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_git::ui::{DiffView, GitBar, GitFooter};
@@ -139,12 +139,12 @@ fn apply_dir(
     entries: Vec<FileDirEntry>,
     parent: Vec<FileDirEntry>,
     new_path: String,
+    select_path: Option<String>,
 ) {
     for url in thumbs.read().values() {
         revoke(url);
     }
     thumbs.set(HashMap::new());
-    selected.set(0);
     if let Preview::Image(old) = &*preview.read() {
         revoke(old);
     }
@@ -152,8 +152,13 @@ fn apply_dir(
     parent_entries.set(parent);
     path.set(new_path);
     let vis = visible_entries(&entries, show_hidden);
-    if let Some(first) = vis.first() {
-        request_preview(first.path.clone());
+    let sel_idx = select_path
+        .as_deref()
+        .map(|p| dir_select_index(&vis, p))
+        .unwrap_or(0);
+    selected.set(sel_idx);
+    if let Some(sel) = vis.get(sel_idx) {
+        request_preview(sel.path.clone());
     }
     for e in &vis {
         if !e.is_dir && image_mime(&e.path).is_some() {
@@ -336,6 +341,7 @@ pub fn Page() -> Element {
     let parent_entries = use_signal(Vec::<FileDirEntry>::new);
     let mut parent_path = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
+    let mut came_from = use_signal(String::new);
     let mut back_dir = use_signal(|| Option::<String>::None);
     let mut show_hidden = use_signal(|| true);
     let mut mode = use_signal(|| Mode::Text);
@@ -392,6 +398,8 @@ pub fn Page() -> Element {
         git_path.set(d.abs_path);
         git_nonce.set(git_nonce() + 1);
         mode.set(Mode::Dir);
+        let came = came_from();
+        came_from.set(String::new());
         apply_dir(
             dir_entries,
             parent_entries,
@@ -403,6 +411,7 @@ pub fn Page() -> Element {
             d.entries,
             d.parent_entries,
             d.path,
+            (!came.is_empty()).then_some(came),
         );
     });
 
@@ -572,6 +581,7 @@ pub fn Page() -> Element {
                                             children,
                                             cur_entries,
                                             ent.path.clone(),
+                                            None,
                                         );
                                     }
                                     open_path(ent.path);
@@ -584,6 +594,8 @@ pub fn Page() -> Element {
                                 let pp = parent_path();
                                 if !pp.is_empty() {
                                     e.prevent_default();
+                                    let came = path();
+                                    came_from.set(came.clone());
                                     let pe = parent_entries.read().clone();
                                     if !pe.is_empty() {
                                         parent_path.set(parent_of(&pp));
@@ -598,6 +610,7 @@ pub fn Page() -> Element {
                                             pe,
                                             Vec::new(),
                                             pp.clone(),
+                                            Some(came),
                                         );
                                     }
                                     open_path(pp);
