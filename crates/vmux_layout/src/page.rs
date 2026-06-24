@@ -346,11 +346,11 @@ fn FooterView(
     });
 
     use_effect(move || {
-        let open = should_show_footer(staged(), ahead(), !message().is_empty());
+        let open = should_show_footer(staged(), ahead(), behind(), !message().is_empty());
         let _ = try_cef_bin_emit_rkyv(&FooterStateRequest { open });
     });
 
-    if !should_show_footer(staged(), ahead(), !message().is_empty()) {
+    if !should_show_footer(staged(), ahead(), behind(), !message().is_empty()) {
         return rsx! {};
     }
 

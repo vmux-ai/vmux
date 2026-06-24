@@ -289,10 +289,12 @@ mod tests {
 
     #[test]
     fn should_show_footer_truth_table() {
-        assert!(!should_show_footer(0, 0, false));
-        assert!(should_show_footer(1, 0, false));
-        assert!(should_show_footer(0, 1, false));
-        assert!(should_show_footer(0, 0, true));
+        assert!(!should_show_footer(0, 0, 0, false));
+        assert!(should_show_footer(1, 0, 0, false));
+        assert!(should_show_footer(0, 1, 0, false));
+        assert!(should_show_footer(0, 0, 1, false));
+        assert!(should_show_footer(0, 1, 1, false));
+        assert!(should_show_footer(0, 0, 0, true));
     }
 
     #[test]
@@ -356,8 +358,8 @@ fn percent_decode_path(input: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-pub fn should_show_footer(staged_count: u32, ahead: u32, has_error: bool) -> bool {
-    staged_count > 0 || ahead > 0 || has_error
+pub fn should_show_footer(staged_count: u32, ahead: u32, behind: u32, has_error: bool) -> bool {
+    staged_count > 0 || ahead > 0 || behind > 0 || has_error
 }
 
 #[derive(
