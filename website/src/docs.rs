@@ -32,7 +32,7 @@ pub const DOCS: &[Doc] = &[
     },
     Doc {
         slug: "built-to-scale",
-        title: "ECS: Design to scale",
+        title: "ECS, explained",
         group: "Architecture",
         content: include_str!("../../docs/architecture/built-to-scale.md"),
     },
@@ -49,6 +49,12 @@ pub const DOCS: &[Doc] = &[
         content: include_str!("../../docs/architecture/agent-first.md"),
     },
     Doc {
+        slug: "background-service",
+        title: "Background Service",
+        group: "Architecture",
+        content: include_str!("../../docs/architecture/background-service.md"),
+    },
+    Doc {
         slug: "layout-model",
         title: "Layout",
         group: "Architecture",
@@ -59,6 +65,30 @@ pub const DOCS: &[Doc] = &[
         title: "2D / 3D renderer",
         group: "Architecture",
         content: include_str!("../../docs/architecture/render-stack.md"),
+    },
+    Doc {
+        slug: "pages",
+        title: "Pages",
+        group: "Pages",
+        content: include_str!("../../docs/architecture/pages.md"),
+    },
+    Doc {
+        slug: "browser",
+        title: "Browser",
+        group: "Pages",
+        content: include_str!("../../docs/architecture/browser.md"),
+    },
+    Doc {
+        slug: "terminal",
+        title: "Terminal",
+        group: "Pages",
+        content: include_str!("../../docs/architecture/terminal.md"),
+    },
+    Doc {
+        slug: "editor",
+        title: "Editor",
+        group: "Pages",
+        content: include_str!("../../docs/architecture/editor.md"),
     },
 ];
 

@@ -28,13 +28,28 @@ both humans and agents tile, persist, and reconcile in real time.
   why a web sandbox is the wrong ceiling for an OS-level workspace.
 - **[Rust for React JS developers](architecture/rust-without-the-headaches.md)** — Bevy ECS as an
   in-memory database, lock-free concurrency, and Rust as the universal FFI glue.
-- **[ECS: Design to scale](architecture/built-to-scale.md)** — composition over inheritance,
-  and what compounds as features, surfaces, and agents grow.
+- **[ECS, explained](architecture/built-to-scale.md)** — entities, components, and systems
+  from the ground up, mapped onto the React model you already know.
 - **[Plugins](architecture/plugins.md)** — the `build()` contract, one capability per crate,
   and how the whole app is assembled from the plugin stack.
-- **[Co-working with agents](architecture/agent-first.md)** — the MCP surface,
-  the persistence daemon, and the scheme-gated security bridge.
+- **[Co-working with agents](architecture/agent-first.md)** — the MCP surface, anchored
+  agent spaces, and the workspace-as-an-API tool set.
+- **[Background Service](architecture/background-service.md)** — the launchd-supervised daemon
+  that owns PTYs and agent sessions so work outlives the window.
 - **[The layout model](architecture/layout-model.md)** — Space → Tab → Pane → Stack, the
   selection invariant, and structural persistence.
 - **[The render stack](architecture/render-stack.md)** — many CEF surfaces in one window,
   zero-copy interop, Rust-all-the-way-down UI, and the 3D mode.
+
+## The pages
+
+The surfaces you actually work in — what each [page](architecture/pages.md) is depends on its URL
+scheme (`https://`, `file://`, or `vmux://`):
+
+- **[Pages](architecture/pages.md)** — the page abstraction, the `vmux://` scheme, and the
+  scheme-gated security bridge.
+- **[Browser](architecture/browser.md)** — Chromium embedded via CEF; windowed-native vs
+  GPU-texture rendering.
+- **[Terminal](architecture/terminal.md)** — a real PTY parsed in the daemon, streamed to a
+  Dioxus grid as incremental patches.
+- **[Editor](architecture/editor.md)** — a syntect + two-face highlighted files surface.

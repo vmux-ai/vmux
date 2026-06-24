@@ -240,10 +240,10 @@ fn render_node(n: &Node) -> Element {
                     rsx! { h1 { id: "{id}", class: "scroll-mt-6 text-3xl sm:text-4xl font-bold tracking-tight mt-10 mb-4", {render_nodes(ch)} } }
                 }
                 2 => {
-                    rsx! { h2 { id: "{id}", class: "scroll-mt-6 text-2xl font-semibold tracking-tight mt-10 mb-3 pb-2 border-b border-border", {render_nodes(ch)} } }
+                    rsx! { h2 { id: "{id}", class: "group scroll-mt-6 text-2xl font-semibold tracking-tight mt-10 mb-3 pb-2 border-b border-border", {render_nodes(ch)} CopyLink { id: id.clone() } } }
                 }
                 3 => {
-                    rsx! { h3 { id: "{id}", class: "scroll-mt-6 text-lg font-semibold mt-6 mb-2 text-accent", {render_nodes(ch)} } }
+                    rsx! { h3 { id: "{id}", class: "group scroll-mt-6 text-lg font-semibold mt-6 mb-2 text-accent", {render_nodes(ch)} CopyLink { id: id.clone() } } }
                 }
                 4 => {
                     rsx! { h4 { id: "{id}", class: "scroll-mt-6 text-base font-semibold mt-5 mb-2", {render_nodes(ch)} } }
@@ -342,6 +342,31 @@ fn render_node(n: &Node) -> Element {
         }
         Node::SoftBreak => rsx! { " " },
         Node::HardBreak => rsx! { br {} },
+    }
+}
+
+#[component]
+fn CopyLink(id: String) -> Element {
+    let copy = crate::hooks::use_copy_link();
+    rsx! {
+        button {
+            r#type: "button",
+            aria_label: "Copy link to this section",
+            class: "ml-2 inline-flex items-center align-middle text-text-muted opacity-0 transition-opacity hover:text-accent group-hover:opacity-100 focus-visible:opacity-100",
+            onclick: move |_| copy.call(id.clone()),
+            svg {
+                width: "15",
+                height: "15",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                path { d: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" }
+                path { d: "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" }
+            }
+        }
     }
 }
 

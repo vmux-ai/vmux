@@ -7,11 +7,13 @@ fights, lifetimes, and FFI boilerplate. The surprise: in day-to-day feature work
 none of that shows up. The scary Rust lives deep in the engine — the code you write looks a
 lot like the front-end you already write.
 
-## The UI is React — in Rust
+## Coming from React? You already know this
 
-Vmux's own surfaces — header, command bar, settings, error pages — are built with
-**[Dioxus](https://dioxuslabs.com)**, which ports React's model to Rust almost one-to-one:
-function components, a JSX-like `rsx!` macro, and hooks.
+Vmux is React-shaped at both layers — the surfaces you *write*, and the host they run *on*.
+
+**The UI is React, in Rust.** Vmux's own surfaces — header, command bar, settings, error
+pages — are built with **[Dioxus](https://dioxuslabs.com)**, which ports React's model to Rust
+almost one-to-one: function components, a JSX-like `rsx!` macro, and hooks.
 
 ```rust
 #[component]
@@ -27,8 +29,8 @@ fn Counter(start: i32) -> Element {
 }
 ```
 
-If you've written a React function component, that reads exactly how you'd expect: state in
-a hook, markup returned declaratively, a click handler that updates state — and the view
+If you've written a React function component, that reads exactly how you'd expect: state in a
+hook, markup returned declaratively, a click handler that updates state — and the view
 re-renders on its own. The names barely change:
 
 | React | Dioxus (Rust) |
@@ -42,19 +44,12 @@ re-renders on its own. The names barely change:
 | props object | typed `#[component]` arguments |
 | `className` + Tailwind | `class:` + the same Tailwind utilities |
 
-Same component-and-hook mental model, now type-checked end to end — no `undefined is not a
-function`, no prop-shape drift. The toolkit (`crates/vmux_ui`) even mirrors **shadcn/ui** on
-Dioxus primitives, so the dialogs, dropdowns, and popovers are the ones you already reach for.
+The toolkit (`crates/vmux_ui`) even mirrors **shadcn/ui** on Dioxus primitives, so the dialogs,
+dropdowns, and popovers are the ones you already reach for — now type-checked end to end: no
+`undefined is not a function`, no prop-shape drift.
 
-## Coming from React? You already know this
-
-Below the UI, the host is built on **Bevy**, a data-oriented **Entity-Component-System
-(ECS)**. Squint and it's a shape you've seen:
-
-- The **world** is one big store — a single Redux store, or an in-memory database.
-- **Entities** are rows; **components** are typed columns (your state).
-- **Systems** are functions that run over the rows matching a query (your effects/reducers).
-- **Messages** are dispatched events (your actions).
+**Below the UI, it's Redux-shaped.** The host runs on **Bevy**, a data-oriented
+**Entity-Component-System (ECS)**. Squint and it's a shape you've seen:
 
 | React / Redux / JS | Vmux (Bevy ECS, Rust) |
 | :--- | :--- |
@@ -66,10 +61,8 @@ Below the UI, the host is built on **Bevy**, a data-oriented **Entity-Component-
 | `package.json` / npm | `Cargo.toml` / cargo |
 | TS: caught at compile, not runtime | Rust: same — extended to memory + data races |
 
-A system is just *"for each entity with `A` and `B`, do X"* — an `array.filter` that runs
-every frame. Components are your state, systems your effects, messages your events; a web
-dev ramps fast. New to ECS? The official [Bevy guides](https://bevyengine.org/learn/) and
-the [Bevy Cheat Book](https://bevy-cheatbook.github.io) cover it in an afternoon.
+A system is just *"for each entity with `A` and `B`, do X"* — an `array.filter` that runs every
+frame. New to ECS? **[ECS, explained](built-to-scale.md)** walks the whole model from the ground up.
 
 ## The borrow checker, where you'll actually meet it
 
