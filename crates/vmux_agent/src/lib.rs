@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-pub mod vibe_setup;
+pub mod vibe;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod client;

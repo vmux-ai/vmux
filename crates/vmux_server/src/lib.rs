@@ -49,7 +49,7 @@ web_pages! {
     render_spaces: "spaces" => vmux_space::page::Page,
     render_team: "team" => vmux_team::page::Page,
     render_settings: "settings" => vmux_setting::page::Page,
-    render_agent: "agent" => vmux_agent::vibe_setup::page::Page,
+    render_agent: "agent" => vmux_agent::vibe::setup::page::Page,
     render_files: "files" => vmux_editor::page::Page,
 }
 

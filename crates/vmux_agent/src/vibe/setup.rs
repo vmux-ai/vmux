@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::vibe_setup::event::VibeInstallRunRequest;
+use crate::vibe::setup::event::VibeInstallRunRequest;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -38,7 +38,6 @@ impl Plugin for VibeSetupPlugin {
     }
 }
 
-/// "Want me to run?" button → spawn a terminal in the focused pane running the Vibe install script.
 #[cfg(not(target_arch = "wasm32"))]
 fn on_vibe_install_run(
     _trigger: On<BinReceive<VibeInstallRunRequest>>,
