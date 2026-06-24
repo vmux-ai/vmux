@@ -1545,7 +1545,14 @@ fn is_non_character_key(key: KeyCode) -> bool {
 
 fn handle_terminal_keyboard(
     mut er: MessageReader<KeyboardInput>,
-    targeted_terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, With<CefKeyboardTarget>)>,
+    targeted_terminals: Query<
+        (&ProcessId, &ChildOf),
+        (
+            With<Terminal>,
+            With<CefKeyboardTarget>,
+            Without<ProcessExited>,
+        ),
+    >,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -2977,7 +2984,14 @@ fn on_restart_pty(
 /// visual/copy mode for the currently focused terminal process.
 fn handle_terminal_copy_mode_command(
     mut er: MessageReader<AppCommand>,
-    targeted_terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, With<CefKeyboardTarget>)>,
+    targeted_terminals: Query<
+        (&ProcessId, &ChildOf),
+        (
+            With<Terminal>,
+            With<CefKeyboardTarget>,
+            Without<ProcessExited>,
+        ),
+    >,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,

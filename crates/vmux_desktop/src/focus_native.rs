@@ -8,16 +8,18 @@ pub(crate) fn apply_winit_host_focus(
     intent: Res<HostFocusIntent>,
     primary: Query<Entity, With<PrimaryWindow>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut pending_key_window: Local<bool>,
 ) {
     if *intent != HostFocusIntent::WinitHost {
+        *pending_key_window = false;
         return;
     }
     let Ok(window_entity) = primary.single() else {
         return;
     };
-    if matches!(
+    if should_release_keys(
         reclaim_first_responder(window_entity),
-        ReclaimOutcome::Reclaimed
+        &mut pending_key_window,
     ) {
         keys.release_all();
     }
@@ -26,8 +28,27 @@ pub(crate) fn apply_winit_host_focus(
 enum ReclaimOutcome {
     AlreadyWinit,
     Reclaimed,
+    PendingKeyWindow,
     Failed,
     NoView,
+}
+
+fn should_release_keys(outcome: ReclaimOutcome, pending_key_window: &mut bool) -> bool {
+    match outcome {
+        ReclaimOutcome::Reclaimed => {
+            *pending_key_window = false;
+            true
+        }
+        ReclaimOutcome::PendingKeyWindow => {
+            *pending_key_window = true;
+            false
+        }
+        ReclaimOutcome::AlreadyWinit if *pending_key_window => {
+            *pending_key_window = false;
+            true
+        }
+        ReclaimOutcome::AlreadyWinit | ReclaimOutcome::Failed | ReclaimOutcome::NoView => false,
+    }
 }
 
 /// Make the winit content view the window's first responder.
@@ -59,15 +80,40 @@ fn reclaim_first_responder(window_entity: Entity) -> ReclaimOutcome {
             responder as *const NSResponder,
         )
     });
-    if !already_winit && !window.makeFirstResponder(Some(responder)) {
+    let changed_responder = !already_winit;
+    if changed_responder && !window.makeFirstResponder(Some(responder)) {
         return ReclaimOutcome::Failed;
     }
     if !window.isKeyWindow() {
+        if changed_responder {
+            return ReclaimOutcome::PendingKeyWindow;
+        }
         return ReclaimOutcome::Failed;
     }
     if already_winit {
         ReclaimOutcome::AlreadyWinit
     } else {
         ReclaimOutcome::Reclaimed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_key_window_releases_keys_when_winit_becomes_responder() {
+        let mut pending = false;
+
+        assert!(!should_release_keys(
+            ReclaimOutcome::PendingKeyWindow,
+            &mut pending
+        ));
+        assert!(pending);
+        assert!(should_release_keys(
+            ReclaimOutcome::AlreadyWinit,
+            &mut pending
+        ));
+        assert!(!pending);
     }
 }
