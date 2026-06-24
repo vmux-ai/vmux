@@ -43,8 +43,8 @@ both humans and agents tile, persist, and reconcile in real time.
 
 ## The pages
 
-The surfaces you actually work in — each a [webview app](architecture/pages.md) on the `vmux://`
-scheme:
+The surfaces you actually work in — what each [page](architecture/pages.md) is depends on its URL
+scheme (`https://`, `file://`, or `vmux://`):
 
 - **[Pages](architecture/pages.md)** — the page abstraction, the `vmux://` scheme, and the
   scheme-gated security bridge.

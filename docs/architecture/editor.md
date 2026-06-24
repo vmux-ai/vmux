@@ -3,9 +3,10 @@
 > Part of the [Vmux Architecture](../architecture.md) overview. One of the
 > [pages](pages.md) Vmux renders in a pane.
 
-The `vmux://files` page (`crates/vmux_editor`) is a fast, syntax-highlighted file browser and
-viewer. Today it is **read-first**: open, navigate, and read code with full highlighting — in-place
-editing and language servers aren't wired up yet.
+The files Editor (`crates/vmux_editor`) is a fast, syntax-highlighted file browser and viewer. It
+opens local files on the **`file://`** scheme — `file:///path/to/main.rs` — not on `vmux://`. Today
+it is **read-first**: open, navigate, and read code with full highlighting — in-place editing and
+language servers aren't wired up yet.
 
 ## Highlighting: syntect + two-face
 
@@ -22,7 +23,7 @@ and **git diffs** (`crates/vmux_git`) all run the same syntect + two-face engine
 spans, so code looks identical wherever it appears. There's no tree-sitter and no LSP — highlighting
 is grammar-based.
 
-## The files:// page
+## The file browser
 
 - **Miller-column browser** — parent · current · preview, navigated with vim keys (`j`/`k`/`h`/`l`;
   `.` toggles hidden files).
