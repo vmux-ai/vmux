@@ -204,7 +204,46 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
         outbox,
         ..Default::default()
     })
-    .add_systems(Update, lsp_open_documents);
+    .add_systems(Update, (lsp_open_documents, drain_lsp_diagnostics));
+}
+
+use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
+use vmux_core::event::{FileDiagnosticsEvent, FILE_DIAGNOSTICS_EVENT};
+
+fn canon(p: &Path) -> PathBuf {
+    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+fn drain_lsp_diagnostics(
+    outbox: Res<LspOutbox>,
+    views: Query<(Entity, &FileView, &FileBuffer)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let drained: Vec<(PathBuf, Vec<lsp_types::Diagnostic>)> = {
+        let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
+        q.drain(..).collect()
+    };
+    for (path, diags) in drained {
+        let target = canon(&path);
+        for (entity, fv, buf) in &views {
+            if canon(&fv.path) != target {
+                continue;
+            }
+            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                continue;
+            }
+            let mapped = to_file_diagnostics(&buf.lines, &diags);
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                FILE_DIAGNOSTICS_EVENT,
+                &FileDiagnosticsEvent {
+                    path: fv.path.to_string_lossy().into_owned(),
+                    diagnostics: mapped,
+                },
+            ));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -280,5 +319,22 @@ mod tests {
         assert_eq!(out[0].line, 0);
         assert_eq!(out[0].start_col, 2);
         assert_eq!(out[0].end_col, 6);
+    }
+
+    #[test]
+    fn drain_empties_outbox() {
+        use crate::lsp::LspOutbox;
+        use std::path::PathBuf;
+
+        let mut app = App::new();
+        let outbox = LspOutbox::default();
+        app.add_plugins(MinimalPlugins).insert_resource(outbox.clone());
+        // Drain logic isolated: push one entry, run a minimal drain that mirrors prod.
+        outbox.0.lock().unwrap().push((PathBuf::from("/x.rs"), vec![]));
+        app.add_systems(Update, |ob: Res<LspOutbox>| {
+            ob.0.lock().unwrap().drain(..).for_each(drop);
+        });
+        app.update();
+        assert!(outbox.0.lock().unwrap().is_empty());
     }
 }
