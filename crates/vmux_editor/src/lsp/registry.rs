@@ -87,6 +87,45 @@ pub fn resolve_spec(
     overrides.get(ext).cloned().or_else(|| builtin_spec(ext))
 }
 
+/// Output format of a linter's stdout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LintFormat {
+    Ruff,
+    Eslint,
+    Shellcheck,
+}
+
+/// How to run a standalone linter for a file extension. The file path is appended
+/// after `args`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinterSpec {
+    pub command: String,
+    pub args: Vec<String>,
+    pub format: LintFormat,
+}
+
+fn linter(command: &str, args: &[&str], format: LintFormat) -> LinterSpec {
+    LinterSpec {
+        command: command.to_string(),
+        args: args.iter().map(|s| s.to_string()).collect(),
+        format,
+    }
+}
+
+/// Standalone linter for a file extension (run only if installed/on PATH).
+pub fn linter_for(ext: &str) -> Option<LinterSpec> {
+    Some(match ext {
+        "py" | "pyi" => linter(
+            "ruff",
+            &["check", "--output-format", "json"],
+            LintFormat::Ruff,
+        ),
+        "js" | "jsx" | "ts" | "tsx" => linter("eslint", &["--format", "json"], LintFormat::Eslint),
+        "sh" | "bash" => linter("shellcheck", &["--format", "json"], LintFormat::Shellcheck),
+        _ => return None,
+    })
+}
+
 /// True if `command` resolves to an executable on `PATH` (or is an absolute path
 /// that exists). Mirrors a `which`-style lookup without adding a dependency.
 pub fn executable_on_path(command: &str) -> bool {
@@ -154,6 +193,14 @@ mod tests {
         let start = tmp.path().join("no").join("markers");
         std::fs::create_dir_all(&start).unwrap();
         assert_eq!(workspace_root(&start, &["Cargo.toml".into()]), start);
+    }
+
+    #[test]
+    fn linters_map_by_extension() {
+        assert_eq!(linter_for("py").unwrap().command, "ruff");
+        assert_eq!(linter_for("ts").unwrap().format, LintFormat::Eslint);
+        assert_eq!(linter_for("sh").unwrap().command, "shellcheck");
+        assert!(linter_for("rs").is_none());
     }
 
     #[test]

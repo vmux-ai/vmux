@@ -224,24 +224,76 @@ fn lsp_open_documents(
 
 /// Called from `LspPlugin::build`. The manager shares the resource's `LspOutbox`
 /// Arc so server threads push into the same queue the drain system reads.
-/// `drain_lsp_diagnostics` is added to this tuple in Task 11.
 pub fn build(app: &mut App, outbox: LspOutbox) {
     app.insert_non_send(LspManager {
         outbox,
         ..Default::default()
     })
-    .add_systems(Update, (lsp_open_documents, drain_lsp_diagnostics));
+    .init_resource::<LintOutbox>()
+    .init_resource::<DiagState>()
+    .add_systems(
+        Update,
+        (
+            lsp_open_documents,
+            lint_on_open,
+            drain_lsp_diagnostics,
+            drain_lint,
+        ),
+    );
 }
 
 use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
 use vmux_core::event::{FILE_DIAGNOSTICS_EVENT, FileDiagnosticsEvent};
 
+use crate::lsp::LintOutbox;
+
 fn canon(p: &Path) -> PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
 }
 
+/// Latest diagnostics per file path, split by origin so LSP and linter results
+/// merge on emit instead of clobbering one another.
+#[derive(Resource, Default)]
+struct DiagState {
+    lsp: HashMap<PathBuf, Vec<FileDiagnostic>>,
+    lint: HashMap<PathBuf, Vec<FileDiagnostic>>,
+}
+
+fn emit_for_path(
+    target: &Path,
+    state: &DiagState,
+    views: &Query<(Entity, &FileView, &FileBuffer)>,
+    browsers: &Browsers,
+    commands: &mut Commands,
+) {
+    let mut merged: Vec<FileDiagnostic> = Vec::new();
+    if let Some(d) = state.lsp.get(target) {
+        merged.extend(d.iter().cloned());
+    }
+    if let Some(d) = state.lint.get(target) {
+        merged.extend(d.iter().cloned());
+    }
+    for (entity, fv, _) in views.iter() {
+        if canon(&fv.path) != target {
+            continue;
+        }
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            FILE_DIAGNOSTICS_EVENT,
+            &FileDiagnosticsEvent {
+                path: fv.path.to_string_lossy().into_owned(),
+                diagnostics: merged.clone(),
+            },
+        ));
+    }
+}
+
 fn drain_lsp_diagnostics(
     outbox: Res<LspOutbox>,
+    mut state: ResMut<DiagState>,
     views: Query<(Entity, &FileView, &FileBuffer)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -252,23 +304,69 @@ fn drain_lsp_diagnostics(
     };
     for (path, diags) in drained {
         let target = canon(&path);
-        for (entity, fv, buf) in &views {
-            if canon(&fv.path) != target {
-                continue;
-            }
-            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
-                continue;
-            }
-            let mapped = to_file_diagnostics(&buf.lines, &diags);
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                FILE_DIAGNOSTICS_EVENT,
-                &FileDiagnosticsEvent {
-                    path: fv.path.to_string_lossy().into_owned(),
-                    diagnostics: mapped,
-                },
-            ));
+        let mapped = views
+            .iter()
+            .find(|(_, fv, _)| canon(&fv.path) == target)
+            .map(|(_, _, buf)| to_file_diagnostics(&buf.lines, &diags))
+            .unwrap_or_default();
+        state.lsp.insert(target.clone(), mapped);
+        emit_for_path(&target, &state, &views, &browsers, &mut commands);
+    }
+}
+
+fn drain_lint(
+    outbox: Res<LintOutbox>,
+    mut state: ResMut<DiagState>,
+    views: Query<(Entity, &FileView, &FileBuffer)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let drained: Vec<(PathBuf, Vec<FileDiagnostic>)> = {
+        let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
+        q.drain(..).collect()
+    };
+    for (path, diags) in drained {
+        let target = canon(&path);
+        state.lint.insert(target.clone(), diags);
+        emit_for_path(&target, &state, &views, &browsers, &mut commands);
+    }
+}
+
+/// Marker: linters have been run for this `FileView`.
+#[derive(Component)]
+pub struct LintRan;
+
+fn lint_on_open(
+    q: Query<(Entity, &FileView, &FileBuffer), Without<LintRan>>,
+    outbox: Res<LintOutbox>,
+    mut commands: Commands,
+) {
+    for (entity, fv, buf) in &q {
+        commands.entity(entity).insert(LintRan);
+        if buf.language.starts_with("__error__:") {
+            continue;
         }
+        let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        let Some(spec) = crate::lsp::registry::linter_for(ext) else {
+            continue;
+        };
+        if matches!(
+            store::resolved_command(&store::default_root(), &spec.command),
+            store::Resolution::Missing
+        ) {
+            continue;
+        }
+        let path = fv.path.clone();
+        let sink = outbox.clone();
+        std::thread::spawn(move || {
+            let diags = crate::lsp::lint::run_linter(&spec, &path);
+            sink.0
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((path, diags));
+        });
     }
 }
 

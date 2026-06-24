@@ -536,7 +536,8 @@ fn on_file_open(
         .remove::<FileBuffer>()
         .remove::<FileImage>()
         .remove::<FileInitialMetaSent>()
-        .remove::<crate::lsp::manager::LspOpened>();
+        .remove::<crate::lsp::manager::LspOpened>()
+        .remove::<crate::lsp::manager::LintRan>();
 }
 
 #[derive(Component)]
@@ -689,7 +690,10 @@ fn reload_changed_files(
             let vpc = *vp;
             emit_window(entity, &buf, &vpc, &browsers, &mut commands);
         }
-        commands.entity(entity).insert(buf);
+        commands
+            .entity(entity)
+            .insert(buf)
+            .remove::<crate::lsp::manager::LintRan>();
         manager.change(&fv.path);
     }
 }

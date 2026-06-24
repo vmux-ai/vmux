@@ -26,6 +26,11 @@ pub type PathDiagnostics = (PathBuf, Vec<lsp_types::Diagnostic>);
 #[derive(Resource, Clone, Default)]
 pub struct LspOutbox(pub Arc<Mutex<Vec<PathDiagnostics>>>);
 
+/// Linter findings (already converted to `FileDiagnostic`) per file path,
+/// produced off-thread by the lint runner and merged with LSP diagnostics.
+#[derive(Resource, Clone, Default)]
+pub struct LintOutbox(pub Arc<Mutex<Vec<(PathBuf, Vec<vmux_core::event::FileDiagnostic>)>>>);
+
 /// Identifies a running server: workspace root + server command.
 pub type ServerKey = (PathBuf, String);
 
