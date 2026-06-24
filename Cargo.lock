@@ -9890,6 +9890,7 @@ dependencies = [
  "uuid",
  "vmux_command",
  "vmux_core",
+ "vmux_git",
  "vmux_history",
  "vmux_ui",
  "wasm-bindgen",

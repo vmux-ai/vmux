@@ -1,12 +1,18 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
-    PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent,
-    TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
+    FooterStateRequest, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT,
+    PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow,
+    StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent, file_url_to_path,
+    should_show_footer,
 };
 use dioxus::prelude::*;
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
+use vmux_git::event::{
+    GIT_ERROR_EVENT, GIT_RESULT_EVENT, GIT_STATUS_EVENT, GitErrorEvent, GitResultEvent,
+    GitStatusEvent, GitStatusRequest,
+};
+use vmux_git::ui::GitFooter;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{GlobeIcon, favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
@@ -80,6 +86,12 @@ pub fn Page() -> Element {
     let stacks = stacks_state();
     let tabs = tabs_state();
     let PaneTreeEvent { panes } = pane_tree_state();
+    let active_stack_url = stacks
+        .stacks
+        .iter()
+        .find(|s| s.is_active)
+        .map(|s| s.url.clone())
+        .unwrap_or_default();
     let active_space = spaces_state().spaces.into_iter().find(|s| s.is_active);
     let layout_error = (layout_listener.error)();
     let stacks_error = (stacks_listener.error)();
@@ -152,6 +164,14 @@ pub fn Page() -> Element {
                         stacks_error: stacks_error.clone(),
                         tabs_error: tabs_error.clone(),
                     }
+                }
+            }
+            if overlay_ready {
+                FooterView {
+                    active_stack_url,
+                    header_left: state.header_left(),
+                    header_right: state.header_right(),
+                    window_pad_bottom: state.window_pad_bottom,
                 }
             }
         }
@@ -273,6 +293,83 @@ fn HeaderView(
                     }
                     TeamFacepile { members: team }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn FooterView(
+    active_stack_url: String,
+    header_left: f32,
+    header_right: f32,
+    window_pad_bottom: f32,
+) -> Element {
+    let mut git_path = use_signal(String::new);
+    let mut branch = use_signal(String::new);
+    let mut ahead = use_signal(|| 0u32);
+    let mut behind = use_signal(|| 0u32);
+    let mut staged = use_signal(|| 0u32);
+    let mut message = use_signal(String::new);
+    let mut nonce = use_signal(|| 0u32);
+
+    use_effect(use_reactive!(|active_stack_url| {
+        git_path.set(file_url_to_path(&active_stack_url).unwrap_or_default());
+    }));
+
+    let _status = use_bin_event_listener::<GitStatusEvent, _>(GIT_STATUS_EVENT, move |s| {
+        branch.set(s.branch);
+        ahead.set(s.ahead);
+        behind.set(s.behind);
+        staged.set(s.staged_count);
+    });
+    let _result = use_bin_event_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |r| {
+        message.set(if r.ok { String::new() } else { r.message });
+        nonce.set(nonce() + 1);
+    });
+    let _error = use_bin_event_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |e| {
+        message.set(e.message);
+    });
+
+    use_effect(move || {
+        let p = git_path();
+        let _ = nonce();
+        if p.is_empty() {
+            branch.set(String::new());
+            ahead.set(0);
+            behind.set(0);
+            staged.set(0);
+            message.set(String::new());
+        } else {
+            let _ = try_cef_bin_emit_rkyv(&GitStatusRequest { path: p });
+        }
+    });
+
+    use_effect(move || {
+        let open = should_show_footer(staged(), ahead(), !message().is_empty());
+        let _ = try_cef_bin_emit_rkyv(&FooterStateRequest { open });
+    });
+
+    if !should_show_footer(staged(), ahead(), !message().is_empty()) {
+        return rsx! {};
+    }
+
+    let footer_style = format!(
+        "left:{header_left}px;right:{header_right}px;bottom:{window_pad_bottom}px;height:{}px;",
+        crate::event::FOOTER_HEIGHT_PX,
+    );
+
+    rsx! {
+        div {
+            class: "pointer-events-auto fixed",
+            style: "{footer_style}",
+            GitFooter {
+                path: git_path,
+                branch,
+                ahead,
+                behind,
+                staged_count: staged,
+                message,
             }
         }
     }
