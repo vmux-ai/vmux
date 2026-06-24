@@ -106,7 +106,10 @@ cleanup:
 	@pkill -f "target/debug/vmux_desktop" 2>/dev/null || true
 	@pkill -f "target/debug/vmux_service" 2>/dev/null || true
 	@pkill -f "bevy_cef_debug_render_process" 2>/dev/null || true
-	@base="$$HOME/Library/Application Support/Vmux"; dev="$$base/dev"; cfg="$$HOME/.vmux"; \
+	@case "$$(uname -s)" in \
+		Darwin) base="$$HOME/Library/Application Support/Vmux" ;; \
+		*) base="$${TMPDIR:-/tmp}/Vmux" ;; \
+	esac; dev="$$base/dev"; cfg="$$HOME/.vmux"; \
 	rm -f "$$dev/store.ron" "$$dev/store.version"; \
 	rm -f "$$dev"/store.ron.*.bak "$$dev"/store.version.bak-*; \
 	rm -f "$$dev/profiles/"*/session.ron; \
