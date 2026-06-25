@@ -6,6 +6,10 @@ use crate::event::{
     TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
 use dioxus::prelude::*;
+use vmux_core::event::extension::{
+    EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest, ExtOpenManagerRequest, ExtRow,
+    ExtensionsEvent,
+};
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{GlobeIcon, favicon_src_for_url, host_for_favicon_fallback};
@@ -64,6 +68,15 @@ pub fn Page() -> Element {
     let mut team_state = use_signal(TeamEvent::default);
     let _team_listener = use_bin_event_listener::<TeamEvent, _>(TEAM_EVENT, move |data| {
         team_state.set(data);
+    });
+
+    let mut extensions_state = use_signal(ExtensionsEvent::default);
+    let _extensions_listener =
+        use_bin_event_listener::<ExtensionsEvent, _>(EXTENSIONS_LIST_EVENT, move |data| {
+            extensions_state.set(data);
+        });
+    use_effect(move || {
+        let _ = try_cef_bin_emit_rkyv(&ExtListRequest);
     });
 
     let mut update_version = use_signal(|| None::<String>);
@@ -148,6 +161,7 @@ pub fn Page() -> Element {
                         stacks_state: stacks,
                         tabs_state: tabs,
                         team: team_state().members,
+                        extensions: extensions_state().extensions,
                         reload_key: reload_key(),
                         stacks_error: stacks_error.clone(),
                         tabs_error: tabs_error.clone(),
@@ -202,6 +216,7 @@ fn HeaderView(
     stacks_state: StacksHostEvent,
     tabs_state: TabsHostEvent,
     team: Vec<TeamMemberRow>,
+    extensions: Vec<ExtRow>,
     reload_key: u32,
     stacks_error: Option<String>,
     tabs_error: Option<String>,
@@ -272,6 +287,39 @@ fn HeaderView(
                         bg_color: active_bg_color.clone(),
                     }
                     TeamFacepile { members: team }
+                    ExtensionBar { extensions }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
+    rsx! {
+        div { class: "flex shrink-0 items-center gap-1 pl-1",
+            for ext in extensions.iter().filter(|e| e.enabled && e.icon.is_some()) {
+                {
+                    let id = ext.id.clone();
+                    let name = ext.name.clone();
+                    let icon = ext.icon.clone().unwrap_or_default();
+                    rsx! {
+                        button {
+                            key: "{ext.id}",
+                            class: "flex h-7 w-7 items-center justify-center rounded-lg hover:bg-white/[0.08]",
+                            title: "{name}",
+                            onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtActionRequest { id: id.clone() }); },
+                            img { class: "h-4 w-4", src: "{icon}" }
+                        }
+                    }
+                }
+            }
+            button {
+                class: "flex h-7 w-7 items-center justify-center rounded-lg text-foreground/80 hover:bg-white/[0.08]",
+                title: "Manage extensions",
+                onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtOpenManagerRequest); },
+                Icon { class: "h-4 w-4",
+                    path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }
                 }
             }
         }
@@ -339,6 +387,10 @@ fn StackIcon(
                 path { d: "M4 14h16a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2Z" }
                 path { d: "M6 7h.01" }
                 path { d: "M6 17h.01" }
+            }
+        } else if url.starts_with("vmux://extensions") || url.starts_with("chrome-extension://") {
+            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }
             }
         } else if let Some(src) = favicon_src.as_ref() {
             if favicon_error() {

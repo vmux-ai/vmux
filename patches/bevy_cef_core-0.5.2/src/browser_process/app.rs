@@ -103,6 +103,18 @@ impl ImplApp for BrowserProcessAppBuilder {
                 Some(&port.as_str().into()),
             );
         }
+
+        let load_extensions = std::env::var("VMUX_LOAD_EXTENSIONS")
+            .ok()
+            .filter(|d| !d.is_empty());
+        if is_browser_process && let Some(dirs) = load_extensions {
+            command_line
+                .append_switch_with_value(Some(&"load-extension".into()), Some(&dirs.as_str().into()));
+            command_line.append_switch_with_value(
+                Some(&"disable-extensions-except".into()),
+                Some(&dirs.as_str().into()),
+            );
+        }
     }
 
     fn on_register_custom_schemes(&self, registrar: Option<&mut SchemeRegistrar>) {

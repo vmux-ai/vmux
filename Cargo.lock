@@ -9781,11 +9781,14 @@ dependencies = [
 name = "vmux_browser"
 version = "0.0.18"
 dependencies = [
+ "base64 0.22.1",
  "bevy",
  "bevy_cef",
  "bevy_cef_core",
  "chrono",
+ "reqwest",
  "ron 0.8.1",
+ "serde",
  "vmux_agent",
  "vmux_command",
  "vmux_core",
@@ -9838,7 +9841,10 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "uuid",
+ "zip",
 ]
 
 [[package]]

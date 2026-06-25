@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
+use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive, JsEmitEventPlugin, Receive};
 use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
@@ -119,10 +119,17 @@ impl Plugin for UpdatePlugin {
         .add_systems(Startup, init_update_checker)
         .add_systems(Update, poll_update_result)
         .add_plugins(BinEventEmitterPlugin::<(RestartRequestEvent,)>::for_hosts(
-            &["debug", "layout"],
+            &["debug", "extensions", "layout"],
         ))
-        .add_observer(on_restart_request);
+        .add_plugins(JsEmitEventPlugin::<PageRelaunchRequest>::default())
+        .add_observer(on_restart_request)
+        .add_observer(on_page_relaunch);
     }
+}
+
+#[derive(serde::Deserialize)]
+struct PageRelaunchRequest {
+    channel: String,
 }
 
 fn relaunch_plan(exe: &std::path::Path, pid: u32, dyld_library_path: Option<&str>) -> Vec<String> {
@@ -148,10 +155,7 @@ fn relaunch_plan(exe: &std::path::Path, pid: u32, dyld_library_path: Option<&str
     ]
 }
 
-fn on_restart_request(
-    _trigger: On<BinReceive<RestartRequestEvent>>,
-    mut exit: MessageWriter<AppExit>,
-) {
+fn relaunch_now(exit: &mut MessageWriter<AppExit>) {
     let Ok(exe) = std::env::current_exe() else {
         bevy::log::error!("restart requested but current_exe() is unavailable");
         return;
@@ -164,6 +168,19 @@ fn on_restart_request(
     }
     bevy::log::info!("relaunching to apply update");
     exit.write(AppExit::Success);
+}
+
+fn on_restart_request(
+    _trigger: On<BinReceive<RestartRequestEvent>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    relaunch_now(&mut exit);
+}
+
+fn on_page_relaunch(trigger: On<Receive<PageRelaunchRequest>>, mut exit: MessageWriter<AppExit>) {
+    if trigger.payload.channel == "vmux-relaunch" {
+        relaunch_now(&mut exit);
+    }
 }
 
 #[derive(Resource)]

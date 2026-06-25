@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+mod extensions;
+pub use extensions::ExtensionsPlugin;
 mod host_focus;
 pub use host_focus::HostFocusIntent;
 
@@ -60,6 +62,7 @@ pub struct BrowserPlugin;
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
+        crate::extensions::load::apply_env();
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
             manifests
@@ -4739,6 +4742,7 @@ mod tests {
                 .add_message::<vmux_layout::BrowserGoBackRequest>()
                 .add_message::<vmux_layout::BrowserGoForwardRequest>()
                 .add_message::<vmux_layout::OpenInNewStackRequest>()
+                .add_message::<vmux_layout::ExtensionInstallRequest>()
                 .add_message::<PageOpenRequest>()
                 .add_message::<CefPageAttachRequest>()
                 .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()

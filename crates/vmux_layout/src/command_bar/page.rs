@@ -459,7 +459,15 @@ pub fn Page() -> Element {
                                     {
                                         dismiss_command_bar(is_open);
                                     } else if e.key() == Key::Enter {
-                                        if should_open_typed_query_on_enter(open_target, nav_mode(), &q) {
+                                        let prefer_page = matches!(
+                                            results.get(sel),
+                                            Some(ResultItem::Page { url, .. })
+                                                if q.trim().starts_with("vmux://")
+                                                    && url.starts_with(q.trim())
+                                        );
+                                        if !prefer_page
+                                            && should_open_typed_query_on_enter(open_target, nav_mode(), &q)
+                                        {
                                             is_open.set(false);
                                             emit_action_with_target("open", &q, open_target);
                                         } else if let Some(item) = results.get(sel) {
@@ -497,13 +505,17 @@ pub fn Page() -> Element {
                                         }
                                         span { class: result_trailing_slot_class() }
                                     },
-                                    ResultItem::Stack { title, url, .. } => rsx! {
+                                    ResultItem::Stack { title, url, icon, .. } => rsx! {
                                         div { class: result_content_row_class(),
-                                            Favicon {
-                                                favicon_url: String::new(),
-                                                url: url.clone(),
-                                                class: result_favicon_class().to_string(),
-                                                globe_class: result_leading_icon_class().to_string(),
+                                            if icon.is_empty() {
+                                                Favicon {
+                                                    favicon_url: String::new(),
+                                                    url: url.clone(),
+                                                    class: result_favicon_class().to_string(),
+                                                    globe_class: result_leading_icon_class().to_string(),
+                                                }
+                                            } else {
+                                                {page_icon(icon)}
                                             }
                                             div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                                 span { class: result_primary_text_class(), "{title}" }
@@ -683,6 +695,9 @@ fn page_icon(icon: &str) -> Element {
         "terminal" => rsx! { Icon { class: icon_class,
             path { d: "m4 17 6-6-6-6" }
             path { d: "M12 19h8" }
+        } },
+        "puzzle" => rsx! { Icon { class: icon_class,
+            path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }
         } },
         _ => rsx! { Icon { class: icon_class,
             path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }

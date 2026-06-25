@@ -60,6 +60,10 @@ pub enum McpParamTool {
     )]
     BrowserHistorySearch { query: String, limit: Option<u32> },
     #[mcp(
+        description = "Install a Chrome extension from the Chrome Web Store. `source` is a store URL (https://chromewebstore.google.com/detail/<slug>/<id>) or a 32-char extension id. The extension is side-loaded and activates after the next vmux relaunch; it runs only in windowed browse panes (macOS), not 3D/OSR panes."
+    )]
+    BrowserInstallExtension { source: String },
+    #[mcp(
         description = "Create a new space and switch to it. If `name` is omitted, an auto-generated name is used."
     )]
     CreateSpace { name: Option<String> },
@@ -98,6 +102,12 @@ impl McpParamTool {
                     return Err("browser_navigate.url is empty".to_string());
                 }
                 Ok(AgentCommand::BrowserNavigate { url, pane })
+            }
+            McpParamTool::BrowserInstallExtension { source } => {
+                if source.trim().is_empty() {
+                    return Err("browser_install_extension.source is empty".to_string());
+                }
+                Ok(AgentCommand::BrowserInstallExtension { source })
             }
             McpParamTool::TerminalSend {
                 text,
@@ -840,6 +850,36 @@ mod tests {
         let err =
             dispatch_query("browser_snapshot", serde_json::json!({ "target": 123 })).unwrap_err();
         assert!(err.contains("target"));
+    }
+
+    #[test]
+    fn install_extension_is_listed() {
+        assert!(tool_names().contains(&"browser_install_extension".to_string()));
+    }
+
+    #[test]
+    fn install_extension_dispatches_with_source() {
+        let cmd = dispatch_command(
+            "browser_install_extension",
+            serde_json::json!({ "source": "cjpalhdlnbpafiamejdnhcphjbkeiagm" }),
+        )
+        .unwrap();
+        assert_eq!(
+            cmd,
+            AgentCommand::BrowserInstallExtension {
+                source: "cjpalhdlnbpafiamejdnhcphjbkeiagm".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn install_extension_rejects_empty_source() {
+        let err = dispatch_command(
+            "browser_install_extension",
+            serde_json::json!({ "source": "  " }),
+        )
+        .unwrap_err();
+        assert!(err.contains("source"));
     }
 
     #[test]

@@ -10,6 +10,7 @@ pub enum CommandBarResultItem {
     Stack {
         title: String,
         url: String,
+        icon: String,
         pane_id: u64,
         tab_index: usize,
     },
@@ -71,6 +72,19 @@ fn space_matches(space: &CommandBarSpace, search_lower: &str) -> bool {
         || space.name.to_lowercase().contains(search_lower)
         || space.id.to_lowercase().contains(search_lower)
         || space.profile.to_lowercase().contains(search_lower)
+}
+
+fn urls_match(a: &str, b: &str) -> bool {
+    a == b || a.trim_end_matches('/') == b.trim_end_matches('/')
+}
+
+fn stack_icon_for(pages: &[CommandBarPage], url: &str) -> String {
+    pages
+        .iter()
+        .find(|p| urls_match(&p.url, url))
+        .filter(|p| !p.favicon)
+        .map(|p| p.icon.clone())
+        .unwrap_or_default()
 }
 
 fn page_matches(page: &CommandBarPage, search_lower: &str) -> bool {
@@ -159,6 +173,7 @@ pub fn filter_results(
         items.extend(tabs.iter().map(|t| CommandBarResultItem::Stack {
             title: t.title.clone(),
             url: t.url.clone(),
+            icon: stack_icon_for(pages, &t.url),
             pane_id: t.pane_id,
             tab_index: t.tab_index as usize,
         }));
@@ -216,6 +231,7 @@ pub fn filter_results(
                 items.push(CommandBarResultItem::Stack {
                     title: t.title.clone(),
                     url: t.url.clone(),
+                    icon: stack_icon_for(pages, &t.url),
                     pane_id: t.pane_id,
                     tab_index: t.tab_index as usize,
                 });
