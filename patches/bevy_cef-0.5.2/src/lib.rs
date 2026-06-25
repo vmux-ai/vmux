@@ -34,7 +34,8 @@ pub mod prelude {
         loading_state::*, navigation::*, popup_state::*, webview::prelude::*,
     };
     pub use bevy_cef_core::prelude::{
-        Browsers, CefDiskProfileRoot, CefEmbeddedHost, CefEmbeddedHosts, CefEmbeddedPageConfig,
+        Browsers, CefColorMode, CefColorScheme, CefDiskProfileRoot, CefEmbeddedHost,
+        CefEmbeddedHosts, CefEmbeddedPageConfig,
         CefExtensions, CefTransitionCore, CefTransitionQualifiers, CommandLineConfig,
         WebviewCefStateEvent, WebviewCommittedNavigationEvent, WebviewLoadingStateEvent,
         WebviewPopupEvent, compile_time_cef_embedded_scheme, resolved_cef_embedded_page_config,
@@ -92,8 +93,21 @@ impl Plugin for CefPlugin {
             ZoomPlugin,
             AudioMutePlugin,
         ));
+        app.init_resource::<bevy_cef_core::prelude::CefColorScheme>()
+            .add_systems(
+                Update,
+                sync_color_scheme
+                    .run_if(resource_changed::<bevy_cef_core::prelude::CefColorScheme>),
+            );
         if !app.is_plugin_added::<RemotePlugin>() {
             app.add_plugins(RemotePlugin::default());
         }
     }
+}
+
+fn sync_color_scheme(
+    mut browsers: NonSendMut<bevy_cef_core::prelude::Browsers>,
+    scheme: Res<bevy_cef_core::prelude::CefColorScheme>,
+) {
+    browsers.set_color_scheme(scheme.0);
 }
