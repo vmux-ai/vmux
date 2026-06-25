@@ -1263,6 +1263,14 @@ mod tests {
     }
 
     #[test]
+    fn embedded_default_theme_shell_is_portable() {
+        let s = load_embedded_settings();
+        let terminal = s.terminal.expect("embedded settings define terminal");
+        let shell = terminal.resolve_theme(&terminal.default_theme).shell;
+        assert_eq!(shell, default_shell());
+    }
+
+    #[test]
     fn resolve_startup_dir_prefers_per_space_then_global_then_builtin() {
         let per = tempfile::tempdir().unwrap();
         let glob = tempfile::tempdir().unwrap();
