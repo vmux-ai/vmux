@@ -95,12 +95,24 @@ const LSP_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 pub enum ReqKind {
     Hover { line: u32, col: u32 },
+    Definition,
+    References,
+    Completion { line: u32, replace_from_col: u32 },
 }
 
 pub struct InFlight {
     entity: Entity,
     kind: ReqKind,
     rx: std::sync::mpsc::Receiver<serde_json::Value>,
+}
+
+/// Emitted when a go-to-definition / reference navigation resolves to a target.
+#[derive(Message)]
+pub struct LspGoto {
+    pub entity: Entity,
+    pub path: PathBuf,
+    pub line: u32,
+    pub utf16_col: u32,
 }
 
 #[derive(Default)]
@@ -223,9 +235,19 @@ impl LspManager {
         }
     }
 
-    /// Request hover at a UTF-16 column. `echo_col` is the original char column to
-    /// echo back to the page for anchoring.
-    pub fn hover(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32, echo_col: u32) {
+    /// Send a positional request and track it in-flight. `extra` is merged into the
+    /// params object (e.g. references context).
+    #[allow(clippy::too_many_arguments)]
+    fn send_doc_request(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        method: &str,
+        line: u32,
+        utf16_col: u32,
+        extra: serde_json::Value,
+        kind: ReqKind,
+    ) {
         let Some(doc) = self.open_docs.get(path) else {
             return;
         };
@@ -235,21 +257,79 @@ impl LspManager {
         let Some(client) = self.servers.get(&doc.key) else {
             return;
         };
-        let (_, rx) = client.send_request(
-            "textDocument/hover",
-            serde_json::json!({
-                "textDocument": { "uri": uri },
-                "position": { "line": line, "character": utf16_col },
-            }),
-        );
-        self.inflight.push(InFlight {
+        let mut params = serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": utf16_col },
+        });
+        if let (Some(obj), Some(ex)) = (params.as_object_mut(), extra.as_object()) {
+            for (k, v) in ex {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+        let (_, rx) = client.send_request(method, params);
+        self.inflight.push(InFlight { entity, kind, rx });
+    }
+
+    /// `echo_col` is the original char column echoed back to the page for anchoring.
+    pub fn hover(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32, echo_col: u32) {
+        self.send_doc_request(
             entity,
-            kind: ReqKind::Hover {
+            path,
+            "textDocument/hover",
+            line,
+            utf16_col,
+            serde_json::json!({}),
+            ReqKind::Hover {
                 line,
                 col: echo_col,
             },
-            rx,
-        });
+        );
+    }
+
+    pub fn definition(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
+        self.send_doc_request(
+            entity,
+            path,
+            "textDocument/definition",
+            line,
+            utf16_col,
+            serde_json::json!({}),
+            ReqKind::Definition,
+        );
+    }
+
+    pub fn references(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
+        self.send_doc_request(
+            entity,
+            path,
+            "textDocument/references",
+            line,
+            utf16_col,
+            serde_json::json!({ "context": { "includeDeclaration": true } }),
+            ReqKind::References,
+        );
+    }
+
+    pub fn completion(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        line: u32,
+        utf16_col: u32,
+        replace_from_col: u32,
+    ) {
+        self.send_doc_request(
+            entity,
+            path,
+            "textDocument/completion",
+            line,
+            utf16_col,
+            serde_json::json!({}),
+            ReqKind::Completion {
+                line,
+                replace_from_col,
+            },
+        );
     }
 }
 
@@ -280,6 +360,89 @@ fn parse_hover(value: &serde_json::Value) -> String {
     serde_json::from_value::<lsp_types::Hover>(result.clone())
         .map(|h| hover_contents_to_string(h.contents))
         .unwrap_or_default()
+}
+
+fn loc_tuple(uri: &lsp_types::Uri, pos: lsp_types::Position) -> Option<(PathBuf, u32, u32)> {
+    let path = crate::lsp::client::path_from_uri(uri.as_str())?;
+    Some((path, pos.line, pos.character))
+}
+
+/// First definition target as (path, line, utf16_col).
+fn parse_definition(value: &serde_json::Value) -> Option<(PathBuf, u32, u32)> {
+    let result = value.get("result")?;
+    if result.is_null() {
+        return None;
+    }
+    use lsp_types::GotoDefinitionResponse::*;
+    match serde_json::from_value::<lsp_types::GotoDefinitionResponse>(result.clone()).ok()? {
+        Scalar(l) => loc_tuple(&l.uri, l.range.start),
+        Array(ls) => ls
+            .into_iter()
+            .find_map(|l| loc_tuple(&l.uri, l.range.start)),
+        Link(lls) => lls
+            .into_iter()
+            .find_map(|l| loc_tuple(&l.target_uri, l.target_range.start)),
+    }
+}
+
+fn parse_references(value: &serde_json::Value) -> Vec<(PathBuf, u32, u32)> {
+    let Some(result) = value.get("result") else {
+        return Vec::new();
+    };
+    serde_json::from_value::<Vec<lsp_types::Location>>(result.clone())
+        .map(|ls| {
+            ls.into_iter()
+                .filter_map(|l| loc_tuple(&l.uri, l.range.start))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_completion(value: &serde_json::Value) -> Vec<vmux_core::event::CompletionItem> {
+    let Some(result) = value.get("result") else {
+        return Vec::new();
+    };
+    if result.is_null() {
+        return Vec::new();
+    }
+    let items = match serde_json::from_value::<lsp_types::CompletionResponse>(result.clone()) {
+        Ok(lsp_types::CompletionResponse::Array(a)) => a,
+        Ok(lsp_types::CompletionResponse::List(l)) => l.items,
+        Err(_) => return Vec::new(),
+    };
+    items
+        .into_iter()
+        .take(200)
+        .map(|it| {
+            let insert_text = it.insert_text.clone().unwrap_or_else(|| it.label.clone());
+            vmux_core::event::CompletionItem {
+                label: it.label.clone(),
+                insert_text,
+                detail: it.detail.clone().unwrap_or_default(),
+                kind: it.kind.map(|k| format!("{k:?}")).unwrap_or_default(),
+            }
+        })
+        .collect()
+}
+
+/// Read line `line` of `path` from disk (for reference previews).
+fn disk_line(path: &Path, line: u32) -> String {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return String::new();
+    };
+    content
+        .lines()
+        .nth(line as usize)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn ref_display(path: &Path, line: u32) -> String {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned());
+    format!("{}:{}", name, line + 1)
 }
 
 #[derive(Component)]
@@ -323,34 +486,90 @@ fn lsp_open_documents(
 fn drain_lsp_requests(
     mut manager: NonSendMut<LspManager>,
     browsers: NonSend<Browsers>,
+    mut goto_w: MessageWriter<LspGoto>,
     mut commands: Commands,
 ) {
-    use vmux_core::event::{FILE_HOVER_EVENT, FileHoverEvent};
+    use vmux_core::event::{
+        FILE_COMPLETION_EVENT, FILE_HOVER_EVENT, FILE_REFERENCES_EVENT, FileCompletionEvent,
+        FileHoverEvent, FileReferencesEvent, RefItem,
+    };
     let drained = std::mem::take(&mut manager.inflight);
     let mut still = Vec::new();
     for f in drained {
-        match f.rx.try_recv() {
-            Ok(value) => match f.kind {
-                ReqKind::Hover { line, col } => {
-                    let contents = parse_hover(&value);
-                    if !contents.is_empty()
-                        && browsers.has_browser(f.entity)
-                        && browsers.host_emit_ready(&f.entity)
-                    {
-                        commands.trigger(BinHostEmitEvent::from_rkyv(
-                            f.entity,
-                            FILE_HOVER_EVENT,
-                            &FileHoverEvent {
-                                line,
-                                col,
-                                contents,
-                            },
-                        ));
-                    }
+        let value = match f.rx.try_recv() {
+            Ok(v) => v,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                still.push(f);
+                continue;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => continue,
+        };
+        let ready = browsers.has_browser(f.entity) && browsers.host_emit_ready(&f.entity);
+        match f.kind {
+            ReqKind::Hover { line, col } => {
+                let contents = parse_hover(&value);
+                if !contents.is_empty() && ready {
+                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                        f.entity,
+                        FILE_HOVER_EVENT,
+                        &FileHoverEvent {
+                            line,
+                            col,
+                            contents,
+                        },
+                    ));
                 }
-            },
-            Err(std::sync::mpsc::TryRecvError::Empty) => still.push(f),
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+            }
+            ReqKind::Definition => {
+                if let Some((path, line, utf16_col)) = parse_definition(&value) {
+                    goto_w.write(LspGoto {
+                        entity: f.entity,
+                        path,
+                        line,
+                        utf16_col,
+                    });
+                }
+            }
+            ReqKind::References => {
+                let items: Vec<RefItem> = parse_references(&value)
+                    .into_iter()
+                    .map(|(path, line, utf16_col)| {
+                        let text = disk_line(&path, line);
+                        let col = utf16_to_char_col(&text, utf16_col);
+                        RefItem {
+                            display: ref_display(&path, line),
+                            path: path.to_string_lossy().into_owned(),
+                            line,
+                            col,
+                            preview: text.trim().to_string(),
+                        }
+                    })
+                    .collect();
+                if !items.is_empty() && ready {
+                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                        f.entity,
+                        FILE_REFERENCES_EVENT,
+                        &FileReferencesEvent { items },
+                    ));
+                }
+            }
+            ReqKind::Completion {
+                line,
+                replace_from_col,
+            } => {
+                let items = parse_completion(&value);
+                if ready {
+                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                        f.entity,
+                        FILE_COMPLETION_EVENT,
+                        &FileCompletionEvent {
+                            items,
+                            replace_from_col,
+                            line,
+                        },
+                    ));
+                }
+            }
         }
     }
     manager.inflight = still;
@@ -363,6 +582,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
     })
     .init_resource::<LintOutbox>()
     .init_resource::<DiagState>()
+    .add_message::<LspGoto>()
     .add_systems(
         Update,
         (

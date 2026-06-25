@@ -33,6 +33,11 @@ pub const FILE_DIRTY_EVENT: &str = "file_dirty";
 pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
 pub const FILE_HOVER_REQUEST_EVENT: &str = "file_hover_request";
 pub const FILE_HOVER_EVENT: &str = "file_hover";
+pub const FILE_DEFINITION_REQUEST_EVENT: &str = "file_definition_request";
+pub const FILE_REFERENCES_REQUEST_EVENT: &str = "file_references_request";
+pub const FILE_REFERENCES_EVENT: &str = "file_references";
+pub const FILE_COMPLETION_REQUEST_EVENT: &str = "file_completion_request";
+pub const FILE_COMPLETION_EVENT: &str = "file_completion";
 pub const LSP_CATALOG_REQUEST: &str = "lsp_catalog_request";
 pub const LSP_CATALOG_EVENT: &str = "lsp_catalog";
 pub const LSP_INSTALL_REQUEST: &str = "lsp_install_request";
@@ -1192,6 +1197,126 @@ pub struct FileHoverEvent {
     pub line: u32,
     pub col: u32,
     pub contents: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileDefinitionRequest {
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileReferencesRequest {
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct RefItem {
+    pub path: String,
+    pub display: String,
+    pub line: u32,
+    pub col: u32,
+    pub preview: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileReferencesEvent {
+    pub items: Vec<RefItem>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileCompletionRequest {
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct CompletionItem {
+    pub label: String,
+    pub insert_text: String,
+    pub detail: String,
+    pub kind: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileCompletionEvent {
+    pub items: Vec<CompletionItem>,
+    pub replace_from_col: u32,
+    pub line: u32,
 }
 
 #[cfg(test)]

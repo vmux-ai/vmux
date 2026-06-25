@@ -374,6 +374,8 @@ pub fn Page() -> Element {
     let mut composing = use_signal(|| false);
     let mut lsp_hover = use_signal(|| Option::<FileHoverEvent>::None);
     let mut hover_pos = use_signal(|| Option::<(u32, u32)>::None);
+    // (x, y, line, col) of an open right-click menu.
+    let mut ctx_menu = use_signal(|| Option::<(f64, f64, u32, u32)>::None);
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
         clear_blob_state(image_url, preview, thumbs);
@@ -863,6 +865,7 @@ pub fn Page() -> Element {
                                                         key: "{ln}",
                                                         class: "group flex hover:bg-white/[0.035]",
                                                         onmousedown: move |e: Event<MouseData>| {
+                                                            ctx_menu.set(None);
                                                             let (cw, _) = cell_dims();
                                                             let g = gw as f64 * cw + 36.0;
                                                             let dd = e.data();
@@ -878,13 +881,45 @@ pub fn Page() -> Element {
                                                                 } else {
                                                                     0
                                                                 };
-                                                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
-                                                                    line: ln,
-                                                                    col,
-                                                                    extend: raw.shift_key(),
-                                                                });
+                                                                if raw.meta_key() {
+                                                                    let _ = try_cef_bin_emit_rkyv(&FileDefinitionRequest {
+                                                                        line: ln,
+                                                                        col,
+                                                                    });
+                                                                } else {
+                                                                    let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                                        line: ln,
+                                                                        col,
+                                                                        extend: raw.shift_key(),
+                                                                    });
+                                                                }
                                                             }
                                                             focus_file_input();
+                                                        },
+                                                        oncontextmenu: move |e: Event<MouseData>| {
+                                                            e.prevent_default();
+                                                            let (cw, _) = cell_dims();
+                                                            let g = gw as f64 * cw + 36.0;
+                                                            let dd = e.data();
+                                                            if let Some(raw) = dd.downcast::<web_sys::MouseEvent>()
+                                                                && let Some(t) = raw
+                                                                    .current_target()
+                                                                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                                                            {
+                                                                let rect = t.get_bounding_client_rect();
+                                                                let x = raw.client_x() as f64 - rect.left() - g;
+                                                                let col = if cw > 0.0 {
+                                                                    (x / cw).round().max(0.0) as u32
+                                                                } else {
+                                                                    0
+                                                                };
+                                                                ctx_menu.set(Some((
+                                                                    raw.client_x() as f64,
+                                                                    raw.client_y() as f64,
+                                                                    ln,
+                                                                    col,
+                                                                )));
+                                                            }
                                                         },
                                                         onmousemove: move |e: Event<MouseData>| {
                                                             let (cw, _) = cell_dims();
@@ -1053,6 +1088,41 @@ pub fn Page() -> Element {
                         }
                         if let Some(src) = d.source.as_ref() {
                             div { class: "mt-1 opacity-50", "{src}" }
+                        }
+                    }
+                })
+            }
+
+            {
+                ctx_menu().map(|(x, y, line, col)| rsx! {
+                    div {
+                        class: "fixed inset-0 z-40",
+                        onmousedown: move |_| ctx_menu.set(None),
+                        oncontextmenu: move |e| {
+                            e.prevent_default();
+                            ctx_menu.set(None);
+                        },
+                    }
+                    div {
+                        class: "fixed z-50 min-w-44 overflow-hidden rounded-lg bg-white/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-white/10 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                        style: "left:{x}px;top:{y}px;",
+                        div {
+                            class: "cursor-default px-3 py-1.5 hover:bg-cyan-400/15",
+                            onmousedown: move |e: Event<MouseData>| {
+                                e.prevent_default();
+                                let _ = try_cef_bin_emit_rkyv(&FileDefinitionRequest { line, col });
+                                ctx_menu.set(None);
+                            },
+                            "Go to Definition"
+                        }
+                        div {
+                            class: "cursor-default px-3 py-1.5 hover:bg-cyan-400/15",
+                            onmousedown: move |e: Event<MouseData>| {
+                                e.prevent_default();
+                                let _ = try_cef_bin_emit_rkyv(&FileReferencesRequest { line, col });
+                                ctx_menu.set(None);
+                            },
+                            "Find References"
                         }
                     }
                 })

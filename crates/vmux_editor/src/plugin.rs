@@ -827,6 +827,31 @@ fn reload_changed_files(
     }
 }
 
+/// Caret as (line, utf16_col, char_col, line_text) for LSP requests.
+fn caret_lsp(edit: &EditState) -> (u32, u32, usize, String) {
+    let head = edit.core.primary().head;
+    let (line, ccol) = edit.core.buffer.char_to_coords(head);
+    let lt: String = edit
+        .core
+        .buffer
+        .rope
+        .line(line)
+        .chars()
+        .filter(|c| *c != '\n' && *c != '\r')
+        .collect();
+    let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, ccol as u32);
+    (line as u32, utf16, ccol, lt)
+}
+
+fn word_start_col(line_text: &str, char_col: usize) -> u32 {
+    let chars: Vec<char> = line_text.chars().collect();
+    let mut i = char_col.min(chars.len());
+    while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
+        i -= 1;
+    }
+    i as u32
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_commands(
     entity: Entity,
@@ -866,10 +891,23 @@ fn run_commands(
                 );
                 continue;
             }
-            EditCommand::GotoDefinition
-            | EditCommand::FindReferences
-            | EditCommand::TriggerCompletion => {
-                // Wired in later milestones (M3-M5).
+            EditCommand::GotoDefinition => {
+                let (line, utf16, _, _) = caret_lsp(edit);
+                let path = edit.core.buffer.path.clone();
+                manager.definition(entity, &path, line, utf16);
+                continue;
+            }
+            EditCommand::FindReferences => {
+                let (line, utf16, _, _) = caret_lsp(edit);
+                let path = edit.core.buffer.path.clone();
+                manager.references(entity, &path, line, utf16);
+                continue;
+            }
+            EditCommand::TriggerCompletion => {
+                let (line, utf16, ccol, lt) = caret_lsp(edit);
+                let replace_from = word_start_col(&lt, ccol);
+                let path = edit.core.buffer.path.clone();
+                manager.completion(entity, &path, line, utf16, replace_from);
                 continue;
             }
             _ => {}
@@ -1041,6 +1079,177 @@ fn on_file_hover_request(
     manager.hover(entity, &edit.core.buffer.path, line, utf16, req.col);
 }
 
+#[derive(Component)]
+struct PendingGoto {
+    line: u32,
+    utf16_col: u32,
+}
+
+fn req_pos(edit: &EditState, line: u32, col: u32) -> (u32, u32, String) {
+    let line = line.min(edit.core.buffer.len_lines().saturating_sub(1) as u32);
+    let lt: String = edit
+        .core
+        .buffer
+        .rope
+        .line(line as usize)
+        .chars()
+        .filter(|c| *c != '\n' && *c != '\r')
+        .collect();
+    let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, col);
+    (line, utf16, lt)
+}
+
+fn on_file_definition_request(
+    trigger: On<BinReceive<FileDefinitionRequest>>,
+    q: Query<&EditState>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event().webview;
+    let req = trigger.event().payload;
+    let Ok(edit) = q.get(entity) else {
+        return;
+    };
+    let (line, utf16, _) = req_pos(edit, req.line, req.col);
+    let path = edit.core.buffer.path.clone();
+    manager.definition(entity, &path, line, utf16);
+}
+
+fn on_file_references_request(
+    trigger: On<BinReceive<FileReferencesRequest>>,
+    q: Query<&EditState>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event().webview;
+    let req = trigger.event().payload;
+    let Ok(edit) = q.get(entity) else {
+        return;
+    };
+    let (line, utf16, _) = req_pos(edit, req.line, req.col);
+    let path = edit.core.buffer.path.clone();
+    manager.references(entity, &path, line, utf16);
+}
+
+fn on_file_completion_request(
+    trigger: On<BinReceive<FileCompletionRequest>>,
+    q: Query<&EditState>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event().webview;
+    let req = trigger.event().payload;
+    let Ok(edit) = q.get(entity) else {
+        return;
+    };
+    let (line, utf16, lt) = req_pos(edit, req.line, req.col);
+    let replace_from = word_start_col(&lt, req.col as usize);
+    let path = edit.core.buffer.path.clone();
+    manager.completion(entity, &path, line, utf16, replace_from);
+}
+
+fn goto_caret(edit: &mut EditState, line: u32, utf16_col: u32, vp: &mut FileViewport) {
+    let line = (line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
+    let lt: String = edit
+        .core
+        .buffer
+        .rope
+        .line(line)
+        .chars()
+        .filter(|c| *c != '\n' && *c != '\r')
+        .collect();
+    let ccol = crate::lsp::manager::utf16_to_char_col(&lt, utf16_col);
+    let at = edit.core.buffer.coords_to_char(line, ccol as usize);
+    edit.core.set_caret(at);
+    if let Some(top) = edit.core.autoscroll(vp.top_line, vp.rows) {
+        vp.top_line = top;
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn apply_goto(
+    mut msgs: MessageReader<crate::lsp::manager::LspGoto>,
+    mut q: Query<(
+        &mut EditState,
+        &mut FileViewport,
+        &mut FileView,
+        &mut PageMetadata,
+        &EditorKeymap,
+    )>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for g in msgs.read() {
+        let Ok((mut edit, mut vp, mut fv, mut meta, keymap)) = q.get_mut(g.entity) else {
+            continue;
+        };
+        if canon(&fv.path) == canon(&g.path) {
+            goto_caret(&mut edit, g.line, g.utf16_col, &mut vp);
+            let vpc = *vp;
+            emit_window(g.entity, &mut edit, &vpc, &browsers, &mut commands);
+            emit_cursor(
+                g.entity,
+                &edit.core,
+                keymap.0.as_ref(),
+                &vpc,
+                &browsers,
+                &mut commands,
+            );
+        } else {
+            manager.close(&fv.path);
+            let url = url::Url::from_file_path(&g.path)
+                .map(|u| u.to_string())
+                .unwrap_or_else(|_| format!("file://{}", g.path.to_string_lossy()));
+            meta.title = g
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            meta.url = url;
+            fv.path = g.path.clone();
+            vp.top_line = 0;
+            commands
+                .entity(g.entity)
+                .remove::<EditState>()
+                .remove::<FileBuffer>()
+                .remove::<FileImage>()
+                .remove::<FileDir>()
+                .remove::<FileInitialMetaSent>()
+                .remove::<crate::lsp::manager::LspOpened>()
+                .remove::<crate::lsp::manager::LintRan>()
+                .insert(PendingGoto {
+                    line: g.line,
+                    utf16_col: g.utf16_col,
+                });
+        }
+    }
+}
+
+fn apply_pending_goto(
+    mut q: Query<(
+        Entity,
+        &mut EditState,
+        &mut FileViewport,
+        &EditorKeymap,
+        &PendingGoto,
+    )>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, mut edit, mut vp, keymap, pg) in &mut q {
+        goto_caret(&mut edit, pg.line, pg.utf16_col, &mut vp);
+        let vpc = *vp;
+        emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
+        emit_cursor(
+            entity,
+            &edit.core,
+            keymap.0.as_ref(),
+            &vpc,
+            &browsers,
+            &mut commands,
+        );
+        commands.entity(entity).remove::<PendingGoto>();
+    }
+}
+
 fn on_file_pointer(
     trigger: On<BinReceive<FilePointerEvent>>,
     mut q: Query<(&mut EditState, &EditorKeymap, &FileViewport)>,
@@ -1131,6 +1340,9 @@ impl Plugin for EditorPlugin {
                 FileKeyEvent,
                 FilePointerEvent,
                 FileHoverRequest,
+                FileDefinitionRequest,
+                FileReferencesRequest,
+                FileCompletionRequest,
             )>::default())
             .add_systems(
                 Update,
@@ -1148,6 +1360,8 @@ impl Plugin for EditorPlugin {
                     drain_thumb_tasks,
                     reconcile_file_watches,
                     flush_lsp_changes,
+                    apply_goto,
+                    apply_pending_goto,
                     (drain_file_changes, reload_changed_files).chain(),
                 ),
             )
@@ -1159,7 +1373,10 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_key)
             .add_observer(on_file_text_input)
             .add_observer(on_file_pointer)
-            .add_observer(on_file_hover_request);
+            .add_observer(on_file_hover_request)
+            .add_observer(on_file_definition_request)
+            .add_observer(on_file_references_request)
+            .add_observer(on_file_completion_request);
     }
 }
 
