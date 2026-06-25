@@ -69,9 +69,31 @@
     anchor.style.display = "none";
     anchor.parentNode.insertBefore(b, anchor);
   }
-  new MutationObserver(place).observe(document.documentElement, {
+  function dismissNags() {
+    var els = document.querySelectorAll("button, a, [role=button]");
+    for (var i = 0; i < els.length; i++) {
+      var t = (els[i].textContent || "").trim();
+      if (t === "No thanks") {
+        els[i].click();
+      } else if (t === "Install Chrome") {
+        var p = els[i];
+        for (var d = 0; d < 6 && p; d++) {
+          if ((p.textContent || "").indexOf("Switch to Chrome to install") >= 0) {
+            p.style.display = "none";
+            break;
+          }
+          p = p.parentElement;
+        }
+      }
+    }
+  }
+  function tick() {
+    place();
+    dismissNags();
+  }
+  new MutationObserver(tick).observe(document.documentElement, {
     childList: true,
     subtree: true,
   });
-  place();
+  tick();
 })();
