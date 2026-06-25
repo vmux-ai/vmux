@@ -328,8 +328,11 @@ fn handle_bookmark_app_commands(
         if meta.url.is_empty() {
             continue;
         }
-        let (url, title, favicon_url) =
-            (meta.url.clone(), meta.title.clone(), meta.favicon_url.clone());
+        let (url, title, favicon_url) = (
+            meta.url.clone(),
+            meta.title.clone(),
+            meta.favicon_url.clone(),
+        );
         if pin {
             ops.write(BookmarkOp::PinUrl {
                 url,
