@@ -620,6 +620,7 @@ pub struct AgentLookups<'w> {
 struct AgentSpaceWriters<'w, 's> {
     layout_apply: MessageWriter<'w, vmux_layout::reconcile::LayoutApplyRequest>,
     space_command: MessageWriter<'w, vmux_space::SpaceCommandRequest>,
+    bookmark_op: MessageWriter<'w, vmux_layout::bookmark::BookmarkOp>,
     focus_pane: MessageWriter<'w, FocusPaneRequest>,
     rename_profile: MessageWriter<'w, RenameProfileRequest>,
     issued: MessageWriter<'w, vmux_command::CommandIssued>,
@@ -1848,6 +1849,44 @@ fn handle_agent_commands(
                         name: name.clone(),
                     });
                 AgentCommandResult::Ok
+            }
+            ServiceAgentCommand::BookmarkCommand {
+                command,
+                uuid,
+                name,
+                url,
+                title,
+                favicon_url,
+            } => {
+                use vmux_layout::bookmark::BookmarkOp;
+                let op = match command.as_str() {
+                    "add" => url.clone().map(|url| BookmarkOp::Add {
+                        url,
+                        title: title.clone().unwrap_or_default(),
+                        favicon_url: favicon_url.clone().unwrap_or_default(),
+                        folder: uuid.clone(),
+                    }),
+                    "remove" => uuid.clone().map(|uuid| BookmarkOp::Remove { uuid }),
+                    "pin" => match (uuid.clone(), url.clone()) {
+                        (Some(uuid), _) => Some(BookmarkOp::Pin { uuid }),
+                        (None, Some(url)) => Some(BookmarkOp::PinUrl {
+                            url,
+                            title: title.clone().unwrap_or_default(),
+                            favicon_url: favicon_url.clone().unwrap_or_default(),
+                        }),
+                        _ => None,
+                    },
+                    "unpin" => uuid.clone().map(|uuid| BookmarkOp::Unpin { uuid }),
+                    "folder_create" => name.clone().map(|name| BookmarkOp::AddFolder { name }),
+                    _ => None,
+                };
+                match op {
+                    Some(op) => {
+                        writers.bookmark_op.write(op);
+                        AgentCommandResult::Ok
+                    }
+                    None => AgentCommandResult::Error("invalid bookmark command".to_string()),
+                }
             }
             ServiceAgentCommand::OpenBeside { .. }
             | ServiceAgentCommand::Run { .. }
@@ -3487,6 +3526,33 @@ fn handle_agent_queries(
         ),
         With<vmux_layout::space::Space>,
     >,
+    bm_pins: Query<(&vmux_core::Uuid, &vmux_core::PageMetadata), With<vmux_core::Pin>>,
+    bm_folders: Query<
+        (
+            &vmux_core::Uuid,
+            &Name,
+            Option<&Children>,
+            Has<vmux_core::Collapsed>,
+            &vmux_core::Order,
+        ),
+        With<vmux_core::Folder>,
+    >,
+    bm_top: Query<
+        (
+            &vmux_core::Uuid,
+            &vmux_core::PageMetadata,
+            &vmux_core::Order,
+        ),
+        (
+            With<vmux_core::Bookmark>,
+            Without<vmux_core::Pin>,
+            Without<ChildOf>,
+        ),
+    >,
+    bm_children: Query<
+        (&vmux_core::Uuid, &vmux_core::PageMetadata),
+        (With<vmux_core::Bookmark>, Without<vmux_core::Pin>),
+    >,
     mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
     mut screenshot_writer: MessageWriter<ScreenshotRequest>,
     mut browser_snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
@@ -3531,6 +3597,52 @@ fn handle_agent_queries(
                 rows.sort_by_key(|(order, _)| *order);
                 let rows: Vec<serde_json::Value> = rows.into_iter().map(|(_, row)| row).collect();
                 let json = serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_string());
+                service.0.send(ClientMessage::AgentQueryResponse {
+                    request_id: request.request_id,
+                    result: AgentQueryResult::Spaces(json),
+                });
+            }
+            AgentQuery::BookmarkList => {
+                let row = |u: &vmux_core::Uuid, m: &vmux_core::PageMetadata| {
+                    serde_json::json!({
+                        "uuid": u.0,
+                        "url": m.url,
+                        "title": m.title,
+                        "favicon_url": m.favicon_url,
+                    })
+                };
+                let pins: Vec<serde_json::Value> = bm_pins.iter().map(|(u, m)| row(u, m)).collect();
+                let mut roots: Vec<(u32, serde_json::Value)> = Vec::new();
+                for (uuid, name, children, collapsed, order) in bm_folders.iter() {
+                    let mut kids: Vec<serde_json::Value> = Vec::new();
+                    if let Some(children) = children {
+                        for child in children.iter() {
+                            if let Ok((u, m)) = bm_children.get(child) {
+                                kids.push(row(u, m));
+                            }
+                        }
+                    }
+                    roots.push((
+                        order.0,
+                        serde_json::json!({
+                            "kind": "folder",
+                            "uuid": uuid.0,
+                            "name": name.as_str(),
+                            "collapsed": collapsed,
+                            "children": kids,
+                        }),
+                    ));
+                }
+                for (uuid, meta, order) in bm_top.iter() {
+                    let mut entry = row(uuid, meta);
+                    entry["kind"] = serde_json::json!("entry");
+                    roots.push((order.0, entry));
+                }
+                roots.sort_by_key(|(order, _)| *order);
+                let roots: Vec<serde_json::Value> = roots.into_iter().map(|(_, v)| v).collect();
+                let json =
+                    serde_json::to_string(&serde_json::json!({"pins": pins, "roots": roots}))
+                        .unwrap_or_else(|_| "{}".to_string());
                 service.0.send(ClientMessage::AgentQueryResponse {
                     request_id: request.request_id,
                     result: AgentQueryResult::Spaces(json),
