@@ -50,11 +50,18 @@ pub enum BookmarkOp {
     },
 }
 
+/// Emitted when the page requests the native bookmarks context menu (e.g.
+/// right-click on the empty placeholder). Consumed host-side (vmux_desktop) to
+/// pop up an OS menu.
+#[derive(Message, Clone, Debug, Default)]
+pub struct ShowBookmarkMenuRequest;
+
 pub struct BookmarkPlugin;
 
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<BookmarkOp>()
+            .add_message::<ShowBookmarkMenuRequest>()
             .add_plugins(BinEventEmitterPlugin::<(BookmarksCommandEvent,)>::for_hosts(&["layout"]))
             .add_observer(on_bookmarks_command_emit)
             .add_systems(
@@ -225,11 +232,15 @@ fn on_bookmarks_command_emit(
     trigger: On<BinReceive<BookmarksCommandEvent>>,
     mut ops: MessageWriter<BookmarkOp>,
     mut app_cmds: MessageWriter<AppCommand>,
+    mut menu_req: MessageWriter<ShowBookmarkMenuRequest>,
 ) {
     let e = &trigger.event().payload;
     match e.command.as_str() {
         "toggle_active" => {
             app_cmds.write(AppCommand::Bookmark(BookmarkCommand::ToggleActive));
+        }
+        "menu_new_folder" => {
+            menu_req.write(ShowBookmarkMenuRequest);
         }
         "open" => {
             if let Some(url) = e.url.clone() {
@@ -311,6 +322,12 @@ fn handle_bookmark_app_commands(
         let pin = match cmd {
             AppCommand::Bookmark(BookmarkCommand::ToggleActive) => false,
             AppCommand::Bookmark(BookmarkCommand::PinActive) => true,
+            AppCommand::Bookmark(BookmarkCommand::NewFolder) => {
+                ops.write(BookmarkOp::AddFolder {
+                    name: "New Folder".to_string(),
+                });
+                continue;
+            }
             _ => continue,
         };
         let (_, _, stack) = focused_stack(

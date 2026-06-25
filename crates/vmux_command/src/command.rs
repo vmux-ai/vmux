@@ -246,6 +246,8 @@ pub enum BookmarkCommand {
     ToggleActive,
     #[menu(id = "bookmark_pin_active", label = "Pin Page")]
     PinActive,
+    #[menu(id = "bookmark_new_folder", label = "New Folder", hidden)]
+    NewFolder,
 }
 
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
