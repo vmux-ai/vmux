@@ -6,6 +6,8 @@ use crate::client::cli::strategy::CliAgentStrategy;
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, McpServerConfig};
 
+const DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec"];
+
 pub struct CodexStrategy;
 
 impl AgentStrategy for CodexStrategy {
@@ -37,6 +39,10 @@ impl CliAgentStrategy for CodexStrategy {
                 "mcp_servers.vmux.cwd={}",
                 quote_toml(&cwd.to_string_lossy())
             ));
+        }
+        for feature in DISABLED_FEATURES {
+            args.push("--disable".into());
+            args.push((*feature).to_string());
         }
         if let Some(sid) = session_id {
             args.push("resume".into());
@@ -227,6 +233,28 @@ mod tests {
         assert_eq!(args[resume_idx + 1], "abc-123");
         let last_dash_c = args.iter().rposition(|a| a == "-c").unwrap();
         assert!(resume_idx > last_dash_c);
+        let last_disable = args.iter().rposition(|a| a == "--disable").unwrap();
+        assert!(
+            resume_idx > last_disable,
+            "the resume subcommand must follow the global --disable options"
+        );
+    }
+
+    #[test]
+    fn build_args_disables_native_shell_features() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into()],
+            cwd: None,
+        };
+        let args = CodexStrategy.build_args(&mcp, None);
+        let disabled: Vec<&str> = args
+            .windows(2)
+            .filter(|w| w[0] == "--disable")
+            .map(|w| w[1].as_str())
+            .collect();
+        assert!(disabled.contains(&"shell_tool"));
+        assert!(disabled.contains(&"unified_exec"));
     }
 
     #[test]

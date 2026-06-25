@@ -8,6 +8,11 @@ use crate::client::cli::strategy::CliAgentStrategy;
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, McpServerConfig};
 
+const DISALLOWED_TOOLS: &str = "Bash,Monitor";
+const ALLOWED_TOOLS: &str = "mcp__vmux__run,mcp__vmux__read_terminal";
+const RUN_STEER_PROMPT: &str = "The native Bash tool is disabled. Run ALL shell commands via the \
+mcp__vmux__run tool, which executes in a visible terminal the user can watch and take over.";
+
 pub struct ClaudeStrategy;
 
 impl AgentStrategy for ClaudeStrategy {
@@ -27,7 +32,16 @@ impl CliAgentStrategy for ClaudeStrategy {
     }
 
     fn build_args(&self, mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
-        let mut args = vec!["--mcp-config".to_string(), build_mcp_config_json(mcp)];
+        let mut args = vec![
+            "--mcp-config".to_string(),
+            build_mcp_config_json(mcp),
+            "--disallowedTools".to_string(),
+            DISALLOWED_TOOLS.to_string(),
+            "--allowedTools".to_string(),
+            ALLOWED_TOOLS.to_string(),
+            "--append-system-prompt".to_string(),
+            RUN_STEER_PROMPT.to_string(),
+        ];
         if let Some(sid) = session_id {
             args.push("--resume".to_string());
             args.push(sid.to_string());
@@ -203,6 +217,34 @@ mod tests {
         let args = ClaudeStrategy.build_args(&mcp, Some("abc-123"));
         let resume_idx = args.iter().position(|a| a == "--resume").unwrap();
         assert_eq!(args[resume_idx + 1], "abc-123");
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some("abc-123"),
+            "--resume must stay last so the tool flags don't swallow it"
+        );
+    }
+
+    #[test]
+    fn build_args_disables_native_bash_and_steers_to_run() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into()],
+            cwd: None,
+        };
+        let args = ClaudeStrategy.build_args(&mcp, None);
+
+        let disallowed = args.iter().position(|a| a == "--disallowedTools").unwrap();
+        assert_eq!(args[disallowed + 1], "Bash,Monitor");
+
+        let allowed = args.iter().position(|a| a == "--allowedTools").unwrap();
+        assert!(args[allowed + 1].contains("mcp__vmux__run"));
+        assert!(args[allowed + 1].contains("mcp__vmux__read_terminal"));
+
+        let steer = args
+            .iter()
+            .position(|a| a == "--append-system-prompt")
+            .unwrap();
+        assert!(args[steer + 1].contains("mcp__vmux__run"));
     }
 
     #[test]
