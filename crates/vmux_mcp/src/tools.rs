@@ -617,6 +617,89 @@ name=<feature> to drop a demo straight into the repo."
     }
 }
 
+fn bookmark_list_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "bookmark_list".into(),
+        description: "List all pins (favicon quick-access) and bookmarks (saved pages, \
+optionally inside folders) for the current profile. Returns JSON: \
+{pins:[{uuid,url,title,favicon_url}], roots:[ {kind:\"entry\",...} | \
+{kind:\"folder\",uuid,name,collapsed,children:[...]} ]}."
+            .into(),
+        input_schema: serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
+    }
+}
+
+fn bookmark_add_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "bookmark_add".into(),
+        description: "Save a page as a bookmark. Optional folder (a folder uuid from \
+bookmark_list) nests it; omit for top level."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["url"],
+            "additionalProperties": false,
+            "properties": {
+                "url": {"type": "string"},
+                "title": {"type": "string"},
+                "favicon_url": {"type": "string"},
+                "folder": {"type": "string"}
+            }
+        }),
+    }
+}
+
+fn bookmark_remove_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "bookmark_remove".into(),
+        description: "Remove a bookmark by its uuid (from bookmark_list).".into(),
+        input_schema: serde_json::json!({
+            "type":"object","required":["uuid"],"additionalProperties":false,
+            "properties":{"uuid":{"type":"string"}}
+        }),
+    }
+}
+
+fn bookmark_pin_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "bookmark_pin".into(),
+        description: "Pin a page to the favicon grid. Provide a bookmark uuid to promote an \
+existing bookmark, OR a url (+optional title/favicon_url) to pin a page directly."
+            .into(),
+        input_schema: serde_json::json!({
+            "type":"object","additionalProperties":false,
+            "properties":{
+                "uuid":{"type":"string"},
+                "url":{"type":"string"},
+                "title":{"type":"string"},
+                "favicon_url":{"type":"string"}
+            }
+        }),
+    }
+}
+
+fn bookmark_unpin_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "bookmark_unpin".into(),
+        description: "Unpin a pin by its uuid (from bookmark_list).".into(),
+        input_schema: serde_json::json!({
+            "type":"object","required":["uuid"],"additionalProperties":false,
+            "properties":{"uuid":{"type":"string"}}
+        }),
+    }
+}
+
+fn bookmark_folder_create_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "bookmark_folder_create".into(),
+        description: "Create a bookmark folder with the given name.".into(),
+        input_schema: serde_json::json!({
+            "type":"object","required":["name"],"additionalProperties":false,
+            "properties":{"name":{"type":"string"}}
+        }),
+    }
+}
+
 pub fn tool_definitions() -> Vec<ToolDefinition> {
     tool_definitions_filtered(false, false)
 }
@@ -657,6 +740,12 @@ pub fn tool_definitions_filtered(acp_session: bool, acp_terminals: bool) -> Vec<
     defs.push(browser_scroll_definition());
     defs.push(record_start_definition());
     defs.push(record_stop_definition());
+    defs.push(bookmark_list_definition());
+    defs.push(bookmark_add_definition());
+    defs.push(bookmark_remove_definition());
+    defs.push(bookmark_pin_definition());
+    defs.push(bookmark_unpin_definition());
+    defs.push(bookmark_folder_create_definition());
     defs
 }
 
@@ -973,6 +1062,54 @@ pub fn dispatch_with_anchor(
         return Ok(DispatchTarget::Query(
             vmux_service::protocol::AgentQuery::ListSpaces,
         ));
+    }
+    if name == "bookmark_list" {
+        return Ok(DispatchTarget::Query(
+            vmux_service::protocol::AgentQuery::BookmarkList,
+        ));
+    }
+    {
+        let str_arg = |key: &str| {
+            arguments
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        };
+        let bookmark_cmd = |command: &str| {
+            DispatchTarget::Command(AgentCommand::BookmarkCommand {
+                command: command.to_string(),
+                uuid: str_arg("uuid"),
+                name: str_arg("name"),
+                url: str_arg("url"),
+                title: str_arg("title"),
+                favicon_url: str_arg("favicon_url"),
+            })
+        };
+        match name {
+            "bookmark_add" => {
+                if str_arg("url").unwrap_or_default().is_empty() {
+                    return Err("bookmark_add.url is required".to_string());
+                }
+                return Ok(DispatchTarget::Command(AgentCommand::BookmarkCommand {
+                    command: "add".to_string(),
+                    uuid: str_arg("folder"),
+                    name: None,
+                    url: str_arg("url"),
+                    title: str_arg("title"),
+                    favicon_url: str_arg("favicon_url"),
+                }));
+            }
+            "bookmark_remove" => return Ok(bookmark_cmd("remove")),
+            "bookmark_pin" => return Ok(bookmark_cmd("pin")),
+            "bookmark_unpin" => return Ok(bookmark_cmd("unpin")),
+            "bookmark_folder_create" => {
+                if str_arg("name").unwrap_or_default().is_empty() {
+                    return Err("bookmark_folder_create.name is required".to_string());
+                }
+                return Ok(bookmark_cmd("folder_create"));
+            }
+            _ => {}
+        }
     }
     if let Some(parsed) = McpParamTool::from_mcp_call(name, arguments.clone()) {
         return parsed
@@ -2036,6 +2173,52 @@ mod tests {
             target,
             DispatchTarget::Query(AgentQuery::ListSpaces)
         ));
+    }
+
+    #[test]
+    fn bookmark_list_dispatches_to_query() {
+        let target = dispatch_from_tool_call("bookmark_list", serde_json::json!({})).unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Query(AgentQuery::BookmarkList)
+        ));
+    }
+
+    #[test]
+    fn bookmark_add_dispatches_to_command() {
+        let cmd = dispatch_command(
+            "bookmark_add",
+            serde_json::json!({"url": "https://a.test", "title": "A", "folder": "f1"}),
+        )
+        .unwrap();
+        match cmd {
+            AgentCommand::BookmarkCommand {
+                command,
+                url,
+                title,
+                uuid,
+                ..
+            } => {
+                assert_eq!(command, "add");
+                assert_eq!(url.as_deref(), Some("https://a.test"));
+                assert_eq!(title.as_deref(), Some("A"));
+                assert_eq!(uuid.as_deref(), Some("f1"));
+            }
+            other => panic!("expected BookmarkCommand, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bookmark_folder_create_dispatches_to_command() {
+        let cmd =
+            dispatch_command("bookmark_folder_create", serde_json::json!({"name": "PRs"})).unwrap();
+        match cmd {
+            AgentCommand::BookmarkCommand { command, name, .. } => {
+                assert_eq!(command, "folder_create");
+                assert_eq!(name.as_deref(), Some("PRs"));
+            }
+            other => panic!("expected BookmarkCommand, got {other:?}"),
+        }
     }
 
     #[test]
