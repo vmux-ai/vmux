@@ -26,7 +26,12 @@ pub struct FileView {
 #[derive(Component, Clone, Debug)]
 pub struct FileBuffer {
     pub language: String,
-    pub lines: Vec<FileLine>,
+}
+
+impl FileBuffer {
+    fn error(message: String) -> Self {
+        Self { language: message }
+    }
 }
 
 #[derive(Component, Clone, Copy, Debug)]
@@ -233,37 +238,32 @@ fn load_file_buffers(
                         });
                     }
                     Err(e) => {
-                        commands.entity(entity).insert(FileBuffer {
-                            language: format!("__error__:{e}"),
-                            lines: Vec::new(),
-                        });
+                        commands
+                            .entity(entity)
+                            .insert(FileBuffer::error(format!("__error__:{e}")));
                     }
                 },
                 _ => {
-                    commands.entity(entity).insert(FileBuffer {
-                        language: "__error__:image too large to preview".into(),
-                        lines: Vec::new(),
-                    });
+                    commands.entity(entity).insert(FileBuffer::error(
+                        "__error__:image too large to preview".into(),
+                    ));
                 }
             }
             continue;
         }
         match std::fs::metadata(&fv.path).map(|m| m.len()) {
             Ok(len) if len > crate::highlight::FILE_VIEW_MAX_BYTES => {
-                commands.entity(entity).insert(FileBuffer {
-                    language: format!(
-                        "__error__:file too large ({len} bytes, max {})",
-                        crate::highlight::FILE_VIEW_MAX_BYTES
-                    ),
-                    lines: Vec::new(),
-                });
+                commands.entity(entity).insert(FileBuffer::error(format!(
+                    "__error__:file too large ({len} bytes, max {})",
+                    crate::highlight::FILE_VIEW_MAX_BYTES
+                )));
                 continue;
             }
             Err(e) => {
-                commands.entity(entity).insert(FileBuffer {
-                    language: format!("__error__:cannot open {}: {e}", fv.path.display()),
-                    lines: Vec::new(),
-                });
+                commands.entity(entity).insert(FileBuffer::error(format!(
+                    "__error__:cannot open {}: {e}",
+                    fv.path.display()
+                )));
                 continue;
             }
             _ => {}
@@ -272,18 +272,18 @@ fn load_file_buffers(
             Ok(bytes) => match String::from_utf8(bytes) {
                 Ok(t) => t,
                 Err(_) => {
-                    commands.entity(entity).insert(FileBuffer {
-                        language: format!("__error__:not a UTF-8 text file: {}", fv.path.display()),
-                        lines: Vec::new(),
-                    });
+                    commands.entity(entity).insert(FileBuffer::error(format!(
+                        "__error__:not a UTF-8 text file: {}",
+                        fv.path.display()
+                    )));
                     continue;
                 }
             },
             Err(e) => {
-                commands.entity(entity).insert(FileBuffer {
-                    language: format!("__error__:cannot read {}: {e}", fv.path.display()),
-                    lines: Vec::new(),
-                });
+                commands.entity(entity).insert(FileBuffer::error(format!(
+                    "__error__:cannot read {}: {e}",
+                    fv.path.display()
+                )));
                 continue;
             }
         };

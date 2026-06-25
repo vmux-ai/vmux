@@ -30,11 +30,20 @@ pub fn to_file_diagnostics(
     lines: &[FileLine],
     diags: &[lsp_types::Diagnostic],
 ) -> Vec<FileDiagnostic> {
+    map_diags(diags, |line| {
+        lines.get(line as usize).map(line_text).unwrap_or_default()
+    })
+}
+
+fn map_diags(
+    diags: &[lsp_types::Diagnostic],
+    line_text: impl Fn(u32) -> String,
+) -> Vec<FileDiagnostic> {
     diags
         .iter()
         .map(|d| {
             let line = d.range.start.line;
-            let text = lines.get(line as usize).map(line_text).unwrap_or_default();
+            let text = line_text(line);
             let start_col = utf16_to_char_col(&text, d.range.start.character);
             let end_col = if d.range.end.line == line {
                 utf16_to_char_col(&text, d.range.end.character).max(start_col)
@@ -50,6 +59,17 @@ pub fn to_file_diagnostics(
                 source: d.source.clone(),
             }
         })
+        .collect()
+}
+
+fn rope_line_text(rope: &ropey::Rope, line: u32) -> String {
+    let l = line as usize;
+    if l >= rope.len_lines() {
+        return String::new();
+    }
+    rope.line(l)
+        .chars()
+        .filter(|c| *c != '\n' && *c != '\r')
         .collect()
 }
 
@@ -173,7 +193,7 @@ impl LspManager {
 #[derive(Component)]
 pub struct LspOpened;
 
-use crate::plugin::{FileBuffer, FileView};
+use crate::plugin::{EditState, FileView};
 
 fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
     settings
@@ -196,16 +216,13 @@ fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
 }
 
 fn lsp_open_documents(
-    q: Query<(Entity, &FileView, &FileBuffer), Without<LspOpened>>,
+    q: Query<(Entity, &FileView, &EditState), Without<LspOpened>>,
     settings: Res<vmux_setting::AppSettings>,
     mut manager: NonSendMut<LspManager>,
     mut commands: Commands,
 ) {
     let overrides = server_overrides(&settings);
-    for (entity, fv, buf) in &q {
-        if buf.language.starts_with("__error__:") {
-            continue;
-        }
+    for (entity, fv, _edit) in &q {
         manager.open(&fv.path, &overrides);
         commands.entity(entity).insert(LspOpened);
     }
@@ -288,7 +305,7 @@ fn emit_diagnostics_system(
 fn drain_lsp_diagnostics(
     outbox: Res<LspOutbox>,
     mut state: ResMut<DiagState>,
-    views: Query<(Entity, &FileView, &FileBuffer)>,
+    views: Query<(Entity, &FileView, &EditState)>,
 ) {
     let drained: Vec<(PathBuf, Vec<lsp_types::Diagnostic>)> = {
         let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
@@ -299,7 +316,7 @@ fn drain_lsp_diagnostics(
         let mapped = views
             .iter()
             .find(|(_, fv, _)| canon(&fv.path) == target)
-            .map(|(_, _, buf)| to_file_diagnostics(&buf.lines, &diags))
+            .map(|(_, _, edit)| map_diags(&diags, |l| rope_line_text(&edit.core.buffer.rope, l)))
             .unwrap_or_default();
         state.lsp.insert(target, mapped);
     }
@@ -319,15 +336,12 @@ fn drain_lint(outbox: Res<LintOutbox>, mut state: ResMut<DiagState>) {
 pub struct LintRan;
 
 fn lint_on_open(
-    q: Query<(Entity, &FileView, &FileBuffer), Without<LintRan>>,
+    q: Query<(Entity, &FileView, &EditState), Without<LintRan>>,
     outbox: Res<LintOutbox>,
     mut commands: Commands,
 ) {
-    for (entity, fv, buf) in &q {
+    for (entity, fv, _edit) in &q {
         commands.entity(entity).insert(LintRan);
-        if buf.language.starts_with("__error__:") {
-            continue;
-        }
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
             continue;
         };
@@ -499,5 +513,58 @@ mod tests {
         });
         app.update();
         assert!(outbox.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn diagnostics_map_through_editstate() {
+        use crate::edit::highlight_cache::HighlightCache;
+        use crate::edit::{EditCore, EditMode};
+        use crate::lsp::LspOutbox;
+        use crate::plugin::{EditState, FileView};
+        use std::path::PathBuf;
+
+        let path = PathBuf::from("/tmp/vmux_lsp_editstate.rs");
+        let mut app = App::new();
+        let outbox = LspOutbox::default();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<DiagState>()
+            .insert_resource(outbox.clone())
+            .add_systems(Update, drain_lsp_diagnostics);
+
+        let core = EditCore::new(
+            path.clone(),
+            "Rust".into(),
+            "fn a() {}\nlet x = 1;\n",
+            EditMode::Insert,
+        );
+        let hl = HighlightCache::new(&path);
+        app.world_mut()
+            .spawn((FileView { path: path.clone() }, EditState { core, hl }));
+
+        let diag = lsp_types::Diagnostic {
+            range: lsp_types::Range {
+                start: lsp_types::Position {
+                    line: 1,
+                    character: 4,
+                },
+                end: lsp_types::Position {
+                    line: 1,
+                    character: 5,
+                },
+            },
+            message: "boom".into(),
+            ..Default::default()
+        };
+        outbox.0.lock().unwrap().push((path.clone(), vec![diag]));
+        app.update();
+
+        let state = app.world().resource::<DiagState>();
+        let mapped = state
+            .lsp
+            .get(&canon(&path))
+            .expect("diagnostics mapped for EditState entity");
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0].line, 1);
+        assert_eq!(mapped[0].start_col, 4);
     }
 }
