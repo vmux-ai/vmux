@@ -34,6 +34,23 @@ pub struct AppSettings {
     pub recording: RecordingSettings,
     #[serde(default)]
     pub editor: EditorSettings,
+    #[serde(default)]
+    pub appearance: AppearanceSettings,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorScheme {
+    Light,
+    Dark,
+    #[default]
+    Device,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+pub struct AppearanceSettings {
+    #[serde(default)]
+    pub mode: ColorScheme,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -436,6 +453,8 @@ struct PartialAppSettings {
     recording: Option<RecordingSettings>,
     #[serde(default)]
     editor: Option<EditorSettings>,
+    #[serde(default)]
+    appearance: Option<AppearanceSettings>,
 }
 
 fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
@@ -466,6 +485,9 @@ fn merge_over_embedded(partial: PartialAppSettings) -> AppSettings {
     }
     if let Some(editor) = partial.editor {
         settings.editor = editor;
+    }
+    if let Some(appearance) = partial.appearance {
+        settings.appearance = appearance;
     }
     settings
 }
@@ -667,6 +689,12 @@ fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
         parts.push(format!(
             "    recording: {},",
             section_ron(&settings.recording)?
+        ));
+    }
+    if differs("appearance") {
+        parts.push(format!(
+            "    appearance: {},",
+            section_ron(&settings.appearance)?
         ));
     }
     if parts.is_empty() {
@@ -1030,6 +1058,7 @@ mod tests {
             spaces: Default::default(),
             recording: Default::default(),
             editor: Default::default(),
+            appearance: Default::default(),
         }
     }
 
@@ -1499,5 +1528,36 @@ mod tests {
                 .font_family,
             "Menlo"
         );
+    }
+
+    #[test]
+    fn color_scheme_defaults_to_device() {
+        assert_eq!(ColorScheme::default(), ColorScheme::Device);
+    }
+
+    #[test]
+    fn appearance_absent_falls_back_to_device() {
+        let s = parse_settings("()").expect("parse empty");
+        assert_eq!(s.appearance.mode, ColorScheme::Device);
+    }
+
+    #[test]
+    fn appearance_round_trips_through_ron() {
+        let s = parse_settings("(appearance: (mode: light))").expect("parse light");
+        assert_eq!(s.appearance.mode, ColorScheme::Light);
+        let s = parse_settings("(appearance: (mode: dark))").expect("parse dark");
+        assert_eq!(s.appearance.mode, ColorScheme::Dark);
+    }
+
+    #[test]
+    fn sparse_omits_default_appearance_and_emits_changed() {
+        let s = load_embedded_settings();
+        assert!(!sparse_settings_ron(&s).unwrap().contains("appearance"));
+        let mut s = s;
+        s.appearance.mode = ColorScheme::Dark;
+        let out = sparse_settings_ron(&s).unwrap();
+        assert!(out.contains("appearance"), "changed appearance persisted: {out}");
+        assert!(out.contains("dark"), "mode value persisted: {out}");
+        assert_eq!(parse_settings(&out).unwrap().appearance.mode, ColorScheme::Dark);
     }
 }

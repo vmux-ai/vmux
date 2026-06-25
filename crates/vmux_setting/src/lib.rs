@@ -25,7 +25,8 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 pub use plugin::SettingsPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::runtime::{
-    AgentSettings, AppProviderSettings, AppSettings, BrowserSettings, EditorSettings, KeyComboDef,
+    AgentSettings, AppProviderSettings, AppSettings, AppearanceSettings, BrowserSettings,
+    ColorScheme, EditorSettings, KeyComboDef,
     LastSelfWriteHash, LspServerOverride, LspSettings, SettingsLoadSet, SettingsSaveRequest,
     SettingsWriteRequest, ShortcutDef, ShortcutEntry, ShortcutSettings, SpaceOverrides,
     TerminalSettings, TerminalTheme, apply_settings_update, load_settings, resolve_startup_dir,
