@@ -17,6 +17,8 @@ use wasm_bindgen::prelude::*;
 const CONTAINER_ID: &str = "file-container";
 const MEASURE_ID: &str = "file-measure";
 const INPUT_ID: &str = "file-input";
+const SCROLL_ID: &str = "file-scroll";
+const SCROLL_EDGE: u32 = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -382,9 +384,12 @@ pub fn Page() -> Element {
     let mut comp_open = use_signal(|| false);
     let mut comp_sel = use_signal(|| 0usize);
     let mut comp_anchor = use_signal(|| (0u32, 0u32));
+    let mut last_scroll_req = use_signal(|| 0u32);
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
         clear_blob_state(image_url, preview, thumbs);
+        reset_file_scroll();
+        last_scroll_req.set(0);
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             let name = m.path.rsplit('/').next().unwrap_or(&m.path).to_string();
             doc.set_title(&name);
@@ -407,10 +412,14 @@ pub fn Page() -> Element {
     });
 
     let _cur = use_bin_event_listener::<FileCursorEvent, _>(FILE_CURSOR_EVENT, move |c| {
+        let moved = cursor() != c.primary;
         ed_mode.set(c.mode);
         ed_label.set(c.mode_label);
         cursor.set(c.primary);
         sel.set(c.selections);
+        if moved {
+            ensure_line_visible(c.primary.line, cell_dims().1);
+        }
     });
 
     let _dirty = use_bin_event_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
@@ -618,30 +627,6 @@ pub fn Page() -> Element {
                 } else {
                     focus_container();
                 }
-            },
-
-            onwheel: move |e: Event<WheelData>| {
-                if mode() != Mode::Text || show_diff() {
-                    return;
-                }
-                e.prevent_default();
-                let (_, ch) = cell_dims();
-                let line_px = if ch > 0.0 { ch } else { 16.0 };
-                let data = e.data();
-                let Some(raw) = data.downcast::<web_sys::WheelEvent>() else {
-                    return;
-                };
-                let delta_lines = match raw.delta_mode() {
-                    web_sys::WheelEvent::DOM_DELTA_LINE => raw.delta_y(),
-                    web_sys::WheelEvent::DOM_DELTA_PAGE => raw.delta_y() * 20.0,
-                    _ => raw.delta_y() / line_px,
-                };
-                let notches = delta_lines.round() as i64;
-                if notches == 0 {
-                    return;
-                }
-                let next = (first_line() as i64 + notches).max(0) as u32;
-                let _ = try_cef_bin_emit_rkyv(&FileScrollEvent { top_line: next });
             },
 
             onkeydown: move |e: Event<KeyboardData>| {
@@ -883,11 +868,10 @@ pub fn Page() -> Element {
                     } else {
                         {
                             let (cw, ch) = cell_dims();
-                            let fl = first_line();
                             let gutter = gw as f64 * cw + 36.0;
-                            let crow = cursor().line.saturating_sub(fl) as f64;
                             let cx = gutter + cursor().col as f64 * cw;
-                            let cy = 8.0 + crow * ch;
+                            let cy = cursor().line as f64 * ch;
+                            let spacer = total_lines() as f64 * ch;
                             let txtcol = if composing() { "inherit" } else { "transparent" };
                             rsx! {
                                 div {
@@ -897,10 +881,30 @@ pub fn Page() -> Element {
                                         lsp_hover.set(None);
                                         hover_pos.set(None);
                                     },
-                                    div { class: "relative min-w-max py-2",
+                                    onscroll: move |_| {
+                                        let (_, ch) = cell_dims();
+                                        if ch <= 0.0 {
+                                            return;
+                                        }
+                                        let Some(el) = scroll_el() else {
+                                            return;
+                                        };
+                                        let vis_first = (el.scroll_top() as f64 / ch).floor().max(0.0) as u32;
+                                        let vis_rows = (el.client_height() as f64 / ch).ceil() as u32 + 1;
+                                        let rfirst = first_line();
+                                        let rend = rfirst + lines.read().len() as u32;
+                                        let near_top = vis_first < rfirst.saturating_add(SCROLL_EDGE);
+                                        let near_bot = vis_first + vis_rows + SCROLL_EDGE > rend;
+                                        if (near_top || near_bot) && last_scroll_req() != vis_first {
+                                            last_scroll_req.set(vis_first);
+                                            let _ = try_cef_bin_emit_rkyv(&FileScrollEvent { top_line: vis_first });
+                                        }
+                                    },
+                                    div { class: "relative", style: "height:{spacer}px;",
                                         for line in lines().iter() {
                                             {
                                                 let ln = line.line_no;
+                                                let lt = ln as f64 * ch;
                                                 let diags = diagnostics();
                                                 let sev = line_severity(&diags, ln);
                                                 let line_diags: Vec<FileDiagnostic> = diags
@@ -912,6 +916,7 @@ pub fn Page() -> Element {
                                                     div {
                                                         key: "{ln}",
                                                         class: "group flex hover:bg-white/[0.035]",
+                                                        style: "position:absolute;left:0;right:0;top:{lt}px;",
                                                         onmousedown: move |e: Event<MouseData>| {
                                                             e.prevent_default();
                                                             ctx_menu.set(None);
@@ -1038,7 +1043,7 @@ pub fn Page() -> Element {
 
                                         for s in sel().iter() {
                                             {
-                                                let top = 8.0 + (s.line.saturating_sub(fl)) as f64 * ch;
+                                                let top = s.line as f64 * ch;
                                                 let left = gutter + s.start as f64 * cw;
                                                 let style = if s.end == u32::MAX {
                                                     format!("left:{left}px;top:{top}px;height:{ch}px;right:0;")
@@ -1139,9 +1144,7 @@ pub fn Page() -> Element {
                                         {
                                             lsp_hover().map(|h| {
                                                 let (cw, ch) = cell_dims();
-                                                let top = 8.0
-                                                    + (h.line.saturating_sub(first_line())) as f64 * ch
-                                                    + ch;
+                                                let top = h.line as f64 * ch + ch;
                                                 let left = gw as f64 * cw + 36.0 + h.col as f64 * cw;
                                                 rsx! {
                                                     div {
@@ -1176,7 +1179,7 @@ pub fn Page() -> Element {
                                         {
                                             (comp_open() && !comp_filtered.is_empty()).then(|| {
                                                 let (cline, cfrom) = comp_anchor();
-                                                let top = 8.0 + (cline.saturating_sub(fl)) as f64 * ch + ch;
+                                                let top = cline as f64 * ch + ch;
                                                 let left = gutter + cfrom as f64 * cw;
                                                 rsx! {
                                                     div {
@@ -1364,6 +1367,38 @@ fn focus_by_id(id: &str) {
         && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
     {
         let _ = html.focus();
+    }
+}
+
+fn scroll_el() -> Option<web_sys::Element> {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(SCROLL_ID))
+}
+
+fn ensure_line_visible(line: u32, ch: f64) {
+    if ch <= 0.0 {
+        return;
+    }
+    let Some(el) = scroll_el() else {
+        return;
+    };
+    let view_h = el.client_height() as f64;
+    if view_h <= 0.0 {
+        return;
+    }
+    let top = line as f64 * ch;
+    let view_top = el.scroll_top() as f64;
+    if top < view_top {
+        el.set_scroll_top(top as i32);
+    } else if top + ch > view_top + view_h {
+        el.set_scroll_top((top + ch - view_h) as i32);
+    }
+}
+
+fn reset_file_scroll() {
+    if let Some(el) = scroll_el() {
+        el.set_scroll_top(0);
     }
 }
 

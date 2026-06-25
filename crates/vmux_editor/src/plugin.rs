@@ -18,6 +18,8 @@ use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::preview;
 use crate::viewport::{clamp_top_line, rows_from_viewport, window_range};
 
+const SCROLL_OVERSCAN: u32 = 48;
+
 #[derive(Component, Clone, Debug)]
 pub struct FileView {
     pub path: PathBuf,
@@ -436,6 +438,14 @@ fn send_initial_dir(
     }
 }
 
+fn window_bounds(total: u32, vp: &FileViewport) -> (u32, u32) {
+    let (vis_first, vis_end) = window_range(total, vp.top_line, vp.rows);
+    (
+        vis_first.saturating_sub(SCROLL_OVERSCAN),
+        (vis_end + SCROLL_OVERSCAN).min(total),
+    )
+}
+
 fn emit_window(
     entity: Entity,
     edit: &mut EditState,
@@ -447,7 +457,7 @@ fn emit_window(
         return;
     }
     let total = edit.core.buffer.len_lines() as u32;
-    let (first, end) = window_range(total, vp.top_line, vp.rows);
+    let (first, end) = window_bounds(total, vp);
     let lines = edit
         .hl
         .line_window(&edit.core.buffer.rope, first as usize, end as usize);
@@ -473,6 +483,9 @@ fn emit_cursor(
     if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
         return;
     }
+    let total = core.buffer.len_lines() as u32;
+    let (first, end) = window_bounds(total, vp);
+    let rows = (end - first).min(u16::MAX as u32) as u16;
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_CURSOR_EVENT,
@@ -480,7 +493,7 @@ fn emit_cursor(
             mode: keymap.mode(),
             mode_label: keymap.mode_label(),
             primary: core.cursor_pos(),
-            selections: core.sel_spans(vp.top_line, vp.rows),
+            selections: core.sel_spans(first, rows),
         },
     ));
 }
