@@ -49,6 +49,19 @@ fn mcp_tools_list_includes_self_anchor_tools() {
 }
 
 #[test]
+fn mcp_tools_list_includes_bookmark_tools() {
+    let stdin = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n";
+    let mut cmd = Command::cargo_bin("vmux").unwrap();
+    cmd.arg("mcp")
+        .write_stdin(stdin)
+        .assert()
+        .success()
+        .stdout(contains("\"bookmark_list\""))
+        .stdout(contains("\"bookmark_add\""))
+        .stdout(contains("\"bookmark_folder_create\""));
+}
+
+#[test]
 fn mcp_accepts_anchor_flag() {
     let stdin = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\"}}\n";
     let mut cmd = Command::cargo_bin("vmux").unwrap();
