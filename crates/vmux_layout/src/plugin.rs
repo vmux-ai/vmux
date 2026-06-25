@@ -17,9 +17,9 @@ use crate::toggle::TogglePlugin;
 use crate::webview_reveal::WebviewRevealPlugin;
 use crate::window::WindowPlugin;
 use crate::{
-    BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, LayoutSpawnRequest,
-    LayoutStartupSet, NewStackContext, Open, OpenInNewStackRequest, TabLayoutSpawnRequest,
-    reconcile, settings,
+    BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, ExtensionInstallRequest,
+    LayoutSpawnRequest, LayoutStartupSet, NewStackContext, Open, OpenInNewStackRequest,
+    TabLayoutSpawnRequest, reconcile, settings,
 };
 
 pub struct LayoutPlugin;
@@ -39,6 +39,7 @@ impl Plugin for LayoutPlugin {
             .add_message::<BrowserGoBackRequest>()
             .add_message::<BrowserGoForwardRequest>()
             .add_message::<OpenInNewStackRequest>()
+            .add_message::<ExtensionInstallRequest>()
             .add_message::<reconcile::LayoutApplyRequest>()
             .add_message::<reconcile::LayoutApplyResponse>()
             .add_message::<reconcile::LayoutSnapshotRequest>()

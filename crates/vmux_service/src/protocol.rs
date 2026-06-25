@@ -73,6 +73,9 @@ pub enum AgentCommand {
         url: String,
         pane: Option<String>,
     },
+    BrowserInstallExtension {
+        source: String,
+    },
     TerminalSend {
         text: String,
         terminal: Option<String>,
@@ -245,6 +248,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::BrowserNavigate { url, .. } if url.trim().is_empty() => {
             Err("browser_navigate.url is empty")
+        }
+        AgentCommand::BrowserInstallExtension { source } if source.trim().is_empty() => {
+            Err("browser_install_extension.source is empty")
         }
         AgentCommand::TerminalSend { text, .. } if text.is_empty() => {
             Err("terminal_send.text is empty")

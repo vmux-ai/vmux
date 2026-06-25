@@ -548,7 +548,10 @@ fn handle_agent_commands(
     mut browser_nav_writer: MessageWriter<vmux_layout::BrowserNavigateRequest>,
     mut browser_go_back_writer: MessageWriter<vmux_layout::BrowserGoBackRequest>,
     mut browser_go_forward_writer: MessageWriter<vmux_layout::BrowserGoForwardRequest>,
-    mut open_in_new_stack_writer: MessageWriter<vmux_layout::OpenInNewStackRequest>,
+    mut stack_writers: (
+        MessageWriter<vmux_layout::OpenInNewStackRequest>,
+        MessageWriter<vmux_layout::ExtensionInstallRequest>,
+    ),
     mut terminal_send_writer: MessageWriter<vmux_terminal::TerminalSendRequest>,
     mut run_shell_writer: MessageWriter<vmux_terminal::RunShellRequest>,
     mut terminal_stack_spawn_writer: MessageWriter<TerminalStackSpawnRequest>,
@@ -673,6 +676,12 @@ fn handle_agent_commands(
                 });
                 continue;
             }
+            ServiceAgentCommand::BrowserInstallExtension { source } => {
+                stack_writers.1.write(vmux_layout::ExtensionInstallRequest {
+                    source: source.clone(),
+                });
+                AgentCommandResult::Ok
+            }
             ServiceAgentCommand::TerminalSend { text, terminal } => {
                 terminal_send_writer.write(vmux_terminal::TerminalSendRequest {
                     text: text.clone(),
@@ -745,7 +754,8 @@ fn handle_agent_commands(
                 AgentCommandResult::Ok
             }
             ServiceAgentCommand::OpenInNewStack { url } => {
-                open_in_new_stack_writer
+                stack_writers
+                    .0
                     .write(vmux_layout::OpenInNewStackRequest { url: url.clone() });
                 AgentCommandResult::Ok
             }
@@ -2331,6 +2341,7 @@ mod tests {
             .add_message::<vmux_layout::BrowserGoBackRequest>()
             .add_message::<vmux_layout::BrowserGoForwardRequest>()
             .add_message::<vmux_layout::OpenInNewStackRequest>()
+            .add_message::<vmux_layout::ExtensionInstallRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
             .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()

@@ -11,6 +11,8 @@ pub mod debug_page;
 pub mod error_page;
 pub mod event;
 #[cfg(target_arch = "wasm32")]
+pub mod extensions_page;
+#[cfg(target_arch = "wasm32")]
 pub mod page;
 pub mod protocol;
 pub mod reconcile;
@@ -201,6 +203,12 @@ pub struct BrowserGoForwardRequest {
 #[derive(Message, Clone)]
 pub struct OpenInNewStackRequest {
     pub url: String,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone)]
+pub struct ExtensionInstallRequest {
+    pub source: String,
 }
 
 #[cfg(test)]

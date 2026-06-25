@@ -6,6 +6,10 @@ use crate::event::{
     TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
 use dioxus::prelude::*;
+use vmux_core::event::extension::{
+    EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest, ExtOpenManagerRequest, ExtRow,
+    ExtensionsEvent,
+};
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{GlobeIcon, favicon_src_for_url, host_for_favicon_fallback};
@@ -64,6 +68,15 @@ pub fn Page() -> Element {
     let mut team_state = use_signal(TeamEvent::default);
     let _team_listener = use_bin_event_listener::<TeamEvent, _>(TEAM_EVENT, move |data| {
         team_state.set(data);
+    });
+
+    let mut extensions_state = use_signal(ExtensionsEvent::default);
+    let _extensions_listener =
+        use_bin_event_listener::<ExtensionsEvent, _>(EXTENSIONS_LIST_EVENT, move |data| {
+            extensions_state.set(data);
+        });
+    use_effect(move || {
+        let _ = try_cef_bin_emit_rkyv(&ExtListRequest);
     });
 
     let mut update_version = use_signal(|| None::<String>);
@@ -148,6 +161,7 @@ pub fn Page() -> Element {
                         stacks_state: stacks,
                         tabs_state: tabs,
                         team: team_state().members,
+                        extensions: extensions_state().extensions,
                         reload_key: reload_key(),
                         stacks_error: stacks_error.clone(),
                         tabs_error: tabs_error.clone(),
@@ -202,6 +216,7 @@ fn HeaderView(
     stacks_state: StacksHostEvent,
     tabs_state: TabsHostEvent,
     team: Vec<TeamMemberRow>,
+    extensions: Vec<ExtRow>,
     reload_key: u32,
     stacks_error: Option<String>,
     tabs_error: Option<String>,
@@ -272,6 +287,39 @@ fn HeaderView(
                         bg_color: active_bg_color.clone(),
                     }
                     TeamFacepile { members: team }
+                    ExtensionBar { extensions }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
+    rsx! {
+        div { class: "flex shrink-0 items-center gap-1 pl-1",
+            for ext in extensions.iter().filter(|e| e.enabled && e.icon.is_some()) {
+                {
+                    let id = ext.id.clone();
+                    let name = ext.name.clone();
+                    let icon = ext.icon.clone().unwrap_or_default();
+                    rsx! {
+                        button {
+                            key: "{ext.id}",
+                            class: "flex h-7 w-7 items-center justify-center rounded-lg hover:bg-white/[0.08]",
+                            title: "{name}",
+                            onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtActionRequest { id: id.clone() }); },
+                            img { class: "h-4 w-4", src: "{icon}" }
+                        }
+                    }
+                }
+            }
+            button {
+                class: "flex h-7 w-7 items-center justify-center rounded-lg text-foreground/80 hover:bg-white/[0.08]",
+                title: "Manage extensions",
+                onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtOpenManagerRequest); },
+                Icon { class: "h-4 w-4",
+                    path { d: "M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.98.98 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z" }
                 }
             }
         }
@@ -339,6 +387,10 @@ fn StackIcon(
                 path { d: "M4 14h16a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2Z" }
                 path { d: "M6 7h.01" }
                 path { d: "M6 17h.01" }
+            }
+        } else if url.starts_with("vmux://extensions") || url.starts_with("chrome-extension://") {
+            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                path { d: "M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.98.98 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z" }
             }
         } else if let Some(src) = favicon_src.as_ref() {
             if favicon_error() {
