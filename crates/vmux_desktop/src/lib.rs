@@ -11,6 +11,7 @@
 
 mod appearance;
 mod background_lifecycle;
+mod bookmark_persistence;
 mod boot_status;
 mod browser_scroll;
 mod browser_snapshot;
@@ -62,7 +63,8 @@ use bevy::window::{
 };
 
 use {
-    os_menu::OsMenuPlugin, persistence::PersistencePlugin, shortcut::ShortcutPlugin,
+    bookmark_persistence::BookmarkPersistencePlugin, os_menu::OsMenuPlugin,
+    persistence::PersistencePlugin, shortcut::ShortcutPlugin,
     vmux_browser::BrowserPlugin, vmux_command::CommandPlugin, vmux_command::WriteAppCommands,
     vmux_core::page::ServerPlugin, vmux_editor::EditorPlugin, vmux_git::GitPlugin,
     vmux_layout::LayoutPlugin, vmux_layout::cef::LayoutCefPlugin,
@@ -161,6 +163,7 @@ impl Plugin for VmuxPlugin {
                 vmux_agent::PageAgentPlugin,
                 vmux_agent::AcpAgentPlugin,
                 PersistencePlugin,
+                BookmarkPersistencePlugin,
                 LayoutPlugin,
                 background_lifecycle::BackgroundLifecyclePlugin,
                 display::DisplayPlugin,
