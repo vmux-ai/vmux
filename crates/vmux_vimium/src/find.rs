@@ -72,10 +72,10 @@ mod dom {
             bar.set_class_name("vmux-bar");
             bar.set_inner_html("<input class=\"vmux-find-input\" placeholder=\"find\u{2026}\"/>");
             sr.append_child(&bar).unwrap();
-            if let Some(input) = sr.query_selector(".vmux-find-input").unwrap() {
-                if let Some(h) = input.dyn_ref::<HtmlElement>() {
-                    let _ = h.focus();
-                }
+            if let Some(input) = sr.query_selector(".vmux-find-input").unwrap()
+                && let Some(h) = input.dyn_ref::<HtmlElement>()
+            {
+                let _ = h.focus();
             }
             Find {
                 matches: Vec::new(),
@@ -113,10 +113,10 @@ mod dom {
 
         pub fn next(&mut self, _doc: &Document, forward: bool) {
             let total = self.matches.len();
-            if let Some(prev) = self.active {
-                if let Some(el) = self.matches.get(prev) {
-                    el.set_class_name("vmux-find-hit");
-                }
+            if let Some(prev) = self.active
+                && let Some(el) = self.matches.get(prev)
+            {
+                el.set_class_name("vmux-find-hit");
             }
             self.active = cycle(self.active, total, forward);
             if let Some(i) = self.active {
@@ -168,14 +168,14 @@ mod dom_search {
             match child.node_type() {
                 Node::TEXT_NODE => {
                     let text = child.text_content().unwrap_or_default();
-                    if text.to_lowercase().contains(query) {
-                        if let Some(parent) = child.parent_node() {
-                            let span = doc.create_element("span").unwrap();
-                            span.set_class_name("vmux-find-hit");
-                            span.set_text_content(Some(&text));
-                            if parent.replace_child(&span, &child).is_ok() {
-                                hits.push(span);
-                            }
+                    if text.to_lowercase().contains(query)
+                        && let Some(parent) = child.parent_node()
+                    {
+                        let span = doc.create_element("span").unwrap();
+                        span.set_class_name("vmux-find-hit");
+                        span.set_text_content(Some(&text));
+                        if parent.replace_child(&span, &child).is_ok() {
+                            hits.push(span);
                         }
                     }
                 }

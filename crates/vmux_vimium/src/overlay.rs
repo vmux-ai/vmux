@@ -3,10 +3,10 @@ use web_sys::{Document, Element, ShadowRoot, ShadowRootInit, ShadowRootMode};
 pub const HOST_ID: &str = "__vmux_vimium_host";
 
 pub fn shadow(doc: &Document) -> ShadowRoot {
-    if let Some(host) = doc.get_element_by_id(HOST_ID) {
-        if let Some(sr) = host.shadow_root() {
-            return sr;
-        }
+    if let Some(host) = doc.get_element_by_id(HOST_ID)
+        && let Some(sr) = host.shadow_root()
+    {
+        return sr;
     }
     let host: Element = doc.create_element("div").unwrap();
     host.set_id(HOST_ID);
@@ -21,14 +21,14 @@ pub fn shadow(doc: &Document) -> ShadowRoot {
 }
 
 pub fn clear(doc: &Document) {
-    if let Some(host) = doc.get_element_by_id(HOST_ID) {
-        if let Some(sr) = host.shadow_root() {
-            while let Some(last) = sr.last_element_child() {
-                if last.tag_name().eq_ignore_ascii_case("style") {
-                    break;
-                }
-                last.remove();
+    if let Some(host) = doc.get_element_by_id(HOST_ID)
+        && let Some(sr) = host.shadow_root()
+    {
+        while let Some(last) = sr.last_element_child() {
+            if last.tag_name().eq_ignore_ascii_case("style") {
+                break;
             }
+            last.remove();
         }
     }
 }

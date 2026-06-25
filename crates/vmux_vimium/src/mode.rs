@@ -57,12 +57,18 @@ mod tests {
 
     #[test]
     fn focus_on_input_is_insert() {
-        assert_eq!(resolve_mode(Some("input"), false, false, false), Mode::Insert);
+        assert_eq!(
+            resolve_mode(Some("input"), false, false, false),
+            Mode::Insert
+        );
     }
 
     #[test]
     fn escape_forces_normal_even_in_input() {
-        assert_eq!(resolve_mode(Some("input"), false, false, true), Mode::Normal);
+        assert_eq!(
+            resolve_mode(Some("input"), false, false, true),
+            Mode::Normal
+        );
     }
 
     #[test]

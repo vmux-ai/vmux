@@ -46,7 +46,10 @@ mod tests {
 
     #[test]
     fn query_becomes_search() {
-        assert_eq!(to_url("hello world"), "https://duckduckgo.com/?q=hello+world");
+        assert_eq!(
+            to_url("hello world"),
+            "https://duckduckgo.com/?q=hello+world"
+        );
     }
 
     #[test]
@@ -73,10 +76,10 @@ mod dom {
                 "<input class=\"vmux-open-input\" placeholder=\"open url or search\u{2026}\"/>",
             );
             sr.append_child(&bar).unwrap();
-            if let Some(input) = sr.query_selector(".vmux-open-input").unwrap() {
-                if let Some(h) = input.dyn_ref::<HtmlElement>() {
-                    let _ = h.focus();
-                }
+            if let Some(input) = sr.query_selector(".vmux-open-input").unwrap()
+                && let Some(h) = input.dyn_ref::<HtmlElement>()
+            {
+                let _ = h.focus();
             }
             OpenBar
         }

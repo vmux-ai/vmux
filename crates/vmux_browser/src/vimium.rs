@@ -30,8 +30,8 @@ fn set_vimium_preload(
         if !vmux_vimium::is_web_scheme(&uri.0) {
             continue;
         }
-        commands
-            .entity(entity)
-            .insert(PreloadScripts(vec![vmux_vimium::preload_script().to_string()]));
+        commands.entity(entity).insert(PreloadScripts(vec![
+            vmux_vimium::preload_script().to_string(),
+        ]));
     }
 }

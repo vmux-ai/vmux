@@ -6,14 +6,16 @@ pub fn generate_labels(count: usize) -> Vec<String> {
         return Vec::new();
     }
     if count <= n {
-        return (0..count)
-            .map(|i| (ALPHABET[i] as char).to_string())
+        return ALPHABET
+            .iter()
+            .take(count)
+            .map(|&c| (c as char).to_string())
             .collect();
     }
     let mut out = Vec::with_capacity(count);
-    'outer: for a in 0..n {
-        for b in 0..n {
-            out.push(format!("{}{}", ALPHABET[a] as char, ALPHABET[b] as char));
+    'outer: for &a in ALPHABET {
+        for &b in ALPHABET {
+            out.push(format!("{}{}", a as char, b as char));
             if out.len() == count {
                 break 'outer;
             }
@@ -174,13 +176,9 @@ mod dom {
             let Ok(h) = node.dyn_into::<HtmlElement>() else {
                 continue;
             };
-            if label.starts_with(typed) {
+            if let Some(rest) = label.strip_prefix(typed) {
                 let _ = h.style().set_property("display", "block");
-                h.set_inner_html(&format!(
-                    "<span class=\"typed\">{}</span>{}",
-                    &label[..typed.len()],
-                    &label[typed.len()..]
-                ));
+                h.set_inner_html(&format!("<span class=\"typed\">{typed}</span>{rest}"));
             } else {
                 let _ = h.style().set_property("display", "none");
             }

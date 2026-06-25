@@ -44,8 +44,12 @@ pub fn install() {
     let handler = Closure::<dyn FnMut(KeyboardEvent)>::new(move |ev: KeyboardEvent| {
         on_keydown(ev);
     });
-    doc.add_event_listener_with_callback_and_bool("keydown", handler.as_ref().unchecked_ref(), true)
-        .unwrap();
+    doc.add_event_listener_with_callback_and_bool(
+        "keydown",
+        handler.as_ref().unchecked_ref(),
+        true,
+    )
+    .unwrap();
     handler.forget();
 }
 
@@ -135,10 +139,10 @@ fn on_keydown(ev: KeyboardEvent) {
     if current_mode(&doc) == Mode::Insert {
         if key == "Escape" {
             FORCE_INSERT.with(|f| *f.borrow_mut() = false);
-            if let Some(el) = doc.active_element() {
-                if let Some(h) = el.dyn_ref::<web_sys::HtmlElement>() {
-                    let _ = h.blur();
-                }
+            if let Some(el) = doc.active_element()
+                && let Some(h) = el.dyn_ref::<web_sys::HtmlElement>()
+            {
+                let _ = h.blur();
             }
         }
         return;
