@@ -27,6 +27,11 @@ pub fn install(
     let unpack_dir = staging.join("unpacked");
     crx::unpack_crx(&bytes, &unpack_dir)?;
 
+    if let Some(pk) = crx::crx_public_key(&bytes) {
+        let key_b64 = base64::engine::general_purpose::STANDARD.encode(&pk);
+        let _ = manifest::ensure_key(&unpack_dir, &key_b64);
+    }
+
     let manifest_json =
         std::fs::read_to_string(unpack_dir.join("manifest.json")).map_err(|e| e.to_string())?;
     let m = manifest::parse(&manifest_json)?;

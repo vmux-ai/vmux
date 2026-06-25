@@ -1,4 +1,20 @@
 use serde_json::Value;
+use std::path::Path;
+
+pub fn ensure_key(dir: &Path, key_b64: &str) -> Result<(), String> {
+    let path = dir.join("manifest.json");
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mut v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let Some(obj) = v.as_object_mut() else {
+        return Err("manifest is not an object".into());
+    };
+    if obj.contains_key("key") {
+        return Ok(());
+    }
+    obj.insert("key".to_string(), Value::String(key_b64.to_string()));
+    let out = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
+    std::fs::write(&path, out).map_err(|e| e.to_string())
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ExtManifest {
