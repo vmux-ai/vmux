@@ -1,19 +1,69 @@
 use serde_json::Value;
 use std::path::Path;
 
-pub fn ensure_key(dir: &Path, key_b64: &str) -> Result<(), String> {
+pub fn prepare_unpacked(dir: &Path, key_b64: &str, popup: Option<&str>) -> Result<(), String> {
     let path = dir.join("manifest.json");
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mut v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let Some(obj) = v.as_object_mut() else {
         return Err("manifest is not an object".into());
     };
-    if obj.contains_key("key") {
-        return Ok(());
+    let mut changed = false;
+    if !obj.contains_key("key") {
+        obj.insert("key".to_string(), Value::String(key_b64.to_string()));
+        changed = true;
     }
-    obj.insert("key".to_string(), Value::String(key_b64.to_string()));
-    let out = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
-    std::fs::write(&path, out).map_err(|e| e.to_string())
+    if let Some(popup) = popup {
+        add_web_accessible(obj, popup);
+        changed = true;
+    }
+    if changed {
+        let out = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
+        std::fs::write(&path, out).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn add_web_accessible(obj: &mut serde_json::Map<String, Value>, popup: &str) {
+    let key = "web_accessible_resources";
+    let mv3 = obj.get("manifest_version").and_then(Value::as_u64) == Some(3);
+    let new_entry = if mv3 {
+        serde_json::json!({ "resources": [popup], "matches": ["<all_urls>"] })
+    } else {
+        Value::String(popup.to_string())
+    };
+    match obj.get_mut(key) {
+        Some(Value::Array(arr)) => arr.push(new_entry),
+        _ => {
+            obj.insert(key.to_string(), Value::Array(vec![new_entry]));
+        }
+    }
+}
+
+pub fn resolve_name(dir: &Path, m: &ExtManifest) -> String {
+    let raw = m.name.trim();
+    if let Some(msg_key) = raw
+        .strip_prefix("__MSG_")
+        .and_then(|s| s.strip_suffix("__"))
+        && let Some(locale) = m.default_locale.as_deref()
+        && let Some(resolved) = read_message(dir, locale, msg_key)
+    {
+        return resolved;
+    }
+    raw.to_string()
+}
+
+fn read_message(dir: &Path, locale: &str, key: &str) -> Option<String> {
+    let path = dir.join("_locales").join(locale).join("messages.json");
+    let text = std::fs::read_to_string(path).ok()?;
+    let v: Value = serde_json::from_str(&text).ok()?;
+    let obj = v.as_object()?;
+    let entry = obj.get(key).or_else(|| {
+        obj.iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(key))
+            .map(|(_, v)| v)
+    })?;
+    entry.get("message")?.as_str().map(str::to_string)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -22,6 +72,7 @@ pub struct ExtManifest {
     pub version: String,
     pub popup: Option<String>,
     pub icon: Option<String>,
+    pub default_locale: Option<String>,
 }
 
 pub fn parse(json: &str) -> Result<ExtManifest, String> {
@@ -44,11 +95,16 @@ pub fn parse(json: &str) -> Result<ExtManifest, String> {
     let icon = action
         .and_then(|a| a.get("default_icon"))
         .and_then(pick_icon);
+    let default_locale = v
+        .get("default_locale")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     Ok(ExtManifest {
         name,
         version,
         popup,
         icon,
+        default_locale,
     })
 }
 

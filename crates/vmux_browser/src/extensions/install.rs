@@ -27,18 +27,19 @@ pub fn install(
     let unpack_dir = staging.join("unpacked");
     crx::unpack_crx(&bytes, &unpack_dir)?;
 
-    if let Some(pk) = crx::crx_public_key(&bytes) {
-        let key_b64 = base64::engine::general_purpose::STANDARD.encode(&pk);
-        let _ = manifest::ensure_key(&unpack_dir, &key_b64);
-    }
-
     let manifest_json =
         std::fs::read_to_string(unpack_dir.join("manifest.json")).map_err(|e| e.to_string())?;
     let m = manifest::parse(&manifest_json)?;
+    let name = manifest::resolve_name(&unpack_dir, &m);
     let icon = m
         .icon
         .as_ref()
         .and_then(|rel| icon_data_url(&unpack_dir, rel));
+
+    if let Some(pk) = crx::crx_public_key(&bytes) {
+        let key_b64 = base64::engine::general_purpose::STANDARD.encode(&pk);
+        let _ = manifest::prepare_unpacked(&unpack_dir, &key_b64, m.popup.as_deref());
+    }
 
     let final_dir = root.join(&id);
     let _ = std::fs::remove_dir_all(&final_dir);
@@ -47,7 +48,11 @@ pub fn install(
 
     let entry = store::ExtEntry {
         id: id.clone(),
-        name: if m.name.is_empty() { id } else { m.name },
+        name: if name.trim().is_empty() {
+            id.clone()
+        } else {
+            name
+        },
         version: m.version,
         popup: m.popup,
         icon,

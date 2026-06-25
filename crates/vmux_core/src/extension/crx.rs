@@ -83,10 +83,10 @@ fn header_public_key(header: &[u8]) -> Option<Vec<u8>> {
                 if stop > header.len() {
                     return None;
                 }
-                if tag >> 3 == 2 {
-                    if let Some(pk) = proof_public_key(&header[i..stop]) {
-                        return Some(pk);
-                    }
+                if tag >> 3 == 2
+                    && let Some(pk) = proof_public_key(&header[i..stop])
+                {
+                    return Some(pk);
                 }
                 i = stop;
             }
