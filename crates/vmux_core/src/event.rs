@@ -1188,7 +1188,22 @@ pub struct FileHoverRequest {
     Debug,
     Clone,
     PartialEq,
-    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct HoverBlock {
+    pub code: bool,
+    pub text: String,
+    pub lines: Vec<FileLine>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
     Serialize,
     Deserialize,
     rkyv::Archive,
@@ -1198,7 +1213,7 @@ pub struct FileHoverRequest {
 pub struct FileHoverEvent {
     pub line: u32,
     pub col: u32,
-    pub contents: String,
+    pub blocks: Vec<HoverBlock>,
 }
 
 #[derive(

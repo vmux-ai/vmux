@@ -35,6 +35,30 @@ pub(crate) fn styled_span(style: Style, text: &str) -> StyledSpan {
     to_styled_span(style, text)
 }
 
+pub fn highlight_snippet(code: &str, lang_token: &str) -> Vec<FileLine> {
+    let ss = syntaxes();
+    let syntax = ss
+        .find_syntax_by_token(lang_token)
+        .or_else(|| ss.find_syntax_by_extension(lang_token))
+        .unwrap_or_else(|| ss.find_syntax_plain_text());
+    let theme = default_theme();
+    let mut h = HighlightLines::new(syntax, &theme);
+    LinesWithEndings::from(code)
+        .enumerate()
+        .map(|(idx, line)| {
+            let ranges = h.highlight_line(line, ss).unwrap_or_default();
+            FileLine {
+                line_no: idx as u32,
+                spans: ranges
+                    .into_iter()
+                    .map(|(style, text)| to_styled_span(style, text))
+                    .filter(|s| !s.text.is_empty())
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug)]
 pub struct HighlightedFile {
     pub language: String,

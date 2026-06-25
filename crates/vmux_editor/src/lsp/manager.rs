@@ -345,16 +345,66 @@ fn hover_contents_to_string(c: lsp_types::HoverContents) -> String {
     }
 }
 
-fn parse_hover(value: &serde_json::Value) -> String {
+fn parse_hover(value: &serde_json::Value) -> Vec<vmux_core::event::HoverBlock> {
     let Some(result) = value.get("result") else {
-        return String::new();
+        return Vec::new();
     };
     if result.is_null() {
-        return String::new();
+        return Vec::new();
     }
-    serde_json::from_value::<lsp_types::Hover>(result.clone())
+    let md = serde_json::from_value::<lsp_types::Hover>(result.clone())
         .map(|h| hover_contents_to_string(h.contents))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    markdown_to_hover_blocks(&md)
+}
+
+fn markdown_to_hover_blocks(md: &str) -> Vec<vmux_core::event::HoverBlock> {
+    use vmux_core::event::HoverBlock;
+    let mut blocks = Vec::new();
+    let mut in_code = false;
+    let mut lang = String::new();
+    let mut buf = String::new();
+    let flush_prose = |buf: &mut String, blocks: &mut Vec<HoverBlock>| {
+        let t = buf.trim();
+        if !t.is_empty() {
+            blocks.push(HoverBlock {
+                code: false,
+                text: t.to_string(),
+                lines: Vec::new(),
+            });
+        }
+        buf.clear();
+    };
+    for line in md.lines() {
+        if let Some(rest) = line.trim_start().strip_prefix("```") {
+            if in_code {
+                blocks.push(HoverBlock {
+                    code: true,
+                    text: String::new(),
+                    lines: crate::highlight::highlight_snippet(&buf, lang.trim()),
+                });
+                buf.clear();
+                in_code = false;
+            } else {
+                flush_prose(&mut buf, &mut blocks);
+                in_code = true;
+                lang = rest.trim().to_string();
+            }
+            continue;
+        }
+        buf.push_str(line);
+        buf.push('\n');
+    }
+    if in_code {
+        blocks.push(HoverBlock {
+            code: true,
+            text: String::new(),
+            lines: crate::highlight::highlight_snippet(&buf, lang.trim()),
+        });
+    } else {
+        flush_prose(&mut buf, &mut blocks);
+    }
+    blocks
 }
 
 fn loc_tuple(uri: &lsp_types::Uri, pos: lsp_types::Position) -> Option<(PathBuf, u32, u32)> {
@@ -500,16 +550,12 @@ fn drain_lsp_requests(
         let ready = browsers.has_browser(f.entity) && browsers.host_emit_ready(&f.entity);
         match f.kind {
             ReqKind::Hover { line, col } => {
-                let contents = parse_hover(&value);
-                if !contents.is_empty() && ready {
+                let blocks = parse_hover(&value);
+                if !blocks.is_empty() && ready {
                     commands.trigger(BinHostEmitEvent::from_rkyv(
                         f.entity,
                         FILE_HOVER_EVENT,
-                        &FileHoverEvent {
-                            line,
-                            col,
-                            contents,
-                        },
+                        &FileHoverEvent { line, col, blocks },
                     ));
                 }
             }

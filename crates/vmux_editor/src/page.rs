@@ -1145,9 +1145,29 @@ pub fn Page() -> Element {
                                                 let left = gw as f64 * cw + 36.0 + h.col as f64 * cw;
                                                 rsx! {
                                                     div {
-                                                        class: "pointer-events-none absolute z-30 max-w-lg whitespace-pre-wrap rounded-xl bg-white/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                                                        class: "pointer-events-none absolute z-30 max-w-2xl overflow-hidden rounded-xl bg-white/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                                                         style: "left:{left}px;top:{top}px;",
-                                                        "{h.contents}"
+                                                        for (bi, b) in h.blocks.iter().enumerate() {
+                                                            if b.code {
+                                                                div {
+                                                                    key: "b{bi}",
+                                                                    class: "my-1 max-w-full overflow-x-auto whitespace-pre font-mono",
+                                                                    for line in b.lines.iter() {
+                                                                        div { key: "{line.line_no}",
+                                                                            for (si, s) in line.spans.iter().enumerate() {
+                                                                                span { key: "{si}", style: "{span_style(s)}", "{s.text}" }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                div {
+                                                                    key: "b{bi}",
+                                                                    class: "whitespace-pre-wrap opacity-80",
+                                                                    "{b.text}"
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             })
