@@ -200,6 +200,14 @@ pub enum AgentCommand {
         anchor: ProcessId,
         branch: String,
     },
+    BookmarkCommand {
+        command: String,
+        uuid: Option<String>,
+        name: Option<String>,
+        url: Option<String>,
+        title: Option<String>,
+        favicon_url: Option<String>,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -267,6 +275,7 @@ pub enum AgentQuery {
         dir: Option<String>,
         name: Option<String>,
     },
+    BookmarkList,
 }
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -349,6 +358,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::SpaceCommand { command, .. } if command.trim().is_empty() => {
             Err("space_command.command is empty")
+        }
+        AgentCommand::BookmarkCommand { command, .. } if command.trim().is_empty() => {
+            Err("bookmark_command.command is empty")
         }
         AgentCommand::OpenBeside { url, .. } if url.trim().is_empty() => {
             Err("open_beside_me.url is empty")
