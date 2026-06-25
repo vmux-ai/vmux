@@ -558,7 +558,7 @@ fn close_tab_if_only_closing_stack(
     if siblings.len() <= 1 {
         return false;
     }
-    if let Some(next) = pick_tab_after_close(tab, &siblings) {
+    if let Some(next) = crate::tab::pick_after_close(tab, &siblings) {
         commands.entity(next).insert(LastActivatedAt::now());
     }
     commands.entity(tab).despawn();
@@ -592,16 +592,6 @@ fn sibling_tabs(
         return vec![tab];
     };
     children.iter().filter(|e| tabs.get(*e).is_ok()).collect()
-}
-
-fn pick_tab_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
-    if siblings.len() <= 1 {
-        return None;
-    }
-    let idx = siblings.iter().position(|e| *e == active)?;
-    let next_idx = if idx + 1 < siblings.len() { idx + 1 } else { 0 };
-    let target = siblings[next_idx];
-    if target == active { None } else { Some(target) }
 }
 
 fn sync_stack_picking(
@@ -820,6 +810,54 @@ mod tests {
         let ctx = app.world().resource::<NewStackContext>();
         assert_eq!(ctx.stack, None);
         assert!(!ctx.needs_open);
+    }
+
+    #[test]
+    fn closing_last_stack_in_active_rightmost_tab_activates_left_neighbor_not_first() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<PageOpenRequest>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<PendingCursorWarp>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
+
+        let root = app.world_mut().spawn_empty().id();
+        let make_tab = |app: &mut App, ts: i64| -> Entity {
+            let tab = app
+                .world_mut()
+                .spawn((Tab::default(), LastActivatedAt(ts), ChildOf(root)))
+                .id();
+            let pane = app
+                .world_mut()
+                .spawn((Pane, LastActivatedAt(ts), ChildOf(tab)))
+                .id();
+            app.world_mut()
+                .spawn((Stack::default(), LastActivatedAt(ts), ChildOf(pane)));
+            tab
+        };
+        let first = make_tab(&mut app, 1);
+        let middle = make_tab(&mut app, 2);
+        let active_rightmost = make_tab(&mut app, 3);
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
+
+        app.update();
+
+        assert!(app.world().get_entity(active_rightmost).is_err());
+        let first_ts = app.world().get::<LastActivatedAt>(first).unwrap().0;
+        let middle_ts = app.world().get::<LastActivatedAt>(middle).unwrap().0;
+        assert_eq!(first_ts, 1, "first tab must not be re-activated");
+        assert!(
+            middle_ts > first_ts,
+            "left neighbor (middle) must become most-recently-activated, not the first tab"
+        );
     }
 
     #[test]
