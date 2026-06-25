@@ -8,6 +8,7 @@
 @source "../../vmux_setting/src";
 @source "../../vmux_space/src";
 @source "../../vmux_terminal/src";
+@source "../../vmux_ui/src";
 @source ".";
 
 @theme {
