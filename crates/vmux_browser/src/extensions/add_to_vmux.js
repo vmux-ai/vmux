@@ -51,11 +51,20 @@
     b.addEventListener("click", function (ev) {
       ev.preventDefault();
       ev.stopPropagation();
+      if (b.dataset.added) {
+        try {
+          cef.emit({ channel: "vmux-relaunch" });
+        } catch (e) {}
+        if (ln) ln.nodeValue = "Relaunching…";
+        else b.textContent = "Relaunching…";
+        return;
+      }
       try {
         cef.emit({ channel: "vmux-add-extension", id: id });
       } catch (e) {}
-      if (ln) ln.nodeValue = "Added — relaunch";
-      else b.textContent = "Added — relaunch";
+      b.dataset.added = "1";
+      if (ln) ln.nodeValue = "Relaunch to enable";
+      else b.textContent = "Relaunch to enable";
     });
     anchor.style.display = "none";
     anchor.parentNode.insertBefore(b, anchor);
