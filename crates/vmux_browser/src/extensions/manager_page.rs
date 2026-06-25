@@ -273,6 +273,7 @@ struct AddExtensionRequest {
 }
 
 const ADD_CHANNEL: &str = "vmux-add-extension";
+const REMOVE_CHANNEL: &str = "vmux-remove-extension";
 
 fn is_webstore_url(url: &str) -> bool {
     url.strip_prefix("https://")
@@ -289,7 +290,15 @@ fn inject_on_cws_nav(
 ) {
     for ev in events.read() {
         if ev.is_main_frame && is_webstore_url(&ev.url) {
-            browsers.execute_js(&ev.webview, INJECTOR_JS);
+            let idx = store::Index::load(&store::root()).unwrap_or_default();
+            let list = idx
+                .entries
+                .iter()
+                .map(|e| format!("\"{}\"", e.id))
+                .collect::<Vec<_>>()
+                .join(",");
+            let js = format!("window.__VMUX_INSTALLED__=[{list}];{INJECTOR_JS}");
+            browsers.execute_js(&ev.webview, &js);
         }
     }
 }
@@ -297,14 +306,25 @@ fn inject_on_cws_nav(
 fn on_add_extension(
     trigger: On<Receive<AddExtensionRequest>>,
     mut writer: MessageWriter<vmux_layout::ExtensionInstallRequest>,
+    subs: Res<ExtSubscribers>,
+    outbox: Res<ExtOutbox>,
 ) {
     let req = &trigger.payload;
-    if req.channel != ADD_CHANNEL || req.id.trim().is_empty() {
+    if req.id.trim().is_empty() {
         return;
     }
-    writer.write(vmux_layout::ExtensionInstallRequest {
-        source: req.id.clone(),
-    });
+    match req.channel.as_str() {
+        ADD_CHANNEL => {
+            writer.write(vmux_layout::ExtensionInstallRequest {
+                source: req.id.clone(),
+            });
+        }
+        REMOVE_CHANNEL => {
+            let _ = store::uninstall(&store::root(), &req.id);
+            broadcast_list(&outbox, &subs);
+        }
+        _ => {}
+    }
 }
 
 fn drain_outbox(outbox: Res<ExtOutbox>, browsers: NonSend<Browsers>, mut commands: Commands) {
