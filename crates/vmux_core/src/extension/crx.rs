@@ -9,19 +9,20 @@ pub fn zip_offset(bytes: &[u8]) -> Result<usize, String> {
     match version {
         3 => {
             let header_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-            let off = 12 + header_len;
-            if off > bytes.len() {
-                return Err("crx3 header length out of range".into());
-            }
+            let off = 12usize
+                .checked_add(header_len)
+                .filter(|off| *off <= bytes.len())
+                .ok_or("crx3 header length out of range")?;
             Ok(off)
         }
         2 => {
             let pubkey_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
             let sig_len = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
-            let off = 16 + pubkey_len + sig_len;
-            if off > bytes.len() {
-                return Err("crx2 header length out of range".into());
-            }
+            let off = 16usize
+                .checked_add(pubkey_len)
+                .and_then(|x| x.checked_add(sig_len))
+                .filter(|off| *off <= bytes.len())
+                .ok_or("crx2 header length out of range")?;
             Ok(off)
         }
         v => Err(format!("unsupported crx version {v}")),
@@ -60,7 +61,7 @@ pub fn crx_public_key(bytes: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let header_len = u32::from_le_bytes(bytes[8..12].try_into().ok()?) as usize;
-    let end = 12 + header_len;
+    let end = 12usize.checked_add(header_len)?;
     if end > bytes.len() {
         return None;
     }
@@ -79,7 +80,7 @@ fn header_public_key(header: &[u8]) -> Option<Vec<u8>> {
             2 => {
                 let (len, n) = read_varint(header, i)?;
                 i += n;
-                let stop = i + len as usize;
+                let stop = i.checked_add(len as usize)?;
                 if stop > header.len() {
                     return None;
                 }
@@ -108,7 +109,7 @@ fn proof_public_key(msg: &[u8]) -> Option<Vec<u8>> {
             2 => {
                 let (len, n) = read_varint(msg, i)?;
                 i += n;
-                let stop = i + len as usize;
+                let stop = i.checked_add(len as usize)?;
                 if stop > msg.len() {
                     return None;
                 }

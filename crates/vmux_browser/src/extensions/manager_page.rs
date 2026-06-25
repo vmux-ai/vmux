@@ -310,17 +310,15 @@ fn on_add_extension(
     outbox: Res<ExtOutbox>,
 ) {
     let req = &trigger.payload;
-    if req.id.trim().is_empty() {
+    let Some(id) = vmux_core::extension::webstore::extension_id(&req.id) else {
         return;
-    }
+    };
     match req.channel.as_str() {
         ADD_CHANNEL => {
-            writer.write(vmux_layout::ExtensionInstallRequest {
-                source: req.id.clone(),
-            });
+            writer.write(vmux_layout::ExtensionInstallRequest { source: id });
         }
         REMOVE_CHANNEL => {
-            let _ = store::uninstall(&store::root(), &req.id);
+            let _ = store::uninstall(&store::root(), &id);
             broadcast_list(&outbox, &subs);
         }
         _ => {}
