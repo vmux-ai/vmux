@@ -111,6 +111,14 @@ pub enum AgentCommand {
         space_id: Option<String>,
         name: Option<String>,
     },
+    BookmarkCommand {
+        command: String,
+        uuid: Option<String>,
+        name: Option<String>,
+        url: Option<String>,
+        title: Option<String>,
+        favicon_url: Option<String>,
+    },
     OpenBeside {
         anchor: ProcessId,
         direction: Option<AgentPaneDirection>,
@@ -182,6 +190,7 @@ pub enum AgentQuery {
     },
     GetSettings,
     ListSpaces,
+    BookmarkList,
     Screenshot {
         pane: Option<String>,
     },
@@ -272,6 +281,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::SpaceCommand { command, .. } if command.trim().is_empty() => {
             Err("space_command.command is empty")
+        }
+        AgentCommand::BookmarkCommand { command, .. } if command.trim().is_empty() => {
+            Err("bookmark_command.command is empty")
         }
         AgentCommand::OpenBeside { url, .. } if url.trim().is_empty() => {
             Err("open_beside_me.url is empty")
