@@ -64,7 +64,10 @@ impl Index {
     }
 
     pub fn enabled_dirs(&self, root: &Path) -> Vec<PathBuf> {
-        self.enabled_ids().into_iter().map(|id| root.join(id)).collect()
+        self.enabled_ids()
+            .into_iter()
+            .map(|id| root.join(id))
+            .collect()
     }
 
     pub fn is_dirty(&self, loaded: &[String]) -> bool {

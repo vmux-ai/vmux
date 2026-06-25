@@ -125,6 +125,7 @@ impl Plugin for VmuxPlugin {
                 vmux_history::HistoryPlugin,
                 vmux_agent::vibe::setup::VibeSetupPlugin,
                 LayoutCefPlugin,
+                vmux_browser::ExtensionsPlugin,
                 BrowserPlugin,
                 lechat_bridge::LeChatBridgePlugin,
             ))
