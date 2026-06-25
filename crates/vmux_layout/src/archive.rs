@@ -376,18 +376,7 @@ fn resolve_reopen_stack(
                 leaf,
             );
         }
-        if let Some(leaf) = reattach_along_path(space, pos, layout, commands) {
-            let anchor = pos
-                .pane_path
-                .first()
-                .and_then(|s| {
-                    layout
-                        .pane_ids
-                        .iter()
-                        .find(|(_, id)| id.0 == s.split_id)
-                        .map(|(e, _)| e)
-                })
-                .unwrap_or(leaf);
+        if let Some((leaf, anchor)) = reattach_along_path(space, pos, layout, commands) {
             return (
                 spawn_stack_in_leaf(leaf, pos.stack_index, layout, commands),
                 anchor,
@@ -459,7 +448,7 @@ fn reattach_along_path(
     pos: &ArchivedPagePosition,
     layout: &ReopenLayout,
     commands: &mut Commands,
-) -> Option<Entity> {
+) -> Option<(Entity, Entity)> {
     let path = &pos.pane_path;
     let root_step = path.first()?;
     let root = layout
@@ -498,8 +487,9 @@ fn reattach_along_path(
             None => break,
         }
     }
+    let anchor = parent;
     if depth == path.len() {
-        return Some(parent);
+        return Some((parent, anchor));
     }
 
     if layout.leaf_panes.contains(parent) {
@@ -530,7 +520,12 @@ fn reattach_along_path(
                 SplitAxis::Column => PaneSplitDirection::Column,
             };
             commands
-                .spawn((split_root_bundle(axis), PaneId(child_id), ChildOf(parent)))
+                .spawn((
+                    split_root_bundle(axis),
+                    PaneId(child_id),
+                    vmux_history::LastActivatedAt::now(),
+                    ChildOf(parent),
+                ))
                 .id()
         };
         commands
@@ -542,7 +537,7 @@ fn reattach_along_path(
             .insert_children(insert_at, &[new_child]);
         parent = new_child;
     }
-    Some(parent)
+    Some((parent, anchor))
 }
 
 fn clamp_child_index(parent: Entity, idx: usize, children_q: &Query<&Children>) -> usize {
@@ -1381,6 +1376,73 @@ mod tests {
                 .entity(tab)
                 .get::<vmux_history::LastActivatedAt>()
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn reopen_focus_propagates_through_reattached_splits() {
+        use crate::pane::{Pane, PaneId, PaneSplit, PaneSplitDirection};
+        let mut app = reopen_app();
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let root = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                PaneId("root".to_string()),
+                ChildOf(tab),
+            ))
+            .id();
+        let mid = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Column,
+                },
+                PaneId("mid".to_string()),
+                ChildOf(root),
+            ))
+            .id();
+        app.world_mut().spawn((
+            ArchivedPage {
+                url: "https://z".to_string(),
+                space_id: "s1".to_string(),
+                closed_at: 5,
+                ..default()
+            },
+            ArchivedPagePosition {
+                leaf_pane_id: "leaf-deep".to_string(),
+                stack_index: 0,
+                pane_path: vec![
+                    PaneStep {
+                        split_id: "root".to_string(),
+                        axis: SplitAxis::Row,
+                        child_index: 1,
+                        flex_weights: vec![1.0, 1.0],
+                    },
+                    PaneStep {
+                        split_id: "mid".to_string(),
+                        axis: SplitAxis::Column,
+                        child_index: 1,
+                        flex_weights: vec![1.0, 1.0],
+                    },
+                ],
+            },
+        ));
+        dispatch_reopen(&mut app);
+        assert!(
+            app.world()
+                .entity(mid)
+                .get::<vmux_history::LastActivatedAt>()
+                .is_some(),
+            "reattached intermediate split is activated through the restored chain"
         );
     }
 
