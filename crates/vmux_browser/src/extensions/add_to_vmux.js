@@ -11,14 +11,23 @@
     }
     return null;
   }
+  // The install button is the only button whose label contains the untranslated
+  // brand word "chrome" (e.g. "Add to Chrome", "Ajouter à Google Chrome"). The
+  // store header is a link, and the nag buttons (Yes / No thanks) lack "chrome".
   function findBtn() {
-    var els = document.querySelectorAll("button, a, [role=button]");
+    var els = document.querySelectorAll("button, [role=button]");
     for (var i = 0; i < els.length; i++) {
-      var el = els[i];
+      if (els[i].dataset && els[i].dataset.vmux) return els[i];
+    }
+    for (var j = 0; j < els.length; j++) {
+      var el = els[j];
       if (el.offsetParent === null) continue;
       var t = (el.textContent || "").trim();
-      if (t === "Add to Chrome" || t === "Remove from Chrome") return el;
-      if (el.dataset && el.dataset.vmux) return el;
+      if (!t || t.length > 40) continue;
+      var low = t.toLowerCase();
+      if (low.indexOf("chrome") !== -1 && low.indexOf("web store") === -1) {
+        return el;
+      }
     }
     return null;
   }
@@ -28,15 +37,9 @@
       best = null;
     while ((n = w.nextNode())) {
       var t = (n.nodeValue || "").trim();
-      if (
-        t === "Add to Chrome" ||
-        t === "Remove from Chrome" ||
-        t === "Add to Vmux" ||
-        t === "Remove from Vmux"
-      ) {
-        return n;
-      }
-      if (!best && t) best = n;
+      if (!t) continue;
+      if (t.toLowerCase().indexOf("chrome") !== -1) return n;
+      if (!best) best = n;
     }
     return best;
   }
@@ -89,21 +92,18 @@
     },
     true,
   );
+  // Locale-independent: drop the "switch to Chrome" dialog and banner by role.
   function dismissNags() {
-    var els = document.querySelectorAll("button, a, [role=button]");
-    for (var i = 0; i < els.length; i++) {
-      var t = (els[i].textContent || "").trim();
-      if (t === "No thanks") {
-        els[i].click();
-      } else if (t === "Install Chrome") {
-        var p = els[i];
-        for (var d = 0; d < 6 && p; d++) {
-          if ((p.textContent || "").indexOf("Switch to Chrome to install") >= 0) {
-            p.style.display = "none";
-            break;
-          }
-          p = p.parentElement;
-        }
+    var dialogs = document.querySelectorAll("[role=dialog], [role=alertdialog]");
+    for (var i = 0; i < dialogs.length; i++) {
+      if ((dialogs[i].textContent || "").toLowerCase().indexOf("chrome") !== -1) {
+        dialogs[i].remove();
+      }
+    }
+    var bars = document.querySelectorAll("[role=status], [role=alert]");
+    for (var j = 0; j < bars.length; j++) {
+      if ((bars[j].textContent || "").toLowerCase().indexOf("chrome") !== -1) {
+        bars[j].style.display = "none";
       }
     }
   }
