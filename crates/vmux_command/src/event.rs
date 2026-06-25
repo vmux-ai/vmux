@@ -249,7 +249,7 @@ pub struct PathCompleteResponse {
 }
 
 pub fn looks_like_url(s: &str) -> bool {
-    if s.contains("://") {
+    if s.contains("://") || s.starts_with("data:") {
         return true;
     }
     if s.contains(' ')
@@ -327,6 +327,16 @@ mod tests {
         assert!(looks_like_url("google.com"));
         assert!(looks_like_url("google.com/maps"));
         assert!(looks_like_url("example.co.uk/page"));
+    }
+
+    #[test]
+    fn looks_like_url_data_scheme() {
+        assert!(looks_like_url("data:text/html,<h1>hi</h1>"));
+        assert!(looks_like_url(
+            "data:text/html,<style>body{background:white}</style>"
+        ));
+        // a data: URL must not be classified as a filesystem path
+        assert!(!looks_like_path("data:text/html,<h1>hi</h1>"));
     }
 
     #[test]

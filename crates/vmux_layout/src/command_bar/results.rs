@@ -49,6 +49,9 @@ pub enum CommandBarResultItem {
 }
 
 fn looks_like_path(s: &str) -> bool {
+    if s.starts_with("data:") {
+        return false;
+    }
     s.starts_with('/')
         || s.starts_with("~/")
         || s.starts_with("./")
