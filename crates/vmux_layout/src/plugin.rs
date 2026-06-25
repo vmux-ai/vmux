@@ -4,6 +4,7 @@ use vmux_core::page::{PAGE_READY_BIN_EVENT_ID, PageReady, mark_webview_page_read
 
 use crate::active_panes::ActivePanesPlugin;
 use crate::archive::ArchivePlugin;
+use crate::bookmark::BookmarkPlugin;
 use crate::command_bar::handler::CommandBarInputPlugin;
 #[cfg(feature = "player-mode")]
 use crate::focus_ring::FocusRingPlugin;
@@ -95,6 +96,7 @@ impl Plugin for LayoutPlugin {
                 WebviewRevealPlugin,
                 ArchivePlugin,
                 PrewarmPagesPlugin,
+                BookmarkPlugin,
             ));
         #[cfg(feature = "player-mode")]
         app.add_plugins(FocusRingPlugin);
