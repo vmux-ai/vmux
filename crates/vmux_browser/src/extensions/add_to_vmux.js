@@ -56,10 +56,16 @@
     if (!id) return;
     var btn = findBtn();
     if (!btn) return;
-    if (btn.dataset.vmux === id) return;
-    btn.dataset.vmux = id;
-    btn.dataset.state = "";
-    setLabel(btn, installed.indexOf(id) >= 0 ? "Remove from Vmux" : "Add to Vmux");
+    if (btn.dataset.vmux !== id) {
+      btn.dataset.vmux = id;
+      btn.dataset.state = "";
+    }
+    // mid-action: keep our "Relaunch to..." text.
+    if (btn.dataset.state === "pending") return;
+    // Reflect vmux's own install state, re-asserting if the store page
+    // re-renders the label back to Chrome's text.
+    var want = installed.indexOf(id) >= 0 ? "Remove from Vmux" : "Add to Vmux";
+    if ((btn.textContent || "").trim() !== want) setLabel(btn, want);
   }
   document.addEventListener(
     "click",
