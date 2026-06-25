@@ -2,6 +2,7 @@ pub mod find;
 pub mod hints;
 pub mod keymap;
 pub mod mode;
+pub mod openbar;
 pub mod scroll;
 
 #[cfg(not(target_arch = "wasm32"))]

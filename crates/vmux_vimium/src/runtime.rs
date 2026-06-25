@@ -12,6 +12,7 @@ thread_local! {
     static FORCE_INSERT: RefCell<bool> = const { RefCell::new(false) };
     static HINTS: RefCell<Option<crate::hints::Hints>> = const { RefCell::new(None) };
     static FIND: RefCell<Option<crate::find::Find>> = const { RefCell::new(None) };
+    static OPENBAR: RefCell<Option<crate::openbar::OpenBar>> = const { RefCell::new(None) };
 }
 
 fn document() -> Document {
@@ -97,6 +98,33 @@ fn on_keydown(ev: KeyboardEvent) {
                     if let Some(fd) = f.borrow_mut().as_mut() {
                         fd.search(&doc);
                     }
+                });
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    let open_active = OPENBAR.with(|o| o.borrow().is_some());
+    if open_active {
+        match key.as_str() {
+            "Escape" => {
+                ev.prevent_default();
+                ev.stop_propagation();
+                OPENBAR.with(|o| {
+                    if let Some(b) = o.borrow().as_ref() {
+                        b.close(&doc);
+                    }
+                    *o.borrow_mut() = None;
+                });
+            }
+            "Enter" => {
+                ev.prevent_default();
+                OPENBAR.with(|o| {
+                    if let Some(b) = o.borrow().as_ref() {
+                        b.submit(&doc);
+                    }
+                    *o.borrow_mut() = None;
                 });
             }
             _ => {}
@@ -192,7 +220,9 @@ fn dispatch(action: Action, doc: &Document) {
                 *f.borrow_mut() = None;
             });
         }
-        other => web_sys::console::log_1(&format!("[vmux-vimium] {other:?}").into()),
+        Action::OpenBar => {
+            OPENBAR.with(|o| *o.borrow_mut() = Some(crate::openbar::OpenBar::open(doc)));
+        }
     }
 }
 
