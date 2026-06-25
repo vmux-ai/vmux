@@ -107,8 +107,33 @@
       }
     }
   }
+  // Hide the "Switch to Chrome to install..." banner. Start from its CTA (a
+  // transparent chrome link, not the filled install button), then walk up while
+  // the subtree text stays banner-sized; the last such ancestor is the bar.
+  // The text cap keeps us from ever hiding the search box / page content.
+  function hideBanner() {
+    var els = document.querySelectorAll("a, button, [role=button]");
+    for (var i = 0; i < els.length; i++) {
+      var e = els[i];
+      if (e.offsetParent === null || (e.dataset && e.dataset.vmux)) continue;
+      if (isInstallButton(e)) continue;
+      var t = (e.textContent || "").trim().toLowerCase();
+      if (!t || t.length > 40 || t.indexOf("chrome") === -1 || t.indexOf("web store") !== -1) {
+        continue;
+      }
+      var p = e;
+      var banner = null;
+      for (var d = 0; d < 8 && p; d++) {
+        if ((p.textContent || "").trim().length > 200) break;
+        banner = p;
+        p = p.parentElement;
+      }
+      if (banner && banner !== e) banner.style.display = "none";
+    }
+  }
   function tick() {
     relabel();
+    hideBanner();
     dismissNags();
   }
   new MutationObserver(tick).observe(document.documentElement, {
