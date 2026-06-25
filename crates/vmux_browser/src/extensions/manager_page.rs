@@ -285,15 +285,17 @@ const INJECTOR_JS: &str = r#"(function(){
   if (window.__VMUX_EXT__) return;
   window.__VMUX_EXT__ = true;
   function extId(){
-    var segs = location.pathname.split('/');
-    for (var i=0;i<segs.length;i++){ if (/^[a-p]{32}$/.test(segs[i])) return segs[i]; }
+    var s = location.pathname.split('/');
+    for (var i=0;i<s.length;i++){ if (/^[a-p]{32}$/.test(s[i])) return s[i]; }
     return null;
   }
-  function findAnchor(){
+  function findAddBtn(){
     var els = document.querySelectorAll('button, a, [role=button]');
     for (var i=0;i<els.length;i++){
-      var t = (els[i].textContent||'').trim();
-      if (t === 'Add to Chrome' || t === 'Remove from Chrome') return els[i];
+      var el = els[i];
+      if (el.id === 'vmux-add-ext' || el.offsetParent === null) continue;
+      var t = (el.textContent||'').trim();
+      if (t === 'Add to Chrome' || t === 'Remove from Chrome') return el;
     }
     return null;
   }
@@ -301,21 +303,23 @@ const INJECTOR_JS: &str = r#"(function(){
     var id = extId();
     var existing = document.getElementById('vmux-add-ext');
     if (!id){ if (existing) existing.remove(); return; }
-    if (existing){ if (existing.dataset.extId === id) return; existing.remove(); }
-    var anchor = findAnchor();
+    if (existing && existing.dataset.extId === id) return;
+    var anchor = findAddBtn();
     if (!anchor || !anchor.parentNode) return;
-    var b = document.createElement('button');
+    if (existing) existing.remove();
+    var b = anchor.cloneNode(true);
     b.id = 'vmux-add-ext';
     b.dataset.extId = id;
-    b.textContent = 'Add to vmux';
-    b.style.cssText = 'margin-left:8px;padding:8px 18px;border:0;border-radius:9999px;background:#3b82f6;color:#fff;font:inherit;font-weight:600;cursor:pointer;';
-    b.addEventListener('click', function(){
+    b.removeAttribute('disabled');
+    b.removeAttribute('href');
+    b.textContent = 'Add to Vmux';
+    b.addEventListener('click', function(ev){
+      ev.preventDefault(); ev.stopPropagation();
       try { cef.emit({ channel: 'vmux-add-extension', id: id }); } catch(e){}
-      b.textContent = 'Added — relaunch to enable';
-      b.disabled = true;
-      b.style.opacity = '0.6';
+      b.textContent = 'Added — relaunch';
     });
-    anchor.parentNode.insertBefore(b, anchor.nextSibling);
+    anchor.style.display = 'none';
+    anchor.parentNode.insertBefore(b, anchor);
   }
   new MutationObserver(place).observe(document.documentElement, {childList:true, subtree:true});
   place();
