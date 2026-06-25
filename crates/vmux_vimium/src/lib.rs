@@ -1,3 +1,4 @@
+pub mod find;
 pub mod hints;
 pub mod keymap;
 pub mod mode;

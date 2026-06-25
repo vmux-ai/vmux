@@ -11,6 +11,7 @@ thread_local! {
     static MATCHER: RefCell<Matcher> = RefCell::new(Matcher::new());
     static FORCE_INSERT: RefCell<bool> = const { RefCell::new(false) };
     static HINTS: RefCell<Option<crate::hints::Hints>> = const { RefCell::new(None) };
+    static FIND: RefCell<Option<crate::find::Find>> = const { RefCell::new(None) };
 }
 
 fn document() -> Document {
@@ -54,18 +55,6 @@ fn on_keydown(ev: KeyboardEvent) {
     let doc = document();
     let key = ev.key();
 
-    if current_mode(&doc) == Mode::Insert {
-        if key == "Escape" {
-            FORCE_INSERT.with(|f| *f.borrow_mut() = false);
-            if let Some(el) = doc.active_element() {
-                if let Some(h) = el.dyn_ref::<web_sys::HtmlElement>() {
-                    let _ = h.blur();
-                }
-            }
-        }
-        return;
-    }
-
     let hints_open = HINTS.with(|h| h.borrow().is_some());
     if hints_open {
         ev.prevent_default();
@@ -83,6 +72,45 @@ fn on_keydown(ev: KeyboardEvent) {
             let keep = HINTS.with(|h| h.borrow_mut().as_mut().unwrap().feed(&doc, &key));
             if !keep {
                 HINTS.with(|h| *h.borrow_mut() = None);
+            }
+        }
+        return;
+    }
+
+    let find_input_open =
+        FIND.with(|f| f.borrow().as_ref().map(|x| x.input_open()).unwrap_or(false));
+    if find_input_open {
+        match key.as_str() {
+            "Escape" => {
+                ev.prevent_default();
+                ev.stop_propagation();
+                FIND.with(|f| {
+                    if let Some(fd) = f.borrow().as_ref() {
+                        fd.close(&doc);
+                    }
+                    *f.borrow_mut() = None;
+                });
+            }
+            "Enter" => {
+                ev.prevent_default();
+                FIND.with(|f| {
+                    if let Some(fd) = f.borrow_mut().as_mut() {
+                        fd.search(&doc);
+                    }
+                });
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    if current_mode(&doc) == Mode::Insert {
+        if key == "Escape" {
+            FORCE_INSERT.with(|f| *f.borrow_mut() = false);
+            if let Some(el) = doc.active_element() {
+                if let Some(h) = el.dyn_ref::<web_sys::HtmlElement>() {
+                    let _ = h.blur();
+                }
             }
         }
         return;
@@ -137,6 +165,32 @@ fn dispatch(action: Action, doc: &Document) {
             if let Some(h) = crate::hints::Hints::show(doc) {
                 HINTS.with(|c| *c.borrow_mut() = Some(h));
             }
+        }
+        Action::OpenFind => {
+            FIND.with(|f| {
+                if let Some(fd) = f.borrow().as_ref() {
+                    fd.close(doc);
+                }
+                *f.borrow_mut() = Some(crate::find::Find::open(doc));
+            });
+        }
+        Action::FindNext => FIND.with(|f| {
+            if let Some(fd) = f.borrow_mut().as_mut() {
+                fd.next(doc, true);
+            }
+        }),
+        Action::FindPrev => FIND.with(|f| {
+            if let Some(fd) = f.borrow_mut().as_mut() {
+                fd.next(doc, false);
+            }
+        }),
+        Action::Escape => {
+            FIND.with(|f| {
+                if let Some(fd) = f.borrow().as_ref() {
+                    fd.close(doc);
+                }
+                *f.borrow_mut() = None;
+            });
         }
         other => web_sys::console::log_1(&format!("[vmux-vimium] {other:?}").into()),
     }
