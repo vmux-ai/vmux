@@ -9,8 +9,9 @@ use bevy_cef::prelude::{
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::event::extension::{
     EXT_INSTALL_PROGRESS_EVENT, EXT_STATUS_EVENT, EXTENSIONS_LIST_EVENT, EXTENSIONS_PAGE_URL,
-    ExtActionRequest, ExtInstallPhase, ExtInstallProgress, ExtListRequest, ExtOpenManagerRequest,
-    ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest, ExtUninstallRequest, ExtensionsEvent,
+    ExtActionRequest, ExtBrowseStoreRequest, ExtInstallPhase, ExtInstallProgress, ExtListRequest,
+    ExtOpenManagerRequest, ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest, ExtUninstallRequest,
+    ExtensionsEvent,
 };
 use vmux_core::extension::store;
 use vmux_core::{CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
@@ -47,6 +48,7 @@ impl Plugin for ExtensionsPlugin {
                 ExtListRequest,
                 ExtToggleRequest,
                 ExtUninstallRequest,
+                ExtBrowseStoreRequest,
             )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 ExtActionRequest,
@@ -58,6 +60,7 @@ impl Plugin for ExtensionsPlugin {
             .add_observer(on_uninstall_request)
             .add_observer(on_action_request)
             .add_observer(on_open_manager_request)
+            .add_observer(on_browse_store_request)
             .add_observer(on_add_extension)
             .add_systems(
                 Update,
@@ -248,6 +251,19 @@ fn on_open_manager_request(
     cmd.write(AppCommand::Browser(BrowserCommand::Open(
         OpenCommand::InNewStack {
             url: Some(EXTENSIONS_PAGE_URL.to_string()),
+        },
+    )));
+}
+
+const WEB_STORE_URL: &str = "https://chromewebstore.google.com/category/extensions";
+
+fn on_browse_store_request(
+    _trigger: On<BinReceive<ExtBrowseStoreRequest>>,
+    mut cmd: MessageWriter<AppCommand>,
+) {
+    cmd.write(AppCommand::Browser(BrowserCommand::Open(
+        OpenCommand::InNewStack {
+            url: Some(WEB_STORE_URL.to_string()),
         },
     )));
 }

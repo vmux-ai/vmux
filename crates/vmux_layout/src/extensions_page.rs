@@ -66,8 +66,16 @@ pub fn Page() -> Element {
 
             div { class: "min-h-0 flex-1 overflow-auto px-3 pb-4",
                 if snap.extensions.is_empty() {
-                    div { class: "px-3 py-10 text-center text-xs text-muted-foreground",
-                        "No extensions installed. Browse the Chrome Web Store and click \"Add to vmux\"."
+                    div { class: "flex flex-col items-center gap-3 px-3 py-16 text-center",
+                        div { class: "text-sm text-muted-foreground", "No extensions installed yet." }
+                        button {
+                            class: "rounded-lg bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-200 ring-1 ring-inset ring-cyan-400/30 transition-colors hover:bg-cyan-400/25",
+                            onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtBrowseStoreRequest); },
+                            "Browse the Chrome Web Store"
+                        }
+                        div { class: "text-xs text-muted-foreground/70",
+                            "Open an extension and click \"Add to Vmux\"."
+                        }
                     }
                 }
                 for ext in snap.extensions.iter() {
