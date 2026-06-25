@@ -43,6 +43,10 @@ impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<PageMetadata>()
             .register_type::<ArchivedPage>()
+            .register_type::<crate::archive::ArchivedPagePosition>()
+            .register_type::<crate::archive::PaneStep>()
+            .register_type::<crate::archive::SplitAxis>()
+            .register_type::<Vec<crate::archive::PaneStep>>()
             .register_type::<CreatedAt>()
             .register_type::<LastActivatedAt>()
             .register_type::<Visit>()

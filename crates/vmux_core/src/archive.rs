@@ -16,6 +16,33 @@ pub struct ArchivedPage {
     pub tab_index: Option<usize>,
 }
 
+#[derive(Component, Clone, Debug, Reflect, Default)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_core::archive"]
+pub struct ArchivedPagePosition {
+    pub leaf_pane_id: String,
+    pub stack_index: usize,
+    pub pane_path: Vec<PaneStep>,
+}
+
+#[derive(Clone, Debug, Reflect, Default, PartialEq)]
+#[type_path = "vmux_core::archive"]
+pub struct PaneStep {
+    pub split_id: String,
+    pub axis: SplitAxis,
+    pub child_index: usize,
+    pub flex_weights: Vec<f32>,
+}
+
+#[derive(Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[type_path = "vmux_core::archive"]
+pub enum SplitAxis {
+    #[default]
+    Row,
+    Column,
+}
+
 #[derive(Message, Clone, Debug)]
 pub struct PageArchiveRequest {
     pub url: String,
@@ -23,6 +50,9 @@ pub struct PageArchiveRequest {
     pub space_id: String,
     pub launch: Option<TerminalLaunch>,
     pub tab_index: Option<usize>,
+    pub leaf_pane_id: String,
+    pub stack_index: usize,
+    pub pane_path: Vec<PaneStep>,
 }
 
 #[cfg(test)]
@@ -47,5 +77,19 @@ mod tests {
                 .get(std::any::TypeId::of::<ArchivedPage>())
                 .is_some()
         );
+    }
+
+    #[test]
+    fn archived_position_types_registered_by_core_plugin() {
+        let mut app = App::new();
+        app.add_plugins(crate::CorePlugin);
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        assert!(
+            registry
+                .get(std::any::TypeId::of::<ArchivedPagePosition>())
+                .is_some()
+        );
+        assert!(registry.get(std::any::TypeId::of::<PaneStep>()).is_some());
+        assert!(registry.get(std::any::TypeId::of::<SplitAxis>()).is_some());
     }
 }

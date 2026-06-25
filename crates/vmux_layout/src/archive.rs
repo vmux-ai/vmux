@@ -80,6 +80,9 @@ fn archive_on_stack_close(
         space_id,
         launch: launch.cloned(),
         tab_index,
+        leaf_pane_id: String::new(),
+        stack_index: 0,
+        pane_path: Vec::new(),
     });
 }
 
@@ -270,6 +273,9 @@ mod tests {
                 space_id: "s".to_string(),
                 launch: None,
                 tab_index: None,
+                leaf_pane_id: String::new(),
+                stack_index: 0,
+                pane_path: Vec::new(),
             });
         app.update();
         let mut q = app.world_mut().query::<&ArchivedPage>();
@@ -291,6 +297,9 @@ mod tests {
                 space_id: "s".to_string(),
                 launch: None,
                 tab_index: None,
+                leaf_pane_id: String::new(),
+                stack_index: 0,
+                pane_path: Vec::new(),
             });
         app.update();
         let mut q = app.world_mut().query::<&ArchivedPage>();
