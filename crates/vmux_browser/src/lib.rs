@@ -2582,14 +2582,14 @@ fn handle_browser_commands(
                     if resolved.is_empty() {
                         continue;
                     }
-                    let on_native_view = meta_q
+                    let resolved = normalize_vmux_url(&resolved);
+                    let current_url = meta_q
                         .get(webview)
-                        .map(|m| m.url.starts_with("vmux://"))
-                        .unwrap_or(false);
+                        .map(|m| m.url.clone())
+                        .unwrap_or_default();
                     if is_terminal
-                        || on_native_view
-                        || resolved.starts_with("vmux://")
-                        || resolved.starts_with("file:")
+                        || page_needs_host_spawn(&current_url)
+                        || page_needs_host_spawn(&resolved)
                     {
                         page_open_requests.write(PageOpenRequest {
                             target: PageOpenTarget::Stack(active),
@@ -2597,12 +2597,6 @@ fn handle_browser_commands(
                             request_id: None,
                         });
                         continue;
-                    }
-                    if is_terminal {
-                        commands
-                            .entity(webview)
-                            .remove::<Terminal>()
-                            .remove::<vmux_service::protocol::ProcessId>();
                     }
                     if let Ok(mut meta) = meta_q.get_mut(webview) {
                         meta.url = resolved.clone();
@@ -3009,6 +3003,19 @@ fn normalize_vmux_url(url: &str) -> String {
     url.to_string()
 }
 
+fn page_needs_host_spawn(url: &str) -> bool {
+    fn has_vmux_host(url: &str, host: &str) -> bool {
+        let Some(rest) = url.strip_prefix("vmux://") else {
+            return false;
+        };
+        let Some(tail) = rest.strip_prefix(host) else {
+            return false;
+        };
+        tail.is_empty() || matches!(tail.as_bytes().first(), Some(b'/' | b'?' | b'#'))
+    }
+    url.starts_with("file:") || has_vmux_host(url, "terminal") || has_vmux_host(url, "agent")
+}
+
 fn resolve_page_open_target(
     target: &PageOpenTarget,
     focus: &vmux_layout::stack::FocusedStack,
@@ -3396,6 +3403,21 @@ mod tests {
             normalize_vmux_url("file:///tmp/main.rs"),
             "file:///tmp/main.rs"
         );
+    }
+
+    #[test]
+    fn page_needs_host_spawn_matches_host_on_boundaries() {
+        assert!(page_needs_host_spawn("file:///tmp/x"));
+        assert!(page_needs_host_spawn("vmux://terminal"));
+        assert!(page_needs_host_spawn("vmux://terminal/"));
+        assert!(page_needs_host_spawn("vmux://terminal/?pid=1"));
+        assert!(page_needs_host_spawn("vmux://agent"));
+        assert!(page_needs_host_spawn("vmux://agent/vibe/setup"));
+
+        assert!(!page_needs_host_spawn("vmux://agentic/"));
+        assert!(!page_needs_host_spawn("vmux://terminals/"));
+        assert!(!page_needs_host_spawn("vmux://settings/"));
+        assert!(!page_needs_host_spawn("https://example.com"));
     }
 
     #[test]
@@ -5384,7 +5406,7 @@ mod tests {
         }
 
         #[test]
-        fn in_place_from_native_view_to_web_routes_through_page_open() {
+        fn in_place_from_plain_vmux_to_web_navigates_in_place() {
             let mut app = build_app();
             build_focused_native_stack(&mut app, "vmux://spaces/");
 
@@ -5398,11 +5420,76 @@ mod tests {
 
             app.update();
 
+            let page_opens = app.world().resource::<CapturedPageOpenRequests>();
+            assert!(page_opens.0.is_empty());
+            let navigates = app.world().resource::<CapturedNavigateUrls>();
+            assert_eq!(navigates.0, vec!["https://mistral.ai".to_string()]);
+        }
+
+        #[test]
+        fn in_place_from_web_to_plain_vmux_navigates_in_place() {
+            let mut app = build_app();
+            build_focused_native_stack(&mut app, "https://example.com/");
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace {
+                        url: Some("vmux://settings/".into()),
+                    },
+                )));
+
+            app.update();
+
+            let page_opens = app.world().resource::<CapturedPageOpenRequests>();
+            assert!(page_opens.0.is_empty());
+            let navigates = app.world().resource::<CapturedNavigateUrls>();
+            assert_eq!(navigates.0, vec!["vmux://settings/".to_string()]);
+        }
+
+        #[test]
+        fn in_place_to_terminal_routes_through_page_open() {
+            let mut app = build_app();
+            build_focused_native_stack(&mut app, "vmux://settings/");
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace {
+                        url: Some("vmux://terminal/".into()),
+                    },
+                )));
+
+            app.update();
+
             let navigates = app.world().resource::<CapturedNavigateUrls>();
             assert!(navigates.0.is_empty());
             let page_opens = app.world().resource::<CapturedPageOpenRequests>();
             assert_eq!(page_opens.0.len(), 1);
-            assert_eq!(page_opens.0[0].url, "https://mistral.ai");
+            assert_eq!(page_opens.0[0].url, "vmux://terminal/");
+            assert!(matches!(page_opens.0[0].target, PageOpenTarget::Stack(_)));
+        }
+
+        #[test]
+        fn in_place_to_file_routes_through_page_open() {
+            let mut app = build_app();
+            build_focused_native_stack(&mut app, "https://example.com/");
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace {
+                        url: Some("file:///tmp/x".into()),
+                    },
+                )));
+
+            app.update();
+
+            let navigates = app.world().resource::<CapturedNavigateUrls>();
+            assert!(navigates.0.is_empty());
+            let page_opens = app.world().resource::<CapturedPageOpenRequests>();
+            assert_eq!(page_opens.0.len(), 1);
+            assert_eq!(page_opens.0[0].url, "file:///tmp/x");
             assert!(matches!(page_opens.0[0].target, PageOpenTarget::Stack(_)));
         }
 
