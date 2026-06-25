@@ -1556,8 +1556,14 @@ mod tests {
         let mut s = s;
         s.appearance.mode = ColorScheme::Dark;
         let out = sparse_settings_ron(&s).unwrap();
-        assert!(out.contains("appearance"), "changed appearance persisted: {out}");
+        assert!(
+            out.contains("appearance"),
+            "changed appearance persisted: {out}"
+        );
         assert!(out.contains("dark"), "mode value persisted: {out}");
-        assert_eq!(parse_settings(&out).unwrap().appearance.mode, ColorScheme::Dark);
+        assert_eq!(
+            parse_settings(&out).unwrap().appearance.mode,
+            ColorScheme::Dark
+        );
     }
 }
