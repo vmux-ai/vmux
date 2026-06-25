@@ -14,13 +14,13 @@ use bevy_remote::BrpMessage;
 #[cfg(target_os = "macos")]
 use cef::Rect;
 use cef::{
-    Browser, BrowserHost, BrowserSettings, CefString, Client, CompositionUnderline,
+    Browser, BrowserHost, BrowserSettings, CefString, Client, ColorVariant, CompositionUnderline,
     DictionaryValue, ImplBrowser, ImplBrowserHost, ImplDictionaryValue, ImplFrame, ImplListValue,
     ImplProcessMessage, ImplRequestContext, MouseButtonType, ProcessId, Range, RequestContext,
     RequestContextSettings, WindowInfo, binary_value_create, browser_host_create_browser_sync,
     dictionary_value_create, process_message_create, register_scheme_handler_factory,
 };
-use cef_dll_sys::{cef_event_flags_t, cef_mouse_button_type_t};
+use cef_dll_sys::{cef_color_variant_t, cef_event_flags_t, cef_mouse_button_type_t};
 #[allow(deprecated)]
 use raw_window_handle::RawWindowHandle;
 use std::cell::Cell;
@@ -66,6 +66,28 @@ static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
 #[derive(Resource, Clone, Debug, Default)]
 pub struct CefDiskProfileRoot(pub Option<String>);
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CefColorMode {
+    Light,
+    Dark,
+    #[default]
+    System,
+}
+
+impl CefColorMode {
+    pub fn variant(self) -> ColorVariant {
+        let v = match self {
+            CefColorMode::Light => cef_color_variant_t::CEF_COLOR_VARIANT_LIGHT,
+            CefColorMode::Dark => cef_color_variant_t::CEF_COLOR_VARIANT_DARK,
+            CefColorMode::System => cef_color_variant_t::CEF_COLOR_VARIANT_SYSTEM,
+        };
+        ColorVariant::from(v)
+    }
+}
+
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct CefColorScheme(pub CefColorMode);
+
 pub struct WebviewBrowser {
     pub client: Browser,
     pub host: BrowserHost,
@@ -106,6 +128,7 @@ pub struct Browsers {
     /// Lazily created when [`Self::create_browser`] is called with a non-empty disk profile root.
     /// Shared by all webviews so multiple panes use one cookie store and avoid conflicting contexts on the same path.
     shared_disk_context: Option<RequestContext>,
+    color_scheme: CefColorMode,
 }
 
 impl Default for Browsers {
@@ -119,6 +142,7 @@ impl Default for Browsers {
             accel_sender,
             accel_receiver,
             shared_disk_context: None,
+            color_scheme: CefColorMode::default(),
         }
     }
 }
@@ -246,6 +270,7 @@ impl Browsers {
         // Holds the per-browser ephemeral context when not using `shared_disk_context`.
         #[allow(unused_assignments)]
         let mut ephemeral_local: Option<RequestContext> = None;
+        let color_scheme = self.color_scheme;
         let context_for_browser = match disk_profile_root.filter(|s| !s.trim().is_empty()) {
             Some(root) => {
                 if self.shared_disk_context.is_none() {
@@ -256,7 +281,7 @@ impl Browsers {
                 self.shared_disk_context.as_mut()
             }
             None => {
-                ephemeral_local = Self::ephemeral_request_context(requester);
+                ephemeral_local = Self::ephemeral_request_context(requester, color_scheme);
                 ephemeral_local.as_mut()
             }
         };
@@ -1473,11 +1498,15 @@ impl Browsers {
                 None,
                 Some(&mut LocalSchemaHandlerBuilder::build(requester)),
             );
+            context.set_chrome_color_scheme(self.color_scheme.variant(), 0);
         }
         self.shared_disk_context = context;
     }
 
-    fn ephemeral_request_context(requester: Requester) -> Option<RequestContext> {
+    fn ephemeral_request_context(
+        requester: Requester,
+        mode: CefColorMode,
+    ) -> Option<RequestContext> {
         let mut context = cef::request_context_create_context(
             Some(&RequestContextSettings::default()),
             Some(&mut RequestContextHandlerBuilder::build()),
@@ -1499,8 +1528,16 @@ impl Browsers {
                 None,
                 Some(&mut LocalSchemaHandlerBuilder::build(requester)),
             );
+            context.set_chrome_color_scheme(mode.variant(), 0);
         }
         context
+    }
+
+    pub fn set_color_scheme(&mut self, mode: CefColorMode) {
+        self.color_scheme = mode;
+        if let Some(context) = self.shared_disk_context.as_ref() {
+            context.set_chrome_color_scheme(mode.variant(), 0);
+        }
     }
 
     fn client_handler(
@@ -2062,5 +2099,22 @@ mod tests {
             .unwrap_or_default();
         assert!(implementation.contains("pub fn set_all_osr_hidden"));
         assert!(implementation.contains("browser.host.set_focus(false"));
+    }
+
+    #[test]
+    fn mode_maps_to_cef_variant() {
+        use cef_dll_sys::cef_color_variant_t;
+        assert_eq!(
+            cef_color_variant_t::from(super::CefColorMode::System.variant()),
+            cef_color_variant_t::CEF_COLOR_VARIANT_SYSTEM
+        );
+        assert_eq!(
+            cef_color_variant_t::from(super::CefColorMode::Light.variant()),
+            cef_color_variant_t::CEF_COLOR_VARIANT_LIGHT
+        );
+        assert_eq!(
+            cef_color_variant_t::from(super::CefColorMode::Dark.variant()),
+            cef_color_variant_t::CEF_COLOR_VARIANT_DARK
+        );
     }
 }
