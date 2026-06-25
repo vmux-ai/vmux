@@ -425,8 +425,8 @@ fn parse_completion(value: &serde_json::Value) -> Vec<vmux_core::event::Completi
         .collect()
 }
 
-/// Read line `line` of `path` from disk (for reference previews).
-fn disk_line(path: &Path, line: u32) -> String {
+/// Read line `line` of `path` from disk (for reference previews / nav col mapping).
+pub fn disk_line(path: &Path, line: u32) -> String {
     let Ok(content) = std::fs::read_to_string(path) else {
         return String::new();
     };

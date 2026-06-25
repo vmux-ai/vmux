@@ -376,6 +376,13 @@ pub fn Page() -> Element {
     let mut hover_pos = use_signal(|| Option::<(u32, u32)>::None);
     // (x, y, line, col) of an open right-click menu.
     let mut ctx_menu = use_signal(|| Option::<(f64, f64, u32, u32)>::None);
+    let mut refs = use_signal(Vec::<RefItem>::new);
+    let mut refs_sel = use_signal(|| 0usize);
+    let mut refs_open = use_signal(|| false);
+    let mut comps = use_signal(Vec::<CompletionItem>::new);
+    let mut comp_open = use_signal(|| false);
+    let mut comp_sel = use_signal(|| 0usize);
+    let mut comp_anchor = use_signal(|| (0u32, 0u32));
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
         clear_blob_state(image_url, preview, thumbs);
@@ -413,6 +420,20 @@ pub fn Page() -> Element {
 
     let _hov = use_bin_event_listener::<FileHoverEvent, _>(FILE_HOVER_EVENT, move |h| {
         lsp_hover.set(Some(h));
+    });
+
+    let _refs = use_bin_event_listener::<FileReferencesEvent, _>(FILE_REFERENCES_EVENT, move |e| {
+        refs.set(e.items);
+        refs_sel.set(0);
+        refs_open.set(true);
+        focus_by_id("refs-panel");
+    });
+
+    let _comp = use_bin_event_listener::<FileCompletionEvent, _>(FILE_COMPLETION_EVENT, move |e| {
+        comp_open.set(!e.items.is_empty());
+        comps.set(e.items);
+        comp_sel.set(0);
+        comp_anchor.set((e.line, e.replace_from_col));
     });
 
     let _diag =
@@ -557,6 +578,32 @@ pub fn Page() -> Element {
         let g = git_display();
         if g.is_empty() { path() } else { g }
     };
+
+    let comp_filtered: Vec<CompletionItem> = if comp_open() {
+        let (cline, cfrom) = comp_anchor();
+        let lt: String = lines()
+            .iter()
+            .find(|l| l.line_no == cline)
+            .map(|l| l.spans.iter().map(|s| s.text.as_str()).collect())
+            .unwrap_or_default();
+        let chars: Vec<char> = lt.chars().collect();
+        let caret = cursor().col as usize;
+        let from = cfrom as usize;
+        let prefix: String = if from <= caret && from <= chars.len() {
+            chars[from..caret.min(chars.len())].iter().collect()
+        } else {
+            String::new()
+        };
+        let pl = prefix.to_lowercase();
+        comps()
+            .into_iter()
+            .filter(|c| c.label.to_lowercase().starts_with(&pl))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
+    let comp_keys = comp_filtered.clone();
 
     rsx! {
         div {
@@ -1039,6 +1086,39 @@ pub fn Page() -> Element {
                                                     return;
                                                 }
                                                 let key = raw.key();
+                                                if comp_open() && !comp_keys.is_empty() {
+                                                    match key.as_str() {
+                                                        "ArrowDown" => {
+                                                            e.prevent_default();
+                                                            comp_sel.set((comp_sel_clamped + 1).min(comp_keys.len() - 1));
+                                                            return;
+                                                        }
+                                                        "ArrowUp" => {
+                                                            e.prevent_default();
+                                                            comp_sel.set(comp_sel_clamped.saturating_sub(1));
+                                                            return;
+                                                        }
+                                                        "Enter" | "Tab" => {
+                                                            e.prevent_default();
+                                                            if let Some(it) = comp_keys.get(comp_sel_clamped) {
+                                                                let (cline, cfrom) = comp_anchor();
+                                                                let _ = try_cef_bin_emit_rkyv(&FileCompletionCommit {
+                                                                    line: cline,
+                                                                    replace_from_col: cfrom,
+                                                                    text: it.insert_text.clone(),
+                                                                });
+                                                            }
+                                                            comp_open.set(false);
+                                                            return;
+                                                        }
+                                                        "Escape" => {
+                                                            e.prevent_default();
+                                                            comp_open.set(false);
+                                                            return;
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
                                                 let mods = key_mods(raw);
                                                 let chord = mods.ctrl || mods.alt || mods.meta;
                                                 if ed_mode().accepts_text() && !chord && is_text_key(&key) {
@@ -1066,6 +1146,30 @@ pub fn Page() -> Element {
                                                         class: "pointer-events-none absolute z-30 max-w-lg whitespace-pre-wrap rounded-xl bg-white/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                                                         style: "left:{left}px;top:{top}px;",
                                                         "{h.contents}"
+                                                    }
+                                                }
+                                            })
+                                        }
+
+                                        {
+                                            (comp_open() && !comp_filtered.is_empty()).then(|| {
+                                                let (cline, cfrom) = comp_anchor();
+                                                let top = 8.0 + (cline.saturating_sub(fl)) as f64 * ch + ch;
+                                                let left = gutter + cfrom as f64 * cw;
+                                                rsx! {
+                                                    div {
+                                                        class: "absolute z-40 max-h-56 min-w-48 overflow-auto rounded-lg bg-white/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                                                        style: "left:{left}px;top:{top}px;",
+                                                        for (i, it) in comp_filtered.iter().enumerate() {
+                                                            div {
+                                                                key: "{i}",
+                                                                class: if i == comp_sel_clamped { "flex items-center gap-2 px-3 py-1 bg-cyan-400/15" } else { "flex items-center gap-2 px-3 py-1" },
+                                                                span { class: "truncate", "{it.label}" }
+                                                                if !it.detail.is_empty() {
+                                                                    span { class: "ml-auto truncate text-[10px] text-foreground/40", "{it.detail}" }
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             })
@@ -1128,6 +1232,83 @@ pub fn Page() -> Element {
                 })
             }
 
+            {
+                refs_open().then(|| {
+                    let items = refs();
+                    rsx! {
+                        div {
+                            id: "refs-panel",
+                            tabindex: "0",
+                            class: "absolute bottom-8 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-white/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                            onkeydown: move |e: Event<KeyboardData>| {
+                                let key = e
+                                    .data()
+                                    .downcast::<web_sys::KeyboardEvent>()
+                                    .map(|k| k.key())
+                                    .unwrap_or_default();
+                                let len = refs.read().len();
+                                match key.as_str() {
+                                    "ArrowDown" | "j" => {
+                                        e.prevent_default();
+                                        if len > 0 {
+                                            refs_sel.set((refs_sel() + 1).min(len - 1));
+                                        }
+                                    }
+                                    "ArrowUp" | "k" => {
+                                        e.prevent_default();
+                                        refs_sel.set(refs_sel().saturating_sub(1));
+                                    }
+                                    "Enter" => {
+                                        e.prevent_default();
+                                        if let Some(it) = refs.read().get(refs_sel()) {
+                                            let _ = try_cef_bin_emit_rkyv(&FileGotoRequest {
+                                                path: it.path.clone(),
+                                                line: it.line,
+                                                col: it.col,
+                                            });
+                                        }
+                                        refs_open.set(false);
+                                        focus_file_input();
+                                    }
+                                    "Escape" => {
+                                        e.prevent_default();
+                                        refs_open.set(false);
+                                        focus_file_input();
+                                    }
+                                    _ => {}
+                                }
+                            },
+                            div { class: "px-2 py-1 text-[10px] uppercase tracking-wide text-foreground/50",
+                                "{items.len()} references"
+                            }
+                            for (i, it) in items.iter().enumerate() {
+                                {
+                                    let nav = (it.path.clone(), it.line, it.col);
+                                    rsx! {
+                                        div {
+                                            key: "{i}",
+                                            class: if i == refs_sel() { "flex gap-2 rounded px-2 py-1 bg-cyan-400/15" } else { "flex gap-2 rounded px-2 py-1 hover:bg-white/[0.05]" },
+                                            onmousedown: move |e: Event<MouseData>| {
+                                                e.prevent_default();
+                                                let _ = try_cef_bin_emit_rkyv(&FileGotoRequest {
+                                                    path: nav.0.clone(),
+                                                    line: nav.1,
+                                                    col: nav.2,
+                                                });
+                                                refs_open.set(false);
+                                                focus_file_input();
+                                            },
+                                            span { class: "shrink-0 text-cyan-300/80", "{it.display}" }
+                                            span { class: "truncate text-foreground/60", "{it.preview}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                })
+            }
+
             GitFooter {
                 path: git_path,
                 branch: git_branch,
@@ -1151,9 +1332,13 @@ fn focus_container() {
 }
 
 fn focus_file_input() {
+    focus_by_id(INPUT_ID);
+}
+
+fn focus_by_id(id: &str) {
     if let Some(el) = web_sys::window()
         .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id(INPUT_ID))
+        .and_then(|d| d.get_element_by_id(id))
         && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
     {
         let _ = html.focus();

@@ -1145,6 +1145,61 @@ fn on_file_completion_request(
     manager.completion(entity, &path, line, utf16, replace_from);
 }
 
+fn on_file_goto_request(
+    trigger: On<BinReceive<FileGotoRequest>>,
+    mut goto_w: MessageWriter<crate::lsp::manager::LspGoto>,
+) {
+    let entity = trigger.event().webview;
+    let req = &trigger.event().payload;
+    let path = PathBuf::from(&req.path);
+    let lt = crate::lsp::manager::disk_line(&path, req.line);
+    let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, req.col);
+    goto_w.write(crate::lsp::manager::LspGoto {
+        entity,
+        path,
+        line: req.line,
+        utf16_col: utf16,
+    });
+}
+
+fn on_file_completion_commit(
+    trigger: On<BinReceive<FileCompletionCommit>>,
+    mut q: Query<(&mut EditState, &EditorKeymap, &mut FileViewport)>,
+    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let req = trigger.event().payload.clone();
+    let Ok((mut edit, keymap, mut vp)) = q.get_mut(entity) else {
+        return;
+    };
+    let start = edit
+        .core
+        .buffer
+        .coords_to_char(req.line as usize, req.replace_from_col as usize);
+    let head = edit.core.primary().head;
+    let (a, b) = (start.min(head), start.max(head));
+    edit.core.selections = vec![Selection { anchor: a, head: b }];
+    run_commands(
+        entity,
+        vec![
+            EditCommand::DeleteSelection,
+            EditCommand::InsertText(req.text),
+        ],
+        &mut edit,
+        keymap.0.as_ref(),
+        &mut vp,
+        &mut clipboard,
+        &mut self_writes,
+        &mut manager,
+        &browsers,
+        &mut commands,
+    );
+}
+
 fn goto_caret(edit: &mut EditState, line: u32, utf16_col: u32, vp: &mut FileViewport) {
     let line = (line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
     let lt: String = edit
@@ -1342,7 +1397,11 @@ impl Plugin for EditorPlugin {
                 FileHoverRequest,
                 FileDefinitionRequest,
                 FileReferencesRequest,
+            )>::default())
+            .add_plugins(BinEventEmitterPlugin::<(
                 FileCompletionRequest,
+                FileGotoRequest,
+                FileCompletionCommit,
             )>::default())
             .add_systems(
                 Update,
@@ -1376,7 +1435,9 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_hover_request)
             .add_observer(on_file_definition_request)
             .add_observer(on_file_references_request)
-            .add_observer(on_file_completion_request);
+            .add_observer(on_file_completion_request)
+            .add_observer(on_file_goto_request)
+            .add_observer(on_file_completion_commit);
     }
 }
 

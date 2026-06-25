@@ -38,6 +38,8 @@ pub const FILE_REFERENCES_REQUEST_EVENT: &str = "file_references_request";
 pub const FILE_REFERENCES_EVENT: &str = "file_references";
 pub const FILE_COMPLETION_REQUEST_EVENT: &str = "file_completion_request";
 pub const FILE_COMPLETION_EVENT: &str = "file_completion";
+pub const FILE_GOTO_REQUEST_EVENT: &str = "file_goto_request";
+pub const FILE_COMPLETION_COMMIT_EVENT: &str = "file_completion_commit";
 pub const LSP_CATALOG_REQUEST: &str = "lsp_catalog_request";
 pub const LSP_CATALOG_EVENT: &str = "lsp_catalog";
 pub const LSP_INSTALL_REQUEST: &str = "lsp_install_request";
@@ -1317,6 +1319,40 @@ pub struct FileCompletionEvent {
     pub items: Vec<CompletionItem>,
     pub replace_from_col: u32,
     pub line: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileGotoRequest {
+    pub path: String,
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileCompletionCommit {
+    pub line: u32,
+    pub replace_from_col: u32,
+    pub text: String,
 }
 
 #[cfg(test)]
