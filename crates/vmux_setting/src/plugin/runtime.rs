@@ -1020,6 +1020,7 @@ mod tests {
         AppSettings {
             browser: BrowserSettings {
                 startup_url: default_browser_startup_url(),
+                vimium_enabled: true,
             },
             layout: LayoutSettings {
                 radius: 0.0,

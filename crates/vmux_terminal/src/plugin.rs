@@ -3211,6 +3211,7 @@ mod tests {
         AppSettings {
             browser: BrowserSettings {
                 startup_url: "about:blank".to_string(),
+                vimium_enabled: true,
             },
             layout: LayoutSettings {
                 radius: 0.0,
