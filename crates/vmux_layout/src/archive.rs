@@ -502,6 +502,10 @@ fn reattach_along_path(
         return Some(parent);
     }
 
+    if layout.leaf_panes.contains(parent) {
+        promote_leaf_to_split(parent, path[depth].axis, layout, commands);
+    }
+
     for level in depth..path.len() {
         let step = &path[level];
         let is_last = level + 1 == path.len();
@@ -547,6 +551,34 @@ fn clamp_child_index(parent: Entity, idx: usize, children_q: &Query<&Children>) 
         .map(|c| c.iter().count())
         .unwrap_or(0);
     idx.min(count)
+}
+
+fn promote_leaf_to_split(
+    parent: Entity,
+    axis: SplitAxis,
+    layout: &ReopenLayout,
+    commands: &mut Commands,
+) {
+    let direction = match axis {
+        SplitAxis::Row => PaneSplitDirection::Row,
+        SplitAxis::Column => PaneSplitDirection::Column,
+    };
+    let stacks: Vec<Entity> = layout
+        .children_q
+        .get(parent)
+        .map(|c| c.iter().filter(|&e| layout.stacks_q.contains(e)).collect())
+        .unwrap_or_default();
+    let survivor = commands
+        .spawn((
+            leaf_pane_bundle(),
+            vmux_history::LastActivatedAt::now(),
+            ChildOf(parent),
+        ))
+        .id();
+    for s in stacks {
+        commands.entity(s).insert(ChildOf(survivor));
+    }
+    commands.entity(parent).insert(split_root_bundle(direction));
 }
 
 #[cfg(test)]
@@ -1350,5 +1382,70 @@ mod tests {
                 .get::<vmux_history::LastActivatedAt>()
                 .is_some()
         );
+    }
+
+    #[test]
+    fn reopen_resplits_collapsed_two_pane() {
+        use crate::pane::{Pane, PaneId, PaneSplit};
+        let mut app = reopen_app();
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let root = app
+            .world_mut()
+            .spawn((Pane, PaneId("root".to_string()), ChildOf(tab)))
+            .id();
+        let survivor_stack = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(root)))
+            .id();
+        app.world_mut().spawn((
+            ArchivedPage {
+                url: "https://z".to_string(),
+                space_id: "s1".to_string(),
+                closed_at: 5,
+                ..default()
+            },
+            ArchivedPagePosition {
+                leaf_pane_id: "paneR".to_string(),
+                stack_index: 0,
+                pane_path: vec![PaneStep {
+                    split_id: "root".to_string(),
+                    axis: SplitAxis::Row,
+                    child_index: 1,
+                    flex_weights: vec![1.0, 1.0],
+                }],
+            },
+        ));
+        dispatch_reopen(&mut app);
+
+        assert!(
+            app.world().entity(root).get::<PaneSplit>().is_some(),
+            "root was re-split"
+        );
+        let panes: Vec<Entity> = app
+            .world()
+            .entity(root)
+            .get::<Children>()
+            .unwrap()
+            .iter()
+            .filter(|&e| app.world().entity(e).contains::<Pane>())
+            .collect();
+        assert_eq!(panes.len(), 2, "two panes under the restored split");
+        let total_stacks = app.world_mut().query::<&Stack>().iter(app.world()).count();
+        assert_eq!(total_stacks, 2);
+        let survivor_pane = app
+            .world()
+            .entity(survivor_stack)
+            .get::<ChildOf>()
+            .unwrap()
+            .parent();
+        assert!(
+            panes.contains(&survivor_pane),
+            "survivor re-homed into a pane"
+        );
+        assert_eq!(drain_opens(&mut app).len(), 1);
     }
 }
