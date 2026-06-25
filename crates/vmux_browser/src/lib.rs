@@ -4742,6 +4742,7 @@ mod tests {
                 .add_message::<vmux_layout::BrowserGoBackRequest>()
                 .add_message::<vmux_layout::BrowserGoForwardRequest>()
                 .add_message::<vmux_layout::OpenInNewStackRequest>()
+                .add_message::<vmux_layout::ExtensionInstallRequest>()
                 .add_message::<PageOpenRequest>()
                 .add_message::<CefPageAttachRequest>()
                 .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
