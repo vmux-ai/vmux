@@ -49,7 +49,7 @@ pub fn Page() -> Element {
                 if snap.pending {
                     button {
                         class: "rounded-lg bg-cyan-400/15 px-3 py-1.5 text-xs font-medium text-cyan-200 ring-1 ring-inset ring-cyan-400/30 transition-colors hover:bg-cyan-400/25",
-                        onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtRelaunchRequest); },
+                        onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&crate::event::RestartRequestEvent); },
                         "Relaunch to apply"
                     }
                 }

@@ -7,7 +7,7 @@ use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::event::extension::{
     EXT_INSTALL_PROGRESS_EVENT, EXT_STATUS_EVENT, EXTENSIONS_LIST_EVENT, EXTENSIONS_PAGE_URL,
     ExtActionRequest, ExtInstallPhase, ExtInstallProgress, ExtInstallRequest, ExtListRequest,
-    ExtOpenManagerRequest, ExtRelaunchRequest, ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest,
+    ExtOpenManagerRequest, ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest,
     ExtUninstallRequest, ExtensionsEvent,
 };
 use vmux_core::extension::store;
@@ -50,7 +50,6 @@ impl Plugin for ExtensionsPlugin {
             .add_plugins(BinEventEmitterPlugin::<(
                 ExtActionRequest,
                 ExtOpenManagerRequest,
-                ExtRelaunchRequest,
             )>::default())
             .add_observer(on_list_request)
             .add_observer(on_install_request)
@@ -58,7 +57,6 @@ impl Plugin for ExtensionsPlugin {
             .add_observer(on_uninstall_request)
             .add_observer(on_action_request)
             .add_observer(on_open_manager_request)
-            .add_observer(on_relaunch_request)
             .add_systems(
                 Update,
                 handle_extensions_page_open.in_set(PageOpenSet::HandleKnownPages),
@@ -216,11 +214,7 @@ fn on_toggle_request(
     outbox: Res<ExtOutbox>,
 ) {
     let req = trigger.event().payload.clone();
-    let root = store::root();
-    if let Ok(mut idx) = store::Index::load(&root) {
-        idx.set_enabled(&req.id, req.enabled);
-        let _ = idx.save(&root);
-    }
+    let _ = store::update_index(&store::root(), |idx| idx.set_enabled(&req.id, req.enabled));
     broadcast_list(&outbox, &subs);
 }
 
@@ -262,8 +256,6 @@ fn on_open_manager_request(
         },
     )));
 }
-
-fn on_relaunch_request(_trigger: On<BinReceive<ExtRelaunchRequest>>) {}
 
 fn run_agent_installs(
     mut reader: MessageReader<vmux_layout::ExtensionInstallRequest>,

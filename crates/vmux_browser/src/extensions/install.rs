@@ -48,9 +48,8 @@ pub fn install(
         icon,
         enabled: true,
     };
-    let mut idx = store::Index::load(&root)?;
-    idx.upsert(entry.clone());
-    idx.save(&root)?;
+    let upsert_entry = entry.clone();
+    store::update_index(&root, move |idx| idx.upsert(upsert_entry))?;
     progress(ExtInstallPhase::Done, Some(100), "done");
     Ok(entry)
 }

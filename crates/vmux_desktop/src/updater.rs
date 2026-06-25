@@ -119,7 +119,7 @@ impl Plugin for UpdatePlugin {
         .add_systems(Startup, init_update_checker)
         .add_systems(Update, poll_update_result)
         .add_plugins(BinEventEmitterPlugin::<(RestartRequestEvent,)>::for_hosts(
-            &["debug", "layout"],
+            &["debug", "extensions", "layout"],
         ))
         .add_observer(on_restart_request);
     }

@@ -55,7 +55,7 @@ fn pick_icon(v: &Value) -> Option<String> {
                     (true, false) => true,
                     (false, true) => false,
                     (true, true) => size > *bsize,
-                    (false, false) => size < *bsize,
+                    (false, false) => size > *bsize,
                 }
             }
         };
@@ -115,11 +115,11 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_smallest_above_48() {
+    fn falls_back_to_largest_above_48() {
         let m = parse(
             r#"{ "name": "x", "version": "1", "action": { "default_icon": { "64": "a.png", "128": "b.png" } } }"#,
         )
         .unwrap();
-        assert_eq!(m.icon.as_deref(), Some("a.png"));
+        assert_eq!(m.icon.as_deref(), Some("b.png"));
     }
 }

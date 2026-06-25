@@ -1,5 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use crate::extension::webstore;
+
+static INDEX_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtEntry {
@@ -79,7 +84,18 @@ impl Index {
     }
 }
 
+pub fn update_index<F: FnOnce(&mut Index)>(root: &Path, f: F) -> Result<(), String> {
+    let _guard = INDEX_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut idx = Index::load(root)?;
+    f(&mut idx);
+    idx.save(root)
+}
+
 pub fn uninstall(root: &Path, id: &str) -> Result<(), String> {
+    if webstore::extension_id(id).as_deref() != Some(id) {
+        return Err(format!("invalid extension id: {id}"));
+    }
+    let _guard = INDEX_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let dir = root.join(id);
     if dir.exists() {
         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -133,6 +149,14 @@ mod tests {
         let dirs = idx.enabled_dirs(root.path());
         assert_eq!(dirs.len(), 1);
         assert!(dirs[0].ends_with("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+    }
+
+    #[test]
+    fn uninstall_rejects_non_extension_id() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(uninstall(root.path(), "../evil").is_err());
+        assert!(uninstall(root.path(), "/etc/passwd").is_err());
+        assert!(uninstall(root.path(), "short").is_err());
     }
 
     #[test]

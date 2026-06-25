@@ -202,17 +202,4 @@ pub struct ExtOpenManagerRequest;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct ExtRelaunchRequest;
-
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
 pub struct ExtListRequest;
